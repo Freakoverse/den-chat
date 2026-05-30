@@ -56,11 +56,11 @@ const TOKEN_CONTRACTS: Record<string, Record<string, string>> = {
 
 // ── Currency icon imports (from DENOS) ──
 
-import iconPyusd from '../../../../../DNN/signers/DENOS/src/assets/icons/blockchain/token/pyusd128.png'
-import iconUsdt from '../../../../../DNN/signers/DENOS/src/assets/icons/blockchain/token/usdt128.png'
-import iconUsdc from '../../../../../DNN/signers/DENOS/src/assets/icons/blockchain/token/usdc128.png'
-import iconBitcoin from '../../../../../DNN/signers/DENOS/src/assets/icons/blockchain/native/bitcoin128.png'
-import iconEthereum from '../../../../../DNN/signers/DENOS/src/assets/icons/blockchain/native/ethereum128.png'
+import iconPyusd from '@/assets/icons/blockchain/token/pyusd128.png'
+import iconUsdt from '@/assets/icons/blockchain/token/usdt128.png'
+import iconUsdc from '@/assets/icons/blockchain/token/usdc128.png'
+import iconBitcoin from '@/assets/icons/blockchain/native/bitcoin128.png'
+import iconEthereum from '@/assets/icons/blockchain/native/ethereum128.png'
 
 // ── Currency definitions ──
 
