@@ -1,0 +1,1147 @@
+/**
+ * MessageContent — Shared markdown message renderer
+ *
+ * Handles: markdown, spoiler text (||text||), code blocks with line numbers,
+ * media embeds (images, video, audio, YouTube, Twitter), and link previews.
+ *
+ * Used by both hub chat (ChannelView) and DMs (DMPage).
+ */
+
+import { useState, useEffect, useMemo, memo, useCallback, Children, isValidElement, cloneElement } from 'react'
+import { Clipboard, ClipboardCheck, Download, Loader2, Check, Copy, Hash } from 'lucide-react'
+import { useBlossomMedia } from '@/hooks/useBlossomMedia'
+import { VerificationBadge } from '@/components/ui/VerificationBadge'
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
+import Markdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import { nip19 } from 'nostr-tools'
+import { getEmojiMap, isEmojiSizeOk } from '@/stores/emojiStore'
+import { BlossomImg } from '@/components/ui/BlossomImg'
+import { HubEventCard } from '@/components/hub/HubEventCard'
+import { HubMessageCard } from '@/components/hub/HubMessageCard'
+import { CalendarTimeEventCard } from '@/components/hub/CalendarTimeEventCard'
+import { ProfileCard, NoteCard, LongFormCard, CommentCard, LiveActivityCard } from '@/components/nostr/NostrCards'
+import { detectEmbed } from '@/lib/embeds'
+import { Embed } from '@/components/ui/Embed'
+import { usePreferencesStore } from '@/stores/preferencesStore'
+import { CustomAudioPlayer } from '@/components/ui/CustomAudioPlayer'
+
+/* ─── Spoiler text (Discord-style ||text||) ─── */
+
+export function SpoilerText({ children }: { children: React.ReactNode }) {
+  const [revealed, setRevealed] = useState(false)
+  return (
+    <TooltipProvider delayDuration={200}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span
+            onClick={() => setRevealed((v) => !v)}
+            className={`inline rounded px-0.5 cursor-pointer transition-all duration-200 select-none
+              ${revealed
+                ? 'bg-muted/60 text-foreground'
+                : 'bg-muted-foreground/80 text-transparent hover:bg-muted-foreground/60'
+              }`}
+          >
+            {children}
+          </span>
+        </TooltipTrigger>
+        <TooltipContent side="top">
+          {revealed ? 'Click to hide spoiler' : 'Click to reveal spoiler'}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  )
+}
+
+/* ─── Muted word pill (click to reveal / rehide) ─── */
+
+export function MutedWordPill({ children }: { children: React.ReactNode }) {
+  const [revealed, setRevealed] = useState(false)
+  return (
+    <TooltipProvider delayDuration={200}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span
+            onClick={() => setRevealed((v) => !v)}
+            className={`inline rounded-sm px-0.5 cursor-pointer transition-all duration-200 select-none
+              ${revealed
+                ? 'bg-slate-500/20 text-foreground'
+                : 'bg-slate-500 text-slate-500'
+              }`}
+          >
+            {children}
+          </span>
+        </TooltipTrigger>
+        <TooltipContent side="top">
+          {revealed ? 'Click to hide' : 'Muted word'}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  )
+}
+
+/** Split content by ||spoiler|| markers into typed segments */
+export function splitSpoilerSegments(text: string): { type: 'text' | 'spoiler'; value: string }[] {
+  const segments: { type: 'text' | 'spoiler'; value: string }[] = []
+  const regex = /\|\|(.+?)\|\|/gs
+  let lastIndex = 0
+  let match: RegExpExecArray | null
+
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      segments.push({ type: 'text', value: text.slice(lastIndex, match.index) })
+    }
+    segments.push({ type: 'spoiler', value: match[1] })
+    lastIndex = regex.lastIndex
+  }
+  if (lastIndex < text.length) {
+    segments.push({ type: 'text', value: text.slice(lastIndex) })
+  }
+  return segments
+}
+
+/* ─── Timestamp token (<t:unix>) ─── */
+
+const TIMESTAMP_REGEX = /<t:(\d+)>/g
+
+/** Check if text contains any <t:unix> tokens */
+function hasTimestampTokens(text: string): boolean {
+  TIMESTAMP_REGEX.lastIndex = 0
+  return TIMESTAMP_REGEX.test(text)
+}
+
+/** Split text into plain text and timestamp segments */
+function splitTimestampSegments(text: string): { type: 'text' | 'timestamp'; value: string }[] {
+  const segments: { type: 'text' | 'timestamp'; value: string }[] = []
+  TIMESTAMP_REGEX.lastIndex = 0
+  let lastIndex = 0
+  let match: RegExpExecArray | null
+
+  while ((match = TIMESTAMP_REGEX.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      segments.push({ type: 'text', value: text.slice(lastIndex, match.index) })
+    }
+    segments.push({ type: 'timestamp', value: match[1] })
+    lastIndex = TIMESTAMP_REGEX.lastIndex
+  }
+  if (lastIndex < text.length) {
+    segments.push({ type: 'text', value: text.slice(lastIndex) })
+  }
+  return segments
+}
+
+/** Live-updating timestamp display — shows full date/time + relative indicator */
+export function TimestampToken({ unix }: { unix: number }) {
+  const [, setTick] = useState(0)
+
+  // Re-render periodically to keep the relative time fresh
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), 30_000)
+    return () => clearInterval(id)
+  }, [])
+
+  const dt = new Date(unix * 1000)
+  const datePart = dt.toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' })
+  const timePart = dt.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+
+  const diffMs = dt.getTime() - Date.now()
+  const absDiffMs = Math.abs(diffMs)
+  let relative: string
+  if (absDiffMs < 60_000) {
+    relative = diffMs >= 0 ? 'now' : 'just now'
+  } else if (absDiffMs < 3_600_000) {
+    const mins = Math.round(absDiffMs / 60_000)
+    relative = diffMs >= 0 ? `in ${mins} minute${mins !== 1 ? 's' : ''}` : `${mins} minute${mins !== 1 ? 's' : ''} ago`
+  } else if (absDiffMs < 86_400_000) {
+    const hrs = Math.round(absDiffMs / 3_600_000)
+    relative = diffMs >= 0 ? `in ${hrs} hour${hrs !== 1 ? 's' : ''}` : `${hrs} hour${hrs !== 1 ? 's' : ''} ago`
+  } else {
+    const days = Math.round(absDiffMs / 86_400_000)
+    relative = diffMs >= 0 ? `in ${days} day${days !== 1 ? 's' : ''}` : `${days} day${days !== 1 ? 's' : ''} ago`
+  }
+
+  return (
+    <span
+      className="inline-block bg-primary/10 text-primary rounded-sm px-1 py-0.5 text-xs font-medium cursor-default"
+      title={dt.toISOString()}
+    >
+      {datePart} – {timePart} ({relative})
+    </span>
+  )
+}
+
+/* ─── Link Preview (Tauri desktop only) ─── */
+
+interface LinkPreviewData {
+  title?: string
+  description?: string
+  image?: string
+  siteName?: string
+}
+
+const previewCache = new Map<string, LinkPreviewData | null>()
+
+export function LinkPreview({ href }: { href: string }) {
+  const [preview, setPreview] = useState<LinkPreviewData | null>(null)
+  const [loaded, setLoaded] = useState(false)
+
+  useEffect(() => {
+    if (!('__TAURI__' in window)) { setLoaded(true); return }
+
+    if (previewCache.has(href)) {
+      setPreview(previewCache.get(href) || null)
+      setLoaded(true)
+      return
+    }
+
+    let cancelled = false
+      ; (async () => {
+        try {
+          const modulePath = '@tauri-apps/' + 'api/core'
+          const { invoke } = await (Function('return import("' + modulePath + '")')() as Promise<{ invoke: (cmd: string, args: Record<string, unknown>) => Promise<LinkPreviewData> }>)
+          const data = await invoke('fetch_link_preview', { url: href })
+          if (!cancelled) {
+            const result = (data?.title || data?.description) ? data : null
+            previewCache.set(href, result)
+            setPreview(result)
+          }
+        } catch {
+          previewCache.set(href, null)
+        } finally {
+          if (!cancelled) setLoaded(true)
+        }
+      })()
+    return () => { cancelled = true }
+  }, [href])
+
+  if (!loaded || !preview) return null
+
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="flex mt-1 rounded-lg border border-border overflow-hidden max-w-[400px] bg-secondary/30 hover:bg-secondary/50 transition-colors group"
+    >
+      {preview.image && (
+        <img
+          src={preview.image}
+          alt=""
+          className="w-24 h-24 object-cover shrink-0"
+          loading="lazy"
+          onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+        />
+      )}
+      <div className="flex flex-col justify-center px-3 py-2 min-w-0">
+        {preview.siteName && (
+          <p className="text-[10px] text-muted-foreground uppercase tracking-wide">{preview.siteName}</p>
+        )}
+        {preview.title && (
+          <p className="text-sm font-medium text-foreground truncate group-hover:text-primary transition-colors">{preview.title}</p>
+        )}
+        {preview.description && (
+          <p className="text-xs text-muted-foreground line-clamp-2 mt-0.5">{preview.description}</p>
+        )}
+      </div>
+    </a>
+  )
+}
+
+/* ─── BlossomImage — inline image with blossom fallback + shimmer skeleton ─── */
+
+function BlossomImage({ src, alt, className }: { src: string; alt?: string; className?: string }) {
+  const blossom = useBlossomMedia(src)
+  const [loaded, setLoaded] = useState(false)
+  const [error, setError] = useState(false)
+
+  // Reset states when src changes
+  useEffect(() => { setLoaded(false); setError(false) }, [src])
+
+  if (blossom.error === 'not-found') {
+    return (
+      <div className="rounded-lg mt-1 bg-destructive/10 border border-destructive/30 flex flex-col items-center text-xs py-3 px-3 gap-1 max-w-[400px]">
+        <span className="text-muted-foreground">Image not found on any server</span>
+        <a href={src} target="_blank" rel="noopener noreferrer" className="text-primary text-xs hover:underline">⬇ Try direct link</a>
+      </div>
+    )
+  }
+
+  const resolvedSrc = blossom.src || src
+  const isLoading = !loaded && !error
+
+  return (
+    <div className="relative inline-block mt-1 max-w-[400px]">
+      {/* Shimmer skeleton while loading */}
+      {isLoading && (
+        <div className="media-skeleton" style={{ minHeight: 160, width: 400, maxWidth: '100%' }} />
+      )}
+      {error && (
+        <div className="rounded-lg bg-secondary/40 border border-border/50 flex items-center justify-center text-xs text-muted-foreground/60 py-6 max-w-[400px]">
+          Failed to load image
+        </div>
+      )}
+      {/* Always render img (hidden until loaded) — matches BlobMedia pattern */}
+      <img
+        src={resolvedSrc}
+        alt={alt || ''}
+        className={`${className || 'w-full max-w-[400px] max-h-[300px] rounded-lg border border-border object-contain'} transition-opacity duration-300 ${loaded ? 'opacity-100' : 'opacity-0 h-0 overflow-hidden'}`}
+        onLoad={() => { setLoaded(true); setError(false) }}
+        onError={() => setError(true)}
+      />
+      {loaded && blossom.verified !== 'verified' && blossom.expectedHash && (
+        <VerificationBadge
+          verified={blossom.verified}
+          expectedHash={blossom.expectedHash}
+          servers={blossom.servers}
+          ext={blossom.ext}
+          onRecovered={blossom.acceptVerifiedUrl}
+        />
+      )}
+    </div>
+  )
+}
+
+/* ─── Video Embed with blossom fallback + shimmer skeleton ─── */
+
+export function VideoEmbed({ src }: { src: string }) {
+  const blossom = useBlossomMedia(src)
+  const [failed, setFailed] = useState(false)
+  const [loaded, setLoaded] = useState(false)
+
+  useEffect(() => { setLoaded(false); setFailed(false) }, [src])
+
+  if (blossom.error === 'not-found') {
+    return (
+      <div className="rounded-lg mt-1 bg-destructive/10 border border-destructive/30 flex flex-col items-center text-xs py-3 px-3 gap-1 max-w-[400px]">
+        <span className="text-muted-foreground">Video not found on any server</span>
+        <a href={src} target="_blank" rel="noopener noreferrer" className="text-primary text-xs hover:underline">⬇ Try direct link</a>
+      </div>
+    )
+  }
+
+  const resolvedSrc = blossom.src || src
+
+  if (failed) {
+    return (
+      <a
+        href={src}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="flex items-center gap-2 px-3 py-2 mt-1 rounded-lg border border-border bg-secondary/40 hover:bg-secondary/80 transition-colors max-w-[400px] group"
+      >
+        <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+          <Download size={18} className="text-primary" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm text-foreground font-medium truncate">Video link</p>
+          <p className="text-xs text-muted-foreground truncate group-hover:text-primary transition-colors">{src.split('/').pop()?.split('?')[0] || 'Open video'}</p>
+        </div>
+      </a>
+    )
+  }
+
+  const isLoading = !loaded
+
+  return (
+    <div className="relative inline-block mt-1 max-w-[400px]">
+      {/* Shimmer skeleton while loading */}
+      {isLoading && (
+        <div className="media-skeleton" style={{ minHeight: 160, aspectRatio: '16/9', maxWidth: 400 }} />
+      )}
+      {/* Always render video (hidden until loaded) — matches BlobMedia pattern */}
+      <video
+        src={resolvedSrc}
+        controls
+        className={`w-full max-w-[400px] max-h-[300px] rounded-lg border border-border transition-opacity duration-300 ${loaded ? 'opacity-100' : 'opacity-0 h-0'}`}
+        preload="metadata"
+        onLoadedData={() => setLoaded(true)}
+        onError={() => setFailed(true)}
+      />
+      {loaded && blossom.verified !== 'verified' && blossom.expectedHash && (
+        <VerificationBadge
+          verified={blossom.verified}
+          expectedHash={blossom.expectedHash}
+          servers={blossom.servers}
+          ext={blossom.ext}
+          onRecovered={blossom.acceptVerifiedUrl}
+        />
+      )}
+    </div>
+  )
+}
+
+/* ─── Audio Embed with blossom fallback + shimmer skeleton ─── */
+
+function AudioEmbed({ src }: { src: string }) {
+  const blossom = useBlossomMedia(src)
+  const [loaded, setLoaded] = useState(false)
+
+  useEffect(() => { setLoaded(false) }, [src])
+
+  if (blossom.error === 'not-found') {
+    return (
+      <div className="rounded-lg mt-1 bg-destructive/10 border border-destructive/30 flex flex-col items-center text-xs py-3 px-3 gap-1 max-w-[340px]">
+        <span className="text-muted-foreground">Audio not found on any server</span>
+        <a href={src} target="_blank" rel="noopener noreferrer" className="text-primary text-xs hover:underline">⬇ Try direct link</a>
+      </div>
+    )
+  }
+
+  const resolvedSrc = blossom.src || src
+  const isLoading = !loaded
+
+  return (
+    <div className="relative mt-1 max-w-[400px]">
+      {/* Shimmer skeleton while loading */}
+      {isLoading && (
+        <div className="media-skeleton" style={{ width: 300, height: 44 }} />
+      )}
+      {/* Audio player */}
+      <div className={`flex flex-col gap-1 px-2 py-1.5 rounded-lg border border-border/50 bg-secondary/30 transition-opacity duration-300 ${loaded ? 'opacity-100' : 'opacity-0 h-0 overflow-hidden'}`}>
+        <CustomAudioPlayer
+          src={resolvedSrc}
+          title={src.split('/').pop() || 'Audio'}
+          preload="metadata"
+          onLoadedData={() => setLoaded(true)}
+        />
+        {loaded && blossom.verified !== 'verified' && blossom.expectedHash && (
+          <VerificationBadge
+            verified={blossom.verified}
+            expectedHash={blossom.expectedHash}
+            servers={blossom.servers}
+            ext={blossom.ext}
+            onRecovered={blossom.acceptVerifiedUrl}
+            position="top-right"
+            size="sm"
+          />
+        )}
+      </div>
+    </div>
+  )
+}
+
+/* ─── Code Block with line numbers + copy ─── */
+
+export function CodeBlock({ code, language }: { code: string; language?: string }) {
+  const [copied, setCopied] = useState(false)
+  const lines = code.split('\n')
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(code)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  return (
+    <div className="relative group/code my-2 rounded-lg border border-border bg-[hsl(var(--secondary))] overflow-hidden">
+      {/* Header bar */}
+      <div className="flex items-center justify-between px-3 py-1 bg-secondary/60 border-b border-border text-[10px] text-muted-foreground">
+        <span>{language || 'text'}</span>
+        <button
+          onClick={handleCopy}
+          className="flex items-center gap-1 px-1.5 py-0.5 rounded cursor-pointer hover:text-foreground hover:bg-accent/50 transition-colors"
+        >
+          {copied ? <ClipboardCheck size={12} /> : <Clipboard size={12} />}
+          {copied ? 'Copied' : 'Copy'}
+        </button>
+      </div>
+      {/* Code content */}
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs font-mono leading-relaxed">
+          <tbody>
+            {lines.map((line, i) => (
+              <tr key={i} className="hover:bg-accent/20">
+                <td className="select-none text-right pr-3 pl-3 py-0 text-muted-foreground/40 w-[1%] whitespace-nowrap">
+                  {i + 1}
+                </td>
+                <td className="pr-4 py-0 whitespace-pre">{line || ' '}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+
+/* ─── Main MessageContent renderer ─── */
+
+export const MessageContent = memo(function MessageContent({ content, suffix, onProfileClick, emojiTags, disableLinkPreviews, disableCustomEmojis, disableMedia, disableHubInviteCards, mutedWords, hubRoleNames }: { content: string; suffix?: React.ReactNode; onProfileClick?: (pubkey: string) => void; emojiTags?: [string, string, string?][]; disableLinkPreviews?: boolean; disableCustomEmojis?: boolean; disableMedia?: boolean; disableHubInviteCards?: boolean; mutedWords?: Set<string>; hubRoleNames?: string[] }) {
+  const globalEmbedsOff = !usePreferencesStore((s) => s.showEmbeds)
+  const globalMutedWordsOff = !usePreferencesStore((s) => s.hideMutedWords)
+  const globalMediaOff = !usePreferencesStore((s) => s.showMedia)
+  const globalEmojisOff = !usePreferencesStore((s) => s.showCustomEmojis)
+  const effectiveDisablePreviews = disableLinkPreviews || globalEmbedsOff
+  const effectiveDisableMedia = disableMedia || globalMediaOff
+  const effectiveDisableEmojis = disableCustomEmojis || globalEmojisOff
+  const effectiveMutedWords = globalMutedWordsOff ? undefined : mutedWords
+  const hasSpoilers = /\|\|.+?\|\|/s.test(content)
+
+  // Preserve blank lines: convert single newlines between paragraphs to double newlines
+  const processed = content.replace(/\n\n/g, '\n\n\u00a0\n\n')
+
+  /** Replace muted words in a text string with redacted pill spans */
+  const redactMutedWords = useCallback((text: string): React.ReactNode => {
+    if (!effectiveMutedWords || effectiveMutedWords.size === 0) return text
+    // Build a regex that matches any muted word (case-insensitive)
+    const escaped = Array.from(effectiveMutedWords).map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    const regex = new RegExp(`(${escaped.join('|')})`, 'gi')
+    const parts = text.split(regex)
+    if (parts.length <= 1) return text
+    return parts.map((part, i) => {
+      if (i % 2 === 1) {
+        return <MutedWordPill key={i}>{part}</MutedWordPill>
+      }
+      return part
+    })
+  }, [effectiveMutedWords])
+
+  /** Recursively walk React children and redact muted words in text nodes */
+  const redactChildren = useCallback((children: React.ReactNode): React.ReactNode => {
+    if (!effectiveMutedWords || effectiveMutedWords.size === 0) return children
+    return Children.map(children, (child) => {
+      if (typeof child === 'string') return redactMutedWords(child)
+      if (isValidElement(child) && (child.props as any)?.children) {
+        return cloneElement(child, {}, redactChildren((child.props as any).children))
+      }
+      return child
+    })
+  }, [effectiveMutedWords, redactMutedWords])
+
+  // Stable reference — prevents React from unmounting/remounting custom elements on parent re-renders
+  const components = useMemo<import('react-markdown').Components>(() => ({
+    p: ({ children }) => {
+      if (children === '\u00a0') return <p className="h-3" />
+      const childArr = Array.isArray(children) ? children : [children]
+      const hasBlock = childArr.some((c: any) =>
+        c?.type && (typeof c.type === 'string'
+          ? ['video', 'audio', 'iframe', 'div', 'figure'].includes(c.type) ||
+          (c.type === 'img' && !(c.props?.alt as string)?.startsWith('emoji:') && !(c.props?.alt as string)?.startsWith('timestamp:'))
+          : true
+        ) && c?.props
+      )
+      const processed = redactChildren(children)
+      if (hasBlock) return <div className="mb-1 last:mb-0">{processed}</div>
+      return <p className="mb-1 last:mb-0">{processed}</p>
+    },
+    h1: ({ children }) => <p className="font-bold text-lg mb-1">{children}</p>,
+    h2: ({ children }) => <p className="font-bold text-[15px] mb-1">{children}</p>,
+    h3: ({ children }) => <p className="font-semibold text-sm mb-1">{children}</p>,
+    h4: ({ children }) => <p className="font-semibold text-sm mb-1 text-foreground/80">{children}</p>,
+    h5: ({ children }) => <p className="font-medium text-xs uppercase tracking-wide mb-1 text-foreground/70">{children}</p>,
+    h6: ({ children }) => <p className="font-medium text-xs mb-1 text-muted-foreground">{children}</p>,
+    strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+    em: ({ children }) => <em>{children}</em>,
+    del: ({ children }) => <del className="opacity-60">{children}</del>,
+    a: ({ href, children }) => {
+      if (!href) return <span>{children}</span>
+      // Normalize URLs without a protocol — prevents relative path resolution
+      if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(href)) {
+        href = 'https://' + href
+      }
+      if (!effectiveDisableMedia && /\.(jpg|jpeg|png|gif|webp|svg|bmp)(\?.*)?$/i.test(href)) {
+        return <BlossomImage src={href} alt={String(children) || ''} />
+      }
+      if (!effectiveDisableMedia && /\.(mp4|webm|mov|avi|mkv)(\?.*)?$/i.test(href)) {
+        return <VideoEmbed src={href} />
+      }
+      if (!effectiveDisableMedia && /\.(mp3|ogg|wav|flac|aac|m4a)(\?.*)?$/i.test(href)) {
+        return <AudioEmbed src={href} />
+      }
+      // Embeddable URLs (YouTube, Twitch, Kick, Twitter/X, Spotify, Steam, TikTok)
+      const embedInfo = !effectiveDisablePreviews ? detectEmbed(href) : null
+      if (embedInfo) {
+        return (
+          <>
+            <a href={href} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">{children}</a>
+            <div className="mt-1">
+              <Embed embed={embedInfo} maxWidth={400} />
+            </div>
+          </>
+        )
+      }
+      return (
+        <>
+          <TooltipProvider delayDuration={300}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <a href={href} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
+                  {children}
+                </a>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="max-w-[400px] break-all">
+                {href}
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+          {!effectiveDisablePreviews && <LinkPreview href={href} />}
+        </>
+      )
+    },
+    ul: ({ children }) => <ul className="list-disc list-inside mb-1">{children}</ul>,
+    ol: ({ children }) => <ol className="list-decimal list-inside mb-1">{children}</ol>,
+    li: ({ children }) => <li>{children}</li>,
+    pre: ({ children }) => <>{children}</>,
+    code: ({ className, children }) => {
+      const isBlock = className?.includes('language-') || (typeof children === 'string' && children.includes('\n'))
+      if (isBlock) {
+        const codeStr = String(children).replace(/\n$/, '')
+        return <CodeBlock code={codeStr} language={className?.replace('language-', '')} />
+      }
+      return (
+        <code className="bg-secondary/80 border border-border rounded px-1.5 py-0.5 text-xs font-mono text-primary">
+          {children}
+        </code>
+      )
+    },
+    blockquote: ({ children }) => (
+      <blockquote className="border-l-2 border-primary/40 pl-2 my-1 opacity-80">{children}</blockquote>
+    ),
+    hr: () => <hr className="border-border my-2" />,
+    img: ({ src, alt }) => {
+      // Mention pills (inserted by preMentionMarkdown) — render inline styled badge
+      // alt format: "mention:everyone", "mention:here", "mention:role:roleName"
+      if (alt && alt.startsWith('mention:')) {
+        const mentionType = alt.slice(8) // e.g. "everyone", "here", "role:r2"
+        let label: string
+        let colorClass: string
+        if (mentionType === 'everyone') {
+          label = '@everyone'
+          colorClass = 'bg-primary/15 text-primary hover:bg-primary/25'
+        } else if (mentionType === 'here') {
+          label = '@here'
+          colorClass = 'bg-amber-500/15 text-amber-400 hover:bg-amber-500/25'
+        } else if (mentionType.startsWith('role:')) {
+          label = `@${mentionType.slice(5)}`
+          colorClass = 'bg-indigo-500/15 text-indigo-400 hover:bg-indigo-500/25'
+        } else {
+          label = `@${mentionType}`
+          colorClass = 'bg-primary/15 text-primary hover:bg-primary/25'
+        }
+        return (
+          <span
+            className={`inline-flex items-center rounded px-1 py-0.5 text-xs font-medium cursor-default transition-colors ${colorClass}`}
+          >
+            {label}
+          </span>
+        )
+      }
+      // Timestamp tokens (inserted by preTimestampMarkdown) — render inline badge
+      // alt format: "timestamp:unix"
+      if (alt && alt.startsWith('timestamp:')) {
+        const unix = parseInt(alt.slice(10), 10)
+        if (!isNaN(unix)) return <TimestampToken unix={unix} />
+      }
+      // NIP-30 custom emoji images (inserted by preEmojify) — render inline at emoji size
+      // alt format: "emoji:shortcode" or "emoji:shortcode|setAddress"
+      if (alt && alt.startsWith('emoji:')) {
+        // When custom emojis are disabled, show a gray pill placeholder
+        if (effectiveDisableEmojis) {
+          const rest = alt.slice(6)
+          const pipeIdx = rest.indexOf('|')
+          const shortcode = pipeIdx >= 0 ? rest.slice(0, pipeIdx) : rest
+          return (
+            <span className="inline-flex items-center bg-muted-foreground/20 text-muted-foreground text-[11px] rounded px-1 py-0.5 align-text-bottom" title={`:${shortcode}:`}>
+              &lt;disabled&gt;
+            </span>
+          )
+        }
+        const rest = alt.slice(6)
+        const pipeIdx = rest.indexOf('|')
+        const shortcode = pipeIdx >= 0 ? rest.slice(0, pipeIdx) : rest
+        const setAddress = pipeIdx >= 0 ? rest.slice(pipeIdx + 1) : undefined
+        // Size gate: skip rendering if emoji exceeds 1 MB
+        if (src && !isEmojiSizeOk(src)) {
+          return <span title="Emoji too large (>1 MB)">{`:${shortcode}:`}</span>
+        }
+        return (
+          <TooltipProvider delayDuration={200}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <BlossomImg
+                  src={src || ''}
+                  alt={`:${shortcode}:`}
+                  className="inline h-5 w-5 align-text-bottom object-contain cursor-pointer hover:scale-125 transition-transform"
+                  loading="lazy"
+                  data-set-address={setAddress || undefined}
+                  onClick={(e) => dispatchEmojiClick(e, shortcode)}
+                />
+              </TooltipTrigger>
+              <TooltipContent side="top" className="flex items-center gap-2 px-2.5 py-1.5 z-[150]">
+                <img src={src} alt={shortcode} className="w-8 h-8 object-contain" />
+                <span className="text-xs font-mono">:{shortcode}:</span>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        )
+      }
+      // Normal images
+      return <BlossomImage src={src || ''} alt={alt || ''} />
+    },
+  }), [effectiveDisablePreviews, effectiveDisableEmojis, effectiveDisableMedia, redactChildren, hubRoleNames])
+
+  // Split content on nostr bech32 identifiers to render cards inline
+  const nostrSegments = useMemo(() => splitNostr(content), [content])
+  const hasNostr = nostrSegments.some(s => s.type === 'nostr')
+
+  const renderMarkdown = (text: string) => {
+    // Pre-process: replace @everyone, @here, @roleName with markdown image syntax for inline rendering
+    const mentioned = preMentionMarkdown(text, hubRoleNames)
+    // Pre-process: replace <t:unix> with markdown image syntax for inline rendering
+    const timestamped = preTimestampMarkdown(mentioned)
+    // Pre-process: replace :shortcode: with markdown image syntax for NIP-30 emojis
+    const emojified = effectiveDisableEmojis ? timestamped : preEmojifyMarkdown(timestamped, emojiTags)
+    const proc = emojified.replace(/\n\n/g, '\n\n\u00a0\n\n')
+    return (
+      <Markdown remarkPlugins={[remarkGfm]} components={components}>
+        {proc}
+      </Markdown>
+    )
+  }
+
+  /** Wrap output with suffix that appears inline at the end of the last paragraph */
+  const wrapWithSuffix = (node: React.ReactNode) => {
+    if (!suffix) return node
+    return (
+      <span className="msg-with-suffix">
+        {node}
+        {suffix}
+      </span>
+    )
+  }
+
+  // If content has nostr references, render segments with cards
+  if (hasNostr) {
+    return wrapWithSuffix(
+      <>
+        {nostrSegments.map((seg, i) => {
+          if (seg.type === 'nostr') {
+            return <NostrCard key={i} bech32={seg.value} onProfileClick={onProfileClick} disableHubInviteCards={disableHubInviteCards} />
+          }
+          if (hasSpoilers) {
+            const segs = splitSpoilerSegments(seg.value)
+            return segs.map((s, j) =>
+              s.type === 'spoiler'
+                ? <SpoilerText key={`${i}-${j}`}>{s.value}</SpoilerText>
+                : <span key={`${i}-${j}`}>{renderMarkdown(s.value)}</span>
+            )
+          }
+          // If the text segment is simple (no markdown block syntax), render inline
+          // to avoid <p> tags pushing content to a new line after mentions
+          const hasBlockSyntax = /^(\s*(#{1,6}\s|[-*]\s|\d+\.\s|>|```|---|\|))|\n\n/m.test(seg.value)
+          if (!hasBlockSyntax) {
+            return <span key={i}>{emojifyTimestampAndMention(seg.value, emojiTags, hubRoleNames)}</span>
+          }
+          return <span key={i}>{renderMarkdown(seg.value)}</span>
+        })}
+      </>
+    )
+  }
+
+  // If content has spoilers, split into segments and render each
+  if (hasSpoilers) {
+    const segments = splitSpoilerSegments(content)
+    return wrapWithSuffix(
+      <>
+        {segments.map((seg, i) => {
+          if (seg.type === 'spoiler') {
+            return <SpoilerText key={i}>{seg.value}</SpoilerText>
+          }
+          return <span key={i}>{renderMarkdown(seg.value)}</span>
+        })}
+      </>
+    )
+  }
+
+  return wrapWithSuffix(renderMarkdown(processed))
+})
+
+/* ─── Emoji click → discovery dispatch ───────────────────── */
+
+/** Dispatch a custom DOM event when a rendered emoji is clicked */
+function dispatchEmojiClick(e: React.MouseEvent, shortcode: string) {
+  e.stopPropagation()
+  const emojiMap = getEmojiMap()
+  const entry = emojiMap.get(shortcode)
+  // Also check for set address from data attribute (event-level tag)
+  const imgEl = e.target as HTMLImageElement
+  const eventSetAddr = imgEl.dataset?.setAddress
+  window.dispatchEvent(new CustomEvent('emoji-click', {
+    detail: {
+      shortcode,
+      url: entry?.url || imgEl.src,
+      setAddress: entry?.setAddress || eventSetAddr || null,
+    },
+  }))
+}
+
+/* ─── Timestamp pre-processing for markdown ──────────────── */
+
+/**
+ * Pre-process text for markdown rendering: replace <t:unix> with markdown image syntax.
+ * Uses alt="timestamp:unix" as a marker for the custom img component to render a TimestampToken.
+ * The src is a dummy value since the img handler intercepts before loading.
+ */
+function preTimestampMarkdown(text: string): string {
+  TIMESTAMP_REGEX.lastIndex = 0
+  return text.replace(TIMESTAMP_REGEX, (_full, unix: string) => {
+    return `![timestamp:${unix}](ts)`
+  })
+}
+
+/* ─── Group/role mention pre-processing ──────────────────── */
+
+/**
+ * Pre-process text for markdown rendering: replace @everyone, @here, and @roleName
+ * with markdown image syntax. Uses alt="mention:type" as a marker for the custom
+ * img component to render as styled inline mention pills.
+ *
+ * Word-boundary matching ensures we don't match partial words like "everywhere".
+ */
+function preMentionMarkdown(text: string, hubRoleNames?: string[]): string {
+  // Replace @everyone (case-insensitive, word-boundary)
+  let result = text.replace(/(^|[^a-zA-Z0-9_])@everyone(?=[^a-zA-Z0-9_]|$)/gi, '$1![mention:everyone](m)')
+
+  // Replace @here (case-insensitive, word-boundary)
+  result = result.replace(/(^|[^a-zA-Z0-9_])@here(?=[^a-zA-Z0-9_]|$)/gi, '$1![mention:here](m)')
+
+  // Replace @roleName for each hub role
+  if (hubRoleNames && hubRoleNames.length > 0) {
+    for (const roleName of hubRoleNames) {
+      if (!roleName || roleName === 'everyone') continue // skip 'everyone' — already handled
+      // Escape regex special characters in role name
+      const escaped = roleName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      const roleRegex = new RegExp(`(^|[^a-zA-Z0-9_])@${escaped}(?=[^a-zA-Z0-9_]|$)`, 'gi')
+      result = result.replace(roleRegex, `$1![mention:role:${roleName}](m)`)
+    }
+  }
+
+  return result
+}
+
+/* ─── Custom emoji (NIP-30) :shortcode: rendering ────────── */
+
+const EMOJI_SHORTCODE = /:([a-zA-Z0-9_-]+):/g
+
+/**
+ * Pre-process text for markdown rendering: replace :shortcode: with markdown image syntax.
+ * Uses alt="emoji:shortcode" as a marker for the custom img component to render at emoji size.
+ */
+function preEmojifyMarkdown(text: string, eventEmojiTags?: [string, string, string?][]): string {
+  const emojiMap = getEmojiMap()
+  // Build fallback map from event-level emoji tags: shortcode -> { url, setAddress }
+  const eventMap = new Map<string, { url: string; setAddress?: string }>()
+  if (eventEmojiTags) {
+    for (const [sc, url, addr] of eventEmojiTags) {
+      if (!emojiMap.has(sc)) eventMap.set(sc, { url, setAddress: addr })
+    }
+  }
+  if (emojiMap.size === 0 && eventMap.size === 0) return text
+
+  EMOJI_SHORTCODE.lastIndex = 0
+  return text.replace(EMOJI_SHORTCODE, (full, shortcode: string) => {
+    const emoji = emojiMap.get(shortcode)
+    if (emoji) {
+      const addrSuffix = emoji.setAddress ? `|${emoji.setAddress}` : ''
+      return `![emoji:${shortcode}${addrSuffix}](${emoji.url})`
+    }
+    const ev = eventMap.get(shortcode)
+    if (ev) {
+      const addrSuffix = ev.setAddress ? `|${ev.setAddress}` : ''
+      return `![emoji:${shortcode}${addrSuffix}](${ev.url})`
+    }
+    return full
+  })
+}
+
+/** Convert :shortcode: patterns to inline <img> elements (for non-markdown paths) */
+function emojify(text: string, eventEmojiTags?: [string, string, string?][]): React.ReactNode {
+  const emojiMap = getEmojiMap()
+  const eventMap = new Map<string, { url: string; setAddress?: string }>()
+  if (eventEmojiTags) {
+    for (const [sc, url, addr] of eventEmojiTags) {
+      if (!emojiMap.has(sc)) eventMap.set(sc, { url, setAddress: addr })
+    }
+  }
+  if (emojiMap.size === 0 && eventMap.size === 0) return text
+
+  const parts: React.ReactNode[] = []
+  let lastIndex = 0
+  let match: RegExpExecArray | null
+
+  EMOJI_SHORTCODE.lastIndex = 0
+  while ((match = EMOJI_SHORTCODE.exec(text)) !== null) {
+    const shortcode = match[1]
+    const emoji = emojiMap.get(shortcode)
+    const ev = eventMap.get(shortcode)
+    const url = emoji?.url || ev?.url
+    if (!url) continue
+    // Size gate: skip rendering if emoji exceeds 1 MB
+    if (!isEmojiSizeOk(url)) continue
+    const setAddr = emoji?.setAddress || ev?.setAddress
+
+    if (match.index > lastIndex) {
+      parts.push(text.slice(lastIndex, match.index))
+    }
+    parts.push(
+      <TooltipProvider key={`emoji-${match.index}`} delayDuration={200}>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <BlossomImg
+              src={url}
+              alt={`:${shortcode}:`}
+              className="inline h-5 w-5 align-text-bottom object-contain cursor-pointer hover:scale-125 transition-transform"
+              loading="lazy"
+              data-set-address={setAddr || undefined}
+              onClick={(e) => dispatchEmojiClick(e, shortcode)}
+            />
+          </TooltipTrigger>
+          <TooltipContent side="top" className="flex items-center gap-2 px-2.5 py-1.5 z-[150]">
+            <img src={url} alt={shortcode} className="w-8 h-8 object-contain" />
+            <span className="text-xs font-mono">:{shortcode}:</span>
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    )
+    lastIndex = match.index + match[0].length
+  }
+
+  if (parts.length === 0) return text
+  if (lastIndex < text.length) parts.push(text.slice(lastIndex))
+  return <>{parts}</>
+}
+
+/** Process both :shortcode: emojis AND <t:unix> timestamp tokens in one pass (for non-markdown inline paths) */
+function emojifyAndTimestamp(text: string, eventEmojiTags?: [string, string, string?][]): React.ReactNode {
+  // First pass: emojify
+  const emojified = emojify(text, eventEmojiTags)
+
+  // If emojify returned a string (no emojis found), check for timestamps directly
+  if (typeof emojified === 'string') {
+    if (!hasTimestampTokens(emojified)) return emojified
+    const tsSegs = splitTimestampSegments(emojified)
+    return (
+      <>
+        {tsSegs.map((seg, i) =>
+          seg.type === 'timestamp'
+            ? <TimestampToken key={`ts-${i}`} unix={parseInt(seg.value, 10)} />
+            : <span key={`t-${i}`}>{seg.value}</span>
+        )}
+      </>
+    )
+  }
+
+  // If emojified is already a ReactNode tree, we need to process string children for timestamps
+  // The emojify function returns a fragment with mixed string and element children
+  // Walk the children array and expand timestamp tokens in string parts
+  if (emojified && typeof emojified === 'object' && 'props' in emojified) {
+    const children = (emojified as any).props.children
+    if (Array.isArray(children)) {
+      const processed = children.flatMap((child: React.ReactNode, ci: number): React.ReactNode[] => {
+        if (typeof child === 'string' && hasTimestampTokens(child)) {
+          return splitTimestampSegments(child).map((seg, si) =>
+            seg.type === 'timestamp'
+              ? <TimestampToken key={`ts-${ci}-${si}`} unix={parseInt(seg.value, 10)} />
+              : seg.value
+          )
+        }
+        return [child]
+      })
+      return <>{processed}</>
+    }
+  }
+
+  return emojified
+}
+
+/** Inline mention pill styles — shared between markdown and inline paths */
+const MENTION_STYLES: Record<string, { label: string; className: string }> = {
+  everyone: { label: '@everyone', className: 'bg-primary/15 text-primary hover:bg-primary/25' },
+  here: { label: '@here', className: 'bg-amber-500/15 text-amber-400 hover:bg-amber-500/25' },
+}
+
+/** Build a regex matching @everyone, @here, and all hub role names */
+function buildMentionRegex(hubRoleNames?: string[]): RegExp | null {
+  const patterns = ['everyone', 'here']
+  if (hubRoleNames) {
+    for (const name of hubRoleNames) {
+      if (name && name !== 'everyone') patterns.push(name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    }
+  }
+  return new RegExp(`(^|[^a-zA-Z0-9_])@(${patterns.join('|')})(?=[^a-zA-Z0-9_]|$)`, 'gi')
+}
+
+/** Split text on mention patterns and return React nodes with styled mention pills (for non-markdown inline paths) */
+function mentionifyInline(node: React.ReactNode, hubRoleNames?: string[]): React.ReactNode {
+  const regex = buildMentionRegex(hubRoleNames)
+  if (!regex) return node
+
+  const processString = (text: string): React.ReactNode[] => {
+    const parts: React.ReactNode[] = []
+    let lastIndex = 0
+    let match: RegExpExecArray | null
+
+    regex.lastIndex = 0
+    while ((match = regex.exec(text)) !== null) {
+      const prefix = match[1] // leading boundary char (space, etc.)
+      const mentionName = match[2]
+      const fullMatchStart = match.index
+      const contentStart = fullMatchStart + prefix.length // start of @mention
+
+      if (contentStart > lastIndex) {
+        parts.push(text.slice(lastIndex, contentStart))
+      }
+
+      const lower = mentionName.toLowerCase()
+      const style = MENTION_STYLES[lower]
+      const label = style?.label || `@${mentionName}`
+      const colorClass = style?.className || 'bg-indigo-500/15 text-indigo-400 hover:bg-indigo-500/25'
+
+      parts.push(
+        <span
+          key={`mention-${fullMatchStart}`}
+          className={`inline-flex items-center rounded px-1 py-0.5 text-xs font-medium cursor-default transition-colors ${colorClass}`}
+        >
+          {label}
+        </span>
+      )
+      lastIndex = regex.lastIndex
+    }
+    if (lastIndex < text.length) parts.push(text.slice(lastIndex))
+    return parts.length > 0 ? parts : [text]
+  }
+
+  // If it's a simple string, process directly
+  if (typeof node === 'string') {
+    const parts = processString(node)
+    return parts.length === 1 && typeof parts[0] === 'string' ? parts[0] : <>{parts}</>
+  }
+
+  // If it's a React element with children, walk children and process string parts
+  if (node && typeof node === 'object' && 'props' in node) {
+    const children = (node as any).props.children
+    if (Array.isArray(children)) {
+      const processed = children.flatMap((child: React.ReactNode, ci: number) => {
+        if (typeof child === 'string') return processString(child)
+        return [child]
+      })
+      return <>{processed}</>
+    }
+  }
+
+  return node
+}
+
+/** Process emojis, timestamps, AND mentions in one pass (for non-markdown inline paths) */
+function emojifyTimestampAndMention(text: string, eventEmojiTags?: [string, string, string?][], hubRoleNames?: string[]): React.ReactNode {
+  const result = emojifyAndTimestamp(text, eventEmojiTags)
+  return mentionifyInline(result, hubRoleNames)
+}
+
+/* ─── Nostr reference detection + rendering ────────────────── */
+
+/** Matches bare bech32 (npub1, nprofile1, note1, nevent1, naddr1), nostr:-prefixed URIs, and @-prefixed npub */
+const NOSTR_PATTERN = /(?:nostr:)?@?(?:npub1|nprofile1|note1|nevent1|naddr1)[a-zA-Z0-9]+/g
+
+function splitNostr(content: string): { type: 'text' | 'nostr'; value: string }[] {
+  const segments: { type: 'text' | 'nostr'; value: string }[] = []
+  let lastIndex = 0
+  let match: RegExpExecArray | null
+
+  NOSTR_PATTERN.lastIndex = 0
+
+  while ((match = NOSTR_PATTERN.exec(content)) !== null) {
+    if (match.index > lastIndex) {
+      segments.push({ type: 'text', value: content.slice(lastIndex, match.index) })
+    }
+    // Strip nostr: and @ prefixes if present
+    const raw = match[0].replace('nostr:', '').replace(/^@/, '')
+    segments.push({ type: 'nostr', value: raw })
+    lastIndex = NOSTR_PATTERN.lastIndex
+  }
+  if (lastIndex < content.length) {
+    segments.push({ type: 'text', value: content.slice(lastIndex) })
+  }
+  return segments
+}
+
+/** Decodes a bech32 nostr identifier and renders the appropriate card */
+function NostrCard({ bech32, onProfileClick, disableHubInviteCards }: { bech32: string; onProfileClick?: (pubkey: string) => void; disableHubInviteCards?: boolean }) {
+  try {
+    const decoded = nip19.decode(bech32)
+
+    if (decoded.type === 'npub') {
+      return <ProfileCard pubkey={decoded.data as string} onProfileClick={onProfileClick} />
+    }
+    if (decoded.type === 'nprofile') {
+      const data = decoded.data as { pubkey: string }
+      return <ProfileCard pubkey={data.pubkey} onProfileClick={onProfileClick} />
+    }
+    if (decoded.type === 'note') {
+      return <NoteCard eventId={decoded.data as string} />
+    }
+    if (decoded.type === 'nevent') {
+      const data = decoded.data as { id: string; kind?: number; relays?: string[] }
+      if (data.kind === 1111) {
+        return <CommentCard eventId={data.id} relays={data.relays} />
+      }
+      return <NoteCard eventId={data.id} />
+    }
+    if (decoded.type === 'naddr') {
+      const data = decoded.data as { identifier: string; pubkey: string; kind: number; relays?: string[] }
+      if (data.kind === 36942) {
+        if (disableHubInviteCards) {
+          return (
+            <div className="my-1 max-w-[350px] rounded-lg border border-border bg-secondary/20 p-2.5 flex items-center gap-2">
+              <Hash size={14} className="text-muted-foreground shrink-0" />
+              <span className="text-xs text-muted-foreground truncate flex-1">Hub invite</span>
+              <button
+                onClick={() => { navigator.clipboard.writeText(bech32); }}
+                className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] text-muted-foreground hover:text-foreground bg-secondary hover:bg-accent/50 transition-colors cursor-pointer shrink-0"
+              >
+                <Copy size={10} /> Copy
+              </button>
+            </div>
+          )
+        }
+        return <HubEventCard identifier={data.identifier} pubkey={data.pubkey} relays={data.relays} />
+      }
+      if (data.kind === 36943) {
+        return <HubMessageCard identifier={data.identifier} pubkey={data.pubkey} relays={data.relays} />
+      }
+      if (data.kind === 30023) {
+        return <LongFormCard identifier={data.identifier} pubkey={data.pubkey} relays={data.relays} />
+      }
+      if (data.kind === 30311) {
+        return <LiveActivityCard identifier={data.identifier} pubkey={data.pubkey} relays={data.relays} />
+      }
+      if (data.kind === 31923) {
+        return <CalendarTimeEventCard identifier={data.identifier} pubkey={data.pubkey} relays={data.relays} />
+      }
+    }
+  } catch { }
+  // Fallback: unsupported kind
+  return <UnsupportedKindCard bech32={bech32} />
+}
+
+/** Fallback card for nostr references we don't have a specific renderer for */
+function UnsupportedKindCard({ bech32 }: { bech32: string }) {
+  const [copied, setCopied] = useState(false)
+  const handleCopy = () => {
+    navigator.clipboard.writeText(bech32)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+  return (
+    <div className="my-1 max-w-[350px] rounded-lg border border-border bg-secondary/30 p-3 flex items-center justify-between gap-2">
+      <span className="text-xs text-muted-foreground">Kind not supported</span>
+      <button
+        onClick={handleCopy}
+        className="flex items-center gap-1 px-2 py-1 rounded-md text-xs text-muted-foreground hover:text-foreground bg-secondary hover:bg-accent/50 transition-colors cursor-pointer"
+      >
+        {copied ? <><Check size={10} className="text-green-500" /> Copied</> : <><Copy size={10} /> Copy Event Address</>}
+      </button>
+    </div>
+  )
+}

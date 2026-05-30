@@ -1,0 +1,2679 @@
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { useUserStore } from '@/stores/userStore'
+import { isTauri } from '@/lib/utils'
+import { ADMIN_PUBKEY, StorageKey } from '@/lib/constants'
+import { fetchReplaceable, publishToSpecificRelays, getRelayList } from '@/lib/nostr/relay-pool'
+import { MonitorSmartphone, Import, Plus, Loader2, AlertCircle, Link2, KeyRound, Copy, Check, AppWindow, ChevronDown, ChevronLeft, ChevronRight, X, Shield, ShieldAlert, ExternalLink, User, Lock, Eye, EyeOff, GitBranch, Sprout, KeySquare, Download, FileUp, BookOpen, Camera, Settings2, XCircle, FileText, Package, LockOpen, Globe, RefreshCw } from 'lucide-react'
+import { useProfileCache } from '@/hooks/useProfileCache'
+import { BlossomImage } from '@/components/ui/BlossomImage'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Card, CardContent } from '@/components/ui/card'
+import { Separator } from '@/components/ui/separator'
+import { DenChatLogo } from '@/components/ui/DenChatLogo'
+import { QRCodeSVG } from 'qrcode.react'
+import { isValidMnemonic } from '@/lib/auth'
+import { uploadToBlossomServers, blossomServers as blossomServerManager } from '@/lib/blossom'
+import type { UploadProgress } from '@/lib/blossom'
+import { createUnsignedEvent, signWithSigner } from '@/lib/nostr/events'
+import {
+  listAccounts, listSeeds, generateAccount, generateNewSeed,
+  deriveNextAccount, importSeed, importNsec, loginAccount, deleteAccount,
+  type StoredAccount, type StoredSeed,
+} from '@/lib/auth/secure-storage'
+import { PC55Signer } from '@/lib/auth/pc55'
+import { BunkerSigner } from '@/lib/auth/bunker'
+import { NostrConnectSigner, generateNostrConnectDetails } from '@/lib/auth/nostr-connect'
+import { Nip07Signer } from '@/lib/auth/nip07'
+import upv2Service from '@/services/upv2.service'
+
+const LOGIN_BG_DTAG = 'den-chat-background-login'
+const ADS_DTAG = 'den-chat-ads'
+
+interface LoginBgButton { text: string; link: string }
+interface LoginBgEntry {
+  image: string
+  profilePic: string
+  name: string
+  description?: string
+  buttons: LoginBgButton[]
+}
+
+type Screen = 'main' | 'import' | 'nip46' | 'pin-login' | 'generate-pin' | 'import-pin' | 'derive-pin' | 'seed-backup' | 'saved-accounts' | 'onboarding-profile'
+
+// ── Rotating Warning Carousel ──────────────────────────────────────────────
+const WARNING_MESSAGES = [
+  {
+    icon: AlertCircle,
+    text: (
+      <>
+        <span className="font-semibold">There is no PIN recovery.</span> If you forget your PIN,
+        your only option is to re-import using your raw seed phrase (the 24 words).
+      </>
+    ),
+  },
+  {
+    icon: ShieldAlert,
+    text: (
+      <>
+        If your device is compromised, then so is your account, and you wouldn't know about it
+        unless the attacker takes action you notice. No solution.
+      </>
+    ),
+  },
+]
+
+function WarningCarousel() {
+  const [index, setIndex] = useState(0)
+  const [fading, setFading] = useState(false)
+  const [paused, setPaused] = useState(false)
+  const INTERVAL = 10_000
+
+  useEffect(() => {
+    if (paused) return
+    const timer = setInterval(() => {
+      setFading(true)
+      setTimeout(() => {
+        setIndex(i => (i + 1) % WARNING_MESSAGES.length)
+        setFading(false)
+      }, 200)
+    }, INTERVAL)
+    return () => clearInterval(timer)
+  }, [paused])
+
+  const { icon: Icon, text } = WARNING_MESSAGES[index]
+
+  return (
+    <div
+      className="w-full rounded-lg bg-amber-500/10 border border-amber-500/30 overflow-hidden cursor-pointer select-none"
+      onClick={() => setPaused(p => !p)}
+    >
+      <div
+        className="flex items-start gap-2 px-3 py-2 transition-opacity duration-200"
+        style={{ opacity: fading ? 0 : 1 }}
+      >
+        <Icon size={14} className="text-amber-500 shrink-0 mt-0.5" />
+        <p className="text-xs text-amber-600 dark:text-amber-400">{text}</p>
+      </div>
+      {/* Timer progress bar — pure CSS animation */}
+      <div className="h-[2px] w-full bg-amber-500/10">
+        <div
+          key={`${index}-${paused}`}
+          className="h-full bg-amber-500/50"
+          style={{
+            animation: `warningProgress ${INTERVAL}ms linear`,
+            animationPlayState: paused ? 'paused' : 'running',
+          }}
+        />
+      </div>
+      <style>{`
+        @keyframes warningProgress {
+          from { width: 0%; }
+          to   { width: 100%; }
+        }
+      `}</style>
+    </div>
+  )
+}
+
+export function LoginScreen() {
+  const login = useUserStore((s) => s.login)
+  const setSeedPhrase = useUserStore((s) => s.setSeedPhrase)
+  const setSigner = useUserStore((s) => s.setSigner)
+  const localSignerName = useUserStore((s) => s.localSignerName)
+  const isDesktop = isTauri()
+
+  const [screen, setScreen] = useState<Screen>('main')
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [loading, setLoading] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  // Import
+  const [importWords, setImportWords] = useState('')
+
+  // NIP-46 bunker
+  const [bunkerUrl, setBunkerUrl] = useState('')
+
+  // NIP-46 nostr connect — generated on dialog open
+  const [connectDetails, setConnectDetails] = useState<ReturnType<typeof generateNostrConnectDetails> | null>(null)
+  const [connectError, setConnectError] = useState<string | null>(null)
+  const [connectPending, setConnectPending] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const [showTerms, setShowTerms] = useState(false)
+  const [showGuide, setShowGuide] = useState(false)
+  const [showExtensionGuide, setShowExtensionGuide] = useState(false)
+
+  // ── Saved accounts (desktop keyring) ──
+  const [savedAccounts, setSavedAccounts] = useState<StoredAccount[]>([])
+  const [savedSeeds, setSavedSeeds] = useState<StoredSeed[]>([])
+  const [selectedAccount, setSelectedAccount] = useState<StoredAccount | null>(null)
+  const [pin, setPin] = useState('')
+  const [pinHint, setPinHint] = useState('')
+  const [showPin, setShowPin] = useState(false)
+  const [accountName, setAccountName] = useState('')
+  const [backupMnemonic, setBackupMnemonic] = useState<string | null>(null)
+  const [showBackupWords, setShowBackupWords] = useState(false)
+  const [backupCopied, setBackupCopied] = useState(false)
+  const [deriveSeedId, setDeriveSeedId] = useState<string | null>(null)
+  const [showBackupPinPrompt, setShowBackupPinPrompt] = useState(false)
+  const [backupPin, setBackupPin] = useState('')
+  const [backupPinError, setBackupPinError] = useState<string | null>(null)
+  const [backupDownloading, setBackupDownloading] = useState(false)
+  const [backupDownloaded, setBackupDownloaded] = useState(false)
+
+  // File import (encrypted backup)
+  const [fileImportPassword, setFileImportPassword] = useState('')
+  const [fileImportError, setFileImportError] = useState<string | null>(null)
+  const [fileImportLoading, setFileImportLoading] = useState(false)
+  const [showFilePasswordPrompt, setShowFilePasswordPrompt] = useState(false)
+  const [pendingFileData, setPendingFileData] = useState<string | null>(null)
+  const [showFilePassword, setShowFilePassword] = useState(false)
+
+  // Carousel state for account picker
+  const [selectedSeedIdx, setSelectedSeedIdx] = useState(0)
+  const [accountIdx, setAccountIdx] = useState(0)
+  const [showSeedPicker, setShowSeedPicker] = useState(false)
+
+  // ── Onboarding state (post-generate profile setup) ──
+  const [onboardingPubkey, setOnboardingPubkey] = useState<string | null>(null)
+  const [onboardingPrivateKey, setOnboardingPrivateKey] = useState<string | null>(null)
+  const [profileName, setProfileName] = useState('')
+  const [profilePicUrl, setProfilePicUrl] = useState('')
+  const [picUploadStatus, setPicUploadStatus] = useState<'idle' | 'uploading' | 'success' | 'error'>('idle')
+  const [picUploadProgress, setPicUploadProgress] = useState<UploadProgress | null>(null)
+  const [picUploadError, setPicUploadError] = useState<string | null>(null)
+  const picInputRef = useRef<HTMLInputElement>(null)
+  const picAbortRef = useRef<AbortController | null>(null)
+  const [showAdvancedModal, setShowAdvancedModal] = useState(false)
+  const [onboardRelays, setOnboardRelays] = useState<{ url: string; enabled: boolean }[]>([])
+  const [onboardBlossoms, setOnboardBlossoms] = useState<{ url: string; enabled: boolean }[]>([])
+  const [customRelayInput, setCustomRelayInput] = useState('')
+  const [customBlossomInput, setCustomBlossomInput] = useState('')
+  const [advancedTab, setAdvancedTab] = useState<'relays' | 'blossoms'>('relays')
+  const [publishing, setPublishing] = useState(false)
+
+  // Profile cache for NIP-05 display names
+  const { getProfile } = useProfileCache()
+
+  // Build account groups: seeds + standalone nsec imports as a pseudo-group
+  const accountGroups = useMemo(() => {
+    const groups: { type: 'seed' | 'standalone'; seed?: typeof savedSeeds[0]; accounts: StoredAccount[] }[] = []
+    for (const seed of savedSeeds) {
+      const accts = savedAccounts.filter((a) => a.seed_id === seed.id)
+      if (accts.length > 0) groups.push({ type: 'seed', seed, accounts: accts })
+    }
+    const standalone = savedAccounts.filter((a) => !a.seed_id)
+    if (standalone.length > 0) groups.push({ type: 'standalone', accounts: standalone })
+    return groups
+  }, [savedAccounts, savedSeeds])
+
+  // Current group + account
+  const currentGroup = accountGroups[selectedSeedIdx] || null
+  const currentAccounts = currentGroup?.accounts || []
+  const currentAccount = currentAccounts[accountIdx] || null
+
+  // Load saved accounts (desktop only)
+  const loadAccounts = useCallback(async () => {
+    if (!isDesktop) return
+    const [accounts, seeds] = await Promise.all([listAccounts(), listSeeds()])
+    setSavedAccounts(accounts)
+    setSavedSeeds(seeds)
+  }, [isDesktop])
+
+  useEffect(() => {
+    loadAccounts()
+  }, [loadAccounts])
+
+  // ── Pending deletion from Settings (deferred to LoginScreen for stability) ──
+  const [pendingDelete, setPendingDelete] = useState<{ pubkey: string; pin: string } | null>(null)
+  const [deleteStatus, setDeleteStatus] = useState<'deleting' | 'done' | 'error'>('deleting')
+  const [deleteError, setDeleteError] = useState('')
+
+  // Effect 1: Read pending-delete from sessionStorage (no cleanup → StrictMode-safe)
+  useEffect(() => {
+    const raw = sessionStorage.getItem('pending-delete')
+    if (!raw) return
+    sessionStorage.removeItem('pending-delete')
+    try {
+      const data = JSON.parse(raw) as { pubkey: string; pin: string }
+      if (data.pubkey && data.pin) {
+        setPendingDelete(data)
+        setDeleteStatus('deleting')
+      }
+    } catch { /* corrupt data, ignore */ }
+  }, [])
+
+  // Effect 2: Execute deletion when pendingDelete is set (survives StrictMode double-mount)
+  useEffect(() => {
+    if (!pendingDelete) return
+
+    let cancelled = false
+
+    // Safety timeout — if the backend never responds, don't leave the user stuck
+    const safetyTimer = setTimeout(() => {
+      if (!cancelled) {
+        cancelled = true
+        setDeleteError('Deletion timed out. Please restart the app and try again.')
+        setDeleteStatus('error')
+      }
+    }, 30_000)
+
+    // Short delay so the UI transition fully settles
+    const invokeTimer = setTimeout(() => {
+      if (cancelled) return
+      deleteAccount(pendingDelete.pubkey, pendingDelete.pin)
+        .then(() => {
+          if (cancelled) return
+          cancelled = true
+          clearTimeout(safetyTimer)
+          setDeleteStatus('done')
+          loadAccounts()
+        })
+        .catch((err: unknown) => {
+          if (cancelled) return
+          cancelled = true
+          clearTimeout(safetyTimer)
+          const msg = err instanceof Error ? err.message : typeof err === 'string' ? err : 'Deletion failed'
+          setDeleteError(msg)
+          setDeleteStatus('error')
+        })
+    }, 300)
+
+    return () => {
+      cancelled = true
+      clearTimeout(invokeTimer)
+      clearTimeout(safetyTimer)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingDelete])
+
+  // ── Pending account-switch from UserPanel (stashed before page reload) ──
+  useEffect(() => {
+    const raw = sessionStorage.getItem('pending-switch')
+    if (!raw) return
+    sessionStorage.removeItem('pending-switch')
+    try {
+      const data = JSON.parse(raw) as { pubkey: string; authMethod: string; privKeyHex: string }
+      if (data.pubkey && data.privKeyHex) {
+        login(data.pubkey, data.authMethod as 'seed' | 'nsec', data.privKeyHex)
+      }
+    } catch { /* corrupt data, ignore */ }
+  }, [login])
+
+  // Login backgrounds from NIP-78 — gated by user preferences
+  const [bgEntries, setBgEntries] = useState<LoginBgEntry[]>([])
+  const [adEntries, setAdEntries] = useState<LoginBgEntry[]>([])
+  const bgShowcaseEnabled = typeof window !== 'undefined' && localStorage.getItem(StorageKey.BG_SHOWCASE) !== 'false'
+  const adShowcaseEnabled = typeof window !== 'undefined' && localStorage.getItem(StorageKey.AD_SHOWCASE) !== 'false'
+  const [bgLoading, setBgLoading] = useState(bgShowcaseEnabled || adShowcaseEnabled)
+
+  useEffect(() => {
+    if (!bgShowcaseEnabled && !adShowcaseEnabled) return
+
+    let bgDone = !bgShowcaseEnabled, adDone = !adShowcaseEnabled
+    const checkDone = () => { if (bgDone && adDone) setBgLoading(false) }
+
+    if (bgShowcaseEnabled) {
+      fetchReplaceable(ADMIN_PUBKEY, 30078, LOGIN_BG_DTAG).then((event) => {
+        if (event && event.content) {
+          try {
+            const arr = JSON.parse(event.content)
+            if (Array.isArray(arr) && arr.length > 0) {
+              setBgEntries(arr.filter((e: LoginBgEntry) => e.image))
+            }
+          } catch { /* ignore parse errors */ }
+        }
+      }).finally(() => { bgDone = true; checkDone() })
+    }
+
+    if (adShowcaseEnabled) {
+      fetchReplaceable(ADMIN_PUBKEY, 30078, ADS_DTAG).then((event) => {
+        if (event && event.content) {
+          try {
+            const arr = JSON.parse(event.content)
+            if (Array.isArray(arr) && arr.length > 0) {
+              // Ads use 'banner' field as background image
+              setAdEntries(arr.filter((e: any) => e.banner).map((e: any) => ({
+                image: e.banner,
+                profilePic: e.profilePic || '',
+                name: e.name || '',
+                description: e.description || '',
+                buttons: Array.isArray(e.buttons) ? e.buttons : [],
+              })))
+            }
+          } catch { /* ignore parse errors */ }
+        }
+      }).finally(() => { adDone = true; checkDone() })
+    }
+  }, [])
+
+  // Read which list was last shown — once, at mount time
+  const BG_LIST_KEY = 'den-chat-login-bg-last-list'
+  const lastListRef = useRef(typeof window !== 'undefined' ? localStorage.getItem(BG_LIST_KEY) : null)
+
+  // Alternate between bg and ad lists.
+  // First-time / new user always sees the non-ad list.
+  const { activeBg, isAd } = useMemo(() => {
+    const hasBg = bgEntries.length > 0
+    const hasAd = adEntries.length > 0
+
+    if (!hasBg && !hasAd) return { activeBg: null, isAd: false }
+    if (!hasAd) return { activeBg: bgEntries[Math.floor(Math.random() * bgEntries.length)], isAd: false }
+    if (!hasBg) return { activeBg: adEntries[Math.floor(Math.random() * adEntries.length)], isAd: true }
+
+    // Both lists available — alternate
+    // If last was 'bg' → show ad. If last was 'ad' or null (first visit) → show bg.
+    const useAd = lastListRef.current === 'bg'
+    const list = useAd ? adEntries : bgEntries
+    return {
+      activeBg: list[Math.floor(Math.random() * list.length)],
+      isAd: useAd,
+    }
+  }, [bgEntries, adEntries])
+
+  // Persist the choice ONCE after both lists have loaded
+  useEffect(() => {
+    if (bgEntries.length > 0 && adEntries.length > 0) {
+      localStorage.setItem(BG_LIST_KEY, isAd ? 'ad' : 'bg')
+    }
+  }, [bgEntries, adEntries, isAd])
+
+  const bgImageUrl = activeBg?.image || null
+
+  const clearError = () => { setError(null); setConnectError(null) }
+  const goBack = () => { setScreen('main'); clearError(); setConnectDetails(null) }
+
+  // ─── UPV2 Login (main form) ───
+  const handleUPV2Login = async () => {
+    if (!username.trim()) { setError('Enter a DNN ID or npub'); return }
+    if (!password.trim()) { setError('Enter your password'); return }
+
+    setLoading('upv2')
+    clearError()
+    try {
+      const result = await upv2Service.login(username.trim(), password)
+      if (!result.success || !result.session) {
+        setError(result.error || 'UPV2 login failed')
+        return
+      }
+      setSigner(upv2Service as any)
+      login(result.session.signerPubkey, 'upv2')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Login failed')
+    } finally {
+      setLoading(null)
+    }
+  }
+
+  // ─── PC55 Login ───
+  const handlePC55Login = async () => {
+    setLoading('pc55')
+    clearError()
+    try {
+      const signer = new PC55Signer()
+      await signer.init()
+      const pubkey = await signer.getPublicKey()
+      setSigner(signer)
+      login(pubkey, 'pc55')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to connect to local signer')
+    } finally {
+      setLoading(null)
+    }
+  }
+
+  // ─── NIP-07 Login (Browser Extension) ───
+  const handleNip07Login = async () => {
+    clearError()
+    // If no extension detected, show the install guide
+    if (!window.nostr) {
+      setShowExtensionGuide(true)
+      return
+    }
+    setLoading('nip07')
+    try {
+      const signer = new Nip07Signer()
+      await signer.init()
+      const pubkey = await signer.getPublicKey()
+      setSigner(signer)
+      login(pubkey, 'nip46') // group with external signers
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Browser extension login failed')
+    } finally {
+      setLoading(null)
+    }
+  }
+
+  // ─── NIP-46 Bunker Login ───
+  const handleBunkerLogin = async () => {
+    if (!bunkerUrl.trim()) { setError('Enter a bunker:// URL'); return }
+
+    setLoading('bunker')
+    clearError()
+    try {
+      const signer = new BunkerSigner()
+      const pubkey = await signer.login(bunkerUrl.trim())
+      setSigner(signer)
+      login(pubkey, 'nip46')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Bunker login failed')
+    } finally {
+      setLoading(null)
+    }
+  }
+
+  // ─── NIP-46: Open combined dialog ───
+  const openNip46Dialog = () => {
+    clearError()
+    const details = generateNostrConnectDetails()
+    setConnectDetails(details)
+    setConnectPending(true)
+    setScreen('nip46')
+  }
+
+  // ─── NIP-46 Nostr Connect auto-login (runs when dialog opens) ───
+  const handleNostrConnectLogin = useCallback(async () => {
+    if (!connectDetails) return
+
+    setConnectPending(true)
+    setConnectError(null)
+    try {
+      const signer = new NostrConnectSigner(connectDetails.privKey)
+      const { pubkey } = await signer.login(connectDetails.connectionString)
+      setSigner(signer)
+      login(pubkey, 'nip46')
+    } catch (err) {
+      setConnectError(
+        err instanceof Error
+          ? `${err.message}. Please reload and try again.`
+          : 'Connection failed. Please reload and try again.'
+      )
+      setConnectPending(false)
+    }
+  }, [connectDetails, setSigner, login])
+
+  // Auto-start nostr connect when dialog opens
+  useEffect(() => {
+    if (screen === 'nip46' && connectDetails) {
+      handleNostrConnectLogin()
+    }
+  }, [screen, connectDetails, handleNostrConnectLogin])
+
+  const copyConnectionString = () => {
+    if (!connectDetails?.connectionString) return
+    navigator.clipboard.writeText(connectDetails.connectionString)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  // ─── Import Account (now asks for PIN first) ───
+  const handleImportValidate = () => {
+    clearError()
+    const words = importWords.trim()
+    if (!words) { setError('Enter your seed phrase or private key'); return }
+    if (!isValidMnemonic(words) && !/^(nsec1[a-z0-9]+|[0-9a-f]{64})$/i.test(words)) {
+      setError('Invalid seed phrase, nsec, or hex private key')
+      return
+    }
+    setPin('')
+    setPinHint('')
+    setAccountName('')
+    setScreen('import-pin')
+  }
+
+  // ─── Import from encrypted backup file ───
+  const handleFileImportPick = () => {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = '.json'
+    input.onchange = async (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0]
+      if (!file) return
+      try {
+        const text = await file.text()
+        const data = JSON.parse(text)
+        if (data.version !== 1 || data.alg !== 'AES-256-GCM') {
+          setError('Unrecognized backup file format')
+          return
+        }
+        // Store the raw file data and prompt for password
+        setPendingFileData(text)
+        setFileImportPassword('')
+        setFileImportError(null)
+        setShowFilePassword(false)
+        setShowFilePasswordPrompt(true)
+      } catch {
+        setError('Could not read file — make sure it\'s a valid backup .json')
+      }
+    }
+    input.click()
+  }
+
+  const handleFileDecrypt = async () => {
+    if (!pendingFileData) return
+    if (!fileImportPassword) { setFileImportError('Enter the backup password'); return }
+    setFileImportLoading(true)
+    setFileImportError(null)
+    try {
+      const data = JSON.parse(pendingFileData)
+      const salt = Uint8Array.from(atob(data.salt), c => c.charCodeAt(0))
+      const iv = Uint8Array.from(atob(data.iv), c => c.charCodeAt(0))
+      const ciphertext = Uint8Array.from(atob(data.ciphertext), c => c.charCodeAt(0))
+      const iterations = data.iterations || 600_000
+
+      const enc = new TextEncoder()
+      const keyMaterial = await crypto.subtle.importKey('raw', enc.encode(fileImportPassword), 'PBKDF2', false, ['deriveKey'])
+      const key = await crypto.subtle.deriveKey(
+        { name: 'PBKDF2', salt, iterations, hash: 'SHA-256' },
+        keyMaterial,
+        { name: 'AES-GCM', length: 256 },
+        false,
+        ['decrypt'],
+      )
+      const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ciphertext)
+      const mnemonic = new TextDecoder().decode(decrypted)
+
+      // Reuse the backup password as the device PIN — no need to ask again
+      const usedPin = fileImportPassword
+      setShowFilePasswordPrompt(false)
+      setPendingFileData(null)
+      setFileImportPassword('')
+
+      // Import directly — skip the PIN screen
+      try {
+        if (isValidMnemonic(mnemonic)) {
+          await importSeed(mnemonic, usedPin)
+        } else {
+          await importNsec(mnemonic, usedPin)
+        }
+        await loadAccounts()
+        setScreen('main')
+      } catch (importErr: unknown) {
+        setError(typeof importErr === 'string' ? importErr : importErr instanceof Error ? importErr.message : 'Import failed')
+      }
+    } catch {
+      setFileImportError('Incorrect password or corrupted file')
+    } finally {
+      setFileImportLoading(false)
+    }
+  }
+
+  const handleImportWithPin = async () => {
+    clearError()
+    if (!pin) { setError('PIN is required'); return }
+    const words = importWords.trim()
+    setLoading('import')
+    try {
+      if (isValidMnemonic(words)) {
+        await importSeed(words, pin, accountName || undefined, pinHint || undefined)
+      } else {
+        await importNsec(words, pin, accountName || undefined, pinHint || undefined)
+      }
+      await loadAccounts()
+      setImportWords('')
+      setScreen('main')
+    } catch (err: unknown) {
+      setError(typeof err === 'string' ? err : err instanceof Error ? err.message : 'Import failed')
+    } finally {
+      setLoading(null)
+    }
+  }
+
+  // ─── Generate New Account (PIN-gated) ───
+  const openGenerateFlow = () => {
+    clearError()
+    setPin('')
+    setPinHint('')
+    setAccountName('')
+    setScreen('generate-pin')
+  }
+
+  const handleGenerateWithPin = async () => {
+    clearError()
+    if (!pin) { setError('PIN is required'); return }
+    setLoading('generate')
+    try {
+      let result: { pubkey: string; mnemonic: string; seed_id: string }
+      // If no seeds exist, generate brand-new seed
+      if (savedSeeds.length === 0) {
+        result = await generateAccount(pin, accountName || undefined, pinHint || undefined)
+      } else {
+        // Generate a new independent seed (user chose "New Seed" or first-time generate)
+        result = await generateNewSeed(pin, accountName || undefined, pinHint || undefined)
+      }
+      // Show the backup screen with the mnemonic (no auto-login)
+      setBackupMnemonic(result.mnemonic)
+      setShowBackupWords(false)
+      await loadAccounts()
+
+      // Store pubkey + get private key for onboarding signing
+      setOnboardingPubkey(result.pubkey)
+      const privKey = await loginAccount(result.pubkey, pin)
+      setOnboardingPrivateKey(privKey)
+
+      // Pre-populate relay/blossom lists with 3 random enabled entries
+      const clientRelays = getRelayList()
+      const shuffledRelays = [...clientRelays].sort(() => Math.random() - 0.5).slice(0, 3)
+      setOnboardRelays(shuffledRelays.map(r => ({ url: r.url, enabled: true })))
+
+      const clientBlossoms = blossomServerManager.getList()
+      const shuffledBlossoms = [...clientBlossoms].sort(() => Math.random() - 0.5).slice(0, 3)
+      setOnboardBlossoms(shuffledBlossoms.map(b => ({ url: b.url, enabled: true })))
+
+      setScreen('seed-backup')
+    } catch (err: unknown) {
+      setError(typeof err === 'string' ? err : err instanceof Error ? err.message : 'Generation failed')
+    } finally {
+      setLoading(null)
+    }
+  }
+
+  const handleDeriveFromSeed = async (seedId: string) => {
+    clearError()
+    if (!pin) { setError('PIN is required'); return }
+    setLoading('derive')
+    try {
+      await deriveNextAccount(seedId, pin, pinHint || undefined)
+      await loadAccounts()
+      setScreen('main')
+    } catch (err: unknown) {
+      setError(typeof err === 'string' ? err : err instanceof Error ? err.message : 'Derivation failed')
+    } finally {
+      setLoading(null)
+    }
+  }
+
+  // ─── Derive from carousel + button ───
+  const openDeriveFlow = (seedId: string) => {
+    clearError()
+    setDeriveSeedId(seedId)
+    setPin('')
+    setShowPin(false)
+    setScreen('derive-pin')
+  }
+
+  // ─── Onboarding: Image Upload ───
+  const handleOnboardingImageUpload = async (file: File) => {
+    setPicUploadStatus('uploading')
+    setPicUploadProgress(null)
+    setPicUploadError(null)
+    try {
+      const buffer = await file.arrayBuffer()
+      const data = new Uint8Array(buffer)
+      const enabledBlossoms = onboardBlossoms.filter(b => b.enabled).map(b => b.url)
+      const servers = enabledBlossoms.length > 0 ? enabledBlossoms : undefined
+      const { hash, serverUrls } = await uploadToBlossomServers(
+        data, null, onboardingPrivateKey, servers, file.type,
+        (p) => setPicUploadProgress({ ...p }),
+        () => { const c = new AbortController(); picAbortRef.current = c; return c.signal },
+      )
+      const baseUrl = serverUrls[0] || 'https://blossom.primal.net'
+      setProfilePicUrl(`${baseUrl}/${hash}`)
+      setPicUploadStatus('success')
+    } catch (err) {
+      setPicUploadStatus('error')
+      setPicUploadError(err instanceof Error ? err.message : 'Upload failed')
+    } finally {
+      setPicUploadProgress(null)
+      picAbortRef.current = null
+    }
+  }
+
+  // ─── Onboarding: Publish profile + relay list + blossom list ───
+  const handleOnboardingPublish = async () => {
+    if (!onboardingPubkey || !onboardingPrivateKey) return
+    setPublishing(true)
+    try {
+      const enabledRelays = onboardRelays.filter(r => r.enabled)
+      const publishRelays = enabledRelays.map(r => r.url)
+      if (publishRelays.length === 0) {
+        // Fallback to client defaults if user disabled all
+        publishRelays.push(...getRelayList().filter(r => r.enabled).map(r => r.url))
+      }
+
+      // 1. Kind 0 — Profile metadata
+      const profileContent = JSON.stringify({
+        ...(profileName ? { name: profileName, display_name: profileName } : {}),
+        ...(profilePicUrl ? { picture: profilePicUrl } : {}),
+      })
+      const profileUnsigned = createUnsignedEvent(0, profileContent, [])
+      const signedProfile = await signWithSigner(profileUnsigned, null, onboardingPrivateKey)
+
+      // 2. Kind 10002 — Relay list (NIP-65)
+      const relayTags: [string, ...string[]][] = enabledRelays.map(r => ['r', r.url])
+      const relayUnsigned = createUnsignedEvent(10002, '', relayTags)
+      const signedRelays = await signWithSigner(relayUnsigned, null, onboardingPrivateKey)
+
+      // 3. Kind 10063 — Blossom server list
+      const enabledBlossoms = onboardBlossoms.filter(b => b.enabled)
+      const blossomTags: [string, ...string[]][] = enabledBlossoms.map(b => ['server', b.url])
+      const blossomUnsigned = createUnsignedEvent(10063, '', blossomTags)
+      const signedBlossoms = await signWithSigner(blossomUnsigned, null, onboardingPrivateKey)
+
+      // Publish all 3 in parallel
+      await Promise.allSettled([
+        publishToSpecificRelays(publishRelays, signedProfile),
+        publishToSpecificRelays(publishRelays, signedRelays),
+        publishToSpecificRelays(publishRelays, signedBlossoms),
+      ])
+    } catch (err) {
+      console.error('Onboarding publish failed:', err)
+    } finally {
+      setPublishing(false)
+      // Navigate carousel to the just-created account
+      const createdPubkey = onboardingPubkey
+      if (createdPubkey) {
+        for (let gi = 0; gi < accountGroups.length; gi++) {
+          const ai = accountGroups[gi].accounts.findIndex(a => a.pubkey === createdPubkey)
+          if (ai !== -1) { setSelectedSeedIdx(gi); setAccountIdx(ai); break }
+        }
+      }
+      // Clear sensitive state + navigate
+      setOnboardingPubkey(null)
+      setOnboardingPrivateKey(null)
+      setProfileName('')
+      setProfilePicUrl('')
+      setPicUploadStatus('idle')
+      setPicUploadProgress(null)
+      setPicUploadError(null)
+      setScreen('saved-accounts')
+    }
+  }
+
+  // ─── Onboarding: Skip ───
+  const handleOnboardingSkip = () => {
+    // Navigate carousel to the just-created account
+    const createdPubkey = onboardingPubkey
+    if (createdPubkey) {
+      for (let gi = 0; gi < accountGroups.length; gi++) {
+        const ai = accountGroups[gi].accounts.findIndex(a => a.pubkey === createdPubkey)
+        if (ai !== -1) { setSelectedSeedIdx(gi); setAccountIdx(ai); break }
+      }
+    }
+    setOnboardingPubkey(null)
+    setOnboardingPrivateKey(null)
+    setProfileName('')
+    setProfilePicUrl('')
+    setPicUploadStatus('idle')
+    setPicUploadProgress(null)
+    setPicUploadError(null)
+    setScreen('saved-accounts')
+  }
+
+  // ─── Encrypted backup download ───
+  const handleEncryptedBackup = async () => {
+    if (!backupPin) { setBackupPinError('Enter your PIN'); return }
+    if (!backupMnemonic) return
+    setBackupDownloading(true)
+    setBackupPinError(null)
+    try {
+      // Verify the PIN matches by attempting a verify call (uses the newest account)
+      const newest = savedAccounts[savedAccounts.length - 1]
+      if (newest) {
+        const { verifyPin } = await import('@/lib/auth/secure-storage')
+        const valid = await verifyPin(newest.pubkey, backupPin)
+        if (!valid) { setBackupPinError('Incorrect PIN'); setBackupDownloading(false); return }
+      }
+      // Encrypt mnemonic with PBKDF2 + AES-256-GCM
+      const enc = new TextEncoder()
+      const keyMaterial = await crypto.subtle.importKey('raw', enc.encode(backupPin), 'PBKDF2', false, ['deriveKey'])
+      const salt = crypto.getRandomValues(new Uint8Array(16))
+      const iterations = 600_000
+      const key = await crypto.subtle.deriveKey(
+        { name: 'PBKDF2', salt, iterations, hash: 'SHA-256' },
+        keyMaterial,
+        { name: 'AES-GCM', length: 256 },
+        false,
+        ['encrypt'],
+      )
+      const iv = crypto.getRandomValues(new Uint8Array(12))
+      const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, enc.encode(backupMnemonic))
+      const payload = JSON.stringify({
+        version: 1,
+        alg: 'AES-256-GCM',
+        kdf: 'PBKDF2-SHA256',
+        iterations,
+        salt: btoa(String.fromCharCode(...salt)),
+        iv: btoa(String.fromCharCode(...iv)),
+        ciphertext: btoa(String.fromCharCode(...new Uint8Array(ciphertext))),
+      })
+      // Trigger download
+      const blob = new Blob([payload], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `den-seed-backup-${Date.now()}.json`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+      setShowBackupPinPrompt(false)
+      setBackupPin('')
+      setBackupDownloaded(true)
+    } catch (err: unknown) {
+      setBackupPinError(typeof err === 'string' ? err : err instanceof Error ? err.message : 'Encryption failed')
+    } finally {
+      setBackupDownloading(false)
+    }
+  }
+
+  // ─── PIN Login for saved account ───
+  const openPinLogin = (account: StoredAccount) => {
+    clearError()
+    setSelectedAccount(account)
+    setPin('')
+    setShowPin(false)
+    setScreen('pin-login')
+  }
+
+  const handlePinLogin = async () => {
+    clearError()
+    if (!selectedAccount) return
+    if (!pin) { setError('Enter your PIN'); return }
+    setLoading('pin-login')
+    try {
+      const privKeyHex = await loginAccount(selectedAccount.pubkey, pin)
+      login(selectedAccount.pubkey, selectedAccount.auth_method, privKeyHex)
+    } catch (err: unknown) {
+      setError(typeof err === 'string' ? err : err instanceof Error ? err.message : 'Wrong PIN or login failed')
+    } finally {
+      setLoading(null)
+    }
+  }
+
+  // ── Background overlay card ──
+  const bgSkeletonOverlay = bgLoading && (bgShowcaseEnabled || adShowcaseEnabled) ? (
+    <div className="absolute bottom-4 left-4 z-[5] max-w-[280px]">
+      <div className="rounded-xl bg-black/60 backdrop-blur-md border border-white/10 p-3 space-y-2.5 animate-pulse">
+        <div className="h-2.5 w-28 rounded bg-white/10" />
+        <div className="flex items-center gap-2.5">
+          <div className="w-9 h-9 rounded-full bg-white/10 shrink-0" />
+          <div className="h-3.5 w-20 rounded bg-white/10" />
+        </div>
+        <div className="flex gap-1.5">
+          <div className="h-6 w-16 rounded-md bg-white/10" />
+          <div className="h-6 w-14 rounded-md bg-white/10" />
+        </div>
+      </div>
+    </div>
+  ) : null
+
+  const bgOverlay = !bgLoading && activeBg ? (
+    <div className="absolute bottom-4 left-4 z-[5] max-w-[280px] animate-in fade-in duration-500">
+      <div className="rounded-xl bg-black/60 backdrop-blur-md border border-white/10 p-3 space-y-2.5">
+        <p className="text-[10px] text-white/50 uppercase tracking-wider font-medium">{isAd ? 'Advertisement' : 'Background Showcase'}</p>
+        <div className="flex items-center gap-2.5">
+          {activeBg.profilePic ? (
+            <BlossomImage src={activeBg.profilePic} alt="" className="w-9 h-9 rounded-full object-cover shrink-0 ring-1 ring-white/20" />
+          ) : (
+            <div className="w-9 h-9 rounded-full bg-white/10 shrink-0" />
+          )}
+          <span className="text-sm text-white font-medium truncate">{activeBg.name || ''}</span>
+        </div>
+        {isAd && activeBg.description && (
+          <p className="text-[11px] text-white/60 leading-snug line-clamp-2">{activeBg.description}</p>
+        )}
+        {activeBg.buttons && activeBg.buttons.filter((b) => b.text?.trim()).length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {activeBg.buttons.filter((b) => b.text?.trim()).map((btn, i) => (
+              <a
+                key={i}
+                href={btn.link || '#'}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-white/15 hover:bg-white/25 text-white/90 transition-colors"
+              >
+                {btn.text}
+                {btn.link && <ExternalLink size={10} className="opacity-60" />}
+              </a>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  ) : null
+
+  // ────────────────────────────────────────────
+  // ─── Render: Import Screen ───
+  // ────────────────────────────────────────────
+  if (screen === 'import') {
+    return (
+      <div className="flex items-center justify-center h-full bg-surface-background relative p-4 max-[1080px]:items-start">
+        {bgImageUrl && <BlossomImage src={bgImageUrl} alt="" className="absolute bottom-0 right-0 w-full h-full" imgClassName="object-right-bottom" />}
+        {bgSkeletonOverlay}
+        {bgOverlay}
+        <Card className="w-full max-w-sm shadow-lg relative z-10">
+          <CardContent className="p-8 flex flex-col items-center gap-4">
+            <h2 className="text-xl font-bold text-foreground">Import Account</h2>
+            <p className="text-sm text-muted-foreground text-center">
+              Enter your 24-word seed phrase, nsec, or hex private key.
+            </p>
+            <textarea
+              value={importWords}
+              onChange={(e) => { setImportWords(e.target.value); clearError() }}
+              placeholder="word1 word2 word3 ... (24 words) or nsec1... or hex"
+              className="w-full h-32 rounded-lg border border-input bg-transparent px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none resize-none"
+              spellCheck={false}
+            />
+            {error && (
+              <div className="flex items-center gap-2 text-sm text-destructive">
+                <AlertCircle size={14} /> {error}
+              </div>
+            )}
+            <Button onClick={handleImportValidate} className="w-full">
+              Continue
+            </Button>
+
+            <div className="flex items-center gap-3 w-full">
+              <Separator className="flex-1" />
+              <span className="text-xs text-muted-foreground">or</span>
+              <Separator className="flex-1" />
+            </div>
+
+            <Button variant="outline" onClick={handleFileImportPick} className="w-full gap-2">
+              <FileUp size={15} /> Import from Backup File
+            </Button>
+
+            <Button variant="ghost" onClick={goBack} className="w-full text-muted-foreground">Back</Button>
+
+            {/* File decryption password prompt */}
+            {showFilePasswordPrompt && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => { setShowFilePasswordPrompt(false); setPendingFileData(null) }}>
+                <Card className="w-full max-w-sm shadow-lg" onClick={(e) => e.stopPropagation()}>
+                  <CardContent className="p-6 flex flex-col items-center gap-4">
+                    <div className="flex items-center gap-2">
+                      <Lock size={18} className="text-primary" />
+                      <h3 className="text-lg font-semibold text-foreground">Decrypt Backup</h3>
+                    </div>
+                    <p className="text-sm text-muted-foreground text-center">
+                      Enter the password used when this backup was created.
+                    </p>
+                    <div className="w-full relative">
+                      <Input
+                        type={showFilePassword ? 'text' : 'password'}
+                        placeholder="Backup password"
+                        value={fileImportPassword}
+                        onChange={(e) => { setFileImportPassword(e.target.value); setFileImportError(null) }}
+                        className="h-10 pr-10"
+                        onKeyDown={(e) => e.key === 'Enter' && handleFileDecrypt()}
+                        autoFocus
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowFilePassword(!showFilePassword)}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                      >
+                        {showFilePassword ? <EyeOff size={15} /> : <Eye size={15} />}
+                      </button>
+                    </div>
+                    {fileImportError && (
+                      <div className="flex items-center gap-2 text-sm text-destructive w-full">
+                        <AlertCircle size={14} className="shrink-0" /> <span>{fileImportError}</span>
+                      </div>
+                    )}
+                    <Button onClick={handleFileDecrypt} className="w-full" disabled={fileImportLoading}>
+                      {fileImportLoading ? <Loader2 size={16} className="animate-spin" /> : 'Decrypt'}
+                    </Button>
+                    <Button variant="ghost" onClick={() => { setShowFilePasswordPrompt(false); setPendingFileData(null) }} className="w-full text-muted-foreground">
+                      Cancel
+                    </Button>
+                  </CardContent>
+                </Card>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  // ────────────────────────────────────────────
+  // ─── Render: Import PIN Screen ───
+  // ────────────────────────────────────────────
+  if (screen === 'import-pin') {
+    return (
+      <div className="flex items-center justify-center h-full bg-surface-background relative p-4 max-[1080px]:items-start">
+        {bgImageUrl && <BlossomImage src={bgImageUrl} alt="" className="absolute bottom-0 right-0 w-full h-full" imgClassName="object-right-bottom" />}
+        {bgSkeletonOverlay}
+        {bgOverlay}
+        <Card className="w-full max-w-sm shadow-lg relative z-10">
+          <CardContent className="p-8 flex flex-col items-center gap-4">
+            <div className="flex items-center gap-2">
+              <Lock size={20} className="text-primary" />
+              <h2 className="text-xl font-bold text-foreground">Set PIN</h2>
+            </div>
+            <p className="text-sm text-muted-foreground text-center">
+              Choose a PIN to encrypt this account on your device. You'll need it to log in.
+            </p>
+
+            <WarningCarousel />
+
+            <Input
+              type="text"
+              placeholder="Local seed label (optional)"
+              value={accountName}
+              onChange={(e) => setAccountName(e.target.value)}
+              className="h-10"
+            />
+
+            <div className="w-full relative">
+              <Input
+                type={showPin ? 'text' : 'password'}
+                placeholder="Enter PIN"
+                value={pin}
+                onChange={(e) => { setPin(e.target.value); clearError() }}
+                className="h-10 pr-10"
+                onKeyDown={(e) => e.key === 'Enter' && handleImportWithPin()}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPin(!showPin)}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+              >
+                {showPin ? <EyeOff size={15} /> : <Eye size={15} />}
+              </button>
+            </div>
+
+            <Input
+              type="text"
+              placeholder="PIN hint (optional)"
+              value={pinHint}
+              onChange={(e) => setPinHint(e.target.value)}
+              className="h-10"
+            />
+
+            {error && (
+              <div className="flex items-center gap-2 text-sm text-destructive w-full">
+                <AlertCircle size={14} className="shrink-0" /> <span>{error}</span>
+              </div>
+            )}
+
+            <Button onClick={handleImportWithPin} className="w-full" disabled={loading === 'import'}>
+              {loading === 'import' ? <Loader2 size={16} className="animate-spin" /> : 'Import & Login'}
+            </Button>
+            <Button variant="ghost" onClick={() => setScreen('import')} className="w-full text-muted-foreground">Back</Button>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  // ────────────────────────────────────────────
+  // ─── Render: Generate PIN Screen ───
+  // ────────────────────────────────────────────
+  if (screen === 'generate-pin') {
+    return (
+      <div className="flex items-center justify-center h-full bg-surface-background relative p-4 max-[1080px]:items-start">
+        {bgImageUrl && <BlossomImage src={bgImageUrl} alt="" className="absolute bottom-0 right-0 w-full h-full" imgClassName="object-right-bottom" />}
+        {bgSkeletonOverlay}
+        {bgOverlay}
+        <Card className="w-full max-w-sm shadow-lg relative z-10">
+          <CardContent className="p-8 flex flex-col items-center gap-4">
+            <div className="flex items-center gap-2">
+              <Lock size={20} className="text-primary" />
+              <h2 className="text-xl font-bold text-foreground">Create Account</h2>
+            </div>
+            <p className="text-sm text-muted-foreground text-center">
+              Choose a PIN to protect your new account. You'll need it every time you log in.
+            </p>
+
+            <WarningCarousel />
+
+            <Input
+              type="text"
+              placeholder="Local seed label (optional)"
+              value={accountName}
+              onChange={(e) => setAccountName(e.target.value)}
+              className="h-10"
+            />
+
+            <div className="w-full relative">
+              <Input
+                type={showPin ? 'text' : 'password'}
+                placeholder="Enter PIN"
+                value={pin}
+                onChange={(e) => { setPin(e.target.value); clearError() }}
+                className="h-10 pr-10"
+                onKeyDown={(e) => e.key === 'Enter' && handleGenerateWithPin()}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPin(!showPin)}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+              >
+                {showPin ? <EyeOff size={15} /> : <Eye size={15} />}
+              </button>
+            </div>
+
+            <Input
+              type="text"
+              placeholder="PIN hint (optional)"
+              value={pinHint}
+              onChange={(e) => setPinHint(e.target.value)}
+              className="h-10"
+            />
+
+
+            {error && (
+              <div className="flex items-center gap-2 text-sm text-destructive w-full">
+                <AlertCircle size={14} className="shrink-0" /> <span>{error}</span>
+              </div>
+            )}
+
+            <Button onClick={handleGenerateWithPin} className="w-full" disabled={loading === 'generate'}>
+              {loading === 'generate' ? <Loader2 size={16} className="animate-spin" /> : 'Generate New Seed'}
+            </Button>
+            <Button variant="ghost" onClick={goBack} className="w-full text-muted-foreground">Back</Button>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  // ────────────────────────────────────────────
+  // ─── Render: Derive PIN Screen ───
+  // ────────────────────────────────────────────
+  if (screen === 'derive-pin' && deriveSeedId) {
+    const deriveSeed = savedSeeds.find((s) => s.id === deriveSeedId)
+    return (
+      <div className="flex items-center justify-center h-full bg-surface-background relative p-4 max-[1080px]:items-start">
+        {bgImageUrl && <BlossomImage src={bgImageUrl} alt="" className="absolute bottom-0 right-0 w-full h-full" imgClassName="object-right-bottom" />}
+        {bgSkeletonOverlay}
+        {bgOverlay}
+        <Card className="w-full max-w-sm shadow-lg relative z-10">
+          <CardContent className="p-8 flex flex-col items-center gap-4">
+            <div className="flex items-center gap-2">
+              <GitBranch size={20} className="text-primary" />
+              <h2 className="text-xl font-bold text-foreground">Derive New Account</h2>
+            </div>
+            <p className="text-sm text-muted-foreground text-center">
+              Enter the PIN for <strong>{deriveSeed?.name || 'this seed'}</strong> to derive a new account.
+            </p>
+
+            <div className="w-full relative">
+              <Input
+                type={showPin ? 'text' : 'password'}
+                placeholder="Enter seed PIN"
+                value={pin}
+                onChange={(e) => { setPin(e.target.value); clearError() }}
+                className="h-10 pr-10"
+                onKeyDown={(e) => e.key === 'Enter' && handleDeriveFromSeed(deriveSeedId)}
+                autoFocus
+              />
+              <button
+                type="button"
+                onClick={() => setShowPin(!showPin)}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+              >
+                {showPin ? <EyeOff size={15} /> : <Eye size={15} />}
+              </button>
+            </div>
+
+            {error && (
+              <div className="flex items-center gap-2 text-sm text-destructive w-full">
+                <AlertCircle size={14} className="shrink-0" /> <span>{error}</span>
+              </div>
+            )}
+
+            <Button onClick={() => handleDeriveFromSeed(deriveSeedId)} className="w-full" disabled={loading === 'derive'}>
+              {loading === 'derive' ? <Loader2 size={16} className="animate-spin" /> : 'Derive account'}
+            </Button>
+            <Button variant="ghost" onClick={goBack} className="w-full text-muted-foreground">Back</Button>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  // ────────────────────────────────────────────
+  // ─── Render: Seed Backup Screen ───
+  // ────────────────────────────────────────────
+  if (screen === 'seed-backup' && backupMnemonic) {
+    const words = backupMnemonic.split(' ')
+    return (
+      <div className="flex items-center justify-center h-full bg-surface-background relative p-4 max-[1080px]:items-start">
+        {bgImageUrl && <BlossomImage src={bgImageUrl} alt="" className="absolute bottom-0 right-0 w-full h-full" imgClassName="object-right-bottom" />}
+        {bgSkeletonOverlay}
+        {bgOverlay}
+        <Card className="w-full max-w-md shadow-lg relative z-10">
+          <CardContent className="p-8 flex flex-col items-center gap-4">
+            <div className="flex items-center gap-2">
+              <Shield size={20} className="text-primary" />
+              <h2 className="text-xl font-bold text-foreground">Backup Seed Phrase</h2>
+            </div>
+
+            <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-destructive/10 border border-destructive/30 w-full">
+              <AlertCircle size={14} className="text-destructive shrink-0 mt-0.5" />
+              <p className="text-xs text-destructive">
+                Write down these words and store them securely. Anyone with these words can access your keys and funds.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 w-full">
+              {words.map((word, i) => (
+                <div key={i} className="flex items-center gap-2 p-2 bg-secondary/50 rounded-lg border border-border">
+                  <span className="text-[10px] text-muted-foreground w-5 text-right">{i + 1}.</span>
+                  <span className="font-mono text-sm">{showBackupWords ? word : '••••'}</span>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex gap-2 w-full">
+              <button
+                onClick={() => setShowBackupWords(!showBackupWords)}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-secondary/50 border border-border text-xs hover:bg-secondary transition-colors cursor-pointer"
+              >
+                {showBackupWords ? <><EyeOff size={14} /> Censor</> : <><Eye size={14} /> Reveal</>}
+              </button>
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(backupMnemonic)
+                  setBackupCopied(true)
+                  setTimeout(() => setBackupCopied(false), 2000)
+                }}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-secondary/50 border border-border text-xs hover:bg-secondary transition-colors cursor-pointer"
+              >
+                {backupCopied ? <><Check size={14} /> Copied!</> : <><Copy size={14} /> Copy</>}
+              </button>
+            </div>
+
+            {/* Encrypted backup download */}
+            {!showBackupPinPrompt ? (
+              <button
+                onClick={() => { setBackupPin(''); setBackupPinError(null); setShowBackupPinPrompt(true) }}
+                className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-secondary/30 border border-border text-xs hover:bg-secondary/60 transition-colors cursor-pointer text-muted-foreground hover:text-foreground"
+              >
+                <Download size={14} />
+                Download Encrypted Backup
+              </button>
+            ) : (
+              <div className="w-full space-y-2 p-3 rounded-lg border border-border bg-secondary/20">
+                <p className="text-xs text-muted-foreground">Re-enter your PIN to encrypt and download:</p>
+                <div className="relative">
+                  <Input
+                    type="password"
+                    placeholder="Enter your PIN"
+                    value={backupPin}
+                    onChange={(e) => { setBackupPin(e.target.value); setBackupPinError(null) }}
+                    className="h-9 pr-10 text-sm"
+                    onKeyDown={(e) => e.key === 'Enter' && handleEncryptedBackup()}
+                    autoFocus
+                  />
+                </div>
+                {backupPinError && (
+                  <div className="flex items-center gap-1.5 text-xs text-destructive">
+                    <AlertCircle size={12} /> {backupPinError}
+                  </div>
+                )}
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="flex-1 text-xs"
+                    onClick={() => setShowBackupPinPrompt(false)}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    size="sm"
+                    className="flex-1 text-xs gap-1.5"
+                    disabled={backupDownloading}
+                    onClick={handleEncryptedBackup}
+                  >
+                    {backupDownloading ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
+                    Encrypt & Download
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            <Button className="w-full mt-2" disabled={!backupDownloaded} onClick={() => { setBackupMnemonic(null); setBackupDownloaded(false); setScreen('onboarding-profile') }}>
+              {backupDownloaded ? "I've Saved My Seed · Continue" : 'Download backup to continue'}
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  // ────────────────────────────────────────────
+  // ─── Render: Onboarding Profile Screen ───
+  // ────────────────────────────────────────────
+  if (screen === 'onboarding-profile') {
+    const hasContent = profileName.trim() || profilePicUrl
+    return (
+      <div className="flex items-center justify-center h-full bg-surface-background relative p-4 max-[1080px]:items-start">
+        {bgImageUrl && <BlossomImage src={bgImageUrl} alt="" className="absolute bottom-0 right-0 w-full h-full" imgClassName="object-right-bottom" />}
+        {bgSkeletonOverlay}
+        {bgOverlay}
+        <Card className="w-full max-w-sm shadow-lg relative z-10">
+          <CardContent className="p-8 flex flex-col items-center gap-4">
+            <div className="flex items-center gap-2">
+              <User size={20} className="text-primary" />
+              <h2 className="text-xl font-bold text-foreground">Set Up Profile</h2>
+            </div>
+            <p className="text-sm text-muted-foreground text-center">
+              Optional — add a display name and profile picture. You can always change these later.
+            </p>
+
+            {/* Profile Picture */}
+            <input
+              ref={picInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0]
+                e.target.value = ''
+                if (file) handleOnboardingImageUpload(file)
+              }}
+            />
+            <div className="flex flex-col items-center gap-1">
+              <button
+                type="button"
+                onClick={() => { if (picUploadStatus !== 'uploading') picInputRef.current?.click() }}
+                className="relative w-24 h-24 rounded-full bg-secondary/50 border-2 border-dashed border-border hover:border-primary/50 transition-colors cursor-pointer group overflow-hidden"
+              >
+                {profilePicUrl ? (
+                  <BlossomImage src={profilePicUrl} alt="Profile" className="w-full h-full rounded-full" imgClassName="object-cover" />
+                ) : (
+                  <div className="flex flex-col items-center justify-center w-full h-full text-muted-foreground group-hover:text-primary transition-colors">
+                    <Camera size={24} />
+                    <span className="text-[10px] mt-1">Upload</span>
+                  </div>
+                )}
+                {/* Upload overlay */}
+                {picUploadStatus === 'uploading' && (
+                  <div className="absolute inset-0 bg-black/50 rounded-full flex items-center justify-center">
+                    <Loader2 size={20} className="animate-spin text-white" />
+                  </div>
+                )}
+                {/* Hover overlay when image exists */}
+                {profilePicUrl && picUploadStatus !== 'uploading' && (
+                  <div className="absolute inset-0 bg-black/40 rounded-full flex items-center justify-center transition-opacity opacity-0 group-hover:opacity-100">
+                    <Camera size={16} className="text-white" />
+                  </div>
+                )}
+                {/* Success checkmark overlay */}
+                {picUploadStatus === 'success' && profilePicUrl && (
+                  <div className="absolute bottom-0 right-0 w-6 h-6 rounded-full bg-emerald-500 flex items-center justify-center border-2 border-background">
+                    <Check size={12} className="text-white" />
+                  </div>
+                )}
+              </button>
+              {profilePicUrl && picUploadStatus !== 'uploading' && (
+                <button onClick={() => { setProfilePicUrl(''); setPicUploadStatus('idle') }} className="text-[10px] text-destructive hover:underline cursor-pointer">Remove</button>
+              )}
+              {picUploadStatus === 'uploading' && picUploadProgress && (
+                <div className="flex flex-col gap-0.5 w-full mt-0.5">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-amber-400 truncate max-w-[120px]">
+                      {(() => { try { return new URL(picUploadProgress.serverUrl).hostname.replace('www.', '') } catch { return picUploadProgress.serverUrl } })()} ({picUploadProgress.serverIndex + 1}/{picUploadProgress.totalServers})
+                    </span>
+                    <button
+                      onClick={() => { picAbortRef.current?.abort(); picAbortRef.current = null }}
+                      className="text-muted-foreground hover:text-destructive cursor-pointer flex items-center gap-0.5"
+                    >
+                      <XCircle size={10} /><span className="text-[10px]">Skip</span>
+                    </button>
+                  </div>
+                  <div className="w-full h-1.5 rounded-full bg-secondary overflow-hidden">
+                    <div className="h-full bg-amber-400 rounded-full transition-all duration-150" style={{ width: `${picUploadProgress.percent}%` }} />
+                  </div>
+                  <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+                    <span>{Math.round(picUploadProgress.percent)}%</span>
+                    <span>{picUploadProgress.speed < 1024 ? `${Math.round(picUploadProgress.speed)} B/s` : picUploadProgress.speed < 1024 * 1024 ? `${(picUploadProgress.speed / 1024).toFixed(1)} KB/s` : `${(picUploadProgress.speed / (1024 * 1024)).toFixed(1)} MB/s`}</span>
+                  </div>
+                </div>
+              )}
+            </div>
+            {picUploadStatus === 'error' && picUploadError && (
+              <div className="flex items-center gap-1.5 text-xs text-destructive">
+                <AlertCircle size={12} /> {picUploadError}
+              </div>
+            )}
+
+            {/* Display Name */}
+            <Input
+              type="text"
+              placeholder="Display name (optional)"
+              value={profileName}
+              onChange={(e) => setProfileName(e.target.value)}
+              className="h-10"
+            />
+
+            {/* Advanced — gear icon */}
+            <button
+              type="button"
+              onClick={() => setShowAdvancedModal(true)}
+              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+            >
+              <Settings2 size={14} />
+              Advanced (relays & media servers)
+            </button>
+
+            {error && (
+              <div className="flex items-center gap-2 text-sm text-destructive">
+                <AlertCircle size={16} /> {error}
+              </div>
+            )}
+
+            {/* Publish */}
+            <Button
+              className="w-full"
+              disabled={publishing || !hasContent}
+              onClick={handleOnboardingPublish}
+            >
+              {publishing ? (
+                <><Loader2 size={16} className="animate-spin mr-2" /> Publishing...</>
+              ) : (
+                'Publish Profile'
+              )}
+            </Button>
+
+            {/* Skip */}
+            <button
+              type="button"
+              onClick={handleOnboardingSkip}
+              disabled={publishing}
+              className="text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer disabled:opacity-50"
+            >
+              Skip for now
+            </button>
+          </CardContent>
+        </Card>
+
+        {/* ─── Advanced Modal: Relays & Blossoms ─── */}
+        {showAdvancedModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setShowAdvancedModal(false)}>
+            <div className="bg-background border border-border rounded-xl shadow-2xl w-full max-w-md max-h-[70vh] flex flex-col mx-4" onClick={(e) => e.stopPropagation()}>
+              {/* Header */}
+              <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+                <h4 className="text-sm font-semibold text-foreground">Advanced Setup</h4>
+                <button onClick={() => setShowAdvancedModal(false)} className="p-1 rounded hover:bg-secondary/60 text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
+                  <X size={16} />
+                </button>
+              </div>
+
+              {/* Tabs */}
+              <div className="flex border-b border-border">
+                <button
+                  onClick={() => setAdvancedTab('relays')}
+                  className={`flex-1 px-4 py-2 text-xs font-medium transition-colors cursor-pointer ${advancedTab === 'relays' ? 'text-primary border-b-2 border-primary' : 'text-muted-foreground hover:text-foreground'}`}
+                >
+                  Relays ({onboardRelays.filter(r => r.enabled).length}/{onboardRelays.length})
+                </button>
+                <button
+                  onClick={() => setAdvancedTab('blossoms')}
+                  className={`flex-1 px-4 py-2 text-xs font-medium transition-colors cursor-pointer ${advancedTab === 'blossoms' ? 'text-primary border-b-2 border-primary' : 'text-muted-foreground hover:text-foreground'}`}
+                >
+                  Media Servers ({onboardBlossoms.filter(b => b.enabled).length}/{onboardBlossoms.length})
+                </button>
+              </div>
+
+              {/* Content */}
+              <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
+                {advancedTab === 'relays' ? (
+                  <>
+                    <p className="text-[11px] text-muted-foreground mb-2">
+                      Relays store and distribute your profile data. Toggle to enable/disable.
+                    </p>
+                    {onboardRelays.map((relay, idx) => (
+                      <div key={idx} className="flex items-center gap-2 p-2 rounded-lg bg-secondary/20 border border-border">
+                        <button
+                          onClick={() => setOnboardRelays(prev => prev.map((r, i) => i === idx ? { ...r, enabled: !r.enabled } : r))}
+                          className={`w-8 h-5 rounded-full flex items-center transition-colors cursor-pointer shrink-0 ${relay.enabled ? 'bg-primary justify-end' : 'bg-secondary justify-start'}`}
+                        >
+                          <span className={`w-3.5 h-3.5 rounded-full bg-white shadow-sm transition-all mx-0.5`} />
+                        </button>
+                        <span className="text-xs text-foreground font-mono truncate flex-1">{relay.url}</span>
+                        <button
+                          onClick={() => setOnboardRelays(prev => prev.filter((_, i) => i !== idx))}
+                          className="p-0.5 rounded text-muted-foreground hover:text-destructive transition-colors cursor-pointer shrink-0"
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+                    ))}
+                    <div className="flex gap-1.5 mt-2">
+                      <input
+                        type="text"
+                        placeholder="wss://relay.example.com"
+                        value={customRelayInput}
+                        onChange={(e) => setCustomRelayInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && customRelayInput.trim().startsWith('wss://')) {
+                            setOnboardRelays(prev => [...prev, { url: customRelayInput.trim(), enabled: true }])
+                            setCustomRelayInput('')
+                          }
+                        }}
+                        className="flex-1 px-2.5 py-1.5 rounded border border-border bg-background text-xs text-foreground placeholder:text-muted-foreground outline-none focus:border-primary/50 transition-colors font-mono"
+                      />
+                      <button
+                        onClick={() => {
+                          if (customRelayInput.trim().startsWith('wss://')) {
+                            setOnboardRelays(prev => [...prev, { url: customRelayInput.trim(), enabled: true }])
+                            setCustomRelayInput('')
+                          }
+                        }}
+                        className="px-2.5 py-1.5 rounded border border-border bg-secondary/40 text-xs font-medium text-foreground hover:bg-secondary/70 transition-colors cursor-pointer"
+                      >
+                        <Plus size={12} />
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-[11px] text-muted-foreground mb-2">
+                      Media servers (Blossom) store your profile picture and other uploads.
+                    </p>
+                    {onboardBlossoms.map((blossom, idx) => (
+                      <div key={idx} className="flex items-center gap-2 p-2 rounded-lg bg-secondary/20 border border-border">
+                        <button
+                          onClick={() => setOnboardBlossoms(prev => prev.map((b, i) => i === idx ? { ...b, enabled: !b.enabled } : b))}
+                          className={`w-8 h-5 rounded-full flex items-center transition-colors cursor-pointer shrink-0 ${blossom.enabled ? 'bg-primary justify-end' : 'bg-secondary justify-start'}`}
+                        >
+                          <span className={`w-3.5 h-3.5 rounded-full bg-white shadow-sm transition-all mx-0.5`} />
+                        </button>
+                        <span className="text-xs text-foreground font-mono truncate flex-1">{blossom.url}</span>
+                        <button
+                          onClick={() => setOnboardBlossoms(prev => prev.filter((_, i) => i !== idx))}
+                          className="p-0.5 rounded text-muted-foreground hover:text-destructive transition-colors cursor-pointer shrink-0"
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+                    ))}
+                    <div className="flex gap-1.5 mt-2">
+                      <input
+                        type="text"
+                        placeholder="https://blossom.example.com"
+                        value={customBlossomInput}
+                        onChange={(e) => setCustomBlossomInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && customBlossomInput.trim().startsWith('https://')) {
+                            setOnboardBlossoms(prev => [...prev, { url: customBlossomInput.trim(), enabled: true }])
+                            setCustomBlossomInput('')
+                          }
+                        }}
+                        className="flex-1 px-2.5 py-1.5 rounded border border-border bg-background text-xs text-foreground placeholder:text-muted-foreground outline-none focus:border-primary/50 transition-colors font-mono"
+                      />
+                      <button
+                        onClick={() => {
+                          if (customBlossomInput.trim().startsWith('https://')) {
+                            setOnboardBlossoms(prev => [...prev, { url: customBlossomInput.trim(), enabled: true }])
+                            setCustomBlossomInput('')
+                          }
+                        }}
+                        className="px-2.5 py-1.5 rounded border border-border bg-secondary/40 text-xs font-medium text-foreground hover:bg-secondary/70 transition-colors cursor-pointer"
+                      >
+                        <Plus size={12} />
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {/* Footer */}
+              <div className="px-4 py-3 border-t border-border">
+                <Button className="w-full" onClick={() => setShowAdvancedModal(false)}>Done</Button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // ────────────────────────────────────────────
+  // ─── Render: PIN Login Screen ───
+  // ────────────────────────────────────────────
+  if (screen === 'pin-login' && selectedAccount) {
+    return (
+      <div className="flex items-center justify-center h-full bg-surface-background relative p-4 max-[1080px]:items-start">
+        {bgImageUrl && <BlossomImage src={bgImageUrl} alt="" className="absolute bottom-0 right-0 w-full h-full" imgClassName="object-right-bottom" />}
+        {bgSkeletonOverlay}
+        {bgOverlay}
+        <Card className="w-full max-w-sm shadow-lg relative z-10">
+          <CardContent className="p-8 flex flex-col items-center gap-4">
+            {(() => {
+              const profile = getProfile(selectedAccount.pubkey)
+              const displayName = profile?.display_name || profile?.name || selectedAccount.name || 'Unnamed Account'
+              const picture = profile?.picture
+              return (
+                <>
+                  {picture ? (
+                    <BlossomImage
+                      src={picture}
+                      alt={displayName}
+                      className="w-14 h-14 rounded-full ring-2 ring-primary/20"
+                      imgClassName="object-cover rounded-full"
+                    />
+                  ) : (
+                    <div className="w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center">
+                      <User size={28} className="text-primary" />
+                    </div>
+                  )}
+                  <div className="text-center">
+                    <h2 className="text-lg font-bold text-foreground">
+                      {displayName}
+                    </h2>
+                    <p className="text-xs text-muted-foreground font-mono mt-1">
+                      {selectedAccount.npub.slice(0, 12)}...{selectedAccount.npub.slice(-6)}
+                    </p>
+                  </div>
+                </>
+              )
+            })()}
+
+            <div className="w-full relative">
+              <Input
+                type={showPin ? 'text' : 'password'}
+                placeholder="Enter PIN"
+                value={pin}
+                onChange={(e) => { setPin(e.target.value); clearError() }}
+                className="h-11 pr-10"
+                onKeyDown={(e) => e.key === 'Enter' && handlePinLogin()}
+                autoFocus
+              />
+              <button
+                type="button"
+                onClick={() => setShowPin(!showPin)}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+              >
+                {showPin ? <EyeOff size={15} /> : <Eye size={15} />}
+              </button>
+            </div>
+
+            {selectedAccount.pin_hint && (
+              <p className="text-xs text-muted-foreground w-full">
+                <span className="font-medium">Hint:</span> {selectedAccount.pin_hint}
+              </p>
+            )}
+
+            {error && (
+              <div className="flex items-center gap-2 text-sm text-destructive w-full">
+                <AlertCircle size={14} className="shrink-0" /> <span>{error}</span>
+              </div>
+            )}
+
+            <Button onClick={handlePinLogin} className="w-full" disabled={loading === 'pin-login'}>
+              {loading === 'pin-login' ? <Loader2 size={16} className="animate-spin" /> : 'Unlock'}
+            </Button>
+            <Button variant="ghost" onClick={goBack} className="w-full text-muted-foreground">Back</Button>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  // ────────────────────────────────────────────
+  // ─── Render: NIP-46 Combined Dialog ───
+  // ────────────────────────────────────────────
+  if (screen === 'nip46') {
+    return (
+      <div className="flex items-center justify-center h-full bg-surface-background relative p-4 max-[1080px]:items-start">
+        {bgImageUrl && <BlossomImage src={bgImageUrl} alt="" className="absolute bottom-0 right-0 w-full h-full" imgClassName="object-right-bottom" />}
+        {bgSkeletonOverlay}
+        {bgOverlay}
+        <Card className="w-full max-w-sm shadow-lg relative z-10">
+          <CardContent className="p-8 flex flex-col items-center gap-4">
+            <h2 className="text-xl font-bold text-foreground">Nostr Connect / Bunker</h2>
+
+            {/* ── Nostr Connect: QR code + copy URI, auto-connecting ── */}
+            <div className="w-full flex flex-col items-center gap-3">
+              <p className="text-sm text-muted-foreground text-center">
+                Scan the QR code or copy the URI below into your signer app.
+              </p>
+
+              {connectDetails && (
+                <>
+                  {/* QR Code */}
+                  <a href={connectDetails.connectionString} aria-label="Open with Nostr signer app">
+                    <div className="p-3 bg-white rounded-xl">
+                      <QRCodeSVG
+                        value={connectDetails.connectionString}
+                        size={180}
+                        level="M"
+                        includeMargin={false}
+                      />
+                    </div>
+                  </a>
+
+                  {/* Copy URI pill */}
+                  <div
+                    className="flex items-center gap-2 text-xs text-muted-foreground bg-muted px-3 py-2.5 rounded-lg cursor-pointer transition-colors hover:bg-muted/80 w-full max-w-[280px]"
+                    onClick={copyConnectionString}
+                    role="button"
+                    tabIndex={0}
+                  >
+                    <span className="flex-grow min-w-0 truncate select-none font-mono">
+                      {connectDetails.connectionString}
+                    </span>
+                    <span className="shrink-0">
+                      {copied ? <Check size={14} className="text-green-500" /> : <Copy size={14} />}
+                    </span>
+                  </div>
+                </>
+              )}
+
+              {connectPending && (
+                <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground py-1">
+                  <Loader2 size={14} className="animate-spin" />
+                  <span>Waiting for signer to connect...</span>
+                </div>
+              )}
+
+              {connectError && (
+                <div className="flex items-center gap-2 text-sm text-destructive">
+                  <AlertCircle size={14} className="shrink-0" /> {connectError}
+                </div>
+              )}
+            </div>
+
+            {/* ── OR divider ── */}
+            <div className="flex items-center w-full">
+              <div className="flex-grow border-t border-border/40" />
+              <span className="px-3 text-xs text-muted-foreground">OR</span>
+              <div className="flex-grow border-t border-border/40" />
+            </div>
+
+            {/* ── Bunker: paste bunker:// URL ── */}
+            <div className="w-full flex flex-col gap-3">
+              <div className="flex items-center gap-2">
+                <Input
+                  value={bunkerUrl}
+                  onChange={(e) => { setBunkerUrl(e.target.value); setError(null) }}
+                  placeholder="bunker://..."
+                  className="h-10 flex-1"
+                  onKeyDown={(e) => e.key === 'Enter' && handleBunkerLogin()}
+                />
+                <Button onClick={handleBunkerLogin} disabled={loading === 'bunker'} size="sm" className="shrink-0">
+                  {loading === 'bunker' ? <Loader2 size={14} className="animate-spin" /> : 'Login'}
+                </Button>
+              </div>
+              {error && (
+                <div className="flex items-center gap-2 text-sm text-destructive">
+                  <AlertCircle size={14} className="shrink-0" /> {error}
+                </div>
+              )}
+            </div>
+
+            <Button variant="ghost" onClick={goBack} className="w-full text-muted-foreground">Back</Button>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  // ────────────────────────────────────────────
+  // ─── Render: Saved Accounts Page ───
+  // ────────────────────────────────────────────
+  if (screen === 'saved-accounts') {
+    return (
+      <div className="flex items-center justify-center h-full bg-surface-background relative p-4 max-[1080px]:items-start">
+        {bgImageUrl && <BlossomImage src={bgImageUrl} alt="" className="absolute bottom-0 right-0 w-full h-full" imgClassName="object-right-bottom" />}
+        {bgSkeletonOverlay}
+        {bgOverlay}
+        <Card className="w-full max-w-sm shadow-lg relative z-10">
+          <CardContent className="p-6 flex flex-col items-center gap-4">
+            {/* Header with back button */}
+            <div className="w-full flex items-center gap-2">
+              <button onClick={goBack} className="p-1.5 rounded-md hover:bg-secondary/60 transition-colors cursor-pointer">
+                <ChevronLeft size={16} className="text-muted-foreground" />
+              </button>
+              <h2 className="text-lg font-bold text-foreground">Saved Accounts</h2>
+            </div>
+
+            {accountGroups.length > 0 && currentAccount && (() => {
+              const profile = getProfile(currentAccount.pubkey)
+              const displayName = profile?.display_name || profile?.name || null
+              const groupLabel = currentGroup?.type === 'seed' ? currentGroup.seed!.name : 'Imported Keys'
+              const groupIcon = currentGroup?.type === 'seed'
+                ? <Sprout size={13} className="text-emerald-500 shrink-0" />
+                : <KeySquare size={13} className="text-orange-500 shrink-0" />
+
+              return (
+                <div className="w-full space-y-2">
+                  {/* Seed/group selector */}
+                  <button
+                    onClick={() => setShowSeedPicker(true)}
+                    className="w-full flex items-center gap-2 px-3 py-1.5 rounded-md border border-border/60 bg-secondary/30 hover:bg-secondary/50 transition-colors cursor-pointer text-left"
+                  >
+                    {groupIcon}
+                    <span className="text-xs font-medium text-foreground truncate flex-1">{groupLabel}</span>
+                    <ChevronRight size={12} className="text-muted-foreground shrink-0" />
+                  </button>
+
+                  {/* Account card — click to login */}
+                  <button
+                    onClick={() => openPinLogin(currentAccount)}
+                    className="w-full flex items-center gap-3 px-3 py-3 rounded-lg border border-border/60 bg-secondary/20 hover:bg-secondary/40 transition-colors cursor-pointer text-left"
+                  >
+                    {profile?.picture ? (
+                      <BlossomImage src={profile.picture} alt="" className="w-10 h-10 rounded-full object-cover shrink-0 ring-2 ring-border" />
+                    ) : (
+                      <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                        <User size={18} className="text-primary" />
+                      </div>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-foreground truncate">
+                        {displayName || currentAccount.npub.slice(0, 12) + '...' + currentAccount.npub.slice(-6)}
+                      </p>
+                      <p className="text-[10px] text-muted-foreground font-mono truncate">
+                        {currentAccount.npub.slice(0, 16)}...{currentAccount.npub.slice(-6)}
+                      </p>
+                    </div>
+                    <Lock size={14} className="text-muted-foreground/50 shrink-0" />
+                  </button>
+
+                  {/* Derive button (seed groups only) */}
+                  {currentGroup?.type === 'seed' && (
+                    <button
+                      onClick={() => openDeriveFlow(currentGroup.seed!.id)}
+                      className="w-full flex items-center justify-center gap-1.5 py-2 rounded-md border border-dashed border-border/60 hover:bg-secondary/40 hover:border-primary/40 transition-colors cursor-pointer"
+                    >
+                      <Plus size={13} className="text-muted-foreground" />
+                      <span className="text-[11px] text-muted-foreground font-medium">Derive New Account</span>
+                    </button>
+                  )}
+
+                  {/* Navigation arrows */}
+                  {currentAccounts.length > 1 && (
+                    <div className="flex items-center justify-center gap-3">
+                      <button
+                        onClick={() => setAccountIdx((i) => Math.max(0, i - 1))}
+                        disabled={accountIdx === 0}
+                        className="p-2 grow-1 flex justify-center rounded-md hover:bg-secondary/50 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                      >
+                        <ChevronLeft size={16} className="text-muted-foreground" />
+                      </button>
+                      <span className="text-xs text-muted-foreground font-medium tabular-nums">
+                        {accountIdx + 1} / {currentAccounts.length}
+                      </span>
+                      <button
+                        onClick={() => setAccountIdx((i) => Math.min(currentAccounts.length - 1, i + 1))}
+                        disabled={accountIdx === currentAccounts.length - 1}
+                        className="p-2 grow-1 flex justify-center rounded-md hover:bg-secondary/50 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                      >
+                        <ChevronRight size={16} className="text-muted-foreground" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
+
+            {/* Empty state */}
+            {accountGroups.length === 0 && (
+              <p className="text-sm text-muted-foreground text-center py-4">No saved accounts on this device.</p>
+            )}
+
+            {/* Import + Generate buttons */}
+            <Separator />
+            <div className="w-full flex gap-2">
+              <Button
+                variant="outline"
+                onClick={() => { setScreen('import'); clearError() }}
+                className="flex-1 gap-1.5"
+              >
+                <Import size={14} />
+                Import
+              </Button>
+              <Button
+                variant="outline"
+                onClick={openGenerateFlow}
+                className="flex-1 gap-1.5"
+              >
+                <Plus size={14} />
+                Generate
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Seed picker modal */}
+        {showSeedPicker && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-150">
+            <div className="bg-card border border-border rounded-xl shadow-2xl w-[340px] max-h-[400px] flex flex-col animate-in zoom-in-95 duration-150">
+              <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
+                <h3 className="text-sm font-semibold text-foreground">Select Seed</h3>
+                <button
+                  onClick={() => setShowSeedPicker(false)}
+                  className="p-1 rounded-md hover:bg-secondary/60 transition-colors cursor-pointer"
+                >
+                  <X size={14} className="text-muted-foreground" />
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto p-2 space-y-2">
+                {accountGroups.map((group, idx) => {
+                  const isActive = idx === selectedSeedIdx
+                  const label = group.type === 'seed' ? group.seed!.name : 'Imported Keys'
+                  const icon = group.type === 'seed'
+                    ? <Sprout size={16} className="text-emerald-500 shrink-0" />
+                    : <KeySquare size={16} className="text-orange-500 shrink-0" />
+                  return (
+                    <button
+                      key={group.type === 'seed' ? group.seed!.id : 'standalone'}
+                      onClick={() => {
+                        setSelectedSeedIdx(idx)
+                        setAccountIdx(0)
+                        setShowSeedPicker(false)
+                      }}
+                      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors cursor-pointer ${isActive
+                        ? 'bg-primary/10 ring-1 ring-primary/30'
+                        : 'hover:bg-secondary/40'
+                        }`}
+                    >
+                      {icon}
+                      <div className="flex-1 min-w-0">
+                        <p className={`text-sm font-medium truncate ${isActive ? 'text-primary' : 'text-foreground'}`}>{label}</p>
+                        <p className="text-[10px] text-muted-foreground">
+                          {group.accounts.length} account{group.accounts.length !== 1 ? 's' : ''}
+                        </p>
+                      </div>
+                      {isActive && (
+                        <Check size={14} className="text-primary shrink-0" />
+                      )}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // ────────────────────────────────────────────
+  // ─── Render: Main Login ───
+  // ────────────────────────────────────────────
+  return (
+    <div className="flex items-center justify-center h-full bg-surface-background relative p-4 max-[1080px]:items-start">
+      {bgImageUrl && <BlossomImage src={bgImageUrl} alt="" className="absolute bottom-0 right-0 w-full h-full" imgClassName="object-right-bottom" />}
+      {bgSkeletonOverlay}
+      {bgOverlay}
+      <Card className="w-full max-w-sm shadow-lg relative z-10">
+        <CardContent className="p-8 flex flex-col items-center gap-6">
+          {/* Logo */}
+          <div className="flex flex-col items-center gap-3 mb-2">
+            <DenChatLogo size={64} />
+            <h1 className="text-2xl font-bold text-foreground">DEN Chat</h1>
+          </div>
+
+          {/* UPV2: DNN ID/npub + Password */}
+          <div className="w-full flex flex-col gap-3">
+            <Input
+              type="text"
+              placeholder="DNN ID or npub"
+              value={username}
+              onChange={(e) => { setUsername(e.target.value); clearError() }}
+              className="h-11"
+            />
+            <Input
+              type="password"
+              placeholder="Password"
+              value={password}
+              onChange={(e) => { setPassword(e.target.value); clearError() }}
+              className="h-11"
+              onKeyDown={(e) => e.key === 'Enter' && handleUPV2Login()}
+            />
+            <Button onClick={handleUPV2Login} size="lg" className="w-full" disabled={loading === 'upv2'}>
+              {loading === 'upv2' ? <Loader2 size={16} className="animate-spin" /> : 'Login'}
+            </Button>
+          </div>
+
+          {error && (
+            <div className="flex items-center gap-2 text-sm text-destructive w-full">
+              <AlertCircle size={14} className="shrink-0" />
+              <span>{error}</span>
+            </div>
+          )}
+
+          <Separator />
+
+          <div className="w-full flex flex-col gap-2">
+            {/* External signer row — Local | Connect | Extension */}
+            <div className="w-full flex gap-2">
+              {/* NIP-PC55: Local Signer — only if detected */}
+              {localSignerName && (
+                <Button
+                  variant="outline"
+                  onClick={handlePC55Login}
+                  className="flex-1 gap-1.5 text-xs"
+                  disabled={loading === 'pc55'}
+                >
+                  {loading === 'pc55' ? (
+                    <Loader2 size={14} className="animate-spin" />
+                  ) : (
+                    <MonitorSmartphone size={14} />
+                  )}
+                  Local
+                </Button>
+              )}
+
+              {/* NIP-46: Connect / Bunker */}
+              <Button
+                variant="outline"
+                onClick={openNip46Dialog}
+                className="flex-1 gap-1.5 text-xs"
+              >
+                <Link2 size={14} />
+                Connect
+              </Button>
+
+              {/* NIP-07: Browser Extension - browser only */}
+              {!isDesktop && (
+                <Button
+                  variant="outline"
+                  onClick={handleNip07Login}
+                  className="flex-1 gap-1.5 text-xs"
+                  disabled={loading === 'nip07'}
+                >
+                  {loading === 'nip07' ? (
+                    <Loader2 size={14} className="animate-spin" />
+                  ) : (
+                    <AppWindow size={14} />
+                  )}
+                  Extension
+                </Button>
+              )}
+            </div>
+
+            {/* Desktop-only: Saved Accounts or Import+Generate */}
+            {isDesktop && (
+              savedAccounts.length > 0 ? (
+                <Button
+                  variant="outline"
+                  onClick={() => { setScreen('saved-accounts'); clearError() }}
+                  className="w-full gap-2"
+                >
+                  <KeyRound size={15} />
+                  Saved Accounts
+                  <span className="ml-auto text-[10px] bg-primary/10 text-primary px-1.5 py-0.5 rounded-full font-medium">
+                    {savedAccounts.length}
+                  </span>
+                </Button>
+              ) : (
+                <div className="w-full flex gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={() => { setScreen('import'); clearError() }}
+                    className="flex-1 gap-1.5 text-xs"
+                  >
+                    <Import size={14} />
+                    Import
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={openGenerateFlow}
+                    className="flex-1 gap-1.5 text-xs"
+                  >
+                    <Plus size={14} />
+                    Generate
+                  </Button>
+                </div>
+              )
+            )}
+
+            {/* Guide / Tutorial */}
+            <Button
+              variant="ghost"
+              className="w-full gap-2 text-muted-foreground hover:text-foreground"
+              onClick={() => setShowGuide(true)}
+            >
+              <BookOpen size={15} />
+              Guide / Tutorial
+            </Button>
+          </div>
+
+          {/* Terms of use link */}
+          <p className="text-[11px] text-muted-foreground text-center mt-1">
+            By continuing to use DEN Chat, you agree to its{' '}
+            <button onClick={() => setShowTerms(true)} className="underline text-foreground/70 hover:text-foreground transition-colors cursor-pointer">
+              Terms of Use
+            </button>
+          </p>
+        </CardContent>
+      </Card>
+
+      <TermsModal open={showTerms} onClose={() => setShowTerms(false)} />
+      <GuideModal open={showGuide} onClose={() => setShowGuide(false)} />
+      <ExtensionGuideModal open={showExtensionGuide} onClose={() => setShowExtensionGuide(false)} />
+
+
+      {/* ── Pending Deletion Modal ── */}
+      {pendingDelete && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 backdrop-blur-sm">
+          <div className="w-[340px] bg-card border border-border rounded-xl shadow-2xl p-6 space-y-4 text-center">
+            {deleteStatus === 'deleting' && (
+              <>
+                <div className="w-12 h-12 mx-auto rounded-full bg-destructive/10 flex items-center justify-center">
+                  <Loader2 size={24} className="text-destructive animate-spin" />
+                </div>
+                <h3 className="text-lg font-bold text-foreground">Deleting Account</h3>
+                <p className="text-sm text-muted-foreground">
+                  Removing account from this device…<br />
+                  Please don't close the app.
+                </p>
+              </>
+            )}
+            {deleteStatus === 'done' && (
+              <>
+                <div className="w-12 h-12 mx-auto rounded-full bg-green-500/10 flex items-center justify-center">
+                  <Check size={24} className="text-green-500" />
+                </div>
+                <h3 className="text-lg font-bold text-foreground">Account Deleted</h3>
+                <p className="text-sm text-muted-foreground">The account has been removed from this device.</p>
+                <button
+                  onClick={() => setPendingDelete(null)}
+                  className="w-full py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors cursor-pointer"
+                >
+                  OK
+                </button>
+              </>
+            )}
+            {deleteStatus === 'error' && (
+              <>
+                <div className="w-12 h-12 mx-auto rounded-full bg-destructive/10 flex items-center justify-center">
+                  <AlertCircle size={24} className="text-destructive" />
+                </div>
+                <h3 className="text-lg font-bold text-foreground">Deletion Failed</h3>
+                <p className="text-sm text-destructive">{deleteError}</p>
+                <button
+                  onClick={() => setPendingDelete(null)}
+                  className="w-full py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors cursor-pointer"
+                >
+                  OK
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ─── Terms of Use Modal ─── */
+
+const TERMS_SECTIONS = [
+  {
+    title: 'Account Responsibility',
+    content: 'DEN Chat and its creator(s) bear no responsibility for any lost, stolen, or compromised accounts or funds. You are solely responsible for safeguarding your cryptographic keys, seed phrases, and any associated credentials. No recovery mechanism exists. If you lose access, it cannot be restored by anyone.',
+  },
+  {
+    title: 'Self-Custodial Software',
+    content: 'DEN Chat is self-custodial software that generates and manages cryptographic keypairs on your behalf. You hold full and exclusive custody of your keys at all times. No third party, including the developers of DEN Chat, has access to, manages, or can retrieve your private keys. You bear complete responsibility for maintaining the security and privacy of your accounts.',
+  },
+  {
+    title: 'Emerging Technology',
+    content: 'The underlying technologies, including the Nostr protocol, Blossom media storage, Cashu eCash, and cryptographic signing mechanisms, are under active development. These systems may contain undiscovered vulnerabilities, bugs, or design limitations that could result in loss of account access, funds, data, or other unintended consequences. You acknowledge and accept these risks by using this software.',
+  },
+  {
+    title: 'Decentralized & Permissionless',
+    content: 'DEN Chat is decentralized, open-source software that does not require permission from any authority to use. It enables you to generate a cryptographic keypair and participate in social, messaging, and other operations on the Nostr network. Because of its decentralized architecture, DEN Chat is inherently censorship-resistant. No single entity can restrict, moderate, or revoke access to the network on your behalf.',
+  },
+  {
+    title: 'Privacy & Data Collection',
+    content: 'As a decentralized and permissionless application, DEN Chat does not collect, store, or process any personally identifiable information. No age verification, identity checks, or surveillance mechanisms are implemented. You acknowledge that implementing such systems in a decentralized context would be ineffective at best and actively harmful at worst, creating centralized stores of sensitive data that are vulnerable to breaches, corruption, and misuse, posing a potential direct threat to the privacy and safety of individuals or groups, from men and women, to the elderly and especially children. In other words, to "protect children", DEN Chat does not collect personal identifiable information such as ID and age verification.',
+  },
+  {
+    title: 'Minor Users',
+    content: 'DEN Chat is primarily a communications tool that connects you with a global population of users. If you are under the legal age of adulthood as defined by the laws of your country or jurisdiction, we strongly advise that a parent, familial guardian, or legal guardian be present to oversee your use of this software, otherwise you should not use DEN Chat. While DEN Chat does not knowingly target or market to minors, its open and permissionless nature means that interactions with the broader public are inherent to its function.',
+  },
+  {
+    title: 'Open-Source Software',
+    content: 'DEN Chat is provided as free and open-source software. You are free to inspect, modify, and distribute the source code in accordance with its license. The software is provided in the spirit of transparency, and you are encouraged to verify its behavior independently.',
+  },
+  {
+    title: 'No Warranty',
+    content: 'This software is provided "as is" without warranty of any kind, express or implied, including but not limited to the warranties of merchantability, fitness for a particular purpose, and non-infringement. In no event shall the authors or copyright holders be liable for any claim, damages, or other liability arising from the use of this software.',
+  },
+  {
+    title: 'Limitation of Liability',
+    content: 'You acknowledge that DEN Chat and its creator(s) are not responsible for any mental, emotional, or physical harm that you may experience as a result of using this software or interacting with other users through it. This includes, but is not limited to, exposure to objectionable content, harassment, misinformation, or any other negative interactions that may occur on a decentralized and permissionless communication platform.',
+  },
+  {
+    title: 'Mental Health & Sound Judgment',
+    content: 'By using DEN Chat, you confirm that you are of sound mental health and capable of exercising reasonable judgment. This may include, but is not limited to, the ability to differentiate between fiction and reality, to recognize satire, sarcasm, and hypothetical scenarios, and to understand that content shared by other users does not constitute professional advice of any kind (medical, legal, financial, or otherwise). If you are experiencing a mental health crisis or are unable to make sound decisions, you should not use this software as it may negatively affect you or others. DEN Chat is a communication tool and is not a substitute for professional help.',
+  },
+  {
+    title: 'Encryption & Communications Privacy',
+    content: 'DEN Chat implements cryptographic encryption for direct messages and hub communications. However, encryption alone does not guarantee private communications. You acknowledge that message confidentiality can be compromised by any participant, intentionally or unintentionally, through leaked encryption keys, screen sharing or streaming, physical observers viewing a screen, operating systems or installed software monitoring activity, compromised devices, or any other means outside the scope of the encryption itself. DEN Chat guarantees the implementation of encryption flows, but cannot and does not guarantee that your communications will remain private under all circumstances. Note: Media files (images, videos, audio) uploaded to Blossom servers are not encrypted and are stored in plaintext that can be viewed by server operators. Only message text and metadata are encrypted.',
+  },
+  {
+    title: 'Third-Party Relays & Services',
+    content: "DEN Chat connects to third-party Nostr relays, Blossom media servers, and other decentralized infrastructure that are not owned, operated, or controlled by DEN Chat or its creator(s). The availability, uptime, performance, and data handling practices of these services are entirely outside the scope of DEN Chat's responsibility. Relay operators may impose their own policies, filter content, or cease operation at any time without notice.",
+  },
+  {
+    title: 'Content Responsibility',
+    content: 'You are solely responsible for all content you create, publish, and broadcast through DEN Chat. Once a Nostr event is signed and published to the network, it may be replicated and stored across multiple relays indefinitely. Deletion requests are best-effort and cannot be guaranteed; any content you publish should be considered potentially permanent. DEN Chat does not monitor, moderate, or endorse any user-generated content.',
+  },
+]
+
+function TermsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [expanded, setExpanded] = useState<number | null>(null)
+
+  if (!open) return null
+
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center">
+      {/* Backdrop */}
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
+
+      {/* Modal */}
+      <div className="relative z-10 w-full max-w-lg mx-4 max-h-[85vh] flex flex-col bg-card rounded-xl border border-border shadow-2xl">
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
+          <div className="flex items-center gap-2.5">
+            <Shield size={18} className="text-primary" />
+            <h2 className="font-semibold text-foreground">Terms of Use</h2>
+          </div>
+          <button onClick={onClose} className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors cursor-pointer">
+            <X size={16} />
+          </button>
+        </div>
+
+        {/* Description */}
+        <div className="px-5 py-3 border-b border-border/50 bg-secondary/30 shrink-0">
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            By using DEN Chat, you confirm that you have fully read, acknowledge, and understand the following:
+          </p>
+        </div>
+
+        {/* Accordion sections */}
+        <div className="flex-1 overflow-y-auto px-5 py-3 max-h-[500px]">
+          {TERMS_SECTIONS.map((section, i) => {
+            const isOpen = expanded === i
+            return (
+              <div key={i} className="border-b border-border/40 last:border-0">
+                <button
+                  onClick={() => setExpanded(isOpen ? null : i)}
+                  className="w-full flex items-center justify-between py-3.5 text-left cursor-pointer group"
+                >
+                  <span className="text-sm font-medium text-foreground group-hover:text-primary transition-colors">
+                    {section.title}
+                  </span>
+                  <ChevronDown
+                    size={14}
+                    className={`text-muted-foreground shrink-0 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}
+                  />
+                </button>
+                <div
+                  className={`overflow-hidden transition-all duration-150 ease-in-out ${isOpen ? 'max-h-[200px] opacity-100 pb-3' : 'max-h-0 opacity-0'
+                    }`}
+                >
+                  <p className="text-xs text-muted-foreground leading-relaxed pl-0.5">
+                    {section.content}
+                  </p>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+
+        {/* Footer */}
+        <div className="px-5 py-3 border-t border-border shrink-0">
+          <button
+            onClick={onClose}
+            className="w-full py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors cursor-pointer"
+          >
+            I Understand
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* ─── Guide / Tutorial Modal ─── */
+
+const GUIDE_PAGES: { title: string; icon: React.ReactNode; content: React.ReactNode }[] = [
+  {
+    title: 'What is Your Account?',
+    icon: <KeyRound size={22} className="text-primary" />,
+    content: (
+      <div className="space-y-3 text-[13px] text-muted-foreground leading-relaxed">
+        <p>
+          Your account isn't stored on a server somewhere. It lives <strong className="text-foreground">entirely on your device</strong>. When you
+          create an account, the app generates a unique pair of cryptographic keys:
+        </p>
+        <div className="rounded-lg bg-secondary/40 border border-border/50 p-3 space-y-2">
+          <p><strong className="text-foreground">Public key</strong> - Like your username. Others use it to find and message you. It's safe to share.</p>
+          <p><strong className="text-foreground">Private key</strong> - Like your password, but much more powerful. It proves you are you.{' '}
+            <span className="text-amber-400 font-medium">Never share it with anyone.</span>
+          </p>
+        </div>
+        <p>
+          There is no company holding your account. No email, no phone number, no "forgot password" link.
+          If you lose your private key (or the seed phrase that generates it), <strong className="text-foreground">nobody can recover it for you</strong>. Not
+          even the developers of this app.
+        </p>
+      </div>
+    ),
+  },
+  {
+    title: 'Your Seed Phrase',
+    icon: <Sprout size={22} className="text-emerald-500" />,
+    content: (
+      <div className="space-y-3 text-[13px] text-muted-foreground leading-relaxed">
+        <p>
+          When you generate a new account, you'll receive a <strong className="text-foreground">24-word seed phrase</strong>. Think of it as the
+          master key to your account. From these 24 words, your private key is mathematically derived.
+        </p>
+        <div className="rounded-lg bg-amber-500/10 border border-amber-500/20 p-3 space-y-2">
+          <p className="font-medium text-amber-400 flex items-center gap-1.5"><Lock size={14} className="shrink-0" /> Treat your seed phrase like a bank vault key:</p>
+          <ul className="list-disc list-inside space-y-1 text-xs">
+            <li>Write it down on paper and store it somewhere safe</li>
+            <li>Download the encrypted backup when prompted</li>
+            <li>Never type it into any website or share it in a message</li>
+            <li>Anyone with these words has <em>full control</em> of your account</li>
+          </ul>
+        </div>
+        <p>
+          You can also derive <strong className="text-foreground">multiple accounts</strong> from a single seed phrase. Each one gets its own
+          unique identity, but they all trace back to the same 24 words.
+        </p>
+      </div>
+    ),
+  },
+  {
+    title: 'Logging In',
+    icon: <Lock size={22} className="text-primary" />,
+    content: (
+      <div className="space-y-3 text-[13px] text-muted-foreground leading-relaxed">
+        <p>
+          There are several ways to log in, depending on your setup. Here's a quick overview:
+        </p>
+        <div className="space-y-2">
+          <div className="rounded-lg bg-secondary/40 border border-border/50 p-2.5">
+            <p className="font-medium text-foreground text-xs mb-1 flex items-center gap-1.5"><MonitorSmartphone size={13} className="shrink-0" /> Desktop App (Normal)</p>
+            <p className="text-xs">Your keys are stored securely in your device's keychain when you generate it through DEN Chat, protected by a PIN you choose. Just enter your PIN to unlock.</p>
+          </div>
+          <div className="rounded-lg bg-secondary/40 border border-border/50 p-2.5">
+            <p className="font-medium text-foreground text-xs mb-1 flex items-center gap-1.5"><Link2 size={13} className="shrink-0" /> Remote Signer (Advanced)</p>
+            <p className="text-xs">Apps like <strong>DENOS</strong> (desktop) or <strong>Amber</strong> (Android) hold your keys separately and approve requests
+              from DEN Chat. Your private key never touches this app. This is the recomended ways to login and use DEN Chat as it would be more secure.</p>
+          </div>
+          <div className="rounded-lg bg-secondary/40 border border-border/50 p-2.5">
+            <p className="font-medium text-foreground text-xs mb-1 flex items-center gap-1.5"><AppWindow size={13} className="shrink-0" /> Browser Extension</p>
+            <p className="text-xs">Extensions like <strong>nos2x</strong> or <strong>Keys.Band</strong> manage your key in the browser. Quick to set up,
+              but be sure you trust the extension, and even other extensions you've installed, as well as the browser you have, as it has access to your private key.</p>
+          </div>
+          <div className="rounded-lg bg-secondary/40 border border-border/50 p-2.5">
+            <p className="font-medium text-foreground text-xs mb-1 flex items-center gap-1.5"><KeyRound size={13} className="shrink-0" /> DNN ID + Password</p>
+            <p className="text-xs">If you have a DNN ID, you can log in with a username and password, done by having a running remote signer that supports this flow like DENOS</p>
+          </div>
+        </div>
+      </div>
+    ),
+  },
+  {
+    title: 'Backups Matter',
+    icon: <Download size={22} className="text-cyan-500" />,
+    content: (
+      <div className="space-y-3 text-[13px] text-muted-foreground leading-relaxed">
+        <p>
+          Since no one can recover your account for you, <strong className="text-foreground">backups are everything</strong>. Here's what you should do:
+        </p>
+        <div className="space-y-2">
+          <div className="rounded-lg bg-secondary/40 border border-border/50 p-2.5">
+            <p className="font-medium text-foreground text-xs mb-1 flex items-center gap-1.5"><FileText size={13} className="shrink-0" /> Write down your 24 words</p>
+            <p className="text-xs">Physical paper, stored offline and somewhere safe. This is your ultimate fallback. If everything else fails, these words can restore your account.</p>
+          </div>
+          <div className="rounded-lg bg-secondary/40 border border-border/50 p-2.5">
+            <p className="font-medium text-foreground text-xs mb-1 flex items-center gap-1.5"><Package size={13} className="shrink-0" /> Download the encrypted backup</p>
+            <p className="text-xs">When creating an account, the app offers a PIN-encrypted backup file. Save this file on a USB drive or a cloud storage you trust. You'll need your PIN to decrypt it later.</p>
+          </div>
+        </div>
+        <div className="rounded-lg bg-destructive/10 border border-destructive/20 p-3">
+          <p className="text-xs text-destructive font-medium flex items-center gap-1.5"><AlertCircle size={13} className="shrink-0" /> No backup = no recovery. If your device breaks, gets stolen, or you forget your PIN, your only
+            lifeline is the 24-word seed phrase or the encrypted backup file.</p>
+        </div>
+      </div>
+    ),
+  },
+  {
+    title: 'Security Basics',
+    icon: <Shield size={22} className="text-emerald-500" />,
+    content: (
+      <div className="space-y-3 text-[13px] text-muted-foreground leading-relaxed">
+        <p>
+          A few important security truths to keep in mind:
+        </p>
+        <div className="space-y-2">
+          <div className="rounded-lg bg-secondary/40 border border-border/50 p-2.5">
+            <p className="font-medium text-foreground text-xs mb-1 flex items-center gap-1.5"><XCircle size={13} className="shrink-0" /> There is no "Forgot Password"</p>
+            <p className="text-xs">Nobody can reset your access. Not the developers, not a support team. If you lose your seed phrase and forget your PIN, that account is gone forever.</p>
+          </div>
+          <div className="rounded-lg bg-secondary/40 border border-border/50 p-2.5">
+            <p className="font-medium text-foreground text-xs mb-1 flex items-center gap-1.5"><LockOpen size={13} className="shrink-0" /> If your key leaks, it's over</p>
+            <p className="text-xs">Anyone who gets your private key or seed phrase can post as you, read your encrypted messages, and spend any funds in your wallet. There is no way to "change your password" - you'd have to create a new account entirely.</p>
+          </div>
+          <div className="rounded-lg bg-secondary/40 border border-border/50 p-2.5">
+            <p className="font-medium text-foreground text-xs mb-1 flex items-center gap-1.5"><MonitorSmartphone size={13} className="shrink-0" /> Your device is your vault</p>
+            <p className="text-xs">If your device is compromised (malware, someone else has access), then your account is also compromised. Keep your OS updated and be mindful of what you install.</p>
+          </div>
+          <div className="rounded-lg bg-secondary/40 border border-border/50 p-2.5">
+            <p className="font-medium text-foreground text-xs mb-1 flex items-center gap-1.5"><EyeOff size={13} className="shrink-0" /> Encrypted doesn't mean private</p>
+            <p className="text-xs">While your DMs and hub chat messages are encrypted, others can still see <em>who</em> you've talked to and <em>which</em> hubs you've been active in. On top of that, closed-source operating systems like Windows or macOS could potentially monitor your messages before encryption even happens, so you're trusting that they don't considering these systems are closed source.</p>
+          </div>
+        </div>
+      </div>
+    ),
+  },
+  {
+    title: 'You\'re Ready!',
+    icon: <Check size={22} className="text-emerald-500" />,
+    content: (
+      <div className="space-y-3 text-[13px] text-muted-foreground leading-relaxed">
+        <p>
+          That covers the essentials. Here's a quick recap:
+        </p>
+        <div className="rounded-lg bg-primary/5 border border-primary/20 p-3 space-y-2">
+          <ul className="space-y-2 text-xs">
+            <li className="flex items-start gap-2"><Check size={14} className="text-emerald-500 shrink-0 mt-0.5" /> Your account is a cryptographic key pair that lives on your device. No servers, no company.</li>
+            <li className="flex items-start gap-2"><Check size={14} className="text-emerald-500 shrink-0 mt-0.5" /> Your 24-word seed phrase is your ultimate backup. Keep it safe, keep it secret.</li>
+            <li className="flex items-start gap-2"><Check size={14} className="text-emerald-500 shrink-0 mt-0.5" /> There are multiple ways to log in. Choose what fits your comfort level.</li>
+            <li className="flex items-start gap-2"><Check size={14} className="text-emerald-500 shrink-0 mt-0.5" /> Always back up your account. No backup means no recovery.</li>
+            <li className="flex items-start gap-2"><Check size={14} className="text-emerald-500 shrink-0 mt-0.5" /> If your key leaks, nobody can fix it. Treat it like cash - once it's gone, it's gone.</li>
+          </ul>
+        </div>
+        <p className="text-center text-sm text-foreground font-medium pt-1 flex items-center justify-center gap-1.5">
+          Welcome to DEN Chat. Enjoy the freedom. <Check size={16} className="text-emerald-500" />
+        </p>
+      </div>
+    ),
+  },
+]
+
+function GuideModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [page, setPage] = useState(0)
+  const total = GUIDE_PAGES.length
+  const current = GUIDE_PAGES[page]
+
+  // Reset to first page when modal opens
+  useEffect(() => { if (open) setPage(0) }, [open])
+
+  if (!open) return null
+
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center">
+      {/* Backdrop */}
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
+
+      {/* Modal */}
+      <div className="relative z-10 w-full max-w-lg mx-4 flex flex-col bg-card rounded-xl border border-border shadow-2xl animate-in fade-in-0 zoom-in-95 duration-200">
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
+          <div className="flex items-center gap-2.5">
+            <BookOpen size={18} className="text-primary" />
+            <h2 className="font-semibold text-foreground">Getting Started</h2>
+          </div>
+          <button onClick={onClose} className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors cursor-pointer">
+            <X size={16} />
+          </button>
+        </div>
+
+        {/* Page title */}
+        <div className="px-5 py-3 border-b border-border/50 bg-secondary/30 shrink-0 flex items-center gap-2.5">
+          {current.icon}
+          <h3 className="text-sm font-semibold text-foreground">{current.title}</h3>
+          <span className="ml-auto text-[10px] text-muted-foreground font-medium tabular-nums">{page + 1} / {total}</span>
+        </div>
+
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto px-5 py-4 min-h-[260px] max-h-[50vh]">
+          {current.content}
+        </div>
+
+        {/* Footer navigation */}
+        <div className="px-5 py-3 border-t border-border shrink-0 flex items-center justify-between">
+          <button
+            onClick={() => setPage(p => Math.max(0, p - 1))}
+            disabled={page === 0}
+            className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+          >
+            <ChevronLeft size={16} /> Back
+          </button>
+
+          {/* Page dots */}
+          <div className="flex items-center gap-1.5">
+            {Array.from({ length: total }).map((_, i) => (
+              <button
+                key={i}
+                onClick={() => setPage(i)}
+                className={`w-2 h-2 rounded-full transition-all cursor-pointer ${i === page ? 'bg-primary scale-110' : 'bg-border hover:bg-muted-foreground/50'
+                  }`}
+              />
+            ))}
+          </div>
+
+          {page < total - 1 ? (
+            <button
+              onClick={() => setPage(p => Math.min(total - 1, p + 1))}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors cursor-pointer"
+            >
+              Next <ChevronRight size={16} />
+            </button>
+          ) : (
+            <button
+              onClick={onClose}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors cursor-pointer"
+            >
+              Got it <Check size={16} />
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* ─── Extension Guide Modal ─── */
+
+const CHROME_EXTENSIONS = [
+  { name: 'nos2x', url: 'https://chromewebstore.google.com/detail/nos2x/kpgefcfmnafjgpblomihpgmejjdanjjp' },
+  { name: 'Keys.Band', url: 'https://chromewebstore.google.com/detail/keysband/jdencabhccnfhedpfoojbbdlgmecnlkm' },
+]
+
+const FIREFOX_EXTENSIONS = [
+  { name: 'nos2x-fox', url: 'https://addons.mozilla.org/en-US/firefox/addon/nos2x-fox/' },
+  { name: 'Nostr Connect', url: 'https://addons.mozilla.org/en-US/firefox/addon/nostr-connect/' },
+]
+
+function ExtensionGuideModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  if (!open) return null
+
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center">
+      {/* Backdrop */}
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
+
+      {/* Modal */}
+      <div className="relative z-10 w-full max-w-md mx-4 flex flex-col bg-card rounded-xl border border-border shadow-2xl animate-in fade-in-0 zoom-in-95 duration-200">
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
+          <div className="flex items-center gap-2.5">
+            <AppWindow size={18} className="text-primary" />
+            <h2 className="font-semibold text-foreground">Browser Extension Required</h2>
+          </div>
+          <button onClick={onClose} className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors cursor-pointer">
+            <X size={16} />
+          </button>
+        </div>
+
+        {/* Content */}
+        <div className="px-5 py-4 space-y-4">
+          <p className="text-[13px] text-muted-foreground leading-relaxed">
+            No Nostr signer extension was detected in your browser. To log in this way, you'll need to install one first.
+          </p>
+
+          {/* Chrome */}
+          <div className="space-y-2">
+            <p className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+              <Globe size={13} className="shrink-0" /> Chrome / Chromium-based browsers
+            </p>
+            <div className="flex gap-2">
+              {CHROME_EXTENSIONS.map(ext => (
+                <a
+                  key={ext.name}
+                  href={ext.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-secondary/40 border border-border/50 text-xs font-medium text-foreground hover:bg-secondary/70 transition-colors"
+                >
+                  {ext.name}
+                  <ExternalLink size={11} className="text-muted-foreground" />
+                </a>
+              ))}
+            </div>
+          </div>
+
+          {/* Firefox */}
+          <div className="space-y-2">
+            <p className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+              <Globe size={13} className="shrink-0" /> Firefox
+            </p>
+            <div className="flex gap-2">
+              {FIREFOX_EXTENSIONS.map(ext => (
+                <a
+                  key={ext.name}
+                  href={ext.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-secondary/40 border border-border/50 text-xs font-medium text-foreground hover:bg-secondary/70 transition-colors"
+                >
+                  {ext.name}
+                  <ExternalLink size={11} className="text-muted-foreground" />
+                </a>
+              ))}
+            </div>
+          </div>
+
+          {/* Refresh reminder */}
+          <div className="rounded-lg bg-amber-500/10 border border-amber-500/20 p-3 flex items-start gap-2">
+            <RefreshCw size={14} className="text-amber-400 shrink-0 mt-0.5" />
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              After installing an extension and generating or importing an account in it, <strong className="text-foreground">refresh this page</strong> and click "Extension" again to log in.
+            </p>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="px-5 py-3 border-t border-border shrink-0">
+          <button
+            onClick={onClose}
+            className="w-full py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors cursor-pointer"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
