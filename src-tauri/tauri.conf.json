@@ -2,11 +2,11 @@
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "DEN Chat",
   "version": "0.1.0",
-  "identifier": "top.denchat.app",
+  "identifier": "top.denchat.desktop",
   "build": {
-    "beforeDevCommand": "npm --prefix client run dev",
+    "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:5173",
-    "beforeBuildCommand": "npm --prefix client run build",
+    "beforeBuildCommand": "npm run build",
     "frontendDist": "../client/dist"
   },
   "app": {
