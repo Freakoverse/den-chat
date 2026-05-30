@@ -71,4 +71,4 @@ jobs:
           prerelease: false
           args: ${{ matrix.args }}
           projectPath: '.'
-          tauriScript: npx tauri
+          tauriScript: npx -y @tauri-apps/cli

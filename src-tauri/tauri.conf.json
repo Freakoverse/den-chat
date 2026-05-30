@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "identifier": "top.denchat.app",
   "build": {
-    "beforeDevCommand": "npm run dev",
+    "beforeDevCommand": "npm --prefix client run dev",
     "devUrl": "http://localhost:5173",
-    "beforeBuildCommand": "npm run build",
+    "beforeBuildCommand": "npm --prefix client run build",
     "frontendDist": "../client/dist"
   },
   "app": {
