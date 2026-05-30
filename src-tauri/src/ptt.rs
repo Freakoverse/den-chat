@@ -136,7 +136,7 @@ fn run_ptt_loop(app: AppHandle, keysym: u32) {
     tracing::info!("PTT watcher started (Linux/X11) for keysym 0x{:04X} -> keycode {}", keysym, keycode);
     while PTT_ACTIVE.load(Ordering::SeqCst) && PTT_VKEY.load(Ordering::SeqCst) == keysym {
         let pressed = unsafe {
-            let mut keymap: [i8; 32] = [0; 32];
+            let mut keymap: [std::os::raw::c_char; 32] = [0; 32];
             x11::XQueryKeymap(display, keymap.as_mut_ptr());
             let byte = keycode / 8;
             let bit = keycode % 8;
