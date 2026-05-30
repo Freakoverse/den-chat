@@ -76,6 +76,7 @@ mod x11 {
     use std::os::raw::{c_char, c_int, c_ulong};
     #[allow(non_camel_case_types)]
     pub type Display = *mut std::ffi::c_void;
+    #[link(name = "X11")]
     extern "C" {
         pub fn XOpenDisplay(name: *const c_char) -> Display;
         pub fn XCloseDisplay(display: Display) -> c_int;
