@@ -1,6 +1,7 @@
 import { useHubStore, type Role } from '@/stores/hubStore'
 import { useUserStore } from '@/stores/userStore'
 import { useDMStore } from '@/stores/dmStore'
+import { useDM04Store } from '@/stores/dm04Store'
 import { useNavigationStore } from '@/stores/navigationStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { UserProfileModal } from '@/components/hub/UserProfileModal'
@@ -245,6 +246,7 @@ export function MemberList() {
         targetPubkey={profileModalPubkey}
         hubContext={hub.creatorPubkey ? { dTag: hub.dTag, creatorPubkey: hub.creatorPubkey } : null}
         onDM={(pubkey) => {
+          useDM04Store.getState().setActiveConversation(pubkey)
           useDMStore.getState().setActiveConversation(pubkey)
           useNavigationStore.getState().setActivePage('dms')
           setProfileModalPubkey(null)

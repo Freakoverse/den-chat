@@ -11,6 +11,7 @@ import { useHubStore } from '@/stores/hubStore'
 import { useUserStore } from '@/stores/userStore'
 import { useBlockStore } from '@/stores/blockStore'
 import { useDMStore } from '@/stores/dmStore'
+import { useDM04Store } from '@/stores/dm04Store'
 import { useNavigationStore } from '@/stores/navigationStore'
 import { useMessages, type ChatMessage } from '@/hooks/useMessages'
 import { fetchOlderMessages, PAGE_SIZE } from '@/hooks/useHubSubscriptions'
@@ -1245,6 +1246,7 @@ function ForumPostDetail({
         targetPubkey={profileModalPubkey}
         hubContext={hub ? { dTag: hubDTag, creatorPubkey: hub.creatorPubkey } : null}
         onDM={(pk) => {
+          useDM04Store.getState().setActiveConversation(pk)
           useDMStore.getState().setActiveConversation(pk)
           useNavigationStore.getState().setActivePage('dms')
         }}

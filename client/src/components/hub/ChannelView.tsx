@@ -5,6 +5,7 @@ import { useUserStore } from '@/stores/userStore'
 import { useBlockStore } from '@/stores/blockStore'
 import { useWotStore } from '@/stores/wotStore'
 import { useDMStore } from '@/stores/dmStore'
+import { useDM04Store } from '@/stores/dm04Store'
 import { useNavigationStore } from '@/stores/navigationStore'
 import { useMessages, type ChatMessage, type Attachment } from '@/hooks/useMessages'
 import { fetchOlderMessages, fetchNewerMessages, fetchSingleMessage, fetchMessageContext, PAGE_SIZE } from '@/hooks/useHubSubscriptions'
@@ -1750,6 +1751,7 @@ function MessageList({ hubDTag, channelId, channelName, optimisticMessages, setO
             return hub ? { dTag: hubDTag, creatorPubkey: hub.creatorPubkey } : null
           })()}
           onDM={(pubkey) => {
+            useDM04Store.getState().setActiveConversation(pubkey)
             useDMStore.getState().setActiveConversation(pubkey)
             useNavigationStore.getState().setActivePage('dms')
           }}
@@ -6566,6 +6568,7 @@ function ThreadModal({ parentMsg, threadReplies, hubDTag, channelId, getProfile,
             return hub ? { dTag: hubDTag, creatorPubkey: hub.creatorPubkey } : null
           })()}
           onDM={(pubkey) => {
+            useDM04Store.getState().setActiveConversation(pubkey)
             useDMStore.getState().setActiveConversation(pubkey)
             useNavigationStore.getState().setActivePage('dms')
             onClose()
