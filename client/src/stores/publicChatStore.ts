@@ -8,11 +8,13 @@
  * - Relay subscription management per active topic
  * - No encryption, no authority, no editing
  * - NIP-09 deletion monitoring (kind 5) scoped by #k + #t tags
+ * - Kind 7 reactions (plaintext) with subscription + publish
+ * - Kind 9735 zap receipt tracking
  */
 
 import { create } from 'zustand'
 import { KINDS, STANDARD_KINDS } from '@/lib/crypto/constants'
-import { createPublicChatMessage, createPublicChatList } from '@/lib/nostr/events'
+import { createPublicChatMessage, createPublicChatList, createPublicChatReaction, createDeletionEvent } from '@/lib/nostr/events'
 import { signWithSigner, mineAndSign } from '@/lib/nostr'
 import { countLeadingZeroBits } from '@/lib/pow/pow'
 import { isClientTagEnabled } from '@/components/social/ComposeSettings'
@@ -23,6 +25,7 @@ import {
   publishEvent,
   publishEventProgressive,
 } from '@/lib/nostr/relay-pool'
+import { parseZapReceipt, type ZapInfo } from '@/lib/nostr/zap'
 import type { ISigner } from '@/stores/userStore'
 import type { Event } from 'nostr-tools'
 
@@ -40,8 +43,17 @@ export interface PublicChatMessage {
   pow: number            // computed difficulty of this event's ID
   clientTag?: string     // from ["client", "..."] tag
   nsfw?: boolean         // from ["content-warning", ...] tag (NIP-36)
+  emojiTags?: [string, string, string?][]    // [shortcode, url, setRef?]
   stickerTags?: [string, string, string?][]  // [shortcode, url, setRef?]
   gifTags?: [string, string, string][]       // [name, url, nsfw-flag]
+}
+
+/** A single plaintext reaction stored in the public chat store */
+export interface PCStoredReaction {
+  emoji: string
+  pubkey: string
+  eventId: string
+  customUrl?: string
 }
 
 /** Number of messages to fetch per page */
@@ -93,6 +105,24 @@ interface PublicChatState {
   /** Relay progress for publishing */
   relayProgress: Record<string, { confirmed: number; total: number; acceptedRelays: string[] }>
 
+  // ── Reactions (Kind 7 — plaintext) ──
+  /** Reactions: targetMsgEventId → PCStoredReaction[] */
+  pcReactions: Record<string, PCStoredReaction[]>
+  /** Processed reaction event IDs (dedup) */
+  processedReactionIds: Set<string>
+  /** Active reaction subscription handles */
+  _reactionSub: { close: () => void } | null
+  _reactionInitialSub: { close: () => void } | null
+
+  // ── Zaps (Kind 9735) ──
+  /** Zaps: targetMsgEventId → ZapInfo[] */
+  pcZaps: Record<string, ZapInfo[]>
+  /** Processed zap receipt IDs (dedup) */
+  processedZapIds: Set<string>
+  /** Active zap subscription handles */
+  _zapSub: { close: () => void } | null
+  _zapInitialSub: { close: () => void } | null
+
   // ── Actions ──
   setActiveTopic: (topic: string | null) => void
   setShowMedia: (v: boolean) => void
@@ -140,6 +170,34 @@ interface PublicChatState {
   /** Relay progress */
   setRelayProgress: (eventId: string, confirmed: number, total: number, acceptedRelays?: string[]) => void
   clearRelayProgress: (eventId: string) => void
+
+  // ── Reaction actions ──
+  addReaction: (targetMsgId: string, reaction: PCStoredReaction) => void
+  removeReaction: (targetMsgId: string, emoji: string, pubkey: string) => void
+  markReactionProcessed: (eventId: string) => boolean
+  startReactionSubscription: (topic: string) => void
+  stopReactionSubscription: () => void
+  publishReaction: (params: {
+    emoji: string
+    targetEventId: string
+    targetPubkey: string
+    topic: string
+    pubkey: string
+    signer: ISigner | null
+    privateKey: string | null
+    customUrl?: string
+  }) => Promise<void>
+  unreactReaction: (params: {
+    reactionEventId: string
+    signer: ISigner | null
+    privateKey: string | null
+  }) => Promise<void>
+
+  // ── Zap actions ──
+  addZap: (messageId: string, zap: ZapInfo) => void
+  markZapProcessed: (receiptId: string) => boolean
+  startZapSubscription: (topic: string) => void
+  stopZapSubscription: () => void
 }
 
 /** Parse a kind 1312 event into a PublicChatMessage */
@@ -164,6 +222,11 @@ function parsePublicChatEvent(event: Event): PublicChatMessage | null {
   const nsfw = event.tags.some(t => t[0] === 'content-warning')
   const pow = countLeadingZeroBits(event.id)
 
+  // Emoji tags: ['emoji', shortcode, url, setRef?]
+  const emojiTags = event.tags
+    .filter(t => t[0] === 'emoji' && t[1] && t[2])
+    .map(t => [t[1], t[2], t[3]] as [string, string, string?])
+
   // Sticker tags: ['sticker', shortcode, url, setAddress?]
   const stickerTags = event.tags
     .filter(t => t[0] === 'sticker' && t[1] && t[2])
@@ -185,6 +248,7 @@ function parsePublicChatEvent(event: Event): PublicChatMessage | null {
     pow,
     clientTag,
     nsfw: nsfw || undefined,
+    emojiTags: emojiTags.length > 0 ? emojiTags : undefined,
     stickerTags: stickerTags.length > 0 ? stickerTags : undefined,
     gifTags: gifTags.length > 0 ? gifTags : undefined,
   }
@@ -203,6 +267,18 @@ export const usePublicChatStore = create<PublicChatState>((set, get) => ({
   _deletionSub: null,
   _processedDeletionIds: [],
   relayProgress: {},
+
+  // Reactions
+  pcReactions: {},
+  processedReactionIds: new Set(),
+  _reactionSub: null,
+  _reactionInitialSub: null,
+
+  // Zaps
+  pcZaps: {},
+  processedZapIds: new Set(),
+  _zapSub: null,
+  _zapInitialSub: null,
 
   // Content filters — default OFF, persisted in localStorage
   showMedia: typeof window !== 'undefined' && localStorage.getItem('pc_showMedia') === 'true',
@@ -509,20 +585,28 @@ export const usePublicChatStore = create<PublicChatState>((set, get) => ({
     // Mine PoW + sign (with automatic retry if signer invalidates PoW)
     const signed = await mineAndSign(unsigned, difficulty, pubkey, signer, privateKey)
 
-    // Publish with progress tracking
+    // Publish with progress tracking — inject on first relay confirmation
+    // (matches hub chat pattern: instant UI feedback, safe against phantom messages)
+    let injected = false
     await publishEventProgressive(
       signed,
       (confirmed, total, acceptedRelays) => {
         get().setRelayProgress(signed.id, confirmed, total, acceptedRelays)
+        if (!injected && confirmed > 0) {
+          injected = true
+          const msg = parsePublicChatEvent(signed)
+          if (msg) get().addMessage(msg)
+        }
       },
     )
 
-    // Clear progress after a delay
-    setTimeout(() => get().clearRelayProgress(signed.id), 3000)
+    // If no relay accepted the event, throw so the caller can show error UI
+    if (!injected) {
+      throw new Error('Message rejected by all relays')
+    }
 
-    // Optimistically add to local messages
-    const msg = parsePublicChatEvent(signed)
-    if (msg) get().addMessage(msg)
+    // Clear progress after a delay
+    setTimeout(() => get().clearRelayProgress(signed.id), 5000)
   },
 
   // ── Message management ──
@@ -558,4 +642,194 @@ export const usePublicChatStore = create<PublicChatState>((set, get) => ({
       const { [eventId]: _, ...rest } = s.relayProgress
       return { relayProgress: rest }
     }),
+
+  // ── Reaction state management ──
+
+  addReaction: (targetMsgId, reaction) =>
+    set(s => {
+      const existing = s.pcReactions[targetMsgId] || []
+      // Deduplicate: skip if same emoji + pubkey already exists
+      if (existing.some(r => r.emoji === reaction.emoji && r.pubkey === reaction.pubkey)) return s
+      return {
+        pcReactions: {
+          ...s.pcReactions,
+          [targetMsgId]: [...existing, reaction],
+        },
+      }
+    }),
+
+  removeReaction: (targetMsgId, emoji, pubkey) =>
+    set(s => {
+      const existing = s.pcReactions[targetMsgId] || []
+      return {
+        pcReactions: {
+          ...s.pcReactions,
+          [targetMsgId]: existing.filter(r => !(r.emoji === emoji && r.pubkey === pubkey)),
+        },
+      }
+    }),
+
+  markReactionProcessed: (eventId) => {
+    const state = get()
+    if (state.processedReactionIds.has(eventId)) return false
+    set({ processedReactionIds: new Set(state.processedReactionIds).add(eventId) })
+    return true
+  },
+
+  startReactionSubscription: (topic) => {
+    const state = get()
+    state._reactionSub?.close()
+    state._reactionInitialSub?.close()
+
+    const normalizedTopic = topic.toLowerCase()
+    const now = Math.floor(Date.now() / 1000)
+
+    /** Route a kind 7 event into the reaction store */
+    const handleReactionEvent = (event: Event) => {
+      const s = get()
+      if (!s.markReactionProcessed(event.id)) return
+
+      const targetEventId = event.tags.find(t => t[0] === 'e')?.[1]
+      if (!targetEventId || !event.content) return
+
+      // Check for custom emoji tag
+      const emojiTag = event.tags.find(t => t[0] === 'emoji' && t[1] && t[2])
+      const emoji = emojiTag ? `:${emojiTag[1]}:` : event.content
+      const customUrl = emojiTag ? emojiTag[2] : undefined
+
+      s.addReaction(targetEventId, {
+        emoji,
+        pubkey: event.pubkey,
+        eventId: event.id,
+        customUrl,
+      })
+    }
+
+    // 1. Initial fetch — get recent reactions for this topic
+    const initialSub = subscribeEvents(
+      { kinds: [STANDARD_KINDS.REACTION], '#t': [normalizedTopic], limit: 200 },
+      handleReactionEvent,
+      () => { initialSub.close() },
+    )
+
+    // 2. Real-time — new reactions as they arrive
+    const realtimeSub = subscribeEvents(
+      { kinds: [STANDARD_KINDS.REACTION], '#t': [normalizedTopic], since: now },
+      handleReactionEvent,
+    )
+
+    set({ _reactionInitialSub: initialSub, _reactionSub: realtimeSub })
+  },
+
+  stopReactionSubscription: () => {
+    const state = get()
+    state._reactionSub?.close()
+    state._reactionInitialSub?.close()
+    set({ _reactionSub: null, _reactionInitialSub: null })
+  },
+
+  publishReaction: async ({ emoji, targetEventId, targetPubkey, topic, pubkey, signer, privateKey, customUrl }) => {
+    if (!signer && !privateKey) return
+
+    let unsigned = createPublicChatReaction(emoji, targetEventId, targetPubkey, topic)
+
+    // Custom emoji tag (plaintext — no encryption needed)
+    if (customUrl) {
+      const scMatch = emoji.match(/^:([a-zA-Z0-9_-]+):$/)
+      if (scMatch) {
+        unsigned = { ...unsigned, tags: [...unsigned.tags, ['emoji', scMatch[1], customUrl]] }
+      }
+    }
+
+    // Add client tag if enabled
+    if (isClientTagEnabled()) {
+      unsigned = { ...unsigned, tags: [...unsigned.tags, ['client', 'DEN Chat']] }
+    }
+
+    const signed = await signWithSigner(unsigned, signer, privateKey)
+
+    // Mark as processed to avoid dedup with subscription
+    get().markReactionProcessed(signed.id)
+
+    await publishEvent(signed)
+  },
+
+  unreactReaction: async ({ reactionEventId, signer, privateKey }) => {
+    if (!signer && !privateKey) return
+
+    // Kind 5 deletion request for the reaction event
+    const deletionEvent = createDeletionEvent([reactionEventId], [], 'User removed reaction')
+    const signed = await signWithSigner(deletionEvent, signer, privateKey)
+    await publishEvent(signed)
+  },
+
+  // ── Zap state management ──
+
+  addZap: (messageId, zap) =>
+    set(s => {
+      const existing = s.pcZaps[messageId] || []
+      // Deduplicate by receiptId
+      if (existing.some(z => z.receiptId === zap.receiptId)) return s
+      return {
+        pcZaps: {
+          ...s.pcZaps,
+          [messageId]: [...existing, zap],
+        },
+      }
+    }),
+
+  markZapProcessed: (receiptId) => {
+    const state = get()
+    if (state.processedZapIds.has(receiptId)) return false
+    set({ processedZapIds: new Set(state.processedZapIds).add(receiptId) })
+    return true
+  },
+
+  startZapSubscription: (topic) => {
+    const state = get()
+    state._zapSub?.close()
+    state._zapInitialSub?.close()
+
+    const normalizedTopic = topic.toLowerCase()
+    const msgs = state.messages[normalizedTopic] || []
+    const eventIds = msgs.filter(m => !m.deleted).map(m => m.id)
+    if (eventIds.length === 0) {
+      set({ _zapSub: null, _zapInitialSub: null })
+      return
+    }
+
+    const now = Math.floor(Date.now() / 1000)
+
+    const handleZapEvent = (event: Event) => {
+      const s = get()
+      if (!s.markZapProcessed(event.id)) return
+
+      const zapInfo = parseZapReceipt(event)
+      if (!zapInfo || !zapInfo.targetEventId) return
+
+      s.addZap(zapInfo.targetEventId, zapInfo)
+    }
+
+    // 1. Initial fetch
+    const initialSub = subscribeEvents(
+      { kinds: [STANDARD_KINDS.ZAP_RECEIPT], '#e': eventIds },
+      handleZapEvent,
+      () => { initialSub.close() },
+    )
+
+    // 2. Real-time
+    const realtimeSub = subscribeEvents(
+      { kinds: [STANDARD_KINDS.ZAP_RECEIPT], '#e': eventIds, since: now },
+      handleZapEvent,
+    )
+
+    set({ _zapInitialSub: initialSub, _zapSub: realtimeSub })
+  },
+
+  stopZapSubscription: () => {
+    const state = get()
+    state._zapSub?.close()
+    state._zapInitialSub?.close()
+    set({ _zapSub: null, _zapInitialSub: null })
+  },
 }))

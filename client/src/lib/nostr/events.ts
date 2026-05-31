@@ -660,6 +660,30 @@ export function createPublicChatMessage(
 }
 
 /**
+ * Create a public chat reaction event (Kind 7).
+ * Plaintext — no encryption. Uses `t` tag for topic-scoped relay filtering.
+ *
+ * @param emoji - Emoji string (unicode or :shortcode:)
+ * @param targetEventId - Event ID of the message being reacted to
+ * @param targetPubkey - Author pubkey of the target message
+ * @param topic - Topic string (normalized lowercase)
+ */
+export function createPublicChatReaction(
+  emoji: string,
+  targetEventId: string,
+  targetPubkey: string,
+  topic: string,
+): UnsignedEvent {
+  const tags: Tag[] = [
+    ['e', targetEventId],
+    ['p', targetPubkey],
+    ['t', topic.toLowerCase()],
+    ['k', String(KINDS.PUBLIC_CHAT)],
+  ]
+  return createUnsignedEvent(STANDARD_KINDS.REACTION, emoji, tags)
+}
+
+/**
  * Create a public chat topic list event (NIP-78 — Kind 30078).
  * Addressable replaceable: stores the user's subscribed public chat topics.
  *

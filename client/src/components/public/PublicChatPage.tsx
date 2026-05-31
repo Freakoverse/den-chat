@@ -4,7 +4,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { usePublicChatStore, type PublicChatMessage } from '@/stores/publicChatStore'
+import { usePublicChatStore, type PublicChatMessage, type PCStoredReaction } from '@/stores/publicChatStore'
 import { useNotificationStore } from '@/stores/notificationStore'
 import { useUserStore } from '@/stores/userStore'
 import { useNavigationStore } from '@/stores/navigationStore'
@@ -19,11 +19,17 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { ChatInputBar, type FileAttachment } from '@/components/chat/ChatInputBar'
 import { MessageContent } from '@/components/chat/MessageContent'
 import { ContentMediaGroupsWithGallery, extractContentMediaGroups } from '@/components/chat/ContentMediaGrouping'
-import { DeleteConfirmDialog } from '@/components/hub/ChannelView'
+import { DeleteConfirmDialog, ReactionBar, type Reaction } from '@/components/hub/ChannelView'
+import { EmojiPickerPopover } from '@/components/chat/EmojiPickerPopover'
+import { ZapModal } from '@/components/hub/ZapModal'
+import { ZapListModal } from '@/components/hub/ZapListModal'
 import { UserProfileModal } from '@/components/hub/UserProfileModal'
 import { DnnBadge } from '@/components/ui/DnnBadge'
+import { BlossomImg } from '@/components/ui/BlossomImg'
 import { useDnnStore } from '@/stores/dnnStore'
-import { Plus, Info, Hash, X, Loader2, MessagesSquare, Trash2, Reply, ArrowDown, Shield, Smile, Zap, MoreVertical, Copy, Code, Check, Filter, Minus, RotateCcw, Eye, EyeOff, AlertTriangle, ImageOff, LinkIcon, Sticker, Crown, BadgeCheck, Users, MessageCircleOff, Bell, ChevronRight } from 'lucide-react'
+import { useGifStore } from '@/stores/gifStore'
+import { publishGifFavorites } from '@/lib/nostr/customGif'
+import { Plus, Info, Hash, X, Loader2, MessagesSquare, Trash2, Reply, ArrowDown, Shield, Smile, Zap, MoreVertical, Copy, Code, Check, Filter, Minus, RotateCcw, Eye, EyeOff, AlertTriangle, ImageOff, LinkIcon, Sticker, Crown, BadgeCheck, Users, MessageCircleOff, Bell, ChevronRight, Star } from 'lucide-react'
 import { DoodleBackground } from '@/components/ui/DoodleBackground'
 import { nip19 } from 'nostr-tools'
 import { cn, truncateNpub, formatTimestamp } from '@/lib/utils'
@@ -38,6 +44,7 @@ import { benchmarkHashRate, estimateSolveTime, countLeadingZeroBits } from '@/li
 import { useUnreadDivider } from '@/hooks/useUnreadDivider'
 import { NewMessagesDivider } from '@/components/chat/NewMessagesDivider'
 import { UnreadBanner } from '@/components/chat/UnreadBanner'
+import { formatSats, type ZapInfo } from '@/lib/nostr/zap'
 
 const EMPTY_MSGS: PublicChatMessage[] = []
 
@@ -599,6 +606,34 @@ function formatShortTime(ts: number): string {
   return new Date(ts * 1000).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: getHour12() })
 }
 
+function formatFullDate(ts: number): string {
+  const d = new Date(ts * 1000)
+  return d.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
+    + ' ' + d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: getHour12() })
+}
+
+/** GIF image with skeleton placeholder (matches hub chat pattern) */
+function GifImg({ src, alt, className, style }: { src: string; alt: string; className?: string; style?: React.CSSProperties }) {
+  const [loaded, setLoaded] = useState(false)
+  const w = (style?.maxWidth as number) || 220
+  const h = (style?.maxHeight as number) || 220
+
+  return (
+    <>
+      {!loaded && (
+        <span className="media-skeleton inline-block" style={{ width: w, height: h, maxWidth: '100%' }} />
+      )}
+      <img
+        src={src}
+        alt={alt}
+        className={`${className || ''} ${!loaded ? 'opacity-0 h-0 overflow-hidden block' : ''}`}
+        style={style}
+        onLoad={() => setLoaded(true)}
+      />
+    </>
+  )
+}
+
 /* ═══════════════════════════════════════════ */
 /*  CHAT VIEW                                  */
 /* ═══════════════════════════════════════════ */
@@ -623,6 +658,14 @@ function PublicChatView({ topic, pendingHighlightId, onHighlightConsumed }: { to
   const loadingOlder = usePublicChatStore((s) => s.loadingOlder)
   const hasMore = usePublicChatStore((s) => s.hasMore[topic])
   const blockedPubkeys = useBlockStore((s) => s.blockedPubkeys)
+
+  // Reaction + Zap store selectors
+  const pcReactions = usePublicChatStore((s) => s.pcReactions)
+  const pcZaps = usePublicChatStore((s) => s.pcZaps)
+  const startReactionSubscription = usePublicChatStore((s) => s.startReactionSubscription)
+  const stopReactionSubscription = usePublicChatStore((s) => s.stopReactionSubscription)
+  const startZapSubscription = usePublicChatStore((s) => s.startZapSubscription)
+  const stopZapSubscription = usePublicChatStore((s) => s.stopZapSubscription)
   const { getProfile } = useProfileCache()
   const myProfile = myPubkey ? getProfile(myPubkey) : null
   const myDisplayName = myProfile?.display_name || myProfile?.name || (myPubkey ? truncateNpub(nip19.npubEncode(myPubkey)) : 'You')
@@ -638,6 +681,7 @@ function PublicChatView({ topic, pendingHighlightId, onHighlightConsumed }: { to
   const [pendingGifs, setPendingGifs] = useState<{ name: string; url: string; nsfw: boolean }[]>([])
   const [showFilterSettings, setShowFilterSettings] = useState(false)
   const [profilePubkey, setProfilePubkey] = useState<string | null>(null)
+  const [pendingUnreact, setPendingUnreact] = useState<{ messageId: string; emoji: string; eventId: string } | null>(null)
 
   const messagesContainerRef = useRef<HTMLDivElement>(null)
   const chatContainerRef = useRef<HTMLDivElement>(null)
@@ -706,11 +750,53 @@ function PublicChatView({ topic, pendingHighlightId, onHighlightConsumed }: { to
     fetchMessages(topic)
     startSubscription(topic)
     startDeletionSubscription(topic)
+    startReactionSubscription(topic)
     return () => {
       stopSubscription()
       stopDeletionSubscription()
+      stopReactionSubscription()
     }
-  }, [topic, fetchMessages, startSubscription, stopSubscription, startDeletionSubscription, stopDeletionSubscription])
+  }, [topic, fetchMessages, startSubscription, stopSubscription, startDeletionSubscription, stopDeletionSubscription, startReactionSubscription, stopReactionSubscription])
+
+  // Zap subscription — depends on loaded messages (need event IDs)
+  const messageCount = messages.length
+  useEffect(() => {
+    if (messageCount === 0) return
+    startZapSubscription(topic)
+    return () => { stopZapSubscription() }
+  }, [topic, messageCount, startZapSubscription, stopZapSubscription])
+
+  // ── Reaction handling ──
+  const handleReaction = useCallback((messageId: string, emoji: string, customUrl?: string) => {
+    if (!myPubkey) return
+
+    const existing = pcReactions[messageId] || []
+    const myExisting = existing.find((r) => r.emoji === emoji && r.pubkey === myPubkey)
+    if (myExisting) {
+      setPendingUnreact({ messageId, emoji, eventId: myExisting.eventId })
+      return
+    }
+
+    // Optimistic add
+    usePublicChatStore.getState().addReaction(messageId, {
+      emoji,
+      pubkey: myPubkey,
+      eventId: 'optimistic-' + Date.now(),
+      customUrl,
+    })
+
+    // Publish
+    usePublicChatStore.getState().publishReaction({
+      emoji,
+      targetEventId: messageId,
+      targetPubkey: messages.find((m) => m.id === messageId)?.pubkey || '',
+      topic,
+      pubkey: myPubkey,
+      signer,
+      privateKey,
+      customUrl,
+    }).catch(() => {})
+  }, [messages, pcReactions, myPubkey, topic, signer, privateKey])
 
   // Scroll handling
   const handleScroll = useCallback(() => {
@@ -886,6 +972,9 @@ function PublicChatView({ topic, pendingHighlightId, onHighlightConsumed }: { to
                       onOpenProfile={(pk) => setProfilePubkey(pk)}
                       highlighted={highlightedId === msg.id}
                       onScrollToMessage={scrollToMessage}
+                      onAddReaction={handleReaction}
+                      rawReactions={pcReactions[msg.id]}
+                      msgZaps={pcZaps[msg.id]}
                     />
                   </div>
                 )
@@ -1041,6 +1130,25 @@ function PublicChatView({ topic, pendingHighlightId, onHighlightConsumed }: { to
         onClose={() => setProfilePubkey(null)}
         targetPubkey={profilePubkey}
       />
+
+      {/* Unreact confirmation dialog */}
+      {pendingUnreact && (
+        <DeleteConfirmDialog
+          onCancel={() => setPendingUnreact(null)}
+          onConfirm={async () => {
+            const { messageId, emoji, eventId } = pendingUnreact
+            // Optimistic remove
+            usePublicChatStore.getState().removeReaction(messageId, emoji, myPubkey!)
+            // Publish deletion
+            usePublicChatStore.getState().unreactReaction({
+              reactionEventId: eventId,
+              signer,
+              privateKey,
+            }).catch(() => {})
+            setPendingUnreact(null)
+          }}
+        />
+      )}
     </div>
   )
 }
@@ -1049,7 +1157,7 @@ function PublicChatView({ topic, pendingHighlightId, onHighlightConsumed }: { to
 /*  MESSAGE ROW                                */
 /* ═══════════════════════════════════════════ */
 
-function PublicMessageRow({ msg, showDateSep, isGrouped, onReply, onRequestDelete, allMessages, onOpenSettings, onOpenProfile, highlighted, onScrollToMessage }: {
+function PublicMessageRow({ msg, showDateSep, isGrouped, onReply, onRequestDelete, allMessages, onOpenSettings, onOpenProfile, highlighted, onScrollToMessage, onAddReaction, rawReactions, msgZaps }: {
   msg: PublicChatMessage
   showDateSep: boolean
   isGrouped: boolean
@@ -1060,7 +1168,11 @@ function PublicMessageRow({ msg, showDateSep, isGrouped, onReply, onRequestDelet
   onOpenProfile?: (pubkey: string) => void
   highlighted?: boolean
   onScrollToMessage?: (messageId: string) => void
+  onAddReaction?: (messageId: string, emoji: string, customUrl?: string) => void
+  rawReactions?: PCStoredReaction[]
+  msgZaps?: ZapInfo[]
 }) {
+  const myPubkey = useUserStore((s) => s.pubkey)
   const { getProfile } = useProfileCache()
   const profile = getProfile(msg.pubkey)
   const npub = nip19.npubEncode(msg.pubkey)
@@ -1071,10 +1183,27 @@ function PublicMessageRow({ msg, showDateSep, isGrouped, onReply, onRequestDelet
   const showNsfwPref = typeof window !== 'undefined' && localStorage.getItem('SHOW_NSFW') === 'true'
   const shouldBlurMsg = msg.nsfw && !showNsfwPref && !nsfwRevealed
 
-  // Content filters
+  // Content filters (must be above reaction aggregation since it uses showCustomEmojis)
   const showMedia = usePublicChatStore((s) => s.showMedia)
   const showLinkPreviews = usePublicChatStore((s) => s.showLinkPreviews)
   const showCustomEmojis = usePublicChatStore((s) => s.showCustomEmojis)
+
+  // Aggregate reactions: PCStoredReaction[] -> Reaction[] for ReactionBar
+  // When showCustomEmojis is OFF, strip custom emoji URLs so ReactionBar shows shortcodes instead of images
+  const reactions: Reaction[] = useMemo(() => {
+    if (!rawReactions || rawReactions.length === 0) return []
+    const map = new Map<string, { emoji: string; count: number; reacted: boolean; customUrl?: string }>()
+    for (const r of rawReactions) {
+      const existing = map.get(r.emoji)
+      if (existing) {
+        existing.count++
+        if (r.pubkey === myPubkey) existing.reacted = true
+      } else {
+        map.set(r.emoji, { emoji: r.emoji, count: 1, reacted: r.pubkey === myPubkey, customUrl: showCustomEmojis ? r.customUrl : undefined })
+      }
+    }
+    return Array.from(map.values())
+  }, [rawReactions, myPubkey, showCustomEmojis])
 
   // Muted words filter
   const hideMutedWords = usePublicChatStore((s) => s.hideMutedWords)
@@ -1099,6 +1228,17 @@ function PublicMessageRow({ msg, showDateSep, isGrouped, onReply, onRequestDelet
   // Reply preview
   const replyTarget = msg.replyTo ? allMessages.find(m => m.id === msg.replyTo) : null
   const replyProfile = replyTarget ? getProfile(replyTarget.pubkey) : null
+
+  // Mention highlight detection (matches hub chat pattern)
+  const isMentioned = useMemo(() => {
+    if (!myPubkey || !msg.content) return false
+    const content = msg.content
+    const myNpub = nip19.npubEncode(myPubkey)
+    if (content.includes(`@${myNpub}`)) return true
+    if (content.includes('@everyone')) return true
+    if (content.includes('@here')) return true
+    return false
+  }, [msg.content, myPubkey])
 
   // DNN filter — must be after all hooks
   if (dnnIdOnly && !dnnVerified) return null
@@ -1146,13 +1286,20 @@ function PublicMessageRow({ msg, showDateSep, isGrouped, onReply, onRequestDelet
         </div>
       )}
 
-      <div className={`group relative flex gap-3 px-2 hover:bg-accent/30 rounded-lg transition-colors ${isGrouped ? '' : 'py-2'} ${highlighted ? 'bg-primary/10' : ''}`}>
+      <div className={`group relative flex gap-3 px-2 hover:bg-accent/30 rounded-lg transition-colors ${isGrouped ? '' : 'py-2'} ${highlighted ? 'bg-primary/10' : ''} ${isMentioned && !highlighted ? 'bg-amber-500/[0.08]' : ''}`}>
         {/* Avatar or timestamp gutter */}
         {isGrouped ? (
           <div className="w-10 shrink-0 flex items-center justify-end">
-            <span className="text-[10px] text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity">
-              {formatShortTime(msg.createdAt)}
-            </span>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="text-[10px] text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity cursor-default">
+                  {formatShortTime(msg.createdAt)}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="left" className="text-xs">
+                {formatFullDate(msg.createdAt)}
+              </TooltipContent>
+            </Tooltip>
           </div>
         ) : (
           <Avatar className="w-10 h-10 shrink-0 mt-0.5 cursor-pointer" onClick={() => onOpenProfile?.(msg.pubkey)}>
@@ -1169,7 +1316,14 @@ function PublicMessageRow({ msg, showDateSep, isGrouped, onReply, onRequestDelet
             <div className="flex items-center gap-2">
               <span className="text-sm font-semibold text-foreground hover:underline cursor-pointer" onClick={() => onOpenProfile?.(msg.pubkey)}>{displayName}</span>
               <DnnBadge pubkey={msg.pubkey} />
-              <span className="text-[10px] text-muted-foreground">{formatShortTime(msg.createdAt)}</span>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="text-[10px] text-muted-foreground cursor-default">{formatShortTime(msg.createdAt)}</span>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="text-xs">
+                  {formatFullDate(msg.createdAt)}
+                </TooltipContent>
+              </Tooltip>
               {msg.clientTag && (
                 <TooltipProvider delayDuration={200}>
                   <Tooltip>
@@ -1199,7 +1353,7 @@ function PublicMessageRow({ msg, showDateSep, isGrouped, onReply, onRequestDelet
             <>
               {strippedContent && (
                 <div className="text-sm text-foreground break-words">
-                  <MessageContent content={strippedContent} disableLinkPreviews={!showLinkPreviews} disableCustomEmojis={!showCustomEmojis} disableMedia={!showMedia} mutedWords={hideMutedWords ? mutedWords : undefined} />
+                  <MessageContent content={strippedContent} emojiTags={msg.emojiTags} onProfileClick={(pk) => onOpenProfile?.(pk)} disableLinkPreviews={!showLinkPreviews} disableCustomEmojis={!showCustomEmojis} disableMedia={!showMedia} mutedWords={hideMutedWords ? mutedWords : undefined} />
                 </div>
               )}
               {/* Media disabled placeholder (above media so it doesn't jump when preview loads) */}
@@ -1240,19 +1394,26 @@ function PublicMessageRow({ msg, showDateSep, isGrouped, onReply, onRequestDelet
               )}
               {/* Media gallery (renders below placeholder when previewing) */}
               {(showMedia || mediaPreview) && hasMedia && <ContentMediaGroupsWithGallery content={msg.content} />}
-              {/* Stickers */}
+              {/* Stickers — BlossomImg for integrity verification */}
               {(showMedia || mediaPreview) && msg.stickerTags && msg.stickerTags.length > 0 && (
                 <div className={`flex flex-wrap gap-2 ${strippedContent ? 'mt-1' : ''}`}>
-                  {msg.stickerTags.map(([shortcode, url], i) => (
+                  {msg.stickerTags.map(([shortcode, url, setRef], i) => (
                     <TooltipProvider key={`sticker-${shortcode}-${i}`} delayDuration={200}>
                       <Tooltip>
                         <TooltipTrigger asChild>
-                          <img
+                          <BlossomImg
                             src={url || ''}
                             alt={`:${shortcode}:`}
-                            className="rounded-lg hover:opacity-80 transition-opacity"
+                            className="rounded-lg cursor-pointer hover:opacity-80 transition-opacity"
                             style={{ maxWidth: 180, maxHeight: 180, objectFit: 'contain' }}
                             loading="lazy"
+                            showBadge
+                            showSkeleton
+                            onClick={() => {
+                              window.dispatchEvent(new CustomEvent('sticker-click', {
+                                detail: { shortcode, url, setAddress: setRef || null },
+                              }))
+                            }}
                           />
                         </TooltipTrigger>
                         <TooltipContent side="top" className="text-xs">:{shortcode}:</TooltipContent>
@@ -1261,24 +1422,49 @@ function PublicMessageRow({ msg, showDateSep, isGrouped, onReply, onRequestDelet
                   ))}
                 </div>
               )}
-              {/* GIFs */}
+              {/* GIFs — GifImg with skeleton + star-to-favorite */}
               {(showMedia || mediaPreview) && msg.gifTags && msg.gifTags.length > 0 && (
                 <div className={`flex flex-wrap gap-2 ${strippedContent ? 'mt-1' : ''}`}>
                   {msg.gifTags.map(([name, url, nsfwFlag], i) => (
-                    <TooltipProvider key={`gif-${url}-${i}`} delayDuration={200}>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <img
-                            src={url || ''}
-                            alt={name || 'GIF'}
-                            className={`rounded-lg hover:opacity-80 transition-opacity ${nsfwFlag === 'nsfw' ? 'blur-lg hover:blur-none' : ''}`}
-                            style={{ maxWidth: 220, maxHeight: 220, objectFit: 'contain' }}
-                            loading="lazy"
-                          />
-                        </TooltipTrigger>
-                        <TooltipContent side="top" className="text-xs">{name || 'GIF'}{nsfwFlag === 'nsfw' ? ' (NSFW)' : ''}</TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
+                    <div key={`gif-${url}-${i}`} className="relative group/gif">
+                      <TooltipProvider delayDuration={200}>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <GifImg
+                              src={url || ''}
+                              alt={name || 'GIF'}
+                              className={`rounded-lg hover:opacity-80 transition-opacity ${nsfwFlag === 'nsfw' ? 'blur-lg hover:blur-none' : ''}`}
+                              style={{ maxWidth: 220, maxHeight: 220, objectFit: 'contain' }}
+                            />
+                          </TooltipTrigger>
+                          <TooltipContent side="top" className="text-xs">{name || 'GIF'}{nsfwFlag === 'nsfw' ? ' (NSFW)' : ''}</TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                      <TooltipProvider delayDuration={200}>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button
+                              onClick={async (e) => {
+                                e.stopPropagation()
+                                const store = useGifStore.getState()
+                                const { signer: s, privateKey: pk } = useUserStore.getState()
+                                const exists = store.favorites.some((f) => f.url === url)
+                                const updated = exists ? store.favorites.filter((f) => f.url !== url) : [...store.favorites, { name: name || '', url, nsfw: nsfwFlag === 'nsfw', tagged: true }]
+                                store.setFavorites(updated)
+                                await publishGifFavorites(updated, s, pk).catch(() => { })
+                              }}
+                              className={`absolute top-1 right-1 w-6 h-6 rounded-full flex items-center justify-center transition-all cursor-pointer ${useGifStore.getState().favorites.some((f) => f.url === url)
+                                ? 'bg-yellow-500/90 text-white opacity-80 hover:opacity-100'
+                                : 'bg-black/50 text-white/80 opacity-0 group-hover/gif:opacity-100 hover:bg-black/70'
+                                }`}
+                            >
+                              <Star size={12} fill={useGifStore.getState().favorites.some((f) => f.url === url) ? 'currentColor' : 'none'} />
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent side="bottom" className="text-xs">{useGifStore.getState().favorites.some((f) => f.url === url) ? 'Remove from favorites' : 'Add to favorites'}</TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    </div>
                   ))}
                 </div>
               )}
@@ -1292,11 +1478,60 @@ function PublicMessageRow({ msg, showDateSep, isGrouped, onReply, onRequestDelet
               )}
             </>
           )}
+
+          {/* Reaction bar + Zap badge — inside content div so it renders below message text */}
+          {onAddReaction && (
+            <ReactionBar
+              reactions={reactions}
+              messageId={msg.id}
+              onAddReaction={onAddReaction}
+              rawReactions={rawReactions?.map(r => ({ ...r, decrypted: true as const }))}
+              onOpenProfile={onOpenProfile}
+              disableCustomEmojis={!showCustomEmojis}
+            >
+              <PCZapBadge zaps={msgZaps} onOpenProfile={onOpenProfile} />
+            </ReactionBar>
+          )}
         </div>
 
         {/* Actions */}
-        <PublicMessageActions msg={msg} onReply={onReply} onRequestDelete={onRequestDelete} />
+        <PublicMessageActions msg={msg} onReply={onReply} onRequestDelete={onRequestDelete} onAddReaction={onAddReaction} />
       </div>
+    </>
+  )
+}
+
+/* ═══════════════════════════════════════════ */
+/*  PUBLIC CHAT ZAP BADGE                      */
+/* ═══════════════════════════════════════════ */
+
+function PCZapBadge({ zaps, onOpenProfile }: { zaps?: ZapInfo[]; onOpenProfile?: (pubkey: string) => void }) {
+  const [showZapList, setShowZapList] = useState(false)
+
+  if (!zaps || zaps.length === 0) return null
+
+  const totalSats = zaps.reduce((sum, z) => sum + z.amount, 0)
+
+  return (
+    <>
+      <button
+        onClick={() => setShowZapList(true)}
+        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs cursor-pointer transition-colors border bg-yellow-400/10 border-yellow-400/30 text-yellow-400 hover:bg-yellow-400/20"
+      >
+        <Zap size={12} fill="currentColor" />
+        <span className="font-semibold">{formatSats(totalSats)}</span>
+        {zaps.length > 1 && (
+          <span className="text-yellow-400/60">({zaps.length})</span>
+        )}
+      </button>
+      {showZapList && (
+        <ZapListModal
+          open={showZapList}
+          onClose={() => setShowZapList(false)}
+          zaps={zaps}
+          onOpenProfile={onOpenProfile}
+        />
+      )}
     </>
   )
 }
@@ -1305,15 +1540,18 @@ function PublicMessageRow({ msg, showDateSep, isGrouped, onReply, onRequestDelet
 /*  MESSAGE ACTIONS                            */
 /* ═══════════════════════════════════════════ */
 
-function PublicMessageActions({ msg, onReply, onRequestDelete }: { msg: PublicChatMessage; onReply: () => void; onRequestDelete: () => void }) {
+function PublicMessageActions({ msg, onReply, onRequestDelete, onAddReaction }: { msg: PublicChatMessage; onReply: () => void; onRequestDelete: () => void; onAddReaction?: (messageId: string, emoji: string, customUrl?: string) => void }) {
   const myPubkey = useUserStore((s) => s.pubkey)
   const isMine = msg.pubkey === myPubkey
   const [showMenu, setShowMenu] = useState(false)
   const [copied, setCopied] = useState(false)
   const [showRaw, setShowRaw] = useState(false)
+  const [showPicker, setShowPicker] = useState(false)
+  const [showZap, setShowZap] = useState(false)
   const [menuPos, setMenuPos] = useState<{ top?: number; bottom?: number; left?: number; right?: number } | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const dotsRef = useRef<HTMLButtonElement>(null)
+  const reactBtnRef = useRef<HTMLButtonElement>(null)
 
   // Only show zap if author has a lightning address and it's not our own message
   const recipientProfile = getCachedProfile(msg.pubkey)
@@ -1382,7 +1620,7 @@ function PublicMessageActions({ msg, onReply, onRequestDelete }: { msg: PublicCh
           {/* React */}
           <Tooltip>
             <TooltipTrigger asChild>
-              <button className="p-1 rounded cursor-pointer text-muted-foreground hover:text-foreground hover:bg-accent transition-colors">
+              <button ref={reactBtnRef} onClick={() => setShowPicker(!showPicker)} className="p-1 rounded cursor-pointer text-muted-foreground hover:text-foreground hover:bg-accent transition-colors">
                 <Smile size={16} />
               </button>
             </TooltipTrigger>
@@ -1401,7 +1639,7 @@ function PublicMessageActions({ msg, onReply, onRequestDelete }: { msg: PublicCh
           {canZap && (
             <Tooltip>
               <TooltipTrigger asChild>
-                <button className="p-1 rounded cursor-pointer text-muted-foreground hover:text-yellow-400 hover:bg-yellow-400/10 transition-colors">
+                <button onClick={() => setShowZap(true)} className="p-1 rounded cursor-pointer text-muted-foreground hover:text-yellow-400 hover:bg-yellow-400/10 transition-colors">
                   <Zap size={16} />
                 </button>
               </TooltipTrigger>
@@ -1469,6 +1707,30 @@ function PublicMessageActions({ msg, onReply, onRequestDelete }: { msg: PublicCh
             </pre>
           </div>
         </div>
+      )}
+
+      {/* Emoji picker for reactions */}
+      {showPicker && onAddReaction && (
+        <EmojiPickerPopover
+          anchorRef={reactBtnRef}
+          onClose={() => setShowPicker(false)}
+          onSelect={(emoji, customEmoji) => {
+            onAddReaction(msg.id, emoji, customEmoji?.url)
+            setShowPicker(false)
+          }}
+        />
+      )}
+
+      {/* Zap modal */}
+      {showZap && recipientProfile?.lud16 && (
+        <ZapModal
+          open={showZap}
+          onClose={() => setShowZap(false)}
+          recipientPubkey={msg.pubkey}
+          messageEventId={msg.id}
+          messageKind={1312}
+          disableSplit
+        />
       )}
     </>
   )

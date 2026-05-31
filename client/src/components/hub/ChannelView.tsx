@@ -2963,13 +2963,15 @@ function ReplyPreview({ repliedMessage, getProfile, onScrollTo }: {
 
 /* ──────────────── Reaction Pills ──────────────── */
 
-export function ReactionBar({ reactions, messageId, onAddReaction, rawReactions, onOpenProfile, children }: {
+export function ReactionBar({ reactions, messageId, onAddReaction, rawReactions, onOpenProfile, children, disableCustomEmojis }: {
   reactions: Reaction[]
   messageId: string
   onAddReaction: (messageId: string, emoji: string, customUrl?: string) => void
   rawReactions?: import('@/stores/messageStore').StoredReaction[]
   onOpenProfile?: (pubkey: string) => void
   children?: React.ReactNode
+  /** When true, custom emoji images are not rendered (shows :shortcode: text instead) */
+  disableCustomEmojis?: boolean
 }) {
   const [showPicker, setShowPicker] = useState(false)
   const [showReactionList, setShowReactionList] = useState(false)
@@ -3006,12 +3008,16 @@ export function ReactionBar({ reactions, messageId, onAddReaction, rawReactions,
             }`}
         >
           <span>{(() => {
-            if (r.customUrl) return <img src={r.customUrl} alt={r.emoji} className="h-4 w-4 object-contain inline" />
-            const scMatch = r.emoji.match(/^:([a-zA-Z0-9_-]+):$/)
-            if (scMatch) {
-              const entry = getEmojiMap().get(scMatch[1])
-              if (entry) return <img src={entry.url} alt={r.emoji} className="h-4 w-4 object-contain inline" />
+            if (!disableCustomEmojis && r.customUrl) return <img src={r.customUrl} alt={r.emoji} className="h-4 w-4 object-contain inline" />
+            if (!disableCustomEmojis) {
+              const scMatch = r.emoji.match(/^:([a-zA-Z0-9_-]+):$/)
+              if (scMatch) {
+                const entry = getEmojiMap().get(scMatch[1])
+                if (entry) return <img src={entry.url} alt={r.emoji} className="h-4 w-4 object-contain inline" />
+              }
             }
+            // When disabled, show 'n/a' for custom emojis instead of raw :shortcode:
+            if (disableCustomEmojis && (r.customUrl || /^:[a-zA-Z0-9_-]+:$/.test(r.emoji))) return 'n/a'
             return r.emoji
           })()}</span>
           <span className="font-medium">{r.count}</span>
@@ -3057,6 +3063,7 @@ export function ReactionBar({ reactions, messageId, onAddReaction, rawReactions,
           onClose={() => setShowReactionList(false)}
           reactions={reactionInfos}
           onOpenProfile={onOpenProfile}
+          disableCustomEmojis={disableCustomEmojis}
         />
       )}
     </div>

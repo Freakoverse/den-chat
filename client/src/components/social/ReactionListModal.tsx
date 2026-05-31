@@ -23,9 +23,11 @@ interface ReactionListModalProps {
   onClose: () => void
   reactions: ReactionInfo[]
   onOpenProfile?: (pubkey: string) => void
+  /** When true, custom emoji images are not rendered (shows :shortcode: text instead) */
+  disableCustomEmojis?: boolean
 }
 
-export function ReactionListModal({ open, onClose, reactions, onOpenProfile }: ReactionListModalProps) {
+export function ReactionListModal({ open, onClose, reactions, onOpenProfile, disableCustomEmojis }: ReactionListModalProps) {
   const { getProfile } = useProfileCache()
 
   const sorted = useMemo(
@@ -73,7 +75,7 @@ export function ReactionListModal({ open, onClose, reactions, onOpenProfile }: R
                 key={emoji}
                 className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-accent/40 border border-border/50"
               >
-                <ResolvedEmoji emoji={emoji} size={14} />
+                <ResolvedEmoji emoji={emoji} size={14} disableCustomEmojis={disableCustomEmojis} />
                 <span className="text-muted-foreground font-medium">{count}</span>
               </span>
             ))}
@@ -96,12 +98,12 @@ export function ReactionListModal({ open, onClose, reactions, onOpenProfile }: R
               return (
                 <div
                   key={reaction.eventId}
-                  className="flex items-center gap-3 px-5 py-2.5 border-b border-border/50 hover:bg-accent/20 transition-colors cursor-pointer"
+                  className="flex items-center gap-3 px-5 py-2.5 border-b border-border/50 last:border-b-0 hover:bg-accent/20 transition-colors cursor-pointer"
                   onClick={() => onOpenProfile?.(reaction.pubkey)}
                 >
                   {/* Emoji */}
                   <div className="w-8 flex items-center justify-center shrink-0">
-                    <ResolvedEmoji emoji={displayEmoji} url={reaction.emojiUrl} size={20} />
+                    <ResolvedEmoji emoji={displayEmoji} url={reaction.emojiUrl} size={20} disableCustomEmojis={disableCustomEmojis} />
                   </div>
 
                   {/* Avatar */}
@@ -132,19 +134,25 @@ export function ReactionListModal({ open, onClose, reactions, onOpenProfile }: R
 }
 
 /** Renders an emoji — resolves custom shortcodes from the emoji map */
-function ResolvedEmoji({ emoji, url, size = 16 }: { emoji: string; url?: string; size?: number }) {
-  // If a direct URL was provided (from emoji tag)
-  if (url) {
-    return <img src={url} alt={emoji} className="object-contain inline" style={{ width: size, height: size }} />
-  }
-
-  // Check for custom emoji shortcode pattern :name:
-  const scMatch = emoji.match(/^:([a-zA-Z0-9_-]+):$/)
-  if (scMatch) {
-    const entry = getEmojiMap().get(scMatch[1])
-    if (entry) {
-      return <img src={entry.url} alt={emoji} className="object-contain inline" style={{ width: size, height: size }} />
+function ResolvedEmoji({ emoji, url, size = 16, disableCustomEmojis }: { emoji: string; url?: string; size?: number; disableCustomEmojis?: boolean }) {
+  if (!disableCustomEmojis) {
+    // If a direct URL was provided (from emoji tag)
+    if (url) {
+      return <img src={url} alt={emoji} className="object-contain inline" style={{ width: size, height: size }} />
     }
+
+    // Check for custom emoji shortcode pattern :name:
+    const scMatch = emoji.match(/^:([a-zA-Z0-9_-]+):$/)
+    if (scMatch) {
+      const entry = getEmojiMap().get(scMatch[1])
+      if (entry) {
+        return <img src={entry.url} alt={emoji} className="object-contain inline" style={{ width: size, height: size }} />
+      }
+    }
+  }
+  // When disabled, show 'n/a' for custom emojis instead of raw :shortcode:
+  if (disableCustomEmojis && (url || /^:[a-zA-Z0-9_-]+:$/.test(emoji))) {
+    return <span style={{ fontSize: size }} className="leading-none text-muted-foreground">n/a</span>
   }
 
   // Unicode emoji or fallback
