@@ -825,10 +825,14 @@ function DeviceSelect({
     return () => document.removeEventListener('mousedown', handler)
   }, [open])
 
-  // Close on scroll of any ancestor
+  // Close on scroll of any ancestor (but not the dropdown itself)
   useEffect(() => {
     if (!open) return
-    const handler = () => setOpen(false)
+    const handler = (e: Event) => {
+      // Don't close when scrolling inside the dropdown
+      if (dropdownRef.current?.contains(e.target as Node)) return
+      setOpen(false)
+    }
     window.addEventListener('scroll', handler, true)
     return () => window.removeEventListener('scroll', handler, true)
   }, [open])
@@ -8736,8 +8740,12 @@ function BuildPlatformRow({ plat, onUpdate, onRemove, signer, privateKey }: {
           options={[
             { value: 'Windows x64', label: 'Windows x64' },
             { value: 'Windows ARM', label: 'Windows ARM' },
-            { value: 'Linux x64', label: 'Linux x64' },
-            { value: 'Linux ARM', label: 'Linux ARM' },
+            { value: 'Linux AppImage x64', label: 'Linux AppImage x64' },
+            { value: 'Linux AppImage ARM', label: 'Linux AppImage ARM' },
+            { value: 'Linux deb x64', label: 'Linux .deb x64' },
+            { value: 'Linux deb ARM', label: 'Linux .deb ARM' },
+            { value: 'Linux rpm x64', label: 'Linux .rpm x64' },
+            { value: 'Linux rpm ARM', label: 'Linux .rpm ARM' },
             { value: 'macOS Intel', label: 'macOS Intel' },
             { value: 'macOS ARM', label: 'macOS ARM' },
           ]}
