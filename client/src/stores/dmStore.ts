@@ -124,6 +124,12 @@ export const useDMStore = create<DMState>((set, get) => ({
           conv.unread = 0
           return { activeConversation: pubkey, conversations }
         }
+        // If no conversation exists yet, add as pending so the DM UI shows it
+        if (!conv && !s.pendingConversations.has(pubkey)) {
+          const pending = new Set(s.pendingConversations)
+          pending.add(pubkey)
+          return { activeConversation: pubkey, pendingConversations: pending }
+        }
       }
       return { activeConversation: pubkey }
     })
