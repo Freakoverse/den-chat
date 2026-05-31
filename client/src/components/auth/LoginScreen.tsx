@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useUserStore } from '@/stores/userStore'
 import { isTauri } from '@/lib/utils'
 import { ADMIN_PUBKEY, StorageKey } from '@/lib/constants'
-import { fetchReplaceable, publishToSpecificRelays, getRelayList } from '@/lib/nostr/relay-pool'
+import { fetchReplaceable, fetchEvents, publishToSpecificRelays, getRelayList } from '@/lib/nostr/relay-pool'
 import { MonitorSmartphone, Import, Plus, Loader2, AlertCircle, Link2, KeyRound, Copy, Check, AppWindow, ChevronDown, ChevronLeft, ChevronRight, X, Shield, ShieldAlert, ExternalLink, User, Lock, Eye, EyeOff, GitBranch, Sprout, KeySquare, Download, FileUp, BookOpen, Camera, Settings2, XCircle, FileText, Package, LockOpen, Globe, RefreshCw } from 'lucide-react'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { BlossomImage } from '@/components/ui/BlossomImage'
@@ -21,7 +21,7 @@ import {
   deriveNextAccount, importSeed, importNsec, loginAccount, deleteAccount,
   type StoredAccount, type StoredSeed,
 } from '@/lib/auth/secure-storage'
-import { PC55Signer } from '@/lib/auth/pc55'
+import { PC55Signer, discover } from '@/lib/auth/pc55'
 import { BunkerSigner } from '@/lib/auth/bunker'
 import { NostrConnectSigner, generateNostrConnectDetails } from '@/lib/auth/nostr-connect'
 import { Nip07Signer } from '@/lib/auth/nip07'
@@ -128,6 +128,7 @@ export function LoginScreen() {
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [showLocalSignerModal, setShowLocalSignerModal] = useState(false)
 
   // Import
   const [importWords, setImportWords] = useState('')
@@ -350,7 +351,46 @@ export function LoginScreen() {
 
   // Read which list was last shown — once, at mount time
   const BG_LIST_KEY = 'den-chat-login-bg-last-list'
+  const BG_SEEN_KEY = 'den-chat-login-bg-seen'
+  const AD_SEEN_KEY = 'den-chat-login-ad-seen'
   const lastListRef = useRef(typeof window !== 'undefined' ? localStorage.getItem(BG_LIST_KEY) : null)
+
+  /**
+   * Pick a random entry from `list` that hasn't been shown yet (round-robin).
+   * - Tracks seen image URLs in localStorage under `storageKey`.
+   * - Prunes stale URLs that are no longer in the current list (handles list edits).
+   * - Resets the cycle when every entry has been shown.
+   */
+  const pickUnseen = useCallback((list: LoginBgEntry[], storageKey: string): LoginBgEntry => {
+    const allUrls = new Set(list.map(e => e.image))
+
+    // Load previously seen URLs and prune any that no longer exist in the list
+    let seen: Set<string>
+    try {
+      const raw = localStorage.getItem(storageKey)
+      const arr: string[] = raw ? JSON.parse(raw) : []
+      seen = new Set(arr.filter(url => allUrls.has(url)))
+    } catch {
+      seen = new Set<string>()
+    }
+
+    // Find entries not yet shown in this cycle
+    let unseen = list.filter(e => !seen.has(e.image))
+    if (unseen.length === 0) {
+      // All shown — reset cycle
+      seen.clear()
+      unseen = list
+    }
+
+    // Pick randomly from unseen
+    const pick = unseen[Math.floor(Math.random() * unseen.length)]
+
+    // Mark as seen and persist
+    seen.add(pick.image)
+    localStorage.setItem(storageKey, JSON.stringify([...seen]))
+
+    return pick
+  }, [])
 
   // Alternate between bg and ad lists.
   // First-time / new user always sees the non-ad list.
@@ -359,20 +399,19 @@ export function LoginScreen() {
     const hasAd = adEntries.length > 0
 
     if (!hasBg && !hasAd) return { activeBg: null, isAd: false }
-    if (!hasAd) return { activeBg: bgEntries[Math.floor(Math.random() * bgEntries.length)], isAd: false }
-    if (!hasBg) return { activeBg: adEntries[Math.floor(Math.random() * adEntries.length)], isAd: true }
+    if (!hasAd) return { activeBg: pickUnseen(bgEntries, BG_SEEN_KEY), isAd: false }
+    if (!hasBg) return { activeBg: pickUnseen(adEntries, AD_SEEN_KEY), isAd: true }
 
     // Both lists available — alternate
     // If last was 'bg' → show ad. If last was 'ad' or null (first visit) → show bg.
     const useAd = lastListRef.current === 'bg'
-    const list = useAd ? adEntries : bgEntries
     return {
-      activeBg: list[Math.floor(Math.random() * list.length)],
+      activeBg: pickUnseen(useAd ? adEntries : bgEntries, useAd ? AD_SEEN_KEY : BG_SEEN_KEY),
       isAd: useAd,
     }
-  }, [bgEntries, adEntries])
+  }, [bgEntries, adEntries, pickUnseen])
 
-  // Persist the choice ONCE after both lists have loaded
+  // Persist the list alternation choice ONCE after both lists have loaded
   useEffect(() => {
     if (bgEntries.length > 0 && adEntries.length > 0) {
       localStorage.setItem(BG_LIST_KEY, isAd ? 'ad' : 'bg')
@@ -406,11 +445,19 @@ export function LoginScreen() {
     }
   }
 
-  // ─── PC55 Login ───
-  const handlePC55Login = async () => {
+  // ─── PC55 Login (detect-on-click) ───
+  const handleLocalLogin = async () => {
     setLoading('pc55')
     clearError()
     try {
+      // Step 1: Try to discover the signer first
+      const info = await discover()
+      if (!info) {
+        // No signer found — show the friendly modal
+        setShowLocalSignerModal(true)
+        return
+      }
+      // Step 2: Signer found — proceed with login
       const signer = new PC55Signer()
       await signer.init()
       const pubkey = await signer.getPublicKey()
@@ -2038,22 +2085,20 @@ export function LoginScreen() {
           <div className="w-full flex flex-col gap-2">
             {/* External signer row — Local | Connect | Extension */}
             <div className="w-full flex gap-2">
-              {/* NIP-PC55: Local Signer — only if detected */}
-              {localSignerName && (
-                <Button
-                  variant="outline"
-                  onClick={handlePC55Login}
-                  className="flex-1 gap-1.5 text-xs"
-                  disabled={loading === 'pc55'}
-                >
-                  {loading === 'pc55' ? (
-                    <Loader2 size={14} className="animate-spin" />
-                  ) : (
-                    <MonitorSmartphone size={14} />
-                  )}
-                  Local
-                </Button>
-              )}
+              {/* NIP-PC55: Local Signer — always visible */}
+              <Button
+                variant="outline"
+                onClick={handleLocalLogin}
+                className="flex-1 gap-1.5 text-xs"
+                disabled={loading === 'pc55'}
+              >
+                {loading === 'pc55' ? (
+                  <Loader2 size={14} className="animate-spin" />
+                ) : (
+                  <MonitorSmartphone size={14} />
+                )}
+                Local
+              </Button>
 
               {/* NIP-46: Connect / Bunker */}
               <Button
@@ -2143,6 +2188,7 @@ export function LoginScreen() {
       <TermsModal open={showTerms} onClose={() => setShowTerms(false)} />
       <GuideModal open={showGuide} onClose={() => setShowGuide(false)} />
       <ExtensionGuideModal open={showExtensionGuide} onClose={() => setShowExtensionGuide(false)} />
+      <NoLocalSignerModal open={showLocalSignerModal} onClose={() => setShowLocalSignerModal(false)} isDesktop={isDesktop} />
 
 
       {/* ── Pending Deletion Modal ── */}
@@ -2669,6 +2715,300 @@ function ExtensionGuideModal({ open, onClose }: { open: boolean; onClose: () => 
           <button
             onClick={onClose}
             className="w-full py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors cursor-pointer"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* ─── No Local Signer Modal ─── */
+
+
+/** s-tag value used by DENOS to group version history events */
+const DENOS_VERSIONS_TAG = 'denos-versions'
+
+/** Platform labels for display */
+const PLATFORM_LABELS: Record<string, string> = {
+  'windows-x86_64': 'Windows',
+  'windows-aarch64': 'Windows (ARM)',
+  'linux-x86_64': 'Linux',
+  'linux-x86_64-bin': 'Linux (binary)',
+  'linux-aarch64': 'Linux (ARM)',
+  'linux-aarch64-bin': 'Linux ARM (binary)',
+  'darwin-x86_64': 'macOS (Intel)',
+  'darwin-aarch64': 'macOS (ARM)',
+}
+
+interface DenosPlatformBinary {
+  target: string   // e.g. "windows-x86_64"
+  label: string    // e.g. "Windows"
+  hash: string     // SHA-256 hash (blossom file ID)
+  ext: string      // e.g. "nsis.zip", "dmg", "AppImage"
+}
+
+interface DenosBuild {
+  version: string
+  notes: string
+  pub_date: string
+  platforms: DenosPlatformBinary[]
+  source?: { hash: string; ext: string }
+  created_at: number
+}
+
+function NoLocalSignerModal({ open, onClose, isDesktop }: { open: boolean; onClose: () => void; isDesktop: boolean }) {
+  const [view, setView] = useState<'info' | 'downloads'>('info')
+  const [builds, setBuilds] = useState<DenosBuild[]>([])
+  const [loadingBuilds, setLoadingBuilds] = useState(false)
+  const [buildError, setBuildError] = useState(false)
+  const [openBuildIdx, setOpenBuildIdx] = useState<number | null>(null)
+
+  // Reset view when modal opens
+  useEffect(() => {
+    if (open) setView('info')
+  }, [open])
+
+  const fetchDenosBuilds = useCallback(() => {
+    setLoadingBuilds(true)
+    setBuildError(false)
+
+    // Fetch kind:30078 events from DENOS creator with s=denos-versions
+    fetchEvents({ authors: [ADMIN_PUBKEY], kinds: [30078] }).then((events) => {
+      const parsed: DenosBuild[] = []
+      for (const ev of events) {
+        // Only include version history events (s-tag = denos-versions)
+        const hasVersionsTag = ev.tags.some((t) => t[0] === 's' && t[1] === DENOS_VERSIONS_TAG)
+        if (!hasVersionsTag) continue
+        try {
+          const data = JSON.parse(ev.content)
+          if (!data.version) continue
+          // Map platforms from { target: { hash, ext } } to array
+          const platforms: DenosPlatformBinary[] = []
+          if (data.platforms && typeof data.platforms === 'object') {
+            for (const [target, info] of Object.entries(data.platforms)) {
+              const bin = info as { hash?: string; ext?: string }
+              if (bin.hash) {
+                platforms.push({
+                  target,
+                  label: PLATFORM_LABELS[target] || target,
+                  hash: bin.hash,
+                  ext: bin.ext || 'bin',
+                })
+              }
+            }
+          }
+          parsed.push({
+            version: data.version,
+            notes: data.notes || '',
+            pub_date: data.pub_date || '',
+            platforms,
+            source: data.source?.hash ? data.source : undefined,
+            created_at: ev.created_at,
+          })
+        } catch { /* ignore */ }
+      }
+      // Sort by created_at (newest first), deduplicate by version
+      parsed.sort((a, b) => b.created_at - a.created_at)
+      const seen = new Set<string>()
+      const deduped = parsed.filter((b) => {
+        if (seen.has(b.version)) return false
+        seen.add(b.version)
+        return true
+      })
+      setBuilds(deduped)
+      if (deduped.length > 0) setOpenBuildIdx(0)
+    }).catch(() => setBuildError(true)).finally(() => setLoadingBuilds(false))
+  }, [])
+
+  const handleShowDownloads = () => {
+    setView('downloads')
+    if (builds.length === 0 && !loadingBuilds) fetchDenosBuilds()
+  }
+
+  /** Construct a blossom download URL from hash + ext */
+  const getDownloadUrl = (hash: string, ext: string) => {
+    const servers = blossomServerManager.getServers()
+    const base = servers.length > 0
+      ? servers[0].replace(/\/+$/, '')
+      : 'https://blossom.primal.net'
+    return `${base}/${hash}.${ext}`
+  }
+
+  if (!open) return null
+
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50" onClick={onClose}>
+      <div
+        className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-md mx-4 flex flex-col overflow-hidden"
+        style={{ maxHeight: '85vh' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
+          <div className="flex items-center gap-2">
+            {view === 'downloads' && (
+              <button
+                onClick={() => setView('info')}
+                className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors cursor-pointer"
+              >
+                <ChevronLeft size={16} />
+              </button>
+            )}
+            <MonitorSmartphone size={18} className="text-primary" />
+            <h3 className="text-sm font-semibold text-foreground">
+              {view === 'info' ? 'Local Signer' : 'Download DENOS'}
+            </h3>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors cursor-pointer"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto px-5 py-4">
+          {view === 'info' ? (
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground leading-relaxed">
+                No local signer was detected. The Local login connects to a NIP-PC55 signer application
+                (like <span className="text-foreground font-medium">DENOS</span>) running on your device.
+              </p>
+
+              <div className="space-y-2">
+                <p className="text-xs font-medium text-foreground">To use this login method:</p>
+                <div className="space-y-1.5">
+                  <div className="flex items-start gap-2 text-xs text-muted-foreground">
+                    <span className="text-primary font-semibold mt-0.5">1.</span>
+                    <span>Download and install <span className="text-foreground font-medium">DENOS</span> or another NIP-PC55 compatible signer</span>
+                  </div>
+                  <div className="flex items-start gap-2 text-xs text-muted-foreground">
+                    <span className="text-primary font-semibold mt-0.5">2.</span>
+                    <span>Open the signer app and create or import an account</span>
+                  </div>
+                  <div className="flex items-start gap-2 text-xs text-muted-foreground">
+                    <span className="text-primary font-semibold mt-0.5">3.</span>
+                    <span>Come back here and click <span className="text-foreground font-medium">Local</span> again</span>
+                  </div>
+                </div>
+              </div>
+
+              {!isDesktop && (
+                <div className="rounded-lg bg-secondary/50 border border-border px-3 py-2.5">
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    <span className="text-foreground font-medium">Browser users:</span> Your browser may block access to local
+                    network resources (<code className="text-[10px] bg-secondary px-1 py-0.5 rounded">ws://localhost</code>).
+                    If a signer is running, check your browser&apos;s security settings or try the desktop app.
+                  </p>
+                </div>
+              )}
+
+              <button
+                onClick={handleShowDownloads}
+                className="flex items-center justify-center gap-2 w-full py-2.5 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors cursor-pointer"
+              >
+                <Download size={15} />
+                Download DENOS
+              </button>
+            </div>
+          ) : (
+            /* Downloads view */
+            <div className="space-y-3">
+              {loadingBuilds ? (
+                <div className="flex flex-col items-center justify-center py-12 gap-3">
+                  <Loader2 size={20} className="text-primary animate-spin" />
+                  <p className="text-sm text-muted-foreground">Fetching available builds...</p>
+                </div>
+              ) : buildError ? (
+                <div className="flex flex-col items-center justify-center py-12 gap-3">
+                  <p className="text-sm text-muted-foreground">Failed to load builds.</p>
+                  <button
+                    onClick={fetchDenosBuilds}
+                    className="flex items-center gap-1.5 px-4 py-2 rounded-lg border border-border bg-secondary/40 text-sm font-medium text-foreground hover:bg-secondary/70 transition-colors cursor-pointer"
+                  >
+                    <RefreshCw size={14} /> Try Again
+                  </button>
+                </div>
+              ) : builds.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-12">No builds published yet.</p>
+              ) : (
+                builds.map((build, idx) => {
+                  const isOpen = openBuildIdx === idx
+                  const dateStr = build.pub_date
+                    ? new Date(build.pub_date).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+                    : new Date(build.created_at * 1000).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+                  return (
+                    <div key={build.version} className="rounded-lg border border-border overflow-hidden bg-secondary/20">
+                      <button
+                        onClick={() => setOpenBuildIdx(isOpen ? null : idx)}
+                        className="flex items-center justify-between w-full px-4 py-3 text-left cursor-pointer hover:bg-secondary/40 transition-colors"
+                      >
+                        <div className="flex items-center gap-3 pr-4">
+                          <span className="text-sm font-semibold text-foreground">v{build.version}</span>
+                          <span className="text-xs text-muted-foreground">{dateStr}</span>
+                          {idx === 0 && <span className="text-[10px] font-medium text-primary bg-primary/10 px-1.5 py-0.5 rounded-full">Latest</span>}
+                        </div>
+                        <svg className={`w-4 h-4 text-muted-foreground shrink-0 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                        </svg>
+                      </button>
+                      {isOpen && (
+                        <div className="px-4 pb-4 space-y-2">
+                          {build.notes && (
+                            <p className="text-xs text-muted-foreground leading-relaxed whitespace-pre-wrap">{build.notes}</p>
+                          )}
+                          {build.platforms.length > 0 && (
+                            <div className="space-y-1.5">
+                              <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Downloads</div>
+                              {build.platforms.map((p) => (
+                                <a
+                                  key={p.target}
+                                  href={getDownloadUrl(p.hash, p.ext)}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="flex items-center gap-2 px-3 py-2 rounded-lg bg-secondary/40 border border-border hover:bg-secondary/60 transition-colors group w-full text-left no-underline"
+                                >
+                                  <Download size={14} className="text-primary shrink-0" />
+                                  <span className="text-sm text-foreground font-medium">{p.label}</span>
+                                  <span className="text-xs text-muted-foreground truncate flex-1 text-right group-hover:text-foreground/60 transition-colors">
+                                    .{p.ext}
+                                  </span>
+                                </a>
+                              ))}
+                            </div>
+                          )}
+                          {build.source && (
+                            <a
+                              href={getDownloadUrl(build.source.hash, build.source.ext)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-center gap-2 px-3 py-2 rounded-lg bg-secondary/40 border border-border hover:bg-secondary/60 transition-colors group w-full text-left no-underline"
+                            >
+                              <FileText size={14} className="text-muted-foreground shrink-0" />
+                              <span className="text-sm text-foreground font-medium">Source Code</span>
+                              <span className="text-xs text-muted-foreground truncate flex-1 text-right group-hover:text-foreground/60 transition-colors">
+                                .{build.source.ext}
+                              </span>
+                            </a>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="px-5 py-3 border-t border-border shrink-0">
+          <button
+            onClick={onClose}
+            className="w-full py-2 rounded-lg bg-secondary text-foreground text-sm font-medium hover:bg-secondary/80 transition-colors cursor-pointer"
           >
             Close
           </button>

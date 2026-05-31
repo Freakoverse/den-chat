@@ -21,6 +21,18 @@ import { getRelayList, getDefaultRelays, setRelays, publishToSpecificRelays, fet
 import { getPublishRelays } from '@/stores/postingBehaviourStore'
 import { createUnsignedEvent, signWithSigner, createHubListEvent, createDeletionEvent } from '@/lib/nostr/events'
 import { DeleteConfirmDialog } from '@/components/hub/ChannelView'
+import {
+  getSoundEffectsConfig as getSfxConfig,
+  getSoundNames as getSfxNames,
+  setGlobalSoundEffectsEnabled as setGlobalSfxEnabled,
+  setSoundEffectEnabled as setSfxEnabled,
+  setSoundEffectVolume as setSfxVolume,
+  setSoundEffect as setSfxFile,
+  previewSoundEffect as previewSfx,
+  hasCustomSound as hasSfxCustom,
+  SOUND_LABELS as SFX_LABELS,
+  type SoundEffectName as SfxName,
+} from '@/lib/voice/soundEffects'
 import { DenChatLogo } from '@/components/ui/DenChatLogo'
 import {
   Settings, Palette, Globe, Shield, ShieldCheck, Info, Keyboard, MessageSquare, Users,
@@ -428,6 +440,12 @@ function PreferencesTab() {
           </div>
           <ToggleSwitch checked={skipSplash} onChange={toggleSkipSplash} />
         </div>
+
+        {/* Divider */}
+        <div className="h-px bg-border" />
+
+        {/* Sound Effects */}
+        <SoundEffectsSection />
 
 
       </div>
@@ -2770,6 +2788,9 @@ function ModerationTab() {
       {/* Divider */}
       <div className="h-px bg-border" />
 
+      {/* Divider */}
+      <div className="h-px bg-border" />
+
       {/* Web of Trust */}
       <section className="space-y-5">
         <div>
@@ -3039,6 +3060,120 @@ function MutedWordsGlobalToggle() {
       </div>
       <ToggleSwitch checked={hideMutedWords} onChange={setHideMutedWords} />
     </div>
+  )
+}
+
+/* ─────────── Sound Effects ─────────── */
+
+function SoundEffectsSection() {
+  const [config, setConfig] = useState(() => getSfxConfig())
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [editingSound, setEditingSound] = useState<SfxName | null>(null)
+
+  // Re-read config from module after any change
+  const refresh = () => setConfig(getSfxConfig())
+
+  const handleGlobalToggle = (enabled: boolean) => {
+    setGlobalSfxEnabled(enabled)
+    refresh()
+  }
+
+  const handleToggle = (name: SfxName, enabled: boolean) => {
+    setSfxEnabled(name, enabled)
+    refresh()
+  }
+
+  const handleCustomFile = (name: SfxName) => {
+    setEditingSound(name)
+    fileInputRef.current?.click()
+  }
+
+  const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file || !editingSound) return
+    await setSfxFile(editingSound, file)
+    setEditingSound(null)
+    refresh()
+  }
+
+  const handleReset = async (name: SfxName) => {
+    await setSfxFile(name, null)
+    refresh()
+  }
+
+  const names = getSfxNames()
+  const globalOff = !config.globalEnabled
+
+  return (
+    <section className="space-y-3">
+      <div className="flex items-center justify-between">
+        <div>
+          <h4 className="text-sm font-semibold text-foreground uppercase tracking-wider text-muted-foreground">Sound Effects</h4>
+          <p className="text-xs text-muted-foreground mt-1">
+            Audio feedback for voice channel actions. Customise or disable individual sounds.
+          </p>
+        </div>
+        <ToggleSwitch checked={config.globalEnabled} onChange={handleGlobalToggle} />
+      </div>
+
+      <div className={`flex flex-col gap-1.5 transition-opacity ${globalOff ? 'opacity-40 pointer-events-none' : ''}`}>
+        {names.map((name) => {
+          const effect = config.effects[name]
+          const isCustom = hasSfxCustom(name)
+          return (
+            <div key={name} className="flex items-center gap-2 px-3 py-2 rounded-lg border border-border bg-secondary/30">
+              {/* Preview button */}
+              <button
+                onClick={() => previewSfx(name)}
+                className="w-7 h-7 rounded-md bg-secondary/60 hover:bg-secondary flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors cursor-pointer shrink-0"
+                title="Preview sound"
+              >
+                <Volume2 size={14} />
+              </button>
+
+              {/* Label */}
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-foreground truncate">{SFX_LABELS[name]}</p>
+                {isCustom && (
+                  <p className="text-[10px] text-primary/70">Custom sound</p>
+                )}
+              </div>
+
+              {/* Change / Reset buttons */}
+              <button
+                onClick={() => handleCustomFile(name)}
+                className="px-2 py-1 rounded text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors cursor-pointer shrink-0"
+                title="Upload custom sound"
+              >
+                Change
+              </button>
+              {isCustom && (
+                <button
+                  onClick={() => handleReset(name)}
+                  className="px-2 py-1 rounded text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors cursor-pointer shrink-0"
+                  title="Reset to default sound"
+                >
+                  <Undo2 size={12} />
+                </button>
+              )}
+
+              {/* Enable/Disable toggle */}
+              <ToggleSwitch checked={effect.enabled} onChange={(v) => handleToggle(name, v)} />
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Hidden file input for custom sound uploads */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="audio/mpeg,audio/wav,audio/ogg,audio/webm,.mp3,.wav,.ogg,.webm"
+        className="hidden"
+        onChange={handleFileSelected}
+      />
+    </section>
   )
 }
 
@@ -5328,8 +5463,9 @@ function GuideMedia({ videoUrl, imageUrl }: { videoUrl?: string; imageUrl?: stri
 }
 
 function GuidesTab() {
-  const [search, setSearch] = useState('')
-  const [openIdx, setOpenIdx] = useState<number | null>(null)
+  const prefill = useNavigationStore((s) => s.settingsSearchPrefill)
+  const [search, setSearch] = useState(prefill || '')
+  const [activeGuide, setActiveGuide] = useState<ResolvedGuide | null>(null)
   const [guides, setGuides] = useState<ResolvedGuide[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
@@ -5400,6 +5536,14 @@ function GuidesTab() {
 
   useEffect(() => { fetchGuides() }, [fetchGuides])
 
+  // Consume and clear prefill on mount
+  useEffect(() => {
+    if (prefill) {
+      setSearch(prefill)
+      useNavigationStore.getState().setSettingsSearchPrefill(null)
+    }
+  }, [prefill])
+
   const filtered = useMemo(() => {
     if (!search.trim()) return guides
     const words = search.toLowerCase().split(/\s+/).filter(Boolean)
@@ -5408,17 +5552,6 @@ function GuidesTab() {
       return words.every((w) => haystack.includes(w))
     })
   }, [search, guides])
-
-  // Auto-expand when search narrows to single result
-  useEffect(() => {
-    if (filtered.length === 1) {
-      setOpenIdx(guides.indexOf(filtered[0]))
-    }
-  }, [filtered, guides])
-
-  const toggle = (idx: number) => {
-    setOpenIdx(openIdx === idx ? null : idx)
-  }
 
   if (loading) {
     return (
@@ -5470,66 +5603,159 @@ function GuidesTab() {
       <p className="text-xs text-muted-foreground mb-4">Video walkthroughs and tutorials to help you get the most out of DEN Chat.</p>
 
       {/* Search */}
-      {guides.length > 1 && (
+      {(guides.length > 1 || search) && (
         <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-secondary/50 border border-border mb-4">
           <Search size={16} className="text-muted-foreground shrink-0" />
           <input
             type="text"
             placeholder="Search guides..."
             value={search}
-            onChange={(e) => { setSearch(e.target.value); setOpenIdx(null) }}
+            onChange={(e) => setSearch(e.target.value)}
             className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none rounded-sm px-1 py-1"
           />
           {search && (
-            <button onClick={() => { setSearch(''); setOpenIdx(null) }} className="text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
+            <button onClick={() => setSearch('')} className="text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
               <X size={14} />
             </button>
           )}
         </div>
       )}
 
-      {/* Accordion list */}
+      {/* Guide cards */}
       <div className="space-y-1.5">
         {filtered.length === 0 ? (
           <p className="text-sm text-muted-foreground text-center py-8">No matching guides found.</p>
         ) : (
-          filtered.map((guide) => {
-            const realIdx = guides.indexOf(guide)
-            const isOpen = openIdx === realIdx
-
-            return (
-              <div key={guide.coordinate} className="rounded-lg border border-border overflow-hidden bg-secondary/20">
-                <button
-                  onClick={() => toggle(realIdx)}
-                  className="flex items-center justify-between w-full px-4 py-3 text-left cursor-pointer hover:bg-secondary/40 transition-colors"
-                >
-                  <div className="flex-1 pr-4">
-                    <span className="text-sm font-medium text-foreground block">{guide.title || 'Untitled Guide'}</span>
-                    {guide.summary && <span className="text-[11px] text-muted-foreground mt-0.5 block">{guide.summary}</span>}
-                  </div>
-                  <svg
-                    className={`w-4 h-4 text-muted-foreground shrink-0 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}
-                    fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
-                  >
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                  </svg>
-                </button>
-                {isOpen && (
-                  <div className="px-4 pb-4 pt-1">
-                    <GuideMedia videoUrl={guide.videoUrl || undefined} imageUrl={guide.imageUrl || undefined} />
-                    {guide.content && (
-                      <div className="mt-3 prose prose-sm prose-invert max-w-none text-muted-foreground [&_strong]:text-foreground [&_code]:bg-secondary/60 [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:text-xs [&_code]:font-mono [&_table]:text-xs [&_table]:my-1 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:font-semibold [&_th]:text-foreground [&_td]:px-3 [&_td]:py-1.5 [&_thead]:bg-secondary/40 [&_thead]:border-b [&_thead]:border-border [&_tbody_tr]:border-b [&_tbody_tr]:border-border [&_table]:w-full [&_table]:border [&_table]:border-border [&_table]:rounded-lg [&_blockquote]:border-l-2 [&_blockquote]:border-amber-500/50 [&_blockquote]:pl-3 [&_blockquote]:text-amber-400 [&_blockquote]:not-italic [&_a]:text-primary [&_a]:underline [&_ul]:list-disc [&_ul]:pl-4 [&_ol]:list-decimal [&_ol]:pl-4 [&_p]:my-2">
-                        <Markdown remarkPlugins={[remarkGfm]}>{guide.content}</Markdown>
-                      </div>
-                    )}
-                  </div>
-                )}
+          filtered.map((guide) => (
+            <button
+              key={guide.coordinate}
+              onClick={() => setActiveGuide(guide)}
+              className="flex items-center gap-3 w-full px-4 py-3 rounded-lg border border-border bg-secondary/20 hover:bg-secondary/40 transition-colors cursor-pointer text-left group"
+            >
+              <BookOpen size={16} className="text-muted-foreground group-hover:text-primary transition-colors shrink-0" />
+              <div className="flex-1 min-w-0">
+                <span className="text-sm font-medium text-foreground block truncate">{guide.title || 'Untitled Guide'}</span>
+                {guide.summary && <span className="text-[11px] text-muted-foreground mt-0.5 block truncate">{guide.summary}</span>}
               </div>
-            )
-          })
+              <ChevronRight size={14} className="text-muted-foreground shrink-0 group-hover:text-foreground transition-colors" />
+            </button>
+          ))
         )}
       </div>
+
+      {/* Guide reader modal */}
+      {activeGuide && (
+        <GuideReaderModal guide={activeGuide} onClose={() => setActiveGuide(null)} />
+      )}
     </div>
+  )
+}
+
+/* ── Guide Reader Modal ─────────────────────────────────────── */
+
+function GuideReaderModal({ guide, onClose }: { guide: ResolvedGuide; onClose: () => void }) {
+  // Close on Escape
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [onClose])
+
+  return createPortal(
+    <div className="fixed inset-0 z-[200] flex items-center justify-center">
+      {/* Backdrop */}
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+
+      {/* Modal */}
+      <div className="relative z-10 w-full max-w-[760px] max-h-[90vh] mx-4 rounded-xl border border-border bg-background shadow-2xl flex flex-col overflow-hidden">
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-3 border-b border-border shrink-0">
+          <h2 className="text-base font-semibold text-foreground truncate pr-4">{guide.title || 'Untitled Guide'}</h2>
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors cursor-pointer shrink-0"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto">
+          <article className="w-full mx-auto py-6 px-6 max-[640px]:px-4" style={{ maxWidth: 680 }}>
+            {/* Featured media */}
+            {(guide.videoUrl || guide.imageUrl) && (
+              <GuideMedia videoUrl={guide.videoUrl || undefined} imageUrl={guide.imageUrl || undefined} />
+            )}
+
+            {/* Summary */}
+            {guide.summary && (
+              <div className="mb-5 mt-4 px-4 py-3 rounded-r-lg bg-secondary/40 border-l-3 border-primary/40">
+                <p className="text-sm text-foreground/80 italic leading-relaxed">{guide.summary}</p>
+              </div>
+            )}
+
+            {/* Markdown body */}
+            {guide.content && (
+              <div className="prose prose-sm dark:prose-invert max-w-none article-body">
+                <Markdown
+                  remarkPlugins={[remarkGfm]}
+                  components={{
+                    img: ({ src, alt }) => {
+                      if (!src) return null
+                      return (
+                        <span className="block relative my-4 rounded-lg overflow-hidden border border-border/50">
+                          <BlossomImage src={src} alt={alt || ''} className="w-full rounded-lg" />
+                        </span>
+                      )
+                    },
+                    a: ({ href, children }) => (
+                      <a href={href} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
+                        {children}
+                      </a>
+                    ),
+                    pre: ({ children }) => (
+                      <pre className="rounded-lg bg-secondary/80 border border-border p-4 overflow-x-auto text-xs">
+                        {children}
+                      </pre>
+                    ),
+                    code: ({ children, className }) => {
+                      const isInline = !className
+                      if (isInline) {
+                        return <code className="px-1.5 py-0.5 rounded bg-secondary text-primary text-[12px] font-mono">{children}</code>
+                      }
+                      return <code className={`text-[12px] font-mono ${className || ''}`}>{children}</code>
+                    },
+                    blockquote: ({ children }) => (
+                      <blockquote className="border-l-3 border-primary/40 pl-4 py-1 text-foreground/70 italic my-4">
+                        {children}
+                      </blockquote>
+                    ),
+                    h1: ({ children }) => <h1 className="text-xl font-bold text-foreground mt-8 mb-3">{children}</h1>,
+                    h2: ({ children }) => <h2 className="text-lg font-bold text-foreground mt-6 mb-2.5">{children}</h2>,
+                    h3: ({ children }) => <h3 className="text-base font-semibold text-foreground mt-5 mb-2">{children}</h3>,
+                    h4: ({ children }) => <h4 className="text-sm font-semibold text-foreground mt-4 mb-1.5">{children}</h4>,
+                    p: ({ children }) => <p className="text-sm leading-relaxed text-foreground/90 mb-4">{children}</p>,
+                    ul: ({ children }) => <ul className="list-disc list-inside text-sm text-foreground/90 mb-4 space-y-1">{children}</ul>,
+                    ol: ({ children }) => <ol className="list-decimal list-inside text-sm text-foreground/90 mb-4 space-y-1">{children}</ol>,
+                    table: ({ children }) => (
+                      <div className="overflow-x-auto my-4 rounded-lg border border-border">
+                        <table className="w-full text-xs">{children}</table>
+                      </div>
+                    ),
+                    th: ({ children }) => <th className="px-3 py-2 bg-secondary text-left text-xs font-semibold text-foreground border-b border-border">{children}</th>,
+                    td: ({ children }) => <td className="px-3 py-2 text-xs text-foreground/80 border-b border-border/50">{children}</td>,
+                    hr: () => <hr className="my-6 border-border/50" />,
+                  }}
+                >
+                  {guide.content}
+                </Markdown>
+              </div>
+            )}
+          </article>
+        </div>
+      </div>
+    </div>,
+    document.body,
   )
 }
 
@@ -8074,6 +8300,7 @@ interface AdminBuildEntry {
   sourceUrl: string
   sourceExt: string
   publishedAt: number
+  createdAt: number
   platforms: BuildPlatformEntry[]
   isNew: boolean
 }
@@ -8116,6 +8343,7 @@ function AdminBuildsSection({ pubkey, signer, privateKey }: { pubkey: string | n
                 ext: p.ext || '',
               })),
               publishedAt: data.published_at || ev.created_at,
+              createdAt: ev.created_at,
               isNew: false,
             })
           }
@@ -8139,6 +8367,7 @@ function AdminBuildsSection({ pubkey, signer, privateKey }: { pubkey: string | n
       sourceUrl: '',
       sourceExt: '',
       publishedAt: 0,
+      createdAt: 0,
       platforms: [],
       isNew: true,
     }
@@ -8197,12 +8426,25 @@ function AdminBuildsSection({ pubkey, signer, privateKey }: { pubkey: string | n
         published_at: publishedAt,
         platforms: build.platforms.map(({ platform, url, ext }) => ({ platform, url, ext })),
       })
-      const unsigned = createUnsignedEvent(30078, content, [['d', build.dTag]])
+      // For existing builds: use created_at + 1 so the replacement doesn't jump in timeline
+      // For new builds: use default (now)
+      const createdAt = !build.isNew && build.createdAt ? build.createdAt + 1 : undefined
+      const unsigned = createUnsignedEvent(30078, content, [['d', build.dTag]], createdAt)
       const signed = await signWithSigner(unsigned, signer, privateKey)
-      const accepted = await publishToSpecificRelays(getPublishRelays(), signed)
-      updateBuild(build.id, { isNew: false, publishedAt })
+      const publishRelays = getPublishRelays()
+      const accepted = await publishToSpecificRelays(publishRelays, signed)
+      const newCreatedAt = signed.created_at
+      updateBuild(build.id, { isNew: false, publishedAt, createdAt: newCreatedAt })
       // Update snapshot so it's no longer dirty
       setSnapshots((prev) => ({ ...prev, [build.id]: buildContentKey({ ...build, publishedAt }) }))
+
+      // Also publish/update the den-chat-latest pointer event
+      const latestContent = JSON.stringify({ version: build.version })
+      const aRef = `30078:${pubkey}:${build.dTag}`
+      const latestUnsigned = createUnsignedEvent(30078, latestContent, [['d', 'den-chat-latest'], ['a', aRef]])
+      const latestSigned = await signWithSigner(latestUnsigned, signer, privateKey)
+      await publishToSpecificRelays(publishRelays, latestSigned)
+
       setPublishStatusMap((prev) => ({ ...prev, [build.id]: `Published to ${accepted.length} relay${accepted.length !== 1 ? 's' : ''}` }))
     } catch (err) {
       setPublishStatusMap((prev) => ({ ...prev, [build.id]: `Error: ${err instanceof Error ? err.message : 'Publishing failed'}` }))
@@ -8412,8 +8654,10 @@ function AdminBuildsSection({ pubkey, signer, privateKey }: { pubkey: string | n
             const publishRelays = getPublishRelays()
 
             // Step 1+2: Re-publish with deleted content (replaces original on relay)
+            // Use created_at + 1 so the replacement doesn't jump in timeline (consistent with other soft-deletes)
             const deletedContent = JSON.stringify({ deleted: true })
-            const unsigned = createUnsignedEvent(30078, deletedContent, [['d', build.dTag], ['deleted', 'true']])
+            const deleteCreatedAt = build.createdAt ? build.createdAt + 1 : undefined
+            const unsigned = createUnsignedEvent(30078, deletedContent, [['d', build.dTag], ['deleted', 'true']], deleteCreatedAt)
             const signed = await signWithSigner(unsigned, signer, privateKey)
             await publishToSpecificRelays(publishRelays, signed)
 

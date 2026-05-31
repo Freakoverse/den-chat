@@ -16,7 +16,7 @@ import {
   ArrowLeft, Loader2, X, Upload, Check, Plus, Image as ImageIcon,
   Bold, Italic, Strikethrough, Heading1, Heading2, Heading3,
   List as ListIcon, ListOrdered, Link, Code, CodeSquare, Smile,
-  Tag as TagIcon, FileIcon, Save, Video,
+  Tag as TagIcon, FileIcon, Save, Video, ShieldAlert,
 } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { EmojiPickerPopover } from '@/components/chat/EmojiPickerPopover'
@@ -58,6 +58,7 @@ export function LongFormWritePage() {
   const [tagInput, setTagInput] = useState('')
   const [featuredImage, setFeaturedImage] = useState('')
   const [videoUrl, setVideoUrl] = useState('')
+  const [isNsfw, setIsNsfw] = useState(false)
   const [publishing, setPublishing] = useState(false)
   const [showEmoji, setShowEmoji] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
@@ -124,6 +125,7 @@ export function LongFormWritePage() {
         setFeaturedImage(t.find(x => x[0] === 'image')?.[1] || '')
         setVideoUrl(t.find(x => x[0] === 'video')?.[1] || '')
         setTags(t.filter(x => x[0] === 't').map(x => x[1]))
+        setIsNsfw(t.some(x => x[0] === 'content-warning'))
         setBody(ev.content)
         setEditDTag(t.find(x => x[0] === 'd')?.[1] || null)
         setEditCreatedAt(ev.created_at)
@@ -271,6 +273,7 @@ export function LongFormWritePage() {
         ...(videoUrl.trim() ? [['video', videoUrl.trim()]] : []),
         ['published_at', String(publishedAt)],
         ...tags.map(t => ['t', t]),
+        ...(isNsfw ? [['content-warning', ''], ['L', 'content-warning']] : []),
       ]
 
       const unsigned = {
@@ -288,7 +291,7 @@ export function LongFormWritePage() {
       handleGoBack()
     } catch (err) { console.error('[LongForm] Publish failed:', err) }
     finally { setPublishing(false) }
-  }, [title, summary, body, featuredImage, tags, pubkey, editDTag, editPublishedAt, editCreatedAt, editingDraft, settings, handleGoBack, pendingFiles, featuredPreview, videoUrl])
+  }, [title, summary, body, featuredImage, tags, pubkey, editDTag, editPublishedAt, editCreatedAt, editingDraft, settings, handleGoBack, pendingFiles, featuredPreview, videoUrl, isNsfw])
 
   const hasPending = pendingFiles.some(f => f.status === 'pending' || f.status === 'uploading') || featuredUploading || (!!featuredFile && !featuredUploadDone && !featuredImage)
 
@@ -449,6 +452,25 @@ export function LongFormWritePage() {
                 <Plus size={14} />
               </button>
             </div>
+          </div>
+
+          {/* NSFW Toggle */}
+          <div>
+            <button
+              type="button"
+              onClick={() => setIsNsfw(!isNsfw)}
+              className={`flex items-center gap-2 w-full px-3 py-2.5 rounded-lg border transition-colors cursor-pointer ${
+                isNsfw
+                  ? 'border-amber-500/40 bg-amber-500/10'
+                  : 'border-border bg-secondary/40 hover:bg-secondary/60'
+              }`}
+            >
+              <div className={`w-8 h-5 rounded-full flex items-center transition-colors shrink-0 ${isNsfw ? 'bg-amber-500 justify-end' : 'bg-secondary justify-start'}`}>
+                <span className="w-3.5 h-3.5 rounded-full bg-white shadow-sm transition-all mx-0.5" />
+              </div>
+              <ShieldAlert size={14} className={isNsfw ? 'text-amber-500' : 'text-muted-foreground'} />
+              <span className={`text-xs font-medium ${isNsfw ? 'text-amber-500' : 'text-muted-foreground'}`}>Mark as NSFW (content warning)</span>
+            </button>
           </div>
 
           {/* Body */}

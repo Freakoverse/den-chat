@@ -15,7 +15,7 @@ import { useProfileCache } from '@/hooks/useProfileCache'
 import { fetchEvents } from '@/lib/nostr/relay-pool'
 import { BlossomImage } from '@/components/ui/BlossomImage'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import { Loader2, Newspaper, RefreshCw, Search, ChevronDown } from 'lucide-react'
+import { Loader2, Newspaper, RefreshCw, Search, ChevronDown, Eye, EyeOff, ShieldAlert } from 'lucide-react'
 import { truncateNpub, formatTimestamp } from '@/lib/utils'
 import { nip19 } from 'nostr-tools'
 import type { Event } from 'nostr-tools'
@@ -33,6 +33,7 @@ export interface ArticleCard {
   publishedAt: number
   tags: string[]
   wordCount: number
+  isNsfw: boolean
 }
 
 /* ─── Helper: parse article metadata from event tags ─── */
@@ -47,8 +48,9 @@ export function parseArticle(event: Event): ArticleCard {
   const publishedAt = publishedAtStr ? parseInt(publishedAtStr, 10) : event.created_at
   const articleTags = tags.filter(t => t[0] === 't').map(t => t[1])
   const wordCount = event.content.split(/\s+/).filter(Boolean).length
+  const isNsfw = event.tags.some(t => t[0] === 'content-warning')
 
-  return { event, dTag, title, summary, image, publishedAt, tags: articleTags, wordCount }
+  return { event, dTag, title, summary, image, publishedAt, tags: articleTags, wordCount, isNsfw }
 }
 
 /* ─── Helper: deduplicate + filter deleted articles ─── */
@@ -86,6 +88,11 @@ export function ArticleCardItem({ article, onOpenArticle, onOpenProfile }: {
   const displayName = profile?.display_name || profile?.name || truncateNpub(npub, 8)
   const readingTime = Math.max(1, Math.ceil(article.wordCount / 230))
 
+  // NSFW logic
+  const showNsfwPref = typeof window !== 'undefined' && localStorage.getItem('SHOW_NSFW') === 'true'
+  const [nsfwRevealed, setNsfwRevealed] = useState(false)
+  const shouldBlur = article.isNsfw && !showNsfwPref && !nsfwRevealed
+
   // Build naddr for navigation
   const naddr = useMemo(() => {
     try {
@@ -98,71 +105,108 @@ export function ArticleCardItem({ article, onOpenArticle, onOpenProfile }: {
   }, [article])
 
   return (
-    <button
-      onClick={() => onOpenArticle(naddr)}
-      className="w-full h-full text-left rounded-xl border border-border bg-card hover:bg-accent/30 overflow-hidden transition-all duration-200 group cursor-pointer hover:border-primary/20 flex flex-col"
-    >
-      {/* Featured image — flush to card top, 16:9 aspect ratio */}
-      {article.image && /^https?:\/\//.test(article.image) ? (
-        <BlossomImage
-          src={article.image}
-          alt={article.title}
-          className="w-full aspect-video shrink-0"
-          imgClassName="group-hover:scale-[1.02] transition-transform duration-300"
-          fallback={
-            <div className="w-full aspect-video shrink-0 bg-secondary/80 flex items-center justify-center">
+    <div className="relative w-full h-full">
+      <button
+        onClick={() => !shouldBlur && onOpenArticle(naddr)}
+        className={`w-full h-full text-left rounded-xl border border-border bg-card hover:bg-accent/30 overflow-hidden transition-all duration-200 group cursor-pointer hover:border-primary/20 flex flex-col ${
+          shouldBlur ? 'pointer-events-auto' : ''
+        }`}
+      >
+        {/* Featured image — flush to card top, 16:9 aspect ratio */}
+        <div className="relative">
+          {article.image && /^https?:\/\//.test(article.image) ? (
+            <BlossomImage
+              src={article.image}
+              alt={article.title}
+              className={`w-full aspect-video shrink-0 ${shouldBlur ? 'blur-xl' : ''}`}
+              imgClassName="group-hover:scale-[1.02] transition-transform duration-300"
+              fallback={
+                <div className="w-full aspect-video shrink-0 bg-secondary/80 flex items-center justify-center">
+                  <img src="/app-icon.png" alt="" className="w-16 h-16 object-contain opacity-40" />
+                </div>
+              }
+            />
+          ) : (
+            <div className={`w-full aspect-video shrink-0 bg-secondary/80 flex items-center justify-center ${shouldBlur ? 'blur-xl' : ''}`}>
               <img src="/app-icon.png" alt="" className="w-16 h-16 object-contain opacity-40" />
             </div>
-          }
-        />
-      ) : (
-        <div className="w-full aspect-video shrink-0 bg-secondary/80 flex items-center justify-center">
-          <img src="/app-icon.png" alt="" className="w-16 h-16 object-contain opacity-40" />
+          )}
+          {/* NSFW badge */}
+          {article.isNsfw && (
+            <span className="absolute top-2 right-2 flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-500/90 text-white text-[10px] font-bold uppercase tracking-wide z-10">
+              <ShieldAlert size={10} /> NSFW
+            </span>
+          )}
         </div>
-      )}
 
-      {/* Content — fills remaining height */}
-      <div className="p-4 flex flex-col flex-1 min-h-0">
-        {/* Title */}
-        <h3 className="text-sm font-semibold text-foreground line-clamp-2 leading-snug group-hover:text-primary transition-colors">
-          {article.title}
-        </h3>
+        {/* Content — fills remaining height */}
+        <div className={`p-4 flex flex-col flex-1 min-h-0 ${shouldBlur ? 'blur-xl' : ''}`}>
+          {/* Title */}
+          <h3 className="text-sm font-semibold text-foreground line-clamp-2 leading-snug group-hover:text-primary transition-colors">
+            {article.title}
+          </h3>
 
-        {/* Summary */}
-        {article.summary && (
-          <p className="text-xs text-muted-foreground line-clamp-3 leading-relaxed mt-1.5">
-            {article.summary}
-          </p>
-        )}
+          {/* Summary */}
+          {article.summary && (
+            <p className="text-xs text-muted-foreground line-clamp-3 leading-relaxed mt-1.5">
+              {article.summary}
+            </p>
+          )}
 
-        {/* Footer — pushed to bottom */}
-        <div className="mt-auto pt-3">
-          <div className="border-t border-border/40 pt-2.5 space-y-1.5">
-            {/* Author */}
-            <div className="flex items-center gap-2">
-              <Avatar className="w-5 h-5 shrink-0">
-                {profile?.picture && <AvatarImage src={profile.picture} />}
-                <AvatarFallback className="text-[8px] bg-primary/20 text-primary">
-                  {displayName.slice(0, 2).toUpperCase()}
-                </AvatarFallback>
-              </Avatar>
-              <button
-                onClick={(e) => { e.stopPropagation(); onOpenProfile(article.event.pubkey) }}
-                className="text-xs font-medium text-foreground hover:underline cursor-pointer truncate"
-              >
-                {displayName}
-              </button>
-            </div>
-            {/* Date + reading time */}
-            <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-              <span>{formatTimestamp(article.publishedAt)}</span>
-              <span>·</span>
-              <span>{readingTime} min read</span>
+          {/* Footer — pushed to bottom */}
+          <div className="mt-auto pt-3">
+            <div className="border-t border-border/40 pt-2.5 space-y-1.5">
+              {/* Author */}
+              <div className="flex items-center gap-2">
+                <Avatar className="w-5 h-5 shrink-0">
+                  {profile?.picture && <AvatarImage src={profile.picture} />}
+                  <AvatarFallback className="text-[8px] bg-primary/20 text-primary">
+                    {displayName.slice(0, 2).toUpperCase()}
+                  </AvatarFallback>
+                </Avatar>
+                <button
+                  onClick={(e) => { e.stopPropagation(); onOpenProfile(article.event.pubkey) }}
+                  className="text-xs font-medium text-foreground hover:underline cursor-pointer truncate"
+                >
+                  {displayName}
+                </button>
+              </div>
+              {/* Date + reading time */}
+              <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                <span>{formatTimestamp(article.publishedAt)}</span>
+                <span>·</span>
+                <span>{readingTime} min read</span>
+              </div>
             </div>
           </div>
         </div>
-      </div>
-    </button>
+      </button>
+
+      {/* NSFW overlay — blocks interaction until revealed */}
+      {shouldBlur && (
+        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center rounded-xl bg-background/80 backdrop-blur-sm">
+          <ShieldAlert size={24} className="text-amber-500 mb-2" />
+          <span className="text-sm font-medium text-foreground mb-1">Content Warning</span>
+          <span className="text-xs text-muted-foreground mb-3">This article is marked NSFW</span>
+          <button
+            onClick={(e) => { e.stopPropagation(); setNsfwRevealed(true) }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-secondary text-sm text-foreground hover:bg-secondary/80 transition-colors cursor-pointer"
+          >
+            <Eye size={14} /> Show Content
+          </button>
+        </div>
+      )}
+
+      {/* Re-hide button after reveal */}
+      {article.isNsfw && !showNsfwPref && nsfwRevealed && (
+        <button
+          onClick={(e) => { e.stopPropagation(); setNsfwRevealed(false) }}
+          className="absolute top-2 left-2 z-20 flex items-center gap-1 px-2 py-1 rounded-md bg-black/60 text-white text-[10px] hover:bg-black/80 transition-colors cursor-pointer"
+        >
+          <EyeOff size={10} /> Hide
+        </button>
+      )}
+    </div>
   )
 }
 

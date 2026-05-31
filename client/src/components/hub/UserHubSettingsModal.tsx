@@ -20,7 +20,7 @@ import { nip19 } from 'nostr-tools'
 import {
   X, Search, Loader2, Check, AlertTriangle, SlidersHorizontal, UserCheck, Shield, ShieldOff, ShieldBan, Lock, LockOpen,
   Users, Plus, Trash2, Volume2, Globe, Server, Wifi, WifiOff, Flag, MessagesSquare, Undo2, EyeOff, RefreshCw, Bell,
-  BellOff, AtSign, UsersRound, Radio, Tag, ChevronLeft, ChevronRight,
+  BellOff, AtSign, UsersRound, Radio, Tag, ChevronLeft, ChevronRight, BookOpen,
 } from 'lucide-react'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
 import { UserProfileModal } from '@/components/hub/UserProfileModal'
@@ -28,6 +28,7 @@ import { aesDecrypt } from '@/lib/crypto/aes'
 import { deriveChannelKey } from '@/lib/crypto/hkdf'
 import { useVoiceStore } from '@/stores/voiceStore'
 import { useNotificationStore } from '@/stores/notificationStore'
+import { useNavigationStore } from '@/stores/navigationStore'
 import type { HubMuteSettings } from '@/lib/notifications/readState'
 import { useReportStore, type HubReport } from '@/stores/reportStore'
 import type { VoiceProviderType, CloudflareConfig, LiveKitConfig } from '@/lib/voice/types'
@@ -113,7 +114,7 @@ export function UserHubSettingsModal({ open, onClose, hub }: UserHubSettingsModa
   const [lkUrl, setLkUrl] = useState('')
   const [lkApiKey, setLkApiKey] = useState('')
   const [lkApiSecret, setLkApiSecret] = useState('')
-  const [voiceHostStatus, setVoiceHostStatus] = useState<'available' | 'paused'>('paused')
+  const [voiceHostStatus, setVoiceHostStatus] = useState<'available' | 'paused'>('available')
   const [voicePublishing, setVoicePublishing] = useState(false)
   const [voiceError, setVoiceError] = useState<string | null>(null)
   const [voiceSaved, setVoiceSaved] = useState(false)
@@ -249,7 +250,7 @@ export function UserHubSettingsModal({ open, onClose, hub }: UserHubSettingsModa
         setCfAppId(''); setCfApiToken(''); setCfTurnKeyId(''); setCfTurnToken('')
         setLkUrl(''); setLkApiKey(''); setLkApiSecret('')
         setVoiceProviderType('cloudflare')
-        setVoiceHostStatus('paused')
+        setVoiceHostStatus('available')
       }
     }
     setVoiceScope(newScope)
@@ -1259,9 +1260,21 @@ export function UserHubSettingsModal({ open, onClose, hub }: UserHubSettingsModa
                       <Volume2 size={12} />
                       Voice Hosting
                     </h4>
-                    <p className="text-xs text-muted-foreground leading-relaxed mb-3">
+                    <p className="text-xs text-muted-foreground leading-relaxed mb-2">
                       Provide SFU hosting for this hub's voice channels. Your credentials are encrypted with the hub secret — only members can use them.
                     </p>
+                    <button
+                      onClick={() => {
+                        useNavigationStore.getState().setSettingsSearchPrefill('voice channel')
+                        useNavigationStore.getState().setSettingsTab('guides')
+                        useNavigationStore.getState().setActivePage('settings')
+                        onClose()
+                      }}
+                      className="inline-flex items-center gap-1.5 text-xs text-primary/80 hover:text-primary transition-colors cursor-pointer mb-3"
+                    >
+                      <BookOpen size={12} />
+                      View setup guide →
+                    </button>
 
                     {/* Epoch mismatch warning — checks both hub and group epochs */}
                     {(() => {

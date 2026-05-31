@@ -27,6 +27,7 @@ import { LiveKitProvider } from '@/lib/voice/livekit-provider'
 import { SpatialAudioEngine } from '@/lib/voice/spatial-engine'
 import { deriveE2EEKey, supportsE2EE, cleanupE2EEWorkers } from '@/lib/voice/e2ee-crypto'
 import { registerGlobalPtt, unregisterGlobalPtt } from '@/lib/voice/globalPtt'
+import { playSoundEffect } from '@/lib/voice/soundEffects'
 import type {
   VoiceProvider,
   VoiceProviderConfig,
@@ -673,6 +674,8 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
               const trackNames = incomingTrackKinds.map(k => `${senderPubkey}:${k}`)
 
               if (!existingParticipant) {
+                // Play join sound for remote participant
+                playSoundEffect('join')
                 // New participant — pull tracks (but respect opt-in/out)
                 // Filter out screenshare unless opted in, camera if hidden
                 const filteredTrackNames = trackNames.filter(t => {
@@ -761,6 +764,8 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
           // Remote participant left via DataChannel
           const state = get()
           if (state.participants[senderPubkey]) {
+            // Play leave sound for remote participant
+            playSoundEffect('leave')
             console.log(`[VoiceStore] DC: Participant left: ${senderPubkey.slice(0, 8)}...`)
             const engine = state._spatialEngine
             if (engine) engine.removeParticipant(senderPubkey)
@@ -1109,6 +1114,9 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
       spatialPanelOpen: false,
     })
 
+    // Play join sound for local user
+    playSoundEffect('join')
+
     // Create our publishing DataChannel
     try {
       await provider.createDataChannel(`state-${identity}`)
@@ -1165,6 +1173,8 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
   },
 
   leaveChannel: async (relays, signer, privateKey) => {
+    // Play leave sound for local user
+    playSoundEffect('leave')
     const { provider, currentHubDTag, currentChannelId } = get()
 
     // Send "left" via DataChannel (instant notification to in-call peers)
@@ -1288,6 +1298,7 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
     // When unmuting while deafened, also undeafen (restore full audio)
     const newDeafened = !newMuted ? false : isDeafened
     set({ isMuted: newMuted, isDeafened: newDeafened })
+    playSoundEffect(newMuted ? 'mute' : 'unmute')
     if (provider) {
       provider.setMuted('audio', newMuted)
       if (isDeafened && !newDeafened) {
@@ -1304,6 +1315,7 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
     // (user must manually unmute after undeafening).
     const newMuted = newDeafened ? true : isMuted
     set({ isDeafened: newDeafened, isMuted: newMuted })
+    playSoundEffect(newDeafened ? 'deafen' : 'undeafen')
     if (provider) {
       provider.setMuted('audio', newMuted)
       // Mute/unmute all remote audio
