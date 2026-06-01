@@ -20,7 +20,7 @@ import {
   X, Copy, Check, Pencil, UserPlus, UserMinus, ExternalLink,
   MoreVertical, ShieldBan, ShieldCheck, MessageCircle,
   Globe, Zap, AtSign, Camera, ImageIcon, Loader2, XCircle, AlertTriangle,
-  Link2, Flag, BadgeCheck,
+  Link2, Flag, BadgeCheck, RotateCw, Users,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
@@ -40,6 +40,7 @@ import { DnnBadge } from '@/components/ui/DnnBadge'
 import { useDnnStore } from '@/stores/dnnStore'
 import { isDnnId } from '@/lib/dnn/dnnUtils'
 import { getPermissionsForUser } from '@/lib/hub/permissions'
+import { useProfileCache } from '@/hooks/useProfileCache'
 
 /** Banner image with blossom fallback */
 function BlossomBannerImg({ src }: { src: string }) {
@@ -134,6 +135,11 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
 
   // Block type modal state
   const [showBlockTypeModal, setShowBlockTypeModal] = useState(false)
+
+  // Following list modal state
+  const [showFollowingList, setShowFollowingList] = useState(false)
+  const [followingPubkeys, setFollowingPubkeys] = useState<string[]>([])
+  const [followingLoaded, setFollowingLoaded] = useState(false)
 
   const ACCEPTED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
   const ACCEPTED_IMAGE_EXTENSIONS = '.png,.jpg,.jpeg,.gif,.webp'
@@ -240,6 +246,19 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
       const linkSets = events.filter((ev) => ev.tags.some((t) => t[0] === 'd' && t[1]?.startsWith('links-')))
       setHasLinks(linkSets.some((ev) => ev.tags.some((t) => t[0] === 'r' && t[1])))
     })
+
+    // Fetch target user's follow list (kind 3) for the "Following" button
+    fetchEvents({ kinds: [3], authors: [displayPubkey], limit: 1 }).then((events) => {
+      if (events.length > 0) {
+        const latest = events.sort((a, b) => b.created_at - a.created_at)[0]
+        const follows: string[] = []
+        for (const tag of latest.tags) {
+          if (tag[0] === 'p' && tag[1]) follows.push(tag[1])
+        }
+        setFollowingPubkeys(follows)
+      }
+      setFollowingLoaded(true)
+    }).catch(() => setFollowingLoaded(true))
   }, [open, displayPubkey, loaded, isSelf, myPubkey])
 
   // Reset on close / auto-enter edit mode
@@ -251,6 +270,9 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
       setShowLinksViewer(false)
       setShowLinksEditor(false)
       setHasLinks(false)
+      setShowFollowingList(false)
+      setFollowingPubkeys([])
+      setFollowingLoaded(false)
     } else if (startEditingProp && isSelf) {
       setEditing(true)
     }
@@ -357,6 +379,22 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
   const [modBanStep, setModBanStep] = useState<string | null>(null)
   const [modBanSteps, setModBanSteps] = useState<string[]>([])
   const [modBanError, setModBanError] = useState<string | null>(null)
+
+  // Auto-dismiss ban overlay on success after 1.5s
+  useEffect(() => {
+    if (banStep === 'Done' && !banError) {
+      const timer = setTimeout(() => { setBanSteps([]); setBanStep(null) }, 1500)
+      return () => clearTimeout(timer)
+    }
+  }, [banStep, banError])
+
+  // Auto-dismiss mod-ban overlay on success after 1.5s
+  useEffect(() => {
+    if (modBanStep === 'Done' && !modBanError) {
+      const timer = setTimeout(() => { setModBanSteps([]); setModBanStep(null) }, 1500)
+      return () => clearTimeout(timer)
+    }
+  }, [modBanStep, modBanError])
 
   // Check if current user can mod-ban (has ban_members permission, not creator)
   const hubDTagForPerms = hubContext?.dTag || ''
@@ -1382,6 +1420,18 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
                 {copied ? <Check size={11} className="text-emerald-400" /> : <Copy size={11} className="opacity-60 group-hover:opacity-100 transition-opacity" />}
               </button>
 
+              {/* Following button */}
+              {followingLoaded && followingPubkeys.length > 0 && (
+                <button
+                  onClick={() => setShowFollowingList(true)}
+                  className="flex items-center gap-1.5 px-2.5 py-1 mb-2 rounded-full bg-secondary/60 hover:bg-secondary text-xs text-muted-foreground hover:text-foreground transition-all cursor-pointer group"
+                >
+                  <Users size={11} className="opacity-60 group-hover:opacity-100 transition-opacity" />
+                  <span className="font-medium">{followingPubkeys.length}</span>
+                  <span>Following</span>
+                </button>
+              )}
+
               {/* Bio */}
               {profile.about && (
                 <p className="text-sm text-foreground/85 whitespace-pre-wrap leading-relaxed mb-2">{profile.about}</p>
@@ -1481,6 +1531,12 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
         onSelect={handleBlockWithType}
         displayName={displayName}
       />
+      {/* Following list modal */}
+      <FollowingListModal
+        open={showFollowingList}
+        onClose={() => setShowFollowingList(false)}
+        pubkeys={followingPubkeys}
+      />
       {/* Creator ban progress overlay */}
       {(banning || banSteps.length > 0) && (
         <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={(e) => e.stopPropagation()}>
@@ -1507,6 +1563,14 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
                   {banError ? banError : banStep === 'Done' ? 'All steps completed successfully' : banStep || 'Starting...'}
                 </p>
               </div>
+              <div className="flex-1" />
+              <button
+                onClick={() => { setBanning(false); setBanSteps([]); setBanStep(null); setBanError(null) }}
+                className="p-1 rounded-full hover:bg-accent/50 transition-colors cursor-pointer shrink-0 self-start"
+                title="Close"
+              >
+                <X size={14} className="text-muted-foreground" />
+              </button>
             </div>
 
             {/* Step list */}
@@ -1534,15 +1598,27 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
               })}
             </div>
 
-            {/* Done / Error dismiss */}
-            {(banStep === 'Done' || banError) && (
-              <Button
-                onClick={() => { setBanSteps([]); setBanStep(null); setBanError(null) }}
-                variant={banError ? 'destructive' : 'default'}
-                className="w-full h-8 text-xs"
-              >
-                {banError ? 'Dismiss' : 'Done'}
-              </Button>
+            {/* Error: Retry + Dismiss */}
+            {banError && (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    setBanError(null)
+                    setBanStep(null)
+                    setBanSteps([])
+                    handleBanFromHub()
+                  }}
+                  className="flex-1 flex items-center justify-center gap-1.5 h-8 text-xs rounded-lg font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors cursor-pointer"
+                >
+                  <RotateCw size={12} /> Retry
+                </button>
+                <button
+                  onClick={() => { setBanSteps([]); setBanStep(null); setBanError(null) }}
+                  className="flex-1 h-8 text-xs rounded-lg font-medium text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors cursor-pointer"
+                >
+                  Dismiss
+                </button>
+              </div>
             )}
           </div>
         </div>
@@ -1573,6 +1649,14 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
                   {modBanError ? modBanError : modBanStep === 'Done' ? 'All steps completed successfully' : modBanStep || 'Starting...'}
                 </p>
               </div>
+              <div className="flex-1" />
+              <button
+                onClick={() => { setModBanning(false); setModBanSteps([]); setModBanStep(null); setModBanError(null) }}
+                className="p-1 rounded-full hover:bg-accent/50 transition-colors cursor-pointer shrink-0 self-start"
+                title="Close"
+              >
+                <X size={14} className="text-muted-foreground" />
+              </button>
             </div>
 
             {/* Step list */}
@@ -1600,15 +1684,27 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
               })}
             </div>
 
-            {/* Done / Error dismiss */}
-            {(modBanStep === 'Done' || modBanError) && (
-              <Button
-                onClick={() => { setModBanSteps([]); setModBanError(null) }}
-                variant={modBanError ? 'destructive' : 'default'}
-                className="w-full h-8 text-xs"
-              >
-                {modBanError ? 'Dismiss' : 'Done'}
-              </Button>
+            {/* Error: Retry + Dismiss */}
+            {modBanError && (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    setModBanError(null)
+                    setModBanStep(null)
+                    setModBanSteps([])
+                    isModBanned ? handleModUnban() : handleModBan()
+                  }}
+                  className="flex-1 flex items-center justify-center gap-1.5 h-8 text-xs rounded-lg font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors cursor-pointer"
+                >
+                  <RotateCw size={12} /> Retry
+                </button>
+                <button
+                  onClick={() => { setModBanSteps([]); setModBanStep(null); setModBanError(null) }}
+                  className="flex-1 h-8 text-xs rounded-lg font-medium text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors cursor-pointer"
+                >
+                  Dismiss
+                </button>
+              </div>
             )}
           </div>
         </div>
@@ -1753,3 +1849,108 @@ function RoleAssignmentPanel({ hubDTag, memberPubkey }: { hubDTag: string; membe
   )
 }
 
+/* ─── Following List Modal ─── */
+function FollowingListModal({ open, onClose, pubkeys }: { open: boolean; onClose: () => void; pubkeys: string[] }) {
+  const { getProfile } = useProfileCache()
+  const [search, setSearch] = useState('')
+
+  if (!open) return null
+
+  const filtered = pubkeys.filter((pk) => {
+    if (!search.trim()) return true
+    const p = getProfile(pk)
+    const q = search.toLowerCase()
+    return (
+      pk.toLowerCase().includes(q) ||
+      (p?.name || '').toLowerCase().includes(q) ||
+      (p?.display_name || '').toLowerCase().includes(q)
+    )
+  })
+
+  return (
+    <div className="fixed inset-0 z-[250] flex items-center justify-center bg-black/60 backdrop-blur-sm p-2" onClick={onClose}>
+      <div
+        className="bg-card rounded-2xl w-full max-w-[400px] max-h-[70vh] overflow-hidden shadow-2xl border border-border/50 animate-in fade-in-0 zoom-in-95 duration-200 flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
+          <div className="flex items-center gap-2">
+            <Users size={14} className="text-primary" />
+            <h3 className="text-sm font-semibold text-foreground">Following</h3>
+            <span className="text-xs text-muted-foreground">({pubkeys.length})</span>
+          </div>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground cursor-pointer transition-colors">
+            <X size={14} />
+          </button>
+        </div>
+
+        {/* Search */}
+        {pubkeys.length > 10 && (
+          <div className="px-4 py-2 border-b border-border shrink-0">
+            <input
+              type="text"
+              placeholder="Search..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full h-8 rounded-lg bg-secondary/60 border border-border px-3 text-xs text-foreground placeholder:text-muted-foreground outline-none focus:border-primary/40 transition-colors"
+            />
+          </div>
+        )}
+
+        {/* List */}
+        <div className="flex-1 overflow-y-auto min-h-0">
+          {filtered.length === 0 ? (
+            <div className="flex items-center justify-center py-8 text-xs text-muted-foreground">
+              {search ? 'No matches found' : 'Not following anyone'}
+            </div>
+          ) : (
+            filtered.map((pk) => <FollowingListItem key={pk} pubkey={pk} />)
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function FollowingListItem({ pubkey }: { pubkey: string }) {
+  const { getProfile } = useProfileCache()
+  const profile = getProfile(pubkey)
+  const name = profile?.display_name || profile?.name || truncateNpub(nip19.npubEncode(pubkey), 10)
+  const picture = profile?.picture
+  const [copied, setCopied] = useState(false)
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(nip19.npubEncode(pubkey))
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
+  }
+
+  return (
+    <div className="flex items-center gap-3 px-4 py-2.5 hover:bg-accent/30 transition-colors">
+      <Avatar className="h-9 w-9 shrink-0">
+        {picture && <AvatarImage src={picture} />}
+        <AvatarFallback className="text-[10px] font-semibold bg-primary/20 text-primary">
+          {name.slice(0, 2).toUpperCase()}
+        </AvatarFallback>
+      </Avatar>
+      <div className="flex-1 min-w-0">
+        <div className="text-sm font-medium text-foreground truncate">{name}</div>
+        <div className="text-[10px] text-muted-foreground font-mono truncate">{truncateNpub(nip19.npubEncode(pubkey), 14)}</div>
+      </div>
+      <TooltipProvider delayDuration={300}>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              onClick={handleCopy}
+              className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors cursor-pointer shrink-0"
+            >
+              {copied ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="top" className="text-xs">Copy npub</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    </div>
+  )
+}

@@ -10,7 +10,7 @@ import { useState, useRef, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Separator } from '@/components/ui/separator'
-import { Loader2, Plus, Hash, X, Camera, ImageIcon, Check, AlertTriangle, XCircle, ChevronDown, Trash2, Info, Lightbulb } from 'lucide-react'
+import { Loader2, Plus, Hash, X, Camera, ImageIcon, Check, AlertTriangle, XCircle, ChevronDown, Trash2, Info, Lightbulb, KeyRound, Upload, FileSignature, Radio, ListPlus, Database, CheckCircle2 } from 'lucide-react'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { useUserStore } from '@/stores/userStore'
@@ -26,6 +26,28 @@ import { DEFAULT_EVERYONE_PERMISSIONS } from '@/lib/hub/permissions'
 import type { UploadProgress } from '@/lib/blossom'
 
 type UploadStatus = 'idle' | 'uploading' | 'success' | 'error'
+
+/** Steps during hub creation */
+type CreationStep =
+  | 'generating-secret'
+  | 'uploading-member-files'
+  | 'building-event'
+  | 'signing-event'
+  | 'publishing-hub'
+  | 'updating-hub-list'
+  | 'finalizing'
+  | 'done'
+  | 'error'
+
+const CREATION_STEPS: { key: CreationStep; label: string; icon: typeof KeyRound }[] = [
+  { key: 'generating-secret', label: 'Generating hub secret', icon: KeyRound },
+  { key: 'uploading-member-files', label: 'Uploading member files', icon: Upload },
+  { key: 'building-event', label: 'Building hub event', icon: Database },
+  { key: 'signing-event', label: 'Signing hub event', icon: FileSignature },
+  { key: 'publishing-hub', label: 'Publishing to relays', icon: Radio },
+  { key: 'updating-hub-list', label: 'Updating hub list', icon: ListPlus },
+  { key: 'finalizing', label: 'Finalizing', icon: CheckCircle2 },
+]
 
 const ACCEPTED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
 const ACCEPTED_IMAGE_EXTENSIONS = '.png,.jpg,.jpeg,.gif,.webp'
@@ -79,6 +101,9 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
   const [addClientTag, setAddClientTag] = useState(true)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [creationStep, setCreationStep] = useState<CreationStep | null>(null)
+  const [completedSteps, setCompletedSteps] = useState<Set<CreationStep>>(new Set())
+  const [memberFileProgress, setMemberFileProgress] = useState<{ fileIndex: number; totalFiles: number; label: string } | null>(null)
 
   // Image state
   const [iconPreview, setIconPreview] = useState<string | null>(null)
@@ -183,6 +208,9 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
       setCustomRelayInput('')
       setCustomBlossomEntries([])
       setCustomBlossomInput('')
+      setCreationStep(null)
+      setCompletedSteps(new Set())
+      setMemberFileProgress(null)
     }
   }, [open])
 
@@ -390,6 +418,10 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
 
     setLoading(true)
     setError(null)
+    setCreationStep('generating-secret')
+    setCompletedSteps(new Set())
+
+    const markDone = (step: CreationStep) => setCompletedSteps(prev => new Set(prev).add(step))
 
     try {
       const dTag = crypto.randomUUID()
@@ -398,6 +430,7 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
       // Generate hub secret (32 random bytes)
       const hubSecret = crypto.getRandomValues(new Uint8Array(32))
       const hubSecretHex = Array.from(hubSecret).map(b => b.toString(16).padStart(2, '0')).join('')
+      markDone('generating-secret')
 
       // Build single default 'general' channel
       const channelDefs = [{
@@ -444,24 +477,29 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
       const relays = selectedRelays.length > 0 ? selectedRelays : getRelays()
 
       // Upload member files to Blossom
+      setCreationStep('uploading-member-files')
       let indexHash = ''
       if (pubkey) {
         try {
-          const result = await createAndUploadMemberFiles(
+           const result = await createAndUploadMemberFiles(
             pubkey,
             dTag,
             hubSecret,
             privateKey,
             signer,
             blossomServerList,
+            (info) => setMemberFileProgress(info),
           )
           indexHash = result.indexHash
         } catch (err) {
           console.warn('Blossom upload failed, hub created without member files:', err)
         }
+        markDone('uploading-member-files')
+        setMemberFileProgress(null)
       }
 
       // Build hub event tags per NIP-CHAT spec
+      setCreationStep('building-event')
       const tags: [string, ...string[]][] = [
         ['d', dTag],
         ['n', name.trim()],
@@ -491,19 +529,26 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
         tags.push(['client', 'DEN Chat'])
       }
 
+      markDone('building-event')
+
       // Create and sign hub event with JSON content
+      setCreationStep('signing-event')
       const unsigned = createUnsignedEvent(KINDS.HUB_EVENT, JSON.stringify(contentObj), tags)
       // Set published_at to match created_at on first creation (per NIP-CHAT spec §6.1)
       unsigned.tags = [...unsigned.tags, ['published_at', unsigned.created_at.toString()]]
       const signed = await signWithSigner(unsigned, signer, privateKey)
+      markDone('signing-event')
 
       // Publish to relays
+      setCreationStep('publishing-hub')
       const accepted = await publishToSpecificRelays(getPublishRelays(), signed)
       if (accepted.length === 0) {
         console.warn('No relays accepted the hub event yet')
       }
+      markDone('publishing-hub')
 
       // Update user's hub list
+      setCreationStep('updating-hub-list')
       const newEntry = { dTag, relayHint: relays[0] || '', position: hubEntries.length, folderId: undefined }
       const newEntries = [...hubEntries, newEntry]
       setHubEntries(newEntries, folders)
@@ -514,8 +559,10 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
       )
       const signedHubList = await signWithSigner(hubListEvent, signer, privateKey)
       await publishToSpecificRelays(getPublishRelays(), signedHubList)
+      markDone('updating-hub-list')
 
       // Set hub data in store immediately
+      setCreationStep('finalizing')
       setHubData(dTag, {
         dTag,
         creatorPubkey: pubkey!,
@@ -552,10 +599,16 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
       const secretHexStr = Array.from(hubSecret).map(b => b.toString(16).padStart(2, '0')).join('')
       setHubSecret(dTag, secretHexStr)
       setHubStatus(dTag, 'loaded')
+      markDone('finalizing')
+
+      setCreationStep('done')
+      // Brief pause so the user sees the completed state
+      await new Promise(r => setTimeout(r, 800))
 
       setActiveHub(dTag)
       onClose()
     } catch (err) {
+      setCreationStep('error')
       setError(err instanceof Error ? err.message : 'Failed to create hub')
     } finally {
       setLoading(false)
@@ -1115,6 +1168,123 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
           </div>
         </div>
       </div>
+
+      {/* Hub creation progress overlay */}
+      {creationStep && creationStep !== 'error' && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center px-2 bg-black/70 backdrop-blur-sm">
+          <div className="w-[380px] bg-card border border-border rounded-xl shadow-2xl p-6 space-y-5 animate-in fade-in-0 zoom-in-95" onClick={(e) => e.stopPropagation()}>
+            {/* Header */}
+            <div className="flex items-center gap-3">
+              {creationStep === 'done' ? (
+                <div className="w-10 h-10 rounded-full bg-emerald-500/15 flex items-center justify-center shrink-0">
+                  <CheckCircle2 size={22} className="text-emerald-400" />
+                </div>
+              ) : (
+                <div className="w-10 h-10 rounded-full bg-primary/15 flex items-center justify-center shrink-0">
+                  <Loader2 size={22} className="text-primary animate-spin" />
+                </div>
+              )}
+              <div>
+                <h3 className="text-sm font-semibold text-foreground">
+                  {creationStep === 'done' ? 'Hub Created!' : 'Creating Hub…'}
+                </h3>
+                <p className="text-xs text-muted-foreground">
+                  {creationStep === 'done'
+                    ? 'Your hub is ready. Redirecting…'
+                    : 'Please wait while we set everything up'
+                  }
+                </p>
+              </div>
+            </div>
+
+            {/* Overall progress bar */}
+            {(() => {
+              const doneCount = CREATION_STEPS.filter(s => completedSteps.has(s.key)).length
+              const pct = creationStep === 'done' ? 100 : Math.round((doneCount / CREATION_STEPS.length) * 100)
+              return (
+                <div className="space-y-1">
+                  <div className="w-full h-2 rounded-full bg-secondary overflow-hidden">
+                    <div
+                      className={cn(
+                        'h-full rounded-full transition-all duration-500 ease-out',
+                        creationStep === 'done' ? 'bg-emerald-500' : 'bg-primary'
+                      )}
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                  <p className="text-[10px] text-muted-foreground text-right">{pct}%</p>
+                </div>
+              )
+            })()}
+
+            {/* Step list */}
+            <div className="space-y-1">
+              {CREATION_STEPS.map((step) => {
+                const isDone = completedSteps.has(step.key)
+                const isCurrent = creationStep === step.key
+                const Icon = step.icon
+                return (
+                  <div key={step.key}>
+                    <div
+                      className={cn(
+                        'flex items-center gap-3 px-3 py-2 rounded-lg transition-all duration-300',
+                        isCurrent && 'bg-primary/8 border border-primary/20',
+                        isDone && !isCurrent && 'opacity-70',
+                        !isDone && !isCurrent && 'opacity-35',
+                      )}
+                    >
+                      {/* Status icon */}
+                      <div className="w-5 h-5 flex items-center justify-center shrink-0">
+                        {isDone ? (
+                          <Check size={14} className="text-emerald-400" />
+                        ) : isCurrent ? (
+                          <Loader2 size={14} className="text-primary animate-spin" />
+                        ) : (
+                          <div className="w-2 h-2 rounded-full bg-muted-foreground/30" />
+                        )}
+                      </div>
+                      {/* Step icon + label */}
+                      <Icon size={14} className={cn(
+                        isDone ? 'text-emerald-400' : isCurrent ? 'text-primary' : 'text-muted-foreground/50'
+                      )} />
+                      <span className={cn(
+                        'text-xs',
+                        isDone ? 'text-foreground' : isCurrent ? 'text-foreground font-medium' : 'text-muted-foreground'
+                      )}>
+                        {step.label}
+                      </span>
+                    </div>
+                    {/* Member file sub-progress */}
+                    {step.key === 'uploading-member-files' && isCurrent && memberFileProgress && (
+                      <div className="ml-11 mr-3 mt-1 mb-1 space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] text-muted-foreground">
+                            {memberFileProgress.label} ({memberFileProgress.fileIndex + 1}/{memberFileProgress.totalFiles})
+                          </span>
+                        </div>
+                        {/* Mini segmented progress */}
+                        <div className="flex gap-1">
+                          {Array.from({ length: memberFileProgress.totalFiles }, (_, i) => (
+                            <div
+                              key={i}
+                              className={cn(
+                                'h-1 flex-1 rounded-full transition-all duration-300',
+                                i < memberFileProgress.fileIndex ? 'bg-emerald-400'
+                                  : i === memberFileProgress.fileIndex ? 'bg-primary animate-pulse'
+                                  : 'bg-muted-foreground/20'
+                              )}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* File size warning modal */}
       {fileSizeWarning && (

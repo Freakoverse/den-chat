@@ -20,6 +20,7 @@ import { HubInfoModal } from '@/components/hub/HubInfoModal'
 import {
   Info, UserPlus, Zap, AlertTriangle, Loader2, Check, Hash, X,
 } from 'lucide-react'
+import { HubJoinWarningModal, isJoinWarningDismissed } from '@/components/hub/HubJoinWarningModal'
 
 interface HubEventCardProps {
   /** naddr data */
@@ -49,6 +50,7 @@ export function HubEventCard({ identifier, pubkey, relays }: HubEventCardProps) 
   const [showFullDesc, setShowFullDesc] = useState(false)
   const [showAllTags, setShowAllTags] = useState(false)
   const [showInfoModal, setShowInfoModal] = useState(false)
+  const [showJoinWarning, setShowJoinWarning] = useState(false)
 
   // Check if already a member/entry
   const isAlreadyInList = hubEntries.some(e => e.dTag === identifier)
@@ -144,6 +146,18 @@ export function HubEventCard({ identifier, pubkey, relays }: HubEventCardProps) 
   }, [identifier, pubkey, hubs])
 
   const handleRequestJoin = async () => {
+    if (!myPubkey || !hubData || joining) return
+
+    // Show warning modal if not dismissed
+    if (!isJoinWarningDismissed()) {
+      setShowJoinWarning(true)
+      return
+    }
+
+    doJoin()
+  }
+
+  const doJoin = async () => {
     if (!myPubkey || !hubData || joining) return
     setJoining(true)
     setJoinError(null)
@@ -388,6 +402,13 @@ export function HubEventCard({ identifier, pubkey, relays }: HubEventCardProps) 
           hub={hubData}
         />
       )}
+
+      {/* Join warning modal */}
+      <HubJoinWarningModal
+        open={showJoinWarning}
+        onClose={() => setShowJoinWarning(false)}
+        onConfirm={doJoin}
+      />
     </div>
   )
 }

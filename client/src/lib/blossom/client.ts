@@ -407,7 +407,7 @@ export async function downloadFromBlossom(
   for (const server of allServers) {
     try {
       const url = `${normalize(server)}/${hash}`
-      const res = await fetch(url)
+      const res = await fetch(url, { signal: AbortSignal.timeout(30_000) })
       if (!res.ok) continue
 
       const data = new Uint8Array(await res.arrayBuffer())

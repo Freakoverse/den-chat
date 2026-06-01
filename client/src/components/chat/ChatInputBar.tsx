@@ -290,10 +290,9 @@ export function ChatInputBar({
     onMessageChange(newText)
     requestAnimationFrame(() => {
       ta.focus()
-      const cursorPos = start + prefix.length + text.length + suffix.length
       ta.setSelectionRange(
-        selected ? cursorPos : start + prefix.length,
-        selected ? cursorPos : start + prefix.length + text.length
+        start + prefix.length,
+        start + prefix.length + text.length
       )
       autoResize(ta)
     })

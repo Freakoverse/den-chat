@@ -28,6 +28,16 @@ const DEFAULT_FILTERS: FeedFilters = {
 export type SocialPage = 'feed' | 'thread' | 'profile'
   | 'longform-feed' | 'longform-write' | 'longform-mine' | 'longform-drafts' | 'longform-read' | 'longform-bookmarks' | 'longform-draft-preview'
 
+/** Snapshot of navigable state for the back stack */
+interface NavSnapshot {
+  activePage: SocialPage
+  activeThreadId: string | null
+  activeProfilePubkey: string | null
+  activeArticleNaddr: string | null
+  editingArticleNaddr: string | null
+  previewDraftNaddr: string | null
+}
+
 interface SocialState {
   /** Current social sub-page */
   activePage: SocialPage
@@ -43,6 +53,8 @@ interface SocialState {
   editingArticleNaddr: string | null
   /** Draft naddr being previewed (for longform-draft-preview page) */
   previewDraftNaddr: string | null
+  /** Navigation back stack */
+  navStack: NavSnapshot[]
 
   setActivePage: (page: SocialPage) => void
   setPosts: (posts: Event[]) => void
@@ -59,6 +71,21 @@ interface SocialState {
   setFeedFilter: <K extends keyof FeedFilters>(key: K, value: FeedFilters[K]) => void
 }
 
+/** Helper to snapshot current navigable state */
+function snapshot(s: SocialState): NavSnapshot {
+  return {
+    activePage: s.activePage,
+    activeThreadId: s.activeThreadId,
+    activeProfilePubkey: s.activeProfilePubkey,
+    activeArticleNaddr: s.activeArticleNaddr,
+    editingArticleNaddr: s.editingArticleNaddr,
+    previewDraftNaddr: s.previewDraftNaddr,
+  }
+}
+
+/** Max back-stack depth to prevent unbounded growth */
+const MAX_NAV_STACK = 20
+
 export const useSocialStore = create<SocialState>((set) => ({
   activePage: 'feed',
   posts: [],
@@ -67,6 +94,7 @@ export const useSocialStore = create<SocialState>((set) => ({
   activeArticleNaddr: null,
   editingArticleNaddr: null,
   previewDraftNaddr: null,
+  navStack: [],
 
   setActivePage: (page) => set({ activePage: page }),
 
@@ -94,25 +122,53 @@ export const useSocialStore = create<SocialState>((set) => ({
     return { posts: updated }
   }),
 
-  setActiveThread: (id) => set({ activePage: 'thread', activeThreadId: id }),
+  setActiveThread: (id) => set((s) => ({
+    navStack: [...s.navStack, snapshot(s)].slice(-MAX_NAV_STACK),
+    activePage: 'thread',
+    activeThreadId: id,
+  })),
 
-  setActiveProfile: (pubkey) => set({ activePage: 'profile', activeProfilePubkey: pubkey }),
+  setActiveProfile: (pubkey) => set((s) => ({
+    navStack: [...s.navStack, snapshot(s)].slice(-MAX_NAV_STACK),
+    activePage: 'profile',
+    activeProfilePubkey: pubkey,
+  })),
 
-  setActiveArticle: (naddr) => set({ activePage: 'longform-read', activeArticleNaddr: naddr }),
+  setActiveArticle: (naddr) => set((s) => ({
+    navStack: [...s.navStack, snapshot(s)].slice(-MAX_NAV_STACK),
+    activePage: 'longform-read',
+    activeArticleNaddr: naddr,
+  })),
 
-  setEditingArticle: (naddr) => set({ activePage: 'longform-write', editingArticleNaddr: naddr }),
+  setEditingArticle: (naddr) => set((s) => ({
+    navStack: [...s.navStack, snapshot(s)].slice(-MAX_NAV_STACK),
+    activePage: 'longform-write',
+    editingArticleNaddr: naddr,
+  })),
 
-  setPreviewDraft: (naddr) => set({ activePage: 'longform-draft-preview', previewDraftNaddr: naddr }),
+  setPreviewDraft: (naddr) => set((s) => ({
+    navStack: [...s.navStack, snapshot(s)].slice(-MAX_NAV_STACK),
+    activePage: 'longform-draft-preview',
+    previewDraftNaddr: naddr,
+  })),
 
   goBack: () => set((s) => {
-    // Long-form sub-pages go back to longform-feed
+    const stack = [...s.navStack]
+    const prev = stack.pop()
+
+    if (prev) {
+      // Pop and restore the previous navigation state
+      return { ...prev, navStack: stack }
+    }
+
+    // Fallback: no stack history — use hardcoded defaults
     if (s.activePage === 'longform-draft-preview') {
-      return { activePage: 'longform-drafts' as SocialPage, previewDraftNaddr: null }
+      return { activePage: 'longform-drafts' as SocialPage, previewDraftNaddr: null, navStack: [] }
     }
     if (s.activePage.startsWith('longform-')) {
-      return { activePage: 'longform-feed' as SocialPage, activeArticleNaddr: null, editingArticleNaddr: null, previewDraftNaddr: null }
+      return { activePage: 'longform-feed' as SocialPage, activeArticleNaddr: null, editingArticleNaddr: null, previewDraftNaddr: null, navStack: [] }
     }
-    return { activePage: 'feed' as SocialPage, activeThreadId: null, activeProfilePubkey: null }
+    return { activePage: 'feed' as SocialPage, activeThreadId: null, activeProfilePubkey: null, navStack: [] }
   }),
 
   feedFilters: loadFilters(),

@@ -238,7 +238,7 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
       nsfw: isNsfw,
       clientTag: raw.clientTag,
       facilitator: raw.facilitator,
-      isForum: raw.isForum,
+      isForum: raw.isForum || !!title,  // derive from raw tag OR decrypted content
       title,
       featuredImage,
       forumTags,
@@ -482,6 +482,7 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
       rootRef: rootRef,
       deleted: false,
       isThread: isThread,
+      isForum: !!forumFields,
       rawEvent: JSON.stringify(signed),
       clientTag: isClientTagEnabled() ? 'DEN Chat' : undefined,
       facilitator: facilitator,

@@ -20,6 +20,10 @@ interface HubInfoModalProps {
   open: boolean
   onClose: () => void
   hub: HubData
+  /** When true, banner & icon images are heavily blurred (used on Discover page for safety) */
+  blurMedia?: boolean
+  /** Called when the user clicks the creator's avatar or name */
+  onCreatorClick?: (pubkey: string) => void
 }
 
 interface CreatorProfile {
@@ -29,7 +33,7 @@ interface CreatorProfile {
   npub: string
 }
 
-export function HubInfoModal({ open, onClose, hub }: HubInfoModalProps) {
+export function HubInfoModal({ open, onClose, hub, blurMedia, onCreatorClick }: HubInfoModalProps) {
   const [creator, setCreator] = useState<CreatorProfile | null>(null)
   const [copied, setCopied] = useState(false)
 
@@ -83,7 +87,7 @@ export function HubInfoModal({ open, onClose, hub }: HubInfoModalProps) {
         {/* Banner */}
         {hub.banner ? (
           <div className="h-32 w-full">
-            <BlossomImage src={hub.banner} alt="" className="w-full h-full object-cover" fallback={
+            <BlossomImage src={hub.banner} alt="" className={`w-full h-full object-cover${blurMedia ? ' blur-lg' : ''}`} fallback={
               <div className="w-full h-full bg-gradient-to-br from-primary/30 to-primary/10" />
             } />
           </div>
@@ -103,7 +107,7 @@ export function HubInfoModal({ open, onClose, hub }: HubInfoModalProps) {
         <div className="px-5 -mt-10 relative">
           <div className="w-20 h-20 rounded-2xl bg-secondary border-4 border-background overflow-hidden">
             {hub.icon ? (
-              <BlossomImage src={hub.icon} alt={hub.name} className="w-full h-full object-cover" fallback={
+              <BlossomImage src={hub.icon} alt={hub.name} className={`w-full h-full object-cover${blurMedia ? ' blur-sm' : ''}`} fallback={
                 <div className="w-full h-full flex items-center justify-center text-xl font-bold text-muted-foreground">
                   {hub.name.slice(0, 2).toUpperCase()}
                 </div>
@@ -144,16 +148,37 @@ export function HubInfoModal({ open, onClose, hub }: HubInfoModalProps) {
             <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2 block">Created by</label>
             {creator ? (
               <div className="flex items-center gap-3 p-3 rounded-lg bg-secondary/50 border border-border/50">
-                <Avatar className="h-10 w-10 shrink-0">
-                  {creator.picture && <AvatarImage src={creator.picture} />}
-                  <AvatarFallback className="text-xs bg-primary text-primary-foreground">
-                    {(creator.name || 'U').slice(0, 2).toUpperCase()}
-                  </AvatarFallback>
-                </Avatar>
+                {/* Clickable avatar */}
+                {onCreatorClick && hub.creatorPubkey ? (
+                  <button onClick={() => onCreatorClick(hub.creatorPubkey)} className="cursor-pointer shrink-0">
+                    <Avatar className="h-10 w-10">
+                      {creator.picture && <AvatarImage src={creator.picture} />}
+                      <AvatarFallback className="text-xs bg-primary text-primary-foreground">
+                        {(creator.name || 'U').slice(0, 2).toUpperCase()}
+                      </AvatarFallback>
+                    </Avatar>
+                  </button>
+                ) : (
+                  <Avatar className="h-10 w-10 shrink-0">
+                    {creator.picture && <AvatarImage src={creator.picture} />}
+                    <AvatarFallback className="text-xs bg-primary text-primary-foreground">
+                      {(creator.name || 'U').slice(0, 2).toUpperCase()}
+                    </AvatarFallback>
+                  </Avatar>
+                )}
                 <div className="flex-1 min-w-0">
-                  <div className="text-sm font-medium text-foreground truncate">
-                    {creator.name || 'Unknown'}
-                  </div>
+                  {onCreatorClick && hub.creatorPubkey ? (
+                    <button
+                      onClick={() => onCreatorClick(hub.creatorPubkey)}
+                      className="text-sm font-medium text-foreground truncate hover:underline cursor-pointer text-left block max-w-full"
+                    >
+                      {creator.name || 'Unknown'}
+                    </button>
+                  ) : (
+                    <div className="text-sm font-medium text-foreground truncate">
+                      {creator.name || 'Unknown'}
+                    </div>
+                  )}
                   <div className="text-xs text-muted-foreground truncate font-mono">
                     {truncateNpub(creator.npub)}
                   </div>

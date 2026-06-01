@@ -40,6 +40,7 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
   const [showJoinRequests, setShowJoinRequests] = useState(false)
   const [showUserSettings, setShowUserSettings] = useState(false)
   const [showEvents, setShowEvents] = useState(false)
+  const [showCreatorProfile, setShowCreatorProfile] = useState(false)
   const [rescinding, setRescinding] = useState(false)
   const [rescindDone, setRescindDone] = useState(false)
 
@@ -414,6 +415,17 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
         open={showInfo}
         onClose={() => setShowInfo(false)}
         hub={hub}
+        onCreatorClick={() => {
+          setShowInfo(false)
+          setShowCreatorProfile(true)
+        }}
+      />
+
+      {/* Creator profile modal */}
+      <UserProfileModal
+        open={showCreatorProfile}
+        onClose={() => setShowCreatorProfile(false)}
+        targetPubkey={hub.creatorPubkey}
       />
 
       {/* Invite modal */}

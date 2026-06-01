@@ -597,7 +597,7 @@ function DMChatView({ recipientPubkey, onSwitchProtocol, onBack }: { recipientPu
 
   const handleSend = useCallback(async (attachments?: FileAttachment[]) => {
     const text = message.trim()
-    if (!text && !attachments?.length && pendingStickers.length === 0) return
+    if (!text && !attachments?.length && pendingStickers.length === 0 && pendingGifs.length === 0) return
     if (!myPubkey || sending) return
 
     setSending(true)
@@ -934,6 +934,7 @@ function DMChatView({ recipientPubkey, onSwitchProtocol, onBack }: { recipientPu
         onSend={handleSend}
         disabled={!hasNip44}
         sending={sending}
+        canSend={(message.trim() || pendingStickers.length > 0 || pendingGifs.length > 0) ? true : undefined}
         placeholder={hasNip44
           ? `Message ${profile?.display_name || profile?.name || truncateNpub(npubStr, 8)}`
           : 'NIP-44 encryption unavailable'

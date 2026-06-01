@@ -289,7 +289,10 @@ export async function createAndUploadMemberFiles(
   privateKey: string | null,
   signer: ISigner | null,
   blossomServerUrls: string[],
+  onFileProgress?: (info: { fileIndex: number; totalFiles: number; label: string }) => void,
 ): Promise<{ indexHash: string; blossomServers: string[] }> {
+  const totalFiles = 4
+
   // 1. Create a single leaf for the creator
   const creatorLeaf = createLeaf(creatorPubkey, 'everyone')
 
@@ -306,6 +309,7 @@ export async function createAndUploadMemberFiles(
   const page = await buildLeafPage([creatorLeaf], 0)
 
   // 4. Serialize and upload leaf page
+  onFileProgress?.({ fileIndex: 0, totalFiles, label: 'Leaf page' })
   const pageContent = serializeLeafPage(page)
   const pageBytes = new TextEncoder().encode(pageContent)
   const { hash: pageHash } = await uploadToBlossomServers(
@@ -319,6 +323,7 @@ export async function createAndUploadMemberFiles(
   )
 
   // 6. Serialize and upload spine
+  onFileProgress?.({ fileIndex: 1, totalFiles, label: 'Spine tree' })
   const spineContent = serializeSpine(spine)
   const spineBytes = new TextEncoder().encode(spineContent)
   const { hash: spineHash } = await uploadToBlossomServers(
@@ -326,6 +331,7 @@ export async function createAndUploadMemberFiles(
   )
 
   // 7. Create epoch history file
+  onFileProgress?.({ fileIndex: 2, totalFiles, label: 'Epoch history' })
   const hubSecretHex = toHex(hubSecret)
   const historyPlaintext = `hub:1:${hubSecretHex}`
   const historyBlob = await aesEncrypt(hubSecret, historyPlaintext)
@@ -335,6 +341,7 @@ export async function createAndUploadMemberFiles(
   )
 
   // 8. Create and upload paginated index file
+  onFileProgress?.({ fileIndex: 3, totalFiles, label: 'Index file' })
   const indexContent = createPaginatedIndexFile(
     spineHash,
     [{ pageIndex: 0, firstPubkey: creatorPubkey, hash: pageHash }],

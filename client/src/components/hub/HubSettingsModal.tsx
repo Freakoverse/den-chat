@@ -2722,22 +2722,67 @@ function SecurityPage({ hub }: { hub: HubData }) {
   const [fixing, setFixing] = useState(false)
   const [fixError, setFixError] = useState<string | null>(null)
   const [fixSuccess, setFixSuccess] = useState(false)
+  const [fixStep, setFixStep] = useState<string | null>(null)
+  const [fixSteps, setFixSteps] = useState<string[]>([])
 
   const signer = useUserStore((s) => s.signer)
   const privateKey = useUserStore((s) => s.privateKey)
   const pubkey = useUserStore((s) => s.pubkey)
+  const authMethod = useUserStore((s) => s.authMethod)
   const hubSecrets = useHubStore((s) => s.hubSecrets)
   const setHubData = useHubStore((s) => s.setHubData)
   const setHubSecret = useHubStore((s) => s.setHubSecret)
   const setHubMembers = useHubStore((s) => s.setHubMembers)
+
+  /** Yield to let React render between sync steps */
+  const markStep = async (step: string) => {
+    setFixStep(step)
+    await new Promise(r => setTimeout(r, 0))
+  }
+  const markDone = (step: string) => setFixSteps(prev => [...prev, step])
+
+  // ── Time guesstimate ──
+  const currentMembers = useHubStore((s) => s.hubMembers[hub.dTag]) || []
+  const memberCount = Math.max(currentMembers.length, 1) // at least creator
+  const groupedRoles = hub.groupedRoles || []
+
+  const computeEstimate = () => {
+    // Per-encrypt rate based on signer type
+    const isLocalKey = authMethod === 'nsec' || authMethod === 'seed'
+    const msPerEncrypt = isLocalKey ? 1 : 200
+
+    // Count total NIP-04 encryptions: hub tree + all group trees
+    let totalGroupMembers = 0
+    if (groupedRoles.length > 0) {
+      // Lazy import would be async — use a rough estimate: assume each group
+      // has ~60% of total members on average (some groups are small, some large)
+      totalGroupMembers = Math.ceil(memberCount * 0.6) * groupedRoles.length
+    }
+    const totalEncryptions = memberCount + totalGroupMembers
+    const numPages = Math.ceil(memberCount / 10_000)
+    const numUploads = numPages + groupedRoles.length + 3 // pages + group trees + spine + history + index
+    const downloadOverheadMs = 5_000
+    const uploadOverheadMs = numUploads * 2_000
+    const estimateMs = (totalEncryptions * msPerEncrypt) + downloadOverheadMs + uploadOverheadMs
+
+    // Round up to nearest 30s, minimum 30s
+    const estimateSec = Math.max(30, Math.ceil(estimateMs / 30_000) * 30)
+    if (estimateSec <= 30) return 'up to 30 seconds'
+    if (estimateSec <= 60) return 'up to 1 minute'
+    const mins = Math.ceil(estimateSec / 60)
+    return `up to ${mins} minutes`
+  }
 
   const handleFixEncryption = async () => {
     if (!pubkey || fixing) return
     setFixing(true)
     setFixError(null)
     setFixSuccess(false)
+    setFixStep(null)
+    setFixSteps([])
 
     try {
+      await markStep('Downloading current tree')
       const { downloadTextFromBlossom, parseIndexFile, uploadToBlossomServers } = await import('@/lib/blossom')
       const { aesEncrypt, aesDecrypt } = await import('@/lib/crypto/aes')
       const { createPaginatedIndexFile } = await import('@/lib/blossom/members')
@@ -2745,16 +2790,22 @@ function SecurityPage({ hub }: { hub: HubData }) {
       const oldSecretHex = hubSecrets[hub.dTag]
       const oldSecret = oldSecretHex ? fromHex(oldSecretHex) : null
 
-      // 1. Download and decrypt old epoch history (single-blob format)
+      // 1. Download and parse old index — capture ban pages + group tree refs
       let oldEpochLines: string[] = []
       let oldSpineHash = ''
       let oldHistoryHash = ''
+      let oldBanPageHashes: string[] = []
+      let oldGroupTreeRefs: Array<{ groupId: string; hash: string }> = []
+      let oldLeafPageHashes: string[] = []
       if (oldSecret && hub.indexFileHash && hub.blossomServers.length > 0) {
         try {
           const indexContent = await downloadTextFromBlossom(hub.indexFileHash, hub.blossomServers)
           const index = parseIndexFile(indexContent)
           oldSpineHash = index.spineHash
           oldHistoryHash = index.historyHash
+          oldBanPageHashes = index.banPages.map(bp => bp.hash)
+          oldGroupTreeRefs = [...index.groupTrees]
+          oldLeafPageHashes = index.leafPages.map(lp => lp.hash)
 
           if (index.historyHash) {
             const historyBlob = await downloadTextFromBlossom(index.historyHash, hub.blossomServers)
@@ -2763,7 +2814,6 @@ function SecurityPage({ hub }: { hub: HubData }) {
               oldEpochLines = plaintext.split('\n').filter(l => l.trim())
             } catch {
               console.warn('Could not decrypt history blob — trying legacy per-row format')
-              // Fallback: try legacy per-row format for backward compat
               for (const line of historyBlob.split('\n')) {
                 const trimmed = line.trim()
                 if (!trimmed || !trimmed.startsWith('hub:')) continue
@@ -2784,13 +2834,15 @@ function SecurityPage({ hub }: { hub: HubData }) {
           console.warn('Could not load old history file:', err)
         }
       }
+      markDone('Downloading current tree')
 
       // 2. Generate a new hub secret
+      await markStep('Rebuilding member tree')
       const newHubSecret = crypto.getRandomValues(new Uint8Array(32))
       const newSecretHex = toHex(newHubSecret)
       const newEpoch = hub.epoch + 1
 
-      // 3. Build updated history — preserve old epoch lines, add old current + new epoch
+      // 3. Build updated hub history — preserve old epoch lines, add old current + new epoch
       const lines = [...oldEpochLines]
       if (oldSecretHex) {
         const alreadyStored = lines.some(l => l.startsWith(`hub:${hub.epoch}:`))
@@ -2800,31 +2852,24 @@ function SecurityPage({ hub }: { hub: HubData }) {
       }
       lines.push(`hub:${newEpoch}:${newSecretHex}`)
 
-      // 4. Encrypt as single blob with new secret and upload
-      const historyBlob = await aesEncrypt(newHubSecret, lines.join('\n'))
-      const historyBytes = new TextEncoder().encode(historyBlob)
-      const { hash: historyHash } = await uploadToBlossomServers(
-        historyBytes, signer, privateKey, hub.blossomServers, 'text/plain',
-      )
-
-      // 5. Build a new paginated LKH tree with ALL current members
+      // 4. Build a new paginated LKH tree with ALL current members
       const {
         createLeaf, buildLeafPage, buildSpine,
         serializeLeafPage, serializeSpine, PAGE_SIZE,
       } = await import('@/lib/crypto/lkh')
       const { nip04Encrypt } = await import('@/lib/blossom/members')
-      const currentMembers = useHubStore.getState().hubMembers[hub.dTag] || []
+      const storeMembers = useHubStore.getState().hubMembers[hub.dTag] || []
 
-      const memberPubkeys = new Set<string>()
-      memberPubkeys.add(pubkey)
-      for (const m of currentMembers) {
-        memberPubkeys.add(m.pubkey)
+      const memberPubkeySet = new Set<string>()
+      memberPubkeySet.add(pubkey)
+      for (const m of storeMembers) {
+        memberPubkeySet.add(m.pubkey)
       }
 
       // Create leaves sorted by pubkey for deterministic page assignment
       const allLeaves = []
-      for (const memberPk of [...memberPubkeys].sort()) {
-        const memberRoles = currentMembers.find(m => m.pubkey === memberPk)?.roles || 'everyone'
+      for (const memberPk of [...memberPubkeySet].sort()) {
+        const memberRoles = storeMembers.find(m => m.pubkey === memberPk)?.roles || 'everyone'
         const leaf = createLeaf(memberPk, memberRoles)
         const leafKeyHex = toHex(leaf.rawKey!)
         leaf.encryptedLeafKey = await nip04Encrypt(memberPk, leafKeyHex, signer, privateKey)
@@ -2838,29 +2883,29 @@ function SecurityPage({ hub }: { hub: HubData }) {
       }
 
       // Build leaf pages
-      const pages = []
+      const builtPages = []
       for (let pi = 0; pi < pageChunks.length; pi++) {
         const page = await buildLeafPage(pageChunks[pi], pi)
-        pages.push(page)
+        builtPages.push(page)
       }
 
       // Upload each page
       const leafPageRefs: Array<{ pageIndex: number; firstPubkey: string; hash: string }> = []
       const pageRoots: Array<{ nodeId: string; rawKey: Uint8Array }> = []
-      for (let pi = 0; pi < pages.length; pi++) {
-        const serialized = serializeLeafPage(pages[pi])
+      for (let pi = 0; pi < builtPages.length; pi++) {
+        const serialized = serializeLeafPage(builtPages[pi])
         const pageBytes = new TextEncoder().encode(serialized)
         const { hash } = await uploadToBlossomServers(
           pageBytes, signer, privateKey, hub.blossomServers, 'text/plain',
         )
         leafPageRefs.push({
           pageIndex: pi,
-          firstPubkey: pages[pi].leaves[0].pubkey,
+          firstPubkey: builtPages[pi].leaves[0].pubkey,
           hash,
         })
         pageRoots.push({
-          nodeId: pages[pi].pageRoot.nodeId,
-          rawKey: pages[pi].pageRoot.rawKey!,
+          nodeId: builtPages[pi].pageRoot.nodeId,
+          rawKey: builtPages[pi].pageRoot.rawKey!,
         })
       }
 
@@ -2872,16 +2917,111 @@ function SecurityPage({ hub }: { hub: HubData }) {
         spineBytes, signer, privateKey, hub.blossomServers, 'text/plain',
       )
 
-      console.log(`Fix encryption: rebuilt paginated LKH tree with ${allLeaves.length} members across ${pages.length} page(s), epoch ${newEpoch}`)
+      console.log(`Fix encryption: rebuilt paginated LKH tree with ${allLeaves.length} members across ${builtPages.length} page(s), epoch ${newEpoch}`)
+      markDone('Rebuilding member tree')
 
-      // 6. Create and upload index file with new spine + pages + history hashes
-      const indexContent = createPaginatedIndexFile(spineHash, leafPageRefs, [], historyHash)
+      // 5. Rebuild group trees with new secrets + bumped epochs
+      let updatedGroupedRoles = [...(hub.groupedRoles || [])]
+      const updatedGroupTrees: Array<{ groupId: string; hash: string }> = []
+      const groupHistoryEntries: Array<{ groupId: string; epoch: number; secretHex: string }> = []
+      const oldGroupTreeHashesForCleanup: string[] = oldGroupTreeRefs.map(gt => gt.hash)
+
+      if (updatedGroupedRoles.length > 0) {
+        await markStep('Rebuilding group encryption')
+        const { memberQualifiesForGroup, getGroupMembers } = await import('@/lib/hub/groupEncryption')
+        const { createAndUploadGroupTree } = await import('@/lib/blossom/members')
+
+        for (let gi = 0; gi < updatedGroupedRoles.length; gi++) {
+          const group = updatedGroupedRoles[gi]
+          try {
+            // Determine qualifying members for this group
+            const qualifying = getGroupMembers(storeMembers, group.roleIds)
+            // Always include the hub creator
+            const groupMemberPubkeys = Array.from(new Set([
+              pubkey,
+              ...qualifying.map(m => m.pubkey),
+            ]))
+
+            if (groupMemberPubkeys.length === 0) continue
+
+            // Record old group secret for history
+            const oldGroupSecretHex = useHubStore.getState().groupSecrets[hub.dTag]?.[group.groupId]
+            if (oldGroupSecretHex) {
+              groupHistoryEntries.push({
+                groupId: group.groupId,
+                epoch: group.epoch,
+                secretHex: oldGroupSecretHex,
+              })
+            }
+
+            // Generate new group secret
+            const newGroupSecret = crypto.getRandomValues(new Uint8Array(32))
+            const newGroupSecretHex = Array.from(newGroupSecret)
+              .map(b => b.toString(16).padStart(2, '0')).join('')
+
+            // Create and upload new group tree
+            const groupTreeHash = await createAndUploadGroupTree(
+              groupMemberPubkeys, newGroupSecret, signer, privateKey, hub.blossomServers,
+            )
+
+            updatedGroupTrees.push({ groupId: group.groupId, hash: groupTreeHash })
+
+            // Bump group epoch
+            const newGroupEpoch = group.epoch + 1
+            updatedGroupedRoles[gi] = { ...group, epoch: newGroupEpoch }
+
+            // Record new group secret for history
+            groupHistoryEntries.push({
+              groupId: group.groupId,
+              epoch: newGroupEpoch,
+              secretHex: newGroupSecretHex,
+            })
+
+            // Update local group secret
+            useHubStore.getState().setGroupSecret(hub.dTag, group.groupId, newGroupSecretHex)
+
+            console.log(`Fix encryption: rebuilt group tree for ${group.groupId} with ${groupMemberPubkeys.length} members, epoch ${newGroupEpoch}`)
+          } catch (err) {
+            console.warn(`Failed to rebuild group tree ${group.groupId}:`, err)
+          }
+        }
+        markDone('Rebuilding group encryption')
+      }
+
+      // 6. Append group history entries to the history blob
+      if (groupHistoryEntries.length > 0) {
+        for (const entry of groupHistoryEntries) {
+          const line = `group:${entry.groupId}:${entry.epoch}:${entry.secretHex}`
+          const existIdx = lines.findIndex(l => l.startsWith(`group:${entry.groupId}:${entry.epoch}:`))
+          if (existIdx >= 0) lines[existIdx] = line
+          else lines.push(line)
+        }
+      }
+
+      // 7. Encrypt and upload final history blob (with hub + group entries)
+      await markStep('Uploading tree & index')
+      const finalHistoryBlob = await aesEncrypt(newHubSecret, lines.join('\n'))
+      const finalHistoryBytes = new TextEncoder().encode(finalHistoryBlob)
+      const { hash: historyHash } = await uploadToBlossomServers(
+        finalHistoryBytes, signer, privateKey, hub.blossomServers, 'text/plain',
+      )
+
+      // 8. Create and upload index file with preserved ban pages + rebuilt group trees
+      const indexContent = createPaginatedIndexFile(
+        spineHash,
+        leafPageRefs,
+        oldBanPageHashes,
+        historyHash,
+        updatedGroupTrees.length > 0 ? updatedGroupTrees : undefined,
+      )
       const indexBytes = new TextEncoder().encode(indexContent)
       const { hash: finalIndexHash } = await uploadToBlossomServers(
         indexBytes, signer, privateKey, hub.blossomServers, 'text/plain',
       )
+      markDone('Uploading tree & index')
 
-      // 7. Publish updated hub event
+      // 9. Publish updated hub event
+      await markStep('Publishing hub event')
       const unsignedEvent = rebuildHubEvent({
         dTag: hub.dTag,
         name: hub.name,
@@ -2899,16 +3039,16 @@ function SecurityPage({ hub }: { hub: HubData }) {
         minPow: hub.minPow > 0 ? hub.minPow : undefined,
         nsfw: hub.nsfw || undefined,
         discoverable: hub.discoverable,
-        groupedRoles: hub.groupedRoles,
+        groupedRoles: updatedGroupedRoles,
         publishedAt: hub.publishedAt,
-
       })
       const signedEvent = await signWithSigner(unsignedEvent, signer, privateKey)
       await publishToSpecificRelays(getPublishRelays([...hub.generalRelays, ...hub.filterRelays]), signedEvent)
+      markDone('Publishing hub event')
 
-      // 8. Update local store
+      // 10. Update local store
       setHubSecret(hub.dTag, newSecretHex)
-      // Update epoch history locally so old messages remain decryptable
+      // Update hub epoch history locally so old messages remain decryptable
       const epochMap: Record<number, string> = {}
       for (const l of lines) {
         if (l.startsWith('hub:')) {
@@ -2919,14 +3059,26 @@ function SecurityPage({ hub }: { hub: HubData }) {
       if (Object.keys(epochMap).length > 0) {
         useHubStore.getState().setEpochSecrets(hub.dTag, epochMap)
       }
+      // Update group epoch secrets locally
+      if (groupHistoryEntries.length > 0) {
+        const groupEpochMaps: Record<string, Record<number, string>> = {}
+        for (const entry of groupHistoryEntries) {
+          if (!groupEpochMaps[entry.groupId]) groupEpochMaps[entry.groupId] = {}
+          groupEpochMaps[entry.groupId][entry.epoch] = entry.secretHex
+        }
+        for (const [gid, gmap] of Object.entries(groupEpochMaps)) {
+          useHubStore.getState().setGroupEpochSecrets(hub.dTag, gid, gmap)
+        }
+      }
       // Members are preserved — same list in the new tree
       setHubData(hub.dTag, {
         ...hub,
         indexFileHash: finalIndexHash,
         epoch: newEpoch,
+        groupedRoles: updatedGroupedRoles,
       })
 
-      // 9. Cleanup old files (best-effort, only after everything succeeded)
+      // 11. Cleanup old files (best-effort, only after everything succeeded)
       const { deleteFromBlossom } = await import('@/lib/blossom/client')
       const oldIndexHash = hub.indexFileHash
       if (oldSpineHash && oldSpineHash !== spineHash) {
@@ -2938,6 +3090,18 @@ function SecurityPage({ hub }: { hub: HubData }) {
       if (oldHistoryHash && oldHistoryHash !== historyHash) {
         deleteFromBlossom(oldHistoryHash, signer, privateKey, hub.blossomServers).catch(() => { })
       }
+      // Clean up old leaf pages
+      for (const oldPageHash of oldLeafPageHashes) {
+        if (!leafPageRefs.some(lp => lp.hash === oldPageHash)) {
+          deleteFromBlossom(oldPageHash, signer, privateKey, hub.blossomServers).catch(() => { })
+        }
+      }
+      // Clean up old group tree blobs
+      for (const oldGtHash of oldGroupTreeHashesForCleanup) {
+        if (!updatedGroupTrees.some(gt => gt.hash === oldGtHash)) {
+          deleteFromBlossom(oldGtHash, signer, privateKey, hub.blossomServers).catch(() => { })
+        }
+      }
 
       setFixSuccess(true)
       setShowConfirm(false)
@@ -2948,6 +3112,18 @@ function SecurityPage({ hub }: { hub: HubData }) {
       setFixing(false)
     }
   }
+
+  // ── Progress overlay steps ──
+  const allFixStepLabels = [
+    'Downloading current tree',
+    'Rebuilding member tree',
+    ...(groupedRoles.length > 0 ? ['Rebuilding group encryption'] : []),
+    'Uploading tree & index',
+    'Publishing hub event',
+  ]
+
+  // ── Time estimate for confirmation dialog ──
+  const timeEstimate = computeEstimate()
 
   return (
     <div className="flex flex-col gap-6">
@@ -2979,6 +3155,9 @@ function SecurityPage({ hub }: { hub: HubData }) {
         <ul className="text-sm text-muted-foreground list-disc list-inside space-y-1 ml-1">
           <li>Generate a <strong className="text-foreground">new hub secret</strong></li>
           <li>Rebuild the LKH tree with <strong className="text-foreground">all current members</strong> (balanced tree)</li>
+          {groupedRoles.length > 0 && (
+            <li>Rebuild <strong className="text-foreground">{groupedRoles.length} group tree{groupedRoles.length !== 1 ? 's' : ''}</strong> with new secrets</li>
+          )}
           <li>Bump the <strong className="text-foreground">epoch number</strong> (signals key rotation)</li>
           <li>Preserve the <strong className="text-foreground">epoch history</strong> so old messages remain readable</li>
           <li>Upload the new tree, history, and index to Blossom</li>
@@ -2993,7 +3172,52 @@ function SecurityPage({ hub }: { hub: HubData }) {
         </div>
       </div>
 
-      {!showConfirm ? (
+      {/* Progress overlay when fixing */}
+      {fixing && (
+        <div className="rounded-lg border border-primary/30 bg-primary/5 p-4 space-y-3">
+          <div className="flex items-center gap-2">
+            <Loader2 size={16} className="animate-spin text-primary" />
+            <span className="text-sm font-semibold text-foreground">Rebuilding encryption…</span>
+          </div>
+          <div className="space-y-2 ml-1">
+            {allFixStepLabels.map((label) => {
+              const isDone = fixSteps.includes(label)
+              const isActive = fixStep === label && !isDone
+              return (
+                <div key={label} className="flex items-center gap-2 text-sm">
+                  {isDone ? (
+                    <Check size={14} className="text-emerald-400 shrink-0" />
+                  ) : isActive ? (
+                    <Loader2 size={14} className="animate-spin text-primary shrink-0" />
+                  ) : (
+                    <div className="w-3.5 h-3.5 rounded-full border border-border shrink-0" />
+                  )}
+                  <span className={isDone ? 'text-emerald-400' : isActive ? 'text-foreground' : 'text-muted-foreground/50'}>
+                    {label}
+                    {label === 'Rebuilding member tree' && isActive && ` (${memberCount} members)`}
+                    {label === 'Rebuilding group encryption' && isActive && ` (${groupedRoles.length} group${groupedRoles.length !== 1 ? 's' : ''})`}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+          {fixError && (
+            <div className="mt-2 space-y-2">
+              <p className="text-sm text-destructive">{fixError}</p>
+              <div className="flex gap-2">
+                <Button onClick={handleFixEncryption} variant="destructive" size="sm">
+                  <RefreshCw size={12} className="mr-1.5" /> Retry
+                </Button>
+                <Button onClick={() => { setFixing(false); setFixError(null); setFixStep(null); setFixSteps([]) }} variant="ghost" size="sm">
+                  Dismiss
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {!showConfirm && !fixing ? (
         <Button
           onClick={() => setShowConfirm(true)}
           variant="outline"
@@ -3002,7 +3226,7 @@ function SecurityPage({ hub }: { hub: HubData }) {
           <RefreshCw size={14} className="mr-2" />
           Fix Hub Encryption
         </Button>
-      ) : (
+      ) : !fixing && (
         <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-4 space-y-4">
           <div className="flex items-start gap-3">
             <AlertTriangle size={18} className="text-amber-400 shrink-0 mt-0.5" />
@@ -3013,6 +3237,11 @@ function SecurityPage({ hub }: { hub: HubData }) {
                 and bump the epoch.
                 All current members are preserved — they will automatically receive the new keys on sync.
                 Only do this if members are experiencing decryption failures or the tree is corrupted.
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">
+                This hub has <strong className="text-foreground">{memberCount.toLocaleString()} member{memberCount !== 1 ? 's' : ''}</strong>
+                {groupedRoles.length > 0 && <> and <strong className="text-foreground">{groupedRoles.length} group tree{groupedRoles.length !== 1 ? 's' : ''}</strong></>}.
+                {' '}Estimated time: <strong className="text-amber-400">{timeEstimate}</strong>.
               </p>
             </div>
           </div>
@@ -3028,11 +3257,7 @@ function SecurityPage({ hub }: { hub: HubData }) {
               variant="destructive"
               className="min-w-[160px]"
             >
-              {fixing ? (
-                <><Loader2 size={14} className="animate-spin mr-2" /> Rebuilding...</>
-              ) : (
-                'Yes, Fix Encryption'
-              )}
+              Yes, Fix Encryption
             </Button>
             <Button
               onClick={() => { setShowConfirm(false); setFixError(null) }}
@@ -3050,6 +3275,7 @@ function SecurityPage({ hub }: { hub: HubData }) {
           <p className="text-sm text-emerald-400 flex items-center gap-2">
             <ShieldCheck size={14} />
             Encryption fixed successfully! The hub now uses a fresh encryption tree with epoch {hub.epoch + 1}.
+            {groupedRoles.length > 0 && ` ${groupedRoles.length} group tree${groupedRoles.length !== 1 ? 's were' : ' was'} also rebuilt.`}
           </p>
         </div>
       )}

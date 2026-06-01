@@ -4085,7 +4085,7 @@ export function DeleteConfirmDialog({ onConfirm, onCancel, title, description, p
         {!deleting ? (
           <>
             <p className="text-sm text-muted-foreground mb-4">
-              {description || <>This will send a deletion request to the relays. Deletion is <strong>not guaranteed</strong> — some relays may not honor the request, and other clients may have already cached the message.</>}
+              {description || <>This will send a deletion request to the relays. Deletion is <strong>not guaranteed</strong>, as some relays may not honor the request, and other clients may have already cached the message.</>}
             </p>
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={onCancel}>Cancel</Button>
@@ -4528,10 +4528,9 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
     setMessage(newText)
     requestAnimationFrame(() => {
       ta.focus()
-      const cursorPos = start + prefix.length + text.length + suffix.length
       ta.setSelectionRange(
-        selected ? cursorPos : start + prefix.length,
-        selected ? cursorPos : start + prefix.length + text.length
+        start + prefix.length,
+        start + prefix.length + text.length
       )
       autoResize(ta)
     })

@@ -10,7 +10,7 @@
  * - Step-by-step progress feedback during member addition
  */
 
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { useHubStore, type HubData, type HubMember } from '@/stores/hubStore'
 import { useUserStore } from '@/stores/userStore'
@@ -23,7 +23,7 @@ import { truncateNpub, cn } from '@/lib/utils'
 import { nip19 } from 'nostr-tools'
 import { markJoinRequestsSeen } from '@/hooks/useJoinRequestCount'
 import {
-  X, Search, Loader2, Check, Users, CheckSquare, Square, AlertTriangle, ChevronDown, UserPlus,
+  X, Search, Loader2, Check, Users, CheckSquare, Square, AlertTriangle, ChevronDown, UserPlus, RotateCw,
 } from 'lucide-react'
 
 interface JoinRequestsModalProps {
@@ -82,6 +82,19 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
   // Progress tracking
   const [addStep, setAddStep] = useState<string | null>(null)
   const [addSteps, setAddSteps] = useState<string[]>([])
+  const addAbortRef = useRef<AbortController | null>(null)
+  const addTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Auto-dismiss overlay on success after 1.5s
+  useEffect(() => {
+    if (addStep === 'Done' && !addError) {
+      const timer = setTimeout(() => {
+        setAddSteps([])
+        setAddStep(null)
+      }, 1500)
+      return () => clearTimeout(timer)
+    }
+  }, [addStep, addError])
 
   // Fetch join requests
   const loadRequests = useCallback(async () => {
@@ -194,6 +207,20 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
     setAddedCount(0)
     setAddStep(null)
     setAddSteps([])
+
+    // Create abort controller for cancellation
+    const abort = new AbortController()
+    addAbortRef.current = abort
+
+    // Safety timeout — auto-error after 2 minutes to prevent permanent lock
+    if (addTimeoutRef.current) clearTimeout(addTimeoutRef.current)
+    addTimeoutRef.current = setTimeout(() => {
+      if (!abort.signal.aborted) {
+        abort.abort()
+        setAddError('Operation timed out after 2 minutes')
+        setAdding(false)
+      }
+    }, 120_000)
 
     try {
       await markStep('Downloading current tree')
@@ -359,10 +386,14 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
 
       await markStep('Done')
     } catch (err: any) {
-      console.error('Failed to add members:', err)
-      setAddError(err?.message || 'Failed to add members')
+      if (!abort.signal.aborted) {
+        console.error('Failed to add members:', err)
+        setAddError(err?.message || 'Failed to add members')
+      }
     } finally {
       setAdding(false)
+      addAbortRef.current = null
+      if (addTimeoutRef.current) { clearTimeout(addTimeoutRef.current); addTimeoutRef.current = null }
     }
   }
 
@@ -566,6 +597,25 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
                   {addError ? addError : addStep === 'Done' ? `${addedCount} member${addedCount !== 1 ? 's' : ''} added successfully` : addStep || 'Starting...'}
                 </p>
               </div>
+              {/* Always-visible close / cancel button */}
+              <div className="flex-1" />
+              <button
+                onClick={() => {
+                  // Cancel in-progress operation
+                  if (addAbortRef.current && !addAbortRef.current.signal.aborted) {
+                    addAbortRef.current.abort()
+                  }
+                  if (addTimeoutRef.current) { clearTimeout(addTimeoutRef.current); addTimeoutRef.current = null }
+                  setAdding(false)
+                  setAddSteps([])
+                  setAddStep(null)
+                  setAddError(null)
+                }}
+                className="p-1 rounded-full hover:bg-accent/50 transition-colors cursor-pointer shrink-0 self-start"
+                title="Close"
+              >
+                <X size={14} className="text-muted-foreground" />
+              </button>
             </div>
 
             {/* Step list */}
@@ -593,19 +643,27 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
               })}
             </div>
 
-            {/* Done / Error dismiss */}
-            {(addStep === 'Done' || addError) && (
-              <button
-                onClick={() => { setAddSteps([]); setAddStep(null); setAddError(null) }}
-                className={cn(
-                  'w-full h-8 text-xs rounded-lg font-medium transition-colors cursor-pointer',
-                  addError
-                    ? 'bg-destructive text-destructive-foreground hover:bg-destructive/90'
-                    : 'bg-primary text-primary-foreground hover:bg-primary/90'
-                )}
-              >
-                {addError ? 'Dismiss' : 'Done'}
-              </button>
+            {/* Error: Retry + Dismiss */}
+            {addError && (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    setAddError(null)
+                    setAddStep(null)
+                    setAddSteps([])
+                    handleAddMembers()
+                  }}
+                  className="flex-1 flex items-center justify-center gap-1.5 h-8 text-xs rounded-lg font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors cursor-pointer"
+                >
+                  <RotateCw size={12} /> Retry
+                </button>
+                <button
+                  onClick={() => { setAddSteps([]); setAddStep(null); setAddError(null) }}
+                  className="flex-1 h-8 text-xs rounded-lg font-medium text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors cursor-pointer"
+                >
+                  Dismiss
+                </button>
+              </div>
             )}
           </div>
         </div>,

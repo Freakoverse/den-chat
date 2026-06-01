@@ -23,6 +23,10 @@ import { nip19 } from 'nostr-tools'
 import { UserPanel } from '@/components/ui/UserPanel'
 import { ResizablePanel } from '@/components/ui/ResizablePanel'
 import { HubInfoModal } from '@/components/hub/HubInfoModal'
+import { UserProfileModal } from '@/components/hub/UserProfileModal'
+import { HubJoinWarningModal, isJoinWarningDismissed } from '@/components/hub/HubJoinWarningModal'
+import { useBlockStore } from '@/stores/blockStore'
+import { useWotStore } from '@/stores/wotStore'
 import {
   Compass, Search, Loader2, Hash, Info, UserPlus, Check, AlertTriangle,
   X, ShieldAlert, SlidersHorizontal, ChevronLeft, ChevronRight, Plus,
@@ -577,6 +581,8 @@ function DiscoverHubCard({ hub }: { hub: DiscoveredHub }) {
   const [joined, setJoined] = useState(false)
   const [showAllTags, setShowAllTags] = useState(false)
   const [showInfoModal, setShowInfoModal] = useState(false)
+  const [showCreatorProfile, setShowCreatorProfile] = useState(false)
+  const [showJoinWarning, setShowJoinWarning] = useState(false)
 
   const isAlreadyInList = hubEntries.some(e => e.dTag === hub.dTag)
   const creatorProfile = getProfile(hub.creatorPubkey)
@@ -587,6 +593,18 @@ function DiscoverHubCard({ hub }: { hub: DiscoveredHub }) {
   }
 
   const handleRequestJoin = async () => {
+    if (!myPubkey || joining) return
+
+    // Show warning modal if not dismissed
+    if (!isJoinWarningDismissed()) {
+      setShowJoinWarning(true)
+      return
+    }
+
+    doJoin()
+  }
+
+  const doJoin = async () => {
     if (!myPubkey || joining) return
     setJoining(true)
     setJoinError(null)
@@ -659,7 +677,7 @@ function DiscoverHubCard({ hub }: { hub: DiscoveredHub }) {
         {/* Hub identity */}
         <div className="flex items-center gap-2.5 -mt-6 relative z-10">
           {hub.icon ? (
-            <div className="w-11 h-11 rounded-xl overflow-hidden shrink-0 border-2 border-card shadow-lg">
+            <div className="w-11 h-11 rounded-xl overflow-hidden shrink-0 bg-secondary border-2 border-card shadow-lg">
               <IconImage src={hub.icon} name={hub.name} />
             </div>
           ) : (
@@ -710,7 +728,7 @@ function DiscoverHubCard({ hub }: { hub: DiscoveredHub }) {
           </button>
           {isAlreadyInList || joined ? (
             <span className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-              <Check size={12} /> {isAlreadyInList ? 'Joined' : 'Request Sent'}
+              <Check size={12} /> Request Sent
             </span>
           ) : (
             <button
@@ -719,7 +737,7 @@ function DiscoverHubCard({ hub }: { hub: DiscoveredHub }) {
               className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors cursor-pointer disabled:opacity-50"
             >
               {joining ? (
-                <><Loader2 size={12} className="animate-spin" /> {hub.minPow > 0 ? 'Mining...' : 'Joining...'}</>
+                <><Loader2 size={12} className="animate-spin" /> {hub.minPow > 0 ? 'Processing...' : 'Joining...'}</>
               ) : (
                 <><UserPlus size={12} /> Request Join</>
               )}
@@ -771,6 +789,25 @@ function DiscoverHubCard({ hub }: { hub: DiscoveredHub }) {
           filterRelays: [], blossomServers: hub.blossomServers, indexFileHash: '', channels: [],
           categories: [], roles: [], minPow: hub.minPow, nsfw: hub.nsfw, discoverable: hub.discoverable,
         }}
+        blurMedia
+        onCreatorClick={() => {
+          setShowInfoModal(false)
+          setShowCreatorProfile(true)
+        }}
+      />
+
+      {/* Creator profile modal (for viewing / blocking) */}
+      <UserProfileModal
+        open={showCreatorProfile}
+        onClose={() => setShowCreatorProfile(false)}
+        targetPubkey={hub.creatorPubkey}
+      />
+
+      {/* Join warning modal */}
+      <HubJoinWarningModal
+        open={showJoinWarning}
+        onClose={() => setShowJoinWarning(false)}
+        onConfirm={doJoin}
       />
     </div>
   )
@@ -781,7 +818,7 @@ function BannerImage({ src, alt }: { src: string; alt: string }) {
   const blossom = useBlossomMedia(src)
   if (blossom.loading) return <div className="w-full h-full bg-secondary animate-pulse" />
   if (blossom.error) return <div className="w-full h-full bg-gradient-to-br from-primary/15 via-transparent to-secondary/30" />
-  return <img src={blossom.src || src} alt={alt} className="w-full h-full object-cover" loading="lazy" />
+  return <img src={blossom.src || src} alt={alt} className="w-full h-full object-cover blur-lg" loading="lazy" />
 }
 
 function IconImage({ src, name }: { src: string; name: string }) {
@@ -793,7 +830,7 @@ function IconImage({ src, name }: { src: string; name: string }) {
       </div>
     )
   }
-  return <img src={blossom.src || src} alt="" className="w-full h-full object-cover" loading="lazy" />
+  return <img src={blossom.src || src} alt="" className="w-full h-full object-cover blur-sm" loading="lazy" />
 }
 
 // ── Main Page Component ──
@@ -806,6 +843,11 @@ export function DiscoverPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [exhausted, setExhausted] = useState(false) // true when relays have no more results
   const loadingMoreRef = useRef(false)
+
+  // Reactive block + WoT state for filtering
+  const blockedPubkeys = useBlockStore((s) => s.blockedPubkeys)
+  const wotSettings = useWotStore((s) => s.settings)
+  const wotGraphDepth = useWotStore((s) => s.graphDepth)
 
   // Filter state (defaults: NSFW off, PoW 15-25, no tags)
   const [showNsfw, setShowNsfw] = useState(false)
@@ -1002,6 +1044,20 @@ export function DiscoverPage() {
       result = result.filter(h => !h.nsfw)
     }
 
+    // Block filter — hide hubs from blocked users
+    const blockedPubkeys = useBlockStore.getState().blockedPubkeys
+    if (blockedPubkeys.size > 0) {
+      result = result.filter(h => !blockedPubkeys.has(h.creatorPubkey))
+    }
+
+    // WoT filter — hide hubs from users below the WoT score threshold
+    const wotState = useWotStore.getState()
+    const { scoreThreshold } = wotState.settings
+    result = result.filter(h => {
+      const score = wotState.getScore(h.creatorPubkey)
+      return score >= scoreThreshold
+    })
+
     // PoW range filter
     if (powMin > 0 || powMax < 40) {
       result = result.filter(h => h.minPow >= powMin && h.minPow <= powMax)
@@ -1049,7 +1105,7 @@ export function DiscoverPage() {
     }
 
     return result
-  }, [hubs, showNsfw, powMin, powMax, filterTags, filterClientTags, searchQuery])
+  }, [hubs, showNsfw, powMin, powMax, filterTags, filterClientTags, searchQuery, blockedPubkeys, wotSettings, wotGraphDepth])
 
   // Numbered pagination
   const totalPages = Math.max(1, Math.ceil(filteredHubs.length / PAGE_SIZE))

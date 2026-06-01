@@ -299,7 +299,7 @@ export function DM04ChatView({ recipientPubkey, onSwitchProtocol, onBack }: { re
 
   const handleSend = useCallback(async (attachments?: FileAttachment[]) => {
     const text = message.trim()
-    if (!text && !attachments?.length) return
+    if (!text && !attachments?.length && pendingStickers.length === 0 && pendingGifs.length === 0) return
     if (!myPubkey || sending) return
 
     setSending(true)
@@ -394,7 +394,7 @@ export function DM04ChatView({ recipientPubkey, onSwitchProtocol, onBack }: { re
     } finally {
       setSending(false)
     }
-  }, [message, myPubkey, recipientPubkey, signer, privateKey, sendMessage, sending, replyContext])
+  }, [message, myPubkey, recipientPubkey, signer, privateKey, sendMessage, sending, replyContext, pendingStickers, pendingGifs])
 
   const handleAddReaction = useCallback(async (messageId: string, msgPubkey: string, emoji: string, customUrl?: string) => {
     if (!myPubkey) return
@@ -749,6 +749,7 @@ export function DM04ChatView({ recipientPubkey, onSwitchProtocol, onBack }: { re
         onSend={handleSend}
         disabled={!hasNip04}
         sending={sending}
+        canSend={(message.trim() || pendingStickers.length > 0 || pendingGifs.length > 0) ? true : undefined}
         placeholder={hasNip04
           ? `Message ${profile?.display_name || profile?.name || truncateNpub(npubStr, 8)}`
           : 'NIP-04 encryption unavailable'
