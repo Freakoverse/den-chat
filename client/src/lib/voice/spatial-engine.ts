@@ -51,6 +51,10 @@ export class SpatialAudioEngine {
   private running = false
   private is3D = true
 
+  // Per-user volume multipliers (from the volume slider, 0-5 range)
+  // Applied on top of spatial attenuation so boost works in spatial mode.
+  private userVolumes: Map<string, number> = new Map()
+
   // 3D mode state
   private ctx: AudioContext | null = null
   private participantNodes: Map<string, Participant3DNodes> = new Map()
@@ -113,6 +117,21 @@ export class SpatialAudioEngine {
     this.myConePercent = Math.max(0, Math.min(100, percent))
   }
 
+  /** Set per-user volume (0-5 range). Applied on top of spatial attenuation. */
+  setUserVolume(participantId: string, volume: number): void {
+    this.userVolumes.set(participantId, volume)
+    // Immediately apply to 3D GainNode if connected
+    if (this.is3D) {
+      const nodes = this.participantNodes.get(participantId)
+      if (nodes) {
+        const participant = this.participants.get(participantId)
+        const coneAtten = (this.myConePercent > 0 && participant)
+          ? this.computeConeAttenuation(participant.position) : 1.0
+        nodes.gain.gain.value = coneAtten * volume
+      }
+    }
+  }
+
   updateParticipant(participant: SpatialParticipant): void {
     this.participants.set(participant.id, participant)
 
@@ -166,13 +185,12 @@ export class SpatialAudioEngine {
       // This avoids createMediaElementSource which permanently captures elements.
       const source = this.ctx.createMediaStreamSource(stream)
       const gain = this.ctx.createGain()
-      // Apply current cone attenuation immediately (don't wait for next tick)
+      // Apply current cone attenuation × user volume immediately
       const participant = this.participants.get(participantId)!
-      if (this.myConePercent > 0) {
-        gain.gain.value = this.computeConeAttenuation(participant.position)
-      } else {
-        gain.gain.value = 1.0
-      }
+      const coneAtten = this.myConePercent > 0
+        ? this.computeConeAttenuation(participant.position) : 1.0
+      const userVol = this.userVolumes.get(participantId) ?? 1.0
+      gain.gain.value = coneAtten * userVol
 
       const panner = this.ctx.createPanner()
       panner.panningModel = 'HRTF'
@@ -253,21 +271,14 @@ export class SpatialAudioEngine {
       if (this.ctx?.state === 'suspended') {
         this.ctx.resume().catch(() => {})
       }
-      // Apply cone attenuation to each participant's GainNode
-      if (this.myConePercent > 0) {
-        for (const [id, nodes] of this.participantNodes) {
-          const participant = this.participants.get(id)
-          if (!participant) continue
-          const coneAtten = this.computeConeAttenuation(participant.position)
-          nodes.gain.gain.value = coneAtten
-        }
-      } else {
-        // No cone — reset all gains to 1.0
-        for (const [, nodes] of this.participantNodes) {
-          if (nodes.gain.gain.value !== 1) {
-            nodes.gain.gain.value = 1.0
-          }
-        }
+      // Apply cone attenuation × per-user volume to each participant's GainNode
+      for (const [id, nodes] of this.participantNodes) {
+        const participant = this.participants.get(id)
+        if (!participant) continue
+        const coneAtten = this.myConePercent > 0
+          ? this.computeConeAttenuation(participant.position) : 1.0
+        const userVol = this.userVolumes.get(id) ?? 1.0
+        nodes.gain.gain.value = coneAtten * userVol
       }
     } else {
       // Scalar mode — compute distance-based volume * cone attenuation
@@ -281,6 +292,10 @@ export class SpatialAudioEngine {
         if (this.myConePercent > 0) {
           volume *= this.computeConeAttenuation(participant.position)
         }
+
+        // Apply per-user volume boost
+        const userVol = this.userVolumes.get(id) ?? 1.0
+        volume *= userVol
 
         const lastVol = this.lastVolumes.get(id) ?? -1
         if (Math.abs(volume - lastVol) > 0.01) {

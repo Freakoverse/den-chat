@@ -908,16 +908,27 @@ function UserVolumeModal({
   const handleVolumeChange = useCallback((newVolume: number) => {
     setVolume(newVolume)
     setUserVolume(pubkey, newVolume)
-    // Apply to provider (0-2.0 range)
+    const vol = newVolume / 100
+    // Apply to provider
     if (provider) {
-      provider.setParticipantVolume(pubkey, newVolume / 100)
+      provider.setParticipantVolume(pubkey, vol)
+    }
+    // Apply to spatial engine (so boost works in spatial mode)
+    const engine = useVoiceStore.getState()._spatialEngine
+    if (engine) {
+      engine.setUserVolume(pubkey, vol)
     }
   }, [pubkey, provider])
 
   // Apply saved volume on mount
   useEffect(() => {
+    const vol = volume / 100
     if (provider) {
-      provider.setParticipantVolume(pubkey, volume / 100)
+      provider.setParticipantVolume(pubkey, vol)
+    }
+    const engine = useVoiceStore.getState()._spatialEngine
+    if (engine) {
+      engine.setUserVolume(pubkey, vol)
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -960,7 +971,7 @@ function UserVolumeModal({
             <input
               type="range"
               min={0}
-              max={200}
+              max={500}
               value={volume}
               onChange={(e) => handleVolumeChange(parseInt(e.target.value))}
               className="flex-1 min-w-0 h-1.5 rounded-full appearance-none bg-secondary cursor-pointer accent-primary"
@@ -972,9 +983,6 @@ function UserVolumeModal({
               {volume}%
             </span>
           </div>
-          {volume > 100 && (
-            <p className="text-[10px] text-amber-400/70 mt-1">Boosted — may cause distortion</p>
-          )}
         </div>
 
         <div className="border-t border-border" />

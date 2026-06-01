@@ -1480,6 +1480,19 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
         }
       }
 
+      // Seed saved per-user volumes so boost carries into spatial mode
+      try {
+        const raw = localStorage.getItem('den-chat-user-volumes')
+        if (raw) {
+          const map = JSON.parse(raw)
+          for (const [pk, vol] of Object.entries(map)) {
+            if (typeof vol === 'number' && vol !== 100) {
+              engine.setUserVolume(pk, (vol as number) / 100)
+            }
+          }
+        }
+      } catch { /* ignore */ }
+
       engine.start()
       set({ spatialEnabled: true, spatialPanelOpen: true, _spatialEngine: engine })
     }

@@ -505,7 +505,9 @@ export class CloudflareProvider implements VoiceProvider {
   // ── Spatial / Per-User Volume ────────────────────────────────
 
   // GainNodes for per-user volume boost (when volume > 1.0)
-  private gainNodes = new Map<string, { ctx: AudioContext; gain: GainNode; source: MediaElementAudioSourceNode }>()
+  // Uses createMediaStreamSource (not createMediaElementSource) because
+  // the audio elements are backed by WebRTC MediaStreams, not URLs.
+  private gainNodes = new Map<string, { ctx: AudioContext; gain: GainNode; source: MediaStreamAudioSourceNode }>()
 
   // Spatial 3D routing — tracks which audio elements are managed by the spatial engine.
   // When a participant is in this set, setParticipantVolume() skips (engine handles volume).
@@ -518,11 +520,11 @@ export class CloudflareProvider implements VoiceProvider {
     const el = this.audioElements.get(participantId)
     if (!el) return
 
-    const clampedVolume = Math.max(0, Math.min(2, volume))
+    const clampedVolume = Math.max(0, Math.min(5, volume))
 
     if (clampedVolume <= 1) {
       // Standard volume — use native HTMLAudioElement.volume
-      // Disconnect GainNode if previously boosted
+      // Tear down GainNode if previously boosted
       const existing = this.gainNodes.get(participantId)
       if (existing) {
         try {
@@ -531,29 +533,37 @@ export class CloudflareProvider implements VoiceProvider {
           existing.ctx.close()
         } catch { /* ignore */ }
         this.gainNodes.delete(participantId)
-        // Re-set srcObject so audio plays through native path
-        const stream = el.srcObject as MediaStream
-        el.srcObject = null
-        el.srcObject = stream
+        // Unmute the native element — it was muted during boost
+        el.muted = false
       }
       el.volume = clampedVolume
     } else {
       // Boosted volume (>100%) — route through Web Audio GainNode
-      el.volume = 1  // use native at max
+      // Mute the native element to prevent double playback;
+      // all audio flows through the GainNode → ctx.destination instead.
       let entry = this.gainNodes.get(participantId)
       if (!entry) {
+        const stream = el.srcObject as MediaStream
+        if (!stream) return
         try {
           const ctx = new AudioContext()
-          const source = ctx.createMediaElementSource(el)
+          if (ctx.state === 'suspended') {
+            ctx.resume().catch(() => {})
+          }
+          const source = ctx.createMediaStreamSource(stream)
           const gain = ctx.createGain()
           source.connect(gain)
           gain.connect(ctx.destination)
           entry = { ctx, gain, source }
           this.gainNodes.set(participantId, entry)
+          // Mute native element — GainNode now handles output
+          el.muted = true
         } catch (err) {
           console.warn('[CF Provider] Failed to create GainNode for volume boost:', err)
           return
         }
+      } else if (entry.ctx.state === 'suspended') {
+        entry.ctx.resume().catch(() => {})
       }
       entry.gain.gain.value = clampedVolume
     }
