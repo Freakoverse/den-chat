@@ -3,7 +3,7 @@ import { useUserStore } from '@/stores/userStore'
 import { isTauri } from '@/lib/utils'
 import { ADMIN_PUBKEY, StorageKey } from '@/lib/constants'
 import { fetchReplaceable, fetchEvents, publishToSpecificRelays, getRelayList } from '@/lib/nostr/relay-pool'
-import { MonitorSmartphone, Import, Plus, Loader2, AlertCircle, Link2, KeyRound, Copy, Check, AppWindow, ChevronDown, ChevronLeft, ChevronRight, X, Shield, ShieldAlert, ExternalLink, User, Lock, Eye, EyeOff, GitBranch, Sprout, KeySquare, Download, FileUp, BookOpen, Camera, Settings2, XCircle, FileText, Package, LockOpen, Globe, RefreshCw } from 'lucide-react'
+import { MonitorSmartphone, Import, Plus, Loader2, AlertCircle, Link2, KeyRound, Copy, Check, AppWindow, ChevronDown, ChevronLeft, ChevronRight, X, Shield, ShieldAlert, ExternalLink, User, Lock, Eye, EyeOff, GitBranch, Sprout, KeySquare, Download, FileUp, BookOpen, Camera, Settings2, XCircle, FileText, Package, LockOpen, Globe, RefreshCw, Rocket } from 'lucide-react'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { BlossomImage } from '@/components/ui/BlossomImage'
 import { Button } from '@/components/ui/button'
@@ -2068,7 +2068,7 @@ export function LoginScreen() {
               className="h-11"
               onKeyDown={(e) => e.key === 'Enter' && handleUPV2Login()}
             />
-            <Button onClick={handleUPV2Login} size="lg" className="w-full" disabled={loading === 'upv2'}>
+            <Button variant="secondary" onClick={handleUPV2Login} size="lg" className="w-full hover:!bg-primary hover:!text-primary-foreground" disabled={loading === 'upv2'}>
               {loading === 'upv2' ? <Loader2 size={16} className="animate-spin" /> : 'Login'}
             </Button>
           </div>
@@ -2164,14 +2164,13 @@ export function LoginScreen() {
               )
             )}
 
-            {/* Guide / Tutorial */}
+            {/* New user? */}
             <Button
-              variant="ghost"
-              className="w-full gap-2 text-muted-foreground hover:text-foreground"
+              className="w-full gap-2"
               onClick={() => setShowGuide(true)}
             >
               <BookOpen size={15} />
-              Guide / Tutorial
+              New user?
             </Button>
           </div>
 
@@ -2186,7 +2185,14 @@ export function LoginScreen() {
       </Card>
 
       <TermsModal open={showTerms} onClose={() => setShowTerms(false)} />
-      <GuideModal open={showGuide} onClose={() => setShowGuide(false)} />
+      <GuideModal
+        open={showGuide}
+        onClose={() => setShowGuide(false)}
+        isDesktop={isDesktop}
+        onGenerate={() => { setShowGuide(false); openGenerateFlow() }}
+        onLocalSigner={() => { setShowGuide(false); handleLocalLogin() }}
+        onExtension={() => { setShowGuide(false); handleNip07Login() }}
+      />
       <ExtensionGuideModal open={showExtensionGuide} onClose={() => setShowExtensionGuide(false)} />
       <NoLocalSignerModal open={showLocalSignerModal} onClose={() => setShowLocalSignerModal(false)} isDesktop={isDesktop} />
 
@@ -2537,15 +2543,78 @@ const GUIDE_PAGES: { title: string; icon: React.ReactNode; content: React.ReactN
   },
 ]
 
-function GuideModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+function GuideModal({ open, onClose, isDesktop, onGenerate, onLocalSigner, onExtension }: {
+  open: boolean
+  onClose: () => void
+  isDesktop: boolean
+  onGenerate: () => void
+  onLocalSigner: () => void
+  onExtension: () => void
+}) {
+  type Track = 'choice' | 'quick' | 'detailed'
+  const [track, setTrack] = useState<Track>('choice')
   const [page, setPage] = useState(0)
-  const total = GUIDE_PAGES.length
-  const current = GUIDE_PAGES[page]
+  const [showDownload, setShowDownload] = useState(false)
+  const [latestBuild, setLatestBuild] = useState<{
+    version: string
+    platforms: { platform: string; url: string; ext: string }[]
+    published_at: number
+  } | null>(null)
+  const [buildLoading, setBuildLoading] = useState(false)
 
-  // Reset to first page when modal opens
-  useEffect(() => { if (open) setPage(0) }, [open])
+  // Reset state when modal opens
+  useEffect(() => {
+    if (open) { setTrack('choice'); setPage(0); setShowDownload(false) }
+  }, [open])
+
+  // Fetch latest build when download modal opens (web only)
+  useEffect(() => {
+    if (!showDownload) return
+    setBuildLoading(true)
+    const BUILD_PREFIX = 'den-chat-build-'
+    fetchEvents({ authors: [ADMIN_PUBKEY], kinds: [30078] }).then((events) => {
+      const parsed: { version: string; platforms: { platform: string; url: string; ext: string }[]; published_at: number }[] = []
+      for (const ev of events) {
+        const dTag = ev.tags.find(t => t[0] === 'd')?.[1]
+        if (!dTag || !dTag.startsWith(BUILD_PREFIX)) continue
+        try {
+          const data = JSON.parse(ev.content)
+          if (data.deleted || ev.tags.some(t => t[0] === 'deleted')) continue
+          if (data.version) {
+            parsed.push({
+              version: data.version,
+              platforms: Array.isArray(data.platforms)
+                ? data.platforms.map((p: Record<string, string>) => ({ platform: p.platform || '', url: p.url || '', ext: p.ext || '' }))
+                : [],
+              published_at: data.published_at || ev.created_at,
+            })
+          }
+        } catch { /* ignore */ }
+      }
+      parsed.sort((a, b) => b.published_at - a.published_at)
+      if (parsed.length > 0) setLatestBuild(parsed[0])
+    }).finally(() => setBuildLoading(false))
+  }, [showDownload])
 
   if (!open) return null
+
+  // Quick-start slides
+  const QUICK_SLIDES = [
+    {
+      icon: <KeyRound size={40} className="text-primary" />,
+      bg: 'bg-primary/10',
+      title: 'Your keys, your identity',
+      body: 'Your account is a pair of cryptographic keys that live only on your device. No email, no phone number, no company.',
+    },
+    {
+      icon: <Shield size={40} className="text-emerald-500" />,
+      bg: 'bg-emerald-500/10',
+      title: 'Back it up, or lose it forever',
+      body: 'When you create an account, you may receive a seed phrase (24 words) or a private key. Write it down and keep it safe. If you lose it, nobody can recover your account for you. Not even the developers.',
+    },
+  ]
+
+  const quickTotal = QUICK_SLIDES.length + 1 // +1 for CTA slide
 
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center">
@@ -2557,6 +2626,14 @@ function GuideModal({ open, onClose }: { open: boolean; onClose: () => void }) {
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
           <div className="flex items-center gap-2.5">
+            {track !== 'choice' && (
+              <button
+                onClick={() => { setTrack('choice'); setPage(0) }}
+                className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors cursor-pointer"
+              >
+                <ChevronLeft size={16} />
+              </button>
+            )}
             <BookOpen size={18} className="text-primary" />
             <h2 className="font-semibold text-foreground">Getting Started</h2>
           </div>
@@ -2565,57 +2642,259 @@ function GuideModal({ open, onClose }: { open: boolean; onClose: () => void }) {
           </button>
         </div>
 
-        {/* Page title */}
-        <div className="px-5 py-3 border-b border-border/50 bg-secondary/30 shrink-0 flex items-center gap-2.5">
-          {current.icon}
-          <h3 className="text-sm font-semibold text-foreground">{current.title}</h3>
-          <span className="ml-auto text-[10px] text-muted-foreground font-medium tabular-nums">{page + 1} / {total}</span>
-        </div>
+        {/* ── Choice Screen ── */}
+        {track === 'choice' && (
+          <div className="px-5 py-6 space-y-3">
+            <p className="text-sm text-muted-foreground text-center mb-4">How would you like to get started?</p>
 
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto px-5 py-4 min-h-[260px] max-h-[50vh]">
-          {current.content}
-        </div>
+            {/* Quick Start card */}
+            <button
+              onClick={() => { setTrack('quick'); setPage(0) }}
+              className="w-full flex items-center gap-4 p-4 rounded-xl border border-border bg-secondary/30 hover:bg-secondary/50 hover:border-primary/30 transition-all cursor-pointer text-left group"
+            >
+              <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center shrink-0 group-hover:bg-primary/15 transition-colors">
+                <Rocket size={24} className="text-primary" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h3 className="text-sm font-semibold text-foreground">Quick Start</h3>
+                <p className="text-xs text-muted-foreground mt-0.5">Get up and running in under a minute</p>
+              </div>
+              <ChevronRight size={16} className="text-muted-foreground shrink-0" />
+            </button>
 
-        {/* Footer navigation */}
-        <div className="px-5 py-3 border-t border-border shrink-0 flex items-center justify-between">
-          <button
-            onClick={() => setPage(p => Math.max(0, p - 1))}
-            disabled={page === 0}
-            className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
-          >
-            <ChevronLeft size={16} /> Back
-          </button>
-
-          {/* Page dots */}
-          <div className="flex items-center gap-1.5">
-            {Array.from({ length: total }).map((_, i) => (
-              <button
-                key={i}
-                onClick={() => setPage(i)}
-                className={`w-2 h-2 rounded-full transition-all cursor-pointer ${i === page ? 'bg-primary scale-110' : 'bg-border hover:bg-muted-foreground/50'
-                  }`}
-              />
-            ))}
+            {/* Detailed Guide card */}
+            <button
+              onClick={() => { setTrack('detailed'); setPage(0) }}
+              className="w-full flex items-center gap-4 p-4 rounded-xl border border-border bg-secondary/30 hover:bg-secondary/50 hover:border-primary/30 transition-all cursor-pointer text-left group"
+            >
+              <div className="w-12 h-12 rounded-xl bg-secondary/60 flex items-center justify-center shrink-0 group-hover:bg-secondary/80 transition-colors">
+                <BookOpen size={24} className="text-muted-foreground" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h3 className="text-sm font-semibold text-foreground">Detailed Guide</h3>
+                <p className="text-xs text-muted-foreground mt-0.5">Learn everything about how your account works</p>
+              </div>
+              <ChevronRight size={16} className="text-muted-foreground shrink-0" />
+            </button>
           </div>
+        )}
 
-          {page < total - 1 ? (
-            <button
-              onClick={() => setPage(p => Math.min(total - 1, p + 1))}
-              className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors cursor-pointer"
-            >
-              Next <ChevronRight size={16} />
-            </button>
-          ) : (
-            <button
-              onClick={onClose}
-              className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors cursor-pointer"
-            >
-              Got it <Check size={16} />
-            </button>
-          )}
-        </div>
+        {/* ── Quick Start Track ── */}
+        {track === 'quick' && (
+          <>
+            {/* Info slides */}
+            {page < QUICK_SLIDES.length && (
+              <div className="flex-1 flex flex-col items-center justify-center px-8 py-10 text-center min-h-[280px]">
+                <div className={`w-20 h-20 rounded-2xl ${QUICK_SLIDES[page].bg} flex items-center justify-center mb-5`}>
+                  {QUICK_SLIDES[page].icon}
+                </div>
+                <h3 className="text-lg font-bold text-foreground mb-2">{QUICK_SLIDES[page].title}</h3>
+                <p className="text-sm text-muted-foreground leading-relaxed max-w-sm">
+                  {QUICK_SLIDES[page].body}
+                </p>
+              </div>
+            )}
+
+            {/* CTA slide */}
+            {page === QUICK_SLIDES.length && (
+              <div className="flex-1 flex flex-col items-center justify-center px-8 py-10 text-center min-h-[280px]">
+                <div className="w-20 h-20 rounded-2xl bg-primary/10 flex items-center justify-center mb-5">
+                  <Rocket size={40} className="text-primary" />
+                </div>
+                <h3 className="text-lg font-bold text-foreground mb-2">Ready to go!</h3>
+                <p className="text-sm text-muted-foreground leading-relaxed max-w-sm mb-5">
+                  Create your account and start using DEN Chat.
+                </p>
+
+                <div className="w-full max-w-xs space-y-2">
+                  {isDesktop ? (
+                    <>
+                      <Button variant="outline" onClick={onLocalSigner} className="w-full gap-2">
+                        <MonitorSmartphone size={16} />
+                        Local Signer
+                      </Button>
+                      <Button onClick={onGenerate} className="w-full gap-2">
+                        <Plus size={16} />
+                        Generate Account
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <Button variant="outline" onClick={onExtension} className="w-full gap-2">
+                        <AppWindow size={16} />
+                        Use Extension
+                      </Button>
+                      <Button onClick={() => setShowDownload(true)} className="w-full gap-2">
+                        <Download size={16} />
+                        Download DEN Chat
+                      </Button>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Footer navigation */}
+            <div className="px-5 py-3 border-t border-border shrink-0 flex items-center justify-between">
+              <button
+                onClick={() => setPage(p => Math.max(0, p - 1))}
+                disabled={page === 0}
+                className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+              >
+                <ChevronLeft size={16} /> Back
+              </button>
+
+              {/* Page dots */}
+              <div className="flex items-center gap-1.5">
+                {Array.from({ length: quickTotal }).map((_, i) => (
+                  <button
+                    key={i}
+                    onClick={() => setPage(i)}
+                    className={`w-2 h-2 rounded-full transition-all cursor-pointer ${i === page ? 'bg-primary scale-110' : 'bg-border hover:bg-muted-foreground/50'}`}
+                  />
+                ))}
+              </div>
+
+              {page < quickTotal - 1 ? (
+                <button
+                  onClick={() => setPage(p => Math.min(quickTotal - 1, p + 1))}
+                  className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors cursor-pointer"
+                >
+                  Next <ChevronRight size={16} />
+                </button>
+              ) : (
+                <button
+                  onClick={onClose}
+                  className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors cursor-pointer"
+                >
+                  Close
+                </button>
+              )}
+            </div>
+          </>
+        )}
+
+        {/* ── Detailed Track (existing pages) ── */}
+        {track === 'detailed' && (() => {
+          const detailedTotal = GUIDE_PAGES.length
+          const current = GUIDE_PAGES[page]
+          return (
+            <>
+              {/* Page title */}
+              <div className="px-5 py-3 border-b border-border/50 bg-secondary/30 shrink-0 flex items-center gap-2.5">
+                {current.icon}
+                <h3 className="text-sm font-semibold text-foreground">{current.title}</h3>
+                <span className="ml-auto text-[10px] text-muted-foreground font-medium tabular-nums">{page + 1} / {detailedTotal}</span>
+              </div>
+
+              {/* Content */}
+              <div className="flex-1 overflow-y-auto px-5 py-4 min-h-[260px] max-h-[50vh]">
+                {current.content}
+              </div>
+
+              {/* Footer navigation */}
+              <div className="px-5 py-3 border-t border-border shrink-0 flex items-center justify-between">
+                <button
+                  onClick={() => setPage(p => Math.max(0, p - 1))}
+                  disabled={page === 0}
+                  className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  <ChevronLeft size={16} /> Back
+                </button>
+
+                {/* Page dots */}
+                <div className="flex items-center gap-1.5">
+                  {Array.from({ length: detailedTotal }).map((_, i) => (
+                    <button
+                      key={i}
+                      onClick={() => setPage(i)}
+                      className={`w-2 h-2 rounded-full transition-all cursor-pointer ${i === page ? 'bg-primary scale-110' : 'bg-border hover:bg-muted-foreground/50'}`}
+                    />
+                  ))}
+                </div>
+
+                {page < detailedTotal - 1 ? (
+                  <button
+                    onClick={() => setPage(p => Math.min(detailedTotal - 1, p + 1))}
+                    className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors cursor-pointer"
+                  >
+                    Next <ChevronRight size={16} />
+                  </button>
+                ) : (
+                  <button
+                    onClick={onClose}
+                    className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors cursor-pointer"
+                  >
+                    Got it <Check size={16} />
+                  </button>
+                )}
+              </div>
+            </>
+          )
+        })()}
       </div>
+
+      {/* ── Download Sub-modal (web only) ── */}
+      {showDownload && (
+        <div className="fixed inset-0 z-[210] flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setShowDownload(false)} />
+          <div className="relative z-10 w-full max-w-md mx-4 bg-card rounded-xl border border-border shadow-2xl animate-in fade-in-0 zoom-in-95 duration-200">
+            {/* Header */}
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+              <div className="flex items-center gap-2.5">
+                <Download size={18} className="text-primary" />
+                <h2 className="font-semibold text-foreground">Download DEN Chat</h2>
+              </div>
+              <button onClick={() => setShowDownload(false)} className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors cursor-pointer">
+                <X size={16} />
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="px-5 py-4 max-h-[60vh] overflow-y-auto">
+              {buildLoading ? (
+                <div className="flex flex-col items-center justify-center py-12 gap-2">
+                  <Loader2 size={24} className="animate-spin text-muted-foreground" />
+                  <p className="text-xs text-muted-foreground">Fetching latest build...</p>
+                </div>
+              ) : latestBuild ? (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-semibold text-foreground">{latestBuild.version}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {new Date(latestBuild.published_at * 1000).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}
+                    </span>
+                  </div>
+                  {latestBuild.platforms.length > 0 ? (
+                    <div className="space-y-1.5">
+                      <p className="text-xs font-medium text-muted-foreground">Choose your platform:</p>
+                      {latestBuild.platforms.map((p, i) => (
+                        <a
+                          key={i}
+                          href={p.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-secondary/40 border border-border hover:bg-secondary/60 hover:border-primary/30 transition-all group w-full"
+                        >
+                          <Download size={14} className="text-primary shrink-0" />
+                          <span className="text-sm text-foreground font-medium">{p.platform}</span>
+                          {p.ext && (
+                            <span className="text-[11px] text-muted-foreground ml-auto">.{p.ext.replace(/^\./, '')}</span>
+                          )}
+                        </a>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground text-center py-4">No platform downloads available.</p>
+                  )}
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground text-center py-8">No builds available yet.</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
