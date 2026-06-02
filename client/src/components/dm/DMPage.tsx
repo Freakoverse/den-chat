@@ -206,7 +206,11 @@ export function DMPage() {
 
   const [dmProtocol, setDmProtocol] = useState<DMProtocol>('nip04')
   const [showNewDM, setShowNewDM] = useState(false)
-  const [mobileShowList, setMobileShowList] = useState(true)
+  // Start with list hidden on mobile if there's already an active conversation
+  // (e.g. navigated here via UserProfileModal → onDM)
+  const [mobileShowList, setMobileShowList] = useState(
+    () => !useDM04Store.getState().activeConversation && !useDMStore.getState().activeConversation
+  )
 
   // Use the follow store loaded at startup — no re-fetch needed on mount
   const followSet = useFollowStore((s) => s.followedPubkeys)
@@ -215,6 +219,14 @@ export function DMPage() {
   const activeConversation = dmProtocol === 'nip04' ? nip04Active : nip17Active
   const setActiveConversation = dmProtocol === 'nip04' ? setNip04Active : setNip17Active
   const loading = dmProtocol === 'nip04' ? loadingNip04 : loadingNip17
+
+  // When the active conversation changes externally (e.g. onDM from profile),
+  // automatically switch to the chat panel on mobile.
+  useEffect(() => {
+    if (activeConversation) {
+      setMobileShowList(false)
+    }
+  }, [activeConversation])
 
   // DM subscriptions are now started at app launch in useStartup.ts
   // No need to start/stop them on DMPage mount/unmount

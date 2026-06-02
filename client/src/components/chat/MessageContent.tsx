@@ -16,6 +16,7 @@ import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { nip19 } from 'nostr-tools'
 import { getEmojiMap, isEmojiSizeOk } from '@/stores/emojiStore'
+import { getRenderLimit } from '@/lib/imageSizeGuard'
 import { BlossomImg } from '@/components/ui/BlossomImg'
 import { HubEventCard } from '@/components/hub/HubEventCard'
 import { HubMessageCard } from '@/components/hub/HubMessageCard'
@@ -653,7 +654,7 @@ export const MessageContent = memo(function MessageContent({ content, suffix, on
         const setAddress = pipeIdx >= 0 ? rest.slice(pipeIdx + 1) : undefined
         // Size gate: skip rendering if emoji exceeds 1 MB
         if (src && !isEmojiSizeOk(src)) {
-          return <span title="Emoji too large (>1 MB)">{`:${shortcode}:`}</span>
+          return <span title={`Emoji too large (>${getRenderLimit('chat')} MB limit)`}>{`:${shortcode}:`}</span>
         }
         return (
           <TooltipProvider delayDuration={200}>
@@ -877,7 +878,7 @@ function emojify(text: string, eventEmojiTags?: [string, string, string?][]): Re
     const ev = eventMap.get(shortcode)
     const url = emoji?.url || ev?.url
     if (!url) continue
-    // Size gate: skip rendering if emoji exceeds 1 MB
+    // Size gate: skip rendering if emoji exceeds the render limit
     if (!isEmojiSizeOk(url)) continue
     const setAddr = emoji?.setAddress || ev?.setAddress
 

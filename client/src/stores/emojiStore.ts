@@ -170,64 +170,47 @@ export function getAllowLargeEmojis(): boolean {
   } catch { return false }
 }
 
-/* ─── Emoji size checking cache ─── */
+/* ─── Emoji size checking (delegates to shared imageSizeGuard) ─── */
 
-const EMOJI_SIZE_LIMIT = 1 * 1024 * 1024 // 1 MB
-const sizeCache = new Map<string, 'ok' | 'too-large' | 'checking'>()
+import {
+  checkImageSize, checkSizeSync, getCachedSize,
+  getRenderLimit, hasSizeOverride,
+} from '@/lib/imageSizeGuard'
+
+/** Render limit in bytes for emojis — reads from the user-configurable 'chat' category. */
+function getEmojiRenderLimitBytes(): number {
+  return getRenderLimit('chat') * 1024 * 1024
+}
 
 /**
- * Check if an emoji URL is within the 1 MB size limit.
- * Uses HEAD requests with caching. Returns true if ok/unknown, false if too large.
+ * Synchronous check: is an emoji URL within the render limit?
+ * Uses the shared imageSizeGuard cache (HEAD requests with dedup).
+ * Returns true if ok/unknown/checking, false if too large.
  * When allowLargeEmojis is enabled, always returns true.
  */
 export function isEmojiSizeOk(url: string): boolean {
   if (getAllowLargeEmojis()) return true
-  const cached = sizeCache.get(url)
-  if (cached === 'ok') return true
-  if (cached === 'too-large') return false
-  if (cached === 'checking') return true // optimistic while checking
-  // Start async check
-  sizeCache.set(url, 'checking')
-  checkEmojiSize(url)
-  return true // optimistic first render
-}
-
-async function checkEmojiSize(url: string): Promise<void> {
-  try {
-    const resp = await fetch(url, { method: 'HEAD' })
-    const cl = resp.headers.get('content-length')
-    if (cl && Number(cl) > EMOJI_SIZE_LIMIT) {
-      sizeCache.set(url, 'too-large')
-    } else {
-      sizeCache.set(url, 'ok')
-    }
-  } catch {
-    sizeCache.set(url, 'ok') // on error, allow rendering
-  }
+  if (hasSizeOverride(url)) return true
+  const limitBytes = getEmojiRenderLimitBytes()
+  const status = checkSizeSync(url, limitBytes)
+  // 'ok' | 'checking' | 'unknown' → allow; 'too-large' → block
+  return status !== 'too-large'
 }
 
 /**
- * Check all emojis in a set. Returns true if ANY emoji is > 1 MB.
+ * Check all emojis in a set. Returns true if ANY emoji exceeds the render limit.
  */
 export async function hasOversizedEmoji(emojis: { url: string }[]): Promise<boolean> {
   if (getAllowLargeEmojis()) return false
+  const limitBytes = getEmojiRenderLimitBytes()
   const checks = await Promise.all(emojis.map(async (e) => {
-    const cached = sizeCache.get(e.url)
-    if (cached === 'ok') return false
-    if (cached === 'too-large') return true
-    try {
-      const resp = await fetch(e.url, { method: 'HEAD' })
-      const cl = resp.headers.get('content-length')
-      if (cl && Number(cl) > EMOJI_SIZE_LIMIT) {
-        sizeCache.set(e.url, 'too-large')
-        return true
-      }
-      sizeCache.set(e.url, 'ok')
-      return false
-    } catch {
-      sizeCache.set(e.url, 'ok')
-      return false
+    if (hasSizeOverride(e.url)) return false
+    const cached = getCachedSize(e.url)
+    if (cached !== undefined) {
+      return cached !== 'unknown' && cached > limitBytes
     }
+    const size = await checkImageSize(e.url)
+    return size !== 'unknown' && size > limitBytes
   }))
   return checks.some(Boolean)
 }

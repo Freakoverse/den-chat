@@ -14,6 +14,7 @@
 
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { blossomServers } from '@/lib/blossom'
+import { setCachedSize, hasSizeOverride, checkImageSize as headCheckSize } from '@/lib/imageSizeGuard'
 
 // ── Blossom URL detection ──
 
@@ -106,6 +107,10 @@ export type BlossomMediaState = {
   retryVerification: (fromServerIndex?: number) => void
   /** Accept an externally verified blob URL (from recovery modal) */
   acceptVerifiedUrl: (blobUrl: string) => void
+  /** True if the image exceeds the configured render size limit */
+  sizeExceeded: boolean
+  /** Detected file size in bytes (from HEAD Content-Length), or undefined */
+  detectedSize: number | undefined
 }
 
 // ── Global cache for verified hashes (avoid re-verifying the same file) ──
@@ -115,7 +120,7 @@ const verifiedCache = new Map<string, { serverUrl: string }>()
  * Hook that provides optimistic blossom media rendering with background hash verification.
  * Returns a direct URL immediately so the browser can render/stream natively.
  */
-export function useBlossomMedia(originalUrl: string | undefined): BlossomMediaState {
+export function useBlossomMedia(originalUrl: string | undefined, maxSizeMB?: number): BlossomMediaState {
   const parsed = useMemo(() => originalUrl ? parseBlossomUrl(originalUrl) : null, [originalUrl])
 
   // Build server list: origin first, then all configured servers (deduplicated)
@@ -135,8 +140,13 @@ export function useBlossomMedia(originalUrl: string | undefined): BlossomMediaSt
   const [error, setError] = useState<false | 'not-found'>(false)
   const [serverIdx, setServerIdx] = useState(0)
   const [loading, setLoading] = useState(false)
+  const [sizeExceeded, setSizeExceeded] = useState(false)
+  const [detectedSize, setDetectedSize] = useState<number | undefined>(undefined)
   const cancelRef = useRef(false)
   const verifyingRef = useRef(false)
+
+  // Compute the limit in bytes (undefined = no limit)
+  const limitBytes = maxSizeMB != null && maxSizeMB > 0 ? maxSizeMB * 1024 * 1024 : undefined
 
   // Build a URL from server index
   const buildUrl = useCallback((idx: number) => {
@@ -165,6 +175,8 @@ export function useBlossomMedia(originalUrl: string | undefined): BlossomMediaSt
     setError(false)
     setVerified('pending')
     setServerIdx(0)
+    setSizeExceeded(false)
+    setDetectedSize(undefined)
 
     const findServer = async () => {
       for (let i = 0; i < servers.length; i++) {
@@ -177,6 +189,24 @@ export function useBlossomMedia(originalUrl: string | undefined): BlossomMediaSt
           clearTimeout(timer)
           if (res.ok) {
             if (cancelRef.current) return
+
+            // ── Size limit check (Tier 1: HEAD Content-Length) ──
+            const cl = res.headers.get('content-length')
+            if (cl) {
+              const sizeBytes = Number(cl)
+              if (!isNaN(sizeBytes) && sizeBytes > 0) {
+                setCachedSize(url, sizeBytes)
+                setDetectedSize(sizeBytes)
+                if (limitBytes && !hasSizeOverride(originalUrl || '') && sizeBytes > limitBytes) {
+                  setSizeExceeded(true)
+                  setLoading(false)
+                  return
+                }
+              }
+            } else {
+              setCachedSize(url, 'unknown')
+            }
+
             setCurrentSrc(url)
             setServerIdx(i)
             setLoading(false)
@@ -252,7 +282,7 @@ export function useBlossomMedia(originalUrl: string | undefined): BlossomMediaSt
 
     findServer()
     return () => { cancelRef.current = true }
-  }, [parsed, servers, buildUrl])
+  }, [parsed, servers, buildUrl, limitBytes, originalUrl])
 
   // ── Manual retry (for recovery modal) ──
   const retryVerification = useCallback((fromServerIndex?: number) => {
@@ -318,10 +348,30 @@ export function useBlossomMedia(originalUrl: string | undefined): BlossomMediaSt
     }
   }, [parsed])
 
+  // ── Non-blossom URL: standalone size check ──
+  const [nonBlossomSizeExceeded, setNonBlossomSizeExceeded] = useState(false)
+  const [nonBlossomSize, setNonBlossomSize] = useState<number | undefined>(undefined)
+
+  useEffect(() => {
+    if (parsed || !originalUrl || !limitBytes || hasSizeOverride(originalUrl)) return
+    let cancelled = false
+
+    headCheckSize(originalUrl).then((result) => {
+      if (cancelled) return
+      if (typeof result === 'number') {
+        setNonBlossomSize(result)
+        if (result > limitBytes) setNonBlossomSizeExceeded(true)
+      }
+      // If 'unknown', we allow it through (can't determine size from HEAD)
+    })
+
+    return () => { cancelled = true }
+  }, [parsed, originalUrl, limitBytes])
+
   // Not a blossom URL — return original unchanged
   if (!parsed) {
     return {
-      src: originalUrl || '',
+      src: nonBlossomSizeExceeded ? '' : (originalUrl || ''),
       loading: false,
       verified: 'verified',
       error: false,
@@ -332,11 +382,13 @@ export function useBlossomMedia(originalUrl: string | undefined): BlossomMediaSt
       ext: '',
       retryVerification: () => {},
       acceptVerifiedUrl: () => {},
+      sizeExceeded: nonBlossomSizeExceeded,
+      detectedSize: nonBlossomSize,
     }
   }
 
   return {
-    src: currentSrc,
+    src: sizeExceeded ? '' : currentSrc,
     loading,
     verified,
     error,
@@ -347,6 +399,8 @@ export function useBlossomMedia(originalUrl: string | undefined): BlossomMediaSt
     ext: parsed.ext,
     retryVerification,
     acceptVerifiedUrl,
+    sizeExceeded,
+    detectedSize,
   }
 }
 

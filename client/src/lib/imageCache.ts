@@ -10,8 +10,11 @@
  * are passed through unchanged.
  */
 
-/** Remote URL → blob URL */
+/** Remote URL → blob URL (or TOO_LARGE sentinel) */
 const blobCache = new Map<string, string>()
+
+/** Sentinel value indicating the image was too large */
+export const IMAGE_TOO_LARGE = '__too_large__'
 
 /** URLs currently being fetched */
 const pendingFetches = new Set<string>()
@@ -63,32 +66,79 @@ export function fetchAndCacheImage(url: string, onCached: () => void): void {
 }
 
 /** Internal: perform the actual fetch and cache */
-function _doFetch(url: string): void {
+function _doFetch(url: string, maxBytes?: number): void {
   pendingFetches.add(url)
 
-  fetch(url, { mode: 'cors' })
-    .then((res) => {
+  const doFetch = async () => {
+    try {
+      const res = await fetch(url, { mode: 'cors' })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      return res.blob()
-    })
-    .then((blob) => {
+
+      // Check Content-Length header first (cheap)
+      if (maxBytes) {
+        const cl = res.headers.get('content-length')
+        if (cl) {
+          const size = Number(cl)
+          if (!isNaN(size) && size > maxBytes) {
+            blobCache.set(url, IMAGE_TOO_LARGE)
+            _notifyListeners(url)
+            return
+          }
+        }
+      }
+
+      // If we have a size limit and the body supports streaming, count bytes
+      if (maxBytes && res.body) {
+        const reader = res.body.getReader()
+        const chunks: Uint8Array[] = []
+        let totalBytes = 0
+
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          totalBytes += value.length
+          if (totalBytes > maxBytes) {
+            reader.cancel()
+            blobCache.set(url, IMAGE_TOO_LARGE)
+            _notifyListeners(url)
+            return
+          }
+          chunks.push(value)
+        }
+
+        const blob = new Blob(chunks)
+        const blobUrl = URL.createObjectURL(blob)
+        blobCache.set(url, blobUrl)
+        _notifyListeners(url)
+        return
+      }
+
+      // No size limit or no ReadableStream support — standard path
+      const blob = await res.blob()
+      if (maxBytes && blob.size > maxBytes) {
+        blobCache.set(url, IMAGE_TOO_LARGE)
+        _notifyListeners(url)
+        return
+      }
       const blobUrl = URL.createObjectURL(blob)
       blobCache.set(url, blobUrl)
-
-      // Notify all waiting listeners
-      const cbs = listeners.get(url)
-      if (cbs) {
-        for (const cb of cbs) cb()
-      }
-    })
-    .catch(() => {
-      // CORS or network error — mark as failed so we don't retry
+      _notifyListeners(url)
+    } catch {
       failedUrls.add(url)
-    })
-    .finally(() => {
+    } finally {
       pendingFetches.delete(url)
       listeners.delete(url)
-    })
+    }
+  }
+
+  doFetch()
+}
+
+function _notifyListeners(url: string): void {
+  const cbs = listeners.get(url)
+  if (cbs) {
+    for (const cb of cbs) cb()
+  }
 }
 
 /* ─── React Hook ─── */
@@ -103,7 +153,7 @@ import { useState, useEffect, useRef } from 'react'
  *
  * Safe for non-HTTP URLs (blob:, data:, relative) — passes them through unchanged.
  */
-export function useCachedImageUrl(src: string | undefined): string | undefined {
+export function useCachedImageUrl(src: string | undefined, maxSizeMB?: number): string | undefined {
   const [, forceUpdate] = useState(0)
   const mountedRef = useRef(true)
 
@@ -114,15 +164,21 @@ export function useCachedImageUrl(src: string | undefined): string | undefined {
 
   if (!src) return undefined
 
-  // Already cached — return blob URL instantly
+  // Already cached — return blob URL instantly (or undefined if too large)
   const cached = getCachedImageUrl(src)
+  if (cached === IMAGE_TOO_LARGE) return IMAGE_TOO_LARGE
   if (cached) return cached
 
-  // Not cached — trigger background fetch, re-render when ready
+  // Not cached — trigger background fetch with optional size limit, re-render when ready
   if (isCacheableUrl(src)) {
+    const maxBytes = maxSizeMB != null && maxSizeMB > 0 ? maxSizeMB * 1024 * 1024 : undefined
     fetchAndCacheImage(src, () => {
       if (mountedRef.current) forceUpdate((t) => t + 1)
     })
+    // If there's a size limit and the fetch hasn't started yet, start the size-aware fetch
+    if (maxBytes && !pendingFetches.has(src) && !blobCache.has(src) && !failedUrls.has(src)) {
+      _doFetch(src, maxBytes)
+    }
   }
 
   // While fetching (or non-cacheable URL), use the original

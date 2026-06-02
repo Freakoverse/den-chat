@@ -3304,12 +3304,14 @@ function DangerousPage({ hub, onClose, setHubStatus }: DangerousPageProps) {
   const handleDelete = async () => {
     try {
       // 1. Re-publish hub event with deleted tag (primary — addressable replaceable overwrite)
+      // Use eventCreatedAt + 1 so the replacement doesn't jump in timeline
+      const deleteCreatedAt = hub.eventCreatedAt ? hub.eventCreatedAt + 1 : undefined
       const deletedHubEvent = createUnsignedEvent(KINDS.HUB_EVENT, '', [
         ['d', hub.dTag],
         ['n', hub.name],
         ['epoch', hub.epoch.toString()],
         ['deleted', 'true'],
-      ] as [string, ...string[]][])
+      ] as [string, ...string[]][], deleteCreatedAt)
 
       const signedDeletedHub = await signWithSigner(deletedHubEvent, signer, privateKey)
       await publishToSpecificRelays(getPublishRelays([...hub.generalRelays, ...hub.filterRelays]), signedDeletedHub)

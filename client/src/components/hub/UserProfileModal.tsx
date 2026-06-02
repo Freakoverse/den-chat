@@ -14,6 +14,8 @@ import type { BlockType } from '@/stores/blockStore'
 import { BlockTypeModal } from '@/components/ui/BlockTypeModal'
 import { useFollowStore } from '@/stores/followStore'
 import { useNavigationStore } from '@/stores/navigationStore'
+import { useDMStore } from '@/stores/dmStore'
+import { useDM04Store } from '@/stores/dm04Store'
 import { useSocialStore } from '@/stores/socialStore'
 import { useHubStore } from '@/stores/hubStore'
 import {
@@ -347,10 +349,16 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
   }
 
   const handleDM = () => {
-    if (displayPubkey && onDM) {
+    if (!displayPubkey) return
+    if (onDM) {
       onDM(displayPubkey)
-      onClose()
+    } else {
+      // Self-sufficient DM navigation: set both stores and navigate
+      useDM04Store.getState().setActiveConversation(displayPubkey)
+      useDMStore.getState().setActiveConversation(displayPubkey)
+      useNavigationStore.getState().setActivePage('dms')
     }
+    onClose()
   }
 
   const handleToggleBlock = async () => {
@@ -1112,7 +1120,7 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
               {!isSelf && (
                 <>
                   {/* DM button */}
-                  {onDM && (
+                  {(
                     <TooltipProvider delayDuration={300}>
                       <Tooltip>
                         <TooltipTrigger asChild>

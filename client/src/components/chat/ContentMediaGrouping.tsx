@@ -9,6 +9,8 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useBlossomMedia } from '@/hooks/useBlossomMedia'
 import { VerificationBadge } from '@/components/ui/VerificationBadge'
 import { ImageGallery } from '@/components/social/RichContent'
+import { getRenderLimit } from '@/lib/imageSizeGuard'
+import { ImageTooLarge } from '@/components/ui/ImageTooLarge'
 
 /* ────────────── URL detection helpers ────────────── */
 
@@ -102,11 +104,25 @@ export function ContentMediaImage({ src, className, style, onClick }: {
   style?: React.CSSProperties
   onClick?: () => void
 }) {
-  const blossom = useBlossomMedia(src)
+  const chatLimitMB = getRenderLimit('chat')
+  const blossom = useBlossomMedia(src, chatLimitMB)
   const [loaded, setLoaded] = useState(false)
   const [error, setError] = useState(false)
+  const [overridden, setOverridden] = useState(false)
 
-  useEffect(() => { setLoaded(false); setError(false) }, [src])
+  useEffect(() => { setLoaded(false); setError(false); setOverridden(false) }, [src])
+
+  // Size limit exceeded
+  if (blossom.sizeExceeded && !overridden) {
+    return (
+      <ImageTooLarge
+        url={src}
+        detectedSize={blossom.detectedSize}
+        onOverride={() => setOverridden(true)}
+        className="rounded-lg mt-2 max-w-[400px] max-[1080px]:max-w-full"
+      />
+    )
+  }
 
   if (blossom.error === 'not-found') {
     return (

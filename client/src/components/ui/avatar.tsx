@@ -1,7 +1,7 @@
 import * as AvatarPrimitive from '@radix-ui/react-avatar'
 import * as React from 'react'
 import { cn } from '@/lib/utils'
-import { useCachedImageUrl } from '@/lib/imageCache'
+import { useCachedImageUrl, IMAGE_TOO_LARGE } from '@/lib/imageCache'
 
 const Avatar = React.forwardRef<
   React.ElementRef<typeof AvatarPrimitive.Root>,
@@ -17,15 +17,18 @@ Avatar.displayName = AvatarPrimitive.Root.displayName
 
 const AvatarImage = React.forwardRef<
   React.ElementRef<typeof AvatarPrimitive.Image>,
-  React.ComponentPropsWithoutRef<typeof AvatarPrimitive.Image>
->(({ className, src, ...props }, ref) => {
-  const cachedSrc = useCachedImageUrl(src)
+  React.ComponentPropsWithoutRef<typeof AvatarPrimitive.Image> & { maxSizeMB?: number }
+>(({ className, src, maxSizeMB, ...props }, ref) => {
+  const cachedSrc = useCachedImageUrl(src, maxSizeMB)
+
+  // If image is too large, don't set src — Radix will fall through to AvatarFallback
+  const effectiveSrc = cachedSrc === IMAGE_TOO_LARGE ? undefined : cachedSrc
 
   return (
     <AvatarPrimitive.Image
       ref={ref}
       className={cn('aspect-square h-full w-full object-cover', className)}
-      src={cachedSrc}
+      src={effectiveSrc}
       {...props}
     />
   )

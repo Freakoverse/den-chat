@@ -34,20 +34,36 @@ import { ArticleComments } from '@/components/social/ArticleComments'
 import { cn, truncateNpub, formatTimestamp } from '@/lib/utils'
 import { nip19, nip04 } from 'nostr-tools'
 import type { Event } from 'nostr-tools'
+import { getRenderLimit } from '@/lib/imageSizeGuard'
+import { ImageTooLarge } from '@/components/ui/ImageTooLarge'
 
 /* ─── Markdown Image with Blossom Integrity ─── */
 
 function MarkdownImage({ src, alt }: { src?: string; alt?: string }) {
-  const blossom = useBlossomMedia(src)
+  const socialLimitMB = getRenderLimit('social')
+  const blossom = useBlossomMedia(src, socialLimitMB)
   const resolvedSrc = blossom.src || src
   const cachedSrc = useCachedImageUrl(resolvedSrc)
   const [loaded, setLoaded] = useState(false)
   const [errored, setErrored] = useState(false)
+  const [overridden, setOverridden] = useState(false)
 
   // Reset state when the underlying source changes
-  useEffect(() => { setLoaded(false); setErrored(false) }, [src])
+  useEffect(() => { setLoaded(false); setErrored(false); setOverridden(false) }, [src])
 
   if (!src) return null
+
+  // Size limit exceeded
+  if (blossom.sizeExceeded && !overridden) {
+    return (
+      <ImageTooLarge
+        url={src}
+        detectedSize={blossom.detectedSize}
+        onOverride={() => setOverridden(true)}
+        className="my-4 rounded-lg"
+      />
+    )
+  }
 
   return (
     <span className="block relative my-4 rounded-lg overflow-hidden border border-border/50">
@@ -103,6 +119,7 @@ function MarkdownImage({ src, alt }: { src?: string; alt?: string }) {
 /* ─── Featured Media (video-first with image fallback) ─── */
 
 function ArticleFeaturedMedia({ videoUrl, imageUrl, title }: { videoUrl?: string; imageUrl?: string; title: string }) {
+  const socialLimitMB = getRenderLimit('social')
   const [videoFailed, setVideoFailed] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
   const stallTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -150,6 +167,7 @@ function ArticleFeaturedMedia({ videoUrl, imageUrl, title }: { videoUrl?: string
           src={imageUrl}
           alt={title}
           className="w-full h-full"
+          maxSizeMB={socialLimitMB}
         />
       ) : null}
     </div>

@@ -10,6 +10,7 @@
 import { useState, useEffect } from 'react'
 import { useBlossomMedia } from '@/hooks/useBlossomMedia'
 import { useCachedImageUrl } from '@/lib/imageCache'
+import { ImageTooLarge } from '@/components/ui/ImageTooLarge'
 
 interface BlossomImageProps {
   src: string | undefined
@@ -19,20 +20,35 @@ interface BlossomImageProps {
   imgClassName?: string
   /** Fallback content when image is not available (defaults to nothing) */
   fallback?: React.ReactNode
+  /** Optional render size limit in MB (uses imageSizeGuard) */
+  maxSizeMB?: number
 }
 
-export function BlossomImage({ src, alt, className, imgClassName, fallback }: BlossomImageProps) {
-  const blossom = useBlossomMedia(src)
+export function BlossomImage({ src, alt, className, imgClassName, fallback, maxSizeMB }: BlossomImageProps) {
+  const blossom = useBlossomMedia(src, maxSizeMB)
   const [loaded, setLoaded] = useState(false)
   const [imgError, setImgError] = useState(false)
+  const [overridden, setOverridden] = useState(false)
 
   // Reset loaded/error state when src changes
-  useEffect(() => { setLoaded(false); setImgError(false) }, [src])
+  useEffect(() => { setLoaded(false); setImgError(false); setOverridden(false) }, [src])
 
   const resolvedSrc = blossom.src || src
   const cachedSrc = useCachedImageUrl(resolvedSrc)
 
   if (!src) return fallback ? <>{fallback}</> : null
+
+  // Size limit exceeded
+  if (blossom.sizeExceeded && !overridden) {
+    return (
+      <ImageTooLarge
+        url={src}
+        detectedSize={blossom.detectedSize}
+        onOverride={() => setOverridden(true)}
+        className={className}
+      />
+    )
+  }
 
   if (blossom.error || imgError) {
     if (fallback) return <>{fallback}</>

@@ -153,55 +153,46 @@ export function getAllowLargeStickers(): boolean {
   } catch { return false }
 }
 
-/* ─── Sticker size checking cache ─── */
+/* ─── Sticker size checking (delegates to shared imageSizeGuard) ─── */
 
-const STICKER_SIZE_LIMIT = 5 * 1024 * 1024 // 5 MB
-const stickerSizeCache = new Map<string, 'ok' | 'too-large' | 'checking'>()
+import {
+  checkImageSize, checkSizeSync, getCachedSize,
+  getRenderLimit, hasSizeOverride,
+} from '@/lib/imageSizeGuard'
 
+/** Render limit in bytes for stickers — reads from the user-configurable 'chat' category. */
+function getStickerRenderLimitBytes(): number {
+  return getRenderLimit('chat') * 1024 * 1024
+}
+
+/**
+ * Synchronous check: is a sticker URL within the render limit?
+ * Uses the shared imageSizeGuard cache (HEAD requests with dedup).
+ * Returns true if ok/unknown/checking, false if too large.
+ * When allowLargeStickers is enabled, always returns true.
+ */
 export function isStickerSizeOk(url: string): boolean {
   if (getAllowLargeStickers()) return true
-  const cached = stickerSizeCache.get(url)
-  if (cached === 'ok') return true
-  if (cached === 'too-large') return false
-  if (cached === 'checking') return true
-  stickerSizeCache.set(url, 'checking')
-  checkStickerSize(url)
-  return true
+  if (hasSizeOverride(url)) return true
+  const limitBytes = getStickerRenderLimitBytes()
+  const status = checkSizeSync(url, limitBytes)
+  return status !== 'too-large'
 }
 
-async function checkStickerSize(url: string): Promise<void> {
-  try {
-    const resp = await fetch(url, { method: 'HEAD' })
-    const cl = resp.headers.get('content-length')
-    if (cl && Number(cl) > STICKER_SIZE_LIMIT) {
-      stickerSizeCache.set(url, 'too-large')
-    } else {
-      stickerSizeCache.set(url, 'ok')
-    }
-  } catch {
-    stickerSizeCache.set(url, 'ok')
-  }
-}
-
+/**
+ * Check all stickers in a set. Returns true if ANY sticker exceeds the render limit.
+ */
 export async function hasOversizedSticker(stickers: { url: string }[]): Promise<boolean> {
   if (getAllowLargeStickers()) return false
+  const limitBytes = getStickerRenderLimitBytes()
   const checks = await Promise.all(stickers.map(async (s) => {
-    const cached = stickerSizeCache.get(s.url)
-    if (cached === 'ok') return false
-    if (cached === 'too-large') return true
-    try {
-      const resp = await fetch(s.url, { method: 'HEAD' })
-      const cl = resp.headers.get('content-length')
-      if (cl && Number(cl) > STICKER_SIZE_LIMIT) {
-        stickerSizeCache.set(s.url, 'too-large')
-        return true
-      }
-      stickerSizeCache.set(s.url, 'ok')
-      return false
-    } catch {
-      stickerSizeCache.set(s.url, 'ok')
-      return false
+    if (hasSizeOverride(s.url)) return false
+    const cached = getCachedSize(s.url)
+    if (cached !== undefined) {
+      return cached !== 'unknown' && cached > limitBytes
     }
+    const size = await checkImageSize(s.url)
+    return size !== 'unknown' && size > limitBytes
   }))
   return checks.some(Boolean)
 }

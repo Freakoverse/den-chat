@@ -65,6 +65,10 @@ import { useBlossomMedia } from '@/hooks/useBlossomMedia'
 import { MediaUploadStrip, useMediaUpload } from '@/components/social/MediaUploadStrip'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import {
+  getRenderLimit, setRenderLimit, resetRenderLimits, getRenderLimitDefault,
+  LIMIT_MAX_SLIDER, type RenderLimitCategory,
+} from '@/lib/imageSizeGuard'
 
 /* ─────────── types ─────────── */
 
@@ -2792,6 +2796,9 @@ function ModerationTab() {
       {/* Divider */}
       <div className="h-px bg-border" />
 
+      {/* Image Render Limits */}
+      <ImageRenderLimitSettings />
+
       {/* Divider */}
       <div className="h-px bg-border" />
 
@@ -3048,6 +3055,105 @@ function CustomEmojiPreferenceToggle() {
       </div>
       <ToggleSwitch checked={showCustomEmojis} onChange={setShowCustomEmojis} />
     </div>
+  )
+}
+
+function ImageRenderLimitSettings() {
+  const [limits, setLimits] = useState(() => ({
+    profile: getRenderLimit('profile'),
+    banner: getRenderLimit('banner'),
+    chat: getRenderLimit('chat'),
+    social: getRenderLimit('social'),
+  }))
+
+  const handleChange = (cat: RenderLimitCategory, val: number) => {
+    setRenderLimit(cat, val)
+    setLimits(prev => ({ ...prev, [cat]: val }))
+  }
+
+  const handleReset = () => {
+    resetRenderLimits()
+    setLimits({
+      profile: getRenderLimitDefault('profile'),
+      banner: getRenderLimitDefault('banner'),
+      chat: getRenderLimitDefault('chat'),
+      social: getRenderLimitDefault('social'),
+    })
+  }
+
+  const isDefault =
+    limits.profile === getRenderLimitDefault('profile') &&
+    limits.banner === getRenderLimitDefault('banner') &&
+    limits.chat === getRenderLimitDefault('chat') &&
+    limits.social === getRenderLimitDefault('social')
+
+  const rows: { key: RenderLimitCategory; label: string; desc: string; max: number }[] = [
+    { key: 'profile', label: 'Profile Pictures', desc: 'User avatars, hub icons', max: LIMIT_MAX_SLIDER.profile },
+    { key: 'banner', label: 'Banners', desc: 'User & hub banners', max: LIMIT_MAX_SLIDER.banner },
+    { key: 'chat', label: 'Chat Images', desc: 'Hub chat, DMs, public chat', max: LIMIT_MAX_SLIDER.chat },
+    { key: 'social', label: 'Social Images', desc: 'Posts, articles, note cards', max: LIMIT_MAX_SLIDER.social },
+  ]
+
+  return (
+    <section className="space-y-3">
+      <div className="flex items-center justify-between">
+        <div>
+          <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Image Render Limits</h4>
+          <p className="text-xs text-muted-foreground mt-1">
+            Images larger than these limits show a placeholder instead of auto-downloading. You can still load them with one click.
+          </p>
+        </div>
+        {!isDefault && (
+          <button onClick={handleReset} className="text-[11px] text-primary hover:underline cursor-pointer shrink-0">
+            Reset defaults
+          </button>
+        )}
+      </div>
+
+      <div className="flex flex-col gap-2">
+        {rows.map(({ key, label, desc, max }) => (
+          <div key={key} className="px-3 py-2.5 rounded-lg border border-border bg-secondary/30 space-y-2">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-foreground">{label}</p>
+                <p className="text-[11px] text-muted-foreground">{desc}</p>
+              </div>
+              <span className="text-sm font-mono font-semibold px-2 py-0.5 rounded bg-secondary text-foreground tabular-nums">
+                {limits[key]} MB
+              </span>
+            </div>
+            <div className="flex items-center gap-3 px-1">
+              <div className="flex-1 relative h-5 flex items-center">
+                <div className="absolute left-0 right-0 h-1.5 rounded-full overflow-hidden">
+                  <div className="absolute inset-0 bg-muted-foreground/20" />
+                  <div
+                    className="absolute inset-y-0 left-0 bg-gradient-to-r from-emerald-500 to-amber-400"
+                    style={{ width: `${(limits[key] / max) * 100}%` }}
+                  />
+                </div>
+                <div
+                  className="absolute w-4 h-4 rounded-full bg-primary border-2 border-background shadow-lg pointer-events-none transition-all"
+                  style={{ left: `calc(${(limits[key] / max) * 100}% - 8px)` }}
+                />
+                <input
+                  type="range"
+                  min={1}
+                  max={max}
+                  step={1}
+                  value={limits[key]}
+                  onChange={(e) => handleChange(key, Number(e.target.value))}
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                />
+              </div>
+            </div>
+            <div className="flex justify-between text-[9px] text-muted-foreground/60 px-1">
+              <span>1 MB</span>
+              <span>{max} MB</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
   )
 }
 
@@ -4005,12 +4111,13 @@ function MyHubsTab() {
       const signedDelete = await signWithSigner(deleteEvent, signer, privateKey)
       await publishToSpecificRelays(getPublishRelays(), signedDelete)
 
+      const deleteCreatedAt = hub.eventCreatedAt ? hub.eventCreatedAt + 1 : undefined
       const deletedHubEvent = createUnsignedEvent(KINDS.HUB_EVENT, '', [
         ['d', hub.dTag],
         ['n', hub.name],
         ['epoch', hub.epoch.toString()],
         ['deleted', 'true'],
-      ] as [string, ...string[]][])
+      ] as [string, ...string[]][], deleteCreatedAt)
       const signedDeletedHub = await signWithSigner(deletedHubEvent, signer, privateKey)
       await publishToSpecificRelays(getPublishRelays(), signedDeletedHub)
 

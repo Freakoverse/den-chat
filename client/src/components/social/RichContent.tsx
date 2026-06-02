@@ -30,6 +30,8 @@ import type { EmbedInfo } from '@/lib/embeds'
 import type { Event } from 'nostr-tools'
 import { usePreferencesStore } from '@/stores/preferencesStore'
 import { CustomAudioPlayer } from '@/components/ui/CustomAudioPlayer'
+import { getRenderLimit } from '@/lib/imageSizeGuard'
+import { ImageTooLarge } from '@/components/ui/ImageTooLarge'
 
 const IMAGE_REGEX = /\.(jpg|jpeg|png|gif|webp|svg|bmp)(\?[^\s]*)?$/i
 const VIDEO_REGEX = /\.(mp4|webm|mov|avi|mkv)(\?[^\s]*)?$/i
@@ -367,12 +369,26 @@ function MediaImage({ src, className, style, onClick }: {
   style?: React.CSSProperties
   onClick?: (e: React.MouseEvent) => void
 }) {
-  const blossom = useBlossomMedia(src)
+  const socialLimitMB = getRenderLimit('social')
+  const blossom = useBlossomMedia(src, socialLimitMB)
   const [loaded, setLoaded] = useState(false)
   const [error, setError] = useState(false)
+  const [overridden, setOverridden] = useState(false)
 
   // Reset states when src changes
-  useEffect(() => { setLoaded(false); setError(false) }, [src])
+  useEffect(() => { setLoaded(false); setError(false); setOverridden(false) }, [src])
+
+  // Size limit exceeded
+  if (blossom.sizeExceeded && !overridden) {
+    return (
+      <ImageTooLarge
+        url={src}
+        detectedSize={blossom.detectedSize}
+        onOverride={() => setOverridden(true)}
+        className="rounded-lg mt-2 max-w-full"
+      />
+    )
+  }
 
   // Show not-found error
   if (blossom.error === 'not-found') {

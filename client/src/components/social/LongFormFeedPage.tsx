@@ -19,6 +19,7 @@ import { Loader2, Newspaper, RefreshCw, Search, ChevronDown, Eye, EyeOff, Shield
 import { truncateNpub, formatTimestamp } from '@/lib/utils'
 import { nip19 } from 'nostr-tools'
 import type { Event } from 'nostr-tools'
+import { getRenderLimit } from '@/lib/imageSizeGuard'
 
 const PAGE_SIZE = 12
 
@@ -87,6 +88,7 @@ export function ArticleCardItem({ article, onOpenArticle, onOpenProfile }: {
   const npub = nip19.npubEncode(article.event.pubkey)
   const displayName = profile?.display_name || profile?.name || truncateNpub(npub, 8)
   const readingTime = Math.max(1, Math.ceil(article.wordCount / 230))
+  const socialLimitMB = getRenderLimit('social')
 
   // NSFW logic
   const showNsfwPref = typeof window !== 'undefined' && localStorage.getItem('SHOW_NSFW') === 'true'
@@ -120,6 +122,7 @@ export function ArticleCardItem({ article, onOpenArticle, onOpenProfile }: {
               alt={article.title}
               className={`w-full aspect-video shrink-0 ${shouldBlur ? 'blur-xl' : ''}`}
               imgClassName="group-hover:scale-[1.02] transition-transform duration-300"
+              maxSizeMB={socialLimitMB}
               fallback={
                 <div className="w-full aspect-video shrink-0 bg-secondary/80 flex items-center justify-center">
                   <img src="/app-icon.png" alt="" className="w-16 h-16 object-contain opacity-40" />
