@@ -1,39 +1,22 @@
 /**
- * DonateModal — NSP-based donation system
+ * DonateModal — Deterministic donation address generator
  *
- * Multi-step modal for generating tweaked donation addresses and sending
- * encrypted kind 1604 notifications to the admin. Follows NIP-NSP spec.
+ * Two-step modal: select currency/chain → view deterministic address + QR code.
+ * Derives addresses directly from the admin's Nostr pubkey (no tweak, no notification).
  */
 
 import { useState, useCallback, useMemo } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
-import { nip19 } from 'nostr-tools'
-import {
-  X, Copy, Check, AlertTriangle, Heart, Loader2, ThumbsUp, ThumbsDown, ChevronLeft,
-} from 'lucide-react'
-import { useUserStore, type ISigner } from '@/stores/userStore'
+import { X, Copy, Check, Heart, ChevronLeft } from 'lucide-react'
 import { ADMIN_PUBKEY } from '@/lib/constants'
-import { getPublishRelays } from '@/stores/postingBehaviourStore'
-import { publishToSpecificRelays } from '@/lib/nostr/relay-pool'
 import {
-  generateTweak,
   deriveTaprootAddress,
   deriveEvmAddress,
   buildPaymentURI,
-  createNspNotification,
-  fetchNip65Relays,
-  nip44EncryptSelf,
-  nip44DecryptSelf,
-  KIND_NSP_SENT_LIST,
-  NSP_SENT_DTAG,
-  type NspChain,
-  type NspPayload,
-  type NspSentEntry,
-} from '@/lib/crypto/nsp'
-import { finalizeEvent } from 'nostr-tools'
-import { hexToBytes } from '@noble/hashes/utils'
+  type Chain,
+} from '@/lib/crypto/derive'
 
-// ── Token contract addresses (from DENOS evm.ts) ──
+// ── Token contract addresses ──
 
 const TOKEN_CONTRACTS: Record<string, Record<string, string>> = {
   USDT: {
@@ -54,7 +37,7 @@ const TOKEN_CONTRACTS: Record<string, Record<string, string>> = {
   },
 }
 
-// ── Currency icon imports (from DENOS) ──
+// ── Currency icon imports ──
 
 import iconPyusd from '@/assets/icons/blockchain/token/pyusd128.png'
 import iconUsdt from '@/assets/icons/blockchain/token/usdt128.png'
@@ -70,7 +53,7 @@ interface CurrencyDef {
   fallbackIcon: string
   iconImg: string
   color: string
-  chains: { id: NspChain; label: string }[]
+  chains: { id: Chain; label: string }[]
   isBitcoin?: boolean
   isNativeEth?: boolean
 }
@@ -165,8 +148,6 @@ const CHAIN_LABELS: Record<string, string> = {
   base: 'Base',
 }
 
-type ModalState = 'idle' | 'generated' | 'notifying' | 'notified'
-
 interface DonateModalProps {
   open: boolean
   onClose: () => void
@@ -174,22 +155,11 @@ interface DonateModalProps {
 
 export function DonateModal({ open, onClose }: DonateModalProps) {
   // ── State ──
-  const [state, setState] = useState<ModalState>('idle')
   const [selectedCurrency, setSelectedCurrency] = useState<string | null>(null)
-  const [selectedChain, setSelectedChain] = useState<NspChain | null>(null)
+  const [selectedChain, setSelectedChain] = useState<Chain | null>(null)
   const [generatedAddress, setGeneratedAddress] = useState('')
-  const [generatedTweak, setGeneratedTweak] = useState('')
-  const [includeIdentity, setIncludeIdentity] = useState(true)
   const [copied, setCopied] = useState(false)
-  const [showCloseGuard, setShowCloseGuard] = useState(false)
-  const [showRegenGuard, setShowRegenGuard] = useState(false)
-  const [notifyError, setNotifyError] = useState<string | null>(null)
-  const [relayResults, setRelayResults] = useState<{ total: number; success: number } | null>(null)
-  const [ephemeralSkHex, setEphemeralSkHex] = useState('')
-
-  const pubkey = useUserStore((s) => s.pubkey)
-  const privateKey = useUserStore((s) => s.privateKey)
-  const signer = useUserStore((s) => s.signer)
+  const [error, setError] = useState<string | null>(null)
 
   const currency = useMemo(
     () => CURRENCIES.find((c) => c.id === selectedCurrency),
@@ -197,7 +167,7 @@ export function DonateModal({ open, onClose }: DonateModalProps) {
   )
 
   const needsChainSelector = currency && !currency.isBitcoin && !currency.isNativeEth
-  const effectiveChain: NspChain | null = currency?.isBitcoin
+  const effectiveChain: Chain | null = currency?.isBitcoin
     ? 'bitcoin'
     : currency?.isNativeEth
       ? 'ethereum'
@@ -205,46 +175,41 @@ export function DonateModal({ open, onClose }: DonateModalProps) {
 
   const canGenerate = !!currency && !!effectiveChain
 
+  // ── Derived step ──
+  const step: 1 | 2 = generatedAddress ? 2 : 1
+  const STEP_LABELS = ['Select', 'Pay']
+
   // ── Handlers ──
 
   const handleSelectCurrency = useCallback((id: string) => {
     const c = CURRENCIES.find((cur) => cur.id === id)
     setSelectedCurrency(id)
-    // Auto-select chain if only 1 option
     if (c && c.chains.length === 1) {
       setSelectedChain(c.chains[0].id)
     } else {
-      // Default to ethereum for multi-chain tokens
       setSelectedChain('ethereum')
     }
-    // Reset generation if previously generated
-    if (state !== 'idle') {
-      setState('idle')
+    // Reset if previously generated
+    if (generatedAddress) {
       setGeneratedAddress('')
-      setGeneratedTweak('')
-      setNotifyError(null)
-      setRelayResults(null)
+      setError(null)
     }
-  }, [state])
+  }, [generatedAddress])
 
   const handleGenerate = useCallback(() => {
     if (!canGenerate || !effectiveChain) return
     try {
-      const tweak = generateTweak()
       let address: string
       if (effectiveChain === 'bitcoin') {
-        address = deriveTaprootAddress(ADMIN_PUBKEY, tweak)
+        address = deriveTaprootAddress(ADMIN_PUBKEY)
       } else {
-        address = deriveEvmAddress(ADMIN_PUBKEY, tweak)
+        address = deriveEvmAddress(ADMIN_PUBKEY)
       }
       setGeneratedAddress(address)
-      setGeneratedTweak(tweak)
-      setState('generated')
-      setNotifyError(null)
-      setRelayResults(null)
+      setError(null)
     } catch (err: any) {
-      console.error('[Donate] Address generation failed:', err)
-      setNotifyError(err?.message || 'Address generation failed')
+      console.error('[Donate] Address derivation failed:', err)
+      setError(err?.message || 'Address derivation failed')
     }
   }, [canGenerate, effectiveChain])
 
@@ -254,153 +219,35 @@ export function DonateModal({ open, onClose }: DonateModalProps) {
     setTimeout(() => setCopied(false), 2000)
   }, [generatedAddress])
 
-  const handleNotify = useCallback(async () => {
-    if (!currency || !effectiveChain || !generatedAddress || !generatedTweak) return
-
-    setState('notifying')
-    setNotifyError(null)
-
-    try {
-      // Determine asset and token contract
-      let asset: string
-      let token: string | null = null
-      if (currency.isBitcoin) {
-        asset = 'taproot'
-      } else if (currency.isNativeEth) {
-        asset = 'native'
-      } else {
-        asset = currency.id.toLowerCase() // DENOS uses lowercase asset IDs (usdt, usdc, pyusd)
-        token = TOKEN_CONTRACTS[currency.id]?.[effectiveChain] || null
-      }
-
-      // Build payload
-      const payload: NspPayload = {
-        address: generatedAddress,
-        chain: effectiveChain,
-        asset,
-        token,
-        tweak: generatedTweak,
-        txid: '',
-        amount: '',
-        timestamp: Math.floor(Date.now() / 1000),
-      }
-
-      // Include identity if toggled on
-      if (includeIdentity && pubkey) {
-        payload.senderNpub = nip19.npubEncode(pubkey)
-      }
-
-      // Create the kind 1604 notification
-      const { event, ephemeralSkHex: skHex } = createNspNotification(ADMIN_PUBKEY, payload)
-      setEphemeralSkHex(skHex)
-
-      // Gather relays: NSP mandatory relays + admin NIP-65 + user NIP-65 + client relays
-      // Always include the NSP relay list so DENOS can find the notification
-      const NSP_RELAYS = [
-        'wss://relay.damus.io',
-        'wss://nos.lol',
-        'wss://relay.nostr.band',
-        'wss://relay.primal.net',
-        'wss://relay.snort.social',
-      ]
-
-      const [adminRelays, userRelays] = await Promise.all([
-        fetchNip65Relays(ADMIN_PUBKEY),
-        pubkey ? fetchNip65Relays(pubkey) : Promise.resolve([]),
-      ])
-
-      const clientRelays = getPublishRelays().slice(0, 3)
-      const allRelays = [...new Set([...NSP_RELAYS, ...adminRelays, ...userRelays, ...clientRelays])]
-
-      // Publish
-      console.log(`[Donate] Publishing kind 1604 notification to ${allRelays.length} relays:`, allRelays)
-      const successRelays = await publishToSpecificRelays(allRelays, event as any)
-      console.log(`[Donate] Publish result: ${successRelays.length}/${allRelays.length} relays accepted`, successRelays)
-
-      setRelayResults({ total: allRelays.length, success: successRelays.length })
-
-      // Treat 0 accepted relays as failure — admin won't receive the notification
-      if (successRelays.length === 0) {
-        throw new Error('No relays accepted the notification. Please try again.')
-      }
-
-      // Save to NIP-78 sent list (works with raw key, signer, or browser extension)
-      if (pubkey && (privateKey || signer?.nip44)) {
-        try {
-          await saveSentEntry(pubkey, {
-            txid: '',
-            chain: effectiveChain,
-            asset,
-            token,
-            amount: '',
-            address: generatedAddress,
-            tweak: generatedTweak,
-            recipientPubkey: ADMIN_PUBKEY,
-            senderNsec: skHex,
-            timestamp: Math.floor(Date.now() / 1000),
-          }, privateKey, signer)
-        } catch (err) {
-          console.warn('[Donate] Failed to save sent entry:', err)
-        }
-      }
-
-      setState('notified')
-    } catch (err: any) {
-      console.error('[Donate] Notification failed:', err)
-      setNotifyError(err?.message || 'Failed to send notification')
-      setState('generated')
-    }
-  }, [currency, effectiveChain, generatedAddress, generatedTweak, includeIdentity, pubkey, privateKey, signer])
-
-  const handleAttemptClose = useCallback(() => {
-    if (state === 'generated' || state === 'notifying') {
-      setShowCloseGuard(true)
-    } else {
-      resetAndClose()
-    }
-  }, [state])
+  const handleBack = useCallback(() => {
+    setGeneratedAddress('')
+    setError(null)
+  }, [])
 
   const resetAndClose = useCallback(() => {
-    setState('idle')
     setSelectedCurrency(null)
     setSelectedChain(null)
     setGeneratedAddress('')
-    setGeneratedTweak('')
-    setNotifyError(null)
-    setRelayResults(null)
-    setShowCloseGuard(false)
-    setShowRegenGuard(false)
+    setError(null)
     setCopied(false)
-    setEphemeralSkHex('')
     onClose()
   }, [onClose])
 
   // ── QR value ──
   const qrValue = useMemo(() => {
     if (!generatedAddress || !effectiveChain) return ''
-    if (effectiveChain === 'bitcoin') return `bitcoin:${generatedAddress}`
     const token = currency && !currency.isBitcoin && !currency.isNativeEth
       ? TOKEN_CONTRACTS[currency.id]?.[effectiveChain] || null
       : null
     return buildPaymentURI(effectiveChain, generatedAddress, token)
   }, [generatedAddress, effectiveChain, currency])
 
-  // ── Step derivation ──
-  const step: 1 | 2 | 3 = state === 'notified' ? 3 : state === 'notifying' ? 3 : (state === 'generated') ? 2 : 1
-  const STEP_LABELS = ['Select', 'Pay', 'Confirm']
-
-  const handleBack = useCallback(() => {
-    if (step === 2) {
-      setShowRegenGuard(true)
-    }
-  }, [step])
-
   if (!open) return null
 
   return (
     <>
       {/* Backdrop */}
-      <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm" onClick={handleAttemptClose} />
+      <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm" onClick={resetAndClose} />
 
       {/* Modal */}
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -412,7 +259,7 @@ export function DonateModal({ open, onClose }: DonateModalProps) {
           <div className="sticky top-0 z-10 flex flex-col border-b border-border bg-background/95 backdrop-blur-sm rounded-t-2xl">
             <div className="flex items-center justify-between px-5 py-4">
               <div className="flex items-center gap-2.5">
-                {step > 1 && step < 3 && (
+                {step === 2 && (
                   <button onClick={handleBack} className="p-1 -ml-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors cursor-pointer">
                     <ChevronLeft size={18} />
                   </button>
@@ -421,7 +268,7 @@ export function DonateModal({ open, onClose }: DonateModalProps) {
                 <h2 className="text-lg font-semibold text-foreground">Donate</h2>
               </div>
               <button
-                onClick={handleAttemptClose}
+                onClick={resetAndClose}
                 className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors cursor-pointer"
               >
                 <X size={18} />
@@ -499,7 +346,7 @@ export function DonateModal({ open, onClose }: DonateModalProps) {
                   </div>
                 )}
 
-                {notifyError && <p className="text-xs text-destructive text-center">{notifyError}</p>}
+                {error && <p className="text-xs text-destructive text-center">{error}</p>}
 
                 {/* Generate button */}
                 <button
@@ -514,7 +361,7 @@ export function DonateModal({ open, onClose }: DonateModalProps) {
               </>
             )}
 
-            {/* ═══════════ STEP 2 — QR + Address + Notify ═══════════ */}
+            {/* ═══════════ STEP 2 — QR + Address ═══════════ */}
             {step === 2 && generatedAddress && (
               <>
                 {/* Selected currency pill */}
@@ -549,230 +396,26 @@ export function DonateModal({ open, onClose }: DonateModalProps) {
                   </div>
                 </div>
 
-                {/* Warning */}
-                <div className="flex items-start gap-2.5 px-3 py-2.5 rounded-lg bg-amber-500/10 border border-amber-500/20">
-                  <AlertTriangle size={16} className="text-amber-400 shrink-0 mt-0.5" />
-                  <p className="text-xs text-amber-300/90 leading-relaxed">
-                    Did you send the payment? Notify us, otherwise the money is lost forever!
+                {/* Thank you message */}
+                <div className="flex flex-col items-center gap-2 pt-2">
+                  <p className="text-sm text-muted-foreground text-center leading-relaxed">
+                    Send any amount to the address above. Thank you for your support! 💜
                   </p>
                 </div>
 
-                {/* Identity toggle */}
-                <div className="flex items-center justify-between px-3 py-2.5 rounded-lg bg-secondary/20 border border-border/30">
-                  <div className="flex flex-col gap-0.5 min-w-0 flex-1 mr-3">
-                    <span className="text-sm text-foreground">Include your identity?</span>
-                    <span className="text-[11px] text-muted-foreground leading-tight">
-                      {includeIdentity ? 'Your npub will be included in the encrypted notification' : 'The donation will be fully anonymous'}
-                    </span>
-                  </div>
-                  <div className="shrink-0 flex items-center h-8 rounded-lg border border-border/40 bg-secondary/20 overflow-hidden">
-                    <button onClick={() => setIncludeIdentity(true)} className={`h-full px-2.5 flex items-center gap-1 text-xs font-medium transition-all cursor-pointer border-r border-border/30 ${includeIdentity ? 'bg-emerald-500/20 text-emerald-400' : 'text-muted-foreground/40 hover:text-muted-foreground/70'}`}>
-                      <ThumbsUp size={12} />
-                    </button>
-                    <button onClick={() => setIncludeIdentity(false)} className={`h-full px-2.5 flex items-center gap-1 text-xs font-medium transition-all cursor-pointer ${!includeIdentity ? 'bg-red-500/20 text-red-400' : 'text-muted-foreground/40 hover:text-muted-foreground/70'}`}>
-                      <ThumbsDown size={12} />
-                    </button>
-                  </div>
-                </div>
-
-                {/* Notify button */}
+                {/* Done button */}
                 <button
-                  onClick={handleNotify}
-                  className="w-full py-3 rounded-xl text-sm font-semibold bg-emerald-600 hover:bg-emerald-500 text-white transition-all cursor-pointer shadow-md flex items-center justify-center gap-2"
+                  onClick={resetAndClose}
+                  className="w-full py-3 rounded-xl text-sm font-semibold bg-primary text-primary-foreground hover:bg-primary/90 transition-all cursor-pointer shadow-md"
                 >
-                  Send Payment Notification
+                  Done
                 </button>
-              </>
-            )}
-
-            {/* ═══════════ STEP 3 — Progress / Success ═══════════ */}
-            {step === 3 && (
-              <>
-                {state === 'notifying' && (
-                  <div className="flex flex-col items-center gap-4 py-8">
-                    <Loader2 size={40} className="text-primary animate-spin" />
-                    <p className="text-sm font-medium text-foreground">Sending notification...</p>
-                    <p className="text-xs text-muted-foreground text-center max-w-xs">
-                      Encrypting payment details and publishing to Nostr relays. This may take a few seconds.
-                    </p>
-                  </div>
-                )}
-
-                {state === 'notified' && (
-                  <div className="flex flex-col items-center gap-3 py-6">
-                    <div className="w-14 h-14 rounded-full bg-emerald-500/20 flex items-center justify-center">
-                      <Check size={28} className="text-emerald-400" />
-                    </div>
-                    <p className="text-base font-semibold text-emerald-400">Notification Sent!</p>
-                    {relayResults && (
-                      <p className="text-xs text-muted-foreground">
-                        Published to {relayResults.success}/{relayResults.total} relays
-                      </p>
-                    )}
-                    <p className="text-xs text-muted-foreground text-center max-w-xs mt-1">
-                      Thank you for your donation. The payment details have been securely encrypted and delivered.
-                    </p>
-                    <button
-                      onClick={resetAndClose}
-                      className="mt-4 px-6 py-2.5 rounded-xl text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors cursor-pointer"
-                    >
-                      Done
-                    </button>
-                  </div>
-                )}
-
-                {notifyError && (
-                  <div className="flex flex-col items-center gap-3 py-6">
-                    <AlertTriangle size={32} className="text-destructive" />
-                    <p className="text-sm font-medium text-destructive">Notification Failed</p>
-                    <p className="text-xs text-muted-foreground text-center">{notifyError}</p>
-                    <button
-                      onClick={handleNotify}
-                      className="mt-2 px-6 py-2.5 rounded-xl text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors cursor-pointer"
-                    >
-                      Retry
-                    </button>
-                  </div>
-                )}
               </>
             )}
 
           </div>
         </div>
       </div>
-
-      {/* ── Close Guard Modal ── */}
-      {showCloseGuard && (
-        <>
-          <div className="fixed inset-0 z-[60] bg-black/50" />
-          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-            <div className="w-full max-w-sm rounded-xl border border-border bg-background shadow-2xl p-5 space-y-4">
-              <div className="flex items-start gap-3">
-                <AlertTriangle size={22} className="text-amber-400 shrink-0 mt-0.5" />
-                <div className="space-y-2">
-                  <h3 className="text-sm font-semibold text-foreground">Are you sure?</h3>
-                  <p className="text-sm text-muted-foreground leading-relaxed">
-                    If you sent funds but haven't sent a notification, the money is <strong className="text-foreground">lost forever</strong> and hasn't reached us.
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2 justify-end">
-                <button
-                  onClick={resetAndClose}
-                  className="px-4 py-2 rounded-lg text-sm font-medium text-muted-foreground hover:text-foreground border border-border hover:bg-secondary/40 transition-colors cursor-pointer"
-                >
-                  I'm sure
-                </button>
-                <button
-                  onClick={() => setShowCloseGuard(false)}
-                  className="px-4 py-2 rounded-lg text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors cursor-pointer"
-                >
-                  No, wait!
-                </button>
-              </div>
-            </div>
-          </div>
-        </>
-      )}
-
-      {/* ── Regenerate Guard Modal ── */}
-      {showRegenGuard && (
-        <>
-          <div className="fixed inset-0 z-[60] bg-black/50" />
-          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-            <div className="w-full max-w-sm rounded-xl border border-border bg-background shadow-2xl p-5 space-y-4">
-              <div className="flex items-start gap-3">
-                <AlertTriangle size={22} className="text-amber-400 shrink-0 mt-0.5" />
-                <div className="space-y-2">
-                  <h3 className="text-sm font-semibold text-foreground">Regenerate address?</h3>
-                  <p className="text-sm text-muted-foreground leading-relaxed">
-                    If you already sent funds to the current address but haven't sent a notification, that money is <strong className="text-foreground">lost forever</strong>. Make sure you've sent the notification first.
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2 justify-end">
-                <button
-                  onClick={() => {
-                    setShowRegenGuard(false)
-                    setState('idle')
-                    setGeneratedAddress('')
-                    setGeneratedTweak('')
-                    setNotifyError(null)
-                    setRelayResults(null)
-                  }}
-                  className="px-4 py-2 rounded-lg text-sm font-medium text-muted-foreground hover:text-foreground border border-border hover:bg-secondary/40 transition-colors cursor-pointer"
-                >
-                  Regenerate anyway
-                </button>
-                <button
-                  onClick={() => setShowRegenGuard(false)}
-                  className="px-4 py-2 rounded-lg text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors cursor-pointer"
-                >
-                  No, wait!
-                </button>
-              </div>
-            </div>
-          </div>
-        </>
-      )}
     </>
   )
-}
-
-// ── NIP-78 Sent List Persistence ──
-
-async function saveSentEntry(
-  pubkeyHex: string,
-  entry: NspSentEntry,
-  privateKeyHex?: string | null,
-  signer?: ISigner | null,
-): Promise<void> {
-  // Determine signing/encryption method
-  const useSigner = !privateKeyHex && signer?.nip44
-  if (!privateKeyHex && !useSigner) {
-    console.warn('[Donate] No signing method available for NIP-78 sent list')
-    return
-  }
-
-  // Load existing sent list
-  let entries: NspSentEntry[] = []
-  try {
-    const { fetchReplaceable } = await import('@/lib/nostr/relay-pool')
-    const existingEvent = await fetchReplaceable(pubkeyHex, KIND_NSP_SENT_LIST, NSP_SENT_DTAG)
-    if (existingEvent?.content) {
-      const plaintext = useSigner
-        ? await signer!.nip44!.decrypt(pubkeyHex, existingEvent.content)
-        : nip44DecryptSelf(privateKeyHex!, existingEvent.content)
-      const parsed = JSON.parse(plaintext)
-      entries = parsed.entries || []
-    }
-  } catch (err) {
-    console.warn('[Donate] Could not load existing sent list:', err)
-  }
-
-  // Append new entry
-  entries.push(entry)
-
-  // Encrypt
-  const payload = JSON.stringify({ entries })
-  const encrypted = useSigner
-    ? await signer!.nip44!.encrypt(pubkeyHex, payload)
-    : nip44EncryptSelf(privateKeyHex!, payload)
-
-  const template = {
-    kind: KIND_NSP_SENT_LIST,
-    created_at: Math.floor(Date.now() / 1000),
-    tags: [['d', NSP_SENT_DTAG]],
-    content: encrypted,
-  }
-
-  // Sign
-  const signedEvent = useSigner
-    ? await signer!.signEvent(template)
-    : finalizeEvent(template, hexToBytes(privateKeyHex!))
-
-  const publishRelays = getPublishRelays()
-  await publishToSpecificRelays(publishRelays, signedEvent as any)
-
-  console.log(`[Donate] Saved sent entry to NIP-78 (${entries.length} total entries)`)
 }

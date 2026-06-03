@@ -37,24 +37,38 @@ import { ReactionListModal, type ReactionInfo } from '@/components/social/Reacti
 /** Namespace used in zapStore for social feed posts */
 const SOCIAL_ZAP_NS = '__social__'
 
+/** Module-level WoT cache — avoids re-traversing the graph for each post in the same render */
+const wotHideCache = new Map<string, boolean>()
+/** Clear WoT cache periodically (every 30 seconds) to pick up graph changes */
+setInterval(() => wotHideCache.clear(), 30_000)
+
 interface SocialPostProps {
   event: Event
   onOpenProfile?: (pubkey: string) => void
   onOpenThread?: (eventId: string) => void
   compact?: boolean
+  /** Pre-fetched bookmark state from feed-level batch. Undefined = self-fetch. */
+  isBookmarked?: boolean
+  /** Pre-fetched reactions from feed-level batch. Undefined = self-fetch. */
+  initialReactions?: ReactionInfo[]
+  /** If true, zap data was batch-populated in zapStore by the parent — skip per-post fetch */
+  skipZapFetch?: boolean
 }
 
-export function SocialPost({ event, onOpenProfile, onOpenThread, compact }: SocialPostProps) {
+export function SocialPost({ event, onOpenProfile, onOpenThread, compact, isBookmarked: isBookmarkedProp, initialReactions, skipZapFetch }: SocialPostProps) {
   const { getProfile } = useProfileCache()
   const myPubkey = useUserStore((s) => s.pubkey)
   const signer = useUserStore((s) => s.signer)
   const privateKey = useUserStore((s) => s.privateKey)
 
-  const [liked, setLiked] = useState(false)
-  const [reactions, setReactions] = useState<ReactionInfo[]>([])
+  const [liked, setLiked] = useState(() => {
+    if (initialReactions && myPubkey) return initialReactions.some(r => r.pubkey === myPubkey)
+    return false
+  })
+  const [reactions, setReactions] = useState<ReactionInfo[]>(initialReactions ?? [])
   const [showReactionList, setShowReactionList] = useState(false)
   const [reposted, setReposted] = useState(false)
-  const [bookmarked, setBookmarked] = useState(false)
+  const [bookmarked, setBookmarked] = useState(isBookmarkedProp ?? false)
   const [likeLoading, setLikeLoading] = useState(false)
   const [repostLoading, setRepostLoading] = useState(false)
   const [bookmarkLoading, setBookmarkLoading] = useState(false)
@@ -86,7 +100,11 @@ export function SocialPost({ event, onOpenProfile, onOpenThread, compact }: Soci
   if (isBlockedUser && hideBlockedCompletely) return null
 
   // WoT filter — hide if score below threshold
-  const wotHidden = useWotStore.getState().shouldHide(event.pubkey, 'social')
+  let wotHidden = wotHideCache.get(event.pubkey)
+  if (wotHidden === undefined) {
+    wotHidden = useWotStore.getState().shouldHide(event.pubkey, 'social')
+    wotHideCache.set(event.pubkey, wotHidden)
+  }
   if (wotHidden) return null
 
   const shouldBlurBlocked = isBlockedUser && !blockedRevealed
@@ -124,6 +142,7 @@ export function SocialPost({ event, onOpenProfile, onOpenThread, compact }: Soci
 
   // Check initial bookmark state
   useEffect(() => {
+    if (isBookmarkedProp !== undefined) return  // Fed from batch — skip per-post fetch
     if (!myPubkey) return
     fetchEvents({ kinds: [10003], authors: [myPubkey], limit: 1 }).then(async (events) => {
       if (events.length > 0) {
@@ -161,6 +180,7 @@ export function SocialPost({ event, onOpenProfile, onOpenThread, compact }: Soci
 
   // Fetch historical reactions for this post
   useEffect(() => {
+    if (initialReactions !== undefined) return  // Fed from batch — skip per-post fetch
     fetchEvents({ kinds: [7], '#e': [event.id], limit: 100 }).then((rawReactions) => {
       const parsed: ReactionInfo[] = rawReactions.map((r) => {
         const emojiTag = r.tags.find((t) => t[0] === 'emoji')
@@ -196,6 +216,7 @@ export function SocialPost({ event, onOpenProfile, onOpenThread, compact }: Soci
   const zapTotal = zaps.reduce((sum: number, z: ZapInfo) => sum + z.amount, 0)
 
   useEffect(() => {
+    if (skipZapFetch) return  // Fed from batch — skip per-post fetch
     fetchEvents({ kinds: [9735], '#e': [event.id], limit: 50 }).then((receipts) => {
       const zapStore = useZapStore.getState()
       for (const receipt of receipts) {
@@ -215,8 +236,20 @@ export function SocialPost({ event, onOpenProfile, onOpenThread, compact }: Soci
   const shortNpub = npubStr.length > 20 ? `${npubStr.slice(0, 10)}...${npubStr.slice(-5)}` : npubStr
 
   const [showReactionPicker, setShowReactionPicker] = useState(false)
-  const [reactionEmoji, setReactionEmoji] = useState<string | null>(null)
-  const [reactionCustomUrl, setReactionCustomUrl] = useState<string | null>(null)
+  const [reactionEmoji, setReactionEmoji] = useState<string | null>(() => {
+    if (initialReactions && myPubkey) {
+      const my = initialReactions.find(r => r.pubkey === myPubkey)
+      if (my) return my.emoji === '+' ? '❤️' : my.emoji
+    }
+    return null
+  })
+  const [reactionCustomUrl, setReactionCustomUrl] = useState<string | null>(() => {
+    if (initialReactions && myPubkey) {
+      const my = initialReactions.find(r => r.pubkey === myPubkey)
+      if (my) return my.emojiUrl || null
+    }
+    return null
+  })
   const [showDotMenu, setShowDotMenu] = useState(false)
   const [rawEventJson, setRawEventJson] = useState<string | null>(null)
   const [copyFeedback, setCopyFeedback] = useState(false)

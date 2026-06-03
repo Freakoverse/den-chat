@@ -8401,6 +8401,9 @@ interface BuildPlatformEntry {
   platform: string
   url: string
   ext: string
+  originalFilename: string
+  size: number
+  mimeType: string
 }
 
 interface AdminBuildEntry {
@@ -8447,11 +8450,14 @@ function AdminBuildsSection({ pubkey, signer, privateKey }: { pubkey: string | n
               body: data.body || '',
               sourceUrl: data.sourceUrl || '',
               sourceExt: data.sourceExt || '',
-              platforms: (Array.isArray(data.platforms) ? data.platforms : []).map((p: Record<string, string>) => ({
+              platforms: (Array.isArray(data.platforms) ? data.platforms : []).map((p: Record<string, unknown>) => ({
                 id: crypto.randomUUID(),
-                platform: p.platform || '',
-                url: p.url || '',
-                ext: p.ext || '',
+                platform: (p.platform as string) || '',
+                url: (p.url as string) || '',
+                ext: (p.ext as string) || '',
+                originalFilename: (p.originalFilename as string) || '',
+                size: (p.size as number) || 0,
+                mimeType: (p.mimeType as string) || '',
               })),
               publishedAt: data.published_at || ev.created_at,
               createdAt: ev.created_at,
@@ -8505,7 +8511,7 @@ function AdminBuildsSection({ pubkey, signer, privateKey }: { pubkey: string | n
   const addPlatform = (buildId: string) => {
     setBuilds((prev) => prev.map((b) => b.id === buildId ? {
       ...b,
-      platforms: [...b.platforms, { id: crypto.randomUUID(), platform: '', url: '', ext: '' }],
+      platforms: [...b.platforms, { id: crypto.randomUUID(), platform: '', url: '', ext: '', originalFilename: '', size: 0, mimeType: '' }],
     } : b))
   }
 
@@ -8535,7 +8541,7 @@ function AdminBuildsSection({ pubkey, signer, privateKey }: { pubkey: string | n
         sourceUrl: build.sourceUrl,
         sourceExt: build.sourceExt,
         published_at: publishedAt,
-        platforms: build.platforms.map(({ platform, url, ext }) => ({ platform, url, ext })),
+        platforms: build.platforms.map(({ platform, url, ext, originalFilename, size, mimeType }) => ({ platform, url, ext, originalFilename, size, mimeType })),
       })
       // For existing builds: use created_at + 1 so the replacement doesn't jump in timeline
       // For new builds: use default (now)
@@ -8571,7 +8577,7 @@ function AdminBuildsSection({ pubkey, signer, privateKey }: { pubkey: string | n
       body: b.body,
       sourceUrl: b.sourceUrl,
       sourceExt: b.sourceExt,
-      platforms: b.platforms.map(({ platform, url, ext }) => ({ platform, url, ext })),
+      platforms: b.platforms.map(({ platform, url, ext, originalFilename, size, mimeType }) => ({ platform, url, ext, originalFilename, size, mimeType })),
     })
   }
 
@@ -8791,6 +8797,37 @@ function AdminBuildsSection({ pubkey, signer, privateKey }: { pubkey: string | n
 
 /* ─── Build Platform Row with Upload ─── */
 
+function formatBuildFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`
+}
+
+function MetadataRow({ label, value, mono, copiable }: { label: string; value: string; mono?: boolean; copiable?: boolean }) {
+  const [copied, setCopied] = useState(false)
+  const handleCopy = () => {
+    navigator.clipboard.writeText(value)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
+  }
+  return (
+    <div>
+      <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">{label}</span>
+      <div className="flex items-center gap-1.5 mt-0.5">
+        <span className={`text-xs text-foreground break-all flex-1 ${mono ? 'font-mono' : ''} ${value === '—' ? 'text-muted-foreground' : ''}`}>
+          {value}
+        </span>
+        {copiable && value !== '—' && (
+          <button onClick={handleCopy} className="p-1 rounded hover:bg-secondary/60 text-muted-foreground hover:text-foreground transition-colors cursor-pointer shrink-0">
+            {copied ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function BuildPlatformRow({ plat, onUpdate, onRemove, signer, privateKey }: {
   plat: BuildPlatformEntry
   onUpdate: (patch: Partial<BuildPlatformEntry>) => void
@@ -8799,10 +8836,12 @@ function BuildPlatformRow({ plat, onUpdate, onRemove, signer, privateKey }: {
   privateKey: string | null
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const uploadAbortRef = useRef<AbortController | null>(null)
   const [uploading, setUploading] = useState(false)
   const [progress, setProgress] = useState<{ percent: number; serverUrl: string; serverIndex: number; totalServers: number } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [successMsg, setSuccessMsg] = useState<string | null>(null)
+  const [metadataOpen, setMetadataOpen] = useState(false)
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -8823,9 +8862,10 @@ function BuildPlatformRow({ plat, onUpdate, onRemove, signer, privateKey }: {
       const { hash, serverUrls, successCount } = await uploadToBlossomServers(
         data, signer || null, privateKey || null, undefined, file.type,
         (p) => setProgress({ percent: p.percent, serverUrl: p.serverUrl, serverIndex: p.serverIndex, totalServers: p.totalServers }),
+        () => { const c = new AbortController(); uploadAbortRef.current = c; return c.signal },
       )
       const baseUrl = serverUrls[0] || 'https://blossom.primal.net'
-      onUpdate({ url: `${baseUrl}/${hash}`, ext: fileExt })
+      onUpdate({ url: `${baseUrl}/${hash}`, ext: fileExt, originalFilename: file.name, size: file.size, mimeType: file.type })
       setProgress(null)
       setSuccessMsg(`Uploaded to ${successCount} server${successCount !== 1 ? 's' : ''}`)
       setTimeout(() => setSuccessMsg(null), 5000)
@@ -8888,7 +8928,15 @@ function BuildPlatformRow({ plat, onUpdate, onRemove, signer, privateKey }: {
             </div>
             <div className="flex items-center justify-between text-[9px] text-muted-foreground mt-0.5">
               <span className="truncate">{new URL(progress.serverUrl).hostname} ({progress.serverIndex + 1}/{progress.totalServers})</span>
-              <span>{progress.percent >= 100 ? 'Processing...' : `${progress.percent}%`}</span>
+              <span className="flex items-center gap-1">
+                {progress.percent >= 100 ? 'Processing...' : `${progress.percent}%`}
+                <button
+                  onClick={() => { uploadAbortRef.current?.abort(); uploadAbortRef.current = null }}
+                  className="text-muted-foreground hover:text-destructive cursor-pointer flex items-center gap-0.5 ml-0.5"
+                >
+                  <XCircle size={10} /><span className="text-[9px]">Skip</span>
+                </button>
+              </span>
             </div>
           </div>
         )}
@@ -8901,17 +8949,80 @@ function BuildPlatformRow({ plat, onUpdate, onRemove, signer, privateKey }: {
           <p className="text-[10px] text-emerald-400 mt-0.5">✓ {successMsg}</p>
         )}
       </div>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            onClick={onRemove}
-            className="p-1 rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-colors cursor-pointer mt-0.5"
-          >
-            <Trash2 size={14} />
-          </button>
-        </TooltipTrigger>
-        <TooltipContent side="top" className="text-xs">Remove platform</TooltipContent>
-      </Tooltip>
+      <div className="flex flex-col gap-1 mt-0.5">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              onClick={() => setMetadataOpen(true)}
+              disabled={!plat.url}
+              className="p-1 rounded hover:bg-secondary/60 text-muted-foreground hover:text-foreground transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              <Info size={14} />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="top" className="text-xs">File metadata</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              onClick={onRemove}
+              className="p-1 rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-colors cursor-pointer"
+            >
+              <Trash2 size={14} />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="top" className="text-xs">Remove platform</TooltipContent>
+        </Tooltip>
+      </div>
+
+      {/* File Metadata Modal */}
+      {metadataOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setMetadataOpen(false)}>
+          <div className="bg-background border border-border rounded-xl shadow-2xl w-full max-w-md mx-4" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+              <h4 className="text-sm font-semibold text-foreground flex items-center gap-2"><Info size={14} className="text-primary" /> File Metadata</h4>
+              <button onClick={() => setMetadataOpen(false)} className="p-1 rounded hover:bg-secondary/60 text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="p-4 space-y-3">
+              {/* Original Filename */}
+              <MetadataRow label="Original Filename" value={plat.originalFilename || '—'} />
+
+              {/* Extension (editable) */}
+              <div>
+                <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Extension</span>
+                <div className="flex items-center gap-2 mt-0.5">
+                  <input
+                    type="text"
+                    value={plat.ext}
+                    onChange={(e) => onUpdate({ ext: e.target.value })}
+                    placeholder="e.g. .exe"
+                    className="flex-1 px-2.5 py-1.5 rounded border border-border bg-secondary/30 text-xs text-foreground placeholder:text-muted-foreground outline-none focus:border-primary/50 transition-colors font-mono"
+                  />
+                  <span className="text-[10px] text-muted-foreground">editable</span>
+                </div>
+              </div>
+
+              {/* File Size */}
+              <MetadataRow label="File Size" value={plat.size ? formatBuildFileSize(plat.size) : '—'} />
+
+              {/* SHA-256 Hash */}
+              {(() => {
+                const hashMatch = plat.url.match(/\/([a-f0-9]{64})(?:\.[^/]*)?$/i)
+                const hash = hashMatch?.[1] || ''
+                return hash ? <MetadataRow label="SHA-256 Hash" value={hash} mono copiable /> : <MetadataRow label="SHA-256 Hash" value="—" />
+              })()}
+
+              {/* MIME Type */}
+              <MetadataRow label="MIME Type" value={plat.mimeType || '—'} />
+
+              {/* Download URL */}
+              <MetadataRow label="Download URL" value={plat.url || '—'} mono copiable />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -8925,6 +9036,7 @@ function BuildSourceUploadField({ url, onUpdate, signer, privateKey }: {
   privateKey: string | null
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const uploadAbortRef = useRef<AbortController | null>(null)
   const [uploading, setUploading] = useState(false)
   const [progress, setProgress] = useState<{ percent: number; serverUrl: string; serverIndex: number; totalServers: number } | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -8948,6 +9060,7 @@ function BuildSourceUploadField({ url, onUpdate, signer, privateKey }: {
       const { hash, serverUrls, successCount } = await uploadToBlossomServers(
         data, signer || null, privateKey || null, undefined, file.type || 'application/zip',
         (p) => setProgress({ percent: p.percent, serverUrl: p.serverUrl, serverIndex: p.serverIndex, totalServers: p.totalServers }),
+        () => { const c = new AbortController(); uploadAbortRef.current = c; return c.signal },
       )
       const baseUrl = serverUrls[0] || 'https://blossom.primal.net'
       onUpdate(`${baseUrl}/${hash}`, fileExt)
@@ -8995,7 +9108,15 @@ function BuildSourceUploadField({ url, onUpdate, signer, privateKey }: {
           </div>
           <div className="flex items-center justify-between text-[9px] text-muted-foreground mt-0.5">
             <span className="truncate">{new URL(progress.serverUrl).hostname} ({progress.serverIndex + 1}/{progress.totalServers})</span>
-            <span>{progress.percent >= 100 ? 'Processing...' : `${progress.percent}%`}</span>
+            <span className="flex items-center gap-1">
+              {progress.percent >= 100 ? 'Processing...' : `${progress.percent}%`}
+              <button
+                onClick={() => { uploadAbortRef.current?.abort(); uploadAbortRef.current = null }}
+                className="text-muted-foreground hover:text-destructive cursor-pointer flex items-center gap-0.5 ml-0.5"
+              >
+                <XCircle size={10} /><span className="text-[9px]">Skip</span>
+              </button>
+            </span>
           </div>
         </div>
       )}

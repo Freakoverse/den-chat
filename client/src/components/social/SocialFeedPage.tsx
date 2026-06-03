@@ -32,6 +32,9 @@ import { ResizablePanel } from '@/components/ui/ResizablePanel'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { DnnBadge } from '@/components/ui/DnnBadge'
 import { cn, truncateNpub, formatTimestamp } from '@/lib/utils'
+import { parseZapReceipt } from '@/lib/nostr/zap'
+import { useZapStore } from '@/stores/zapStore'
+import type { ReactionInfo } from '@/components/social/ReactionListModal'
 import type { Event } from 'nostr-tools'
 
 type FeedTab = 'home' | 'reactions' | 'bookmarks' | 'notifications'
@@ -206,6 +209,115 @@ export function SocialFeedPage() {
   const [subLoading, setSubLoading] = useState(false)
   const [showFilterModal, setShowFilterModal] = useState(false)
 
+  // ── Batch data for SocialPost (avoids per-post relay queries) ──
+  const SOCIAL_ZAP_NS = '__social__'
+  const [bookmarkedIds, setBookmarkedIds] = useState<Set<string>>(new Set())
+  const [reactionsMap, setReactionsMap] = useState<Map<string, ReactionInfo[]>>(new Map())
+  const batchFetchedRef = useRef<Set<string>>(new Set())
+
+  // Fetch bookmarks once
+  useEffect(() => {
+    if (!pubkey) return
+    fetchEvents({ kinds: [10003], authors: [pubkey], limit: 1 }).then(async (events) => {
+      if (events.length === 0) return
+      const latest = events.sort((a, b) => b.created_at - a.created_at)[0]
+      let ids: string[] = []
+      if (latest.content) {
+        try {
+          const signer = useUserStore.getState().signer
+          const privateKey = useUserStore.getState().privateKey
+          let decrypted: string
+          if (privateKey) {
+            decrypted = await nip04.decrypt(privateKey, pubkey, latest.content)
+          } else if (signer?.nip04Decrypt) {
+            decrypted = await signer.nip04Decrypt(pubkey, latest.content)
+          } else if (signer?.nip04?.decrypt) {
+            decrypted = await signer.nip04.decrypt(pubkey, latest.content)
+          } else {
+            return
+          }
+          const tags: string[][] = JSON.parse(decrypted)
+          ids = tags.filter(t => t[0] === 'e').map(t => t[1])
+        } catch {
+          ids = latest.tags.filter(t => t[0] === 'e').map(t => t[1])
+        }
+      } else {
+        ids = latest.tags.filter(t => t[0] === 'e').map(t => t[1])
+      }
+      setBookmarkedIds(new Set(ids))
+    })
+  }, [pubkey])
+
+  // Batch-fetch reactions & zaps when posts change
+  useEffect(() => {
+    if (posts.length === 0) return
+    const newIds = posts.map(p => p.id).filter(id => !batchFetchedRef.current.has(id))
+    if (newIds.length === 0) return
+    for (const id of newIds) batchFetchedRef.current.add(id)
+
+    // Batch reactions — fetch in chunks of 50 IDs
+    const fetchReactionBatches = async () => {
+      for (let i = 0; i < newIds.length; i += 50) {
+        const chunk = newIds.slice(i, i + 50)
+        try {
+          const rawReactions = await fetchEvents({ kinds: [7], '#e': chunk, limit: chunk.length * 5 })
+          setReactionsMap(prev => {
+            const next = new Map(prev)
+            for (const r of rawReactions) {
+              const eTag = r.tags.find(t => t[0] === 'e')
+              if (!eTag?.[1]) continue
+              const targetId = eTag[1]
+              const emojiTag = r.tags.find(t => t[0] === 'emoji')
+              let emoji = r.content || '+'
+              let emojiUrl: string | undefined
+              if (emojiTag && emojiTag[1] && emojiTag[2]) {
+                emoji = `:${emojiTag[1]}:`
+                emojiUrl = emojiTag[2]
+              }
+              const entry: ReactionInfo = {
+                eventId: r.id,
+                pubkey: r.pubkey,
+                emoji,
+                emojiUrl,
+                createdAt: r.created_at,
+              }
+              const existing = next.get(targetId) || []
+              existing.push(entry)
+              next.set(targetId, existing)
+            }
+            return next
+          })
+        } catch (err) {
+          console.error('[Feed] Batch reaction fetch failed:', err)
+        }
+      }
+    }
+
+    // Batch zaps — fetch in chunks of 50 IDs
+    const fetchZapBatches = async () => {
+      for (let i = 0; i < newIds.length; i += 50) {
+        const chunk = newIds.slice(i, i + 50)
+        try {
+          const receipts = await fetchEvents({ kinds: [9735], '#e': chunk, limit: chunk.length * 3 })
+          const zapStore = useZapStore.getState()
+          for (const receipt of receipts) {
+            if (!zapStore.markZapProcessed(receipt.id)) continue
+            const zapInfo = parseZapReceipt(receipt)
+            if (zapInfo) {
+              const eTag = receipt.tags.find(t => t[0] === 'e')
+              if (eTag?.[1]) zapStore.addZap(SOCIAL_ZAP_NS, eTag[1], zapInfo)
+            }
+          }
+        } catch (err) {
+          console.error('[Feed] Batch zap fetch failed:', err)
+        }
+      }
+    }
+
+    fetchReactionBatches()
+    fetchZapBatches()
+  }, [posts])
+
   // Load feed when follows are ready (or immediately for self-posts)
   useEffect(() => {
     if (!followsLoaded || posts.length > 0) return
@@ -226,7 +338,7 @@ export function SocialFeedPage() {
         kinds: [1, 6],
         authors,
         since,
-        limit: 150,
+        limit: 40,
       })
       setPosts(events)
     } catch (err) {
@@ -583,6 +695,8 @@ export function SocialFeedPage() {
                     onOpenThread={setActiveThread}
                     sentinelRef={sentinelRef}
                     loadingMore={loadingMore}
+                    bookmarkedIds={bookmarkedIds}
+                    reactionsMap={reactionsMap}
                   />
                 )}
               </div>
@@ -976,6 +1090,8 @@ interface FilteredFeedProps {
   onOpenThread: (eventId: string) => void
   sentinelRef: React.RefObject<HTMLDivElement | null>
   loadingMore: boolean
+  bookmarkedIds: Set<string>
+  reactionsMap: Map<string, ReactionInfo[]>
 }
 
 /** Categorise a nostr event:  root | quote-repost | repost | reply */
@@ -997,7 +1113,7 @@ function parseRepostInner(event: Event): Event | null {
   return null
 }
 
-export function FilteredFeed({ posts, feedFilters, onOpenProfile, onOpenThread, sentinelRef, loadingMore }: FilteredFeedProps) {
+export function FilteredFeed({ posts, feedFilters, onOpenProfile, onOpenThread, sentinelRef, loadingMore, bookmarkedIds, reactionsMap }: FilteredFeedProps) {
   // Build filtered + deduped feed
   const feedItems = useMemo(() => {
     const items: Array<{ key: string; event: Event; type: 'root' | 'quote-repost' | 'repost' | 'reply'; repostedByPubkey?: string; replyParentId?: string }> = []
@@ -1060,6 +1176,9 @@ export function FilteredFeed({ posts, feedFilters, onOpenProfile, onOpenThread, 
             event={item.event}
             onOpenProfile={onOpenProfile}
             onOpenThread={onOpenThread}
+            isBookmarked={bookmarkedIds.has(item.event.id)}
+            initialReactions={reactionsMap.get(item.event.id)}
+            skipZapFetch
           />
         </div>
       ))}
