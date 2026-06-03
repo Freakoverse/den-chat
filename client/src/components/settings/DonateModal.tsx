@@ -11,7 +11,7 @@ import { nip19 } from 'nostr-tools'
 import {
   X, Copy, Check, AlertTriangle, Heart, Loader2, ThumbsUp, ThumbsDown, ChevronLeft,
 } from 'lucide-react'
-import { useUserStore } from '@/stores/userStore'
+import { useUserStore, type ISigner } from '@/stores/userStore'
 import { ADMIN_PUBKEY } from '@/lib/constants'
 import { getPublishRelays } from '@/stores/postingBehaviourStore'
 import { publishToSpecificRelays } from '@/lib/nostr/relay-pool'
@@ -189,6 +189,7 @@ export function DonateModal({ open, onClose }: DonateModalProps) {
 
   const pubkey = useUserStore((s) => s.pubkey)
   const privateKey = useUserStore((s) => s.privateKey)
+  const signer = useUserStore((s) => s.signer)
 
   const currency = useMemo(
     () => CURRENCIES.find((c) => c.id === selectedCurrency),
@@ -268,7 +269,7 @@ export function DonateModal({ open, onClose }: DonateModalProps) {
       } else if (currency.isNativeEth) {
         asset = 'native'
       } else {
-        asset = currency.id // USDT, USDC, PYUSD
+        asset = currency.id.toLowerCase() // DENOS uses lowercase asset IDs (usdt, usdc, pyusd)
         token = TOKEN_CONTRACTS[currency.id]?.[effectiveChain] || null
       }
 
@@ -293,29 +294,40 @@ export function DonateModal({ open, onClose }: DonateModalProps) {
       const { event, ephemeralSkHex: skHex } = createNspNotification(ADMIN_PUBKEY, payload)
       setEphemeralSkHex(skHex)
 
-      // Gather relays: admin NIP-65 + user NIP-65 + client relays
+      // Gather relays: NSP mandatory relays + admin NIP-65 + user NIP-65 + client relays
+      // Always include the NSP relay list so DENOS can find the notification
+      const NSP_RELAYS = [
+        'wss://relay.damus.io',
+        'wss://nos.lol',
+        'wss://relay.nostr.band',
+        'wss://relay.primal.net',
+        'wss://relay.snort.social',
+      ]
+
       const [adminRelays, userRelays] = await Promise.all([
         fetchNip65Relays(ADMIN_PUBKEY),
         pubkey ? fetchNip65Relays(pubkey) : Promise.resolve([]),
       ])
 
       const clientRelays = getPublishRelays().slice(0, 3)
-      const allRelays = [...new Set([...adminRelays, ...userRelays, ...clientRelays])]
-
-      if (allRelays.length === 0) {
-        // Fallback to hardcoded
-        allRelays.push('wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.nostr.band')
-      }
+      const allRelays = [...new Set([...NSP_RELAYS, ...adminRelays, ...userRelays, ...clientRelays])]
 
       // Publish
+      console.log(`[Donate] Publishing kind 1604 notification to ${allRelays.length} relays:`, allRelays)
       const successRelays = await publishToSpecificRelays(allRelays, event as any)
+      console.log(`[Donate] Publish result: ${successRelays.length}/${allRelays.length} relays accepted`, successRelays)
 
       setRelayResults({ total: allRelays.length, success: successRelays.length })
 
-      // Save to NIP-78 sent list if user has a private key
-      if (privateKey && pubkey) {
+      // Treat 0 accepted relays as failure — admin won't receive the notification
+      if (successRelays.length === 0) {
+        throw new Error('No relays accepted the notification. Please try again.')
+      }
+
+      // Save to NIP-78 sent list (works with raw key, signer, or browser extension)
+      if (pubkey && (privateKey || signer?.nip44)) {
         try {
-          await saveSentEntry(privateKey, pubkey, {
+          await saveSentEntry(pubkey, {
             txid: '',
             chain: effectiveChain,
             asset,
@@ -326,7 +338,7 @@ export function DonateModal({ open, onClose }: DonateModalProps) {
             recipientPubkey: ADMIN_PUBKEY,
             senderNsec: skHex,
             timestamp: Math.floor(Date.now() / 1000),
-          })
+          }, privateKey, signer)
         } catch (err) {
           console.warn('[Donate] Failed to save sent entry:', err)
         }
@@ -338,7 +350,7 @@ export function DonateModal({ open, onClose }: DonateModalProps) {
       setNotifyError(err?.message || 'Failed to send notification')
       setState('generated')
     }
-  }, [currency, effectiveChain, generatedAddress, generatedTweak, includeIdentity, pubkey, privateKey])
+  }, [currency, effectiveChain, generatedAddress, generatedTweak, includeIdentity, pubkey, privateKey, signer])
 
   const handleAttemptClose = useCallback(() => {
     if (state === 'generated' || state === 'notifying') {
@@ -710,17 +722,27 @@ export function DonateModal({ open, onClose }: DonateModalProps) {
 // ── NIP-78 Sent List Persistence ──
 
 async function saveSentEntry(
-  privateKeyHex: string,
   pubkeyHex: string,
   entry: NspSentEntry,
+  privateKeyHex?: string | null,
+  signer?: ISigner | null,
 ): Promise<void> {
+  // Determine signing/encryption method
+  const useSigner = !privateKeyHex && signer?.nip44
+  if (!privateKeyHex && !useSigner) {
+    console.warn('[Donate] No signing method available for NIP-78 sent list')
+    return
+  }
+
   // Load existing sent list
   let entries: NspSentEntry[] = []
   try {
     const { fetchReplaceable } = await import('@/lib/nostr/relay-pool')
     const existingEvent = await fetchReplaceable(pubkeyHex, KIND_NSP_SENT_LIST, NSP_SENT_DTAG)
     if (existingEvent?.content) {
-      const plaintext = nip44DecryptSelf(privateKeyHex, existingEvent.content)
+      const plaintext = useSigner
+        ? await signer!.nip44!.decrypt(pubkeyHex, existingEvent.content)
+        : nip44DecryptSelf(privateKeyHex!, existingEvent.content)
       const parsed = JSON.parse(plaintext)
       entries = parsed.entries || []
     }
@@ -731,9 +753,11 @@ async function saveSentEntry(
   // Append new entry
   entries.push(entry)
 
-  // Encrypt and publish
-  const encrypted = nip44EncryptSelf(privateKeyHex, JSON.stringify({ entries }))
-  const sk = hexToBytes(privateKeyHex)
+  // Encrypt
+  const payload = JSON.stringify({ entries })
+  const encrypted = useSigner
+    ? await signer!.nip44!.encrypt(pubkeyHex, payload)
+    : nip44EncryptSelf(privateKeyHex!, payload)
 
   const template = {
     kind: KIND_NSP_SENT_LIST,
@@ -742,7 +766,11 @@ async function saveSentEntry(
     content: encrypted,
   }
 
-  const signedEvent = finalizeEvent(template, sk)
+  // Sign
+  const signedEvent = useSigner
+    ? await signer!.signEvent(template)
+    : finalizeEvent(template, hexToBytes(privateKeyHex!))
+
   const publishRelays = getPublishRelays()
   await publishToSpecificRelays(publishRelays, signedEvent as any)
 
