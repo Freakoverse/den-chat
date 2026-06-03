@@ -48,6 +48,7 @@ import { nip19 } from 'nostr-tools'
 import { PERMISSION_KEYS, PERMISSION_LABELS, PERMISSION_DESCRIPTIONS, DISABLED_PERMISSIONS, DEFAULT_EVERYONE_PERMISSIONS, getPermissionsForUser, type ResolvedPermissions } from '@/lib/hub/permissions'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
 import { Pagination } from '@/components/ui/Pagination'
+import { CustomSelect } from '@/components/ui/custom-select'
 
 const EMPTY_REPORTS: HubReport[] = []
 
@@ -1684,6 +1685,8 @@ function ChannelsPage({ editCategories, setEditCategories, editChannels, setEdit
   const [dragOverTarget, setDragOverTarget] = useState<string | null>(null)
   const [editingChannelId, setEditingChannelId] = useState<string | null>(null)
   const [editingChannelName, setEditingChannelName] = useState('')
+  const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null)
+  const [editingCategoryName, setEditingCategoryName] = useState('')
   const [permEditTarget, setPermEditTarget] = useState<{ type: 'channel' | 'category'; id: string } | null>(null)
 
   const addCategory = () => {
@@ -1731,6 +1734,26 @@ function ChannelsPage({ editCategories, setEditCategories, editChannels, setEdit
   const cancelEditChannel = () => {
     setEditingChannelId(null)
     setEditingChannelName('')
+  }
+
+  const startEditCategory = (cat: Category) => {
+    setEditingCategoryId(cat.categoryId)
+    setEditingCategoryName(cat.name)
+  }
+
+  const commitEditCategory = () => {
+    if (!editingCategoryId) return
+    const trimmed = editingCategoryName.trim()
+    if (trimmed && !editCategories.some(c => c.categoryId !== editingCategoryId && c.name === trimmed)) {
+      setEditCategories(editCategories.map(c => c.categoryId === editingCategoryId ? { ...c, name: trimmed } : c))
+    }
+    setEditingCategoryId(null)
+    setEditingCategoryName('')
+  }
+
+  const cancelEditCategory = () => {
+    setEditingCategoryId(null)
+    setEditingCategoryName('')
   }
 
   const onCategoryDragStart = (e: React.DragEvent, catId: string) => { setDragItem({ type: 'category', id: catId }); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', catId) }
@@ -1818,17 +1841,16 @@ function ChannelsPage({ editCategories, setEditCategories, editChannels, setEdit
         <Input placeholder="channel-name" className="text-xs" value={newChannelNames[key] || ''}
           onChange={(e) => setNewChannelNames({ ...newChannelNames, [key]: e.target.value })}
           onKeyDown={(e) => e.key === 'Enter' && addChannel(categoryId)} />
-        <select
+        <CustomSelect
           value={selectedType}
-          onChange={(e) => setNewChannelTypes({ ...newChannelTypes, [key]: e.target.value as 'chat' | 'forum' | 'announcement' | 'voice' })}
-          className="h-9 px-2 rounded-lg border border-input bg-background text-xs text-foreground cursor-pointer outline-none appearance-none"
-          style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 0.35rem center', paddingRight: '1.4rem' }}
-        >
-          <option value="chat">Chat</option>
-          <option value="forum">Forum</option>
-          <option value="announcement">Announcement</option>
-          <option value="voice">Voice</option>
-        </select>
+          onChange={(val) => setNewChannelTypes({ ...newChannelTypes, [key]: val as 'chat' | 'forum' | 'announcement' | 'voice' })}
+          options={[
+            { value: 'chat', label: 'Chat' },
+            { value: 'forum', label: 'Forum' },
+            { value: 'announcement', label: 'Announcement' },
+            { value: 'voice', label: 'Voice' },
+          ]}
+        />
         <Button variant="ghost" size="sm" className="h-7 w-7 p-0 shrink-0" onClick={() => addChannel(categoryId)}><Plus size={14} /></Button>
       </div>
     )
@@ -1888,8 +1910,25 @@ function ChannelsPage({ editCategories, setEditCategories, editChannels, setEdit
                   <button onClick={() => toggleCategory(cat.categoryId)} className="p-1.5 rounded-md hover:bg-secondary cursor-pointer transition-colors">
                     {isCollapsed ? <ChevronRight size={14} className="text-muted-foreground" /> : <ChevronDown size={14} className="text-muted-foreground" />}
                   </button>
-                  <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex-1">{cat.name}</span>
+                  {editingCategoryId === cat.categoryId ? (
+                    <input
+                      autoFocus
+                      value={editingCategoryName}
+                      onChange={(e) => setEditingCategoryName(e.target.value)}
+                      onBlur={commitEditCategory}
+                      onKeyDown={(e) => { if (e.key === 'Enter') commitEditCategory(); if (e.key === 'Escape') cancelEditCategory() }}
+                      className="flex-1 bg-transparent text-xs font-semibold uppercase tracking-wide text-muted-foreground outline-none px-1 py-0.5 rounded-sm"
+                    />
+                  ) : (
+                    <Tip text="Double-click to rename" side="bottom">
+                      <span
+                        className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex-1 cursor-text hover:text-primary/90 transition-colors px-1 py-0.5"
+                        onDoubleClick={() => startEditCategory(cat)}
+                      >{cat.name}</span>
+                    </Tip>
+                  )}
                   <div className="flex items-center gap-1">
+                    <Tip text="Rename"><button onClick={() => startEditCategory(cat)} className="p-1.5 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 cursor-pointer transition-colors"><Pencil size={14} /></button></Tip>
                     <Tip text="Permissions"><button onClick={() => setPermEditTarget({ type: 'category', id: cat.categoryId })} className="p-1.5 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 cursor-pointer transition-colors"><Settings size={14} /></button></Tip>
                     <Tip text="Delete category"><button onClick={() => removeCategory(cat.categoryId)} className="p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 cursor-pointer transition-colors"><Trash2 size={14} /></button></Tip>
                   </div>
@@ -4249,13 +4288,7 @@ function NetworkPage({ hub, editRelays, setEditRelays, editBlossoms, setEditBlos
             editRelays.map((url) => (
               <div key={url} className="flex items-center gap-2.5 px-3 py-2 rounded-lg bg-secondary/30 border border-border">
                 <span className="text-sm text-foreground font-mono truncate flex-1">{url}</span>
-                <select
-                  className="h-6 text-[10px] rounded border border-border bg-background px-1 text-muted-foreground cursor-pointer"
-                  disabled
-                  value="general"
-                >
-                  <option value="general">general</option>
-                </select>
+                <span className="h-6 flex items-center text-[10px] rounded border border-border bg-background px-1.5 text-muted-foreground select-none">general</span>
                 <button
                   onClick={() => removeRelay(url)}
                   className="text-muted-foreground hover:text-destructive transition-colors cursor-pointer"

@@ -322,7 +322,7 @@ export function HubEventCard({ identifier, pubkey, relays }: HubEventCardProps) 
           </button>
           {isAlreadyInList || joined ? (
             <span className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-              <Check size={12} /> {isAlreadyInList ? 'Joined' : 'Request Sent'}
+              <Check size={12} /> Request Sent
             </span>
           ) : (
             <button

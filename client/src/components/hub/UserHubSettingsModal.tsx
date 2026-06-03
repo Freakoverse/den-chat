@@ -34,6 +34,7 @@ import { useReportStore, type HubReport } from '@/stores/reportStore'
 import type { VoiceProviderType, CloudflareConfig, LiveKitConfig } from '@/lib/voice/types'
 import { getPermissionsForUser } from '@/lib/hub/permissions'
 import { Pagination } from '@/components/ui/Pagination'
+import { CustomSelect } from '@/components/ui/custom-select'
 
 interface UserHubSettingsModalProps {
   open: boolean
@@ -1330,20 +1331,17 @@ export function UserHubSettingsModal({ open, onClose, hub }: UserHubSettingsModa
                     {/* Scope selector — hub-wide or grouped role */}
                     <div className="mb-3">
                       <label className="text-xs text-muted-foreground mb-1 block">Publish scope</label>
-                      <select
+                      <CustomSelect
                         value={voiceScope ?? '__hub__'}
-                        onChange={(e) => switchVoiceScope(e.target.value === '__hub__' ? null : e.target.value)}
-                        className="w-full h-9 rounded-lg border border-input bg-background px-3 text-sm text-foreground focus:outline-none cursor-pointer"
-                      >
-                        <option value="__hub__">Hub (all members)</option>
-                        {availableGroupScopes
-                          .filter((g) => g.roleIds.length > 0)
-                          .map((g) => (
-                            <option key={g.groupId} value={g.groupId}>
-                              Group #{g.groupId.slice(0, 6)}
-                            </option>
-                          ))}
-                      </select>
+                        onChange={(val) => switchVoiceScope(val === '__hub__' ? null : val)}
+                        options={[
+                          { value: '__hub__', label: 'Hub (all members)' },
+                          ...availableGroupScopes
+                            .filter((g) => g.roleIds.length > 0)
+                            .map((g) => ({ value: g.groupId, label: `Group #${g.groupId.slice(0, 6)}` })),
+                        ]}
+                        className="w-full"
+                      />
                       {/* Contextual helper — channels in the selected scope */}
                       {(() => {
                         if (!voiceScope) return null
@@ -1889,10 +1887,10 @@ export function UserHubSettingsModal({ open, onClose, hub }: UserHubSettingsModa
                           <p className="text-xs text-muted-foreground text-center py-4">No other moderators with ban permission</p>
                         ) : (
                           <>
-                            <select
+                            <CustomSelect
                               value={selectedMod || ''}
-                              onChange={async (e) => {
-                                const modPk = e.target.value || null
+                              onChange={async (val) => {
+                                const modPk = val || null
                                 setSelectedMod(modPk)
                                 setOtherModBanList([])
                                 if (modPk && modBanLists[modPk]) {
@@ -1922,20 +1920,20 @@ export function UserHubSettingsModal({ open, onClose, hub }: UserHubSettingsModa
                                   setOtherModLoading(false)
                                 }
                               }}
-                              className="w-full px-3 py-2 rounded-lg bg-secondary/50 border border-border text-sm text-foreground outline-none mb-3 cursor-pointer"
-                            >
-                              <option value="">Select a moderator...</option>
-                              {otherMods.map((m) => {
-                                const p = getProfile(m.pubkey)
-                                const name = p?.display_name || p?.name || truncateNpub(nip19.npubEncode(m.pubkey), 10)
-                                const banCount = modBanLists[m.pubkey]?.length || 0
-                                return (
-                                  <option key={m.pubkey} value={m.pubkey}>
-                                    {name}{banCount > 0 ? ` (${banCount} ban${banCount !== 1 ? 's' : ''})` : ''}
-                                  </option>
-                                )
-                              })}
-                            </select>
+                              options={[
+                                { value: '', label: 'Select a moderator...' },
+                                ...otherMods.map((m) => {
+                                  const p = getProfile(m.pubkey)
+                                  const name = p?.display_name || p?.name || truncateNpub(nip19.npubEncode(m.pubkey), 10)
+                                  const banCount = modBanLists[m.pubkey]?.length || 0
+                                  return {
+                                    value: m.pubkey,
+                                    label: `${name}${banCount > 0 ? ` (${banCount} ban${banCount !== 1 ? 's' : ''})` : ''}`,
+                                  }
+                                }),
+                              ]}
+                              className="w-full mb-3"
+                            />
 
                             {selectedMod && (
                               otherModLoading ? (

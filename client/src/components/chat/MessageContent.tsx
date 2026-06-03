@@ -14,6 +14,7 @@ import { VerificationBadge } from '@/components/ui/VerificationBadge'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import remarkBreaks from 'remark-breaks'
 import { nip19 } from 'nostr-tools'
 import { getEmojiMap, isEmojiSizeOk } from '@/stores/emojiStore'
 import { getRenderLimit } from '@/lib/imageSizeGuard'
@@ -695,7 +696,7 @@ export const MessageContent = memo(function MessageContent({ content, suffix, on
     const emojified = effectiveDisableEmojis ? timestamped : preEmojifyMarkdown(timestamped, emojiTags)
     const proc = emojified.replace(/\n\n/g, '\n\n\u00a0\n\n')
     return (
-      <Markdown remarkPlugins={[remarkGfm]} components={components}>
+      <Markdown remarkPlugins={[remarkGfm, remarkBreaks]} components={components}>
         {proc}
       </Markdown>
     )
