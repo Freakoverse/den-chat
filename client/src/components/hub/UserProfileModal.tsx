@@ -12,6 +12,7 @@ import { useUserStore } from '@/stores/userStore'
 import { useBlockStore } from '@/stores/blockStore'
 import type { BlockType } from '@/stores/blockStore'
 import { BlockTypeModal } from '@/components/ui/BlockTypeModal'
+import { FollowSafetyModal } from '@/components/ui/FollowSafetyModal'
 import { useFollowStore } from '@/stores/followStore'
 import { useNavigationStore } from '@/stores/navigationStore'
 import { useDMStore } from '@/stores/dmStore'
@@ -137,6 +138,10 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
 
   // Block type modal state
   const [showBlockTypeModal, setShowBlockTypeModal] = useState(false)
+
+  // Follow safety modal state
+  const [showFollowSafetyModal, setShowFollowSafetyModal] = useState(false)
+  const [pendingFollowSafetyStatus, setPendingFollowSafetyStatus] = useState<'empty-list' | 'not-loaded' | 'load-error'>('empty-list')
 
   // Following list modal state
   const [showFollowingList, setShowFollowingList] = useState(false)
@@ -332,6 +337,22 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
   const following = displayPubkey ? followStoreState.isFollowing(displayPubkey) : false
 
   const handleFollow = async () => {
+    if (!myPubkey || !displayPubkey || (!signer && !privateKey)) return
+
+    // For follow (not unfollow), check safety status
+    if (!following) {
+      const safety = followStoreState.getFollowSafetyStatus()
+      if (safety !== 'safe') {
+        setPendingFollowSafetyStatus(safety as 'empty-list' | 'not-loaded' | 'load-error')
+        setShowFollowSafetyModal(true)
+        return
+      }
+    }
+
+    await executeFollow()
+  }
+
+  const executeFollow = async () => {
     if (!myPubkey || !displayPubkey || (!signer && !privateKey)) return
     setFollowLoading(true)
 
@@ -1539,6 +1560,16 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
         onSelect={handleBlockWithType}
         displayName={displayName}
       />
+      {/* Follow safety warning modal */}
+      {displayPubkey && (
+        <FollowSafetyModal
+          open={showFollowSafetyModal}
+          onClose={() => setShowFollowSafetyModal(false)}
+          targetPubkey={displayPubkey}
+          onConfirmFollow={executeFollow}
+          status={pendingFollowSafetyStatus}
+        />
+      )}
       {/* Following list modal */}
       <FollowingListModal
         open={showFollowingList}
