@@ -9,6 +9,7 @@ import { SettingsPage } from '@/components/settings/SettingsPage'
 import { DMPage } from '@/components/dm/DMPage'
 import { DiscoverPage } from '@/components/discover/DiscoverPage'
 import { PublicChatPage } from '@/components/public/PublicChatPage'
+import { WalletPage } from '@/components/wallet/WalletPage'
 import { useHubStore } from '@/stores/hubStore'
 import { useNavigationStore } from '@/stores/navigationStore'
 import { useNotificationStore } from '@/stores/notificationStore'
@@ -25,7 +26,7 @@ import { useBlockStore } from '@/stores/blockStore'
 import { useWotStore } from '@/stores/wotStore'
 import { useMobile } from '@/hooks/useMobile'
 import { useMemo, useEffect } from 'react'
-import { ShieldAlert, LogOut, Plus, MessageSquare, AtSign, Compass, Settings, Home, X } from 'lucide-react'
+import { ShieldAlert, LogOut, Plus, MessageSquare, AtSign, Compass, Settings, Home, X, Wallet } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { OfflineBanner } from '@/components/ui/OfflineBanner'
 
@@ -137,6 +138,8 @@ export function AppLayout() {
             <DMPage />
           ) : activePage === 'public-chat' ? (
             <PublicChatPage />
+          ) : activePage === 'wallet' ? (
+            <WalletPage />
           ) : activePage === 'hubs' && mobileView === 'chat' && activeHubId && activeChannelId ? (
             /* Full-screen chat view */
             <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
@@ -189,18 +192,7 @@ export function AppLayout() {
       {activePage === 'settings' ? (
         <SettingsPage />
       ) : activePage === 'wallet' ? (
-        <div className="flex flex-1 h-full overflow-hidden bg-background">
-          <ResizablePanel id="wallet" defaultWidth={280} minWidth={200} maxWidth={420} className="flex flex-col border-r border-border bg-secondary/30 pt-4">
-            <h2 className="px-4 text-sm font-semibold text-foreground mb-3">Wallet</h2>
-            <div className="flex-1 overflow-y-auto" />
-            <div className="mt-auto">
-              <UserPanel />
-            </div>
-          </ResizablePanel>
-          <div className="flex-1 flex items-center justify-center">
-            <p className="text-muted-foreground">coming soon</p>
-          </div>
-        </div>
+        <WalletPage />
       ) : activePage === 'social' ? (
         <SocialFeedPage />
       ) : activePage === 'discover' ? (
@@ -242,11 +234,12 @@ function MobileTabBar({ activePage, onNavigate, dmUnread }: {
 }) {
   const setMobileView = useNavigationStore((s) => s.setMobileView)
 
-  const tabs: { id: 'hubs' | 'dms' | 'social' | 'discover' | 'settings'; label: string; icon: typeof Home; badge?: number }[] = [
+  const tabs: { id: 'hubs' | 'dms' | 'social' | 'discover' | 'wallet' | 'settings'; label: string; icon: typeof Home; badge?: number }[] = [
     { id: 'hubs', label: 'Home', icon: Home },
     { id: 'dms', label: 'DMs', icon: MessageSquare, badge: dmUnread },
     { id: 'social', label: 'Social', icon: AtSign },
     { id: 'discover', label: 'Discover', icon: Compass },
+    { id: 'wallet', label: 'Wallet', icon: Wallet },
     { id: 'settings', label: 'Settings', icon: Settings },
   ]
 

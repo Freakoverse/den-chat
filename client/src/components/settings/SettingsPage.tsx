@@ -9,6 +9,7 @@ import { useUserListsStore } from '@/stores/userListsStore'
 import { usePostingBehaviourStore } from '@/stores/postingBehaviourStore'
 import { useNavigationStore } from '@/stores/navigationStore'
 import { useDnnStore } from '@/stores/dnnStore'
+import { useRpcStore, DEFAULT_BITCOIN_NODES, DEFAULT_EVM_CHAINS, type EvmChain } from '@/stores/rpcStore'
 import { useWotStore } from '@/stores/wotStore'
 import { dnnService, type DnnNodeInfo } from '@/lib/dnn/dnnService'
 import { useVoiceStore } from '@/stores/voiceStore'
@@ -40,7 +41,7 @@ import {
   Copy, Check, Lock, FileDown, AlertTriangle, X, RotateCcw, RefreshCw,
   Loader2, Send, HelpCircle, XCircle, UserMinus, ShieldOff, Tag, Download,
   GripVertical, FolderPlus, ChevronDown, ChevronRight, Pencil, ListPlus, Upload, Undo2,
-  BookOpen, Mic, Volume2, Camera, MonitorPlay, Megaphone, Crown, Sparkles, Zap, Palette as PaletteIcon, BadgeCheck, MessageCircleOff, ArrowUp, ArrowDown, Heart, LogOut, Gamepad2,
+  BookOpen, Mic, Volume2, Camera, MonitorPlay, Megaphone, Crown, Sparkles, Zap, Palette as PaletteIcon, BadgeCheck, MessageCircleOff, ArrowUp, ArrowDown, Heart, LogOut, Gamepad2, Activity,
 } from 'lucide-react'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -1716,7 +1717,16 @@ function NetworkTab() {
 
   const sliderPercent = Math.min((uploadLimit / sliderMaxMb) * 100, 100)
 
-  const [netTab, setNetTab] = useState<'posting' | 'relays' | 'blossom' | 'dnn'>('posting')
+  const [netTab, setNetTab] = useState<'posting' | 'relays' | 'blossom' | 'dnn' | 'rpc'>('posting')
+
+  // Allow deep-linking to a specific network sub-tab (e.g., from wallet page → RPC)
+  useEffect(() => {
+    const { settingsNetworkTab, setSettingsNetworkTab } = useNavigationStore.getState()
+    if (settingsNetworkTab && ['posting', 'relays', 'blossom', 'dnn', 'rpc'].includes(settingsNetworkTab)) {
+      setNetTab(settingsNetworkTab as typeof netTab)
+      setSettingsNetworkTab(null)
+    }
+  }, [])
 
   return (
     <div className="space-y-6">
@@ -1732,6 +1742,7 @@ function NetworkTab() {
           { id: 'relays' as const, label: 'Relays' },
           { id: 'blossom' as const, label: 'Blossom Servers' },
           { id: 'dnn' as const, label: 'DNN Nodes' },
+          { id: 'rpc' as const, label: 'RPC' },
         ]).map((t) => (
           <button
             key={t.id}
@@ -1960,9 +1971,342 @@ function NetworkTab() {
       {netTab === 'dnn' && (
         <DnnNodesSection />
       )}
+
+      {/* ── RPC Endpoints ── */}
+      {netTab === 'rpc' && (
+        <RpcSettingsSection />
+      )}
     </div>
   )
 }
+/* ─────────── RPC Endpoint Settings ─────────── */
+
+const EVM_CHAIN_LIST: { id: EvmChain; name: string; symbol: string }[] = [
+  { id: 'ethereum', name: 'Ethereum', symbol: 'ETH' },
+  { id: 'bnb', name: 'BNB Chain', symbol: 'BNB' },
+  { id: 'polygon', name: 'Polygon', symbol: 'POL' },
+  { id: 'avalanche', name: 'Avalanche', symbol: 'AVAX' },
+  { id: 'base', name: 'Base', symbol: 'ETH' },
+]
+
+function RpcSettingsSection() {
+  const bitcoinNodes = useRpcStore((s) => s.bitcoinNodes)
+  const setBitcoinNodes = useRpcStore((s) => s.setBitcoinNodes)
+  const addBitcoinNode = useRpcStore((s) => s.addBitcoinNode)
+  const removeBitcoinNode = useRpcStore((s) => s.removeBitcoinNode)
+  const evmChains = useRpcStore((s) => s.evmChains)
+  const setEvmNodes = useRpcStore((s) => s.setEvmNodes)
+  const addEvmNode = useRpcStore((s) => s.addEvmNode)
+  const removeEvmNode = useRpcStore((s) => s.removeEvmNode)
+  const etherscanApiKey = useRpcStore((s) => s.etherscanApiKey)
+  const setEtherscanApiKey = useRpcStore((s) => s.setEtherscanApiKey)
+  const goldrushApiKey = useRpcStore((s) => s.goldrushApiKey)
+  const setGoldrushApiKey = useRpcStore((s) => s.setGoldrushApiKey)
+  const resetDefaults = useRpcStore((s) => s.resetDefaults)
+  const resetChain = useRpcStore((s) => s.resetChain)
+  const [testing, setTesting] = useState<string | null>(null)
+  const [testResult, setTestResult] = useState<Record<string, 'ok' | 'fail' | null>>({})
+  const [newBtcNode, setNewBtcNode] = useState('')
+  const [newEvmNode, setNewEvmNode] = useState<Record<string, string>>({})
+
+  const handleTestBtcNode = async (url: string) => {
+    setTesting(url)
+    setTestResult((p) => ({ ...p, [url]: null }))
+    try {
+      const controller = new AbortController()
+      const timeout = setTimeout(() => controller.abort(), 6000)
+      try {
+        const res = await fetch(`${url}/blocks/tip/height`, { signal: controller.signal })
+        clearTimeout(timeout)
+        if (res.ok) {
+          setTestResult((p) => ({ ...p, [url]: 'ok' }))
+          return
+        }
+      } catch {
+        clearTimeout(timeout)
+      }
+      const res2 = await fetch(`${url}/address/1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa`, { signal: AbortSignal.timeout(6000) })
+      setTestResult((p) => ({ ...p, [url]: res2.ok ? 'ok' : 'fail' }))
+    } catch {
+      setTestResult((p) => ({ ...p, [url]: 'fail' }))
+    } finally {
+      setTesting(null)
+    }
+  }
+
+  const handleTestEvmNode = async (url: string) => {
+    setTesting(url)
+    setTestResult((p) => ({ ...p, [url]: null }))
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', method: 'eth_blockNumber', params: [], id: 1 }),
+        signal: AbortSignal.timeout(6000),
+      })
+      const data = await res.json()
+      setTestResult((p) => ({ ...p, [url]: data.result ? 'ok' : 'fail' }))
+    } catch {
+      setTestResult((p) => ({ ...p, [url]: 'fail' }))
+    } finally { setTesting(null) }
+  }
+
+  const handleAddBtcNode = () => {
+    const url = newBtcNode.trim().replace(/\/+$/, '')
+    if (!url) return
+    addBitcoinNode(url)
+    setNewBtcNode('')
+  }
+
+  const handleMoveBtcNode = (index: number, direction: -1 | 1) => {
+    const newIndex = index + direction
+    if (newIndex < 0 || newIndex >= bitcoinNodes.length) return
+    const updated = [...bitcoinNodes]
+    ;[updated[index], updated[newIndex]] = [updated[newIndex], updated[index]]
+    setBitcoinNodes(updated)
+  }
+
+  const handleAddEvmNode = (chain: EvmChain) => {
+    const url = (newEvmNode[chain] || '').trim().replace(/\/+$/, '')
+    if (!url) return
+    addEvmNode(chain, url)
+    setNewEvmNode((p) => ({ ...p, [chain]: '' }))
+  }
+
+  const handleMoveEvmNode = (chain: EvmChain, index: number, direction: -1 | 1) => {
+    const nodes = evmChains[chain].nodes
+    const newIndex = index + direction
+    if (newIndex < 0 || newIndex >= nodes.length) return
+    const updated = [...nodes]
+    ;[updated[index], updated[newIndex]] = [updated[newIndex], updated[index]]
+    setEvmNodes(chain, updated)
+  }
+
+  const isChainDefault = (chain: EvmChain) => {
+    const cfg = evmChains[chain]
+    const def = DEFAULT_EVM_CHAINS[chain]
+    return JSON.stringify(cfg.nodes) === JSON.stringify(def.nodes)
+  }
+
+  // Shared node row renderer
+  const renderNodeRow = (
+    url: string, i: number, total: number,
+    onTest: (url: string) => void,
+    onMove: (i: number, dir: -1 | 1) => void,
+    onRemove: (url: string) => void,
+  ) => {
+    const result = testResult[url]
+    return (
+      <div key={url} className="flex items-center gap-1.5 px-2.5 py-2 rounded-lg bg-secondary/30 border border-border/30">
+        <span className="text-[10px] text-muted-foreground/50 w-4 text-center shrink-0 font-mono">{i + 1}</span>
+        <code className="text-xs text-foreground font-mono flex-1 truncate">{url}</code>
+        {result === 'ok' && <Check size={14} className="text-green-500 shrink-0" />}
+        {result === 'fail' && <X size={14} className="text-destructive shrink-0" />}
+        <TooltipProvider delayDuration={200}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button onClick={() => onTest(url)} disabled={testing !== null}
+                className="p-1.5 text-primary hover:bg-primary/10 rounded-md transition-colors cursor-pointer disabled:opacity-50 shrink-0">
+                {testing === url ? <Loader2 size={14} className="animate-spin" /> : <Activity size={14} />}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top"><p>Test connection</p></TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button onClick={() => onMove(i, -1)} disabled={i === 0}
+                className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-secondary/50 rounded-md transition-colors cursor-pointer disabled:opacity-20 shrink-0">
+                <ArrowUp size={14} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top"><p>Move up (higher priority)</p></TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button onClick={() => onMove(i, 1)} disabled={i === total - 1}
+                className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-secondary/50 rounded-md transition-colors cursor-pointer disabled:opacity-20 shrink-0">
+                <ArrowDown size={14} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top"><p>Move down (lower priority)</p></TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button onClick={() => onRemove(url)} disabled={total <= 1}
+                className="p-1.5 text-destructive/60 hover:text-destructive hover:bg-destructive/10 rounded-md transition-colors cursor-pointer disabled:opacity-20 shrink-0">
+                <Trash2 size={14} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top"><p>Remove node</p></TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-6">
+      <section className="space-y-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <h4 className="text-sm font-semibold text-foreground">RPC Endpoints</h4>
+            <p className="text-xs text-muted-foreground mt-0.5">Configure blockchain RPC nodes. Nodes are tried in order for automatic failover.</p>
+          </div>
+          <button onClick={resetDefaults}
+            className="px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground bg-secondary/40 hover:bg-secondary/70 rounded-md transition-colors cursor-pointer">
+            Reset All
+          </button>
+        </div>
+
+        {/* ── Bitcoin Nodes ── */}
+        <div className="rounded-xl border border-border/60 bg-background/60 p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium text-foreground">Bitcoin</span>
+              <span className="text-[10px] text-muted-foreground bg-secondary/50 px-1.5 py-0.5 rounded">BTC</span>
+              <span className="text-[10px] text-muted-foreground/60 bg-secondary/30 px-1.5 py-0.5 rounded">
+                {bitcoinNodes.length} node{bitcoinNodes.length !== 1 ? 's' : ''}
+              </span>
+            </div>
+            {JSON.stringify(bitcoinNodes) !== JSON.stringify(DEFAULT_BITCOIN_NODES) && (
+              <TooltipProvider delayDuration={200}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button onClick={() => resetChain('bitcoin')}
+                      className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-secondary/50 rounded-md transition-colors cursor-pointer">
+                      <RotateCcw size={14} />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top"><p>Reset to default nodes</p></TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            )}
+          </div>
+
+          <div className="space-y-1.5">
+            {bitcoinNodes.map((url, i) => renderNodeRow(url, i, bitcoinNodes.length, handleTestBtcNode, handleMoveBtcNode, removeBitcoinNode))}
+          </div>
+
+          <div className="flex gap-2">
+            <Input value={newBtcNode} onChange={(e) => setNewBtcNode(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleAddBtcNode()}
+              placeholder="https://mempool.space/api" className="text-xs font-mono h-8 flex-1" />
+            <button onClick={handleAddBtcNode} disabled={!newBtcNode.trim()}
+              className="px-3 h-8 text-xs text-primary bg-primary/10 hover:bg-primary/20 rounded-md transition-colors cursor-pointer disabled:opacity-50 shrink-0 flex items-center gap-1.5">
+              <Plus size={14} /> Add
+            </button>
+          </div>
+        </div>
+
+        {/* ── EVM Chains ── */}
+        {EVM_CHAIN_LIST.map((chain) => {
+          const cfg = evmChains[chain.id]
+          const chainIsDefault = isChainDefault(chain.id)
+
+          return (
+            <div key={chain.id} className="rounded-xl border border-border/60 bg-background/60 p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium text-foreground">{chain.name}</span>
+                  <span className="text-[10px] text-muted-foreground bg-secondary/50 px-1.5 py-0.5 rounded">{chain.symbol}</span>
+                  <span className="text-[10px] text-muted-foreground/60 bg-secondary/30 px-1.5 py-0.5 rounded">
+                    {cfg.nodes.length} node{cfg.nodes.length !== 1 ? 's' : ''}
+                  </span>
+                </div>
+                {!chainIsDefault && (
+                  <TooltipProvider delayDuration={200}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button onClick={() => resetChain(chain.id)}
+                          className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-secondary/50 rounded-md transition-colors cursor-pointer">
+                          <RotateCcw size={14} />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="top"><p>Reset to default</p></TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                )}
+              </div>
+
+              {/* Node list */}
+              <div className="space-y-1.5">
+                {cfg.nodes.map((url, i) => renderNodeRow(
+                  url, i, cfg.nodes.length,
+                  handleTestEvmNode,
+                  (idx, dir) => handleMoveEvmNode(chain.id, idx, dir),
+                  (u) => removeEvmNode(chain.id, u),
+                ))}
+              </div>
+              <div className="flex gap-2">
+                <Input value={newEvmNode[chain.id] || ''} onChange={(e) => setNewEvmNode((p) => ({ ...p, [chain.id]: e.target.value }))}
+                  onKeyDown={(e) => e.key === 'Enter' && handleAddEvmNode(chain.id)}
+                  placeholder="https://rpc.example.com" className="text-xs font-mono h-8 flex-1" />
+                <button onClick={() => handleAddEvmNode(chain.id)} disabled={!(newEvmNode[chain.id] || '').trim()}
+                  className="px-3 h-8 text-xs text-primary bg-primary/10 hover:bg-primary/20 rounded-md transition-colors cursor-pointer disabled:opacity-50 shrink-0 flex items-center gap-1.5">
+                  <Plus size={14} /> Add
+                </button>
+              </div>
+            </div>
+          )
+        })}
+
+        {/* ── Etherscan API Key ── */}
+        <div className="rounded-xl border border-border/60 bg-background/60 p-4 space-y-2">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium text-foreground">Etherscan</span>
+            <span className="text-[10px] text-muted-foreground bg-secondary/50 px-1.5 py-0.5 rounded">All chains</span>
+          </div>
+          <p className="text-[10px] text-muted-foreground leading-relaxed">
+            API key for Etherscan V2 unified endpoint — used for transaction history across all EVM chains. Free tier available at <strong>etherscan.io</strong>. Without a key, chain-specific explorers and Routescan are used as fallback.
+          </p>
+          <div className="mt-1">
+            <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium mb-1 block">
+              API Key <span className="text-muted-foreground/50">(optional)</span>
+            </label>
+            <Input
+              value={etherscanApiKey}
+              onChange={(e) => setEtherscanApiKey(e.target.value)}
+              placeholder="XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+              className="text-xs font-mono h-8"
+            />
+          </div>
+        </div>
+
+        {/* ── GoldRush (Covalent) API Key ── */}
+        <div className="rounded-xl border border-border/60 bg-background/60 p-4 space-y-2">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium text-foreground">GoldRush (Covalent)</span>
+            <span className="text-[10px] text-muted-foreground bg-secondary/50 px-1.5 py-0.5 rounded">Fallback</span>
+          </div>
+          <p className="text-[10px] text-muted-foreground leading-relaxed">
+            Optional API key for GoldRush (Covalent) — used as a last-resort fallback for transaction history. Covers all EVM chains. Get a free key at <strong>goldrush.dev</strong>.
+          </p>
+          <div className="mt-1">
+            <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium mb-1 block">
+              API Key <span className="text-muted-foreground/50">(optional)</span>
+            </label>
+            <Input
+              value={goldrushApiKey}
+              onChange={(e) => setGoldrushApiKey(e.target.value)}
+              placeholder="cqt_xxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+              className="text-xs font-mono h-8"
+            />
+          </div>
+        </div>
+
+        <div className="rounded-lg bg-secondary/30 border border-border/40 px-4 py-3 text-xs text-muted-foreground space-y-1">
+          <p className="font-medium text-foreground text-xs">Tips</p>
+          <p>• Each chain has 3 free public nodes by default. Nodes are tried in order for automatic failover.</p>
+          <p>• For better reliability, add your own RPC endpoint from <strong>Alchemy</strong>, <strong>Infura</strong>, or <strong>QuickNode</strong>.</p>
+          <p>• Transaction history uses a 4-layer fallback: Etherscan V2 → chain explorer (bscscan, etc.) → Routescan → GoldRush.</p>
+          <p>• Even without API keys, chain-specific explorers and Routescan provide basic tx history for most chains.</p>
+        </div>
+      </section>
+    </div>
+  )
+}
+
+
 /* ─────────── Voice Notes Settings ─────────── */
 
 function VoiceNoteSettingsSection({ uploadLimitMb }: { uploadLimitMb: number }) {

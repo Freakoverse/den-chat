@@ -13,6 +13,9 @@ interface NavigationStore {
   /** Optional: which tab to open when navigating to settings */
   settingsTab: string | null
   setSettingsTab: (tab: string | null) => void
+  /** Optional: which sub-tab to open within the network settings tab */
+  settingsNetworkTab: string | null
+  setSettingsNetworkTab: (tab: string | null) => void
   /** Optional: prefill a search/filter field when navigating to a settings tab */
   settingsSearchPrefill: string | null
   setSettingsSearchPrefill: (value: string | null) => void
@@ -34,6 +37,8 @@ export const useNavigationStore = create<NavigationStore>((set) => ({
   setActivePage: (page) => set({ activePage: page }),
   settingsTab: null,
   setSettingsTab: (tab) => set({ settingsTab: tab }),
+  settingsNetworkTab: null,
+  setSettingsNetworkTab: (tab) => set({ settingsNetworkTab: tab }),
   settingsSearchPrefill: null,
   setSettingsSearchPrefill: (value) => set({ settingsSearchPrefill: value }),
   showHubChoiceModal: false,

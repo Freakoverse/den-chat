@@ -34,6 +34,7 @@ function blossomProxy(): Plugin {
   }
 }
 
+
 import pkg from './package.json'
 
 export default defineConfig({
