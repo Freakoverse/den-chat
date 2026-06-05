@@ -15,6 +15,7 @@ import { nip44, getPublicKey } from 'nostr-tools'
 import { STANDARD_KINDS } from '@/lib/crypto/constants'
 import { fetchReplaceable, publishEvent } from '@/lib/nostr/relay-pool'
 import { createUnsignedEvent, signWithSigner } from '@/lib/nostr/events'
+import { guardedEncrypt, guardedDecrypt } from '@/lib/auth/signerGuard'
 import type { ISigner } from '@/stores/userStore'
 import type { Event } from 'nostr-tools'
 
@@ -70,10 +71,8 @@ async function encryptToSelf(
     )
     return nip44.v2.encrypt(plaintext, conversationKey)
   }
-  if (signer?.nip44?.encrypt) {
-    return signer.nip44.encrypt(myPubkey, plaintext)
-  }
-  throw new Error('[DM04Registry] No NIP-44 encryption capability available')
+  // Signer path — route through guard
+  return guardedEncrypt(plaintext, myPubkey, signer, null, 'nip44')
 }
 
 async function decryptFromSelf(
@@ -89,10 +88,8 @@ async function decryptFromSelf(
     )
     return nip44.v2.decrypt(ciphertext, conversationKey)
   }
-  if (signer?.nip44?.decrypt) {
-    return signer.nip44.decrypt(myPubkey, ciphertext)
-  }
-  throw new Error('[DM04Registry] No NIP-44 decryption capability available')
+  // Signer path — route through guard
+  return guardedDecrypt(ciphertext, myPubkey, signer, null, 'nip44')
 }
 
 /* ─── Core Functions ─── */

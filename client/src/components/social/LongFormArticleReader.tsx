@@ -32,7 +32,8 @@ import remarkGfm from 'remark-gfm'
 import { Loader2, ArrowLeft, Pencil, Trash2, Copy, Check, Clock, BookOpen, Smile, Bookmark, Zap, MoreVertical, FileCode } from 'lucide-react'
 import { ArticleComments } from '@/components/social/ArticleComments'
 import { cn, truncateNpub, formatTimestamp } from '@/lib/utils'
-import { nip19, nip04 } from 'nostr-tools'
+import { nip19 } from 'nostr-tools'
+import { decryptNip04, encryptNip04 } from '@/lib/nostr/nip04dm'
 import type { Event } from 'nostr-tools'
 import { getRenderLimit } from '@/lib/imageSizeGuard'
 import { ImageTooLarge } from '@/components/ui/ImageTooLarge'
@@ -612,14 +613,8 @@ function ArticleInteractionBar({ event }: { event: Event }) {
       const latest = events.sort((a, b) => b.created_at - a.created_at)[0]
       if (latest.content) {
         try {
-          let decrypted: string
-          if (privateKey) {
-            decrypted = await nip04.decrypt(privateKey, myPubkey, latest.content)
-          } else if (signer?.nip04Decrypt) {
-            decrypted = await signer.nip04Decrypt(myPubkey, latest.content)
-          } else if (signer?.nip04?.decrypt) {
-            decrypted = await signer.nip04.decrypt(myPubkey, latest.content)
-          } else return
+          const decrypted = await decryptNip04(latest.content, myPubkey, signer, privateKey)
+          if (!decrypted) return
           const privateTags: string[][] = JSON.parse(decrypted)
           setBookmarked(privateTags.some(t => t[0] === 'e' && t[1] === event.id))
         } catch {
@@ -680,14 +675,7 @@ function ArticleInteractionBar({ event }: { event: Event }) {
       let tags: string[][] = []
       if (latest?.content) {
         try {
-          let decrypted: string
-          if (privateKey) {
-            decrypted = await nip04.decrypt(privateKey, myPubkey, latest.content)
-          } else if (signer?.nip04Decrypt) {
-            decrypted = await signer.nip04Decrypt(myPubkey, latest.content)
-          } else if (signer?.nip04?.decrypt) {
-            decrypted = await signer.nip04.decrypt(myPubkey, latest.content)
-          } else throw new Error('No decryption method')
+          const decrypted = await decryptNip04(latest.content, myPubkey, signer, privateKey)
           tags = (JSON.parse(decrypted) as string[][]).filter(t => t[0] === 'e')
         } catch {
           tags = latest?.tags.filter(t => t[0] === 'e') || []
@@ -702,14 +690,7 @@ function ArticleInteractionBar({ event }: { event: Event }) {
         if (!tags.some(t => t[1] === event.id)) tags.push(['e', event.id])
       }
 
-      let encrypted: string
-      if (privateKey) {
-        encrypted = await nip04.encrypt(privateKey, myPubkey, JSON.stringify(tags))
-      } else if (signer?.nip04Encrypt) {
-        encrypted = await signer.nip04Encrypt(myPubkey, JSON.stringify(tags))
-      } else if (signer?.nip04?.encrypt) {
-        encrypted = await signer.nip04.encrypt(myPubkey, JSON.stringify(tags))
-      } else throw new Error('No encryption method')
+      const encrypted = await encryptNip04(JSON.stringify(tags), myPubkey, signer, privateKey)
 
       const unsigned = {
         kind: 10003,

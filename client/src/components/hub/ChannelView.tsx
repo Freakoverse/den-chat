@@ -15,7 +15,7 @@ import { useDecryptedMedia, getDecryptedBlobUrl } from '@/hooks/useDecryptedMedi
 import { UserProfileModal } from '@/components/hub/UserProfileModal'
 import { HubSettingsModal } from '@/components/hub/HubSettingsModal'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
-import { Hash, Megaphone, Users, Pin, PinOff, Bell, Search, Send, Plus, Smile, Sticker, Check, X, RotateCcw, Pencil, Reply, MoreVertical, Copy, MessageSquarePlus, Trash2, Loader2, Zap, Code, Bold, Italic, Strikethrough, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, Link, CodeSquare, ALargeSmall, Clipboard, ClipboardCheck, Upload, FileIcon, Download, Image, Paperclip, AlertTriangle, AlertCircle, Eye, EyeOff, ShieldBan, ShieldAlert, ShieldOff, Lock, LockOpen, Settings, ArrowDown, ArrowLeft, ImagePlay, Star, Vote, Clock, Flag, Shield, Globe, Radio, History, BadgeCheck, Mic } from 'lucide-react'
+import { Hash, Megaphone, Users, Pin, PinOff, Bell, Search, Send, Plus, Smile, Sticker, Check, X, RotateCcw, Pencil, Reply, MoreVertical, Copy, MessageSquarePlus, Trash2, Loader2, Zap, Code, Bold, Italic, Strikethrough, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, Link, CodeSquare, ALargeSmall, Clipboard, ClipboardCheck, Upload, FileIcon, Download, Image, Paperclip, AlertTriangle, AlertCircle, Eye, EyeOff, ShieldBan, ShieldAlert, ShieldOff, Lock, LockOpen, Settings, ArrowDown, ArrowLeft, ImagePlay, Star, Vote, Clock, Flag, Shield, Globe, Radio, History, BadgeCheck, Mic, WifiOff } from 'lucide-react'
 import { useState, useEffect, useRef, useCallback, memo, useMemo, Fragment } from 'react'
 import { createPortal } from 'react-dom'
 import { Button } from '@/components/ui/button'
@@ -6090,12 +6090,15 @@ const joinRequestCache = new Map<string, 'pending' | 'none' | 'checking'>()
 
 function EncryptedMessageCard({ hubDTag }: { hubDTag?: string }) {
   const myPubkey = useUserStore((s) => s.pubkey)
+  const failReason = useHubStore((s) => hubDTag ? s.hubSecretFailReason[hubDTag] : undefined)
   const [status, setStatus] = useState<'pending' | 'none' | 'checking'>(() => {
     if (!hubDTag || !myPubkey) return 'none'
     return joinRequestCache.get(`${myPubkey}:${hubDTag}`) || 'checking'
   })
 
   useEffect(() => {
+    // Skip join-request check if it's a signer issue (user IS a member)
+    if (failReason === 'signer-issue') { setStatus('none'); return }
     if (!hubDTag || !myPubkey) { setStatus('none'); return }
     const cacheKey = `${myPubkey}:${hubDTag}`
     const cached = joinRequestCache.get(cacheKey)
@@ -6123,9 +6126,10 @@ function EncryptedMessageCard({ hubDTag }: { hubDTag?: string }) {
           setStatus('none')
         }
       })()
-  }, [hubDTag, myPubkey])
+  }, [hubDTag, myPubkey, failReason])
 
   const isPending = status === 'pending'
+  const isSignerIssue = failReason === 'signer-issue'
 
   return (
     <div className="flex flex-col gap-2.5 py-3 px-4 my-1 rounded-lg bg-gradient-to-br from-primary/5 via-secondary/40 to-primary/5 border border-primary/20">
@@ -6136,21 +6140,26 @@ function EncryptedMessageCard({ hubDTag }: { hubDTag?: string }) {
         <span className="text-xs font-semibold text-foreground">Encrypted Message</span>
       </div>
       <p className="text-[11px] text-muted-foreground leading-relaxed">
-        You currently don't have the decryption secret key to see this message.
-        {isPending
-          ? ' Your join request is pending — once accepted, you\'ll be able to read these messages.'
-          : ' You must request to join the hub and be accepted by one of the appropriate members of the hub to see these messages properly.'
+        {isSignerIssue
+          ? 'Your remote signer declined or was unavailable. Reconnect your signer and reload to decrypt these messages.'
+          : isPending
+            ? 'You currently don\'t have the decryption secret key to see this message. Your join request is pending — once accepted, you\'ll be able to read these messages.'
+            : 'You currently don\'t have the decryption secret key to see this message. You must request to join the hub and be accepted by one of the appropriate members of the hub to see these messages properly.'
         }
       </p>
       <span
         className={cn(
           'self-start flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors',
-          isPending
+          isSignerIssue
             ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
-            : 'bg-primary/10 text-primary hover:bg-primary/20 cursor-pointer'
+            : isPending
+              ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+              : 'bg-primary/10 text-primary hover:bg-primary/20 cursor-pointer'
         )}
       >
-        {isPending ? (
+        {isSignerIssue ? (
+          <><WifiOff size={11} /> Signer unavailable</>
+        ) : isPending ? (
           <><Clock size={11} /> Request pending</>
         ) : (
           <><Lock size={11} /> Request to join</>

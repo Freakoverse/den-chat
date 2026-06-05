@@ -2,8 +2,8 @@ import { create } from 'zustand'
 import { fetchEvents, publishToSpecificRelays } from '@/lib/nostr/relay-pool'
 import { getPublishRelays } from '@/stores/postingBehaviourStore'
 import { signWithSigner } from '@/lib/nostr/events'
+import { encryptNip04, decryptNip04 } from '@/lib/nostr/nip04dm'
 import type { ISigner } from '@/stores/userStore'
-import { nip04 } from 'nostr-tools'
 
 /* ─── NIP-51 Mute/Block List (kind 10000) ─── */
 
@@ -40,44 +40,6 @@ export interface BlockState {
   isWordMuted: (word: string) => boolean
 }
 
-/** Encrypt a string to self using NIP-04 */
-async function encryptToSelf(
-  plaintext: string,
-  myPubkey: string,
-  signer: ISigner | null,
-  privateKey: string | null,
-): Promise<string> {
-  if (privateKey) {
-    return nip04.encrypt(privateKey, myPubkey, plaintext)
-  }
-  if (signer?.nip04Encrypt) {
-    return signer.nip04Encrypt(myPubkey, plaintext)
-  }
-  if (signer?.nip04?.encrypt) {
-    return signer.nip04.encrypt(myPubkey, plaintext)
-  }
-  throw new Error('No encryption method available')
-}
-
-/** Decrypt a string from self using NIP-04 */
-async function decryptFromSelf(
-  ciphertext: string,
-  myPubkey: string,
-  signer: ISigner | null,
-  privateKey: string | null,
-): Promise<string> {
-  if (privateKey) {
-    return nip04.decrypt(privateKey, myPubkey, ciphertext)
-  }
-  if (signer?.nip04Decrypt) {
-    return signer.nip04Decrypt(myPubkey, ciphertext)
-  }
-  if (signer?.nip04?.decrypt) {
-    return signer.nip04.decrypt(myPubkey, ciphertext)
-  }
-  throw new Error('No decryption method available')
-}
-
 /**
  * Publish a kind 10000 mute list with public/private block separation.
  *
@@ -111,7 +73,7 @@ async function publishMuteList(
     ...otherTags,
   ]
 
-  const encrypted = await encryptToSelf(
+  const encrypted = await encryptNip04(
     JSON.stringify(privateTags),
     myPubkey,
     signer,
@@ -172,7 +134,7 @@ export const useBlockStore = create<BlockState>((set, get) => ({
       // Decrypt and parse private tags from content
       if (latest.content) {
         try {
-          const decrypted = await decryptFromSelf(latest.content, pubkey, signer, privateKey)
+          const decrypted = await decryptNip04(latest.content, pubkey, signer, privateKey)
           const privateTags: string[][] = JSON.parse(decrypted)
           for (const tag of privateTags) {
             if (tag[0] === 'p' && tag[1]) {

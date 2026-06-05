@@ -14,6 +14,7 @@
 
 import { create } from 'zustand'
 import type { ISigner } from '@/stores/userStore'
+import { guardedDecrypt, guardedEncrypt } from '@/lib/auth/signerGuard'
 import type {
   HubReadState,
   HubMuteSettings,
@@ -307,9 +308,9 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
     if (hubEvent?.content) {
       let hubDecrypted = false
       // Try NIP-44 decryption first (modern standard)
-      if (!hubDecrypted && signer?.nip44?.decrypt) {
+      if (!hubDecrypted && signer) {
         try {
-          const decrypted = await signer.nip44.decrypt(pubkey, hubEvent.content)
+          const decrypted = await guardedDecrypt(hubEvent.content, pubkey, signer, null, 'nip44')
           hubState = parseHubReadState(decrypted)
           hubDecrypted = true
         } catch { /* not NIP-44 encrypted or decrypt failed */ }
@@ -324,10 +325,9 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
         } catch { /* not NIP-44 encrypted or decrypt failed */ }
       }
       // Fallback: try NIP-04 decryption (backward compat with existing events)
-      if (!hubDecrypted && (signer?.nip04Decrypt || signer?.nip04?.decrypt)) {
+      if (!hubDecrypted && signer) {
         try {
-          const decrypt = signer.nip04?.decrypt ?? signer.nip04Decrypt!
-          const decrypted = await decrypt(pubkey, hubEvent.content)
+          const decrypted = await guardedDecrypt(hubEvent.content, pubkey, signer, null, 'nip04')
           hubState = parseHubReadState(decrypted)
           hubDecrypted = true
         } catch { /* not NIP-04 encrypted */ }
@@ -351,9 +351,9 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
     if (dmEvent?.content) {
       let dmDecrypted = false
       // Try NIP-44 decryption first (modern standard)
-      if (!dmDecrypted && signer?.nip44?.decrypt) {
+      if (!dmDecrypted && signer) {
         try {
-          const decrypted = await signer.nip44.decrypt(pubkey, dmEvent.content)
+          const decrypted = await guardedDecrypt(dmEvent.content, pubkey, signer, null, 'nip44')
           dmState = parseDmReadState(decrypted)
           dmDecrypted = true
         } catch { /* not NIP-44 encrypted or decrypt failed */ }
@@ -368,10 +368,9 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
         } catch { /* not NIP-44 encrypted or decrypt failed */ }
       }
       // Fallback: try NIP-04 decryption (backward compat with existing events)
-      if (!dmDecrypted && (signer?.nip04Decrypt || signer?.nip04?.decrypt)) {
+      if (!dmDecrypted && signer) {
         try {
-          const decrypt = signer.nip04?.decrypt ?? signer.nip04Decrypt!
-          const decrypted = await decrypt(pubkey, dmEvent.content)
+          const decrypted = await guardedDecrypt(dmEvent.content, pubkey, signer, null, 'nip04')
           dmState = parseDmReadState(decrypted)
           dmDecrypted = true
         } catch { /* not NIP-04 encrypted */ }
@@ -632,10 +631,10 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
     const content = JSON.stringify(hubState)
 
     let encryptedContent = content
-    if (signer?.nip44?.encrypt) {
+    if (signer) {
       try {
         const pubkey = await signer.getPublicKey()
-        encryptedContent = await signer.nip44.encrypt(pubkey, content)
+        encryptedContent = await guardedEncrypt(content, pubkey, signer, null, 'nip44')
       } catch (err) {
         console.warn('[notif] Failed to NIP-44 encrypt hub read-state (signer), using plaintext:', err)
       }
@@ -660,10 +659,10 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
     const content = JSON.stringify(dmState)
 
     let encryptedContent = content
-    if (signer?.nip44?.encrypt) {
+    if (signer) {
       try {
         const pubkey = await signer.getPublicKey()
-        encryptedContent = await signer.nip44.encrypt(pubkey, content)
+        encryptedContent = await guardedEncrypt(content, pubkey, signer, null, 'nip44')
       } catch (err) {
         console.warn('[notif] Failed to NIP-44 encrypt DM read-state (signer), using plaintext:', err)
       }

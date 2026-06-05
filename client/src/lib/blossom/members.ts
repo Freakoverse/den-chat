@@ -16,6 +16,7 @@
 
 import { nip04 } from 'nostr-tools'
 import { aesEncrypt } from '@/lib/crypto/aes'
+import { encryptNip04, decryptNip04 } from '@/lib/nostr/nip04dm'
 import {
   buildTree,
   createLeaf,
@@ -65,7 +66,7 @@ export interface IndexFile {
 
 /**
  * NIP-04 encrypt: works with any signer type or raw private key.
- * The leaf key (as hex) is encrypted for the target pubkey.
+ * Routes through SignerGuard for backoff/circuit-breaker protection.
  */
 export async function nip04Encrypt(
   targetPubkey: string,
@@ -73,22 +74,12 @@ export async function nip04Encrypt(
   signer: ISigner | null,
   privateKey: string | null,
 ): Promise<string> {
-  // Try signer first (remote signers, browser extensions)
-  if (signer?.nip04?.encrypt) {
-    return signer.nip04.encrypt(targetPubkey, plaintext)
-  }
-  if (signer?.nip04Encrypt) {
-    return signer.nip04Encrypt(targetPubkey, plaintext)
-  }
-  // Fall back to local key with nostr-tools
-  if (privateKey) {
-    return nip04.encrypt(privateKey, targetPubkey, plaintext)
-  }
-  throw new Error('No signer or private key available for NIP-04 encryption')
+  return encryptNip04(plaintext, targetPubkey, signer, privateKey)
 }
 
 /**
  * NIP-04 decrypt: works with any signer type or raw private key.
+ * Routes through SignerGuard for backoff/circuit-breaker protection.
  */
 async function nip04Decrypt(
   senderPubkey: string,
@@ -96,16 +87,7 @@ async function nip04Decrypt(
   signer: ISigner | null,
   privateKey: string | null,
 ): Promise<string> {
-  if (signer?.nip04?.decrypt) {
-    return signer.nip04.decrypt(senderPubkey, ciphertext)
-  }
-  if (signer?.nip04Decrypt) {
-    return signer.nip04Decrypt(senderPubkey, ciphertext)
-  }
-  if (privateKey) {
-    return nip04.decrypt(privateKey, senderPubkey, ciphertext)
-  }
-  throw new Error('No signer or private key available for NIP-04 decryption')
+  return decryptNip04(ciphertext, senderPubkey, signer, privateKey)
 }
 
 // ─── Index File ───
@@ -404,7 +386,7 @@ export async function decryptHubSecret(
     return hubSecret
   } catch (err) {
     console.error('Failed to decrypt hub secret from LKH tree:', err)
-    return null
+    throw err // Re-throw so caller can distinguish signer errors from not-a-member
   }
 }
 
@@ -491,7 +473,7 @@ export async function decryptHubSecretPaginated(
     return hubSecret
   } catch (err) {
     console.error('Failed to decrypt hub secret (paginated):', err)
-    return null
+    throw err // Re-throw so caller can distinguish signer errors from not-a-member
   }
 }
 

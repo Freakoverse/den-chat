@@ -4,6 +4,7 @@ import { LoginScreen } from './components/auth/LoginScreen'
 import { AppLayout } from './components/layout/AppLayout'
 import { SplashScreen } from './components/auth/SplashScreen'
 import { UpdateToast } from './components/ui/UpdateToast'
+import { SignerGuardBanner } from './components/ui/SignerGuardBanner'
 import { DenChatLogo } from './components/ui/DenChatLogo'
 import { useStartup } from './hooks/useStartup'
 import { StorageKey } from './lib/constants'
@@ -58,6 +59,7 @@ export default function App() {
       {showApp ? <AppLayout /> : <LoginScreen />}
       {!splashDone && <SplashScreen onComplete={handleSplashComplete} />}
       <UpdateToast />
+      <SignerGuardBanner />
       {showOverlay && (
         <div
           style={{

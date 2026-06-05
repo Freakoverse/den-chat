@@ -146,6 +146,9 @@ export interface HubState {
   hubSecretsResolved: Record<string, boolean>
   /** Number of leaf pages in the paginated index (0 or absent = monolithic / unknown) */
   hubPageCounts: Record<string, number>
+  /** Why hub secret decryption failed: 'signer-issue' = signer declined/unavailable,
+   *  'not-a-member' = pubkey not found in LKH tree */
+  hubSecretFailReason: Record<string, 'signer-issue' | 'not-a-member'>
   /** Lightweight version counter incremented whenever any secret changes.
    *  Allows consumers (e.g. useMessages) to react to secret updates without
    *  subscribing to the full secret objects (which would cause new references). */
@@ -178,6 +181,7 @@ export interface HubState {
   addHiddenMessage: (dTag: string, entry: HideEntry) => void
   removeHiddenMessage: (dTag: string, ref: string) => void
   clearHiddenMessages: (dTag: string) => void
+  setHubSecretFailReason: (dTag: string, reason: 'signer-issue' | 'not-a-member') => void
 }
 
 export const useHubStore = create<HubState>((set) => ({
@@ -204,6 +208,7 @@ export const useHubStore = create<HubState>((set) => ({
   hiddenMessages: {},
   hubSecretsResolved: {},
   hubPageCounts: {},
+  hubSecretFailReason: {},
   _secretsVersion: 0,
 
   setHubEntries: (entries, folders) => set({ hubEntries: entries, folders, hubListLoaded: true }),
@@ -338,6 +343,9 @@ export const useHubStore = create<HubState>((set) => ({
       delete next[dTag]
       return { hiddenMessages: next }
     }),
+
+  setHubSecretFailReason: (dTag, reason) =>
+    set((state) => ({ hubSecretFailReason: { ...state.hubSecretFailReason, [dTag]: reason } })),
 }))
 
 /** Standalone helper to read hub prefs without re-render subscription */

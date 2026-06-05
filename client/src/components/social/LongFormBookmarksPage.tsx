@@ -14,7 +14,8 @@ import { BlossomImage } from '@/components/ui/BlossomImage'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Loader2, Bookmark, RefreshCw, Search } from 'lucide-react'
 import { truncateNpub, formatTimestamp } from '@/lib/utils'
-import { nip19, nip04 } from 'nostr-tools'
+import { nip19 } from 'nostr-tools'
+import { decryptNip04 } from '@/lib/nostr/nip04dm'
 import type { Event } from 'nostr-tools'
 
 /* ─── Types ─── */
@@ -161,16 +162,7 @@ export function LongFormBookmarksPage() {
       let eventIds: string[] = []
       if (latest.content) {
         try {
-          let decrypted: string
-          if (privateKey) {
-            decrypted = await nip04.decrypt(privateKey, pubkey, latest.content)
-          } else if (signer?.nip04Decrypt) {
-            decrypted = await signer.nip04Decrypt(pubkey, latest.content)
-          } else if (signer?.nip04?.decrypt) {
-            decrypted = await signer.nip04.decrypt(pubkey, latest.content)
-          } else {
-            throw new Error('No decryption method')
-          }
+          const decrypted = await decryptNip04(latest.content, pubkey, signer, privateKey)
           const privateTags: string[][] = JSON.parse(decrypted)
           eventIds = privateTags.filter(t => t[0] === 'e').map(t => t[1])
         } catch {

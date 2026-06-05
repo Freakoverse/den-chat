@@ -1,6 +1,6 @@
 [package]
 name = "den-chat"
-version = "0.1.0"
+version = "0.2.0"
 description = "DEN Chat — Decentralized Encrypted Network Chat"
 authors = ["Freakoverse"]
 edition = "2021"

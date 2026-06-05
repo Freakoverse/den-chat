@@ -295,18 +295,30 @@ async function loadHubSecret(
       }
 
       // Decrypt hub secret via page + spine
-      const hubSecret = await decryptHubSecretPaginated(
-        memberPubkey,
-        memberPrivateKey,
-        signer,
-        hubData.creatorPubkey,
-        pageContent,
-        spineContent,
-      )
+      let hubSecret: Uint8Array | null = null
+      let signerFailed = false
+      try {
+        hubSecret = await decryptHubSecretPaginated(
+          memberPubkey,
+          memberPrivateKey,
+          signer,
+          hubData.creatorPubkey,
+          pageContent,
+          spineContent,
+        )
+      } catch (err) {
+        // decryptHubSecretPaginated throws on signer errors (declined/circuit open)
+        // but returns null when pubkey not found in tree
+        console.warn(`Hub ${hubData.dTag}: signer error during paginated decrypt:`, err)
+        signerFailed = true
+      }
 
       if (!hubSecret) {
-        console.warn(`Hub ${hubData.dTag}: could not decrypt hub secret (paginated, not a member?)`)
-        return members.length > 0 ? { secretHex: '', members, bannedPubkeys, historyHash: index.historyHash, pageCount: index.leafPages.length } : null
+        const failReason = signerFailed ? 'signer-issue' as const : 'not-a-member' as const
+        console.warn(`Hub ${hubData.dTag}: could not decrypt hub secret (paginated, ${failReason})`)
+        return members.length > 0 || signerFailed
+          ? { secretHex: '', members, bannedPubkeys, historyHash: index.historyHash, pageCount: index.leafPages.length, failReason }
+          : null
       }
 
       const secretHex = Array.from(hubSecret).map(b => b.toString(16).padStart(2, '0')).join('')
@@ -332,17 +344,27 @@ async function loadHubSecret(
     }
 
     // Decrypt hub secret from LKH tree
-    const hubSecret = await decryptHubSecret(
-      memberPubkey,
-      memberPrivateKey,
-      signer,
-      hubData.creatorPubkey,
-      treeContent,
-    )
+    let hubSecret: Uint8Array | null = null
+    let signerFailed = false
+    try {
+      hubSecret = await decryptHubSecret(
+        memberPubkey,
+        memberPrivateKey,
+        signer,
+        hubData.creatorPubkey,
+        treeContent,
+      )
+    } catch (err) {
+      console.warn(`Hub ${hubData.dTag}: signer error during monolithic decrypt:`, err)
+      signerFailed = true
+    }
 
     if (!hubSecret) {
-      console.warn(`Hub ${hubData.dTag}: could not decrypt hub secret (not a member?)`)
-      return members.length > 0 ? { secretHex: '', members, bannedPubkeys, historyHash: index.historyHash, pageCount: 0 } : null
+      const failReason = signerFailed ? 'signer-issue' as const : 'not-a-member' as const
+      console.warn(`Hub ${hubData.dTag}: could not decrypt hub secret (${failReason})`)
+      return members.length > 0 || signerFailed
+        ? { secretHex: '', members, bannedPubkeys, historyHash: index.historyHash, pageCount: 0, failReason }
+        : null
     }
 
     const secretHex = Array.from(hubSecret).map(b => b.toString(16).padStart(2, '0')).join('')
@@ -541,6 +563,7 @@ export function useHubLoader() {
   const setGroupEpochSecrets = useHubStore((s) => s.setGroupEpochSecrets)
   const setHubSecretsResolved = useHubStore((s) => s.setHubSecretsResolved)
   const setHubPageCount = useHubStore((s) => s.setHubPageCount)
+  const setHubSecretFailReason = useHubStore((s) => s.setHubSecretFailReason)
   const pubkey = useUserStore((s) => s.pubkey)
   const privateKey = useUserStore((s) => s.privateKey)
   const signer = useUserStore((s) => s.signer)
@@ -649,6 +672,10 @@ export function useHubLoader() {
         if (!hubData.deleted && !hubSecrets[dTag] && pubkey) {
           const result = await loadHubSecret(hubData, pubkey, privateKey, signer)
           if (result) {
+            // Store failure reason if hub secret couldn't be obtained
+            if (result.failReason) {
+              setHubSecretFailReason(dTag, result.failReason)
+            }
             if (result.secretHex) {
               setHubSecret(dTag, result.secretHex)
             }

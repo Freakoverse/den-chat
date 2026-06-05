@@ -26,7 +26,8 @@ import {
   MessageCircle, Repeat2, Heart, Bookmark, ChevronDown, ChevronUp,
   Eye, EyeOff, Quote, Send, X, Loader2, Smile, MoreVertical, Copy, Code, Check, ShieldBan, Zap,
 } from 'lucide-react'
-import { nip19, nip04 } from 'nostr-tools'
+import { nip19 } from 'nostr-tools'
+import { decryptNip04, encryptNip04 } from '@/lib/nostr/nip04dm'
 import type { Event } from 'nostr-tools'
 import { ZapModal } from '@/components/hub/ZapModal'
 import { useZapStore } from '@/stores/zapStore'
@@ -150,16 +151,8 @@ export function SocialPost({ event, onOpenProfile, onOpenThread, compact, isBook
         // Check encrypted content for private bookmarks
         if (latest.content) {
           try {
-            let decrypted: string
-            if (privateKey) {
-              decrypted = await nip04.decrypt(privateKey, myPubkey, latest.content)
-            } else if (signer?.nip04Decrypt) {
-              decrypted = await signer.nip04Decrypt(myPubkey, latest.content)
-            } else if (signer?.nip04?.decrypt) {
-              decrypted = await signer.nip04.decrypt(myPubkey, latest.content)
-            } else {
-              return
-            }
+            const decrypted = await decryptNip04(latest.content, myPubkey, signer, privateKey)
+            if (!decrypted) return
             const privateTags: string[][] = JSON.parse(decrypted)
             const isBookmarked = privateTags.some(t => t[0] === 'e' && t[1] === event.id)
             setBookmarked(isBookmarked)
@@ -344,16 +337,7 @@ export function SocialPost({ event, onOpenProfile, onOpenThread, compact, isBook
       let tags: string[][] = []
       if (latest?.content) {
         try {
-          let decrypted: string
-          if (privateKey) {
-            decrypted = await nip04.decrypt(privateKey, myPubkey, latest.content)
-          } else if (signer?.nip04Decrypt) {
-            decrypted = await signer.nip04Decrypt(myPubkey, latest.content)
-          } else if (signer?.nip04?.decrypt) {
-            decrypted = await signer.nip04.decrypt(myPubkey, latest.content)
-          } else {
-            throw new Error('No decryption method available')
-          }
+          const decrypted = await decryptNip04(latest.content, myPubkey, signer, privateKey)
           tags = (JSON.parse(decrypted) as string[][]).filter(t => t[0] === 'e')
         } catch {
           // Fallback: migrate from public tags
@@ -373,16 +357,7 @@ export function SocialPost({ event, onOpenProfile, onOpenThread, compact, isBook
       }
 
       // Encrypt tags into content
-      let encrypted: string
-      if (privateKey) {
-        encrypted = await nip04.encrypt(privateKey, myPubkey, JSON.stringify(tags))
-      } else if (signer?.nip04Encrypt) {
-        encrypted = await signer.nip04Encrypt(myPubkey, JSON.stringify(tags))
-      } else if (signer?.nip04?.encrypt) {
-        encrypted = await signer.nip04.encrypt(myPubkey, JSON.stringify(tags))
-      } else {
-        throw new Error('No encryption method available')
-      }
+      const encrypted = await encryptNip04(JSON.stringify(tags), myPubkey, signer, privateKey)
 
       const unsigned = {
         kind: 10003,

@@ -12,6 +12,7 @@
 import { nip44, getPublicKey, finalizeEvent } from 'nostr-tools'
 import { getEventHash } from 'nostr-tools/pure'
 import { STANDARD_KINDS } from '@/lib/crypto/constants'
+import { guardedDecrypt, guardedEncrypt } from '@/lib/auth/signerGuard'
 import type { ISigner } from '@/stores/userStore'
 
 /* ─── Types ─── */
@@ -76,7 +77,7 @@ async function nip44Encrypt(
   recipientPubkey: string,
   signer: ISigner | null,
 ): Promise<string> {
-  // Raw key path
+  // Raw key path — local crypto, no guard needed
   if (senderPrivkeyHex) {
     const conversationKey = nip44.v2.utils.getConversationKey(
       hexToBytes(senderPrivkeyHex),
@@ -85,12 +86,8 @@ async function nip44Encrypt(
     return nip44.v2.encrypt(plaintext, conversationKey)
   }
 
-  // Signer path
-  if (signer?.nip44?.encrypt) {
-    return signer.nip44.encrypt(recipientPubkey, plaintext)
-  }
-
-  throw new Error('No private key or NIP-44 signer available for encryption')
+  // Signer path — route through guard
+  return guardedEncrypt(plaintext, recipientPubkey, signer, null, 'nip44')
 }
 
 async function nip44Decrypt(
@@ -99,7 +96,7 @@ async function nip44Decrypt(
   senderPubkey: string,
   signer: ISigner | null,
 ): Promise<string> {
-  // Raw key path
+  // Raw key path — local crypto, no guard needed
   if (recipientPrivkeyHex) {
     const conversationKey = nip44.v2.utils.getConversationKey(
       hexToBytes(recipientPrivkeyHex),
@@ -108,16 +105,8 @@ async function nip44Decrypt(
     return nip44.v2.decrypt(ciphertext, conversationKey)
   }
 
-  // Signer path
-  if (signer?.nip44?.decrypt) {
-    return signer.nip44.decrypt(senderPubkey, ciphertext)
-  }
-
-  if (!warnedNip44) {
-    warnedNip44 = true
-    console.warn('[NIP-17] No private key or NIP-44 signer available for decryption')
-  }
-  throw new Error('No private key or NIP-44 signer available for decryption')
+  // Signer path — route through guard
+  return guardedDecrypt(ciphertext, senderPubkey, signer, null, 'nip44')
 }
 
 /* ─── Gift Wrap (send) ─── */

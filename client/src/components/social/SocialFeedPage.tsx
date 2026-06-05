@@ -11,7 +11,8 @@ import { useFollowStore } from '@/stores/followStore'
 import { useUserStore } from '@/stores/userStore'
 import { useNotificationStore } from '@/stores/notificationStore'
 import { fetchEvents } from '@/lib/nostr/relay-pool'
-import { nip04, nip19 } from 'nostr-tools'
+import { nip19 } from 'nostr-tools'
+import { decryptNip04 } from '@/lib/nostr/nip04dm'
 import { ComposeBox } from '@/components/social/ComposeBox'
 import { SocialPost } from '@/components/social/SocialPost'
 import { PostThread } from '@/components/social/PostThread'
@@ -226,16 +227,8 @@ export function SocialFeedPage() {
         try {
           const signer = useUserStore.getState().signer
           const privateKey = useUserStore.getState().privateKey
-          let decrypted: string
-          if (privateKey) {
-            decrypted = await nip04.decrypt(privateKey, pubkey, latest.content)
-          } else if (signer?.nip04Decrypt) {
-            decrypted = await signer.nip04Decrypt(pubkey, latest.content)
-          } else if (signer?.nip04?.decrypt) {
-            decrypted = await signer.nip04.decrypt(pubkey, latest.content)
-          } else {
-            return
-          }
+          const decrypted = await decryptNip04(latest.content, pubkey, signer, privateKey)
+          if (!decrypted) return
           const tags: string[][] = JSON.parse(decrypted)
           ids = tags.filter(t => t[0] === 'e').map(t => t[1])
         } catch {
@@ -427,16 +420,7 @@ export function SocialFeedPage() {
         let eventIds: string[] = []
         if (latest.content) {
           try {
-            let decrypted: string
-            if (privateKey) {
-              decrypted = await nip04.decrypt(privateKey, pubkey, latest.content)
-            } else if (signer?.nip04Decrypt) {
-              decrypted = await signer.nip04Decrypt(pubkey, latest.content)
-            } else if (signer?.nip04?.decrypt) {
-              decrypted = await signer.nip04.decrypt(pubkey, latest.content)
-            } else {
-              throw new Error('No decryption method')
-            }
+            const decrypted = await decryptNip04(latest.content, pubkey, signer, privateKey)
             const privateTags: string[][] = JSON.parse(decrypted)
             eventIds = privateTags.filter(t => t[0] === 'e').map(t => t[1])
           } catch {
