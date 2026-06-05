@@ -274,7 +274,7 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
                 <Inbox size={16} />
                 <span>Join Requests</span>
                 {joinRequestCount > 0 && (
-                  <span className="ml-auto min-w-[18px] h-[18px] flex items-center justify-center rounded-full text-[10px] font-bold px-1 bg-secondary text-secondary-foreground">
+                  <span className="ml-auto min-w-[18px] h-[18px] flex items-center justify-center rounded-full text-[10px] font-bold px-1 bg-blue-500 text-white">
                     {joinRequestCount > 99 ? '99+' : joinRequestCount}
                   </span>
                 )}

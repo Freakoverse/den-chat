@@ -3,7 +3,7 @@
  * With emoji picker, media upload, and settings panel (PoW + relay toggles)
  */
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useCallback } from 'react'
 import { useUserStore } from '@/stores/userStore'
 import { useSocialStore } from '@/stores/socialStore'
 import { EmojiPickerPopover } from '@/components/chat/EmojiPickerPopover'
@@ -87,6 +87,7 @@ export function ComposeBox({ replyTo, placeholder, onPosted }: ComposeBoxProps) 
       setText('')
       setNsfw(false)
       media.clearAll()
+      if (textareaRef.current) textareaRef.current.style.height = 'auto'
       onPosted?.()
     } catch (err) {
       console.error('Failed to post:', err)
@@ -102,6 +103,15 @@ export function ComposeBox({ replyTo, placeholder, onPosted }: ComposeBoxProps) 
     }
   }
 
+  /** Auto-resize textarea to fit content, up to MAX_HEIGHT then scroll */
+  const MAX_TEXTAREA_HEIGHT = 200
+  const autoResize = useCallback(() => {
+    const el = textareaRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = Math.min(el.scrollHeight, MAX_TEXTAREA_HEIGHT) + 'px'
+  }, [])
+
   const canPost = (text.trim() || media.allSuccess) && !media.isUploading && !posting
 
   return (
@@ -116,10 +126,11 @@ export function ComposeBox({ replyTo, placeholder, onPosted }: ComposeBoxProps) 
         <textarea
           ref={textareaRef}
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => { setText(e.target.value); autoResize() }}
           onKeyDown={handleKeyDown}
           placeholder={placeholder || "What's happening?"}
-          className="w-full bg-transparent resize-none outline-none text-sm min-h-[48px] text-foreground placeholder:text-muted-foreground rounded-sm py-2 px-2"
+          className="w-full bg-transparent resize-none outline-none text-sm min-h-[48px] text-foreground placeholder:text-muted-foreground rounded-sm py-2 px-2 overflow-y-auto"
+          style={{ maxHeight: MAX_TEXTAREA_HEIGHT }}
           rows={2}
         />
 

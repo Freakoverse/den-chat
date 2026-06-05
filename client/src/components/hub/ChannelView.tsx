@@ -1139,11 +1139,16 @@ function MessageList({ hubDTag, channelId, channelName, optimisticMessages, setO
     setEditText('')
   }, [])
 
-  const saveEdit = useCallback(async (originalMsg: ChatMessage, newText: string) => {
-    if (!newText.trim() || newText === originalMsg.content) return
+  const saveEdit = useCallback(async (originalMsg: ChatMessage, newText: string, removedHashes?: Set<string>) => {
+    const attachmentsChanged = removedHashes && removedHashes.size > 0
+    if (!newText.trim() || (newText === originalMsg.content && !attachmentsChanged)) return
     try {
+      // Filter out removed attachments
+      const remainingAttachments = attachmentsChanged && originalMsg.attachments
+        ? originalMsg.attachments.filter(a => !removedHashes.has(a.hash))
+        : originalMsg.attachments
       // Pass replyTo, rootRef, attachments, and nsfw to preserve them on edit
-      await editMessage(originalMsg.dTag, newText, originalMsg.replyTo, originalMsg.rootRef, undefined, originalMsg.attachments, originalMsg.nsfw || undefined)
+      await editMessage(originalMsg.dTag, newText, originalMsg.replyTo, originalMsg.rootRef, undefined, remainingAttachments, originalMsg.nsfw || undefined)
       setEditingId(null)
       setEditText('')
     } catch (err) {
@@ -3083,7 +3088,7 @@ export interface ChatMessageRowProps {
   onEdit: (msg: ChatMessage) => void
   onReply: (msg: ChatMessage) => void
   onThreadReply: (msg: ChatMessage) => void
-  onSaveEdit: (msg: ChatMessage, newText: string) => void
+  onSaveEdit: (msg: ChatMessage, newText: string, removedAttachmentHashes?: Set<string>) => void
   editingId: string | null
   editText: string
   setEditText: (t: string) => void
@@ -3125,6 +3130,7 @@ export function ChatMessageRow({
   const [showMenu, setShowMenu] = useState(false)
   const [nsfwRevealed, setNsfwRevealed] = useState(false)
   const [blockedRevealed, setBlockedRevealed] = useState(false)
+  const [removedAttachmentHashes, setRemovedAttachmentHashes] = useState<Set<string>>(new Set())
   const rowRef = useRef<HTMLDivElement>(null)
   const emojiButtonRef = useRef<HTMLButtonElement>(null)
 
@@ -3226,7 +3232,7 @@ export function ChatMessageRow({
   const displayName = profile?.display_name || profile?.name || truncateNpub(nip19.npubEncode(msg.pubkey))
   const avatarUrl = profile?.picture
   const isEditing = editingId === msg.id
-  const editUnchanged = editText === msg.content
+  const editUnchanged = editText === msg.content && removedAttachmentHashes.size === 0
 
   // ── Early returns (AFTER all hooks) ──
 
@@ -3296,7 +3302,7 @@ export function ChatMessageRow({
 
         <div className="min-w-0 flex-1">
           {isEditing ? (
-            <EditField text={editText} onChange={setEditText} onCancel={cancelEdit} unchanged={editUnchanged} onSave={() => onSaveEdit(msg, editText)} />
+            <EditField text={editText} onChange={setEditText} onCancel={() => { cancelEdit(); setRemovedAttachmentHashes(new Set()) }} unchanged={editUnchanged} onSave={() => { onSaveEdit(msg, editText, removedAttachmentHashes); setRemovedAttachmentHashes(new Set()) }} />
           ) : !msg.decrypted && !msg.deleted ? (
             <EncryptedMessageCard hubDTag={hubDTag} />
           ) : shouldBlurBlocked ? (
@@ -3337,7 +3343,31 @@ export function ChatMessageRow({
             </>
           )}
           {(!shouldBlurMsg && authorCanAttach && msg.attachments && msg.attachments.length > 0) && (
-            <AttachmentRenderer attachments={msg.attachments} hubDTag={hubDTag} gifTags={msg.gifTags} />
+            <div className="relative">
+              <AttachmentRenderer attachments={msg.attachments.filter(a => !removedAttachmentHashes.has(a.hash))} hubDTag={hubDTag} gifTags={msg.gifTags} />
+              {isEditing && msg.attachments.filter(a => !removedAttachmentHashes.has(a.hash)).length > 0 && (
+                <div className="flex flex-wrap gap-1 mt-1">
+                  {msg.attachments.filter(a => !removedAttachmentHashes.has(a.hash)).map((att) => (
+                    <button
+                      key={att.hash}
+                      onClick={() => setRemovedAttachmentHashes(prev => new Set([...prev, att.hash]))}
+                      className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors cursor-pointer"
+                    >
+                      <X size={10} />
+                      Remove {att.name || att.hash.slice(0, 8)}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {isEditing && removedAttachmentHashes.size > 0 && msg.attachments.some(a => removedAttachmentHashes.has(a.hash)) && (
+                <button
+                  onClick={() => setRemovedAttachmentHashes(new Set())}
+                  className="mt-1 flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors cursor-pointer"
+                >
+                  Undo removal ({removedAttachmentHashes.size})
+                </button>
+              )}
+            </div>
           )}
           {contentGalleryIndex !== null && (
             <ImageGallery images={allContentImages} startIndex={contentGalleryIndex} onClose={() => setContentGalleryIndex(null)} />
@@ -3575,7 +3605,7 @@ export function ChatMessageRow({
             </span>
           </div>
           {isEditing ? (
-            <EditField text={editText} onChange={setEditText} onCancel={cancelEdit} unchanged={editUnchanged} onSave={() => onSaveEdit(msg, editText)} />
+            <EditField text={editText} onChange={setEditText} onCancel={() => { cancelEdit(); setRemovedAttachmentHashes(new Set()) }} unchanged={editUnchanged} onSave={() => { onSaveEdit(msg, editText, removedAttachmentHashes); setRemovedAttachmentHashes(new Set()) }} />
           ) : !msg.decrypted && !msg.deleted ? (
             <EncryptedMessageCard hubDTag={hubDTag} />
           ) : shouldBlurMsg ? (
@@ -3605,7 +3635,31 @@ export function ChatMessageRow({
             </>
           )}
           {(!shouldBlurMsg && authorCanAttach && msg.attachments && msg.attachments.length > 0) && (
-            <AttachmentRenderer attachments={msg.attachments} hubDTag={hubDTag} gifTags={msg.gifTags} />
+            <div className="relative">
+              <AttachmentRenderer attachments={msg.attachments.filter(a => !removedAttachmentHashes.has(a.hash))} hubDTag={hubDTag} gifTags={msg.gifTags} />
+              {isEditing && msg.attachments.filter(a => !removedAttachmentHashes.has(a.hash)).length > 0 && (
+                <div className="flex flex-wrap gap-1 mt-1">
+                  {msg.attachments.filter(a => !removedAttachmentHashes.has(a.hash)).map((att) => (
+                    <button
+                      key={att.hash}
+                      onClick={() => setRemovedAttachmentHashes(prev => new Set([...prev, att.hash]))}
+                      className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors cursor-pointer"
+                    >
+                      <X size={10} />
+                      Remove {att.name || att.hash.slice(0, 8)}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {isEditing && removedAttachmentHashes.size > 0 && msg.attachments.some(a => removedAttachmentHashes.has(a.hash)) && (
+                <button
+                  onClick={() => setRemovedAttachmentHashes(new Set())}
+                  className="mt-1 flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors cursor-pointer"
+                >
+                  Undo removal ({removedAttachmentHashes.size})
+                </button>
+              )}
+            </div>
           )}
           {contentGalleryIndex !== null && (
             <ImageGallery images={allContentImages} startIndex={contentGalleryIndex} onClose={() => setContentGalleryIndex(null)} />
@@ -4461,6 +4515,12 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
     el.style.height = 'auto'
     el.style.height = `${Math.min(el.scrollHeight, 500)}px`
   }, [])
+
+  // Re-run autoResize when message changes (including cleared after send)
+  useEffect(() => {
+    const ta = textareaRef.current
+    if (ta) autoResize(ta)
+  }, [message, autoResize])
 
   // Apply a selected mention (handles user, group, and role types)
   const applyMention = useCallback((suggestion: MentionSuggestion) => {
@@ -6229,10 +6289,14 @@ function ThreadModal({ parentMsg, threadReplies, hubDTag, channelId, getProfile,
     setEditText('')
   }, [])
 
-  const saveEdit = useCallback(async (msg: ChatMessage, newText: string) => {
+  const saveEdit = useCallback(async (msg: ChatMessage, newText: string, removedHashes?: Set<string>) => {
     try {
+      // Filter out removed attachments
+      const remainingAttachments = removedHashes && removedHashes.size > 0 && msg.attachments
+        ? msg.attachments.filter(a => !removedHashes.has(a.hash))
+        : msg.attachments
       // Pass replyTo, rootRef, attachments, and nsfw to preserve them on edit
-      await editMessage(msg.dTag, newText, msg.replyTo, msg.rootRef, undefined, msg.attachments, msg.nsfw || undefined)
+      await editMessage(msg.dTag, newText, msg.replyTo, msg.rootRef, undefined, remainingAttachments, msg.nsfw || undefined)
       setEditingId(null)
       setEditText('')
     } catch (err) {

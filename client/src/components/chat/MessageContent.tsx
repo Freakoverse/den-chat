@@ -184,11 +184,12 @@ interface LinkPreviewData {
 const previewCache = new Map<string, LinkPreviewData | null>()
 
 export function LinkPreview({ href }: { href: string }) {
+  const showLinkPreviews = usePreferencesStore((s) => s.showLinkPreviews)
   const [preview, setPreview] = useState<LinkPreviewData | null>(null)
   const [loaded, setLoaded] = useState(false)
 
   useEffect(() => {
-    if (!('__TAURI__' in window)) { setLoaded(true); return }
+    if (!showLinkPreviews || !('__TAURI__' in window)) { setLoaded(true); return }
 
     if (previewCache.has(href)) {
       setPreview(previewCache.get(href) || null)
@@ -199,9 +200,8 @@ export function LinkPreview({ href }: { href: string }) {
     let cancelled = false
       ; (async () => {
         try {
-          const modulePath = '@tauri-apps/' + 'api/core'
-          const { invoke } = await (Function('return import("' + modulePath + '")')() as Promise<{ invoke: (cmd: string, args: Record<string, unknown>) => Promise<LinkPreviewData> }>)
-          const data = await invoke('fetch_link_preview', { url: href })
+          const { invoke } = await import('@tauri-apps/api/core')
+          const data = await invoke<LinkPreviewData>('fetch_link_preview', { url: href })
           if (!cancelled) {
             const result = (data?.title || data?.description) ? data : null
             previewCache.set(href, result)
@@ -214,7 +214,7 @@ export function LinkPreview({ href }: { href: string }) {
         }
       })()
     return () => { cancelled = true }
-  }, [href])
+  }, [href, showLinkPreviews])
 
   if (!loaded || !preview) return null
 

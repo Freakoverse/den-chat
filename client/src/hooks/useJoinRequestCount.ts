@@ -1,23 +1,23 @@
 /**
  * useJoinRequestCount — Lightweight hook for creator-only join request badge count
  *
- * Fetches kind 36944 events for the active hub and returns the number of
- * pending (non-member) requests that arrived since the creator last opened
- * the JoinRequestsModal.
+ * Opens a real-time relay subscription for kind 36944 events on the hub's
+ * relays, so new join requests appear immediately in the badge count.
+ *
+ * On mount, performs a one-shot fetch to populate the initial count, then
+ * keeps a persistent subscription open to increment on new events.
  *
  * Uses localStorage key `den-join-requests-seen:<hubDTag>` to persist the
  * "last seen" timestamp across sessions.
- *
- * Polls every 2 minutes to stay reasonably fresh without hammering relays.
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { fetchEvents } from '@/lib/nostr/relay-pool'
+import { fetchEventsFromRelays } from '@/lib/nostr/relay-pool'
+import { subscribeToRelays } from '@/lib/nostr/relay-pool'
 import { KINDS } from '@/lib/crypto/constants'
 import { countLeadingZeroBits } from '@/lib/pow/pow'
 import type { HubData, HubMember } from '@/stores/hubStore'
 
-const POLL_INTERVAL_MS = 2 * 60 * 1000 // 2 minutes
 const STORAGE_PREFIX = 'den-join-requests-seen:'
 const SEEN_EVENT = 'den-join-requests-seen'
 
@@ -48,13 +48,15 @@ export function useJoinRequestCount(
   isCreator: boolean,
 ): number {
   const [count, setCount] = useState(0)
-  const fetchingRef = useRef(false)
+  // Track known pubkeys to avoid double-counting from initial fetch + subscription overlap
+  const knownPubkeysRef = useRef<Map<string, number>>(new Map())
+  const hubRelays = hub ? [...hub.generalRelays, ...hub.filterRelays] : []
 
-  const fetchCount = useCallback(async () => {
-    if (!hub || !isCreator || fetchingRef.current) return
-    if (!hub.generalRelays.length) return
+  // Initial fetch to populate count
+  const fetchInitial = useCallback(async () => {
+    if (!hub || !isCreator) return
+    if (hubRelays.length === 0) return
 
-    fetchingRef.current = true
     try {
       const lastSeen = getLastSeen(hub.dTag)
       const filter: any = {
@@ -62,12 +64,11 @@ export function useJoinRequestCount(
         '#d': [hub.dTag],
         limit: 500,
       }
-      // Only fetch events since last seen (or all if never seen)
       if (lastSeen > 0) {
         filter.since = lastSeen
       }
 
-      const events = await fetchEvents(filter)
+      const events = await fetchEventsFromRelays(hubRelays, filter)
 
       // Deduplicate: one per pubkey, keep latest
       // Skip events that carry the ["deleted", "true"] marker (rescinded requests)
@@ -88,36 +89,86 @@ export function useJoinRequestCount(
       // Filter out creator and existing members
       const memberPubkeys = new Set((hubMembers || []).map(m => m.pubkey))
       let pending = 0
+      const known = new Map<string, number>()
       for (const r of byPubkey.values()) {
         if (r.pubkey === hub.creatorPubkey) continue
         if (memberPubkeys.has(r.pubkey)) continue
         if (hub.minPow > 0 && r.powBits < hub.minPow) continue
-        // Only count events created AFTER lastSeen
         if (lastSeen > 0 && r.createdAt <= lastSeen) continue
         pending++
+        known.set(r.pubkey, r.createdAt)
       }
 
+      knownPubkeysRef.current = known
       setCount(pending)
     } catch (err) {
       console.warn('[useJoinRequestCount] Failed to fetch:', err)
-    } finally {
-      fetchingRef.current = false
     }
-  }, [hub?.dTag, hub?.generalRelays?.length, hub?.creatorPubkey, hub?.minPow, hubMembers?.length, isCreator])
+  }, [hub?.dTag, hubRelays.length, hub?.creatorPubkey, hub?.minPow, hubMembers?.length, isCreator])
 
+  // Main effect: initial fetch + live subscription
   useEffect(() => {
     if (!isCreator || !hub) {
       setCount(0)
       return
     }
+    if (hubRelays.length === 0) return
 
     // Initial fetch
-    fetchCount()
+    fetchInitial()
 
-    // Poll
-    const interval = setInterval(fetchCount, POLL_INTERVAL_MS)
-    return () => clearInterval(interval)
-  }, [fetchCount, isCreator, hub?.dTag])
+    // Open persistent subscription for new join requests
+    const lastSeen = getLastSeen(hub.dTag)
+    const subFilter: any = {
+      kinds: [KINDS.JOIN_REQUEST],
+      '#d': [hub.dTag],
+    }
+    // Only subscribe for events newer than what we've seen
+    if (lastSeen > 0) {
+      subFilter.since = lastSeen
+    }
+
+    const memberPubkeys = new Set((hubMembers || []).map(m => m.pubkey))
+
+    const sub = subscribeToRelays(
+      hubRelays,
+      subFilter,
+      (event) => {
+        // Skip rescinded
+        const isDeleted = event.tags?.some((t: string[]) => t[0] === 'deleted' && t[1] === 'true')
+        if (isDeleted) return
+
+        // Skip creator and existing members
+        if (event.pubkey === hub.creatorPubkey) return
+        if (memberPubkeys.has(event.pubkey)) return
+
+        // Skip if below PoW requirement
+        if (hub.minPow > 0 && countLeadingZeroBits(event.id) < hub.minPow) return
+
+        // Skip if before lastSeen
+        if (lastSeen > 0 && event.created_at <= lastSeen) return
+
+        // Check if this pubkey is already counted (dedup with initial fetch)
+        const known = knownPubkeysRef.current
+        const existingTs = known.get(event.pubkey)
+        if (existingTs !== undefined) {
+          // We already counted this pubkey — only update if this event is newer
+          if (event.created_at <= existingTs) return
+          // Update timestamp but don't increment count
+          known.set(event.pubkey, event.created_at)
+          return
+        }
+
+        // New request from a new pubkey
+        known.set(event.pubkey, event.created_at)
+        setCount(prev => prev + 1)
+      },
+    )
+
+    return () => {
+      sub.close()
+    }
+  }, [hub?.dTag, hubRelays.length, hub?.creatorPubkey, hub?.minPow, hubMembers?.length, isCreator])
 
   // Listen for "seen" event (same-tab: custom event, cross-tab: storage event)
   useEffect(() => {
@@ -127,11 +178,13 @@ export function useJoinRequestCount(
       const detail = (e as CustomEvent).detail
       if (detail === hub.dTag) {
         setCount(0)
+        knownPubkeysRef.current.clear()
       }
     }
     const handleStorage = (e: StorageEvent) => {
       if (e.key === STORAGE_PREFIX + hub.dTag) {
         setCount(0)
+        knownPubkeysRef.current.clear()
       }
     }
 

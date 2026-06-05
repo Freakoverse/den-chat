@@ -38,9 +38,22 @@ interface Props {
 }
 
 export function EmojiPickerPopover({ anchorRef, onClose, onSelect }: Props) {
-  const [pos, setPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 })
+  const [pos, setPos] = useState<{ top: number; left: number; height: number }>({ top: 0, left: 0, height: PICKER_HEIGHT })
   const [tab, setTab] = useState<Tab>('basic')
   const containerRef = useRef<HTMLDivElement>(null)
+  const contentRef = useRef<HTMLDivElement>(null)
+  const [contentHeight, setContentHeight] = useState(PICKER_HEIGHT - 70) // conservative initial estimate
+
+  // Measure actual available height for the emoji content area
+  useEffect(() => {
+    const el = contentRef.current
+    if (!el) return
+    const measure = () => setContentHeight(el.clientHeight)
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [pos.height])
 
   const computePosition = useCallback(() => {
     if (!anchorRef.current) return
@@ -51,22 +64,32 @@ export function EmojiPickerPopover({ anchorRef, onClose, onSelect }: Props) {
     const spaceAbove = rect.top
     const spaceBelow = vh - rect.bottom
     let top: number
+    let height = PICKER_HEIGHT
     if (spaceAbove >= PICKER_HEIGHT + GAP) {
       top = rect.top - PICKER_HEIGHT - GAP
     } else if (spaceBelow >= PICKER_HEIGHT + GAP) {
       top = rect.bottom + GAP
     } else {
-      top = spaceAbove > spaceBelow
-        ? Math.max(GAP, rect.top - PICKER_HEIGHT - GAP)
-        : rect.bottom + GAP
+      // Not enough room for full height — pick the larger side and shrink to fit
+      if (spaceAbove > spaceBelow) {
+        height = Math.max(200, spaceAbove - GAP * 2)
+        top = rect.top - height - GAP
+      } else {
+        height = Math.max(200, spaceBelow - GAP * 2)
+        top = rect.bottom + GAP
+      }
     }
+
+    // Final safety clamp: ensure the picker stays within viewport bounds
+    if (top < GAP) top = GAP
+    if (top + height > vh - GAP) height = Math.max(200, vh - top - GAP)
 
     let left = rect.right - PICKER_WIDTH
     if (left < GAP) left = rect.left
     if (left + PICKER_WIDTH > vw - GAP) left = vw - PICKER_WIDTH - GAP
     left = Math.max(GAP, left)
 
-    setPos({ top, left })
+    setPos({ top, left, height })
   }, [anchorRef])
 
   useEffect(() => {
@@ -115,7 +138,7 @@ export function EmojiPickerPopover({ anchorRef, onClose, onSelect }: Props) {
       ref={containerRef}
       data-emoji-picker
       className="fixed z-[100] flex flex-col bg-[hsl(var(--background))] border border-[hsl(var(--border))] rounded-xl shadow-2xl overflow-hidden"
-      style={{ top: pos.top, left: pos.left, width: PICKER_WIDTH, height: PICKER_HEIGHT }}
+      style={{ top: pos.top, left: pos.left, width: PICKER_WIDTH, height: pos.height }}
       onMouseDown={(e) => e.stopPropagation()}
       onClick={(e) => e.stopPropagation()}
     >
@@ -141,7 +164,7 @@ export function EmojiPickerPopover({ anchorRef, onClose, onSelect }: Props) {
       <EmojiNsfwToggle />
 
       {/* Tab content */}
-      <div className="flex-1 overflow-hidden">
+      <div ref={contentRef} className="flex-1 overflow-hidden">
         {tab === 'discover' && (
           <DiscoverEmojiTab />
         )}
@@ -149,7 +172,7 @@ export function EmojiPickerPopover({ anchorRef, onClose, onSelect }: Props) {
           <EmojiPickerReact
             theme={Theme.DARK}
             width={PICKER_WIDTH}
-            height={PICKER_HEIGHT - 36}
+            height={contentHeight}
             autoFocusSearch={false}
             emojiStyle={EmojiStyle.NATIVE}
             searchPlaceHolder="Search emojis..."

@@ -211,6 +211,12 @@ export function ChatInputBar({
     el.style.height = `${Math.min(el.scrollHeight, 500)}px`
   }, [])
 
+  // Re-run autoResize when message changes externally (e.g. cleared after send)
+  useEffect(() => {
+    const ta = textareaRef.current
+    if (ta) autoResize(ta)
+  }, [message, autoResize, textareaRef])
+
   // ─── Emoji shortcode autocomplete state ───
   const [emojiQuery, setEmojiQuery] = useState<string | null>(null)
   const [emojiIndex, setEmojiIndex] = useState(0)

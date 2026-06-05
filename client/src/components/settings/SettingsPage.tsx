@@ -446,6 +446,24 @@ function PreferencesTab() {
           <ToggleSwitch checked={skipSplash} onChange={toggleSkipSplash} />
         </div>
 
+        {/* Show Link Previews */}
+        <div className="flex items-center justify-between">
+          <div>
+            <label className="text-sm font-medium text-foreground">Show Link Previews</label>
+            <p className="text-xs text-muted-foreground">Display OpenGraph preview cards for URLs. Only works on the desktop app.</p>
+          </div>
+          <LinkPreviewToggleInline />
+        </div>
+
+        {/* Show Embeds */}
+        <div className="flex items-center justify-between">
+          <div>
+            <label className="text-sm font-medium text-foreground">Show Embeds</label>
+            <p className="text-xs text-muted-foreground">Render rich embeds for supported services like YouTube, Twitch, Twitter, Spotify, and Steam.</p>
+          </div>
+          <EmbedsToggleInline />
+        </div>
+
         {/* Divider */}
         <div className="h-px bg-border" />
 
@@ -3370,6 +3388,35 @@ function EmbedPreferenceToggle() {
       <ToggleSwitch checked={showEmbeds} onChange={setShowEmbeds} />
     </div>
   )
+}
+
+function LinkPreviewPreferenceToggle() {
+  const showLinkPreviews = usePreferencesStore((s) => s.showLinkPreviews)
+  const setShowLinkPreviews = usePreferencesStore((s) => s.setShowLinkPreviews)
+
+  return (
+    <div className="flex items-center justify-between px-3 py-2.5 rounded-lg border border-border bg-secondary/30">
+      <div>
+        <p className="text-sm font-medium text-foreground">Show Link Previews</p>
+        <p className="text-xs text-muted-foreground">Display OpenGraph preview cards for URLs. Only works on the desktop app.</p>
+      </div>
+      <ToggleSwitch checked={showLinkPreviews} onChange={setShowLinkPreviews} />
+    </div>
+  )
+}
+
+/** Inline toggle for Preferences tab — just the switch, no card wrapper */
+function LinkPreviewToggleInline() {
+  const showLinkPreviews = usePreferencesStore((s) => s.showLinkPreviews)
+  const setShowLinkPreviews = usePreferencesStore((s) => s.setShowLinkPreviews)
+  return <ToggleSwitch checked={showLinkPreviews} onChange={setShowLinkPreviews} />
+}
+
+/** Inline toggle for Preferences tab — just the switch, no card wrapper */
+function EmbedsToggleInline() {
+  const showEmbeds = usePreferencesStore((s) => s.showEmbeds)
+  const setShowEmbeds = usePreferencesStore((s) => s.setShowEmbeds)
+  return <ToggleSwitch checked={showEmbeds} onChange={setShowEmbeds} />
 }
 
 function MediaPreferenceToggle() {

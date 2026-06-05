@@ -61,6 +61,24 @@ export async function cacheMessage(msg: ChatMessage): Promise<void> {
 }
 
 /**
+ * Delete a cached message from IndexedDB by event ID.
+ * Used when a message is request-deleted to remove the stale original entry.
+ */
+export async function deleteCachedMessage(eventId: string): Promise<void> {
+  try {
+    const db = await openDB()
+    const tx = db.transaction(STORE_NAME, 'readwrite')
+    tx.objectStore(STORE_NAME).delete(eventId)
+    await new Promise<void>((resolve, reject) => {
+      tx.oncomplete = () => resolve()
+      tx.onerror = () => reject(tx.error)
+    })
+  } catch (err) {
+    console.warn('[MessageCache] Failed to delete cached message:', err)
+  }
+}
+
+/**
  * Save multiple messages to IndexedDB in a single transaction.
  */
 export async function cacheMessages(msgs: ChatMessage[]): Promise<void> {

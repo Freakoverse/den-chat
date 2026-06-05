@@ -14,6 +14,8 @@ interface PreferencesState {
   timeFormat: TimeFormat
   /** Global toggle for link previews & embeds (YouTube, Twitch, etc.) — default ON */
   showEmbeds: boolean
+  /** Global toggle for OpenGraph link preview cards — default ON (desktop only) */
+  showLinkPreviews: boolean
   /** Global toggle for muted word redaction — default ON */
   hideMutedWords: boolean
   /** Global toggle for inline media (images, video, audio) — default ON */
@@ -27,6 +29,7 @@ interface PreferencesState {
   setLanguage: (lang: LanguageCode) => void
   setTimeFormat: (format: TimeFormat) => void
   setShowEmbeds: (v: boolean) => void
+  setShowLinkPreviews: (v: boolean) => void
   setHideMutedWords: (v: boolean) => void
   setShowMedia: (v: boolean) => void
   setShowCustomEmojis: (v: boolean) => void
@@ -36,7 +39,7 @@ interface PreferencesState {
 
 const STORAGE_KEY = 'den-chat-preferences'
 
-type PrefsData = { language: LanguageCode; timeFormat: TimeFormat; showEmbeds: boolean; hideMutedWords: boolean; showMedia: boolean; showCustomEmojis: boolean; voiceNoteMaxDuration: number; voiceNoteBitrate: number }
+type PrefsData = { language: LanguageCode; timeFormat: TimeFormat; showEmbeds: boolean; showLinkPreviews: boolean; hideMutedWords: boolean; showMedia: boolean; showCustomEmojis: boolean; voiceNoteMaxDuration: number; voiceNoteBitrate: number }
 
 function loadPrefs(): PrefsData {
   try {
@@ -47,6 +50,7 @@ function loadPrefs(): PrefsData {
         language: parsed.language || 'en',
         timeFormat: parsed.timeFormat || 'auto',
         showEmbeds: parsed.showEmbeds !== false,
+        showLinkPreviews: parsed.showLinkPreviews !== false,
         hideMutedWords: parsed.hideMutedWords !== false,
         showMedia: parsed.showMedia !== false,
         showCustomEmojis: parsed.showCustomEmojis !== false,
@@ -55,7 +59,7 @@ function loadPrefs(): PrefsData {
       }
     }
   } catch { /* ignore */ }
-  return { language: 'en', timeFormat: 'auto', showEmbeds: true, hideMutedWords: true, showMedia: true, showCustomEmojis: true, voiceNoteMaxDuration: 30, voiceNoteBitrate: 32000 }
+  return { language: 'en', timeFormat: 'auto', showEmbeds: true, showLinkPreviews: true, hideMutedWords: true, showMedia: true, showCustomEmojis: true, voiceNoteMaxDuration: 30, voiceNoteBitrate: 32000 }
 }
 
 function savePrefs(prefs: PrefsData) {
@@ -79,6 +83,10 @@ export const usePreferencesStore = create<PreferencesState>((set, get) => {
     setShowEmbeds: (showEmbeds) => {
       set({ showEmbeds })
       savePrefs({ ...get(), showEmbeds })
+    },
+    setShowLinkPreviews: (showLinkPreviews) => {
+      set({ showLinkPreviews })
+      savePrefs({ ...get(), showLinkPreviews })
     },
     setHideMutedWords: (hideMutedWords) => {
       set({ hideMutedWords })

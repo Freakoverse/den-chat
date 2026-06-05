@@ -694,6 +694,28 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
 
     // Mark deleted locally for immediate UI feedback
     useMessageStore.getState().markDeleted(hubDTag, channelId, dTag)
+
+    // Persist deletion to IndexedDB cache so the message doesn't resurrect on reload.
+    // Remove the old cache entry (keyed by original event ID) and write the deleted replacement.
+    import('@/lib/cache/messageCache').then(({ deleteCachedMessage, cacheMessage }) => {
+      if (originalMsg) {
+        deleteCachedMessage(originalMsg.id).catch(() => {})
+      }
+      // Cache the deleted replacement so the store picks up deleted: true from cache on next load
+      const deletedCacheMsg: import('@/stores/messageStore').ChatMessage = {
+        id: signedDeleted.id,
+        dTag,
+        hubDTag: hubDTag!,
+        channelId: channelId!,
+        pubkey: signedDeleted.pubkey,
+        content: '',
+        createdAt: originalMsg?.createdAt || signedDeleted.created_at,
+        eventCreatedAt: signedDeleted.created_at,
+        epoch,
+        deleted: true,
+      }
+      cacheMessage(deletedCacheMsg).catch(() => {})
+    })
   }, [hubDTag, channelId, signer, privateKey, pubkey])
 
   // Publish a reaction (kind 7) to a message
