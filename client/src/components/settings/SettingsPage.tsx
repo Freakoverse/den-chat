@@ -2080,7 +2080,7 @@ function RpcSettingsSection() {
     const newIndex = index + direction
     if (newIndex < 0 || newIndex >= bitcoinNodes.length) return
     const updated = [...bitcoinNodes]
-    ;[updated[index], updated[newIndex]] = [updated[newIndex], updated[index]]
+      ;[updated[index], updated[newIndex]] = [updated[newIndex], updated[index]]
     setBitcoinNodes(updated)
   }
 
@@ -2096,7 +2096,7 @@ function RpcSettingsSection() {
     const newIndex = index + direction
     if (newIndex < 0 || newIndex >= nodes.length) return
     const updated = [...nodes]
-    ;[updated[index], updated[newIndex]] = [updated[newIndex], updated[index]]
+      ;[updated[index], updated[newIndex]] = [updated[newIndex], updated[index]]
     setEvmNodes(chain, updated)
   }
 
@@ -5385,6 +5385,19 @@ function VerifiedDownloadButton({ url, label, filename, icon, fileExt }: {
 
   const startDownload = async (targetUrl?: string, skipServers?: string[]) => {
     const downloadUrl = targetUrl || url
+
+    // Non-blossom URLs (GitHub, external links) — open directly instead of fetch+verify
+    if (!isBlossom) {
+      if ('__TAURI__' in window) {
+        import('@tauri-apps/plugin-opener').then(({ openUrl }) => {
+          openUrl(downloadUrl).catch(() => window.open(downloadUrl, '_blank', 'noopener,noreferrer'))
+        })
+      } else {
+        window.open(downloadUrl, '_blank', 'noopener,noreferrer')
+      }
+      return
+    }
+
     abortRef.current = new AbortController()
     setState({ status: 'downloading', progress: { serverUrl: downloadUrl, percent: 0, speed: 0, loaded: 0, total: 0 } })
 
@@ -5671,7 +5684,7 @@ function UpdatesTab() {
                   </svg>
                 </button>
                 {isOpen && (
-                  <div className="px-4 pb-4 space-y-3">
+                  <div className="px-4 py-4 space-y-3">
                     {build.body && (
                       <div className="prose prose-sm prose-invert max-w-none text-muted-foreground [&_strong]:text-foreground [&_code]:bg-secondary/60 [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:text-xs [&_code]:font-mono [&_ul]:list-disc [&_ul]:pl-4 [&_ol]:list-decimal [&_ol]:pl-4 [&_a]:text-primary [&_a]:underline [&_p]:my-2 [&_h1]:text-lg [&_h1]:font-bold [&_h1]:text-foreground [&_h1]:mb-2 [&_h2]:text-base [&_h2]:font-semibold [&_h2]:text-foreground [&_h2]:mb-1.5 [&_h3]:text-sm [&_h3]:font-semibold [&_h3]:text-foreground [&_h3]:mb-1 [&_h4]:text-sm [&_h4]:font-medium [&_h4]:text-foreground [&_h4]:mb-1 [&_hr]:border-border [&_hr]:my-3 [&_blockquote]:border-l-2 [&_blockquote]:border-primary/40 [&_blockquote]:pl-3 [&_blockquote]:italic [&_blockquote]:text-muted-foreground/80">
                         <Markdown remarkPlugins={[remarkGfm]}>{build.body}</Markdown>
