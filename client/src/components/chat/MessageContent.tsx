@@ -537,7 +537,7 @@ export const MessageContent = memo(function MessageContent({ content, suffix, on
     em: ({ children }) => <em>{children}</em>,
     del: ({ children }) => <del className="opacity-60">{children}</del>,
     a: ({ href, children }) => {
-      if (!href) return <span>{children}</span>
+      if (!href || /^javascript:/i.test(href)) return <span>{children}</span>
       // Normalize URLs without a protocol — prevents relative path resolution
       if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(href)) {
         href = 'https://' + href
