@@ -225,7 +225,7 @@ export async function safeTreeUpdate(params: SafeTreeUpdateParams): Promise<Safe
   if (oldHistoryHash && newHubSecret && oldHistoryHash !== newHistoryHash) {
     oldHashes.push(oldHistoryHash)
   }
-
+  // Remove updated pages that are no longer referenced
   for (const hash of oldHashes) {
     try {
       await deleteFromBlossom(hash, signer, privateKey, hub.blossomServers)
@@ -282,6 +282,14 @@ export interface SafePaginatedTreeUpdateParams {
 
   /** Skip publishing the hub event (caller will publish) */
   skipPublish?: boolean
+
+  /** Pre-fetched old index data — avoids redundant download if caller already has it */
+  existingIndexData?: {
+    spineHash: string
+    historyHash: string
+    groupTrees: Array<{ groupId: string; hash: string }>
+    leafPages: Array<{ pageIndex: number; firstPubkey: string; hash: string }>
+  }
 }
 
 /**
@@ -309,6 +317,7 @@ export async function safePaginatedTreeUpdate(params: SafePaginatedTreeUpdatePar
     banEntries,
     preserveGroupTrees = true,
     skipPublish = false,
+    existingIndexData,
   } = params
 
   const epoch = epochOverride ?? hub.epoch
@@ -328,7 +337,13 @@ export async function safePaginatedTreeUpdate(params: SafePaginatedTreeUpdatePar
   let existingGroupTrees: Array<{ groupId: string; hash: string }> = []
   let existingLeafPages: Array<{ pageIndex: number; firstPubkey: string; hash: string }> = []
 
-  if (oldIndexHash && hub.blossomServers.length > 0) {
+  if (existingIndexData) {
+    // Use pre-fetched data — avoids redundant network download
+    oldSpineHash = existingIndexData.spineHash
+    oldHistoryHash = existingIndexData.historyHash
+    existingGroupTrees = existingIndexData.groupTrees
+    existingLeafPages = existingIndexData.leafPages
+  } else if (oldIndexHash && hub.blossomServers.length > 0) {
     try {
       const oldIndexContent = await downloadTextFromBlossom(oldIndexHash, hub.blossomServers)
       const oldIndex = parseIndexFile(oldIndexContent)
@@ -341,43 +356,58 @@ export async function safePaginatedTreeUpdate(params: SafePaginatedTreeUpdatePar
     }
   }
 
-  // ── Step 1-2: Upload updated pages and verify ──
+  // ── Step 1-3: Upload all pages + spine in parallel ──
   const updatedPageHashes = new Map<number, { firstPubkey: string; hash: string }>()
-
-  for (const page of updatedPages) {
-    const pageBytes = new TextEncoder().encode(page.content)
-    const { hash } = await uploadToBlossomServers(
-      pageBytes, signer, privateKey, hub.blossomServers, 'text/plain',
-    )
-    await verifyFileExists(hash, hub.blossomServers)
-    updatedPageHashes.set(page.pageIndex, { firstPubkey: page.firstPubkey, hash })
-  }
-
-  // ── Step 3: Upload new pages from splits ──
   const nextPageIndex = existingLeafPages.length > 0
     ? Math.max(...existingLeafPages.map(p => p.pageIndex)) + 1
     : updatedPages.length
-
   const newPageEntries: Array<{ pageIndex: number; firstPubkey: string; hash: string }> = []
-  for (let i = 0; i < newPages.length; i++) {
-    const pageBytes = new TextEncoder().encode(newPages[i].content)
-    const { hash } = await uploadToBlossomServers(
-      pageBytes, signer, privateKey, hub.blossomServers, 'text/plain',
-    )
-    await verifyFileExists(hash, hub.blossomServers)
-    newPageEntries.push({
-      pageIndex: nextPageIndex + i,
-      firstPubkey: newPages[i].firstPubkey,
-      hash,
-    })
+
+  // Build all upload tasks (pages + new pages + spine)
+  const uploadTasks: Promise<void>[] = []
+  let newSpineHash = ''
+
+  // Updated pages
+  for (const page of updatedPages) {
+    uploadTasks.push((async () => {
+      const pageBytes = new TextEncoder().encode(page.content)
+      const { hash } = await uploadToBlossomServers(
+        pageBytes, signer, privateKey, hub.blossomServers, 'text/plain',
+      )
+      await verifyFileExists(hash, hub.blossomServers)
+      updatedPageHashes.set(page.pageIndex, { firstPubkey: page.firstPubkey, hash })
+    })())
   }
 
-  // ── Step 4: Upload spine ──
-  const spineBytes = new TextEncoder().encode(newSpineContent)
-  const { hash: newSpineHash } = await uploadToBlossomServers(
-    spineBytes, signer, privateKey, hub.blossomServers, 'text/plain',
-  )
-  await verifyFileExists(newSpineHash, hub.blossomServers)
+  // New pages from splits
+  for (let i = 0; i < newPages.length; i++) {
+    const idx = i
+    uploadTasks.push((async () => {
+      const pageBytes = new TextEncoder().encode(newPages[idx].content)
+      const { hash } = await uploadToBlossomServers(
+        pageBytes, signer, privateKey, hub.blossomServers, 'text/plain',
+      )
+      await verifyFileExists(hash, hub.blossomServers)
+      newPageEntries.push({
+        pageIndex: nextPageIndex + idx,
+        firstPubkey: newPages[idx].firstPubkey,
+        hash,
+      })
+    })())
+  }
+
+  // Spine (parallel with pages — independent file)
+  uploadTasks.push((async () => {
+    const spineBytes = new TextEncoder().encode(newSpineContent)
+    const { hash } = await uploadToBlossomServers(
+      spineBytes, signer, privateKey, hub.blossomServers, 'text/plain',
+    )
+    await verifyFileExists(hash, hub.blossomServers)
+    newSpineHash = hash
+  })())
+
+  // Wait for ALL page + spine uploads to complete
+  await Promise.all(uploadTasks)
 
   // ── Step 5: Upload history (if epoch bumped) ──
   let newHistoryHash = oldHistoryHash
@@ -503,13 +533,15 @@ export async function safePaginatedTreeUpdate(params: SafePaginatedTreeUpdatePar
     }
   }
 
-  for (const hash of oldHashes) {
-    try {
-      await deleteFromBlossom(hash, signer, privateKey, hub.blossomServers)
-      cleanedUpHashes.push(hash)
-    } catch {
-      console.warn(`safePaginatedTreeUpdate: cleanup of ${hash} failed (non-fatal)`)
-    }
+  // Fire all cleanup deletes in parallel (best-effort, non-blocking)
+  const cleanupResults = await Promise.allSettled(
+    oldHashes.map(hash =>
+      deleteFromBlossom(hash, signer, privateKey, hub.blossomServers)
+        .then(() => hash)
+    )
+  )
+  for (const r of cleanupResults) {
+    if (r.status === 'fulfilled') cleanedUpHashes.push(r.value)
   }
 
   console.log(`safePaginatedTreeUpdate: success. New index: ${newIndexHash}, cleaned up ${cleanedUpHashes.length} old files`)
@@ -524,17 +556,19 @@ export async function safePaginatedTreeUpdate(params: SafePaginatedTreeUpdatePar
  * Throws if file cannot be found on any server.
  */
 async function verifyFileExists(hash: string, servers: string[]): Promise<void> {
-  for (const server of servers) {
-    try {
-      const url = `${server.replace(/\/+$/, '')}/${hash}`
-      const res = await fetch(url, {
-        method: 'HEAD',
-        signal: AbortSignal.timeout(10_000),
+  // Fire all HEAD requests simultaneously — resolve on first success
+  try {
+    await Promise.any(
+      servers.map(async (server) => {
+        const url = `${server.replace(/\/+$/, '')}/${hash}`
+        const res = await fetch(url, {
+          method: 'HEAD',
+          signal: AbortSignal.timeout(10_000),
+        })
+        if (!res.ok) throw new Error(`${res.status}`)
       })
-      if (res.ok) return // Found on at least one server
-    } catch {
-      continue
-    }
+    )
+  } catch {
+    throw new Error(`safeTreeUpdate: verification failed — file ${hash} not found on any Blossom server`)
   }
-  throw new Error(`safeTreeUpdate: verification failed — file ${hash} not found on any Blossom server`)
 }

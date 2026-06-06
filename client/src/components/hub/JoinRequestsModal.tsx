@@ -369,6 +369,12 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
           firstPubkey: np.firstPubkey,
         })) : undefined,
         newSpineContent,
+        existingIndexData: {
+          spineHash: index.spineHash,
+          historyHash: index.historyHash,
+          groupTrees: index.groupTrees,
+          leafPages: index.leafPages,
+        },
       })
       markDone('Uploading & publishing')
 

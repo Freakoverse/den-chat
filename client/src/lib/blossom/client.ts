@@ -578,28 +578,26 @@ export async function deleteFromBlossom(
   const targetServers = servers || blossomServers.getServers()
   const authHeader = await createAuthHeader('delete', hash, signer, privateKey)
 
-  let deleted = 0
-  let failed = 0
-
-  for (const server of targetServers) {
-    try {
+  // Fire all DELETE requests in parallel — each server is independent
+  const results = await Promise.allSettled(
+    targetServers.map(async (server) => {
       const url = `${normalize(server)}/${hash}`
       const res = await fetch(url, {
         method: 'DELETE',
         headers: { Authorization: authHeader },
         signal: AbortSignal.timeout(10_000),
       })
-      if (res.ok || res.status === 404) {
-        // 404 is fine — file already gone
-        deleted++
-      } else {
-        failed++
-        console.warn(`Blossom DELETE ${hash} from ${server}: ${res.status}`)
-      }
-    } catch (err) {
-      failed++
-      console.warn(`Blossom DELETE ${hash} from ${server} failed:`, err)
-    }
+      if (res.ok || res.status === 404) return true
+      console.warn(`Blossom DELETE ${hash} from ${server}: ${res.status}`)
+      return false
+    })
+  )
+
+  let deleted = 0
+  let failed = 0
+  for (const r of results) {
+    if (r.status === 'fulfilled' && r.value) deleted++
+    else failed++
   }
 
   if (deleted > 0) {
