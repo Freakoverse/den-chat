@@ -148,28 +148,30 @@ function checkPreconditions(domain: DomainState, domainKey: string): void {
 }
 
 /**
- * Heuristic: is this error a crypto-level failure (signer was responsive, decryption just failed)?
- * Crypto errors mean the signer DID process the request — the ciphertext was bad, wrong key, etc.
- * These should NOT count toward the circuit breaker.
+ * Heuristic: is this error a true signer rejection (user denied, timeout, connection lost)?
+ * Only these should count toward the circuit breaker.
  *
- * Signer rejection errors (timeout, user denied, connection lost) will NOT match these patterns.
+ * Everything else (crypto failures, bad ciphertext, wrong key, unknown errors from
+ * extensions) means the signer DID process the request — it was responsive.
+ * We invert the old logic: instead of trying to enumerate all possible crypto error
+ * messages (which misses extension-specific patterns), we explicitly identify rejections.
  */
-function isDecryptCryptoError(err: unknown): boolean {
+function isSignerRejection(err: unknown): boolean {
   if (!(err instanceof Error)) return false
   const msg = err.message.toLowerCase()
-  // Common crypto/decrypt failure signatures across signers
   return (
-    msg.includes('decrypt') ||
-    msg.includes('padding') ||
-    msg.includes('cipher') ||
-    msg.includes('invalid') ||
-    msg.includes('mac') ||
-    msg.includes('bad') ||
-    msg.includes('malformed') ||
-    msg.includes('utf-8') ||
-    msg.includes('utf8') ||
-    msg.includes('encoding') ||
-    msg.includes('unsupported version')
+    msg.includes('reject') ||
+    msg.includes('denied') ||
+    msg.includes('declined') ||
+    msg.includes('cancel') ||
+    msg.includes('timeout') ||
+    msg.includes('timed out') ||
+    msg.includes('time out') ||
+    msg.includes('connection') ||
+    msg.includes('not available') ||
+    msg.includes('no signer') ||
+    msg.includes('user refused') ||
+    msg.includes('aborted')
   )
 }
 
@@ -252,16 +254,12 @@ export async function guardedDecrypt(
     } catch (err) {
       addToFailureCache(domain, ciphertext)
 
-      // Distinguish crypto failures from actual signer rejections:
-      // If the signer processed the request but decryption failed (bad ciphertext,
-      // wrong key, corrupt data), that's NOT a signer rejection — don't trip circuit.
-      // Only count true signer-level failures: timeouts, connection drops, explicit user rejections.
-      if (isDecryptCryptoError(err)) {
-        // Signer was responsive — just bad ciphertext. Don't penalize.
-        throw err
+      // Only trip circuit for true signer rejections (user denied, timeout, connection lost).
+      // All other errors (crypto failures, bad ciphertext, extension-specific errors)
+      // mean the signer DID process the request — it was responsive.
+      if (isSignerRejection(err)) {
+        onFailure(domain, protocol)
       }
-
-      onFailure(domain, protocol)
       throw err
     }
   })
@@ -296,7 +294,9 @@ export async function guardedEncrypt(
       onSuccess(domain)
       return result
     } catch (err) {
-      onFailure(domain, protocol)
+      if (isSignerRejection(err)) {
+        onFailure(domain, protocol)
+      }
       throw err
     }
   })

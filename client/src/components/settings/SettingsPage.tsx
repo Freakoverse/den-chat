@@ -41,7 +41,7 @@ import {
   Copy, Check, Lock, FileDown, AlertTriangle, X, RotateCcw, RefreshCw,
   Loader2, Send, HelpCircle, XCircle, UserMinus, ShieldOff, Tag, Download,
   GripVertical, FolderPlus, ChevronDown, ChevronRight, Pencil, ListPlus, Upload, Undo2,
-  BookOpen, Mic, Volume2, Camera, MonitorPlay, Megaphone, Crown, Sparkles, Zap, Palette as PaletteIcon, BadgeCheck, MessageCircleOff, ArrowUp, ArrowDown, Heart, LogOut, Gamepad2, Activity,
+  BookOpen, Mic, Volume2, Camera, MonitorPlay, Megaphone, Crown, Sparkles, Zap, Palette as PaletteIcon, BadgeCheck, MessageCircleOff, ArrowUp, ArrowDown, Heart, LogOut, Gamepad2, Activity, Save,
 } from 'lucide-react'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -6280,10 +6280,17 @@ function AboutTab() {
   const { getProfile } = useProfileCache()
   const adminProfile = getProfile(ADMIN_PUBKEY)
   const [donateOpen, setDonateOpen] = useState(false)
+  const [profilePubkey, setProfilePubkey] = useState<string | null>(null)
 
   // Fetch other products from NIP-78
   const [products, setProducts] = useState<{ profilePic: string; banner: string; name: string; description: string; buttons: { text: string; link: string }[] }[]>([])
   const [productsLoading, setProductsLoading] = useState(true)
+
+  // Fetch sponsors from NIP-78
+  const currentYear = new Date().getFullYear()
+  const [sponsorsYear, setSponsorsYear] = useState(currentYear)
+  const [sponsorsData, setSponsorsData] = useState<SponsorsData | null>(null)
+  const [sponsorsLoading, setSponsorsLoading] = useState(true)
 
   useEffect(() => {
     fetchReplaceable(ADMIN_PUBKEY, 30078, 'den-chat-about-other-products').then((event) => {
@@ -6295,6 +6302,18 @@ function AboutTab() {
       }
     }).finally(() => setProductsLoading(false))
   }, [])
+
+  useEffect(() => {
+    setSponsorsLoading(true)
+    const sponsorDTag = SPONSORS_DTAG_PREFIX + sponsorsYear
+    fetchReplaceable(ADMIN_PUBKEY, 30078, sponsorDTag).then((event) => {
+      if (event && event.content) {
+        const parsed = parseSponsorsJson(event.content)
+        if (parsed) { setSponsorsData(parsed.data); return }
+      }
+      setSponsorsData(null)
+    }).finally(() => setSponsorsLoading(false))
+  }, [sponsorsYear])
 
   return (
     <div className="flex flex-col items-center justify-center py-12 gap-6">
@@ -6310,7 +6329,10 @@ function AboutTab() {
       {/* By — creator card */}
       <div className="mt-4 w-full max-w-xs">
         <p className="text-xs text-muted-foreground text-center mb-2 uppercase tracking-wider">By</p>
-        <div className="flex items-center gap-3 rounded-xl border border-border bg-secondary/40 p-3">
+        <button
+          onClick={() => setProfilePubkey(ADMIN_PUBKEY)}
+          className="flex items-center gap-3 rounded-xl border border-border bg-secondary/40 p-3 w-full text-left cursor-pointer hover:bg-secondary/60 transition-colors"
+        >
           <Avatar className="h-10 w-10 shrink-0">
             {adminProfile?.picture ? (
               <AvatarImage src={adminProfile.picture} alt={adminProfile.display_name || adminProfile.name || 'Creator'} />
@@ -6327,7 +6349,7 @@ function AboutTab() {
               {truncateNpub(ADMIN_NPUB)}
             </p>
           </div>
-        </div>
+        </button>
       </div>
 
       {/* Donate button */}
@@ -6419,6 +6441,90 @@ function AboutTab() {
           </div>
         </div>
       )}
+
+      {/* Sponsors */}
+      <div className="mt-6 w-full">
+        <div className="flex items-center gap-3 mb-4">
+          <p className="text-xs text-muted-foreground uppercase tracking-wider">Sponsors</p>
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => setSponsorsYear(y => Math.max(2026, y - 1))}
+              disabled={sponsorsYear <= 2026}
+              className="w-6 h-6 flex items-center justify-center rounded-md bg-secondary/50 text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              <ChevronDown size={13} className="rotate-90" />
+            </button>
+            <span className="text-xs font-semibold text-foreground tabular-nums w-10 text-center">{sponsorsYear}</span>
+            <button
+              onClick={() => setSponsorsYear(y => Math.min(currentYear, y + 1))}
+              disabled={sponsorsYear >= currentYear}
+              className="w-6 h-6 flex items-center justify-center rounded-md bg-secondary/50 text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              <ChevronDown size={13} className="-rotate-90" />
+            </button>
+          </div>
+        </div>
+
+        {sponsorsLoading && (
+          <div className="flex gap-3">
+            <div className="w-40 h-24 rounded-xl bg-muted-foreground/10 animate-pulse" />
+            <div className="w-40 h-24 rounded-xl bg-muted-foreground/10 animate-pulse" style={{ animationDelay: '.15s' }} />
+          </div>
+        )}
+
+        {!sponsorsLoading && sponsorsData && (() => {
+          const visibleTiers = SPONSOR_TIERS.filter(t => sponsorsData[t].sponsors.length > 0 || sponsorsData[t].anonymous > 0)
+          if (visibleTiers.length === 0) return null
+          return (
+            <div className="space-y-5">
+              {visibleTiers.map(tier => {
+                const td = sponsorsData[tier]
+                return (
+                  <div key={tier}>
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className={`text-sm font-bold ${TIER_COLORS[tier]}`}>{TIER_LABELS[tier]}</span>
+                      <span className="text-[10px] text-muted-foreground">{TIER_PRICES[tier]}</span>
+                    </div>
+                    {tier === 'common' ? (
+                      <div className="flex flex-wrap gap-x-4 gap-y-1">
+                        {td.sponsors.filter(s => s.name).map((s, i) => (
+                          s.link ? (
+                            <a key={i} href={s.link} target="_blank" rel="noopener noreferrer" className="text-sm text-primary hover:text-primary/80 underline transition-colors">{s.name}</a>
+                          ) : (
+                            <span key={i} className="text-sm text-muted-foreground">{s.name}</span>
+                          )
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="flex flex-wrap gap-3">
+                        {td.sponsors.map((s, i) => (
+                          <a
+                            key={i}
+                            href={s.link || '#'}
+                            target={s.link ? '_blank' : undefined}
+                            rel={s.link ? 'noopener noreferrer' : undefined}
+                            className="flex flex-col items-center justify-center gap-1.5 rounded-xl border border-border bg-secondary/30 hover:bg-secondary/50 transition-colors overflow-hidden"
+                            style={{ width: tier === 'mythic' ? 208 : tier === 'legendary' ? 192 : tier === 'epic' ? 160 : 144, height: tier === 'mythic' ? 128 : tier === 'legendary' ? 112 : tier === 'epic' ? 96 : 80 }}
+                          >
+                            {s.logo && <img src={s.logo} alt={s.name} className="max-w-[80%] max-h-[55%] object-contain" />}
+                            {s.name && <span className="text-[11px] text-muted-foreground font-medium text-center px-2 truncate w-full">{s.name}</span>}
+                          </a>
+                        ))}
+                      </div>
+                    )}
+                    {td.anonymous > 0 && (
+                      <p className="text-xs text-muted-foreground/50 mt-2">Anonymous {TIER_LABELS[tier]} sponsors: {td.anonymous}</p>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )
+        })()}
+      </div>
+
+      {/* Profile Modal */}
+      <UserProfileModal pubkey={profilePubkey} onClose={() => setProfilePubkey(null)} />
     </div>
   )
 }
@@ -6486,7 +6592,7 @@ function AdminTab() {
   const [loading, setLoading] = useState(true)
   const [publishing, setPublishing] = useState(false)
   const [publishStatus, setPublishStatus] = useState<string | null>(null)
-  const [adminTab, setAdminTab] = useState<'backgrounds' | 'products' | 'advertisements' | 'premium' | 'faq' | 'guides' | 'builds'>('backgrounds')
+  const [adminTab, setAdminTab] = useState<'backgrounds' | 'products' | 'advertisements' | 'premium' | 'faq' | 'guides' | 'builds' | 'sponsors'>('backgrounds')
 
   // Fetch existing event on mount
   useEffect(() => {
@@ -6578,7 +6684,7 @@ function AdminTab() {
 
       {/* Inner tabs */}
       <div className="flex flex-wrap gap-1.5 pb-4 border-b border-border">
-        {(['backgrounds', 'products', 'advertisements', 'premium', 'faq', 'guides', 'builds'] as const).map((t) => (
+        {(['backgrounds', 'products', 'advertisements', 'premium', 'faq', 'guides', 'builds', 'sponsors'] as const).map((t) => (
           <button
             key={t}
             onClick={() => setAdminTab(t)}
@@ -6587,7 +6693,7 @@ function AdminTab() {
               : 'bg-secondary/40 text-muted-foreground hover:text-foreground hover:bg-secondary/70'
               }`}
           >
-            {t === 'backgrounds' ? 'Login Backgrounds' : t === 'products' ? 'Other Products' : t === 'advertisements' ? 'Advertisements' : t === 'premium' ? 'Premium' : t === 'faq' ? 'FAQ' : t === 'guides' ? 'Guides' : 'Builds'}
+            {t === 'backgrounds' ? 'Login Backgrounds' : t === 'products' ? 'Other Products' : t === 'advertisements' ? 'Advertisements' : t === 'premium' ? 'Premium' : t === 'faq' ? 'FAQ' : t === 'guides' ? 'Guides' : t === 'builds' ? 'Builds' : 'Sponsors'}
           </button>
         ))}
       </div>
@@ -6675,6 +6781,11 @@ function AdminTab() {
       {/* Builds */}
       {adminTab === 'builds' && (
         <AdminBuildsSection pubkey={pubkey} signer={signer} privateKey={privateKey} />
+      )}
+
+      {/* Sponsors */}
+      {adminTab === 'sponsors' && (
+        <AdminSponsorsSection pubkey={pubkey} signer={signer} privateKey={privateKey} />
       )}
     </div>
   )
@@ -9530,6 +9641,424 @@ function BuildSourceUploadField({ url, onUpdate, signer, privateKey }: {
       {successMsg && (
         <p className="text-[10px] text-emerald-400 mt-0.5">✓ {successMsg}</p>
       )}
+    </div>
+  )
+}
+
+/* ─────────── Sponsors ─────────── */
+
+const SPONSORS_DTAG_PREFIX = 'den-sponsors-'
+const SPONSOR_TIERS = ['mythic', 'legendary', 'epic', 'rare', 'common'] as const
+type SponsorTier = typeof SPONSOR_TIERS[number]
+
+const TIER_LABELS: Record<SponsorTier, string> = {
+  mythic: 'Mythic',
+  legendary: 'Legendary',
+  epic: 'Epic',
+  rare: 'Rare',
+  common: 'Common',
+}
+
+const TIER_COLORS: Record<SponsorTier, string> = {
+  mythic: 'text-orange-400',
+  legendary: 'text-amber-400',
+  epic: 'text-purple-400',
+  rare: 'text-blue-400',
+  common: 'text-muted-foreground',
+}
+
+const TIER_PRICES: Record<SponsorTier, string> = {
+  mythic: '$100k/yr or 1 BTC/yr',
+  legendary: '$50k/yr or 0.5 BTC/yr',
+  epic: '$10k/yr or 0.1 BTC/yr',
+  rare: '$3k/yr or 0.03 BTC/yr',
+  common: '$1k/yr or 0.01 BTC/yr',
+}
+
+interface SponsorEntry {
+  id: string
+  name: string
+  logo: string
+  link: string
+}
+
+interface TierData {
+  sponsors: SponsorEntry[]
+  anonymous: number
+}
+
+type SponsorsData = Record<SponsorTier, TierData>
+
+function emptySponsorsData(): SponsorsData {
+  return Object.fromEntries(SPONSOR_TIERS.map(t => [t, { sponsors: [], anonymous: 0 }])) as SponsorsData
+}
+
+function sponsorsToJson(year: number, data: SponsorsData): string {
+  const tiers: Record<string, { sponsors: { name: string; logo: string; link: string }[]; anonymous: number }> = {}
+  for (const tier of SPONSOR_TIERS) {
+    tiers[tier] = {
+      sponsors: data[tier].sponsors.map(s => ({ name: s.name, logo: s.logo, link: s.link })),
+      anonymous: data[tier].anonymous,
+    }
+  }
+  return JSON.stringify({ year, tiers })
+}
+
+function parseSponsorsJson(json: string): { year: number; data: SponsorsData } | null {
+  try {
+    const obj = JSON.parse(json)
+    if (!obj.year || !obj.tiers) return null
+    const data = emptySponsorsData()
+    for (const tier of SPONSOR_TIERS) {
+      if (obj.tiers[tier]) {
+        data[tier] = {
+          sponsors: (Array.isArray(obj.tiers[tier].sponsors) ? obj.tiers[tier].sponsors : []).map((s: Record<string, string>) => ({
+            id: crypto.randomUUID(),
+            name: s.name || '',
+            logo: s.logo || '',
+            link: s.link || '',
+          })),
+          anonymous: typeof obj.tiers[tier].anonymous === 'number' ? obj.tiers[tier].anonymous : 0,
+        }
+      }
+    }
+    return { year: obj.year, data }
+  } catch {
+    return null
+  }
+}
+
+function AdminSponsorsSection({ pubkey, signer, privateKey }: { pubkey: string | null; signer: ISigner | null; privateKey: string | null }) {
+  const [yearEntries, setYearEntries] = useState<{ year: number; data: SponsorsData; cachedJson: string; publishStatus: string | null; publishing: boolean }[]>([])
+  const [loading, setLoading] = useState(true)
+  const [openYear, setOpenYear] = useState<number | null>(null)
+  const [newYearInput, setNewYearInput] = useState('')
+  const [newYearError, setNewYearError] = useState<string | null>(null)
+
+  // Fetch all existing sponsor events on mount
+  useEffect(() => {
+    if (!pubkey) return
+    setLoading(true)
+    fetchEvents({ authors: [pubkey], kinds: [30078] }).then((events) => {
+      const entries: typeof yearEntries = []
+      for (const ev of events) {
+        const dTag = ev.tags.find((t) => t[0] === 'd')?.[1]
+        if (!dTag || !dTag.startsWith(SPONSORS_DTAG_PREFIX)) continue
+        const parsed = parseSponsorsJson(ev.content)
+        if (!parsed) continue
+        // Deduplicate by year — keep latest
+        const existing = entries.find(e => e.year === parsed.year)
+        if (existing) {
+          const existingJson = sponsorsToJson(existing.year, existing.data)
+          const newJson = sponsorsToJson(parsed.year, parsed.data)
+          if (ev.created_at > 0) { // always replace if we find another
+            existing.data = parsed.data
+            existing.cachedJson = newJson
+          }
+        } else {
+          const json = sponsorsToJson(parsed.year, parsed.data)
+          entries.push({ year: parsed.year, data: parsed.data, cachedJson: json, publishStatus: null, publishing: false })
+        }
+      }
+      entries.sort((a, b) => b.year - a.year)
+      setYearEntries(entries)
+      if (entries.length > 0) setOpenYear(entries[0].year)
+    }).finally(() => setLoading(false))
+  }, [pubkey])
+
+  const addYear = () => {
+    const y = parseInt(newYearInput)
+    if (isNaN(y) || y < 2026 || y > 2999) {
+      setNewYearError('Year must be between 2026 and 2999')
+      return
+    }
+    if (yearEntries.some(e => e.year === y)) {
+      setNewYearError(`${y} already exists`)
+      return
+    }
+    setNewYearError(null)
+    const entry = { year: y, data: emptySponsorsData(), cachedJson: '', publishStatus: null, publishing: false }
+    setYearEntries(prev => [entry, ...prev].sort((a, b) => b.year - a.year))
+    setOpenYear(y)
+    setNewYearInput('')
+  }
+
+  const updateYearEntry = (year: number, patch: Partial<typeof yearEntries[0]>) => {
+    setYearEntries(prev => prev.map(e => e.year === year ? { ...e, ...patch } : e))
+  }
+
+  const addSponsor = (year: number, tier: SponsorTier) => {
+    setYearEntries(prev => prev.map(e => {
+      if (e.year !== year) return e
+      return { ...e, data: { ...e.data, [tier]: { ...e.data[tier], sponsors: [...e.data[tier].sponsors, { id: crypto.randomUUID(), name: '', logo: '', link: '' }] } } }
+    }))
+  }
+
+  const removeSponsor = (year: number, tier: SponsorTier, id: string) => {
+    setYearEntries(prev => prev.map(e => {
+      if (e.year !== year) return e
+      return { ...e, data: { ...e.data, [tier]: { ...e.data[tier], sponsors: e.data[tier].sponsors.filter(s => s.id !== id) } } }
+    }))
+  }
+
+  const updateSponsor = (year: number, tier: SponsorTier, id: string, patch: Partial<SponsorEntry>) => {
+    setYearEntries(prev => prev.map(e => {
+      if (e.year !== year) return e
+      return { ...e, data: { ...e.data, [tier]: { ...e.data[tier], sponsors: e.data[tier].sponsors.map(s => s.id === id ? { ...s, ...patch } : s) } } }
+    }))
+  }
+
+  const setAnonymous = (year: number, tier: SponsorTier, count: number) => {
+    setYearEntries(prev => prev.map(e => {
+      if (e.year !== year) return e
+      return { ...e, data: { ...e.data, [tier]: { ...e.data[tier], anonymous: Math.max(0, count) } } }
+    }))
+  }
+
+  const handlePublish = async (year: number) => {
+    if (!pubkey || (!signer && !privateKey)) return
+    const entry = yearEntries.find(e => e.year === year)
+    if (!entry) return
+    updateYearEntry(year, { publishing: true, publishStatus: null })
+    try {
+      const content = sponsorsToJson(year, entry.data)
+      const dTag = SPONSORS_DTAG_PREFIX + year
+      const unsigned = createUnsignedEvent(30078, content, [['d', dTag], ['first_year', '2026']])
+      const signed = await signWithSigner(unsigned, signer, privateKey)
+      const accepted = await publishToSpecificRelays(getPublishRelays(), signed)
+      updateYearEntry(year, { cachedJson: content, publishing: false, publishStatus: `Published to ${accepted.length} relay${accepted.length !== 1 ? 's' : ''}` })
+    } catch (err) {
+      updateYearEntry(year, { publishing: false, publishStatus: `Error: ${err instanceof Error ? err.message : 'Publishing failed'}` })
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-16 text-muted-foreground text-sm gap-2">
+        <Loader2 size={16} className="animate-spin" /> Loading sponsors...
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-5">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h4 className="text-sm font-semibold text-foreground">Sponsors</h4>
+          <p className="text-xs text-muted-foreground mt-0.5">Manage sponsor tiers and entries per year.</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Input
+            value={newYearInput}
+            onChange={(e) => { setNewYearInput(e.target.value.replace(/\D/g, '').slice(0, 4)); setNewYearError(null) }}
+            placeholder="Year"
+            className="h-8 w-20 text-xs text-center"
+          />
+          <button
+            onClick={addYear}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors cursor-pointer"
+          >
+            <Plus size={13} /> Add Year
+          </button>
+        </div>
+      </div>
+      {newYearError && <p className="text-xs text-destructive -mt-3">{newYearError}</p>}
+
+      {yearEntries.length === 0 && (
+        <p className="text-xs text-muted-foreground/50 text-center py-8">No sponsor years yet. Add a year to get started.</p>
+      )}
+
+      {/* Year accordions */}
+      {yearEntries.map(entry => {
+        const isOpen = openYear === entry.year
+        const currentJson = sponsorsToJson(entry.year, entry.data)
+        const hasChanges = currentJson !== entry.cachedJson
+        const totalSponsors = SPONSOR_TIERS.reduce((sum, t) => sum + entry.data[t].sponsors.length + entry.data[t].anonymous, 0)
+
+        return (
+          <div key={entry.year} className="rounded-xl border border-border overflow-hidden bg-secondary/20">
+            {/* Year accordion header */}
+            <button
+              onClick={() => setOpenYear(isOpen ? null : entry.year)}
+              className="flex items-center justify-between w-full px-4 py-3 text-left cursor-pointer hover:bg-secondary/40 transition-colors"
+            >
+              <div className="flex items-center gap-3">
+                <span className="text-sm font-semibold text-foreground">{entry.year}</span>
+                <span className="text-xs text-muted-foreground">{totalSponsors} sponsor{totalSponsors !== 1 ? 's' : ''}</span>
+                {hasChanges && <span className="text-[10px] text-amber-400 font-medium">● unsaved</span>}
+              </div>
+              <svg className={`w-4 h-4 text-muted-foreground shrink-0 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+
+            {isOpen && (
+              <div className="border-t border-border/50 px-4 py-4 space-y-5">
+                {/* Tiers */}
+                {SPONSOR_TIERS.map(tier => (
+                  <div key={tier} className="rounded-lg border border-border/50 bg-secondary/10 overflow-hidden">
+                    {/* Tier header */}
+                    <div className="px-3 py-2.5 border-b border-border/30 flex items-center justify-between bg-secondary/20">
+                      <div className="flex items-center gap-2">
+                        <span className={`text-xs font-bold ${TIER_COLORS[tier]}`}>{TIER_LABELS[tier]}</span>
+                        <span className="text-[10px] text-muted-foreground">{TIER_PRICES[tier]}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] text-muted-foreground">Anonymous:</span>
+                        <Input
+                          type="number"
+                          min={0}
+                          value={entry.data[tier].anonymous}
+                          onChange={(e) => setAnonymous(entry.year, tier, parseInt(e.target.value) || 0)}
+                          className="w-14 h-7 text-xs text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Sponsors list */}
+                    <div className="p-3 space-y-2.5">
+                      {entry.data[tier].sponsors.length === 0 && (
+                        <p className="text-xs text-muted-foreground/50 text-center py-1.5">No sponsors in this tier yet.</p>
+                      )}
+                      {entry.data[tier].sponsors.map((sponsor) => (
+                        <SponsorEntryEditor
+                          key={sponsor.id}
+                          sponsor={sponsor}
+                          tier={tier}
+                          signer={signer}
+                          privateKey={privateKey}
+                          onUpdate={(patch) => updateSponsor(entry.year, tier, sponsor.id, patch)}
+                          onRemove={() => removeSponsor(entry.year, tier, sponsor.id)}
+                        />
+                      ))}
+                      <button
+                        onClick={() => addSponsor(entry.year, tier)}
+                        className="flex items-center gap-1.5 text-xs text-primary font-medium hover:text-primary/80 transition-colors cursor-pointer"
+                      >
+                        <Plus size={13} /> Add Sponsor
+                      </button>
+                    </div>
+                  </div>
+                ))}
+
+                {/* Per-year publish */}
+                <div className="flex items-center gap-3 pt-1">
+                  <button
+                    onClick={() => handlePublish(entry.year)}
+                    disabled={entry.publishing || !hasChanges}
+                    className="flex items-center gap-2 px-4 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {entry.publishing ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+                    {entry.publishing ? 'Publishing...' : `Publish ${entry.year}`}
+                  </button>
+                  {entry.publishStatus && (
+                    <span className={`text-xs ${entry.publishStatus.startsWith('Error') ? 'text-destructive' : 'text-emerald-400'}`}>
+                      {entry.publishStatus}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+/* ── Sponsor Entry Editor ── */
+
+function SponsorEntryEditor({
+  sponsor, tier, signer, privateKey, onUpdate, onRemove,
+}: {
+  sponsor: SponsorEntry
+  tier: SponsorTier
+  signer: ISigner | null
+  privateKey: string | null
+  onUpdate: (patch: Partial<SponsorEntry>) => void
+  onRemove: () => void
+}) {
+  const logoUpload = useMediaUpload(signer, privateKey)
+  const logoInputRef = useRef<HTMLInputElement>(null)
+  const isCommon = tier === 'common'
+
+  // When logo upload completes, set URL
+  useEffect(() => {
+    if (logoUpload.allSuccess && logoUpload.pendingFiles.length > 0) {
+      const urls = logoUpload.getUploadedUrls()
+      if (urls.length > 0 && urls[0] !== sponsor.logo) {
+        onUpdate({ logo: urls[0] })
+      }
+    }
+  }, [logoUpload.allSuccess, logoUpload.pendingFiles])
+
+  return (
+    <div className="rounded-lg border border-border/50 bg-secondary/10 p-3 space-y-2.5">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          {/* Logo preview */}
+          {!isCommon && sponsor.logo && (
+            <img src={sponsor.logo} alt="" className="w-8 h-8 rounded object-cover border border-border/50" />
+          )}
+          <span className="text-xs font-medium text-foreground">{sponsor.name || 'Unnamed'}</span>
+        </div>
+        <button onClick={onRemove} className="p-1 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors cursor-pointer">
+          <Trash2 size={13} />
+        </button>
+      </div>
+
+      {/* Name */}
+      <div className="space-y-1">
+        <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Name</label>
+        <Input
+          value={sponsor.name}
+          onChange={(e) => onUpdate({ name: e.target.value })}
+          placeholder="Sponsor name"
+          className="h-8 text-xs"
+        />
+      </div>
+
+      {/* Logo (hidden for Common) */}
+      {!isCommon && (
+        <div className="space-y-1">
+          <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Logo</label>
+          <div className="flex items-center gap-2">
+            <Input
+              value={sponsor.logo}
+              onChange={(e) => onUpdate({ logo: e.target.value })}
+              placeholder="https://... or upload"
+              className="h-8 text-xs flex-1"
+            />
+            <input ref={logoInputRef} type="file" accept="image/*" className="hidden"
+              onChange={(e) => { if (e.target.files) { logoUpload.addFiles(Array.from(e.target.files)); e.target.value = '' } }} />
+            <button onClick={() => logoInputRef.current?.click()} className="p-1.5 rounded-lg border border-border bg-secondary/40 text-muted-foreground hover:text-foreground hover:bg-secondary/70 transition-colors cursor-pointer shrink-0">
+              <Upload size={13} />
+            </button>
+          </div>
+          <MediaUploadStrip
+            pendingFiles={logoUpload.pendingFiles}
+            isUploading={logoUpload.isUploading}
+            onRemove={logoUpload.removeFile}
+            onUpload={logoUpload.uploadAll}
+            onRetry={(id) => { logoUpload.setPendingFiles((prev) => prev.map((f) => f.id === id ? { ...f, status: 'pending' as const } : f)); logoUpload.uploadAll() }}
+            onSkipServer={() => logoUpload.uploadAbortRef.current?.abort()}
+            fileSizeWarning={logoUpload.fileSizeWarning}
+            onDismissSizeWarning={logoUpload.dismissSizeWarning}
+          />
+        </div>
+      )}
+
+      {/* Link */}
+      <div className="space-y-1">
+        <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Link</label>
+        <Input
+          value={sponsor.link}
+          onChange={(e) => onUpdate({ link: e.target.value })}
+          placeholder="https://sponsor-website.com"
+          className="h-8 text-xs"
+        />
+      </div>
     </div>
   )
 }
