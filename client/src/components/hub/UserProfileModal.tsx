@@ -1463,7 +1463,7 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
 
               {/* Bio */}
               {profile.about && (
-                <p className="text-sm text-foreground/85 whitespace-pre-wrap leading-relaxed mb-2">{profile.about}</p>
+                <p className="text-sm text-foreground/85 whitespace-pre-wrap break-words leading-relaxed mb-2">{profile.about}</p>
               )}
 
               {/* Links button */}

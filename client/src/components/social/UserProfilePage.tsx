@@ -36,6 +36,9 @@ function BlossomBannerImg({ src }: { src: string }) {
   return <img src={blossom.src || src} alt="Banner" className="w-full h-full object-cover" />
 }
 
+const EMPTY_SET = new Set<string>()
+const EMPTY_MAP = new Map()
+
 export function UserProfilePage() {
   const activeProfilePubkey = useSocialStore((s) => s.activeProfilePubkey)
   const goBack = useSocialStore((s) => s.goBack)
@@ -450,6 +453,8 @@ export function UserProfilePage() {
                       onOpenThread={setActiveThread}
                       sentinelRef={sentinelRef}
                       loadingMore={loadingMore}
+                      bookmarkedIds={EMPTY_SET}
+                      reactionsMap={EMPTY_MAP}
                     />
                   )}
                 </div>
