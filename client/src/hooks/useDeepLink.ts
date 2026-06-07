@@ -165,4 +165,20 @@ export function useDeepLink() {
       unlisteners.forEach(fn => fn())
     }
   }, [])
+
+  // ── Web: check URL hash for #hub/<naddr> (works in browser + Tauri) ──
+  useEffect(() => {
+    const hash = window.location.hash // e.g. "#hub/naddr1..."
+    if (!hash) return
+
+    const match = hash.match(/^#hub\/(naddr1\S+)$/)
+    if (match) {
+      const naddr = match[1]
+      console.log('[DeepLink] Web hash detected:', naddr)
+      // Convert to a denchat:// URL and handle it through the same flow
+      handleDeepLinkUrl(`denchat://hub/${naddr}`)
+      // Clear the hash so it doesn't re-trigger on hot reload
+      window.history.replaceState(null, '', window.location.pathname + window.location.search)
+    }
+  }, [])
 }
