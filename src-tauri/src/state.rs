@@ -73,6 +73,8 @@ pub struct AppState {
     pub accounts: Mutex<Vec<AccountInfo>>,
     pub seeds: Mutex<Vec<SeedInfo>>,
     pub active_account: Mutex<Option<String>>,
+    /// Deep link URL from cold launch (process args), consumed once by the frontend
+    pub pending_deep_link: Mutex<Option<String>>,
 }
 
 const SERVICE_NAME: &str = "den-chat";
@@ -109,10 +111,15 @@ impl AppState {
             seeds.len()
         );
 
+        // Check process args for a cold-launch deep link URL
+        let pending_deep_link = std::env::args()
+            .find(|a| a.starts_with("denchat://"));
+
         Self {
             accounts: Mutex::new(accounts),
             seeds: Mutex::new(seeds),
             active_account: Mutex::new(active),
+            pending_deep_link: Mutex::new(pending_deep_link),
         }
     }
 

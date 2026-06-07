@@ -128,7 +128,7 @@ export function useDeepLink() {
     const unlisteners: (() => void)[] = []
 
     // Method 1: Plugin API — onOpenUrl (listens for deep-link://new-url events)
-    import('@tauri-apps/plugin-deep-link').then(({ onOpenUrl, getCurrent }) => {
+    import('@tauri-apps/plugin-deep-link').then(({ onOpenUrl }) => {
       onOpenUrl((urls: string[]) => {
         console.log('[DeepLink] onOpenUrl fired:', urls)
         if (urls.length > 0) {
@@ -137,17 +137,19 @@ export function useDeepLink() {
       }).then((fn) => {
         unlisteners.push(fn)
       })
-
-      // Check if the app was cold-launched with a deep link URL
-      getCurrent().then((urls) => {
-        if (urls && urls.length > 0) {
-          console.log('[DeepLink] Cold-launch URL:', urls[0])
-          handleDeepLinkUrl(urls[0])
-        }
-      }).catch(() => { /* no initial URL */ })
     }).catch(() => { /* plugin not available (web build) */ })
 
-    // Method 2: Direct Tauri event listener as fallback
+    // Method 2: Retrieve cold-launch URL from Rust state (reliable, no race condition)
+    import('@tauri-apps/api/core').then(({ invoke }) => {
+      invoke<string | null>('consume_pending_deep_link').then((url) => {
+        if (url) {
+          console.log('[DeepLink] Cold-launch URL from backend:', url)
+          handleDeepLinkUrl(url)
+        }
+      }).catch(() => { /* command not available */ })
+    }).catch(() => { /* tauri api not available */ })
+
+    // Method 3: Direct Tauri event listener as fallback
     // (catches the event we emit from the single-instance callback)
     import('@tauri-apps/api/event').then(({ listen }) => {
       listen<string[]>('deep-link://new-url', (event) => {

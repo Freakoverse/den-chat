@@ -6,6 +6,13 @@ mod link_preview;
 use link_preview::fetch_link_preview;
 use state::AppState;
 
+/// Retrieve and consume the pending deep link URL from cold launch.
+/// Returns the URL the first time it's called, then None on subsequent calls.
+#[tauri::command]
+fn consume_pending_deep_link(state: tauri::State<'_, AppState>) -> Option<String> {
+    state.pending_deep_link.lock().unwrap().take()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Fix WebKitGTK blank-window-on-alt-tab bug on Linux.
@@ -56,6 +63,7 @@ pub fn run() {
                     let _ = window.set_focus();
                 }
             });
+
 
             // Register the denchat:// scheme with the OS
             // (In production the installer does this, but this ensures it works in dev too)
@@ -143,6 +151,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             fetch_link_preview,
+            consume_pending_deep_link,
             keys::list_accounts,
             keys::list_seeds,
             keys::generate_account,

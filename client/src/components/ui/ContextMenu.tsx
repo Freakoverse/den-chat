@@ -14,7 +14,7 @@
 import { useState, useEffect, useCallback, useRef, createContext, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import {
-  Copy, Scissors, ClipboardPaste, MousePointerClick, Link, Image, TextSelect, Bell,
+  Copy, Scissors, ClipboardPaste, MousePointerClick, Link, Image, TextSelect, Bell, CheckCheck,
 } from 'lucide-react'
 
 interface MenuItem {
@@ -207,6 +207,15 @@ export function ContextMenuProvider({ children }: { children: ReactNode }) {
       const hubDTag = hubEl?.dataset.hubDtag
       if (hubDTag) {
         if (items.length > 0) items.push({ separator: true })
+        items.push({
+          label: 'Mark Hub as Read',
+          icon: <CheckCheck size={14} />,
+          action: async () => {
+            const { useNotificationStore } = await import('@/stores/notificationStore')
+            useNotificationStore.getState().markHubRead(hubDTag)
+            close()
+          },
+        })
         items.push({
           label: 'Notification Settings',
           icon: <Bell size={14} />,
