@@ -43,6 +43,18 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
   const [showCreatorProfile, setShowCreatorProfile] = useState(false)
   const [rescinding, setRescinding] = useState(false)
   const [rescindDone, setRescindDone] = useState(false)
+  const [userSettingsInitialTab, setUserSettingsInitialTab] = useState<'messages' | 'notifications' | undefined>(undefined)
+
+  // Watch for pending notification settings action from context menu
+  const pendingHubNotifDTag = useNavigationStore((s) => s.pendingHubNotifDTag)
+  const clearPendingNotif = useNavigationStore((s) => s.setPendingHubNotifDTag)
+  useEffect(() => {
+    if (pendingHubNotifDTag && hub && hub.dTag === pendingHubNotifDTag) {
+      clearPendingNotif(null)
+      setUserSettingsInitialTab('notifications')
+      setShowUserSettings(true)
+    }
+  }, [pendingHubNotifDTag, hub, clearPendingNotif])
 
   const markChannelRead = useNotificationStore((s) => s.markChannelRead)
 
@@ -447,8 +459,9 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
       {/* User Hub Settings modal */}
       <UserHubSettingsModal
         open={showUserSettings}
-        onClose={() => setShowUserSettings(false)}
+        onClose={() => { setShowUserSettings(false); setUserSettingsInitialTab(undefined) }}
         hub={hub}
+        initialTab={userSettingsInitialTab}
       />
 
       {/* Calendar Events modal */}

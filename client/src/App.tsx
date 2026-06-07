@@ -9,6 +9,7 @@ import { DenChatLogo } from './components/ui/DenChatLogo'
 import { useStartup } from './hooks/useStartup'
 import { useDeepLink } from './hooks/useDeepLink'
 import { StorageKey } from './lib/constants'
+import { ContextMenuProvider } from './components/ui/ContextMenu'
 
 const skipSplash = localStorage.getItem(StorageKey.SKIP_SPLASH) === 'true'
 
@@ -57,7 +58,7 @@ export default function App() {
   const handleSplashComplete = useCallback(() => setSplashDone(true), [])
 
   return (
-    <>
+    <ContextMenuProvider>
       {showApp ? <AppLayout /> : <LoginScreen />}
       {!splashDone && <SplashScreen onComplete={handleSplashComplete} />}
       <UpdateToast />
@@ -80,6 +81,6 @@ export default function App() {
           <DenChatLogo size={96} className="grayscale opacity-25" />
         </div>
       )}
-    </>
+    </ContextMenuProvider>
   )
 }

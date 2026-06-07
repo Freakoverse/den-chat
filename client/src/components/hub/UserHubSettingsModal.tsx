@@ -40,6 +40,7 @@ interface UserHubSettingsModalProps {
   open: boolean
   onClose: () => void
   hub: HubData
+  initialTab?: UserHubTab
 }
 
 const EMPTY_MEMBERS: HubMember[] = []
@@ -53,7 +54,7 @@ const DEFAULT_PREFS: HubPrefs = {
 
 type UserHubTab = 'messages' | 'notifications' | 'voice' | 'reports' | 'moderation' | 'hidden'
 
-export function UserHubSettingsModal({ open, onClose, hub }: UserHubSettingsModalProps) {
+export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHubSettingsModalProps) {
   const pubkey = useUserStore((s) => s.pubkey)
   const signer = useUserStore((s) => s.signer)
   const privateKey = useUserStore((s) => s.privateKey)
@@ -68,7 +69,7 @@ export function UserHubSettingsModal({ open, onClose, hub }: UserHubSettingsModa
   const { getProfile } = useProfileCache()
 
   const [search, setSearch] = useState('')
-  const [activeTab, setActiveTab] = useState<UserHubTab>('messages')
+  const [activeTab, setActiveTab] = useState<UserHubTab>(initialTab ?? 'messages')
   const [mobileShowNav, setMobileShowNav] = useState(true)
   const [checkingStatus, setCheckingStatus] = useState(false)
   const [checkResult, setCheckResult] = useState<'found' | 'not-found' | null>(null)
@@ -290,6 +291,7 @@ export function UserHubSettingsModal({ open, onClose, hub }: UserHubSettingsModa
       setSelectedFacilitator(hubPrefs.facilitator || null)
       setMeshError(null)
       setAddNpub('')
+      setActiveTab(initialTab ?? 'messages')
       // Snapshot the current mute settings so we can detect changes
       const currentMute = useNotificationStore.getState().hubMuteSettings[hub.dTag] ?? EMPTY_MUTE_SETTINGS
       initialMuteRef.current = { ...currentMute }

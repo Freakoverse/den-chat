@@ -404,3 +404,106 @@ select:focus-visible {
   padding: 0 8px !important;
   border-radius: 4px !important;
 }
+
+/* ── Custom Context Menu ── */
+
+@keyframes contextMenuIn {
+  from {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes contextMenuOut {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+}
+
+.context-menu-root {
+  position: fixed;
+  z-index: 99999;
+  min-width: 180px;
+  max-width: 260px;
+  padding: 4px;
+  background: hsl(var(--popover) / 0.97);
+  backdrop-filter: blur(16px) saturate(1.5);
+  -webkit-backdrop-filter: blur(16px) saturate(1.5);
+  border: 1px solid hsl(var(--border) / 0.8);
+  border-radius: 10px;
+  box-shadow:
+    0 8px 30px hsl(0 0% 0% / 0.3),
+    0 2px 8px hsl(0 0% 0% / 0.15),
+    inset 0 0.5px 0 hsl(0 0% 100% / 0.06);
+  animation: contextMenuIn 120ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  transform-origin: top left;
+  user-select: none;
+}
+
+.context-menu-root.context-menu-out {
+  animation: contextMenuOut 100ms ease-in forwards;
+  pointer-events: none;
+}
+
+.context-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: hsl(var(--popover-foreground));
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color 100ms ease, color 100ms ease;
+  text-align: left;
+}
+
+.context-menu-item:hover {
+  background: hsl(var(--primary) / 0.15);
+  color: hsl(var(--primary));
+}
+
+.context-menu-item:active {
+  background: hsl(var(--primary) / 0.25);
+}
+
+.context-menu-item:disabled {
+  opacity: 0.4;
+  cursor: default;
+  pointer-events: none;
+}
+
+.context-menu-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  color: hsl(var(--muted-foreground));
+  flex-shrink: 0;
+  transition: color 100ms ease;
+}
+
+.context-menu-item:hover .context-menu-icon {
+  color: hsl(var(--primary));
+}
+
+.context-menu-separator {
+  height: 1px;
+  margin: 4px 8px;
+  background: hsl(var(--border) / 0.6);
+}

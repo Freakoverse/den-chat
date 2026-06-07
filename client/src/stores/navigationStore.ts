@@ -30,6 +30,10 @@ interface NavigationStore {
   /** Whether the mobile members overlay is visible */
   showMobileMembers: boolean
   setShowMobileMembers: (show: boolean) => void
+
+  /** Pending hub dTag for opening notification settings (set by context menu, consumed by ChannelList) */
+  pendingHubNotifDTag: string | null
+  setPendingHubNotifDTag: (dTag: string | null) => void
 }
 
 export const useNavigationStore = create<NavigationStore>((set) => ({
@@ -47,5 +51,7 @@ export const useNavigationStore = create<NavigationStore>((set) => ({
   setMobileView: (view) => set({ mobileView: view }),
   showMobileMembers: false,
   setShowMobileMembers: (show) => set({ showMobileMembers: show }),
+  pendingHubNotifDTag: null,
+  setPendingHubNotifDTag: (dTag) => set({ pendingHubNotifDTag: dTag }),
 }))
 

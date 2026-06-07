@@ -489,6 +489,7 @@ function HubIcon({ label, isActive, onClick, children, isAction, isPreview, stat
         <TooltipTrigger asChild>
           <button
             onClick={onClick}
+            data-hub-dtag={hubDTag}
             className={cn(
               'relative flex items-center justify-center transition-all duration-200 cursor-pointer overflow-hidden',
               size, rounding,

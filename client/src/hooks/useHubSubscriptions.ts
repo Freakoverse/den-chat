@@ -35,15 +35,23 @@ import { playSoundEffect } from '@/lib/voice/soundEffects'
 
 import type { Event } from 'nostr-tools'
 
+/** Unix timestamp (seconds) of when this session started — sounds only play for messages after this */
+const sessionStartTime = Math.floor(Date.now() / 1000)
+
 /**
  * Play the 'message' sound effect if allowed by the hub's mute settings.
  * Checks the per-hub HubMuteSettings to determine whether this message type
  * should trigger a sound.
+ * Only plays for messages created after the current session started.
  */
 function playMessageSoundIfAllowed(
   hubDTag: string,
-  mentionType: 'personal' | 'everyone' | 'here' | 'role' | undefined
+  mentionType: 'personal' | 'everyone' | 'here' | 'role' | undefined,
+  createdAt: number
 ) {
+  // Only play sounds for messages that arrived after this session started
+  if (createdAt < sessionStartTime) return
+
   const muteSettings = useNotificationStore.getState().hubMuteSettings[hubDTag]
   if (!muteSettings) {
     // No mute settings — play sound
@@ -646,14 +654,14 @@ export function useHubSubscriptions() {
               msg.hubDTag, msg.channelId, msg.createdAt, mentionType
             )
             // Play message sound if not muted for this hub/mention type
-            playMessageSoundIfAllowed(msg.hubDTag, mentionType)
+            playMessageSoundIfAllowed(msg.hubDTag, mentionType, msg.createdAt)
           })
           .catch(() => {
             // Decryption failed (key not ready, wrong epoch, etc.) — treat as normal message
             useNotificationStore.getState().incrementChannelUnread(
               msg.hubDTag, msg.channelId, msg.createdAt
             )
-            playMessageSoundIfAllowed(msg.hubDTag, undefined)
+            playMessageSoundIfAllowed(msg.hubDTag, undefined, msg.createdAt)
           })
 
         // Also bump the legacy per-hub counter for the old sidebar badge
