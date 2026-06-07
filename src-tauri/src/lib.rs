@@ -39,12 +39,18 @@ pub fn run() {
                 let _ = window.set_focus();
             }
 
-            // Forward any denchat:// deep link URLs from argv to the frontend
-            let urls: Vec<String> = argv.into_iter()
-                .filter(|a| a.starts_with("denchat://"))
-                .collect();
-            if !urls.is_empty() {
-                let _ = app.emit("deep-link://new-url", urls);
+            // Forward any denchat:// deep link URLs from argv
+            let url = argv.iter()
+                .find(|a| a.starts_with("denchat://"))
+                .cloned();
+            if let Some(deep_url) = url {
+                // Store in AppState so the frontend can pull it via consume_pending_deep_link
+                if let Some(state) = app.try_state::<AppState>() {
+                    *state.pending_deep_link.lock().unwrap() = Some(deep_url.clone());
+                }
+                // Also emit events so frontend listeners can pick it up immediately
+                let _ = app.emit("deep-link://new-url", vec![deep_url.clone()]);
+                let _ = app.emit("den-deep-link", deep_url);
             }
         }))
         .plugin(tauri_plugin_opener::init())

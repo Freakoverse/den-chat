@@ -149,11 +149,10 @@ export function useDeepLink() {
       }).catch(() => { /* command not available */ })
     }).catch(() => { /* tauri api not available */ })
 
-    // Method 3: Direct Tauri event listener as fallback
-    // (catches the event we emit from the single-instance callback)
+    // Method 3: Direct Tauri event listener (deep-link://new-url from single-instance)
     import('@tauri-apps/api/event').then(({ listen }) => {
       listen<string[]>('deep-link://new-url', (event) => {
-        console.log('[DeepLink] Raw event received:', event.payload)
+        console.log('[DeepLink] deep-link://new-url event:', event.payload)
         const urls = event.payload
         if (Array.isArray(urls) && urls.length > 0) {
           handleDeepLinkUrl(urls[0])
@@ -161,10 +160,37 @@ export function useDeepLink() {
       }).then((fn) => {
         unlisteners.push(fn)
       })
+
+      // Method 4: Simple event name (avoids potential issues with :// in event names)
+      listen<string>('den-deep-link', (event) => {
+        console.log('[DeepLink] den-deep-link event:', event.payload)
+        if (event.payload) {
+          handleDeepLinkUrl(event.payload)
+        }
+      }).then((fn) => {
+        unlisteners.push(fn)
+      })
     }).catch(() => { /* tauri api not available */ })
+
+    // Method 5: Check for pending deep link when window gains focus
+    // Catches warm-launch case where the single-instance plugin stores the URL
+    // in AppState but events don't reach the webview in release builds
+    const handleFocus = () => {
+      if (!('__TAURI__' in window)) return
+      import('@tauri-apps/api/core').then(({ invoke }) => {
+        invoke<string | null>('consume_pending_deep_link').then((url) => {
+          if (url) {
+            console.log('[DeepLink] Pending URL found on focus:', url)
+            handleDeepLinkUrl(url)
+          }
+        }).catch(() => {})
+      }).catch(() => {})
+    }
+    window.addEventListener('focus', handleFocus)
 
     return () => {
       unlisteners.forEach(fn => fn())
+      window.removeEventListener('focus', handleFocus)
     }
   }, [])
 
