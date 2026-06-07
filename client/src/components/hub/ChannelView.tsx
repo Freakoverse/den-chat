@@ -1723,7 +1723,7 @@ function MessageList({ hubDTag, channelId, channelName, optimisticMessages, setO
 
             {/* Jump-to-latest bar — shown in time-travel mode or when scrolled far from bottom */}
             {(timeTravelMode || showScrollBanner) && (
-              <div className="sticky bottom-0 z-10 flex items-center justify-center">
+              <div className="sticky bottom-4 z-10 flex items-center justify-center">
                 <div className="flex items-center gap-3 py-1.5 pl-4 pr-1.5 bg-secondary/95 backdrop-blur-sm outline outline-1 outline-white/15 shadow-lg rounded-full">
                   <span className="text-[13px] text-muted-foreground leading-none">You're viewing older messages</span>
                   <button
