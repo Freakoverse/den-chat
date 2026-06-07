@@ -62,4 +62,13 @@ export default defineConfig({
     port: 5173,
     strictPort: false,
   },
+  build: {
+    rollupOptions: {
+      // Tauri-only plugins — not available in web builds, imported dynamically at runtime
+      external: [
+        '@tauri-apps/plugin-deep-link',
+        '@tauri-apps/api/event',
+      ],
+    },
+  },
 })
