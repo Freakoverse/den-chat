@@ -31,7 +31,7 @@ uuid = { version = "1", features = ["v4"] }
 tracing = "0.1"
 tauri-plugin-opener = "2"
 tauri-plugin-deep-link = "2"
-tauri-plugin-single-instance = "2"
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 
 [target.'cfg(windows)'.dependencies]
 webview2-com = "0.38"
