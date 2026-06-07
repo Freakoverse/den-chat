@@ -861,7 +861,7 @@ export function DiscoverPage() {
   const [currentPage, setCurrentPage] = useState(1)
 
   // Deduplicate and merge new events into existing hubs
-  const mergeHubs = useCallback((existing: DiscoveredHub[], newEvents: Event[]): DiscoveredHub[] => {
+  const mergeHubs = useCallback((existing: DiscoveredHub[], newEvents: Event[], skipDiscoverableCheck = false): DiscoveredHub[] => {
     const byDTag = new Map<string, DiscoveredHub>()
 
     // Seed with existing
@@ -877,7 +877,7 @@ export function DiscoverPage() {
       if (existingHub && ev.created_at <= existingHub.event.created_at) continue
 
       const h = parseHubEventForDiscover(ev)
-      if (h && h.discoverable) {
+      if (h && (skipDiscoverableCheck || h.discoverable)) {
         byDTag.set(d, h)
       }
     }
@@ -989,9 +989,12 @@ export function DiscoverPage() {
         filter['#w'] = wValues
       }
 
+      let isDirectLookup = false
+
       if (q) {
         if (q.toLowerCase().startsWith('naddr1')) {
           // naddr → decode to author + d-tag for precise hub lookup
+          isDirectLookup = true
           try {
             const decoded = nip19.decode(q.toLowerCase())
             if (decoded.type === 'naddr') {
@@ -1001,16 +1004,19 @@ export function DiscoverPage() {
             }
           } catch {
             // Invalid naddr — fall through to name search
+            isDirectLookup = false
             filter['#n'] = [q]
           }
         } else if (q.toLowerCase().startsWith('npub1')) {
           // npub → targeted author query
+          isDirectLookup = true
           try {
             const decoded = nip19.decode(q.toLowerCase())
             if (decoded.type === 'npub') {
               filter.authors = [decoded.data as string]
             }
           } catch {
+            isDirectLookup = false
             // Invalid npub — just use filter tags
           }
         } else {
@@ -1022,7 +1028,7 @@ export function DiscoverPage() {
       const events = await fetchEvents(filter)
 
       if (events.length > 0) {
-        setHubs(prev => mergeHubs(prev, events))
+        setHubs(prev => mergeHubs(prev, events, isDirectLookup))
       }
     } catch (err) {
       console.error('Relay search failed:', err)
@@ -1035,9 +1041,51 @@ export function DiscoverPage() {
     loadHubs()
   }, [loadHubs])
 
+  // ── Deep link: auto-search when navigated here via denchat://hub/<naddr> ──
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { naddr: string } | undefined
+      if (detail?.naddr) {
+        setSearchQuery(detail.naddr)
+        // Trigger search on next tick after state update
+        setTimeout(() => {
+          const searchBtn = document.querySelector<HTMLButtonElement>('[data-discover-search-btn]')
+          searchBtn?.click()
+        }, 100)
+      }
+    }
+    window.addEventListener('deep-link-hub-search', handler)
+    return () => window.removeEventListener('deep-link-hub-search', handler)
+  }, [])
+
   // Filter hubs
   const filteredHubs = useMemo(() => {
     let result = hubs
+
+    // Direct address lookup — bypass ALL filters
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase().trim()
+      if (q.startsWith('naddr1')) {
+        try {
+          const decoded = nip19.decode(q)
+          if (decoded.type === 'naddr') {
+            const addr = decoded.data as { kind: number; pubkey: string; identifier: string }
+            return hubs.filter(h => h.dTag === addr.identifier && h.creatorPubkey === addr.pubkey)
+          }
+        } catch {
+          // Invalid naddr — fall through to normal filtering
+        }
+      } else if (q.startsWith('npub1')) {
+        try {
+          const decoded = nip19.decode(q)
+          if (decoded.type === 'npub') {
+            return hubs.filter(h => h.creatorPubkey === decoded.data)
+          }
+        } catch {
+          // Invalid npub — fall through to normal filtering
+        }
+      }
+    }
 
     // NSFW filter (default off)
     if (!showNsfw) {
@@ -1077,31 +1125,10 @@ export function DiscoverPage() {
       )
     }
 
-    // Search by name, npub, or naddr
+    // Search by name (text search — not an address)
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase().trim()
-      if (q.startsWith('naddr1')) {
-        try {
-          const decoded = nip19.decode(q)
-          if (decoded.type === 'naddr') {
-            const addr = decoded.data as { kind: number; pubkey: string; identifier: string }
-            result = result.filter(h => h.dTag === addr.identifier && h.creatorPubkey === addr.pubkey)
-          }
-        } catch {
-          result = result.filter(h => h.name.toLowerCase().includes(q))
-        }
-      } else if (q.startsWith('npub1')) {
-        try {
-          const decoded = nip19.decode(q)
-          if (decoded.type === 'npub') {
-            result = result.filter(h => h.creatorPubkey === decoded.data)
-          }
-        } catch {
-          result = result.filter(h => h.name.toLowerCase().includes(q))
-        }
-      } else {
-        result = result.filter(h => h.name.toLowerCase().includes(q))
-      }
+      result = result.filter(h => h.name.toLowerCase().includes(q))
     }
 
     return result
@@ -1207,6 +1234,7 @@ export function DiscoverPage() {
                     )}
                   </div>
                   <button
+                    data-discover-search-btn
                     onClick={searchRelays}
                     disabled={!searchQuery.trim() || searching}
                     className="flex items-center gap-1.5 px-3 py-3.5 rounded-xl border text-xs font-medium transition-colors cursor-pointer shrink-0 bg-secondary/60 border-border text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed"
@@ -1271,7 +1299,7 @@ export function DiscoverPage() {
                       <Search size={24} className="text-muted-foreground" />
                     </div>
                     <h3 className="text-sm font-medium text-foreground mb-1">No hubs found</h3>
-                    <p className="text-xs text-muted-foreground max-w-xs">
+                    <p className="text-xs text-muted-foreground max-w-xs break-all">
                       {searchQuery
                         ? `No hubs match "${searchQuery}". Try a different search or adjust filters.`
                         : 'No discoverable hubs match the current filters. Try adjusting your filter settings.'}

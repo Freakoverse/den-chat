@@ -21,10 +21,46 @@ pub fn run() {
     }
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            // When a second instance is launched, bring the existing window to front
+            use tauri::Manager;
+            use tauri::Emitter;
+
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+
+            // Forward any denchat:// deep link URLs from argv to the frontend
+            let urls: Vec<String> = argv.into_iter()
+                .filter(|a| a.starts_with("denchat://"))
+                .collect();
+            if !urls.is_empty() {
+                let _ = app.emit("deep-link://new-url", urls);
+            }
+        }))
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_deep_link::init())
         .manage(AppState::new())
         .setup(|app| {
             use tauri::Manager;
+            use tauri::Listener;
+
+            // ── Deep-link: bring window to front when a deep link activates the app ──
+            let handle = app.handle().clone();
+            app.listen("deep-link://new-url", move |_event| {
+                if let Some(window) = handle.get_webview_window("main") {
+                    let _ = window.unminimize();
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            });
+
+            // Register the denchat:// scheme with the OS
+            // (In production the installer does this, but this ensures it works in dev too)
+            use tauri_plugin_deep_link::DeepLinkExt;
+            let _ = app.deep_link().register_all();
 
             // ── System tray ──
             {

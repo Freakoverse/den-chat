@@ -54,6 +54,8 @@ export interface PCStoredReaction {
   pubkey: string
   eventId: string
   customUrl?: string
+  /** Unix timestamp (seconds) of the reaction event */
+  createdAt?: number
 }
 
 /** Number of messages to fetch per page */
@@ -701,6 +703,7 @@ export const usePublicChatStore = create<PublicChatState>((set, get) => ({
         emoji,
         pubkey: event.pubkey,
         eventId: event.id,
+        createdAt: event.created_at,
         customUrl,
       })
     }

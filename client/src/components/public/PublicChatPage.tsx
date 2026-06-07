@@ -782,6 +782,7 @@ function PublicChatView({ topic, pendingHighlightId, onHighlightConsumed }: { to
       emoji,
       pubkey: myPubkey,
       eventId: 'optimistic-' + Date.now(),
+      createdAt: Math.floor(Date.now() / 1000),
       customUrl,
     })
 

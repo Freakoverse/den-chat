@@ -7,12 +7,14 @@ import { UpdateToast } from './components/ui/UpdateToast'
 import { SignerGuardBanner } from './components/ui/SignerGuardBanner'
 import { DenChatLogo } from './components/ui/DenChatLogo'
 import { useStartup } from './hooks/useStartup'
+import { useDeepLink } from './hooks/useDeepLink'
 import { StorageKey } from './lib/constants'
 
 const skipSplash = localStorage.getItem(StorageKey.SKIP_SPLASH) === 'true'
 
 export default function App() {
   useStartup()
+  useDeepLink()
   const isAuthenticated = useUserStore((s) => s.isAuthenticated)
   const [splashDone, setSplashDone] = useState(skipSplash)
 

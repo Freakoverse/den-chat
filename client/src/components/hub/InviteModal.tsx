@@ -34,6 +34,7 @@ export function InviteModal({ open, onClose, hub }: InviteModalProps) {
   const [search, setSearch] = useState('')
   const [selected, setSelected] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
+  const [copiedLink, setCopiedLink] = useState(false)
   const [sending, setSending] = useState(false)
   const [sent, setSent] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
@@ -129,6 +130,39 @@ export function InviteModal({ open, onClose, hub }: InviteModalProps) {
               className="shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-lg bg-primary/10 text-primary text-xs font-medium hover:bg-primary/20 transition-colors cursor-pointer"
             >
               {copied ? <><Check size={12} /> Copied</> : <><Copy size={12} /> Copy</>}
+            </button>
+          </div>
+        </div>
+
+        {/* Copy Hub Link */}
+        <div className="px-4 pt-3 pb-3 border-b border-border space-y-2">
+          <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
+            <Link size={12} />
+            Hub Link
+          </label>
+          <div className="flex items-center gap-2">
+            <div className="flex-1 text-xs text-muted-foreground font-mono bg-secondary/50 px-3 py-2 rounded-lg truncate select-all">
+              {`https://denchat.top/#hub/${hubAddress}`}
+            </div>
+            <button
+              onClick={async () => {
+                const link = `https://denchat.top/#hub/${hubAddress}`
+                try {
+                  await navigator.clipboard.writeText(link)
+                } catch {
+                  const el = document.createElement('textarea')
+                  el.value = link
+                  document.body.appendChild(el)
+                  el.select()
+                  document.execCommand('copy')
+                  document.body.removeChild(el)
+                }
+                setCopiedLink(true)
+                setTimeout(() => setCopiedLink(false), 2000)
+              }}
+              className="shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-lg bg-primary/10 text-primary text-xs font-medium hover:bg-primary/20 transition-colors cursor-pointer"
+            >
+              {copiedLink ? <><Check size={12} /> Copied</> : <><Copy size={12} /> Copy</>}
             </button>
           </div>
         </div>

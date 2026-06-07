@@ -1211,6 +1211,7 @@ function MessageList({ hubDTag, channelId, channelName, optimisticMessages, setO
       emoji,
       pubkey: myPubkey!,
       eventId: 'optimistic-' + Date.now(),
+      createdAt: Math.floor(Date.now() / 1000),
       customUrl,
     })
 
@@ -1434,6 +1435,7 @@ function MessageList({ hubDTag, channelId, channelName, optimisticMessages, setO
                             emoji,
                             pubkey: myPubkey!,
                             eventId: 'optimistic-' + Date.now(),
+                            createdAt: Math.floor(Date.now() / 1000),
                             customUrl,
                           })
                           // Publish — no dTag for polls (non-addressable)
@@ -2995,7 +2997,7 @@ export function ReactionBar({ reactions, messageId, onAddReaction, rawReactions,
         pubkey: r.pubkey,
         emoji: r.emoji,
         emojiUrl: r.customUrl,
-        createdAt: 0, // StoredReaction doesn't store timestamp
+        createdAt: r.createdAt || 0,
       }))
   }, [rawReactions])
 
@@ -6259,6 +6261,7 @@ function ThreadModal({ parentMsg, threadReplies, hubDTag, channelId, getProfile,
       emoji,
       pubkey: myPubkey!,
       eventId: 'optimistic-' + Date.now(),
+      createdAt: Math.floor(Date.now() / 1000),
       customUrl,
     })
     publishReaction(emoji, messageId, targetMsg.pubkey, targetMsg.dTag, customUrl).catch(() => { })

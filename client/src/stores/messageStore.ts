@@ -59,6 +59,8 @@ export interface StoredReaction {
   pubkey: string
   eventId: string
   customUrl?: string
+  /** Unix timestamp (seconds) of the reaction event */
+  createdAt?: number
   /** Raw encrypted content from the event (for lazy decryption) */
   rawContent?: string
   /** Raw encrypted emoji tag [shortcode, url] (for lazy decryption) */

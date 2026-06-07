@@ -353,6 +353,7 @@ function processReactionEvent(event: Event) {
     emoji: event.content, // encrypted — will be decrypted at render
     pubkey: event.pubkey,
     eventId: event.id,
+    createdAt: event.created_at,
     rawContent: event.content,
     rawEmojiTag: emojiTag ? [emojiTag[1], emojiTag[2]] : undefined,
     decrypted: false,
