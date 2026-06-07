@@ -641,8 +641,9 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
     } else if (privateKey) {
       try {
         const { nip44, getPublicKey } = await import('nostr-tools')
-        const pubkey = getPublicKey(privateKey as unknown as Uint8Array)
-        const convKey = nip44.v2.utils.getConversationKey(hexToBytes(privateKey), pubkey)
+        const privKeyBytes = hexToBytes(privateKey)
+        const pubkey = getPublicKey(privKeyBytes)
+        const convKey = nip44.v2.utils.getConversationKey(privKeyBytes, pubkey)
         encryptedContent = nip44.v2.encrypt(content, convKey)
       } catch (err) {
         console.warn('[notif] Failed to NIP-44 encrypt hub read-state (privateKey), using plaintext:', err)
@@ -669,8 +670,9 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
     } else if (privateKey) {
       try {
         const { nip44, getPublicKey } = await import('nostr-tools')
-        const pubkey = getPublicKey(privateKey as unknown as Uint8Array)
-        const convKey = nip44.v2.utils.getConversationKey(hexToBytes(privateKey), pubkey)
+        const privKeyBytes = hexToBytes(privateKey)
+        const pubkey = getPublicKey(privKeyBytes)
+        const convKey = nip44.v2.utils.getConversationKey(privKeyBytes, pubkey)
         encryptedContent = nip44.v2.encrypt(content, convKey)
       } catch (err) {
         console.warn('[notif] Failed to NIP-44 encrypt DM read-state (privateKey), using plaintext:', err)

@@ -30,9 +30,46 @@ import { useUserStore } from '@/stores/userStore'
 import { aesDecrypt } from '@/lib/crypto/aes'
 import { deriveChannelKey } from '@/lib/crypto/hkdf'
 import { nip19 } from 'nostr-tools'
+import { playSoundEffect } from '@/lib/voice/soundEffects'
 
 
 import type { Event } from 'nostr-tools'
+
+/**
+ * Play the 'message' sound effect if allowed by the hub's mute settings.
+ * Checks the per-hub HubMuteSettings to determine whether this message type
+ * should trigger a sound.
+ */
+function playMessageSoundIfAllowed(
+  hubDTag: string,
+  mentionType: 'personal' | 'everyone' | 'here' | 'role' | undefined
+) {
+  const muteSettings = useNotificationStore.getState().hubMuteSettings[hubDTag]
+  if (!muteSettings) {
+    // No mute settings — play sound
+    playSoundEffect('message')
+    return
+  }
+
+  // Master mute — suppress all
+  if (muteSettings.all) return
+
+  // Check specific mute flags based on mention type
+  if (!mentionType) {
+    // Normal message — check 'normal' mute flag
+    if (muteSettings.normal) return
+  } else if (mentionType === 'personal') {
+    if (muteSettings.mentions) return
+  } else if (mentionType === 'everyone') {
+    if (muteSettings.everyone) return
+  } else if (mentionType === 'here') {
+    if (muteSettings.here) return
+  } else if (mentionType === 'role') {
+    if (muteSettings.roles) return
+  }
+
+  playSoundEffect('message')
+}
 
 /** Number of messages to fetch on initial load */
 const INITIAL_LIMIT = 50
@@ -608,12 +645,15 @@ export function useHubSubscriptions() {
             useNotificationStore.getState().incrementChannelUnread(
               msg.hubDTag, msg.channelId, msg.createdAt, mentionType
             )
+            // Play message sound if not muted for this hub/mention type
+            playMessageSoundIfAllowed(msg.hubDTag, mentionType)
           })
           .catch(() => {
             // Decryption failed (key not ready, wrong epoch, etc.) — treat as normal message
             useNotificationStore.getState().incrementChannelUnread(
               msg.hubDTag, msg.channelId, msg.createdAt
             )
+            playMessageSoundIfAllowed(msg.hubDTag, undefined)
           })
 
         // Also bump the legacy per-hub counter for the old sidebar badge
