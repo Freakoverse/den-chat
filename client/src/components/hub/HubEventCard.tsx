@@ -179,6 +179,10 @@ export function HubEventCard({ identifier, pubkey, relays }: HubEventCardProps) 
 
       // Add to user's hub list
       if (!isAlreadyInList) {
+        // Store hub data BEFORE updating entries — prevents hub loader
+        // from racing with the signer (which can drop extension connections)
+        setHubData(hubData.dTag, hubData)
+
         const relayHint = hubData.generalRelays[0] || ''
         const newEntry = {
           dTag: hubData.dTag,
@@ -188,9 +192,6 @@ export function HubEventCard({ identifier, pubkey, relays }: HubEventCardProps) 
         }
         const newEntries = [...hubEntries, newEntry]
         setHubEntries(newEntries, folders)
-
-        // Store hub data locally for immediate access
-        setHubData(hubData.dTag, hubData)
 
         // Publish updated hub list
         const hubListEvent = createHubListEvent(

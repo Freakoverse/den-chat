@@ -452,9 +452,9 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
         permissions: { ...DEFAULT_EVERYONE_PERMISSIONS },
       }]
 
-      // Build image URLs from Blossom hashes
-      const selectedBlossoms = getSelectedBlossoms()
-      const blossomServerList = selectedBlossoms.length > 0 ? selectedBlossoms : blossomServerManager.getServers().slice(0, 3)
+      // Build image URLs from Blossom hashes (dedup by normalized URL to avoid trailing-slash duplicates)
+      const rawBlossoms = getSelectedBlossoms().length > 0 ? getSelectedBlossoms() : blossomServerManager.getServers().slice(0, 3)
+      const blossomServerList = [...new Set(rawBlossoms.map(u => u.replace(/\/+$/, '')))]
       const iconUrl = iconHash ? `${blossomServerList[0]}/${iconHash}` : undefined
       const bannerUrl = bannerHash ? `${blossomServerList[0]}/${bannerHash}` : undefined
 
@@ -547,22 +547,10 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
       }
       markDone('publishing-hub')
 
-      // Update user's hub list
-      setCreationStep('updating-hub-list')
-      const newEntry = { dTag, relayHint: relays[0] || '', position: hubEntries.length, folderId: undefined }
-      const newEntries = [...hubEntries, newEntry]
-      setHubEntries(newEntries, folders)
-
-      const hubListEvent = createHubListEvent(
-        newEntries.map(e => ({ dTag: e.dTag, relayHint: e.relayHint, position: e.position, folderId: e.folderId })),
-        folders
-      )
-      const signedHubList = await signWithSigner(hubListEvent, signer, privateKey)
-      await publishToSpecificRelays(getPublishRelays(), signedHubList)
-      markDone('updating-hub-list')
-
-      // Set hub data in store immediately
+      // Set hub data in store BEFORE updating hub entries — prevents the hub loader
+      // from racing with the signer to decrypt the secret (which causes extension drops)
       setCreationStep('finalizing')
+      const secretHexStr = Array.from(hubSecret).map(b => b.toString(16).padStart(2, '0')).join('')
       setHubData(dTag, {
         dTag,
         creatorPubkey: pubkey!,
@@ -595,10 +583,23 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
         nsfw,
         discoverable,
       })
-
-      const secretHexStr = Array.from(hubSecret).map(b => b.toString(16).padStart(2, '0')).join('')
       setHubSecret(dTag, secretHexStr)
       setHubStatus(dTag, 'loaded')
+
+      // Update user's hub list — safe now because hub data/secret are already in store,
+      // so the hub loader will find it "loaded" and skip the NIP-04 decrypt
+      setCreationStep('updating-hub-list')
+      const newEntry = { dTag, relayHint: relays[0] || '', position: hubEntries.length, folderId: undefined }
+      const newEntries = [...hubEntries, newEntry]
+      setHubEntries(newEntries, folders)
+
+      const hubListEvent = createHubListEvent(
+        newEntries.map(e => ({ dTag: e.dTag, relayHint: e.relayHint, position: e.position, folderId: e.folderId })),
+        folders
+      )
+      const signedHubList = await signWithSigner(hubListEvent, signer, privateKey)
+      await publishToSpecificRelays(getPublishRelays(), signedHubList)
+      markDone('updating-hub-list')
       markDone('finalizing')
 
       setCreationStep('done')

@@ -61,8 +61,11 @@ export function UpdateToast() {
     try {
       const { ADMIN_PUBKEY } = await import('@/lib/constants')
       const { fetchReplaceable, fetchEvents } = await import('@/lib/nostr/relay-pool')
+      const { useUpdateStore } = await import('@/stores/updateStore')
 
       let latestVersion: string | null = null
+      let latestBody = ''
+      let latestPlatforms: { platform: string; url: string; ext: string }[] = []
 
       // Try the den-chat-latest pointer first (single event, fast)
       const latestEvent = await fetchReplaceable(ADMIN_PUBKEY, 30078, 'den-chat-latest')
@@ -73,30 +76,43 @@ export function UpdateToast() {
         } catch { /* ignore */ }
       }
 
-      // Fallback: scan all build events if pointer not found
-      if (!latestVersion) {
-        const BUILD_DTAG_PREFIX = 'den-chat-build-'
-        const events = await fetchEvents({ authors: [ADMIN_PUBKEY], kinds: [30078] })
-        let latestTimestamp = 0
-        for (const ev of events) {
-          const dTag = ev.tags.find((t: string[]) => t[0] === 'd')?.[1]
-          if (!dTag || !dTag.startsWith(BUILD_DTAG_PREFIX)) continue
-          try {
-            const data = JSON.parse(ev.content)
-            if (data.deleted) continue
-            if (ev.tags.some((t: string[]) => t[0] === 'deleted')) continue
-            const publishedAt = data.published_at || ev.created_at
-            if (data.version && publishedAt > latestTimestamp) {
-              latestTimestamp = publishedAt
-              latestVersion = data.version
+      // Fetch all build events to get the full details (platforms, release notes)
+      const BUILD_DTAG_PREFIX = 'den-chat-build-'
+      const events = await fetchEvents({ authors: [ADMIN_PUBKEY], kinds: [30078] })
+      let latestTimestamp = 0
+      for (const ev of events) {
+        const dTag = ev.tags.find((t: string[]) => t[0] === 'd')?.[1]
+        if (!dTag || !dTag.startsWith(BUILD_DTAG_PREFIX)) continue
+        try {
+          const data = JSON.parse(ev.content)
+          if (data.deleted) continue
+          if (ev.tags.some((t: string[]) => t[0] === 'deleted')) continue
+          const publishedAt = data.published_at || ev.created_at
+          if (data.version && publishedAt > latestTimestamp) {
+            latestTimestamp = publishedAt
+            if (!latestVersion) latestVersion = data.version
+            // If this is the matching version, grab its details
+            if (data.version === latestVersion) {
+              latestBody = data.body || ''
+              latestPlatforms = Array.isArray(data.platforms)
+                ? data.platforms.map((p: Record<string, string>) => ({
+                    platform: p.platform || '',
+                    url: p.url || '',
+                    ext: p.ext || '',
+                    hash: p.hash || '',
+                  }))
+                : []
             }
-          } catch { /* ignore */ }
-        }
+          }
+        } catch { /* ignore */ }
       }
 
       if (latestVersion && isNewerVersion(__APP_VERSION__, latestVersion)) {
         setServerVersion(latestVersion)
         setUpdateAvailable(true)
+
+        // Populate the update store for the Updates tab
+        useUpdateStore.getState().setAvailable(latestVersion, latestBody, latestPlatforms)
       }
     } catch {
       // Relay fetch failed — silently ignore

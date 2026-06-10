@@ -8,7 +8,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
   X, Send, ArrowRight, Loader2, CheckCircle, XCircle,
-  ExternalLink, AlertTriangle, Fuel, Users, Zap, Clock, Wallet,
+  ExternalLink, AlertTriangle, Fuel, Users, Zap, Clock, Wallet, ChevronDown,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -18,7 +18,8 @@ import type { EvmChain } from '@/stores/rpcStore'
 import { CHAIN_TOKENS, type TokenInfo } from '@/lib/tokens'
 import { ContactPickerModal } from './ContactPickerModal'
 import { nip19 } from 'nostr-tools'
-import { deriveEvmAddress, deriveTaprootAddress, deriveSegwitAddress } from '@/lib/crypto/derive'
+import { deriveEvmAddress, deriveTaprootAddress, deriveSegwitAddress, deriveSegwitOddAddress } from '@/lib/crypto/derive'
+
 
 // ── Types ──
 
@@ -121,6 +122,10 @@ export function SendModal({ chain, address, privateKeyHex, balance, balanceRaw, 
   const [isNpub, setIsNpub] = useState(false)
   // Contact picker
   const [showContactPicker, setShowContactPicker] = useState(false)
+  // Bitcoin npub address type selector
+  const [sendAddressType, setSendAddressType] = useState<'taproot' | 'segwit-even' | 'segwit-odd'>('taproot')
+  const [showAddressTypes, setShowAddressTypes] = useState(false)
+  const [allBtcAddresses, setAllBtcAddresses] = useState<{ taproot: string; segwitEven: string; segwitOdd: string } | null>(null)
 
   const isEvm = chain !== 'bitcoin'
   const decimals = CHAIN_DECIMALS[chain]
@@ -160,16 +165,24 @@ export function SendModal({ chain, address, privateKeyHex, balance, balanceRaw, 
           setIsNpub(true)
           if (isEvm) {
             setResolvedAddress(deriveEvmAddress(pubkeyHex))
-          } else if (bitcoinAddressType === 'taproot') {
-            setResolvedAddress(deriveTaprootAddress(pubkeyHex))
+            setAllBtcAddresses(null)
           } else {
-            setResolvedAddress(deriveSegwitAddress(pubkeyHex))
+            // Derive all 3 Bitcoin address types
+            const taproot = deriveTaprootAddress(pubkeyHex)
+            const segwitEven = deriveSegwitAddress(pubkeyHex)
+            const segwitOdd = deriveSegwitOddAddress(pubkeyHex)
+            setAllBtcAddresses({ taproot, segwitEven, segwitOdd })
+            // Select based on current sendAddressType
+            if (sendAddressType === 'taproot') setResolvedAddress(taproot)
+            else if (sendAddressType === 'segwit-even') setResolvedAddress(segwitEven)
+            else setResolvedAddress(segwitOdd)
           }
           return
         }
       } catch { /* invalid npub */ }
     }
     setIsNpub(false)
+    setAllBtcAddresses(null)
     // For direct addresses, resolve as-is
     if (isEvm && isValidEvmAddress(trimmed)) {
       setResolvedAddress(trimmed)
@@ -178,7 +191,7 @@ export function SendModal({ chain, address, privateKeyHex, balance, balanceRaw, 
     } else {
       setResolvedAddress(null)
     }
-  }, [recipient, chain, isEvm, bitcoinAddressType])
+  }, [recipient, chain, isEvm, bitcoinAddressType, sendAddressType])
 
   // Validate recipient
   const recipientValid = isNpub ? !!resolvedAddress : (isEvm ? isValidEvmAddress(recipient) : isValidBtcAddress(recipient))
@@ -357,9 +370,62 @@ export function SendModal({ chain, address, privateKeyHex, balance, balanceRaw, 
                 />
                 {/* Resolved address from npub */}
                 {isNpub && resolvedAddress && (
-                  <div className="flex items-center gap-1.5 mt-1.5 px-2.5 py-1.5 rounded-lg bg-primary/5 border border-primary/20">
-                    <ArrowRight size={10} className="text-primary shrink-0" />
-                    <code className="text-[10px] text-primary font-mono truncate">{resolvedAddress}</code>
+                  <div className="mt-1.5">
+                    {/* Selected address + toggle button */}
+                    <button
+                      onClick={() => !isEvm && allBtcAddresses && setShowAddressTypes(!showAddressTypes)}
+                      className={cn(
+                        'w-full flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-primary/5 border border-primary/20 text-left transition-colors',
+                        !isEvm && allBtcAddresses ? 'hover:bg-primary/10 cursor-pointer' : ''
+                      )}
+                    >
+                      <ArrowRight size={10} className="text-primary shrink-0" />
+                      <code className="text-[10px] text-primary font-mono truncate flex-1">{resolvedAddress}</code>
+                      {!isEvm && allBtcAddresses && (
+                        <ChevronDown size={12} className={cn('text-primary/60 shrink-0 transition-transform', showAddressTypes && 'rotate-180')} />
+                      )}
+                    </button>
+
+                    {/* Address type accordion */}
+                    {showAddressTypes && allBtcAddresses && (
+                      <div className="mt-1 rounded-lg border border-border/50 bg-secondary/20 overflow-hidden">
+                        {([
+                          { key: 'taproot' as const, label: 'Taproot', sublabel: 'bc1p…', addr: allBtcAddresses.taproot },
+                          { key: 'segwit-even' as const, label: 'SegWit', sublabel: 'Even type · bc1q…', addr: allBtcAddresses.segwitEven },
+                          { key: 'segwit-odd' as const, label: 'SegWit', sublabel: 'Odd type · bc1q…', addr: allBtcAddresses.segwitOdd },
+                        ]).map((opt, i) => (
+                          <button
+                            key={opt.key}
+                            onClick={() => { setSendAddressType(opt.key); setShowAddressTypes(false) }}
+                            className={cn(
+                              'w-full flex items-start gap-2 px-3 py-2 text-left transition-colors cursor-pointer',
+                              i > 0 && 'border-t border-border/30',
+                              sendAddressType === opt.key
+                                ? 'bg-primary/10'
+                                : 'hover:bg-secondary/40'
+                            )}
+                          >
+                            <div className={cn(
+                              'w-3.5 h-3.5 rounded-full border-2 shrink-0 mt-0.5 flex items-center justify-center',
+                              sendAddressType === opt.key
+                                ? 'border-primary'
+                                : 'border-muted-foreground/40'
+                            )}>
+                              {sendAddressType === opt.key && (
+                                <div className="w-1.5 h-1.5 rounded-full bg-primary" />
+                              )}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-xs font-medium text-foreground">{opt.label}</span>
+                                <span className="text-[10px] text-muted-foreground">{opt.sublabel}</span>
+                              </div>
+                              <code className="text-[9px] text-muted-foreground font-mono break-all leading-relaxed">{opt.addr}</code>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
                 {recipient && recipientSelf && (

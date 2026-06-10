@@ -155,6 +155,22 @@ export function deriveSegwitAddress(xOnlyPubkeyHex: string): string {
 }
 
 /**
+ * Derive a Bitcoin SegWit (P2WPKH) address using odd-y parity (03 prefix).
+ * This is the counterpart to deriveSegwitAddress which uses even-y (02).
+ */
+export function deriveSegwitOddAddress(xOnlyPubkeyHex: string): string {
+  // Reconstruct odd-y compressed pubkey (33 bytes: 03 + x)
+  const compressed = hexToU8('03' + xOnlyPubkeyHex)
+
+  // HASH160 = RIPEMD160(SHA256(compressed_pubkey))
+  const hash160 = ripemd160(sha256(compressed)) // 20 bytes
+
+  // witness version 0 + 20-byte program → Bech32 (NOT Bech32m)
+  const words = [0, ...convertBits(hash160, 8, 5, true)]
+  return bech32Encode('bc', words)
+}
+
+/**
  * Derive an EVM (checksummed) address from a 32-byte x-only Nostr pubkey.
  * Reconstructs the even-y point, gets uncompressed (x||y), keccak256 → last 20 bytes → EIP-55.
  */

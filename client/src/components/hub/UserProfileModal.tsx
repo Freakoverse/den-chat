@@ -42,6 +42,7 @@ import { ReportModal } from '@/components/hub/ReportModal'
 import { DnnBadge } from '@/components/ui/DnnBadge'
 import { useDnnStore } from '@/stores/dnnStore'
 import { isDnnId } from '@/lib/dnn/dnnUtils'
+import { formatDnnId } from '@/lib/dnn/formatDnnId'
 import { getPermissionsForUser } from '@/lib/hub/permissions'
 import { useProfileCache } from '@/hooks/useProfileCache'
 
@@ -1782,7 +1783,7 @@ function DnnNip05Row({ pubkey, nip05 }: { pubkey: string | null; nip05: string }
       <AtSign size={14} className="text-muted-foreground shrink-0" />
         <span className="text-muted-foreground text-xs w-14 shrink-0">NIP-05</span>
         <span className="text-primary truncate font-medium text-sm flex items-center gap-1">
-          {nip05}
+          {formatDnnId(nip05)}
           <BadgeCheck size={12} className="text-primary shrink-0" />
         </span>
       </div>

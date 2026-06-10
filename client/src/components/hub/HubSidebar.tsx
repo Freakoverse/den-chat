@@ -509,7 +509,7 @@ function HubIcon({ label, isActive, onClick, children, isAction, isPreview, stat
       {status === 'not-found' && (
         <Tooltip>
           <TooltipTrigger asChild>
-            <div className="absolute -bottom-0.5 right-1 w-5 h-5 rounded-full bg-amber-500 flex items-center justify-center shadow-md z-10 cursor-default">
+            <div className={cn('absolute -bottom-0.5 w-5 h-5 rounded-full bg-amber-500 flex items-center justify-center shadow-md z-10 cursor-default', compact ? '-right-0.5' : 'right-1')}>
               <HelpCircle size={12} className="text-white" />
             </div>
           </TooltipTrigger>
@@ -519,7 +519,7 @@ function HubIcon({ label, isActive, onClick, children, isAction, isPreview, stat
       {status === 'deleted' && (
         <Tooltip>
           <TooltipTrigger asChild>
-            <div className="absolute -bottom-0.5 right-1 w-5 h-5 rounded-full bg-destructive flex items-center justify-center shadow-md z-10 cursor-default">
+            <div className={cn('absolute -bottom-0.5 w-5 h-5 rounded-full bg-destructive flex items-center justify-center shadow-md z-10 cursor-default', compact ? '-right-0.5' : 'right-1')}>
               <XCircle size={12} className="text-white" />
             </div>
           </TooltipTrigger>
@@ -529,7 +529,7 @@ function HubIcon({ label, isActive, onClick, children, isAction, isPreview, stat
 
       {/* Voice call indicator */}
       {isInVoice && status !== 'deleted' && status !== 'not-found' && (
-        <div className="absolute bottom-0 right-2 w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center shadow-md z-10">
+        <div className={cn('absolute bottom-0 w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center shadow-md z-10', compact ? '-right-1' : 'right-2')}>
           <Volume2 size={10} className="text-white" />
         </div>
       )}
@@ -538,10 +538,11 @@ function HubIcon({ label, isActive, onClick, children, isAction, isPreview, stat
       {!isActive && status !== 'deleted' && status !== 'not-found' && !isInVoice && hubDTag && (
         !notifReady ? (
           /* Pulsing dot — indicates notifications are being loaded */
-          <div className="absolute bottom-0 right-3 w-[14px] h-[14px] rounded-full bg-muted-foreground/40 z-10 animate-pulse border-2 border-secondary" />
+          <div className={cn('absolute bottom-0 w-[14px] h-[14px] rounded-full bg-muted-foreground/40 z-10 animate-pulse border-2 border-secondary', compact ? 'right-0' : 'right-3')} />
         ) : totalUnread > 0 ? (
           <div className={cn(
-            'absolute bottom-0 right-2 min-w-[18px] h-[18px] flex items-center justify-center rounded-full text-[10px] font-bold px-1 shadow-md z-10 border-2 border-secondary',
+            'absolute bottom-0 min-w-[18px] h-[18px] flex items-center justify-center rounded-full text-[10px] font-bold px-1 shadow-md z-10 border-2 border-secondary',
+            compact ? '-right-1' : 'right-2',
             hasMention
               ? 'bg-destructive text-destructive-foreground'
               : 'bg-foreground text-background'
@@ -554,9 +555,9 @@ function HubIcon({ label, isActive, onClick, children, isAction, isPreview, stat
       {/* DM / Public Chat unread badge — or pulsing dot while loading */}
       {!isActive && dmUnreadCount !== undefined && (
         !notifReady ? (
-          <div className="absolute bottom-0 right-3 w-[14px] h-[14px] rounded-full bg-muted-foreground/40 z-10 animate-pulse border-2 border-secondary" />
+          <div className={cn('absolute bottom-0 w-[14px] h-[14px] rounded-full bg-muted-foreground/40 z-10 animate-pulse border-2 border-secondary', compact ? 'right-0' : 'right-3')} />
         ) : dmUnreadCount > 0 ? (
-          <div className="absolute bottom-0 right-2 min-w-[18px] h-[18px] flex items-center justify-center rounded-full text-[10px] font-bold px-1 shadow-md z-10 bg-destructive text-destructive-foreground pointer-events-none border-2 border-secondary">
+          <div className={cn('absolute bottom-0 min-w-[18px] h-[18px] flex items-center justify-center rounded-full text-[10px] font-bold px-1 shadow-md z-10 bg-destructive text-destructive-foreground pointer-events-none border-2 border-secondary', compact ? '-right-1' : 'right-2')}>
             {dmUnreadCount > 99 ? '99+' : dmUnreadCount}
           </div>
         ) : null
@@ -564,7 +565,7 @@ function HubIcon({ label, isActive, onClick, children, isAction, isPreview, stat
 
       {/* Simple notification dot (e.g. social feed) */}
       {!isActive && hasNotificationDot && (
-        <div className="absolute bottom-0 right-2 w-[14px] h-[14px] rounded-full bg-destructive shadow-md z-10 pointer-events-none border-2 border-secondary" />
+        <div className={cn('absolute bottom-0 w-[14px] h-[14px] rounded-full bg-destructive shadow-md z-10 pointer-events-none border-2 border-secondary', compact ? '-right-1' : 'right-2')} />
       )}
     </div>
   )

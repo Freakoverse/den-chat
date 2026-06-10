@@ -2,6 +2,7 @@ mod keys;
 mod ptt;
 mod state;
 mod link_preview;
+mod update;
 
 use link_preview::fetch_link_preview;
 use state::AppState;
@@ -164,6 +165,8 @@ pub fn run() {
             keys::get_active_account,
             ptt::start_ptt_watch,
             ptt::stop_ptt_watch,
+            update::download_update,
+            update::install_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running DEN Chat");

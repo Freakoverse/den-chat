@@ -11,6 +11,7 @@ import { nip19 } from 'nostr-tools'
 import { useState, useMemo } from 'react'
 import { Crown, Search, ChevronDown, Info } from 'lucide-react'
 import { useDnnStore } from '@/stores/dnnStore'
+import { formatDnnId } from '@/lib/dnn/formatDnnId'
 
 /** PAGE_SIZE matches the constant in lkh.ts — used for approximate total count display */
 const PAGE_SIZE = 10_000
@@ -311,7 +312,7 @@ function MemberSubline({ pubkey, npub }: { pubkey: string; npub: string }) {
   if (status === 'verified' && dnnId) {
     return (
       <p className="text-sm text-primary/70 font-mono truncate">
-        @{dnnId}
+        @{formatDnnId(dnnId)}
       </p>
     )
   }

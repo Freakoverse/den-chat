@@ -1,5 +1,6 @@
 import { useHubStore } from '@/stores/hubStore'
 import { useDnnStore } from '@/stores/dnnStore'
+import { formatDnnId } from '@/lib/dnn/formatDnnId'
 import { useMessageStore } from '@/stores/messageStore'
 import { useUserStore } from '@/stores/userStore'
 import { useBlockStore } from '@/stores/blockStore'
@@ -5344,7 +5345,7 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
                             {s.name || truncateNpub(s.npub)}
                             {s.dnnId && (
                               <span className="inline-flex items-center gap-0.5 text-[10px] text-primary font-medium shrink-0">
-                                @{s.dnnId}
+                                @{formatDnnId(s.dnnId)}
                                 <BadgeCheck size={11} className="text-primary" />
                               </span>
                             )}

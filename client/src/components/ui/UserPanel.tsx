@@ -14,6 +14,7 @@ import { useHubStore } from '@/stores/hubStore'
 import { UserProfileModal } from '@/components/hub/UserProfileModal'
 import { DnnBadge } from '@/components/ui/DnnBadge'
 import { useDnnStore } from '@/stores/dnnStore'
+import { formatDnnId } from '@/lib/dnn/formatDnnId'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
 import { truncateNpub, isTauri } from '@/lib/utils'
 import { nip19 } from 'nostr-tools'
@@ -486,14 +487,14 @@ function DnnSubline({ pubkey, npub }: { pubkey: string | null; npub: string }) {
 
   if (status === 'verified' && dnnId) {
     return (
-      <div className="text-[10px] truncate text-primary/70 text-left">
-        @{dnnId}
+      <div className="text-sm truncate text-primary/70 text-left">
+        @{formatDnnId(dnnId)}
       </div>
     )
   }
 
   return (
-    <div className="text-xs truncate text-muted-foreground text-left">
+    <div className="text-sm truncate text-muted-foreground text-left">
       {npub ? truncateNpub(npub) : ''}
     </div>
   )

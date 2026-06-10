@@ -8,7 +8,9 @@ import { useFollowStore } from '@/stores/followStore'
 import { useUserListsStore } from '@/stores/userListsStore'
 import { usePostingBehaviourStore } from '@/stores/postingBehaviourStore'
 import { useNavigationStore } from '@/stores/navigationStore'
+import { useUpdateStore, startUpdateDownload, startUpdateInstall, detectOS } from '@/stores/updateStore'
 import { useDnnStore } from '@/stores/dnnStore'
+import { formatDnnId } from '@/lib/dnn/formatDnnId'
 import { useRpcStore, DEFAULT_BITCOIN_NODES, DEFAULT_EVM_CHAINS, type EvmChain } from '@/stores/rpcStore'
 import { useWotStore } from '@/stores/wotStore'
 import { dnnService, type DnnNodeInfo } from '@/lib/dnn/dnnService'
@@ -5590,6 +5592,183 @@ interface BuildEvent {
   created_at: number
 }
 
+function UpdateBanner() {
+  const version = useUpdateStore((s) => s.availableVersion)
+  const notes = useUpdateStore((s) => s.releaseNotes)
+  const matched = useUpdateStore((s) => s.matchedPlatform)
+  const allPlatforms = useUpdateStore((s) => s.allPlatforms)
+  const showAll = useUpdateStore((s) => s.showAllPlatforms)
+  const status = useUpdateStore((s) => s.downloadStatus)
+  const progress = useUpdateStore((s) => s.downloadProgress)
+  const speed = useUpdateStore((s) => s.downloadSpeed)
+  const downloadedBytes = useUpdateStore((s) => s.downloadedBytes)
+  const totalBytes = useUpdateStore((s) => s.totalBytes)
+  const error = useUpdateStore((s) => s.error)
+
+  if (!version) return null
+
+  const os = detectOS()
+  const isWindows = os === 'windows'
+  const activePlatform = showAll ? null : matched
+
+  const handleDownload = (platform: { url: string; ext: string; hash?: string }) => {
+    startUpdateDownload(platform.url, platform.ext, platform.hash)
+  }
+
+  const formatSpeed = (bps: number) => {
+    if (bps < 1024) return `${Math.round(bps)} B/s`
+    if (bps < 1024 * 1024) return `${(bps / 1024).toFixed(1)} KB/s`
+    return `${(bps / (1024 * 1024)).toFixed(1)} MB/s`
+  }
+
+  const formatSize = (bytes: number) => {
+    if (bytes < 1024) return `${bytes} B`
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  }
+
+  return (
+    <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 space-y-3 mb-6">
+      {/* Header */}
+      <div className="flex items-center gap-2">
+        <div className="w-8 h-8 rounded-full bg-primary/15 flex items-center justify-center shrink-0">
+          <ArrowUp size={16} className="text-primary" />
+        </div>
+        <div>
+          <p className="text-sm font-semibold text-foreground">Update Available — v{version}</p>
+          <p className="text-xs text-muted-foreground">You&apos;re on v{__APP_VERSION__}</p>
+        </div>
+      </div>
+
+      {/* Release notes preview */}
+      {notes && (
+        <div className="prose prose-sm prose-invert max-w-none text-muted-foreground text-xs leading-relaxed max-h-32 overflow-y-auto [&_strong]:text-foreground [&_ul]:list-disc [&_ul]:pl-4 [&_ol]:list-decimal [&_ol]:pl-4 [&_a]:text-primary [&_p]:my-1 [&_h1]:text-sm [&_h1]:font-bold [&_h1]:text-foreground [&_h2]:text-sm [&_h2]:font-semibold [&_h2]:text-foreground [&_h3]:text-xs [&_h3]:font-semibold [&_h3]:text-foreground">
+          <Markdown remarkPlugins={[remarkGfm]}>{notes}</Markdown>
+        </div>
+      )}
+
+      {/* Download / Install section */}
+      {status === 'idle' && (
+        <div className="space-y-2">
+          {activePlatform ? (
+            /* Auto-detected platform — single prominent button */
+            <div className="space-y-1.5">
+              <button
+                onClick={() => handleDownload(activePlatform)}
+                className="flex items-center gap-2 w-full px-4 py-2.5 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors cursor-pointer justify-center"
+              >
+                <Download size={14} />
+                {isWindows ? 'Download & Install' : 'Download & Save'}
+                <span className="text-xs opacity-70 ml-1">({activePlatform.platform})</span>
+              </button>
+              <button
+                onClick={() => useUpdateStore.getState().setShowAllPlatforms(true)}
+                className="text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer w-full text-center"
+              >
+                Not your OS? Show all platforms
+              </button>
+            </div>
+          ) : (
+            /* All platforms list */
+            <div className="space-y-1.5">
+              <p className="text-xs font-medium text-foreground">Select your platform:</p>
+              {allPlatforms.map((p, i) => (
+                <button
+                  key={i}
+                  onClick={() => handleDownload(p)}
+                  className="flex items-center gap-2 w-full px-3 py-2 rounded-lg bg-secondary/40 border border-border hover:bg-secondary/60 transition-colors cursor-pointer text-left text-sm text-foreground"
+                >
+                  <Download size={14} className="text-primary shrink-0" />
+                  <span className="font-medium">{p.platform}</span>
+                  <span className="text-xs text-muted-foreground flex-1 text-right">{p.ext || ''}</span>
+                </button>
+              ))}
+              {matched && (
+                <button
+                  onClick={() => useUpdateStore.getState().setShowAllPlatforms(false)}
+                  className="text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer w-full text-center"
+                >
+                  Auto-detect my platform
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Downloading */}
+      {status === 'downloading' && (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <Loader2 size={14} className="text-primary animate-spin shrink-0" />
+            <span className="text-sm text-foreground font-medium flex-1">Downloading update...</span>
+            <button
+              onClick={() => useUpdateStore.getState().setFailed('Cancelled')}
+              className="text-muted-foreground hover:text-destructive transition-colors cursor-pointer"
+            >
+              <X size={14} />
+            </button>
+          </div>
+          <div className="w-full h-2 rounded-full bg-secondary overflow-hidden">
+            <div
+              className="h-full bg-primary rounded-full transition-all duration-150"
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+          <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+            <span>{totalBytes > 0 ? `${formatSize(downloadedBytes)} / ${formatSize(totalBytes)}` : 'Connecting...'}</span>
+            <span>{speed > 0 ? formatSpeed(speed) : ''} {progress > 0 ? `${progress}%` : ''}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Ready to install */}
+      {status === 'ready' && (
+        <div className="space-y-2">
+          {isWindows ? (
+            <button
+              onClick={() => startUpdateInstall()}
+              className="flex items-center gap-2 w-full px-4 py-2.5 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-500 transition-colors cursor-pointer justify-center"
+            >
+              <Sparkles size={14} />
+              Install Now — Restarts DEN Chat
+            </button>
+          ) : (
+            <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30">
+              <Check size={14} className="text-emerald-400 shrink-0" />
+              <span className="text-sm text-emerald-400 font-medium">Downloaded! Open the file from your Downloads folder to install.</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Installing */}
+      {status === 'installing' && (
+        <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-primary/10 border border-primary/30">
+          <Loader2 size={14} className="text-primary animate-spin shrink-0" />
+          <span className="text-sm text-foreground font-medium">Installing update... DEN Chat will restart.</span>
+        </div>
+      )}
+
+      {/* Failed */}
+      {status === 'failed' && (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-destructive/30 bg-destructive/5">
+            <XCircle size={14} className="text-destructive shrink-0" />
+            <span className="text-sm text-destructive font-medium flex-1">{error || 'Update failed'}</span>
+          </div>
+          <button
+            onClick={() => useUpdateStore.getState().reset()}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border bg-secondary/40 text-xs font-medium text-foreground hover:bg-secondary/70 transition-colors cursor-pointer"
+          >
+            <RotateCcw size={12} /> Try Again
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function UpdatesTab() {
   const [builds, setBuilds] = useState<BuildEvent[]>([])
   const [loading, setLoading] = useState(true)
@@ -5637,6 +5816,7 @@ function UpdatesTab() {
     return (
       <div>
         <h3 className="text-lg font-semibold mb-4">Updates <span className="text-xs font-normal text-muted-foreground ml-1.5">v{__APP_VERSION__}</span></h3>
+        <UpdateBanner />
         <div className="space-y-2">
           {[0, 1, 2].map((i) => (
             <div key={i} className="rounded-lg border border-border bg-secondary/20 animate-pulse">
@@ -5652,6 +5832,7 @@ function UpdatesTab() {
     return (
       <div>
         <h3 className="text-lg font-semibold mb-4">Updates <span className="text-xs font-normal text-muted-foreground ml-1.5">v{__APP_VERSION__}</span></h3>
+        <UpdateBanner />
         <div className="flex flex-col items-center gap-3 py-12 text-muted-foreground">
           <p className="text-sm">Failed to load updates.</p>
           <button onClick={fetchBuilds} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border bg-secondary/40 text-xs font-medium text-foreground hover:bg-secondary/70 transition-colors cursor-pointer">
@@ -5665,6 +5846,7 @@ function UpdatesTab() {
   return (
     <div>
       <h3 className="text-lg font-semibold mb-4">Updates <span className="text-xs font-normal text-muted-foreground ml-1.5">v{__APP_VERSION__}</span></h3>
+      <UpdateBanner />
       {builds.length === 0 ? (
         <p className="text-sm text-muted-foreground text-center py-8">No builds published yet.</p>
       ) : (
@@ -8335,7 +8517,7 @@ function SettingsDnnSubline({ pubkey, npub }: { pubkey: string; npub: string }) 
 
   if (status === 'verified' && dnnId) {
     return (
-      <p className="text-xs text-primary/70 font-mono truncate">@{dnnId}</p>
+      <p className="text-xs text-primary/70 font-mono truncate">@{formatDnnId(dnnId)}</p>
     )
   }
 
@@ -8916,6 +9098,7 @@ interface BuildPlatformEntry {
   platform: string
   url: string
   ext: string
+  hash: string
   originalFilename: string
   size: number
   mimeType: string
@@ -8970,6 +9153,7 @@ function AdminBuildsSection({ pubkey, signer, privateKey }: { pubkey: string | n
                 platform: (p.platform as string) || '',
                 url: (p.url as string) || '',
                 ext: (p.ext as string) || '',
+                hash: (p.hash as string) || '',
                 originalFilename: (p.originalFilename as string) || '',
                 size: (p.size as number) || 0,
                 mimeType: (p.mimeType as string) || '',
@@ -9026,7 +9210,7 @@ function AdminBuildsSection({ pubkey, signer, privateKey }: { pubkey: string | n
   const addPlatform = (buildId: string) => {
     setBuilds((prev) => prev.map((b) => b.id === buildId ? {
       ...b,
-      platforms: [...b.platforms, { id: crypto.randomUUID(), platform: '', url: '', ext: '', originalFilename: '', size: 0, mimeType: '' }],
+      platforms: [...b.platforms, { id: crypto.randomUUID(), platform: '', url: '', ext: '', hash: '', originalFilename: '', size: 0, mimeType: '' }],
     } : b))
   }
 
@@ -9056,7 +9240,7 @@ function AdminBuildsSection({ pubkey, signer, privateKey }: { pubkey: string | n
         sourceUrl: build.sourceUrl,
         sourceExt: build.sourceExt,
         published_at: publishedAt,
-        platforms: build.platforms.map(({ platform, url, ext, originalFilename, size, mimeType }) => ({ platform, url, ext, originalFilename, size, mimeType })),
+        platforms: build.platforms.map(({ platform, url, ext, hash, originalFilename, size, mimeType }) => ({ platform, url, ext, hash, originalFilename, size, mimeType })),
       })
       // For existing builds: use created_at + 1 so the replacement doesn't jump in timeline
       // For new builds: use default (now)
@@ -9092,7 +9276,7 @@ function AdminBuildsSection({ pubkey, signer, privateKey }: { pubkey: string | n
       body: b.body,
       sourceUrl: b.sourceUrl,
       sourceExt: b.sourceExt,
-      platforms: b.platforms.map(({ platform, url, ext, originalFilename, size, mimeType }) => ({ platform, url, ext, originalFilename, size, mimeType })),
+      platforms: b.platforms.map(({ platform, url, ext, hash, originalFilename, size, mimeType }) => ({ platform, url, ext, hash, originalFilename, size, mimeType })),
     })
   }
 
@@ -9380,7 +9564,7 @@ function BuildPlatformRow({ plat, onUpdate, onRemove, signer, privateKey }: {
         () => { const c = new AbortController(); uploadAbortRef.current = c; return c.signal },
       )
       const baseUrl = serverUrls[0] || 'https://blossom.primal.net'
-      onUpdate({ url: `${baseUrl}/${hash}`, ext: fileExt, originalFilename: file.name, size: file.size, mimeType: file.type })
+      onUpdate({ url: `${baseUrl}/${hash}`, ext: fileExt, hash, originalFilename: file.name, size: file.size, mimeType: file.type })
       setProgress(null)
       setSuccessMsg(`Uploaded to ${successCount} server${successCount !== 1 ? 's' : ''}`)
       setTimeout(() => setSuccessMsg(null), 5000)
@@ -9434,6 +9618,28 @@ function BuildPlatformRow({ plat, onUpdate, onRemove, signer, privateKey }: {
             </TooltipTrigger>
             <TooltipContent side="top" className="text-xs">Upload file to Blossom</TooltipContent>
           </Tooltip>
+        </div>
+        {/* SHA-256 Hash */}
+        <div className="flex gap-1.5 items-center">
+          <input
+            type="text"
+            placeholder="SHA-256 hash (auto-filled on upload, or paste for external URLs)"
+            value={plat.hash}
+            onChange={(e) => onUpdate({ hash: e.target.value.toLowerCase().replace(/[^a-f0-9]/g, '').slice(0, 64) })}
+            className={`flex-1 px-2.5 py-1.5 rounded border bg-background text-xs text-foreground placeholder:text-muted-foreground outline-none focus:border-primary/50 transition-colors font-mono ${
+              plat.hash
+                ? plat.hash.length === 64
+                  ? 'border-emerald-500/40'
+                  : 'border-amber-500/40'
+                : 'border-border'
+            }`}
+          />
+          {plat.hash && plat.hash.length === 64 && (
+            <Check size={14} className="text-emerald-400 shrink-0" />
+          )}
+          {plat.hash && plat.hash.length !== 64 && (
+            <span className="text-[10px] text-amber-400 shrink-0 whitespace-nowrap">{plat.hash.length}/64</span>
+          )}
         </div>
         {/* Upload progress */}
         {uploading && progress && (
@@ -9522,12 +9728,30 @@ function BuildPlatformRow({ plat, onUpdate, onRemove, signer, privateKey }: {
               {/* File Size */}
               <MetadataRow label="File Size" value={plat.size ? formatBuildFileSize(plat.size) : '—'} />
 
-              {/* SHA-256 Hash */}
-              {(() => {
-                const hashMatch = plat.url.match(/\/([a-f0-9]{64})(?:\.[^/]*)?$/i)
-                const hash = hashMatch?.[1] || ''
-                return hash ? <MetadataRow label="SHA-256 Hash" value={hash} mono copiable /> : <MetadataRow label="SHA-256 Hash" value="—" />
-              })()}
+              {/* SHA-256 Hash (editable — auto-filled for Blossom uploads) */}
+              <div>
+                <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">SHA-256 Hash</span>
+                <div className="flex items-center gap-2 mt-0.5">
+                  <input
+                    type="text"
+                    value={plat.hash}
+                    onChange={(e) => onUpdate({ hash: e.target.value.toLowerCase().replace(/[^a-f0-9]/g, '').slice(0, 64) })}
+                    placeholder="Paste SHA-256 hash for non-Blossom URLs"
+                    className="flex-1 px-2.5 py-1.5 rounded border border-border bg-secondary/30 text-xs text-foreground placeholder:text-muted-foreground outline-none focus:border-primary/50 transition-colors font-mono"
+                  />
+                  {plat.hash && (
+                    <button
+                      onClick={() => { navigator.clipboard.writeText(plat.hash); }}
+                      className="p-1 rounded hover:bg-secondary/60 text-muted-foreground hover:text-foreground transition-colors cursor-pointer shrink-0"
+                    >
+                      <Copy size={12} />
+                    </button>
+                  )}
+                </div>
+                {plat.hash && plat.hash.length !== 64 && (
+                  <p className="text-[10px] text-amber-400 mt-0.5">Hash should be 64 hex characters</p>
+                )}
+              </div>
 
               {/* MIME Type */}
               <MetadataRow label="MIME Type" value={plat.mimeType || '—'} />

@@ -619,11 +619,8 @@ function DiscoverHubCard({ hub }: { hub: DiscoveredHub }) {
       await publishToSpecificRelays(getPublishRelays(hubRelays), signed)
 
       if (!isAlreadyInList) {
-        const relayHint = hub.generalRelays[0] || ''
-        const newEntry = { dTag: hub.dTag, relayHint, position: hubEntries.length, folderId: undefined }
-        const newEntries = [...hubEntries, newEntry]
-        setHubEntries(newEntries, folders)
-
+        // Set hub data BEFORE updating entries — prevents the hub loader from
+        // racing with the signer (which can drop the extension connection)
         const hubData: HubData = {
           dTag: hub.dTag, creatorPubkey: hub.creatorPubkey, name: hub.name, icon: hub.icon, banner: hub.banner,
           tags: hub.tags, description: hub.description, epoch: 1, generalRelays: hub.generalRelays,
@@ -631,6 +628,11 @@ function DiscoverHubCard({ hub }: { hub: DiscoveredHub }) {
           categories: [], roles: [], minPow: hub.minPow, nsfw: hub.nsfw, discoverable: hub.discoverable,
         }
         setHubData(hub.dTag, hubData)
+
+        const relayHint = hub.generalRelays[0] || ''
+        const newEntry = { dTag: hub.dTag, relayHint, position: hubEntries.length, folderId: undefined }
+        const newEntries = [...hubEntries, newEntry]
+        setHubEntries(newEntries, folders)
 
         const hubListEvent = createHubListEvent(
           newEntries.map(e => ({ dTag: e.dTag, relayHint: e.relayHint, position: e.position, folderId: e.folderId })),

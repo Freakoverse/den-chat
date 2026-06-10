@@ -370,7 +370,7 @@ select:focus-visible {
 .msg-with-suffix {
   display: contents;
 }
-.msg-with-suffix > p:last-of-type {
+.msg-with-suffix > p:last-child {
   display: inline !important;
   margin-bottom: 0 !important;
 }

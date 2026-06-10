@@ -8,6 +8,7 @@
 import { BadgeCheck, Loader2 } from 'lucide-react'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
 import { useDnnStore } from '@/stores/dnnStore'
+import { formatDnnId } from '@/lib/dnn/formatDnnId'
 
 export function DnnBadge({ pubkey }: { pubkey: string }) {
   const status = useDnnStore((s) => s.status[pubkey])
@@ -28,14 +29,14 @@ export function DnnBadge({ pubkey }: { pubkey: string }) {
         <Tooltip>
           <TooltipTrigger asChild>
             <span className="inline-flex items-center gap-1 shrink-0 ml-0.5 cursor-default">
-              <span className="text-sm text-primary font-medium">@{dnnId}</span>
+              <span className="text-sm text-primary font-medium">@{formatDnnId(dnnId)}</span>
               <BadgeCheck size={14} className="text-primary shrink-0 -mb-0.5" />
             </span>
           </TooltipTrigger>
           <TooltipContent side="top" className="text-xs">
             <span className="flex items-center gap-1">
               <BadgeCheck size={11} className="text-primary" />
-              DNN verified: <span className="font-mono font-medium">{dnnId}</span>
+              DNN verified: <span className="font-mono font-medium">{formatDnnId(dnnId)}</span>
             </span>
           </TooltipContent>
         </Tooltip>

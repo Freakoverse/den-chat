@@ -480,8 +480,13 @@ export const MessageContent = memo(function MessageContent({ content, suffix, on
   const effectiveMutedWords = globalMutedWordsOff ? undefined : mutedWords
   const hasSpoilers = /\|\|.+?\|\|/s.test(content)
 
-  // Preserve blank lines: convert single newlines between paragraphs to double newlines
-  const processed = content.replace(/\n\n/g, '\n\n\u00a0\n\n')
+  // Preserve multiple blank lines: \n\n is a normal paragraph break (handled by
+  // mb-3 margins). For every extra newline beyond 2, insert a \u00a0 spacer paragraph
+  // so react-markdown doesn't collapse them.
+  const processed = content.replace(/\n{3,}/g, (m) => {
+    const spacers = Array(m.length - 2).fill('\u00a0').join('\n\n')
+    return '\n\n' + spacers + '\n\n'
+  })
 
   /** Replace muted words in a text string with redacted pill spans */
   const redactMutedWords = useCallback((text: string): React.ReactNode => {
@@ -524,8 +529,8 @@ export const MessageContent = memo(function MessageContent({ content, suffix, on
         ) && c?.props
       )
       const processed = redactChildren(children)
-      if (hasBlock) return <div className="mb-1 last:mb-0">{processed}</div>
-      return <p className="mb-1 last:mb-0">{processed}</p>
+      if (hasBlock) return <div className="mb-3 last:mb-0">{processed}</div>
+      return <p className="mb-3 last:mb-0">{processed}</p>
     },
     h1: ({ children }) => <p className="font-bold text-lg mb-1">{children}</p>,
     h2: ({ children }) => <p className="font-bold text-[15px] mb-1">{children}</p>,
@@ -581,8 +586,8 @@ export const MessageContent = memo(function MessageContent({ content, suffix, on
         </>
       )
     },
-    ul: ({ children }) => <ul className="list-disc list-inside mb-1">{children}</ul>,
-    ol: ({ children }) => <ol className="list-decimal list-inside mb-1">{children}</ol>,
+    ul: ({ children }) => <ul className="list-disc list-inside mb-3 last:mb-0">{children}</ul>,
+    ol: ({ children }) => <ol className="list-decimal list-inside mb-3 last:mb-0">{children}</ol>,
     li: ({ children }) => <li>{children}</li>,
     pre: ({ children }) => <>{children}</>,
     code: ({ className, children }) => {
@@ -598,7 +603,7 @@ export const MessageContent = memo(function MessageContent({ content, suffix, on
       )
     },
     blockquote: ({ children }) => (
-      <blockquote className="border-l-2 border-primary/40 pl-2 my-1 opacity-80">{children}</blockquote>
+      <blockquote className="border-l-2 border-primary/40 pl-2 mb-3 last:mb-0 opacity-80">{children}</blockquote>
     ),
     hr: () => <hr className="border-border my-2" />,
     img: ({ src, alt }) => {
@@ -694,7 +699,10 @@ export const MessageContent = memo(function MessageContent({ content, suffix, on
     const timestamped = preTimestampMarkdown(mentioned)
     // Pre-process: replace :shortcode: with markdown image syntax for NIP-30 emojis
     const emojified = effectiveDisableEmojis ? timestamped : preEmojifyMarkdown(timestamped, emojiTags)
-    const proc = emojified.replace(/\n\n/g, '\n\n\u00a0\n\n')
+    const proc = emojified.replace(/\n{3,}/g, (m) => {
+      const spacers = Array(m.length - 2).fill('\u00a0').join('\n\n')
+      return '\n\n' + spacers + '\n\n'
+    })
     return (
       <Markdown remarkPlugins={[remarkGfm, remarkBreaks]} components={components}>
         {proc}
@@ -756,7 +764,7 @@ export const MessageContent = memo(function MessageContent({ content, suffix, on
     )
   }
 
-  return wrapWithSuffix(renderMarkdown(processed))
+  return wrapWithSuffix(renderMarkdown(content))
 })
 
 /* ─── Emoji click → discovery dispatch ───────────────────── */
