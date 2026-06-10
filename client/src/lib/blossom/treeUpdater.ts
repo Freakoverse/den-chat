@@ -290,6 +290,9 @@ export interface SafePaginatedTreeUpdateParams {
     groupTrees: Array<{ groupId: string; hash: string }>
     leafPages: Array<{ pageIndex: number; firstPubkey: string; hash: string }>
   }
+
+  /** Progress callback — called at each major step for UI feedback */
+  onStep?: (step: string) => void
 }
 
 /**
@@ -318,6 +321,7 @@ export async function safePaginatedTreeUpdate(params: SafePaginatedTreeUpdatePar
     preserveGroupTrees = true,
     skipPublish = false,
     existingIndexData,
+    onStep,
   } = params
 
   const epoch = epochOverride ?? hub.epoch
@@ -357,6 +361,7 @@ export async function safePaginatedTreeUpdate(params: SafePaginatedTreeUpdatePar
   }
 
   // ── Step 1-3: Upload all pages + spine in parallel ──
+  onStep?.('Uploading leaf pages & spine')
   const updatedPageHashes = new Map<number, { firstPubkey: string; hash: string }>()
   const nextPageIndex = existingLeafPages.length > 0
     ? Math.max(...existingLeafPages.map(p => p.pageIndex)) + 1
@@ -410,6 +415,7 @@ export async function safePaginatedTreeUpdate(params: SafePaginatedTreeUpdatePar
   await Promise.all(uploadTasks)
 
   // ── Step 5: Upload history (if epoch bumped) ──
+  if (newHubSecret && oldHubSecret && epoch !== hub.epoch) onStep?.('Uploading epoch history')
   let newHistoryHash = oldHistoryHash
   if (newHubSecret && oldHubSecret && epoch !== hub.epoch) {
     const { aesEncrypt, aesDecrypt } = await import('@/lib/crypto/aes')
@@ -448,6 +454,7 @@ export async function safePaginatedTreeUpdate(params: SafePaginatedTreeUpdatePar
   }
 
   // ── Step 7: Build new index ──
+  onStep?.('Building & uploading index')
   // Start with existing pages, apply updates and additions
   const removedSet = new Set(removedPageIndices)
   const finalPages = existingLeafPages
@@ -472,6 +479,7 @@ export async function safePaginatedTreeUpdate(params: SafePaginatedTreeUpdatePar
   )
 
   // ── Step 8: Verify index ──
+  onStep?.('Verifying uploads')
   const verifyIndexContent = await downloadTextFromBlossom(newIndexHash, hub.blossomServers)
   const verifyIndex = parseIndexFile(verifyIndexContent)
   if (verifyIndex.spineHash !== newSpineHash) {
@@ -482,6 +490,7 @@ export async function safePaginatedTreeUpdate(params: SafePaginatedTreeUpdatePar
 
   // ── Step 9: Re-publish hub event ──
   if (!skipPublish) {
+    onStep?.('Signing hub event')
     const unsignedEvent = buildHubEvent({
       dTag: hub.dTag,
       name: hub.name,
@@ -504,6 +513,7 @@ export async function safePaginatedTreeUpdate(params: SafePaginatedTreeUpdatePar
 
     })
     const signedEvent = await signWithSigner(unsignedEvent, signer, privateKey)
+    onStep?.('Publishing to relays')
     await publishToSpecificRelays(
       getPublishRelays([...hub.generalRelays, ...hub.filterRelays]),
       signedEvent,
@@ -511,6 +521,7 @@ export async function safePaginatedTreeUpdate(params: SafePaginatedTreeUpdatePar
   }
 
   // ── Step 10: Cleanup old files ──
+  onStep?.('Cleaning up old files')
   const cleanedUpHashes: string[] = []
 
   // Old spine

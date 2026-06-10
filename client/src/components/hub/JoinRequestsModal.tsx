@@ -53,9 +53,16 @@ const TIME_FILTERS = [
 const EMPTY_MEMBERS: HubMember[] = []
 
 const ADD_STEPS = [
-  'Downloading current tree',
-  'Adding members to tree',
-  'Uploading & publishing',
+  'Downloading index file',
+  'Downloading spine tree',
+  'Recovering page keys',
+  'Downloading leaf pages',
+  'Encrypting keys for members',
+  'Uploading leaf pages & spine',
+  'Building & uploading index',
+  'Verifying uploads',
+  'Signing hub event',
+  'Publishing to relays',
 ]
 
 export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps) {
@@ -84,6 +91,7 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
   const [addSteps, setAddSteps] = useState<string[]>([])
   const addAbortRef = useRef<AbortController | null>(null)
   const addTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const addStepRef = useRef<string | null>(null)
 
   // Auto-dismiss overlay on success after 1.5s
   useEffect(() => {
@@ -196,6 +204,7 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
 
   const markStep = async (step: string) => {
     setAddStep(step)
+    addStepRef.current = step
     await new Promise(r => setTimeout(r, 0))
   }
   const markDone = (step: string) => setAddSteps(prev => [...prev, step])
@@ -223,7 +232,7 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
     }, 120_000)
 
     try {
-      await markStep('Downloading current tree')
+      await markStep('Downloading index file')
       const {
         rehydratePageKeys, addMemberToPage, findPageForPubkey,
         parseIndexFile, createPaginatedIndexFile,
@@ -245,16 +254,20 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
       if (!index.spineHash || index.leafPages.length === 0) {
         throw new Error('Hub does not use paginated format')
       }
+      markDone('Downloading index file')
 
+      await markStep('Downloading spine tree')
       const spineContent = await downloadTextFromBlossom(index.spineHash, hub.blossomServers)
       const spine = deserializeSpine(spineContent)
+      markDone('Downloading spine tree')
 
       // Recover all page-root keys from spine (O(pages) AES decryptions, no page downloads needed)
+      await markStep('Recovering page keys')
       const pageRootKeys = await recoverPageRootKeys(spine, hubSecret)
-      markDone('Downloading current tree')
+      markDone('Recovering page keys')
 
       // Group members by target page
-      await markStep('Adding members to tree')
+      await markStep('Downloading leaf pages')
       const pubkeysToAdd = Array.from(selected)
 
       // Track which pages need modification
@@ -276,18 +289,26 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
         }
       }
 
-      // Process each modified page
+      // Process each modified page — first download all needed pages
       const updatedPages: Array<{ pageIndex: number; content: string; firstPubkey: string }> = []
       const newPages: Array<{ content: string; firstPubkey: string }> = []
       const updatedPageRoots = new Map<string, { nodeId: string; rawKey: Uint8Array }>()
       let count = 0
 
+      // Download and rehydrate all affected pages
+      const rehydratedPages = new Map<number, Awaited<ReturnType<typeof rehydratePageKeys>>>()
       for (const [pageIndex, mod] of pageMods) {
-        // Download and rehydrate only the affected page
         const pageContent = await downloadTextFromBlossom(mod.pageEntry.hash, hub.blossomServers)
-        let rehydrated = await rehydratePageKeys(pageContent, signer, privateKey)
+        const rehydrated = await rehydratePageKeys(pageContent, signer, privateKey)
+        rehydratedPages.set(pageIndex, rehydrated)
+      }
+      markDone('Downloading leaf pages')
 
-        // Add each member to this page
+      // Encrypt keys for each new member
+      await markStep('Encrypting keys for members')
+      for (const [pageIndex, mod] of pageMods) {
+        let rehydrated = rehydratedPages.get(pageIndex)!
+
         for (const memberPk of mod.newMembers) {
           try {
             const result = await addMemberToPage(rehydrated, memberPk, 'everyone', signer, privateKey)
@@ -335,12 +356,9 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
       }
 
       if (count === 0) throw new Error('Failed to add any members')
-      markDone('Adding members to tree')
+      markDone('Encrypting keys for members')
 
-      // Rebuild spine with updated page-root keys
-      await markStep('Uploading & publishing')
-
-      // Build updated page roots array: start with recovered keys, replace modified ones
+      // Rebuild spine with updated page-root keys — start with recovered keys, replace modified ones
       const allPageRoots = pageRootKeys.map((prk, i) => {
         const updated = updatedPageRoots.get(prk.nodeId)
         return updated || prk
@@ -375,8 +393,13 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
           groupTrees: index.groupTrees,
           leafPages: index.leafPages,
         },
+        onStep: (step) => {
+          if (addStepRef.current) markDone(addStepRef.current)
+          markStep(step)
+        },
       })
-      markDone('Uploading & publishing')
+      // Mark the last treeUpdater step as done
+      if (addStepRef.current) markDone(addStepRef.current)
 
       // Update local store
       const newMembers: HubMember[] = [
