@@ -72,7 +72,7 @@ export const blossomServers = {
   /** Get only the enabled server URLs (for runtime use) — normalized and deduped */
   getServers(): string[] {
     const list = this.getList()
-    const enabled = list.filter((s) => s.enabled).map((s) => normalize(s))
+    const enabled = list.filter((s) => s.enabled).map((s) => normalize(s.url))
     const deduped = [...new Set(enabled.length > 0 ? enabled : DEFAULT_SERVERS)]
     return deduped
   },
