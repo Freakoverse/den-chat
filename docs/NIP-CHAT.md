@@ -1877,6 +1877,82 @@ Filter relays MUST accept kinds `31923` and `31925` in addition to kind `36943` 
 
 ---
 
+### 6.13 Message Edit Hint — Kind `26943`
+
+**Type**: Ephemeral Event (kind range 20000–29999 — relays forward to connected subscribers but do NOT persist)
+
+#### Problem
+
+Edited messages use the `created_at` increment rule (§6.2, Editing Messages) to avoid disrupting `limit`-based relay fetches. However, this means the edited event's `created_at` remains close to the original timestamp — far in the past relative to other clients' real-time subscriptions (`since: <current_time>`). As a result, **relays do not push edited messages to real-time subscribers**, and other clients only see edits after a full refresh.
+
+#### Solution
+
+After successfully publishing an edited message, the client SHOULD publish an ephemeral **Message Edit Hint** event. This lightweight signal tells other connected clients that a specific message has been updated, prompting them to re-fetch the latest version.
+
+```json
+{
+  "kind": 26943,
+  "pubkey": "<sender_pubkey>",
+  "created_at": "<current_wall_clock_timestamp>",
+  "tags": [
+    ["h", "<hub_d_tag>"],
+    ["d", "<edited_message_d_tag>"],
+    ["c", "<channel_id>"]
+  ],
+  "content": "",
+  "sig": "<signature>"
+}
+```
+
+| Tag | Required | Description |
+|-----|----------|-------------|
+| `h` | Yes | Hub `d` tag. Ensures the hint reaches clients subscribed to this hub's events. |
+| `d` | Yes | The `d` tag of the edited message. Identifies which addressable event was updated. |
+| `c` | No | Channel UUID. MAY be included to help receivers locate the message in their local store without scanning all channels. |
+
+The message author is identified by `event.pubkey` — since only the author can edit their own message, the hint sender IS the message author. No separate `p` tag is needed.
+
+#### Key Design Points
+
+- **`created_at` = current wall-clock time** — unlike the edit itself (which uses `original + 1`), the hint uses `now` so it passes through real-time subscription `since` filters.
+- **`content` is empty** — the hint carries no sensitive data. It is purely a signal, not a content event. No encryption is needed.
+- **Ephemeral** — relays MUST NOT persist this event. It is only useful to clients connected at the moment of publication. Clients that are offline will pick up the edit on their next initial fetch (which has no `since` filter).
+- **Fire after successful publish** — the hint SHOULD only be published after the edited message has been accepted by at least one relay, to avoid sending hints for edits that failed to publish.
+
+#### Client Behavior (Receiver)
+
+When a client receives a kind `26943` event via its real-time subscription:
+
+1. **Verify the sender is a hub member.** If the hint's `pubkey` is not in the hub's member list, ignore it.
+2. Extract `d` (message d-tag) from the tags. Use `event.pubkey` as the author.
+3. Fetch the latest version of the addressable event from the hub's relays:
+   ```json
+   {"kinds": [36943], "authors": ["<event.pubkey>"], "#d": ["<d_value>"]}
+   ```
+4. If a newer version is returned (higher `created_at` than the locally stored version), update the local store and re-decrypt.
+5. If no newer version is found (relay hasn't propagated yet), the client MAY retry once after a short delay (e.g., 1–2 seconds).
+6. Clients MAY debounce re-fetches per message d-tag (e.g., at most once per 10 seconds) to limit redundant queries from rapid successive hints.
+
+#### Subscription
+
+Clients SHOULD include kind `26943` in their existing real-time hub subscription filter:
+
+```json
+{
+  "kinds": [36943, 26943, ...],
+  "#h": ["<hub_d_tag_1>", "<hub_d_tag_2>"],
+  "since": "<current_timestamp>"
+}
+```
+
+Since this kind is in the ephemeral range, relays that support ephemeral events will forward it to matching subscribers without storing it. Relays that do not support ephemeral events will simply ignore it — the behavior degrades gracefully to the current refresh-to-see-edits model.
+
+#### PoW
+
+Edit hints SHOULD meet the same Proof of Work difficulty as the hub requires for messages (the `w` tag on the hub event). Although hints carry no content, they trigger re-fetch queries on every connected client — a single hint to a hub with N subscribers causes N relay queries. Without PoW, an attacker could exploit this amplification to generate excessive relay load at near-zero cost. Requiring PoW makes such spam computationally expensive.
+
+---
+
 ## 7. Member List Mechanics
 
 ### 7.1 Resolution Order
@@ -2181,6 +2257,7 @@ Mod/creator removes user from the LKH tree
 |------|------|------|-------------|
 | `36942` | Hub Event | Addressable Replaceable | General relays |
 | `36943` | Message | Addressable Replaceable | Filter relays (if defined) or General relays |
+| `26943` | Message Edit Hint | Ephemeral | Filter relays (if defined) or General relays |
 | `36944` | Join Request | Addressable Replaceable | General relays & hub's relays |
 | `36945` | Channel Pin List | Addressable Replaceable | Filter relays (if defined) or General relays |
 | `36946` | Voice Host Availability | Addressable Replaceable | Filter relays (if defined) or General relays |

@@ -18,7 +18,7 @@ import type { Attachment } from '@/stores/messageStore'
 export type { Attachment }
 import { publishEventProgressive, publishToSpecificRelays } from '@/lib/nostr/relay-pool'
 import { getPublishRelays } from '@/stores/postingBehaviourStore'
-import { signWithSigner, mineAndSign, createMessageEvent, createDeletionEvent, createDeletedMessageEvent, createReactionEvent } from '@/lib/nostr/events'
+import { signWithSigner, mineAndSign, createMessageEvent, createDeletionEvent, createDeletedMessageEvent, createReactionEvent, createEditHintEvent } from '@/lib/nostr/events'
 import { KINDS, STANDARD_KINDS } from '@/lib/crypto/constants'
 import { aesEncrypt, aesDecrypt } from '@/lib/crypto/aes'
 import { deriveChannelKey } from '@/lib/crypto/hkdf'
@@ -717,6 +717,22 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
     await publishEventProgressive(signed, (confirmed, total, acceptedRelays) => {
       setRelayProgress(eventId, confirmed, total, acceptedRelays)
     }, publishRelays)
+
+    // Publish ephemeral edit hint (kind 26943) to notify other connected clients.
+    // Fire-and-forget — hint failure should not affect the edit itself.
+    // Uses mineAndSign to meet hub PoW difficulty (prevents amplification abuse, §6.13).
+    const hintUnsigned = createEditHintEvent(hubDTag!, dTag, channelId!)
+    mineAndSign(hintUnsigned, minPow, pubkey, signer, privateKey)
+      .then((hintSigned) => {
+        console.log(`[EditHint] Publishing hint id=${hintSigned.id.slice(0, 12)}… kind=${hintSigned.kind} to ${publishRelays.length} relays, tags=${JSON.stringify(hintSigned.tags)}`)
+        return publishToSpecificRelays(publishRelays, hintSigned)
+      })
+      .then((accepted) => {
+        console.log(`[EditHint] Hint accepted by ${accepted.length}/${publishRelays.length} relays: ${accepted.join(', ')}`)
+      })
+      .catch((err) => {
+        console.error(`[EditHint] Hint publish FAILED:`, err)
+      })
 
     // Auto-clear the relay progress indicator after 5 seconds
     setTimeout(() => {

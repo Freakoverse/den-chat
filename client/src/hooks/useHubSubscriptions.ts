@@ -406,6 +406,85 @@ function processReactionEvent(event: Event) {
 }
 
 /**
+ * Handle an ephemeral edit hint event (kind 26943).
+ * Verifies the sender is a hub member, then re-fetches the edited message
+ * from relays and updates the local store.
+ */
+function handleEditHint(event: Event) {
+  const hubDTag = event.tags.find((t) => t[0] === 'h')?.[1]
+  const messageDTag = event.tags.find((t) => t[0] === 'd')?.[1]
+  // Prefer explicit p tag; fall back to event.pubkey (hint sender = message author,
+  // since you can only edit your own messages). Some signers (nostr-sdk) drop the p tag.
+  const authorPubkey = event.tags.find((t) => t[0] === 'p')?.[1] || event.pubkey
+
+  if (!hubDTag || !messageDTag || !authorPubkey) return
+
+  // Ignore own edit hints — we already have the optimistic update
+  const myPubkey = useUserStore.getState().pubkey
+  if (event.pubkey === myPubkey) return
+
+  // Verify sender is a hub member (prevents amplification from non-members)
+  const members = useHubStore.getState().hubMembers[hubDTag]
+  if (members && members.length > 0 && !members.some((m) => m.pubkey === event.pubkey)) return
+
+  // Check if we already have a newer version locally
+  const channelId = event.tags.find((t) => t[0] === 'c')?.[1]
+  let existingEventTs = 0
+  const existingMsgs = useMessageStore.getState().messages[hubDTag]
+  if (existingMsgs) {
+    if (channelId && existingMsgs[channelId]) {
+      // Fast path: channel tag narrows the search
+      const match = existingMsgs[channelId].find((m) => m.dTag === messageDTag && m.pubkey === authorPubkey)
+      if (match) existingEventTs = match.eventCreatedAt || match.createdAt
+    } else {
+      // Slow path: scan all channels
+      for (const channelMsgs of Object.values(existingMsgs)) {
+        const match = channelMsgs.find((m) => m.dTag === messageDTag && m.pubkey === authorPubkey)
+        if (match) {
+          existingEventTs = match.eventCreatedAt || match.createdAt
+          break
+        }
+      }
+    }
+  }
+
+  // Fetch the latest version from relays
+  const hub = useHubStore.getState().hubs[hubDTag]
+  if (!hub) return
+  const relays = [...new Set([...hub.generalRelays, ...hub.filterRelays])].filter(Boolean)
+  if (relays.length === 0) return
+
+  console.log(`[EditHint] Received for dTag=${messageDTag.slice(0, 12)}… from ${event.pubkey.slice(0, 12)}…, fetching latest version`)
+
+  const sub = subscribeToRelays(
+    relays,
+    {
+      kinds: [KINDS.MESSAGE],
+      authors: [authorPubkey],
+      '#d': [messageDTag],
+      limit: 1,
+    },
+    (fetchedEvent: Event) => {
+      // Only update if fetched version is newer than what we have
+      if (fetchedEvent.created_at > existingEventTs) {
+        const msg = parseMessage(fetchedEvent)
+        if (msg) {
+          useMessageStore.getState().addMessage(msg)
+          cacheMessage(msg).catch(() => {})
+          console.log(`[EditHint] Updated message dTag=${messageDTag.slice(0, 12)}… (new created_at=${fetchedEvent.created_at})`)
+        }
+      }
+    },
+    () => {
+      sub.close()
+    }
+  )
+
+  // Safety timeout
+  setTimeout(() => sub.close(), 10000)
+}
+
+/**
  * Attempt to decrypt message content and detect mention type.
  * Returns the highest-priority mention type found, or undefined for normal messages.
  *
@@ -619,6 +698,12 @@ export function useHubSubscriptions() {
         return
       }
 
+      // Route edit hint events — re-fetch the edited message from relays
+      if (event.kind === KINDS.MESSAGE_EDIT_HINT) {
+        handleEditHint(event)
+        return
+      }
+
       const msg = parseMessage(event)
       if (!msg) return
 
@@ -711,7 +796,8 @@ export function useHubSubscriptions() {
         [batch.relay],
         {
           kinds: [KINDS.MESSAGE, KINDS.POLL, KINDS.POLL_VOTE, STANDARD_KINDS.REACTION,
-                  KINDS.CALENDAR_TIME_EVENT, KINDS.CALENDAR_RSVP, KINDS.HIDE_MESSAGE],
+                  KINDS.CALENDAR_TIME_EVENT, KINDS.CALENDAR_RSVP, KINDS.HIDE_MESSAGE,
+                  KINDS.MESSAGE_EDIT_HINT],
           '#h': batch.hubDTags,
           since: now,
         },

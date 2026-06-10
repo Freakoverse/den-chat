@@ -79,11 +79,22 @@ export async function mineAndSign(
     let signed = await signWithSigner(mined, signer, privateKey)
     while (countLeadingZeroBits(signed.id) < minPow && attempts < MAX_POW_RETRIES) {
       attempts++
-      console.warn(`[mineAndSign] PoW invalidated by signer (attempt ${attempts}), re-mining...`)
+      console.warn(`[mineAndSign] PoW invalidated by signer (attempt ${attempts}, kind ${signed.kind}), re-mining...`)
+      if (attempts === 1) {
+        // Debug: log what the client mined vs what the signer returned
+        const clientSerialized = JSON.stringify([0, mined.pubkey || pubkey, mined.created_at, mined.kind, mined.tags, mined.content])
+        const signerSerialized = JSON.stringify([0, signed.pubkey, signed.created_at, signed.kind, signed.tags, signed.content])
+        if (clientSerialized !== signerSerialized) {
+          console.warn(`[mineAndSign] Serialization mismatch!\n  Client: ${clientSerialized.slice(0, 300)}\n  Signer: ${signerSerialized.slice(0, 300)}`)
+        }
+      }
       const retryEvent: UnsignedEvent = {
         kind: signed.kind,
         content: signed.content,
-        tags: mined.tags.filter((t: string[]) => t[0] !== 'nonce'),
+        // Use signed.tags (signer's ordering) instead of mined.tags (client's ordering).
+        // nostr-sdk may reorder well-known tags (e.g., "p"), so the retry must mine against
+        // the signer's tag order to produce a matching event ID on re-sign.
+        tags: signed.tags.filter((t: string[]) => t[0] !== 'nonce'),
         created_at: signed.created_at,
         pubkey: '',
       }
@@ -91,7 +102,7 @@ export async function mineAndSign(
       signed = await signWithSigner(mined, signer, privateKey)
     }
     if (countLeadingZeroBits(signed.id) < minPow) {
-      console.error(`[mineAndSign] PoW still invalid after ${MAX_POW_RETRIES} retries, sending anyway`)
+      console.error(`[mineAndSign] PoW still invalid after ${MAX_POW_RETRIES} retries (kind ${signed.kind}), sending anyway`)
     }
     return signed
   }
@@ -627,6 +638,37 @@ export function createRetractedReportEvent(
   }
 
   return createUnsignedEvent(KINDS.REPORT, content, tags)
+}
+
+// ── Message Edit Hint (Kind 26943 — Ephemeral) ──
+
+/**
+ * Create an ephemeral edit hint event (Kind 26943).
+ * Per NIP-CHAT §6.13: notifies other connected clients that a message was edited,
+ * prompting them to re-fetch the latest version. Uses wall-clock created_at so it
+ * passes real-time subscription `since` filters.
+ *
+ * @param hubDTag - Hub d tag
+ * @param messageDTag - d-tag of the edited message
+ * @param authorPubkey - Pubkey of the message author
+ * @param channelId - Optional channel ID (helps receivers locate the message)
+ */
+export function createEditHintEvent(
+  hubDTag: string,
+  messageDTag: string,
+  channelId?: string,
+): UnsignedEvent {
+  // No `p` tag needed — event.pubkey (hint sender) IS the message author,
+  // since you can only edit your own messages.
+  const tags: Tag[] = [
+    ['h', hubDTag],
+    ['d', messageDTag],
+  ]
+  if (channelId) {
+    tags.push(['c', channelId])
+  }
+  // created_at defaults to now (wall-clock) — passes real-time since filters
+  return createUnsignedEvent(KINDS.MESSAGE_EDIT_HINT, '', tags)
 }
 
 // ── Public Chat (Kind 1312) ──
