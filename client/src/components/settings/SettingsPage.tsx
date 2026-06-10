@@ -6109,36 +6109,14 @@ function GuideMedia({ videoUrl, imageUrl }: { videoUrl?: string; imageUrl?: stri
 
     return (
       <div className="relative mt-3">
-        {isLoading && (
-          <div
-            className="rounded-lg bg-secondary/60 overflow-hidden"
-            style={{ minHeight: 200, aspectRatio: '16/9' }}
-          >
-            <div className="w-full h-full min-h-[200px] animate-pulse bg-gradient-to-r from-secondary/60 via-secondary/30 to-secondary/60 bg-[length:200%_100%]"
-              style={{ animation: 'shimmer 1.5s ease-in-out infinite' }}
-            />
-            <div className="absolute inset-0 flex items-center justify-center">
-              <div className="flex flex-col items-center gap-1.5 text-xs text-muted-foreground/60">
-                <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24" fill="none">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                </svg>
-                {blossom.loading && blossom.serverIndex > 0 ? (
-                  <span>Trying server {blossom.serverIndex + 1} of {blossom.totalServers}…</span>
-                ) : (
-                  <span>Loading video…</span>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
         {!blossom.loading && resolvedSrc && (
           <video
             ref={videoRef}
             src={resolvedSrc}
             controls
-            className={`rounded-lg w-full transition-opacity duration-300 ${videoLoaded ? 'opacity-100' : 'opacity-0 h-0'}`}
-            style={videoLoaded ? { maxHeight: 500 } : undefined}
+            preload="none"
+            className="rounded-lg w-full"
+            style={{ maxHeight: 500 }}
             onLoadedData={handleVideoLoaded}
             onError={() => setVideoFailed(true)}
           />

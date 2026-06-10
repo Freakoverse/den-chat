@@ -2055,19 +2055,14 @@ function BlobMedia({ servers, hash, ext, type, className, tag, encryption }: {
   if (tag === 'video') {
     return (
       <div className="relative inline-block max-w-[400px]">
-        {/* Shimmer skeleton while video loads */}
-        {isMediaLoading && (
-          <div className="media-skeleton" style={{ minHeight: 160, aspectRatio: '16/9', maxWidth: 400 }} />
-        )}
         <video
           src={currentSrc}
           controls
-          className={`${className || ''} transition-opacity duration-300 ${mediaLoaded ? 'opacity-100' : 'opacity-0 h-0 overflow-hidden'}`}
-          preload="metadata"
-          onLoadedData={() => setMediaLoaded(true)}
+          className={className || ''}
+          preload="none"
           onError={handleError}
         />
-        {mediaLoaded && verified !== 'verified' && (
+        {verified !== 'verified' && (
           <VerificationBadge
             verified={verified}
             expectedHash={hash}

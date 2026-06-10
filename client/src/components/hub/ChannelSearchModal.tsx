@@ -656,7 +656,7 @@ export function ChannelSearchModal({ hubDTag, channelId, onClose }: ChannelSearc
                                 <video
                                   src={blossomUrl}
                                   controls
-                                  preload="metadata"
+                                  preload="none"
                                   className="w-full rounded-lg border border-border/40"
                                 />
                               </div>
@@ -675,7 +675,7 @@ export function ChannelSearchModal({ hubDTag, channelId, onClose }: ChannelSearc
                               <div key={i} className="max-w-[300px]">
                                 <CustomAudioPlayer
                                   src={blossomUrl}
-                                  preload="metadata"
+                                  preload="none"
                                   className="w-full"
                                 />
                               </div>
@@ -711,7 +711,7 @@ export function ChannelSearchModal({ hubDTag, channelId, onClose }: ChannelSearc
                             <video
                               src={url}
                               controls
-                              preload="metadata"
+                              preload="none"
                               className="w-full rounded-lg border border-border/40"
                             />
                           </div>
@@ -720,7 +720,7 @@ export function ChannelSearchModal({ hubDTag, channelId, onClose }: ChannelSearc
                           <div key={`iaud-${i}`} className="max-w-[300px]">
                             <CustomAudioPlayer
                               src={url}
-                              preload="metadata"
+                              preload="none"
                               className="w-full"
                             />
                           </div>

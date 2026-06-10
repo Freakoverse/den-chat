@@ -97,7 +97,7 @@ export function StickerPickerPopover({ anchorRef, onClose, onSelect }: Props) {
       ref={containerRef}
       data-sticker-picker-portal
       onMouseDown={(e) => e.stopPropagation()}
-      className="fixed z-[100]"
+      className="fixed z-[300]"
       style={{ top: pos.top, left: pos.left, width: PICKER_WIDTH, height: PICKER_HEIGHT }}
     >
       <div className="w-full h-full flex flex-col rounded-xl border border-border bg-background shadow-2xl overflow-hidden">
@@ -159,7 +159,7 @@ function StickerNsfwToggle() {
                 <ShieldQuestion size={12} />
               </button>
             </TooltipTrigger>
-            <TooltipContent side="top" className="text-xs z-[110] max-w-[200px]">
+            <TooltipContent side="top" className="text-xs z-[310] max-w-[200px]">
               {untaggedAsNsfw
                 ? 'Untagged content is treated as NSFW \u2014 items without an explicit SFW/NSFW tag are hidden'
                 : 'Untagged content is treated as safe \u2014 items without a tag are shown normally'}
@@ -265,7 +265,7 @@ function MineStickerTab({ onSelect }: { onSelect: (s: { shortcode: string; url: 
                 <FolderPlus size={14} />
               </button>
             </TooltipTrigger>
-            <TooltipContent side="bottom" className="text-xs z-[110]">New Set</TooltipContent>
+            <TooltipContent side="bottom" className="text-xs z-[310]">New Set</TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -283,7 +283,7 @@ function MineStickerTab({ onSelect }: { onSelect: (s: { shortcode: string; url: 
                 <Plus size={14} />
               </button>
             </TooltipTrigger>
-            <TooltipContent side="bottom" className="text-xs z-[110]">Add Sticker</TooltipContent>
+            <TooltipContent side="bottom" className="text-xs z-[310]">Add Sticker</TooltipContent>
           </Tooltip>
         </TooltipProvider>
       </div>
@@ -343,7 +343,7 @@ function MineStickerTab({ onSelect }: { onSelect: (s: { shortcode: string; url: 
                         <img src={st.url} alt={`:${st.shortcode}:`} className="w-14 h-14 object-contain rounded" loading="lazy" />
                       </button>
                     </TooltipTrigger>
-                    <TooltipContent side="top" className="text-xs z-[110]">:{st.shortcode}: ({st.setName})</TooltipContent>
+                    <TooltipContent side="top" className="text-xs z-[310]">:{st.shortcode}: ({st.setName})</TooltipContent>
                   </Tooltip>
                 ))}
               </TooltipProvider>
@@ -423,7 +423,7 @@ function OthersStickerTab({ onSelect }: { onSelect: (s: { shortcode: string; url
                 {searchMode === 'items' ? 'Items' : 'Sets'}
               </button>
             </TooltipTrigger>
-            <TooltipContent side="bottom" className="text-xs z-[110]">
+            <TooltipContent side="bottom" className="text-xs z-[310]">
               {searchMode === 'items' ? 'Switch to set search' : 'Switch to item search'}
             </TooltipContent>
           </Tooltip>
@@ -455,7 +455,7 @@ function OthersStickerTab({ onSelect }: { onSelect: (s: { shortcode: string; url
                         <img src={st.url} alt={`:${st.shortcode}:`} className="w-14 h-14 object-contain rounded" loading="lazy" />
                       </button>
                     </TooltipTrigger>
-                    <TooltipContent side="top" className="text-xs z-[110]">:{st.shortcode}: ({st.setName})</TooltipContent>
+                    <TooltipContent side="top" className="text-xs z-[310]">:{st.shortcode}: ({st.setName})</TooltipContent>
                   </Tooltip>
                 ))}
               </TooltipProvider>
@@ -629,7 +629,7 @@ function StickerSetCard({
                       <Plus size={12} />
                     </button>
                   </TooltipTrigger>
-                  <TooltipContent side="top" className="text-xs z-[110]">Add Stickers</TooltipContent>
+                  <TooltipContent side="top" className="text-xs z-[310]">Add Stickers</TooltipContent>
                 </Tooltip>
               )}
               <Tooltip>
@@ -642,7 +642,7 @@ function StickerSetCard({
                     {deleting ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
                   </button>
                 </TooltipTrigger>
-                <TooltipContent side="top" className="text-xs z-[110]">Request Delete</TooltipContent>
+                <TooltipContent side="top" className="text-xs z-[310]">Request Delete</TooltipContent>
               </Tooltip>
             </TooltipProvider>
           </div>
@@ -735,7 +735,7 @@ function StickerSetCard({
                       )}
                     </div>
                   </TooltipTrigger>
-                  <TooltipContent side="top" className="text-xs z-[110]">:{sticker.shortcode}:</TooltipContent>
+                  <TooltipContent side="top" className="text-xs z-[310]">:{sticker.shortcode}:</TooltipContent>
                 </Tooltip>
               )
             })}
@@ -744,7 +744,7 @@ function StickerSetCard({
       </div>
       {/* Delete confirmation modal */}
       {showDeleteModal && createPortal(
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[120]" onClick={() => setShowDeleteModal(false)}>
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[320]" onClick={() => setShowDeleteModal(false)}>
           <div className="bg-card border border-border rounded-lg p-6 max-w-md w-full mx-4 shadow-xl" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-lg font-semibold text-foreground mb-2">Request Delete Sticker Set</h3>
             <p className="text-sm text-muted-foreground mb-4">
@@ -864,7 +864,7 @@ function DiscoverStickerTab() {
                 <Users size={14} />
               </button>
             </TooltipTrigger>
-            <TooltipContent side="bottom" className="text-xs z-[110]">
+            <TooltipContent side="bottom" className="text-xs z-[310]">
               {searchMode === 'author' ? 'Switch to name search' : 'Search by author'}
             </TooltipContent>
           </Tooltip>
@@ -1024,7 +1024,7 @@ export function StickerDiscoveryModal({ onClose, initialSearch = '', initialAuth
   return (
     <>
       {createPortal(
-        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
+        <div className="fixed inset-0 z-[320] flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
           <div className="w-full max-w-lg max-h-[80vh] flex flex-col bg-background rounded-xl border border-border shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-secondary/30 shrink-0">
               <div className="flex items-center gap-2">
@@ -1048,7 +1048,7 @@ export function StickerDiscoveryModal({ onClose, initialSearch = '', initialAuth
                         <Users size={14} />
                       </button>
                     </TooltipTrigger>
-                    <TooltipContent side="bottom" className="text-xs z-[130]">{searchMode === 'author' ? 'Switch to name search' : 'Search by author'}</TooltipContent>
+                    <TooltipContent side="bottom" className="text-xs z-[330]">{searchMode === 'author' ? 'Switch to name search' : 'Search by author'}</TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
               </div>

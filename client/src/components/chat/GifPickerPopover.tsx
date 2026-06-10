@@ -119,7 +119,7 @@ export function GifPickerPopover({ anchorRef, onClose, onSelect }: Props) {
       ref={containerRef}
       data-gif-picker-portal
       onMouseDown={(e) => e.stopPropagation()}
-      className="fixed z-[100]"
+      className="fixed z-[300]"
       style={{ top: pos.top, left: pos.left, width: PICKER_WIDTH, height: PICKER_HEIGHT }}
     >
       <div className="w-full h-full flex flex-col rounded-xl border border-border bg-background shadow-2xl overflow-hidden">
@@ -182,7 +182,7 @@ function NsfwToggle() {
                 <ShieldQuestion size={12} />
               </button>
             </TooltipTrigger>
-            <TooltipContent side="top" className="text-xs z-[110] max-w-[200px]">
+            <TooltipContent side="top" className="text-xs z-[310] max-w-[200px]">
               {untaggedAsNsfw
                 ? 'Untagged content is treated as NSFW — items without an explicit SFW/NSFW tag are hidden'
                 : 'Untagged content is treated as safe — items without a tag are shown normally'}
@@ -375,7 +375,7 @@ function DiscoverGifTab({ onSelect }: { onSelect: (g: { name: string; url: strin
                   {searchMode === 'g' ? 'GIFs' : 'Sets'}
                 </button>
               </TooltipTrigger>
-              <TooltipContent side="bottom" className="text-xs z-[110]">
+              <TooltipContent side="bottom" className="text-xs z-[310]">
                 {searchMode === 'g' ? 'Switch to set search' : 'Switch to GIF search'}
               </TooltipContent>
             </Tooltip>
@@ -449,7 +449,7 @@ function DiscoverGifTab({ onSelect }: { onSelect: (g: { name: string; url: strin
                               )}
                             </div>
                           </TooltipTrigger>
-                          <TooltipContent side="top" className="text-xs z-[110]">
+                          <TooltipContent side="top" className="text-xs z-[310]">
                             {item.gif.name || 'Unnamed GIF'}
                           </TooltipContent>
                         </Tooltip>
@@ -534,7 +534,7 @@ function DiscoverGifTab({ onSelect }: { onSelect: (g: { name: string; url: strin
 
       {/* Collection preview modal */}
       {viewingCollection && createPortal(
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[120]" onClick={() => setViewingCollection(null)}>
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[320]" onClick={() => setViewingCollection(null)}>
           <div className="bg-card border border-border rounded-xl max-w-sm w-full mx-4 shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
             {/* Header */}
             <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-secondary/30">
@@ -692,7 +692,7 @@ function MineGifTab({ onSelect }: { onSelect: (g: { name: string; url: string; n
                 <FolderPlus size={14} />
               </button>
             </TooltipTrigger>
-            <TooltipContent side="bottom" className="text-xs z-[110]">New Collection</TooltipContent>
+            <TooltipContent side="bottom" className="text-xs z-[310]">New Collection</TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -710,7 +710,7 @@ function MineGifTab({ onSelect }: { onSelect: (g: { name: string; url: string; n
                 <Plus size={14} />
               </button>
             </TooltipTrigger>
-            <TooltipContent side="bottom" className="text-xs z-[110]">Add GIF</TooltipContent>
+            <TooltipContent side="bottom" className="text-xs z-[310]">Add GIF</TooltipContent>
           </Tooltip>
         </TooltipProvider>
       </div>
@@ -770,7 +770,7 @@ function MineGifTab({ onSelect }: { onSelect: (g: { name: string; url: string; n
                         <img src={g.url} alt={g.name} className="w-full h-full object-cover" loading="lazy" />
                       </button>
                     </TooltipTrigger>
-                    <TooltipContent side="top" className="text-xs z-[110]">{g.name || 'Unnamed'} ({g.setName})</TooltipContent>
+                    <TooltipContent side="top" className="text-xs z-[310]">{g.name || 'Unnamed'} ({g.setName})</TooltipContent>
                   </Tooltip>
                 ))}
               </TooltipProvider>
@@ -879,7 +879,7 @@ function OthersGifTab({ onSelect }: { onSelect: (g: { name: string; url: string;
                   {searchMode === 'items' ? 'Items' : 'Sets'}
                 </button>
               </TooltipTrigger>
-              <TooltipContent side="bottom" className="text-xs z-[110]">
+              <TooltipContent side="bottom" className="text-xs z-[310]">
                 {searchMode === 'items' ? 'Switch to set search' : 'Switch to item search'}
               </TooltipContent>
             </Tooltip>
@@ -911,7 +911,7 @@ function OthersGifTab({ onSelect }: { onSelect: (g: { name: string; url: string;
                           <img src={g.url} alt={g.name} className="w-full h-full object-cover" loading="lazy" />
                         </button>
                       </TooltipTrigger>
-                      <TooltipContent side="top" className="text-xs z-[110]">{g.name || 'Unnamed'} ({g.setName})</TooltipContent>
+                      <TooltipContent side="top" className="text-xs z-[310]">{g.name || 'Unnamed'} ({g.setName})</TooltipContent>
                     </Tooltip>
                   ))}
                 </TooltipProvider>
@@ -958,7 +958,7 @@ function OthersGifTab({ onSelect }: { onSelect: (g: { name: string; url: string;
                                 <img src={gif.url} alt={gif.name} className="w-full h-full object-cover" loading="lazy" />
                               </button>
                             </TooltipTrigger>
-                            <TooltipContent side="top" className="text-xs z-[110]">{gif.name || 'Unnamed GIF'}</TooltipContent>
+                            <TooltipContent side="top" className="text-xs z-[310]">{gif.name || 'Unnamed GIF'}</TooltipContent>
                           </Tooltip>
                         ))}
                         {visibleGifs.length > 6 && (
@@ -1008,7 +1008,7 @@ function OthersGifTab({ onSelect }: { onSelect: (g: { name: string; url: string;
                               <img src={gif.url} alt={gif.name} className="w-full h-full object-cover" loading="lazy" />
                             </button>
                           </TooltipTrigger>
-                          <TooltipContent side="top" className="text-xs z-[110]">{gif.name || 'Unnamed GIF'}</TooltipContent>
+                          <TooltipContent side="top" className="text-xs z-[310]">{gif.name || 'Unnamed GIF'}</TooltipContent>
                         </Tooltip>
                       ))}
                       {visibleGifs.length > 6 && (
@@ -1127,7 +1127,7 @@ function FavoritesGifTab({ onSelect }: { onSelect: (g: { name: string; url: stri
                         )}
                       </div>
                     </TooltipTrigger>
-                    <TooltipContent side="top" className="text-xs z-[110]">
+                    <TooltipContent side="top" className="text-xs z-[310]">
                       {gif.name || 'Unnamed GIF'}
                     </TooltipContent>
                   </Tooltip>
@@ -1279,7 +1279,7 @@ function GifCollectionCard({
                       <Plus size={12} />
                     </button>
                   </TooltipTrigger>
-                  <TooltipContent side="top" className="text-xs z-[110]">Add GIFs</TooltipContent>
+                  <TooltipContent side="top" className="text-xs z-[310]">Add GIFs</TooltipContent>
                 </Tooltip>
               )}
               <Tooltip>
@@ -1292,7 +1292,7 @@ function GifCollectionCard({
                     {deleting ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
                   </button>
                 </TooltipTrigger>
-                <TooltipContent side="top" className="text-xs z-[110]">Request Delete</TooltipContent>
+                <TooltipContent side="top" className="text-xs z-[310]">Request Delete</TooltipContent>
               </Tooltip>
             </TooltipProvider>
           </div>
@@ -1308,7 +1308,7 @@ function GifCollectionCard({
                   <X size={12} />
                 </button>
               </TooltipTrigger>
-              <TooltipContent side="top" className="text-xs z-[110]">Unsubscribe</TooltipContent>
+              <TooltipContent side="top" className="text-xs z-[310]">Unsubscribe</TooltipContent>
             </Tooltip>
           </TooltipProvider>
         )}
@@ -1403,7 +1403,7 @@ function GifCollectionCard({
                       )}
                     </div>
                   </TooltipTrigger>
-                  <TooltipContent side="top" className="text-xs z-[110]">{gif.name || 'Unnamed GIF'}</TooltipContent>
+                  <TooltipContent side="top" className="text-xs z-[310]">{gif.name || 'Unnamed GIF'}</TooltipContent>
                 </Tooltip>
               ))}
             </div>
@@ -1413,7 +1413,7 @@ function GifCollectionCard({
 
       {/* Delete confirmation modal */}
       {showDeleteModal && createPortal(
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[120]" onClick={() => setShowDeleteModal(false)}>
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[320]" onClick={() => setShowDeleteModal(false)}>
           <div className="bg-card border border-border rounded-lg p-6 max-w-md w-full mx-4 shadow-xl" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-lg font-semibold text-foreground mb-2">
               {isMine ? 'Request Delete GIF Collection' : 'Unsubscribe from Collection'}
@@ -1464,7 +1464,7 @@ export function GifFavoriteModal({ gifUrl, onClose }: { gifUrl: string; onClose:
   }
 
   return createPortal(
-    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
+    <div className="fixed inset-0 z-[320] flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
       <div className="w-full max-w-sm bg-card border border-border rounded-xl shadow-2xl p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
         <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
           <Star size={16} className="text-yellow-500" />
@@ -1612,7 +1612,7 @@ export function GifDiscoveryModal({ onClose, initialSearch = '' }: { onClose: ()
   return (
     <>
       {createPortal(
-        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
+        <div className="fixed inset-0 z-[320] flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
           <div
             className="w-full max-w-lg max-h-[80vh] flex flex-col bg-background rounded-xl border border-border shadow-2xl overflow-hidden"
             onClick={(e) => e.stopPropagation()}

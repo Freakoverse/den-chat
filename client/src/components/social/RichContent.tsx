@@ -442,7 +442,6 @@ function MediaVideo({ src, className, style, onClick }: {
   onClick?: (e: React.MouseEvent) => void
 }) {
   const blossom = useBlossomMedia(src)
-  const [loaded, setLoaded] = useState(false)
 
   if (blossom.error === 'not-found') {
     return (
@@ -456,25 +455,17 @@ function MediaVideo({ src, className, style, onClick }: {
   }
 
   const resolvedSrc = blossom.src || src
-  const isLoading = blossom.loading || !loaded
 
   return (
     <div className="relative">
-      {/* Shimmer skeleton while loading */}
-      {isLoading && (
-        <div
-          className="rounded-lg mt-2 bg-muted/40 animate-pulse"
-          style={{ ...style, minHeight: 160, aspectRatio: '16/9' }}
-        />
-      )}
       {!blossom.loading && resolvedSrc && (
         <video
           src={resolvedSrc}
           controls
-          className={`${className} transition-opacity duration-300 ${loaded ? 'opacity-100' : 'opacity-0 h-0'}`}
-          style={loaded ? style : undefined}
+          className={className}
+          style={style}
+          preload="none"
           onClick={onClick}
-          onLoadedData={() => setLoaded(true)}
         />
       )}
     </div>

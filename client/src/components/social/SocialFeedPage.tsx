@@ -25,7 +25,7 @@ import { LongFormDraftsPage } from '@/components/social/LongFormDraftsPage'
 import { LongFormBookmarksPage } from '@/components/social/LongFormBookmarksPage'
 import { DraftPreviewPage } from '@/components/social/DraftPreviewPage'
 import { useProfileCache } from '@/hooks/useProfileCache'
-import { Loader2, RefreshCw, Newspaper, Heart, Bookmark, User, SlidersHorizontal, X, ChevronDown, Bell, Repeat2, AtSign, Zap, MessageCircle, FileText, PenLine, FolderOpen, FileArchive, Video, Mail } from 'lucide-react'
+import { Loader2, RefreshCw, Newspaper, Heart, Bookmark, User, SlidersHorizontal, X, ChevronDown, Bell, Repeat2, AtSign, Zap, MessageCircle, FileText, PenLine, FolderOpen, FileArchive, Video, Mail, Radio } from 'lucide-react'
 import type { SocialPage } from '@/stores/socialStore'
 import { Button } from '@/components/ui/button'
 import { UserPanel } from '@/components/ui/UserPanel'
@@ -52,6 +52,7 @@ function SocialNav({ activeTab, activePage, onTabChange, onOpenProfile, onPageCh
   const [longFormOpen, setLongFormOpen] = useState(isLongForm)
   const [forumOpen, setForumOpen] = useState(false)
   const [videoOpen, setVideoOpen] = useState(false)
+  const [livestreamOpen, setLivestreamOpen] = useState(false)
   const [nmailOpen, setNmailOpen] = useState(false)
   const hasSocialNotification = useNotificationStore((s) => s.hasSocialNotification)
 
@@ -154,15 +155,27 @@ function SocialNav({ activeTab, activePage, onTabChange, onOpenProfile, onPageCh
         <p className="px-3 py-2 text-xs text-muted-foreground">coming soon</p>
       )}
 
-      {/* Video accordion */}
+      {/* Videos accordion */}
       <button
         onClick={() => setVideoOpen(!videoOpen)}
         className="flex items-center justify-between px-3 py-1.5 mt-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
       >
-        <span>Video</span>
+        <span>Videos</span>
         <ChevronDown size={14} className={`transition-transform duration-200 ${videoOpen ? '' : '-rotate-90'}`} />
       </button>
       {videoOpen && (
+        <p className="px-3 py-2 text-xs text-muted-foreground">coming soon</p>
+      )}
+
+      {/* Livestreams accordion */}
+      <button
+        onClick={() => setLivestreamOpen(!livestreamOpen)}
+        className="flex items-center justify-between px-3 py-1.5 mt-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+      >
+        <span>Livestreams</span>
+        <ChevronDown size={14} className={`transition-transform duration-200 ${livestreamOpen ? '' : '-rotate-90'}`} />
+      </button>
+      {livestreamOpen && (
         <p className="px-3 py-2 text-xs text-muted-foreground">coming soon</p>
       )}
 
@@ -461,7 +474,8 @@ export function SocialFeedPage() {
           { id: 'short' as const, label: 'Short Form', icon: <Newspaper size={14} /> },
           { id: 'long' as const, label: 'Long Form', icon: <FileText size={14} /> },
           { id: 'forum' as const, label: 'Forum', icon: <MessageCircle size={14} /> },
-          { id: 'video' as const, label: 'Video', icon: <Video size={14} /> },
+          { id: 'video' as const, label: 'Videos', icon: <Video size={14} /> },
+          { id: 'livestream' as const, label: 'Livestreams', icon: <Radio size={14} /> },
           { id: 'nmail' as const, label: 'N-Mail', icon: <Mail size={14} /> },
         ]).map((section) => (
           <button
@@ -473,17 +487,17 @@ export function SocialFeedPage() {
               } else if (section.id === 'long') {
                 useSocialStore.getState().setActivePage('longform-feed')
               }
-              // forum/video/nmail: do nothing (coming soon)
+              // forum/video/livestream/nmail: do nothing (coming soon)
             }}
             className={cn(
               'flex-1 flex items-center justify-center gap-1.5 px-2 py-2 text-[11px] font-semibold uppercase tracking-wide whitespace-nowrap transition-colors cursor-pointer',
               activeSection === section.id
                 ? 'text-primary border-b-2 border-primary'
-                : (section.id === 'forum' || section.id === 'video' || section.id === 'nmail')
+                : (section.id === 'forum' || section.id === 'video' || section.id === 'livestream' || section.id === 'nmail')
                   ? 'text-muted-foreground/40 cursor-default'
                   : 'text-muted-foreground hover:text-foreground'
             )}
-            disabled={section.id === 'forum' || section.id === 'video' || section.id === 'nmail'}
+            disabled={section.id === 'forum' || section.id === 'video' || section.id === 'livestream' || section.id === 'nmail'}
           >
             {section.icon}
             {section.label}

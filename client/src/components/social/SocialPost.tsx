@@ -994,7 +994,7 @@ const RepostDropdown = forwardRef<HTMLDivElement, {
   return (
     <div
       ref={ref}
-      className="fixed w-40 rounded-xl border border-border bg-popover/95 backdrop-blur-md shadow-xl z-[100] p-1 flex flex-col gap-1 animate-in fade-in-0 zoom-in-95"
+      className="fixed w-40 rounded-xl border border-border bg-popover/95 backdrop-blur-md shadow-xl z-[300] p-1 flex flex-col gap-1 animate-in fade-in-0 zoom-in-95"
       style={{ top: pos.top, left: pos.left }}
       onClick={(e) => e.stopPropagation()}
     >

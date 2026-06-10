@@ -169,7 +169,7 @@ export function DraftPreviewPage() {
                 <video
                   src={meta.videoUrl}
                   controls
-                  preload="metadata"
+                  preload="none"
                   className="w-full h-full object-cover rounded-xl"
                 />
               ) : meta.image ? (

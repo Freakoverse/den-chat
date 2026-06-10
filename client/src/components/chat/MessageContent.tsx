@@ -308,9 +308,8 @@ function BlossomImage({ src, alt, className }: { src: string; alt?: string; clas
 export function VideoEmbed({ src }: { src: string }) {
   const blossom = useBlossomMedia(src)
   const [failed, setFailed] = useState(false)
-  const [loaded, setLoaded] = useState(false)
 
-  useEffect(() => { setLoaded(false); setFailed(false) }, [src])
+  useEffect(() => { setFailed(false) }, [src])
 
   if (blossom.error === 'not-found') {
     return (
@@ -342,24 +341,16 @@ export function VideoEmbed({ src }: { src: string }) {
     )
   }
 
-  const isLoading = !loaded
-
   return (
     <div className="relative inline-block mt-1 max-w-[400px]">
-      {/* Shimmer skeleton while loading */}
-      {isLoading && (
-        <div className="media-skeleton" style={{ minHeight: 160, aspectRatio: '16/9', maxWidth: 400 }} />
-      )}
-      {/* Always render video (hidden until loaded) — matches BlobMedia pattern */}
       <video
         src={resolvedSrc}
         controls
-        className={`w-full max-w-[400px] max-h-[300px] rounded-lg border border-border transition-opacity duration-300 ${loaded ? 'opacity-100' : 'opacity-0 h-0'}`}
-        preload="metadata"
-        onLoadedData={() => setLoaded(true)}
+        className="w-full max-w-[400px] max-h-[300px] rounded-lg border border-border"
+        preload="none"
         onError={() => setFailed(true)}
       />
-      {loaded && blossom.verified !== 'verified' && blossom.expectedHash && (
+      {blossom.verified !== 'verified' && blossom.expectedHash && (
         <VerificationBadge
           verified={blossom.verified}
           expectedHash={blossom.expectedHash}

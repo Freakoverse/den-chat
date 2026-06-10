@@ -159,7 +159,7 @@ function ArticleFeaturedMedia({ videoUrl, imageUrl, title }: { videoUrl?: string
           ref={videoRef}
           src={videoUrl}
           controls
-          preload="metadata"
+          preload="none"
           className="w-full h-full object-cover rounded-xl"
           onError={() => setVideoFailed(true)}
         />

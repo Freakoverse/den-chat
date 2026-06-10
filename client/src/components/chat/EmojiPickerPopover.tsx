@@ -137,7 +137,7 @@ export function EmojiPickerPopover({ anchorRef, onClose, onSelect }: Props) {
     <div
       ref={containerRef}
       data-emoji-picker
-      className="fixed z-[100] flex flex-col bg-[hsl(var(--background))] border border-[hsl(var(--border))] rounded-xl shadow-2xl overflow-hidden"
+      className="fixed z-[300] flex flex-col bg-[hsl(var(--background))] border border-[hsl(var(--border))] rounded-xl shadow-2xl overflow-hidden"
       style={{ top: pos.top, left: pos.left, width: PICKER_WIDTH, height: pos.height }}
       onMouseDown={(e) => e.stopPropagation()}
       onClick={(e) => e.stopPropagation()}
@@ -235,7 +235,7 @@ function EmojiNsfwToggle() {
                 <ShieldQuestion size={12} />
               </button>
             </TooltipTrigger>
-            <TooltipContent side="top" className="text-xs z-[110] max-w-[200px]">
+            <TooltipContent side="top" className="text-xs z-[310] max-w-[200px]">
               {untaggedAsNsfw
                 ? 'Untagged content is treated as NSFW — items without an explicit SFW/NSFW tag are hidden'
                 : 'Untagged content is treated as safe — items without a tag are shown normally'}
@@ -364,7 +364,7 @@ function MineTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcode:
                 <FolderPlus size={14} />
               </button>
             </TooltipTrigger>
-            <TooltipContent side="bottom" className="text-xs z-[110]">New Set</TooltipContent>
+            <TooltipContent side="bottom" className="text-xs z-[310]">New Set</TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -375,7 +375,7 @@ function MineTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcode:
                 <Plus size={14} />
               </button>
             </TooltipTrigger>
-            <TooltipContent side="bottom" className="text-xs z-[110]">Add Emoji</TooltipContent>
+            <TooltipContent side="bottom" className="text-xs z-[310]">Add Emoji</TooltipContent>
           </Tooltip>
         </TooltipProvider>
       </div>
@@ -461,7 +461,7 @@ function MineTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcode:
                             <Trash2 size={10} />
                           </button>
                         </TooltipTrigger>
-                        <TooltipContent side="top" className="text-xs z-[110]">Request Delete</TooltipContent>
+                        <TooltipContent side="top" className="text-xs z-[310]">Request Delete</TooltipContent>
                       </Tooltip>
                     </TooltipProvider>
                   </div>
@@ -488,7 +488,7 @@ function MineTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcode:
 
       {/* Delete set confirmation modal */}
       {deleteSetDTag && createPortal(
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[120]" onClick={() => !deletingSet && setDeleteSetDTag(null)}>
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[320]" onClick={() => !deletingSet && setDeleteSetDTag(null)}>
           <div className="bg-card border border-border rounded-lg p-6 max-w-md w-full mx-4 shadow-xl" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-lg font-semibold text-foreground mb-2">Request Delete Emoji Set</h3>
             {!deletingSet ? (
@@ -540,7 +540,7 @@ function EmojiButton({ emoji, onClick, onDelete }: {
               />
             </button>
           </TooltipTrigger>
-          <TooltipContent side="bottom" className="text-xs z-[110]">:{emoji.shortcode}:</TooltipContent>
+          <TooltipContent side="bottom" className="text-xs z-[310]">:{emoji.shortcode}:</TooltipContent>
         </Tooltip>
       </TooltipProvider>
       <button
@@ -787,7 +787,7 @@ function OthersTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcod
                 {searchMode === 'items' ? 'Items' : 'Sets'}
               </button>
             </TooltipTrigger>
-            <TooltipContent side="bottom" className="text-xs z-[110]">
+            <TooltipContent side="bottom" className="text-xs z-[310]">
               {searchMode === 'items' ? 'Switch to set search' : 'Switch to item search'}
             </TooltipContent>
           </Tooltip>
@@ -819,7 +819,7 @@ function OthersTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcod
                         <img src={e.url} alt={`:${e.shortcode}:`} className="w-6 h-6 object-contain" loading="lazy" />
                       </button>
                     </TooltipTrigger>
-                    <TooltipContent side="bottom" className="text-xs z-[110]">:{e.shortcode}: ({e.setName})</TooltipContent>
+                    <TooltipContent side="bottom" className="text-xs z-[310]">:{e.shortcode}: ({e.setName})</TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
               ))}
@@ -863,7 +863,7 @@ function OthersTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcod
                               <img src={e.url} alt={`:${e.shortcode}:`} className="w-6 h-6 object-contain" loading="lazy" />
                             </button>
                           </TooltipTrigger>
-                          <TooltipContent side="bottom" className="text-xs z-[110]">:{e.shortcode}:</TooltipContent>
+                          <TooltipContent side="bottom" className="text-xs z-[310]">:{e.shortcode}:</TooltipContent>
                         </Tooltip>
                       </TooltipProvider>
                     ))}
@@ -905,7 +905,7 @@ function OthersTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcod
                             <img src={e.url} alt={`:${e.shortcode}:`} className="w-6 h-6 object-contain" loading="lazy" />
                           </button>
                         </TooltipTrigger>
-                        <TooltipContent side="bottom" className="text-xs z-[110]">:{e.shortcode}:</TooltipContent>
+                        <TooltipContent side="bottom" className="text-xs z-[310]">:{e.shortcode}:</TooltipContent>
                       </Tooltip>
                     </TooltipProvider>
                   ))}
@@ -1021,7 +1021,7 @@ function DiscoverEmojiTab() {
                 <Users size={14} />
               </button>
             </TooltipTrigger>
-            <TooltipContent side="bottom" className="text-xs z-[110]">
+            <TooltipContent side="bottom" className="text-xs z-[310]">
               {searchMode === 'author' ? 'Switch to name search' : 'Search by author'}
             </TooltipContent>
           </Tooltip>
@@ -1037,7 +1037,7 @@ function DiscoverEmojiTab() {
                 {broad ? 'Broad' : 'Strict'}
               </button>
             </TooltipTrigger>
-            <TooltipContent side="bottom" className="text-xs z-[110]">
+            <TooltipContent side="bottom" className="text-xs z-[310]">
               {broad ? 'Using broad search (all emoji tags)' : 'Using strict search (NIP-30 only)'}
             </TooltipContent>
           </Tooltip>
@@ -1197,7 +1197,7 @@ export function EmojiDiscoveryModal({ onClose, initialSearch = '', initialAuthor
   return (
     <>
       {createPortal(
-        <div data-emoji-picker-portal className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 backdrop-blur-sm" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}>
+        <div data-emoji-picker-portal className="fixed inset-0 z-[320] flex items-center justify-center bg-black/60 backdrop-blur-sm" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}>
           <div
             className="w-full max-w-lg max-h-[80vh] flex flex-col bg-[hsl(var(--background))] rounded-xl border border-[hsl(var(--border))] shadow-2xl overflow-hidden"
             onClick={(e) => e.stopPropagation()}
