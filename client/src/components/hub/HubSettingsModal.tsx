@@ -3516,9 +3516,8 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
     const markDone = (step: string) => setUnbanSteps(prev => [...prev, step])
 
     try {
-      // Remove selected pubkeys from the local ban list
+      // Build updated ban list (applied to store AFTER publish succeeds)
       const remaining = bannedPubkeys.filter(pk => !selected.has(pk))
-      setHubBanList(hub.dTag, remaining)
 
       await markStep('Downloading current index')
       // Re-upload ban page + index to Blossom
@@ -3590,7 +3589,8 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
       await pubToRelays(getPublishRelays([...hub.generalRelays, ...hub.filterRelays]), signedEvent)
       markDone('Publishing hub event')
 
-      // Update local store
+      // Update local store — only after publish succeeds for consistency
+      setHubBanList(hub.dTag, remaining)
       useHubStore.getState().setHubData(hub.dTag, { ...hub, indexFileHash: newIndexHash })
       setSelected(new Set())
 
@@ -3621,7 +3621,8 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
     try {
       const remaining = bannedPubkeys.filter(pk => !selected.has(pk))
       const toReadd = [...selected]
-      setHubBanList(hub.dTag, remaining)
+      // Ban list + member list updates deferred until after publish succeeds
+      let deferredNewMembers: string[] = []
 
       await markStep('Downloading current index')
       const {
@@ -3725,12 +3726,8 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
             if (idx >= 0) leafPages[idx] = { ...leafPages[idx], firstPubkey: up.firstPubkey, hash: up.hash }
           }
 
-          // Update local member list
-          const existingMembers = useHubStore.getState().hubMembers[hub.dTag] || []
-          useHubStore.getState().setHubMembers(hub.dTag, [
-            ...existingMembers,
-            ...allNewMembers.map(pk => ({ pubkey: pk, roles: 'everyone' })),
-          ])
+          // Collect new members — store update deferred until after publish
+          deferredNewMembers = allNewMembers
         }
       }
       markDone('Re-adding to member tree')
@@ -3791,6 +3788,15 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
         }
       } catch { /* best-effort */ }
 
+      // Update local store — only after publish succeeds for consistency
+      setHubBanList(hub.dTag, remaining)
+      if (deferredNewMembers.length > 0) {
+        const existingMembers = useHubStore.getState().hubMembers[hub.dTag] || []
+        useHubStore.getState().setHubMembers(hub.dTag, [
+          ...existingMembers,
+          ...deferredNewMembers.map((pk: string) => ({ pubkey: pk, roles: 'everyone' })),
+        ])
+      }
       useHubStore.getState().setHubData(hub.dTag, { ...hub, indexFileHash: newIndexHash })
       setSelected(new Set())
 
@@ -5501,6 +5507,8 @@ function MembersPage({ hub, onFooterState }: { hub: HubData; onFooterState: (sta
           let groupsChanged = false
           // Track old group secrets for history updates
           const groupHistoryEntries: Array<{ groupId: string; epoch: number; secretHex: string }> = []
+          // Collect new group secrets — deferred until after publish
+          const deferredGroupSecrets = new Map<string, string>()
           markStepDone('Checking group access')
 
           for (const [memberPubkey, newRoles] of Object.entries(stagedChanges)) {
@@ -5570,10 +5578,10 @@ function MembersPage({ hub, onFooterState }: { hub: HubData; onFooterState: (sta
                     // Increment group epoch
                     updatedGroupedRoles[gi] = { ...group, epoch: group.epoch + 1 }
 
-                    // Update local group secret
+                    // Collect new group secret — deferred until after publish
                     const newSecretHex = Array.from(removeResult.newGroupSecret)
                       .map(b => b.toString(16).padStart(2, '0')).join('')
-                    useHubStore.getState().setGroupSecret(hub.dTag, group.groupId, newSecretHex)
+                    deferredGroupSecrets.set(group.groupId, newSecretHex)
 
                     // Also track new group secret in history
                     groupHistoryEntries.push({
@@ -5741,6 +5749,11 @@ function MembersPage({ hub, onFooterState }: { hub: HubData; onFooterState: (sta
           const signedEvent = await signWithSigner(unsignedEvent, signer, privateKey)
           await publishToSpecificRelays(getPublishRelays([...hub.generalRelays, ...hub.filterRelays]), signedEvent)
           markStepDone('Publishing hub update')
+
+          // Flush deferred group secrets to store — only after publish succeeds
+          for (const [groupId, secretHex] of deferredGroupSecrets) {
+            useHubStore.getState().setGroupSecret(hub.dTag, groupId, secretHex)
+          }
         } catch (err) {
           console.warn('Group tree rotation during role save failed:', err)
         }
