@@ -4194,6 +4194,10 @@ function EditField({ text, onChange, onCancel, unchanged, onSave }: {
   useEffect(() => {
     if (ref.current) {
       ref.current.focus()
+      // Place cursor at the end of the text (default is beginning)
+      const len = ref.current.value.length
+      ref.current.selectionStart = len
+      ref.current.selectionEnd = len
       autoResize(ref.current)
     }
   }, [])

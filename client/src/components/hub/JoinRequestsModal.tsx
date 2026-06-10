@@ -25,6 +25,7 @@ import { markJoinRequestsSeen } from '@/hooks/useJoinRequestCount'
 import {
   X, Search, Loader2, Check, Users, CheckSquare, Square, AlertTriangle, ChevronDown, UserPlus, RotateCw,
 } from 'lucide-react'
+import { UserProfileModal } from '@/components/hub/UserProfileModal'
 
 interface JoinRequestsModalProps {
   open: boolean
@@ -79,6 +80,7 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
   const [requests, setRequests] = useState<JoinRequest[]>([])
   const [loading, setLoading] = useState(false)
   const [search, setSearch] = useState('')
+  const [profilePubkey, setProfilePubkey] = useState<string | null>(null)
   const [timeFilterIdx, setTimeFilterIdx] = useState(1) // Default: 48h
   const [showTimeDropdown, setShowTimeDropdown] = useState(false)
   const [multiSelect, setMultiSelect] = useState(false)
@@ -544,17 +546,23 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
                         }
                       </div>
                     )}
-                    <Avatar className="h-9 w-9">
-                      {profile?.picture && <AvatarImage src={profile.picture} />}
-                      <AvatarFallback className="text-xs bg-primary/20 text-primary">
-                        {displayName.slice(0, 2).toUpperCase()}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-foreground truncate">{displayName}</p>
-                      <p className="text-xs text-muted-foreground font-mono truncate">
-                        {truncateNpub(npubStr, 16)}
-                      </p>
+                    <div
+                      className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer hover:opacity-80 transition-opacity"
+                      onClick={(e) => { e.stopPropagation(); setProfilePubkey(req.pubkey) }}
+                      title="View profile"
+                    >
+                      <Avatar className="h-9 w-9 shrink-0">
+                        {profile?.picture && <AvatarImage src={profile.picture} />}
+                        <AvatarFallback className="text-xs bg-primary/20 text-primary">
+                          {displayName.slice(0, 2).toUpperCase()}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-foreground truncate hover:underline">{displayName}</p>
+                        <p className="text-xs text-muted-foreground font-mono truncate">
+                          {truncateNpub(npubStr, 16)}
+                        </p>
+                      </div>
                     </div>
                     <div className="flex flex-col items-end gap-0.5 shrink-0">
                       <span className="text-[10px] text-muted-foreground">{timeAgo}</span>
@@ -698,6 +706,12 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
         </div>,
         document.body,
       )}
+      {/* User profile modal */}
+      <UserProfileModal
+        open={!!profilePubkey}
+        onClose={() => setProfilePubkey(null)}
+        targetPubkey={profilePubkey || undefined}
+      />
     </div>
   )
 }
