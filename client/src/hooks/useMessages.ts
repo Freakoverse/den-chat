@@ -654,7 +654,63 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
       signed.created_at,
       eventId,
       JSON.stringify(signed),
+      epoch, // update epoch so decrypt pipeline uses the correct key
     )
+
+    // Inject pre-decrypted edit into selfDecryptedRef so the UI doesn't briefly
+    // flash "Encrypted Message" while the async decrypt pipeline re-runs.
+    // Same pattern as sendMessage (line 534).
+    // Uses functional updater to avoid stale closure on decryptedMessages.
+    setDecryptedMessages((prev) => {
+      const existingDecrypted = prev.find((m) => m.dTag === dTag && m.pubkey === pubkey)
+      if (!existingDecrypted) return prev
+      const selfEditedMsg: ChatMessage = {
+        ...existingDecrypted,
+        id: eventId,
+        content: newText,        // plaintext — the user's actual text
+        edited: true,
+        eventCreatedAt: signed.created_at,
+        rawEvent: JSON.stringify(signed),
+        attachments: attachments,
+        nsfw: nsfw,
+        title: forumFields?.title,
+        featuredImage: forumFields?.featuredImage,
+        forumTags: forumFields?.tags,
+      }
+      selfDecryptedRef.current.set(dTag, selfEditedMsg)
+      return prev.map((m) => (m.dTag === dTag && m.pubkey === pubkey) ? selfEditedMsg : m)
+    })
+
+    // Persist edited message to IndexedDB cache so the stale pre-edit version
+    // doesn't resurrect on restart (same pattern as sendMessage + deleteMessage)
+    const publishedAtTag = signed.tags.find((t: string[]) => t[0] === 'published_at')
+    const editedCacheMsg: import('@/stores/messageStore').ChatMessage = {
+      id: signed.id,
+      dTag,
+      hubDTag: hubDTag!,
+      channelId: channelId!,
+      pubkey: signed.pubkey,
+      content: signed.content,
+      createdAt: publishedAtTag ? parseInt(publishedAtTag[1], 10) : signed.created_at,
+      eventCreatedAt: signed.created_at,
+      epoch,
+      replyTo: replyTo,
+      rootRef: rootRef,
+      edited: true,
+      deleted: false,
+      isForum: !!forumFields,
+      rawEvent: JSON.stringify(signed),
+      clientTag: isClientTagEnabled() ? 'DEN Chat' : undefined,
+    }
+    import('@/lib/cache/messageCache').then(async ({ replaceCachedMessage }) => {
+      // Atomic delete-old + write-new in a single IDB transaction
+      // (avoids readwrite queue stall from concurrent subscription cacheMessage calls)
+      const oldId = originalMsg?.id
+      console.log(`[Edit] Replacing cache: old=${oldId?.slice(0, 12)}… → new=${signed.id.slice(0, 12)}…, dTag=${dTag.slice(0, 12)}…, eventCreatedAt=${signed.created_at}`)
+      await replaceCachedMessage(oldId, editedCacheMsg).then(() => {
+        console.log(`[Edit] Cache replace SUCCESS for eventId=${signed.id.slice(0, 12)}…`)
+      }).catch((e) => console.warn('[Edit] Cache replace FAILED:', e))
+    })
 
     // Progressive publishing — fires callback on each relay confirmation
     // The RelayProgressIndicator next to the message picks this up via eventId

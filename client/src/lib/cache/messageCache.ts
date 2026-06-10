@@ -79,6 +79,29 @@ export async function deleteCachedMessage(eventId: string): Promise<void> {
 }
 
 /**
+ * Atomically replace a cached message: delete old entry + write new entry in a
+ * single IDB transaction. Avoids the serial readwrite queue stall that happens
+ * when delete and put are separate transactions competing with subscription writes.
+ */
+export async function replaceCachedMessage(oldEventId: string | undefined, newMsg: ChatMessage): Promise<void> {
+  try {
+    const db = await openDB()
+    const tx = db.transaction(STORE_NAME, 'readwrite')
+    const store = tx.objectStore(STORE_NAME)
+    if (oldEventId && oldEventId !== newMsg.id) {
+      store.delete(oldEventId)
+    }
+    store.put(newMsg)
+    await new Promise<void>((resolve, reject) => {
+      tx.oncomplete = () => resolve()
+      tx.onerror = () => reject(tx.error)
+    })
+  } catch (err) {
+    console.warn('[MessageCache] Failed to replace cached message:', err)
+  }
+}
+
+/**
  * Save multiple messages to IndexedDB in a single transaction.
  */
 export async function cacheMessages(msgs: ChatMessage[]): Promise<void> {
@@ -110,10 +133,46 @@ export async function loadAllCachedMessages(): Promise<ChatMessage[]> {
     const store = tx.objectStore(STORE_NAME)
     const request = store.getAll()
 
-    return new Promise((resolve, reject) => {
+    const all: ChatMessage[] = await new Promise((resolve, reject) => {
       request.onsuccess = () => resolve(request.result || [])
       request.onerror = () => reject(request.error)
     })
+
+    // Deduplicate addressable events: same dTag + pubkey = keep newest eventCreatedAt.
+    // Edits create new event IDs for the same dTag, leaving stale entries in cache.
+    const byKey = new Map<string, ChatMessage>()
+    const staleIds: string[] = []
+    for (const msg of all) {
+      const key = `${msg.dTag}:${msg.pubkey}`
+      const existing = byKey.get(key)
+      if (existing) {
+        const msgTs = msg.eventCreatedAt || msg.createdAt
+        const existingTs = existing.eventCreatedAt || existing.createdAt
+        console.log(`[MessageCache] Dup found: dTag=${msg.dTag.slice(0, 12)}\u2026 existing(id=${existing.id.slice(0, 12)}\u2026 ts=${existingTs}) vs incoming(id=${msg.id.slice(0, 12)}\u2026 ts=${msgTs}) → keeping ${msgTs > existingTs ? 'incoming' : 'existing'}`)
+        if (msgTs > existingTs) {
+          staleIds.push(existing.id)
+          byKey.set(key, msg)
+        } else {
+          staleIds.push(msg.id)
+        }
+      } else {
+        byKey.set(key, msg)
+      }
+    }
+
+    console.log(`[MessageCache] Loaded ${all.length} raw entries → ${byKey.size} after dedup (${staleIds.length} stale)`)
+
+    // Clean up stale entries in the background
+    if (staleIds.length > 0) {
+      console.log(`[MessageCache] Pruning ${staleIds.length} stale duplicate(s) from cache`)
+      openDB().then(db2 => {
+        const tx2 = db2.transaction(STORE_NAME, 'readwrite')
+        const store2 = tx2.objectStore(STORE_NAME)
+        for (const id of staleIds) store2.delete(id)
+      }).catch(() => {})
+    }
+
+    return Array.from(byKey.values())
   } catch (err) {
     console.warn('[MessageCache] Failed to load messages:', err)
     return []

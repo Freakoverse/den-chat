@@ -92,7 +92,7 @@ interface MessageState {
   /** Mark a message as deleted (by d-tag) */
   markDeleted: (hubDTag: string, channelId: string, dTag: string) => void
   /** Optimistically update a message's content + mark as edited (for instant UI feedback after edits) */
-  updateMessageContent: (hubDTag: string, channelId: string, dTag: string, pubkey: string, newContent: string, newEventCreatedAt: number, newEventId: string, newRawEvent?: string) => void
+  updateMessageContent: (hubDTag: string, channelId: string, dTag: string, pubkey: string, newContent: string, newEventCreatedAt: number, newEventId: string, newRawEvent?: string, newEpoch?: number) => void
   /** Reset unread count for a hub (when user views it) */
   clearUnread: (hubDTag: string) => void
   /** Increment unread count for a hub */
@@ -133,8 +133,12 @@ export const useMessageStore = create<MessageState>((set, get) => ({
         const existing = channelMsgs[existingIdx]
         const msgEventTs = msg.eventCreatedAt || msg.createdAt
         const existingEventTs = existing.eventCreatedAt || existing.createdAt
-        if (msgEventTs <= existingEventTs) return state
+        if (msgEventTs <= existingEventTs) {
+          console.log(`[MsgStore] Skipping stale version: dTag=${msg.dTag.slice(0, 12)}\u2026 incoming=${msgEventTs} existing=${existingEventTs}`)
+          return state
+        }
 
+        console.log(`[MsgStore] Replacing msg: dTag=${msg.dTag.slice(0, 12)}\u2026 old=${existingEventTs} new=${msgEventTs} edited=${!!msg.edited}`)
         const updated = [...channelMsgs]
         updated[existingIdx] = {
           ...msg,
@@ -252,7 +256,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
       }
     }),
 
-  updateMessageContent: (hubDTag, channelId, dTag, pubkey, newContent, newEventCreatedAt, newEventId, newRawEvent) =>
+  updateMessageContent: (hubDTag, channelId, dTag, pubkey, newContent, newEventCreatedAt, newEventId, newRawEvent, newEpoch) =>
     set((state) => {
       const hubMsgs = state.messages[hubDTag] || {}
       const channelMsgs = hubMsgs[channelId] || []
@@ -266,6 +270,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
         edited: true,
         eventCreatedAt: newEventCreatedAt,
         ...(newRawEvent ? { rawEvent: newRawEvent } : {}),
+        ...(newEpoch !== undefined ? { epoch: newEpoch } : {}),
       }
       return {
         messages: {

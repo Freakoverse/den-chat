@@ -504,7 +504,8 @@ export function useHubSubscriptions() {
 
     loadAllCachedMessages().then((cached) => {
       if (cached.length > 0) {
-        console.log(`[HubSubs] Loaded ${cached.length} cached messages from IndexedDB`)
+        const editedCount = cached.filter(m => m.edited).length
+        console.log(`[HubSubs] Loaded ${cached.length} cached messages from IndexedDB (${editedCount} edited)`)
         for (const msg of cached) {
           // Validate PoW on cached messages
           const hub = hubsRef.current[msg.hubDTag]
@@ -572,8 +573,11 @@ export function useHubSubscriptions() {
     // Use the persistent dedup set (survives reconnections from tab visibility changes)
     const processedMsgIds = processedMsgIdsRef.current
 
-    // Event handler — shared between initial fetch and real-time
-    const handleEvent = (event: Event) => {
+    // Event handler factory — creates a handler that optionally buffers cache writes
+    // instead of writing each event individually to IndexedDB.
+    // Initial fetch: buffer=true → collect messages, flush in bulk at EOSE (1 transaction)
+    // Real-time:     buffer=false → write-through per event (infrequent, no queue stall)
+    const createEventHandler = (buffer: ChatMessage[] | null) => (event: Event) => {
       // Route poll events to pollStore
       if (event.kind === KINDS.POLL) {
         const poll = parsePollEvent(event)
@@ -626,8 +630,12 @@ export function useHubSubscriptions() {
       // Add to in-memory store (messageStore handles its own dedup)
       addMessageRef.current(msg)
 
-      // Write-through to IndexedDB cache
-      cacheMessage(msg).catch(() => {})
+      // Cache write: buffer for bulk flush (initial fetch) or write-through (real-time)
+      if (buffer) {
+        buffer.push(msg)
+      } else {
+        cacheMessage(msg).catch(() => {})
+      }
 
       // Skip unread increment if we already processed this event
       // (prevents double-counting from overlapping initial + real-time subs)
@@ -673,6 +681,9 @@ export function useHubSubscriptions() {
 
     // Create TWO subscriptions per batch:
     for (const batch of batches) {
+      // Buffer for initial fetch — flushed to IDB as one bulk transaction at EOSE
+      const initialBuffer: ChatMessage[] = []
+
       // 1. Initial fetch — latest N messages (closes on EOSE)
       const initialSub = subscribeToRelays(
         [batch.relay],
@@ -682,10 +693,16 @@ export function useHubSubscriptions() {
           '#h': batch.hubDTags,
           limit: INITIAL_LIMIT,
         },
-        handleEvent,
+        createEventHandler(initialBuffer),
         () => {
           // EOSE: initial history is loaded, close this subscription
           initialSub.close()
+          // Flush buffered messages to IndexedDB in a single bulk transaction
+          if (initialBuffer.length > 0) {
+            import('@/lib/cache/messageCache').then(({ cacheMessages }) => {
+              cacheMessages(initialBuffer).catch(() => {})
+            })
+          }
         }
       )
 
@@ -698,7 +715,7 @@ export function useHubSubscriptions() {
           '#h': batch.hubDTags,
           since: now,
         },
-        handleEvent
+        createEventHandler(null) // null = write-through (no buffer)
       )
 
       subsRef.current.push(initialSub, realtimeSub)
