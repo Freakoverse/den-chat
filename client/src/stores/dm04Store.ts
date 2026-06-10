@@ -94,6 +94,9 @@ interface DM04State {
   /** Contacts loaded from NIP-78 registry that haven't been per-person fetched yet */
   registryOnlyContacts: Set<string>
 
+  /** Relay publish progress per event ID (for inline indicators on real messages) */
+  relayProgress: Record<string, { confirmed: number; total: number; acceptedRelays: string[] }>
+
   setActiveConversation: (pubkey: string | null) => void
   addPendingConversation: (pubkey: string) => void
   removePendingConversation: (pubkey: string) => void
@@ -144,12 +147,21 @@ interface DM04State {
     following: DM04Conversation[]
     other: DM04Conversation[]
   }
+  setRelayProgress: (eventId: string, confirmed: number, total: number, acceptedRelays?: string[]) => void
+  clearRelayProgress: (eventId: string) => void
 }
 
 /** Pagination batch size */
 const PAGE_SIZE = 50
 /** Max messages per conversation in memory (FIFO eviction) */
 const MAX_PER_CONVERSATION = 1000
+
+/** Module-level credentials set by startSubscription for priority fetch */
+let _myPubkey: string | null = null
+let _signer: ISigner | null = null
+let _privateKey: string | null = null
+/** Set of pubkeys that have already been priority-fetched (avoids re-fetch on each click) */
+const _priorityFetched = new Set<string>()
 
 /* ─── Store ─── */
 
@@ -168,6 +180,7 @@ export const useDM04Store = create<DM04State>((set, get) => ({
   perPersonFetchDone: false,
   pendingNewContacts: new Map(),
   registryOnlyContacts: new Set(),
+  relayProgress: {},
 
   setActiveConversation: (pubkey) => {
     console.log('[DM04] setActiveConversation called:', pubkey?.slice(0, 12))
@@ -193,6 +206,18 @@ export const useDM04Store = create<DM04State>((set, get) => ({
     if (pubkey) {
       console.log('[DM04] Calling markDmRead for:', pubkey.slice(0, 12))
       useNotificationStore.getState().markDmRead(pubkey, 'nip04')
+
+      // Priority fetch: if conversation has no messages and Track B hasn't finished,
+      // immediately fetch this contact's messages instead of waiting for the queue
+      const state = get()
+      const conv = state.conversations.get(pubkey)
+      const hasNoMessages = !conv || conv.messages.length === 0
+      if (hasNoMessages && !state.perPersonFetchDone && !_priorityFetched.has(pubkey) && _myPubkey) {
+        _priorityFetched.add(pubkey)
+        console.log(`[DM04] Priority fetch for ${pubkey.slice(0, 12)}…`)
+        fetchPerPerson(pubkey, _myPubkey, _signer, _privateKey, set, get)
+          .catch((err) => console.warn(`[DM04] Priority fetch failed for ${pubkey.slice(0, 12)}…:`, err))
+      }
     }
   },
 
@@ -234,6 +259,12 @@ export const useDM04Store = create<DM04State>((set, get) => ({
 
     set({ loading: true, perPersonFetchDone: false, pendingNewContacts: new Map(), registryOnlyContacts: new Set() })
 
+    // Store credentials for priority fetch
+    _myPubkey = myPubkey
+    _signer = signer
+    _privateKey = privateKey
+    _priorityFetched.clear()
+
     // ─── Track A: Raw Feed (immediate UI) ───
     // Fetch last 100 NIP-04 events + keep live subscription open.
     // Extract unique counterparties as events arrive for later NIP-78 reconciliation.
@@ -241,6 +272,8 @@ export const useDM04Store = create<DM04State>((set, get) => ({
     let initialPhase = true
     const msgBuffer: DM04Message[] = []
     const counterpartyBuffer: string[] = []
+    let trackAReceivedCount = 0
+    let trackASentCount = 0
 
     const onDMEvent = async (event: Event) => {
       const state = get()
@@ -252,6 +285,7 @@ export const useDM04Store = create<DM04State>((set, get) => ({
 
       // Track counterparty for NIP-78 reconciliation (metadata only — no decrypt needed)
       const isMine = event.pubkey === myPubkey
+      if (isMine) trackASentCount++; else trackAReceivedCount++
       const recipientTag = event.tags.find((t) => t[0] === 'p')
       const counterparty = isMine ? recipientTag?.[1] : event.pubkey
       if (counterparty) {
@@ -265,6 +299,19 @@ export const useDM04Store = create<DM04State>((set, get) => ({
 
       if (initialPhase) {
         await processNip04EventBuffered(event, myPubkey, signer, privateKey, msgBuffer, counterpartyBuffer)
+        // If EOSE fired while we were awaiting decrypt, the buffer was already flushed
+        // and cleared. Any messages we just pushed are orphaned — flush them directly.
+        if (!initialPhase && msgBuffer.length > 0) {
+          set((s) => {
+            const conversations = new Map(s.conversations)
+            for (let i = 0; i < msgBuffer.length; i++) {
+              addDM04ToConversations(conversations, msgBuffer[i], counterpartyBuffer[i])
+            }
+            return { conversations }
+          })
+          msgBuffer.length = 0
+          counterpartyBuffer.length = 0
+        }
       } else {
         await processNip04Event(event, myPubkey, signer, privateKey, set, get)
       }
@@ -275,6 +322,8 @@ export const useDM04Store = create<DM04State>((set, get) => ({
       eoseCount++
       if (eoseCount >= 2) {
         initialPhase = false
+
+        console.log(`[DM04:TrackA] EOSE — received: ${trackAReceivedCount}, sent: ${trackASentCount}, decrypted: ${msgBuffer.length}`)
 
         // Flush all buffered messages in a single state update
         if (msgBuffer.length > 0) {
@@ -524,11 +573,17 @@ export const useDM04Store = create<DM04State>((set, get) => ({
 
       await publishEventProgressive(
         signed,
-        (confirmed, total) => {
+        (confirmed, total, acceptedRelays) => {
+          get().setRelayProgress(signed.id, confirmed, total, acceptedRelays)
           onPhase?.('publishing', { confirmed, total })
         },
         allRelays.length > 0 ? allRelays : undefined,
       )
+
+      // Auto-clear relay progress after 5 seconds
+      setTimeout(() => {
+        get().clearRelayProgress(signed.id)
+      }, 5000)
 
       // Remove from pending
       get().removePendingConversation(recipientPubkey)
@@ -722,6 +777,20 @@ export const useDM04Store = create<DM04State>((set, get) => ({
 
     return { following, other }
   },
+
+  setRelayProgress: (eventId, confirmed, total, acceptedRelays) =>
+    set((state) => ({
+      relayProgress: {
+        ...state.relayProgress,
+        [eventId]: { confirmed, total, acceptedRelays: acceptedRelays || [] },
+      },
+    })),
+
+  clearRelayProgress: (eventId) =>
+    set((state) => {
+      const { [eventId]: _, ...rest } = state.relayProgress
+      return { relayProgress: rest }
+    }),
 }))
 
 /* ─── Helpers ─── */
@@ -761,7 +830,8 @@ async function processNip04Event(
   let content: string
   try {
     content = await decryptNip04(event.content, isMine ? recipientPubkey : event.pubkey, signer, privateKey)
-  } catch {
+  } catch (err) {
+    console.warn(`[DM04] Decrypt failed for ${isMine ? 'sent' : 'received'} event ${event.id.slice(0, 12)}… (counterparty: ${counterparty.slice(0, 12)}…):`, err)
     return // Can't decrypt — skip
   }
 
@@ -875,7 +945,8 @@ async function processNip04EventBuffered(
   let content: string
   try {
     content = await decryptNip04(event.content, isMine ? recipientPubkey : event.pubkey, signer, privateKey)
-  } catch {
+  } catch (err) {
+    console.warn(`[DM04] Decrypt failed for ${isMine ? 'sent' : 'received'} event ${event.id.slice(0, 12)}… (counterparty: ${counterparty.slice(0, 12)}…):`, err)
     return // Can't decrypt — skip
   }
 
@@ -1265,6 +1336,10 @@ async function fetchPerPerson(
 
     // Fetch both directions in parallel with timeout protection
     const allEvents = await fetchDMEventsWithTimeout(dmRelays, counterpartyPubkey, myPubkey)
+    const newCount = allEvents.filter(e => !get().processedIds.has(e.id)).length
+    if (allEvents.length > 0 && newCount < allEvents.length) {
+      console.log(`[DM04:TrackB] ${counterpartyPubkey.slice(0, 12)}… — ${allEvents.length} events (${allEvents.length - newCount} already processed by Track A)`)
+    }
     await processEvents(allEvents)
 
     // If initial fetch found nothing, try counterparty's relays as fallback
@@ -1318,8 +1393,15 @@ async function fetchDMEventsWithTimeout(
 
   // Collect whatever succeeded — don't discard results just because one direction timed out
   const events: Event[] = []
+  const rcvCount = receivedEvents.status === 'fulfilled' ? receivedEvents.value.length : 0
+  const sntCount = sentEvents.status === 'fulfilled' ? sentEvents.value.length : 0
   if (receivedEvents.status === 'fulfilled') events.push(...receivedEvents.value)
+  else console.warn(`[DM04:TrackB] Received fetch FAILED for ${counterpartyPubkey.slice(0, 12)}…:`, (receivedEvents as PromiseRejectedResult).reason?.message)
   if (sentEvents.status === 'fulfilled') events.push(...sentEvents.value)
+  else console.warn(`[DM04:TrackB] Sent fetch FAILED for ${counterpartyPubkey.slice(0, 12)}…:`, (sentEvents as PromiseRejectedResult).reason?.message)
+  if (rcvCount > 0 || sntCount > 0) {
+    console.log(`[DM04:TrackB] ${counterpartyPubkey.slice(0, 12)}… — received: ${rcvCount}, sent: ${sntCount}`)
+  }
   return events
 }
 

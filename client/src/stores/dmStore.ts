@@ -8,7 +8,7 @@
  */
 
 import { create } from 'zustand'
-import { fetchEvents, publishToSpecificRelays, subscribeEvents } from '@/lib/nostr/relay-pool'
+import { fetchEvents, publishToSpecificRelays, publishEventProgressive, subscribeEvents } from '@/lib/nostr/relay-pool'
 import { getPublishRelays } from '@/stores/postingBehaviourStore'
 import { STANDARD_KINDS } from '@/lib/crypto/constants'
 import { createGiftWrap, unwrapGiftWrap, computeRumorId, type UnwrappedDM } from '@/lib/nostr/nip17'
@@ -63,6 +63,9 @@ interface DMState {
   processedWrapIds: Set<string>
   subscription: { close: () => void } | null
 
+  /** Relay publish progress per event ID (for inline indicators on real messages) */
+  relayProgress: Record<string, { confirmed: number; total: number; acceptedRelays: string[] }>
+
   setActiveConversation: (pubkey: string | null) => void
   addPendingConversation: (pubkey: string) => void
   removePendingConversation: (pubkey: string) => void
@@ -87,11 +90,14 @@ interface DMState {
     emojiTags?: [string, string, string, string][],
     stickerTags?: [string, string, string, string][],
     gifTags?: [string, string, string, string][],
+    onProgress?: (phase: 'encrypting' | 'publishing', relayProgress?: { confirmed: number; total: number }) => void,
   ) => Promise<{ rumorId: string }>
   getFilteredConversations: (followList: Set<string>) => {
     following: Conversation[]
     other: Conversation[]
   }
+  setRelayProgress: (eventId: string, confirmed: number, total: number, acceptedRelays?: string[]) => void
+  clearRelayProgress: (eventId: string) => void
 }
 
 /** Initial subscription limit — kept low for NIP-17.
@@ -114,6 +120,7 @@ export const useDMStore = create<DMState>((set, get) => ({
   loadingOlder: false,
   processedWrapIds: new Set(),
   subscription: null,
+  relayProgress: {},
 
   setActiveConversation: (pubkey) => {
     set((s) => {
@@ -355,7 +362,7 @@ export const useDMStore = create<DMState>((set, get) => ({
     }
   },
 
-  sendMessage: async (recipientPubkey, content, myPubkey, signer, privateKey, emojiTags, stickerTags, gifTags) => {
+  sendMessage: async (recipientPubkey, content, myPubkey, signer, privateKey, emojiTags, stickerTags, gifTags, onProgress) => {
     // Capability check
     if (!privateKey && !signer?.nip44) {
       throw new Error('NIP-44 encryption is not available with your current login method. DMs require NIP-44 support.')
@@ -419,9 +426,41 @@ export const useDMStore = create<DMState>((set, get) => ({
       }
 
       // Publish gift wrap for recipient (to merged relays including their preferred relays)
-      await publishToSpecificRelays(recipientRelays, wraps.wrapForRecipient as unknown as Event)
-      // Self-copy goes to own relays only
-      await publishToSpecificRelays(publishRelays, wraps.wrapForSelf as unknown as Event)
+      onProgress?.('publishing')
+      const allRelays = [...new Set([...recipientRelays, ...publishRelays])]
+      const totalRelays = allRelays.length
+      let cumulativeConfirmed = 0
+
+      // Publish recipient wrap with progressive tracking
+      await publishEventProgressive(
+        wraps.wrapForRecipient as unknown as Event,
+        (confirmed, _total, acceptedRelays) => {
+          cumulativeConfirmed = confirmed
+          const selfWrapId = wrapSelfId || 'self'
+          get().setRelayProgress(selfWrapId, cumulativeConfirmed, totalRelays, acceptedRelays)
+          onProgress?.('publishing', { confirmed: cumulativeConfirmed, total: totalRelays })
+        },
+        recipientRelays,
+      )
+      // Self-copy goes to own relays only — add to cumulative count
+      const recipientConfirmed = cumulativeConfirmed
+      await publishEventProgressive(
+        wraps.wrapForSelf as unknown as Event,
+        (confirmed, _total, acceptedRelays) => {
+          const selfWrapId = wrapSelfId || 'self'
+          const prev = get().relayProgress[selfWrapId]
+          const mergedRelays = [...(prev?.acceptedRelays || []), ...(acceptedRelays || [])]
+          get().setRelayProgress(selfWrapId, recipientConfirmed + confirmed, totalRelays, mergedRelays)
+          onProgress?.('publishing', { confirmed: recipientConfirmed + confirmed, total: totalRelays })
+        },
+        publishRelays,
+      )
+
+      // Auto-clear relay progress after 5 seconds
+      const progressId = wrapSelfId || 'self'
+      setTimeout(() => {
+        get().clearRelayProgress(progressId)
+      }, 5000)
 
       // Remove from pending if it was there
       get().removePendingConversation(recipientPubkey)
@@ -524,6 +563,20 @@ export const useDMStore = create<DMState>((set, get) => ({
 
     return { following, other }
   },
+
+  setRelayProgress: (eventId, confirmed, total, acceptedRelays) =>
+    set((state) => ({
+      relayProgress: {
+        ...state.relayProgress,
+        [eventId]: { confirmed, total, acceptedRelays: acceptedRelays || [] },
+      },
+    })),
+
+  clearRelayProgress: (eventId) =>
+    set((state) => {
+      const { [eventId]: _, ...rest } = state.relayProgress
+      return { relayProgress: rest }
+    }),
 }))
 
 /* ─── Helpers ─── */

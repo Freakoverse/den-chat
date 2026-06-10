@@ -97,6 +97,7 @@ interface OptimisticDM04 {
   replyDisplayName?: string
   replyPreview?: string
   relayProgress?: { confirmed: number; total: number }
+  sentEventId?: string  // event ID for reconciliation with store
 }
 
 /* ═══════════════════════════════════════════ */
@@ -257,6 +258,40 @@ export function DM04ChatView({ recipientPubkey, onSwitchProtocol, onBack }: { re
     }
   }, [optimisticMessages.length])
 
+  // Reconcile optimistic messages with store — remove when real message appears
+  useEffect(() => {
+    if (optimisticMessages.length === 0) return
+    const toRemove = optimisticMessages.filter((opt) =>
+      opt.status === 'published' &&
+      mainMessages.some((m) =>
+        m.isMine &&
+        m.content === opt.content &&
+        Math.abs(m.createdAt - opt.timestamp) < 10
+      )
+    )
+    if (toRemove.length > 0) {
+      const removeIds = new Set(toRemove.map((o) => o.tempId))
+      // 600ms delay so the checkmark is visible briefly
+      const timer = setTimeout(() => {
+        setOptimisticMessages((prev) => prev.filter((m) => !removeIds.has(m.tempId)))
+      }, 600)
+      return () => clearTimeout(timer)
+    }
+  }, [mainMessages, optimisticMessages])
+
+  // Safety net: remove stale published optimistic messages after 30s
+  useEffect(() => {
+    if (optimisticMessages.length === 0) return
+    const now = Math.floor(Date.now() / 1000)
+    const stale = optimisticMessages.filter(
+      (opt) => opt.status === 'published' && (now - opt.timestamp) > 30
+    )
+    if (stale.length > 0) {
+      const staleIds = new Set(stale.map((o) => o.tempId))
+      setOptimisticMessages((prev) => prev.filter((m) => !staleIds.has(m.tempId)))
+    }
+  }, [optimisticMessages])
+
   // Auto-load older messages when viewport isn't full (can't scroll to trigger pagination)
   // Triggers on conversation open and after each batch of older messages arrives
   useEffect(() => {
@@ -380,10 +415,7 @@ export function DM04ChatView({ recipientPubkey, onSwitchProtocol, onBack }: { re
       setReplyContext(null)
       setPendingStickers([])
       setPendingGifs([])
-      // Auto-remove optimistic after relay confirms
-      setTimeout(() => {
-        setOptimisticMessages((prev) => prev.filter((m) => m.tempId !== tempId))
-      }, 3000)
+      // Optimistic removal is handled by the reconciliation useEffect
     } catch (err) {
       console.error('[DM04] Send failed:', err)
       setSendError((err as Error).message)
@@ -607,7 +639,11 @@ export function DM04ChatView({ recipientPubkey, onSwitchProtocol, onBack }: { re
               })}
 
               {/* Optimistic messages (hub-chat-style publishing/relay progress) */}
-              {optimisticMessages.map((optMsg) => (
+              {optimisticMessages.filter((o) =>
+                !(o.status === 'published' && mainMessages.some((m) =>
+                  m.isMine && m.content === o.content && Math.abs(m.createdAt - o.timestamp) < 10
+                ))
+              ).map((optMsg) => (
                 <div
                   key={optMsg.tempId}
                   className={`flex gap-3 mt-4 py-1 px-2 rounded-md -mx-2 transition-opacity ${optMsg.status === 'published' ? 'opacity-70' : 'opacity-50'}`}
@@ -948,6 +984,58 @@ export function DM04ChatView({ recipientPubkey, onSwitchProtocol, onBack }: { re
 }
 
 /* ═══════════════════════════════════════════ */
+/*  DM04 RELAY PROGRESS INDICATOR              */
+/* ═══════════════════════════════════════════ */
+
+function DM04RelayProgressIndicator({ eventId }: { eventId: string }) {
+  const progress = useDM04Store((s) => s.relayProgress[eventId])
+  const [showPopover, setShowPopover] = useState(false)
+  const popRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!showPopover) return
+    const handler = (e: MouseEvent) => {
+      if (popRef.current && !popRef.current.contains(e.target as Node)) setShowPopover(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [showPopover])
+
+  if (!progress) return null
+  const done = progress.confirmed >= progress.total
+  return (
+    <span className="relative inline-flex items-center">
+      <button
+        onClick={(e) => { e.stopPropagation(); setShowPopover(!showPopover) }}
+        className={`text-[10px] inline-flex items-center gap-1 ml-1 cursor-pointer hover:text-muted-foreground transition-colors ${done ? 'text-muted-foreground/40' : 'text-muted-foreground/70'}`}
+      >
+        {!done && <Loader2 size={9} className="animate-spin" />}
+        {progress.confirmed}/{progress.total}
+      </button>
+      {showPopover && (
+        <div ref={popRef} className="absolute bottom-full left-0 mb-1 z-50 bg-popover border border-border rounded-lg shadow-xl p-2.5 min-w-[200px]" onClick={(e) => e.stopPropagation()}>
+          <p className="text-[10px] font-medium text-foreground mb-1.5">Relay Status</p>
+          <div className="space-y-1">
+            {progress.acceptedRelays.map((url) => (
+              <div key={url} className="flex items-center gap-2">
+                <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
+                <span className="text-[10px] text-muted-foreground font-mono truncate">{url.replace('wss://', '')}</span>
+              </div>
+            ))}
+            {progress.confirmed < progress.total && (
+              <div className="flex items-center gap-2">
+                <Loader2 size={8} className="animate-spin text-muted-foreground/50 shrink-0" />
+                <span className="text-[10px] text-muted-foreground/50">{progress.total - progress.confirmed} pending...</span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </span>
+  )
+}
+
+/* ═══════════════════════════════════════════ */
 /*  DM04 MESSAGE ROW                           */
 /* ═══════════════════════════════════════════ */
 
@@ -1067,7 +1155,7 @@ function DM04MessageRow({
                 <>
                   {filteredContent && (
                     <div className="text-sm text-foreground/90 break-words prose-sm [&_p]:m-0 [&_pre]:my-1 [&_code]:text-xs">
-                      <MessageContent content={filteredContent} emojiTags={msg.emojiTags} mutedWords={mutedWords} />
+                      <MessageContent content={filteredContent} emojiTags={msg.emojiTags} mutedWords={mutedWords} suffix={msg.isMine ? <DM04RelayProgressIndicator eventId={msg.id} /> : undefined} />
                     </div>
                   )}
                   {mediaGroups.length > 0 && (

@@ -32,7 +32,7 @@ import { getUploadBlossoms, getPublishRelays } from '@/stores/postingBehaviourSt
 import {
   Search, Plus, MessageSquare, Loader2,
   Lock, Users, UserPlus, AlertCircle, X, ShieldBan, Eye, EyeOff, Shield, ShieldCheck, Info,
-  AlertTriangle, Download, Star, ChevronLeft,
+  AlertTriangle, Download, Star, ChevronLeft, Check,
 } from 'lucide-react'
 import { MessageContent } from '@/components/chat/MessageContent'
 import { ContentMediaGroupsWithGallery, extractContentMediaGroups } from '@/components/chat/ContentMediaGrouping'
@@ -516,6 +516,14 @@ function ConversationList({
 /*  CHAT VIEW (Right Panel)                    */
 /* ═══════════════════════════════════════════ */
 
+interface OptimisticDM17 {
+  tempId: string
+  content: string
+  timestamp: number
+  status: 'publishing' | 'published' | 'failed'
+  relayProgress?: { confirmed: number; total: number }
+}
+
 function DMChatView({ recipientPubkey, onSwitchProtocol, onBack }: { recipientPubkey: string; onSwitchProtocol: () => void; onBack?: () => void }) {
   const myPubkey = useUserStore((s) => s.pubkey)
   const signer = useUserStore((s) => s.signer)
@@ -544,6 +552,9 @@ function DMChatView({ recipientPubkey, onSwitchProtocol, onBack }: { recipientPu
   // ─── GIF state ───
   type PendingGif = { name: string; url: string; nsfw: boolean }
   const [pendingGifs, setPendingGifs] = useState<PendingGif[]>([])
+
+  // ─── Optimistic messages ───
+  const [optimisticMessages, setOptimisticMessages] = useState<OptimisticDM17[]>([])
 
   // ─── Sticker click modal state ───
   const [clickedSticker, setClickedSticker] = useState<{ shortcode: string; url: string; setAddress: string | null } | null>(null)
@@ -607,6 +618,46 @@ function DMChatView({ recipientPubkey, onSwitchProtocol, onBack }: { recipientPu
     prevMsgCountRef.current = messages.length
   }, [messages.length])
 
+  // Reconcile optimistic messages with store
+  useEffect(() => {
+    if (optimisticMessages.length === 0) return
+    const toRemove = optimisticMessages.filter((opt) =>
+      opt.status === 'published' &&
+      messages.some((m) =>
+        m.isMine &&
+        m.content === opt.content &&
+        Math.abs(m.createdAt - opt.timestamp) < 10
+      )
+    )
+    if (toRemove.length > 0) {
+      const removeIds = new Set(toRemove.map((o) => o.tempId))
+      setTimeout(() => {
+        setOptimisticMessages((prev) => prev.filter((m) => !removeIds.has(m.tempId)))
+      }, 600)
+    }
+  }, [messages, optimisticMessages])
+
+  // Safety: remove stale published optimistic messages after 30s
+  useEffect(() => {
+    if (optimisticMessages.length === 0) return
+    const now = Math.floor(Date.now() / 1000)
+    const stale = optimisticMessages.filter(
+      (opt) => opt.status === 'published' && (now - opt.timestamp) > 30
+    )
+    if (stale.length > 0) {
+      const staleIds = new Set(stale.map((o) => o.tempId))
+      setOptimisticMessages((prev) => prev.filter((m) => !staleIds.has(m.tempId)))
+    }
+  }, [optimisticMessages])
+
+  // Auto-scroll when optimistic messages added
+  useEffect(() => {
+    if (optimisticMessages.length > 0) {
+      if (messagesContainerRef.current) messagesContainerRef.current.scrollTop = 0
+      isAtBottomRef.current = true
+    }
+  }, [optimisticMessages.length])
+
   const handleSend = useCallback(async (attachments?: FileAttachment[]) => {
     const text = message.trim()
     if (!text && !attachments?.length && pendingStickers.length === 0 && pendingGifs.length === 0) return
@@ -630,6 +681,12 @@ function DMChatView({ recipientPubkey, onSwitchProtocol, onBack }: { recipientPu
     }
 
     setMessage('')
+
+    const tempId = `opt-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    setOptimisticMessages((prev) => [
+      ...prev,
+      { tempId, content: content || text, timestamp: Math.floor(Date.now() / 1000), status: 'publishing' },
+    ])
 
     try {
       // Extract NIP-30 emoji tags from message content
@@ -670,6 +727,17 @@ function DMChatView({ recipientPubkey, onSwitchProtocol, onBack }: { recipientPu
           emojiTagsToSend.length > 0 ? emojiTagsToSend : undefined,
           stickerTagsToSend.length > 0 ? stickerTagsToSend : undefined,
           gifTagsToSend.length > 0 ? gifTagsToSend : undefined,
+          (phase, relayProgress) => {
+            setOptimisticMessages((prev) =>
+              prev.map((m) => {
+                if (m.tempId !== tempId) return m
+                if (phase === 'publishing' && relayProgress && relayProgress.confirmed > 0) {
+                  return { ...m, status: 'published' as const, relayProgress }
+                }
+                return { ...m, relayProgress: relayProgress || m.relayProgress }
+              })
+            )
+          },
         )
 
         // Use the actual rumor ID from createGiftWrap for e-tag linking
@@ -726,10 +794,16 @@ function DMChatView({ recipientPubkey, onSwitchProtocol, onBack }: { recipientPu
 
       setPendingStickers([])
       setPendingGifs([])
+      setOptimisticMessages((prev) =>
+        prev.map((m) => m.tempId === tempId ? { ...m, status: 'published' as const } : m)
+      )
     } catch (err) {
       console.error('[DM] Send failed:', err)
       setSendError((err as Error).message)
       setMessage(text) // restore on failure
+      setOptimisticMessages((prev) =>
+        prev.map((m) => m.tempId === tempId ? { ...m, status: 'failed' as const } : m)
+      )
     } finally {
       setSending(false)
     }
@@ -862,16 +936,62 @@ function DMChatView({ recipientPubkey, onSwitchProtocol, onBack }: { recipientPu
                 </div>
               )
             })}
-            {/* Sending indicator */}
-            {sending && (
-              <div className="flex gap-3 px-1 py-0.5 mt-1">
-                <div className="w-10 shrink-0" />
-                <div className="flex items-center gap-1.5 text-xs text-muted-foreground italic">
-                  <Loader2 size={12} className="animate-spin" />
-                  Sending...
+            {/* Optimistic messages */}
+            {optimisticMessages.filter((o) =>
+              !(o.status === 'published' && messages.some((m) =>
+                m.isMine && m.content === o.content && Math.abs(m.createdAt - o.timestamp) < 10
+              ))
+            ).map((optMsg) => {
+              const myProfile = getProfile(myPubkey || '')
+              const myDisplayName = myProfile?.display_name || myProfile?.name || (myPubkey ? truncateNpub(nip19.npubEncode(myPubkey), 8) : 'You')
+              return (
+                <div
+                  key={optMsg.tempId}
+                  className={`flex gap-3 mt-4 py-1 px-2 rounded-md -mx-2 transition-opacity ${optMsg.status === 'published' ? 'opacity-70' : 'opacity-50'}`}
+                >
+                  <div className="w-10 shrink-0 flex flex-col items-center">
+                    <Avatar className="h-10 w-10 shrink-0">
+                      {myProfile?.picture && <AvatarImage src={myProfile.picture} alt={myDisplayName} />}
+                      <AvatarFallback className="text-xs bg-primary/20 text-primary">
+                        {myDisplayName.slice(0, 2).toUpperCase()}
+                      </AvatarFallback>
+                    </Avatar>
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-sm font-semibold text-foreground">{myDisplayName}</span>
+                      <span className="text-xs text-muted-foreground">{new Date(optMsg.timestamp * 1000).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="text-sm text-foreground/90 break-words">{optMsg.content}</div>
+                      {optMsg.status === 'publishing' && !optMsg.relayProgress?.confirmed && (
+                        <span className="text-[10px] text-muted-foreground italic whitespace-nowrap flex items-center gap-1">
+                          <Loader2 size={9} className="animate-spin" /> encrypting...
+                        </span>
+                      )}
+                      {optMsg.status === 'publishing' && optMsg.relayProgress && optMsg.relayProgress.confirmed > 0 && (
+                        <span className="text-[10px] text-muted-foreground/60 flex items-center gap-1 whitespace-nowrap">
+                          <Loader2 size={9} className="animate-spin" />
+                          {optMsg.relayProgress.confirmed}/{optMsg.relayProgress.total}
+                        </span>
+                      )}
+                      {optMsg.status === 'published' && <Check size={13} className="text-green-500 shrink-0" />}
+                      {optMsg.status === 'failed' && (
+                        <div className="flex items-center gap-1 shrink-0">
+                          <X size={13} className="text-destructive" />
+                          <button
+                            onClick={() => setOptimisticMessages((prev) => prev.filter((m) => m.tempId !== optMsg.tempId))}
+                            className="p-0.5 rounded cursor-pointer text-muted-foreground hover:text-destructive transition-colors"
+                          >
+                            <X size={12} />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </div>
-              </div>
-            )}
+              )
+            })}
             <div ref={messagesEndRef} />
           </div>
         )}
@@ -1115,6 +1235,58 @@ function DMEmptyState() {
 }
 
 /* ═══════════════════════════════════════════ */
+/*  DM RELAY PROGRESS INDICATOR                */
+/* ═══════════════════════════════════════════ */
+
+function DMRelayProgressIndicator({ eventId }: { eventId: string }) {
+  const progress = useDMStore((s) => s.relayProgress[eventId])
+  const [showPopover, setShowPopover] = useState(false)
+  const popRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!showPopover) return
+    const handler = (e: MouseEvent) => {
+      if (popRef.current && !popRef.current.contains(e.target as Node)) setShowPopover(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [showPopover])
+
+  if (!progress) return null
+  const done = progress.confirmed >= progress.total
+  return (
+    <span className="relative inline-flex items-center">
+      <button
+        onClick={(e) => { e.stopPropagation(); setShowPopover(!showPopover) }}
+        className={`text-[10px] inline-flex items-center gap-1 ml-1 cursor-pointer hover:text-muted-foreground transition-colors ${done ? 'text-muted-foreground/40' : 'text-muted-foreground/70'}`}
+      >
+        {!done && <Loader2 size={9} className="animate-spin" />}
+        {progress.confirmed}/{progress.total}
+      </button>
+      {showPopover && (
+        <div ref={popRef} className="absolute bottom-full left-0 mb-1 z-50 bg-popover border border-border rounded-lg shadow-xl p-2.5 min-w-[200px]" onClick={(e) => e.stopPropagation()}>
+          <p className="text-[10px] font-medium text-foreground mb-1.5">Relay Status</p>
+          <div className="space-y-1">
+            {progress.acceptedRelays.map((url) => (
+              <div key={url} className="flex items-center gap-2">
+                <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
+                <span className="text-[10px] text-muted-foreground font-mono truncate">{url.replace('wss://', '')}</span>
+              </div>
+            ))}
+            {progress.confirmed < progress.total && (
+              <div className="flex items-center gap-2">
+                <Loader2 size={8} className="animate-spin text-muted-foreground/50 shrink-0" />
+                <span className="text-[10px] text-muted-foreground/50">{progress.total - progress.confirmed} pending...</span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </span>
+  )
+}
+
+/* ═══════════════════════════════════════════ */
 /*  DM MESSAGE ROW (with block handling)       */
 /* ═══════════════════════════════════════════ */
 
@@ -1209,7 +1381,7 @@ function DMMessageRow({ msg, showDateSep, isGrouped, senderProfile, displayName,
                   <>
                     {filteredContent && (
                       <div className="text-sm text-foreground/90 break-words prose-sm [&_p]:m-0 [&_pre]:my-1 [&_code]:text-xs">
-                        <MessageContent content={filteredContent} emojiTags={msg.emojiTags} mutedWords={mutedWords} />
+                        <MessageContent content={filteredContent} emojiTags={msg.emojiTags} mutedWords={mutedWords} suffix={msg.isMine ? <DMRelayProgressIndicator eventId={msg.id} /> : undefined} />
                       </div>
                     )}
                     {mediaGroups.length > 0 && (
@@ -1358,7 +1530,7 @@ function DMMessageContent({ msg, showDateSep, isGrouped, senderProfile, displayN
               <>
                 {filteredContent && (
                   <div className="text-sm text-foreground/90 break-words prose-sm [&_p]:m-0 [&_pre]:my-1 [&_code]:text-xs">
-                    <MessageContent content={filteredContent} emojiTags={msg.emojiTags} mutedWords={mutedWords} />
+                    <MessageContent content={filteredContent} emojiTags={msg.emojiTags} mutedWords={mutedWords} suffix={msg.isMine ? <DMRelayProgressIndicator eventId={msg.id} /> : undefined} />
                   </div>
                 )}
                 {mediaGroups.length > 0 && (
