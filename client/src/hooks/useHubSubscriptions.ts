@@ -597,17 +597,31 @@ export function useHubSubscriptions() {
   }, [])
 
   // Re-subscribe when tab becomes visible (browsers drop WebSockets in background)
+  // Also periodically force-reconnect every 5 minutes to catch silently dead
+  // WebSocket connections — especially on Tauri desktop where the tab is always
+  // "visible" and the visibilitychange handler never fires.
+  const RECONNECT_INTERVAL_MS = 5 * 60 * 1000 // 5 minutes
   const [reconnectCount, setReconnectCount] = useState(0)
   useEffect(() => {
+    const forceReconnect = () => {
+      hubFingerprintRef.current = ''
+      setReconnectCount((c) => c + 1)
+    }
+
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') {
-        // Reset fingerprint and bump counter to force re-subscription
-        hubFingerprintRef.current = ''
-        setReconnectCount((c) => c + 1)
+        forceReconnect()
       }
     }
     document.addEventListener('visibilitychange', handleVisibility)
-    return () => document.removeEventListener('visibilitychange', handleVisibility)
+
+    // Periodic keepalive — catches dead subscriptions even when tab stays visible
+    const intervalId = setInterval(forceReconnect, RECONNECT_INTERVAL_MS)
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility)
+      clearInterval(intervalId)
+    }
   }, [])
 
   useEffect(() => {
