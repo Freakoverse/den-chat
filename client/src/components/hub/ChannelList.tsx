@@ -617,7 +617,7 @@ function ChannelItem({ channel, position, isActive, onClick, isLocked = false, i
   const showPendingSelf = (isConnecting || (isInVoice && !selfAlreadyInPresence)) && !!myPubkey
 
   return (
-    <div className="mb-1 relative">
+    <div className="mb-1 relative" data-channel-id={channel.channelId} data-channel-hub={activeHubId || undefined}>
       {/* Discord-style unread pill bar on the left edge */}
       {isUnread && (
         <div

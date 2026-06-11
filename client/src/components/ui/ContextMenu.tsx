@@ -230,6 +230,23 @@ export function ContextMenuProvider({ children }: { children: ReactNode }) {
         })
       }
 
+      // --- Channel actions (right-click on a channel in the channel list) ---
+      const channelEl = target.closest('[data-channel-id]') as HTMLElement | null
+      const channelId = channelEl?.dataset.channelId
+      const channelHub = channelEl?.dataset.channelHub
+      if (channelId && channelHub) {
+        if (items.length > 0) items.push({ separator: true })
+        items.push({
+          label: 'Mark Channel as Read',
+          icon: <CheckCheck size={14} />,
+          action: async () => {
+            const { useNotificationStore } = await import('@/stores/notificationStore')
+            useNotificationStore.getState().markChannelRead(channelHub, channelId)
+            close()
+          },
+        })
+      }
+
       // If no actions, show a minimal "no actions" or fallback to native
       if (items.length === 0) {
         // For non-interactive areas, just show Select All if there's text content
