@@ -1988,18 +1988,18 @@ function BlobMedia({ servers, hash, ext, type, className, tag, encryption }: {
     // Decrypted — render from blob URL
     if (tag === 'video') {
       return (
-        <div className="relative inline-block max-w-[400px]">
+        <div className="relative inline-block max-w-[400px] group">
           <video src={decrypted.src} controls className={className || ''} />
-          <div className="absolute top-1.5 right-1.5 flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/30 text-[9px] text-emerald-400 font-medium">
+          <div className="absolute top-1.5 right-1.5 flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/30 text-[9px] text-emerald-400 font-medium opacity-0 group-hover:opacity-100 transition-opacity duration-200">
             <Lock size={8} /> Encrypted
           </div>
         </div>
       )
     }
     return (
-      <div className="relative inline-block">
+      <div className="relative inline-block group">
         <CustomAudioPlayer src={decrypted.src} className={className} />
-        <div className="absolute -top-1.5 right-1 flex items-center gap-0.5 px-1 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/30 text-[8px] text-emerald-400 font-medium">
+        <div className="absolute -top-1.5 right-1 flex items-center gap-0.5 px-1 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/30 text-[8px] text-emerald-400 font-medium opacity-0 group-hover:opacity-100 transition-opacity duration-200">
           <Lock size={7} />
         </div>
       </div>
@@ -2170,14 +2170,14 @@ function BlobImage({ servers, hash, ext, type, className, wrapperClassName, alt,
     }
     // Decrypted — render from blob URL
     return (
-      <div className={wrapperClassName || "relative inline-block max-w-[400px]"}>
+      <div className={`${wrapperClassName || "relative inline-block max-w-[400px]"} group`}>
         <img
           src={decrypted.src}
           alt={alt || ''}
           className={className || ''}
           onClick={onClick}
         />
-        <div className="absolute top-1.5 right-1.5 flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/30 text-[9px] text-emerald-400 font-medium">
+        <div className="absolute top-1.5 right-1.5 flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/30 text-[9px] text-emerald-400 font-medium opacity-0 group-hover:opacity-100 transition-opacity duration-200">
           <Lock size={8} /> Encrypted
         </div>
       </div>
