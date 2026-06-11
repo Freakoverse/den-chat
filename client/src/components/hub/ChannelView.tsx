@@ -9,7 +9,7 @@ import { useDMStore } from '@/stores/dmStore'
 import { useDM04Store } from '@/stores/dm04Store'
 import { useNavigationStore } from '@/stores/navigationStore'
 import { useMessages, type ChatMessage, type Attachment } from '@/hooks/useMessages'
-import { fetchOlderMessages, fetchNewerMessages, fetchSingleMessage, fetchMessageContext, PAGE_SIZE } from '@/hooks/useHubSubscriptions'
+import { fetchOlderMessages, fetchNewerMessages, fetchSingleMessage, fetchMessageContext, fetchChannelLatest, PAGE_SIZE } from '@/hooks/useHubSubscriptions'
 import { useProfileCache, getCachedProfile } from '@/hooks/useProfileCache'
 import { useBlossomMedia } from '@/hooks/useBlossomMedia'
 import { useDecryptedMedia, getDecryptedBlobUrl } from '@/hooks/useDecryptedMedia'
@@ -761,10 +761,36 @@ function MessageList({ hubDTag, channelId, channelName, optimisticMessages, setO
     return map
   }, [messages])
 
-  // Pagination state
   const [loadingHistory, setLoadingHistory] = useState(false)
   const [hasMore, setHasMore] = useState(true)
   const sentinelRef = useRef<HTMLDivElement>(null)
+
+  // ── Per-channel fetch on open ──
+  // The hub-wide initial subscription fetches the latest 50 events across ALL
+  // channels, so quieter channels may have zero messages in the store.
+  // When we open such a channel, fire a targeted per-channel fetch.
+  const [loadingChannelFetch, setLoadingChannelFetch] = useState(false)
+  const channelFetchedRef = useRef<Set<string>>(new Set())
+
+  useEffect(() => {
+    const key = `${hubDTag}:${channelId}`
+    // Skip if we already fetched for this channel in this session
+    if (channelFetchedRef.current.has(key)) return
+    channelFetchedRef.current.add(key)
+
+    // Only show loading spinner if the store has no messages yet (cache miss).
+    // If we already have cached/hub-wide messages, fetch silently in the background.
+    const rawCount = useMessageStore.getState().messages[hubDTag]?.[channelId]?.length ?? 0
+    if (rawCount === 0) setLoadingChannelFetch(true)
+
+    fetchChannelLatest(hubDTag, channelId)
+      .then((count) => {
+        console.log(`[ChannelView] Channel-open fetch: ${count} messages for ${channelId}`)
+      })
+      .finally(() => {
+        setLoadingChannelFetch(false)
+      })
+  }, [hubDTag, channelId])
 
   // Build set of visible parent refs for thread filter
   const parentRefs = useMemo(() => {
@@ -1338,6 +1364,14 @@ function MessageList({ hubDTag, channelId, channelName, optimisticMessages, setO
         <div className="px-4 py-4">
           <div>
             <WelcomeMessage channelName={channelName} />
+
+            {/* Loading spinner for per-channel fetch on open */}
+            {loadingChannelFetch && messages.length === 0 && (
+              <div className="flex flex-col items-center justify-center py-8">
+                <Loader2 size={22} className="animate-spin text-primary mb-2" />
+                <span className="text-sm text-muted-foreground">Loading messages...</span>
+              </div>
+            )}
 
             {/* Loading spinner for history */}
             {loadingHistory && (

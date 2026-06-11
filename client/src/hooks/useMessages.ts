@@ -3,11 +3,10 @@
  *
  * Messages come from the shared messageStore, which is populated by:
  * 1. IndexedDB cache (loaded on startup — instant)
- * 2. Initial fetch subscription (limit: 50 latest messages)
- * 3. Real-time subscription (new messages as they arrive)
- * 4. History pagination (fetchOlderMessages — scroll-triggered)
- *
- * No per-channel fetch needed — everything is already there.
+ * 2. Initial fetch subscription (limit: 50 latest messages, hub-wide)
+ * 3. Per-channel fetch on channel open (fetchChannelLatest — fills gaps from hub-wide fetch)
+ * 4. Real-time subscription (new messages as they arrive)
+ * 5. History pagination (fetchOlderMessages — scroll-triggered)
  */
 
 import { useEffect, useState, useCallback, useRef } from 'react'

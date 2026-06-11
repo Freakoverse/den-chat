@@ -186,6 +186,64 @@ export function fetchOlderMessages(
 }
 
 /**
+ * Fetch the latest messages for a specific hub+channel on channel open.
+ * Called when the user opens a channel that has no (or few) messages in the store,
+ * because the hub-wide initial fetch (limit: 50 across ALL channels) may have
+ * returned zero messages for this particular channel.
+ *
+ * Uses '#c' to narrow the fetch to a single channel.
+ * Returns a promise that resolves with the count of messages received.
+ */
+export function fetchChannelLatest(
+  hubDTag: string,
+  channelId: string
+): Promise<number> {
+  const hubs = useHubStore.getState().hubs
+  const hub = hubs[hubDTag]
+  if (!hub) return Promise.resolve(0)
+
+  const addMessage = useMessageStore.getState().addMessage
+  const minPow = hub.minPow || 0
+
+  const relays = [...new Set([...hub.generalRelays, ...hub.filterRelays])].filter(Boolean)
+  if (relays.length === 0) return Promise.resolve(0)
+
+  return new Promise((resolve) => {
+    let count = 0
+    const sub = subscribeToRelays(
+      relays,
+      {
+        kinds: [KINDS.MESSAGE],
+        '#h': [hubDTag],
+        '#c': [channelId],
+        limit: INITIAL_LIMIT,
+      },
+      (event: Event) => {
+        const msg = parseMessage(event)
+        if (!msg) return
+
+        if (minPow > 0 && countLeadingZeroBits(event.id) < minPow) return
+
+        addMessage(msg)
+        cacheMessageWithDedup(msg).catch(() => {})
+        count++
+      },
+      () => {
+        sub.close()
+        console.log(`[HubSubs] Channel fetch complete: ${count} messages for channel ${channelId}`)
+        resolve(count)
+      }
+    )
+
+    // Safety timeout
+    setTimeout(() => {
+      sub.close()
+      resolve(count)
+    }, 15000)
+  })
+}
+
+/**
  * Fetch newer messages for a specific hub+channel (scroll-down in time-travel).
  * Queries relays for messages created after `sinceTimestamp` with limit: PAGE_SIZE.
  * Adds to message store. Returns count of messages received.
