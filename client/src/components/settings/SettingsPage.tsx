@@ -3627,13 +3627,17 @@ function SoundEffectsSection() {
           return (
             <div key={name} className="flex items-center gap-2 px-3 py-2 rounded-lg border border-border bg-secondary/30">
               {/* Preview button */}
-              <button
-                onClick={() => previewSfx(name)}
-                className="w-7 h-7 rounded-md bg-secondary/60 hover:bg-secondary flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors cursor-pointer shrink-0"
-                title="Preview sound"
-              >
-                <Volume2 size={14} />
-              </button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    onClick={() => previewSfx(name)}
+                    className="w-7 h-7 rounded-md bg-secondary/60 hover:bg-secondary flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors cursor-pointer shrink-0"
+                  >
+                    <Volume2 size={14} />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top">Preview sound</TooltipContent>
+              </Tooltip>
 
               {/* Label */}
               <div className="flex-1 min-w-0">
@@ -3644,21 +3648,29 @@ function SoundEffectsSection() {
               </div>
 
               {/* Change / Reset buttons */}
-              <button
-                onClick={() => handleCustomFile(name)}
-                className="px-2 py-1 rounded text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors cursor-pointer shrink-0"
-                title="Upload custom sound"
-              >
-                Change
-              </button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    onClick={() => handleCustomFile(name)}
+                    className="px-2 py-1 rounded text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors cursor-pointer shrink-0"
+                  >
+                    Change
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top">Upload custom sound</TooltipContent>
+              </Tooltip>
               {isCustom && (
-                <button
-                  onClick={() => handleReset(name)}
-                  className="px-2 py-1 rounded text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors cursor-pointer shrink-0"
-                  title="Reset to default sound"
-                >
-                  <Undo2 size={12} />
-                </button>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={() => handleReset(name)}
+                      className="px-2 py-1 rounded text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors cursor-pointer shrink-0"
+                    >
+                      <Undo2 size={12} />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top">Reset to default sound</TooltipContent>
+                </Tooltip>
               )}
 
               {/* Enable/Disable toggle */}

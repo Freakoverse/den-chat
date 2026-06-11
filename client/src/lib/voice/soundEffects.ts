@@ -1,13 +1,13 @@
 /**
  * Sound Effects Manager — Plays audio feedback for voice channel actions.
  *
- * Supports 7 sound effect slots: mute, unmute, deafen, undeafen, join, leave, message.
+ * Supports 8 sound effect slots: mute, unmute, deafen, undeafen, join, leave, message, dm_message.
  * Default sounds ship in /audio/*.mp3.
  * Users can override each sound with a custom file (stored as base64 data URI in localStorage).
  * Each sound can be individually enabled/disabled and have its own volume.
  */
 
-export type SoundEffectName = 'mute' | 'unmute' | 'deafen' | 'undeafen' | 'join' | 'leave' | 'message'
+export type SoundEffectName = 'mute' | 'unmute' | 'deafen' | 'undeafen' | 'join' | 'leave' | 'message' | 'dm_message'
 
 export interface SoundEffectConfig {
   enabled: boolean
@@ -22,7 +22,7 @@ export interface SoundEffectsState {
 
 const STORAGE_KEY = 'den-chat-sound-effects'
 
-const SOUND_NAMES: SoundEffectName[] = ['mute', 'unmute', 'deafen', 'undeafen', 'join', 'leave', 'message']
+const SOUND_NAMES: SoundEffectName[] = ['mute', 'unmute', 'deafen', 'undeafen', 'join', 'leave', 'message', 'dm_message']
 
 /** Default audio paths (served from /public/audio/) */
 const DEFAULT_PATHS: Record<SoundEffectName, string> = {
@@ -33,6 +33,7 @@ const DEFAULT_PATHS: Record<SoundEffectName, string> = {
   join: '/audio/join.mp3',
   leave: '/audio/leave.mp3',
   message: '/audio/message.mp3',
+  dm_message: '/audio/message.mp3',
 }
 
 /** Human-readable labels for each sound */
@@ -44,6 +45,7 @@ export const SOUND_LABELS: Record<SoundEffectName, string> = {
   join: 'Join Voice Channel',
   leave: 'Leave Voice Channel',
   message: 'Hub Message',
+  dm_message: 'DM Message',
 }
 
 function defaultEffectConfig(): SoundEffectConfig {

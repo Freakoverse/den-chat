@@ -15,8 +15,13 @@ import { createGiftWrap, unwrapGiftWrap, computeRumorId, type UnwrappedDM } from
 import { useBlockStore } from '@/stores/blockStore'
 import { useNotificationStore } from '@/stores/notificationStore'
 import { useWotStore } from '@/stores/wotStore'
+import { useFollowStore } from '@/stores/followStore'
+import { playSoundEffect } from '@/lib/voice/soundEffects'
 import type { ISigner } from '@/stores/userStore'
 import type { Event } from 'nostr-tools'
+
+/** Unix timestamp (seconds) of when this session started — sounds only play for messages after this */
+const dmSessionStartTime = Math.floor(Date.now() / 1000)
 
 /* ─── Types ─── */
 
@@ -792,6 +797,10 @@ function insertMessage(
           existing.unread++
         }
       }
+      // Play DM sound for real-time messages from followed users
+      if (msg.createdAt >= dmSessionStartTime && useFollowStore.getState().followedPubkeys.has(counterparty)) {
+        playSoundEffect('dm_message')
+      }
     }
   } else {
     // For new conversations, check lastRead before setting initial unread
@@ -803,6 +812,10 @@ function insertMessage(
       } else {
         const lastRead = useNotificationStore.getState().dm17Unreads[counterparty]?.lastRead ?? 0
         if (msg.createdAt > lastRead) initialUnread = 1
+      }
+      // Play DM sound for real-time messages from followed users
+      if (msg.createdAt >= dmSessionStartTime && useFollowStore.getState().followedPubkeys.has(counterparty)) {
+        playSoundEffect('dm_message')
       }
     }
     conversations.set(counterparty, {

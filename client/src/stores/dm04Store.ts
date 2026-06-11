@@ -31,6 +31,10 @@ import {
 } from '@/lib/nostr/dm04ContactRegistry'
 import type { ISigner } from '@/stores/userStore'
 import type { Event } from 'nostr-tools'
+import { playSoundEffect } from '@/lib/voice/soundEffects'
+
+/** Unix timestamp (seconds) of when this session started — DM sounds only play for messages after this */
+const dm04SessionStartTime = Math.floor(Date.now() / 1000)
 
 /* ─── Types ─── */
 
@@ -1130,6 +1134,10 @@ function addDM04ToConversations(
       } else if (!isAlreadyRead) {
         newUnread = existing.unread + 1
       }
+      // Play DM sound for real-time messages from followed users
+      if (msg.createdAt >= dm04SessionStartTime && useFollowStore.getState().followedPubkeys.has(counterparty)) {
+        playSoundEffect('dm_message')
+      }
     }
 
     conversations.set(counterparty, {
@@ -1145,6 +1153,10 @@ function addDM04ToConversations(
   } else {
     if (isActiveConv && !msg.isMine) {
       useNotificationStore.getState().markDmRead(counterparty, 'nip04')
+    }
+    // Play DM sound for real-time messages from followed users (new conversation)
+    if (!msg.isMine && msg.createdAt >= dm04SessionStartTime && useFollowStore.getState().followedPubkeys.has(counterparty)) {
+      playSoundEffect('dm_message')
     }
     conversations.set(counterparty, {
       pubkey: counterparty,
