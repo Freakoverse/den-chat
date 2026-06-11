@@ -18,7 +18,7 @@ import { buildRelayIndex } from '@/lib/nostr/buildRelayIndex'
 import { KINDS, STANDARD_KINDS } from '@/lib/crypto/constants'
 import {
   loadAllCachedMessages,
-  cacheMessage,
+  cacheMessageWithDedup,
   pruneAll,
 } from '@/lib/cache/messageCache'
 import { countLeadingZeroBits } from '@/lib/pow/pow'
@@ -166,7 +166,7 @@ export function fetchOlderMessages(
         if (minPow > 0 && countLeadingZeroBits(event.id) < minPow) return
 
         addMessage(msg)
-        cacheMessage(msg).catch(() => {})
+        cacheMessageWithDedup(msg).catch(() => {})
         count++
       },
       () => {
@@ -222,7 +222,7 @@ export function fetchNewerMessages(
         if (minPow > 0 && countLeadingZeroBits(event.id) < minPow) return
 
         addMessage(msg)
-        cacheMessage(msg).catch(() => {})
+        cacheMessageWithDedup(msg).catch(() => {})
         count++
       },
       () => {
@@ -280,7 +280,7 @@ export function fetchSingleMessage(
           found = msg
           // Also add to store so it's available for context
           useMessageStore.getState().addMessage(msg)
-          cacheMessage(msg).catch(() => {})
+          cacheMessageWithDedup(msg).catch(() => {})
         }
       },
       () => {
@@ -327,7 +327,7 @@ export function fetchMessageContext(
           if (!msg) return
           if (minPow > 0 && countLeadingZeroBits(event.id) < minPow) return
           addMessage(msg)
-          cacheMessage(msg).catch(() => {})
+          cacheMessageWithDedup(msg).catch(() => {})
           count++
         },
         () => {
@@ -470,7 +470,7 @@ function handleEditHint(event: Event) {
         const msg = parseMessage(fetchedEvent)
         if (msg) {
           useMessageStore.getState().addMessage(msg)
-          cacheMessage(msg).catch(() => {})
+          cacheMessageWithDedup(msg).catch(() => {})
           console.log(`[EditHint] Updated message dTag=${messageDTag.slice(0, 12)}… (new created_at=${fetchedEvent.created_at})`)
         }
       }
@@ -719,7 +719,7 @@ export function useHubSubscriptions() {
       if (buffer) {
         buffer.push(msg)
       } else {
-        cacheMessage(msg).catch(() => {})
+        cacheMessageWithDedup(msg).catch(() => {})
       }
 
       // Skip unread increment if we already processed this event
@@ -784,8 +784,8 @@ export function useHubSubscriptions() {
           initialSub.close()
           // Flush buffered messages to IndexedDB in a single bulk transaction
           if (initialBuffer.length > 0) {
-            import('@/lib/cache/messageCache').then(({ cacheMessages }) => {
-              cacheMessages(initialBuffer).catch(() => {})
+            import('@/lib/cache/messageCache').then(({ cacheMessagesWithDedup }) => {
+              cacheMessagesWithDedup(initialBuffer).catch(() => {})
             })
           }
         }

@@ -503,8 +503,8 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
         injected = true
 
         useMessageStore.getState().addMessage(ownMsg)
-        import('@/lib/cache/messageCache').then(({ cacheMessage }) => {
-          cacheMessage(ownMsg).catch(() => {})
+        import('@/lib/cache/messageCache').then(({ cacheMessageWithDedup }) => {
+          cacheMessageWithDedup(ownMsg).catch(() => {})
         })
 
         // Inject pre-decrypted version into the self-decrypt cache so the
@@ -769,7 +769,7 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
 
     // Persist deletion to IndexedDB cache so the message doesn't resurrect on reload.
     // Remove the old cache entry (keyed by original event ID) and write the deleted replacement.
-    import('@/lib/cache/messageCache').then(({ deleteCachedMessage, cacheMessage }) => {
+    import('@/lib/cache/messageCache').then(({ deleteCachedMessage, cacheMessageWithDedup }) => {
       if (originalMsg) {
         deleteCachedMessage(originalMsg.id).catch(() => {})
       }
@@ -786,7 +786,7 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
         epoch,
         deleted: true,
       }
-      cacheMessage(deletedCacheMsg).catch(() => {})
+      cacheMessageWithDedup(deletedCacheMsg).catch(() => {})
     })
   }, [hubDTag, channelId, signer, privateKey, pubkey])
 

@@ -11,7 +11,7 @@
 import type { ChatMessage } from '@/stores/messageStore'
 
 const DB_NAME = 'den-chat-messages'
-const DB_VERSION = 1
+const DB_VERSION = 2
 const STORE_NAME = 'messages'
 
 /** 100 MB per hub limit (approximate, based on JSON byte size) */
@@ -25,13 +25,26 @@ function openDB(): Promise<IDBDatabase> {
   dbPromise = new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION)
 
-    request.onupgradeneeded = () => {
+    request.onupgradeneeded = (event) => {
       const db = request.result
-      if (!db.objectStoreNames.contains(STORE_NAME)) {
+      const oldVersion = event.oldVersion
+
+      if (oldVersion < 1) {
+        // Fresh install — create object store with all indexes
         const store = db.createObjectStore(STORE_NAME, { keyPath: 'id' })
         store.createIndex('by_hub', 'hubDTag', { unique: false })
         store.createIndex('by_hub_channel', ['hubDTag', 'channelId'], { unique: false })
         store.createIndex('by_created', 'createdAt', { unique: false })
+        store.createIndex('by_dtag_pubkey', ['dTag', 'pubkey'], { unique: false })
+      }
+
+      if (oldVersion >= 1 && oldVersion < 2) {
+        // Migration: add dTag+pubkey index for cache dedup on write
+        const tx = (event.target as IDBOpenDBRequest).transaction!
+        const store = tx.objectStore(STORE_NAME)
+        if (!store.indexNames.contains('by_dtag_pubkey')) {
+          store.createIndex('by_dtag_pubkey', ['dTag', 'pubkey'], { unique: false })
+        }
       }
     }
 
@@ -57,6 +70,110 @@ export async function cacheMessage(msg: ChatMessage): Promise<void> {
     })
   } catch (err) {
     console.warn('[MessageCache] Failed to cache message:', err)
+  }
+}
+
+/**
+ * Save a single message to IndexedDB with addressable-event deduplication.
+ * Looks up existing entries with the same dTag + pubkey and removes older versions,
+ * preventing stale edited/deleted messages from accumulating in the cache.
+ */
+export async function cacheMessageWithDedup(msg: ChatMessage): Promise<void> {
+  try {
+    const db = await openDB()
+    const tx = db.transaction(STORE_NAME, 'readwrite')
+    const store = tx.objectStore(STORE_NAME)
+    const index = store.index('by_dtag_pubkey')
+    const range = IDBKeyRange.only([msg.dTag, msg.pubkey])
+    const request = index.getAll(range)
+
+    request.onsuccess = () => {
+      const existing = request.result as ChatMessage[] | undefined
+      if (existing) {
+        const msgTs = msg.eventCreatedAt || msg.createdAt
+        for (const old of existing) {
+          if (old.id !== msg.id) {
+            const oldTs = old.eventCreatedAt || old.createdAt
+            if (msgTs >= oldTs) {
+              // Incoming is newer or same — delete stale entry
+              store.delete(old.id)
+            } else {
+              // Incoming is older — skip writing it entirely
+              return
+            }
+          }
+        }
+      }
+      store.put(msg)
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      tx.oncomplete = () => resolve()
+      tx.onerror = () => reject(tx.error)
+    })
+  } catch (err) {
+    console.warn('[MessageCache] Failed to cache message with dedup:', err)
+  }
+}
+
+/**
+ * Save multiple messages to IndexedDB with addressable-event deduplication.
+ * Deduplicates within the batch first (keeping newest per dTag+pubkey),
+ * then cleans up any stale entries already in the cache.
+ */
+export async function cacheMessagesWithDedup(msgs: ChatMessage[]): Promise<void> {
+  if (msgs.length === 0) return
+
+  // Pre-deduplicate the batch: keep only the newest per dTag+pubkey
+  const byKey = new Map<string, ChatMessage>()
+  for (const msg of msgs) {
+    const key = `${msg.dTag}:${msg.pubkey}`
+    const existing = byKey.get(key)
+    if (existing) {
+      const msgTs = msg.eventCreatedAt || msg.createdAt
+      const existingTs = existing.eventCreatedAt || existing.createdAt
+      if (msgTs > existingTs) {
+        byKey.set(key, msg)
+      }
+    } else {
+      byKey.set(key, msg)
+    }
+  }
+  const deduped = Array.from(byKey.values())
+
+  try {
+    const db = await openDB()
+    const tx = db.transaction(STORE_NAME, 'readwrite')
+    const store = tx.objectStore(STORE_NAME)
+    const index = store.index('by_dtag_pubkey')
+
+    for (const msg of deduped) {
+      // Look up existing entries with same dTag + pubkey and clean up stale ones
+      const range = IDBKeyRange.only([msg.dTag, msg.pubkey])
+      const request = index.getAll(range)
+      request.onsuccess = () => {
+        const existing = request.result as ChatMessage[] | undefined
+        if (existing) {
+          const msgTs = msg.eventCreatedAt || msg.createdAt
+          for (const old of existing) {
+            if (old.id !== msg.id) {
+              const oldTs = old.eventCreatedAt || old.createdAt
+              if (msgTs >= oldTs) {
+                store.delete(old.id)
+              }
+            }
+          }
+        }
+        store.put(msg)
+      }
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      tx.oncomplete = () => resolve()
+      tx.onerror = () => reject(tx.error)
+    })
+  } catch (err) {
+    console.warn('[MessageCache] Failed to cache messages with dedup:', err)
   }
 }
 
