@@ -7,7 +7,7 @@
  * Used by both hub chat (ChannelView) and DMs (DMPage).
  */
 
-import { useState, useEffect, useMemo, memo, useCallback, Children, isValidElement, cloneElement } from 'react'
+import { useState, useEffect, useMemo, memo, useCallback, useRef, Children, isValidElement, cloneElement } from 'react'
 import { Clipboard, ClipboardCheck, Download, Loader2, Check, Copy, Hash } from 'lucide-react'
 import { useBlossomMedia } from '@/hooks/useBlossomMedia'
 import { VerificationBadge } from '@/components/ui/VerificationBadge'
@@ -507,6 +507,26 @@ export const MessageContent = memo(function MessageContent({ content, suffix, on
     })
   }, [effectiveMutedWords, redactMutedWords])
 
+  // Collect embeds/previews during render, then render them all after the text content
+  // This prevents embeds from splitting inline text (e.g. "testing out [link] [EMBED] , seems decent")
+  type DeferredEmbed = { type: 'embed'; href: string; embed: ReturnType<typeof detectEmbed> } | { type: 'preview'; href: string }
+  const collectedEmbedsRef = useRef<DeferredEmbed[]>([])
+
+  /** Renders all embeds/previews collected during the last markdown pass */
+  const DeferredEmbeds = useCallback(() => {
+    const items = collectedEmbedsRef.current
+    if (items.length === 0) return null
+    return (
+      <>
+        {items.map((item, i) =>
+          item.type === 'embed'
+            ? <div key={`embed-${i}`} className="mt-1"><Embed embed={item.embed!} maxWidth={400} /></div>
+            : <LinkPreview key={`preview-${i}`} href={item.href} />
+        )}
+      </>
+    )
+  }, [])
+
   // Stable reference — prevents React from unmounting/remounting custom elements on parent re-renders
   const components = useMemo<import('react-markdown').Components>(() => ({
     p: ({ children }) => {
@@ -550,31 +570,29 @@ export const MessageContent = memo(function MessageContent({ content, suffix, on
       // Embeddable URLs (YouTube, Twitch, Kick, Twitter/X, Spotify, Steam, TikTok)
       const embedInfo = !effectiveDisablePreviews ? detectEmbed(href) : null
       if (embedInfo) {
+        // Defer embed to render after all text content
+        collectedEmbedsRef.current.push({ type: 'embed', href, embed: embedInfo })
         return (
-          <>
-            <a href={href} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">{children}</a>
-            <div className="mt-1">
-              <Embed embed={embedInfo} maxWidth={400} />
-            </div>
-          </>
+          <a href={href} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">{children}</a>
         )
       }
+      // Defer link preview to render after all text content
+      if (!effectiveDisablePreviews) {
+        collectedEmbedsRef.current.push({ type: 'preview', href })
+      }
       return (
-        <>
-          <TooltipProvider delayDuration={300}>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <a href={href} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
-                  {children}
-                </a>
-              </TooltipTrigger>
-              <TooltipContent side="top" className="max-w-[400px] break-all">
-                {href}
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-          {!effectiveDisablePreviews && <LinkPreview href={href} />}
-        </>
+        <TooltipProvider delayDuration={300}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <a href={href} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
+                {children}
+              </a>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="max-w-[400px] break-all">
+              {href}
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
       )
     },
     ul: ({ children }) => <ul className="list-disc list-inside mb-3 last:mb-0">{children}</ul>,
@@ -684,6 +702,8 @@ export const MessageContent = memo(function MessageContent({ content, suffix, on
   const hasNostr = nostrSegments.some(s => s.type === 'nostr')
 
   const renderMarkdown = (text: string) => {
+    // Clear the deferred embeds collector before each render pass
+    collectedEmbedsRef.current = []
     // Pre-process: replace @everyone, @here, @roleName with markdown image syntax for inline rendering
     const mentioned = preMentionMarkdown(text, hubRoleNames)
     // Pre-process: replace <t:unix> with markdown image syntax for inline rendering
@@ -695,9 +715,12 @@ export const MessageContent = memo(function MessageContent({ content, suffix, on
       return '\n\n' + spacers + '\n\n'
     })
     return (
-      <Markdown remarkPlugins={[remarkGfm, remarkBreaks]} components={components}>
-        {proc}
-      </Markdown>
+      <>
+        <Markdown remarkPlugins={[remarkGfm, remarkBreaks]} components={components}>
+          {proc}
+        </Markdown>
+        <DeferredEmbeds />
+      </>
     )
   }
 
