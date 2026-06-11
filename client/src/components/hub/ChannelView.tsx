@@ -5229,51 +5229,51 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
 
         {/* Pending stickers strip */}
         {pendingStickers.length > 0 && (
-          <div className={`flex items-center gap-2 px-3 py-1.5 bg-secondary/60 border border-border border-b-0 ${(replyContext && !hideReplyBanner) || showToolbar || pendingFiles.length > 0 || detectedEmojis.length > 0 ? '' : 'rounded-t-md'}`}>
-            <span className="text-[10px] text-muted-foreground shrink-0">Stickers:</span>
-            {pendingStickers.map((st, i) => (
-              <div key={`${st.shortcode}-${i}`} className="relative group">
-                <TooltipProvider delayDuration={200}>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <img src={st.url} alt={`:${st.shortcode}:`} className="h-12 w-12 object-contain rounded" loading="lazy" />
-                    </TooltipTrigger>
-                    <TooltipContent side="top" className="text-xs">:{st.shortcode}:</TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-                <button
-                  onClick={() => setPendingStickers((prev) => prev.filter((_, idx) => idx !== i))}
-                  className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-destructive text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
-                >
-                  <X size={8} />
-                </button>
-              </div>
-            ))}
+          <div className={`flex flex-col gap-2 px-3 py-2 bg-secondary/60 border border-border border-b-0 ${(replyContext && !hideReplyBanner) || showToolbar || pendingFiles.length > 0 || detectedEmojis.length > 0 ? '' : 'rounded-t-md'}`}>
+            <div className="flex gap-2 overflow-x-auto">
+              {pendingStickers.map((st, i) => (
+                <div key={`${st.shortcode}-${i}`} className="flex items-stretch bg-background rounded-lg border border-border min-w-[140px] max-w-[220px] shrink-0">
+                  <div className="flex items-center gap-2 flex-1 min-w-0 px-2 py-1.5">
+                    <img src={st.url} alt={`:${st.shortcode}:`} className="w-10 h-10 object-contain rounded shrink-0" loading="lazy" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs text-foreground truncate">:{st.shortcode}:</p>
+                      <p className="text-[10px] text-muted-foreground">Sticker</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setPendingStickers((prev) => prev.filter((_, idx) => idx !== i))}
+                    className="flex items-center justify-center px-1.5 border-l border-border text-muted-foreground hover:text-destructive hover:bg-destructive/10 cursor-pointer transition-colors rounded-r-lg"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
         {/* Pending GIFs strip */}
         {pendingGifs.length > 0 && (
-          <div className={`flex items-center gap-2 px-3 py-1.5 bg-secondary/60 border border-border border-b-0 ${(replyContext && !hideReplyBanner) || showToolbar || pendingFiles.length > 0 || detectedEmojis.length > 0 || pendingStickers.length > 0 ? '' : 'rounded-t-md'}`}>
-            <span className="text-[10px] text-muted-foreground shrink-0">GIFs:</span>
-            {pendingGifs.map((g, i) => (
-              <div key={`${g.url}-${i}`} className="relative group">
-                <TooltipProvider delayDuration={200}>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <img src={g.url} alt={g.name || 'GIF'} className="h-12 w-12 object-cover rounded" loading="lazy" />
-                    </TooltipTrigger>
-                    <TooltipContent side="top" className="text-xs">{g.name || 'GIF'}{g.nsfw ? ' (NSFW)' : ''}</TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-                <button
-                  onClick={() => setPendingGifs((prev) => prev.filter((_, idx) => idx !== i))}
-                  className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-destructive text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
-                >
-                  <X size={8} />
-                </button>
-              </div>
-            ))}
+          <div className={`flex flex-col gap-2 px-3 py-2 bg-secondary/60 border border-border border-b-0 ${(replyContext && !hideReplyBanner) || showToolbar || pendingFiles.length > 0 || detectedEmojis.length > 0 || pendingStickers.length > 0 ? '' : 'rounded-t-md'}`}>
+            <div className="flex gap-2 overflow-x-auto">
+              {pendingGifs.map((g, i) => (
+                <div key={`${g.url}-${i}`} className="flex items-stretch bg-background rounded-lg border border-border min-w-[140px] max-w-[220px] shrink-0">
+                  <div className="flex items-center gap-2 flex-1 min-w-0 px-2 py-1.5">
+                    <img src={g.url} alt={g.name || 'GIF'} className="w-10 h-10 object-cover rounded shrink-0" loading="lazy" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs text-foreground truncate">{g.name || 'GIF'}</p>
+                      <p className="text-[10px] text-muted-foreground">{g.nsfw ? 'GIF · NSFW' : 'GIF'}</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setPendingGifs((prev) => prev.filter((_, idx) => idx !== i))}
+                    className="flex items-center justify-center px-1.5 border-l border-border text-muted-foreground hover:text-destructive hover:bg-destructive/10 cursor-pointer transition-colors rounded-r-lg"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
