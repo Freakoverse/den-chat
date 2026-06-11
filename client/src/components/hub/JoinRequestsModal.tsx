@@ -23,7 +23,7 @@ import { truncateNpub, cn } from '@/lib/utils'
 import { nip19 } from 'nostr-tools'
 import { markJoinRequestsSeen } from '@/hooks/useJoinRequestCount'
 import {
-  X, Search, Loader2, Check, Users, CheckSquare, Square, AlertTriangle, ChevronDown, UserPlus, RotateCw,
+  X, Search, Loader2, Check, CheckSquare, Square, AlertTriangle, ChevronDown, UserPlus, RotateCw,
 } from 'lucide-react'
 import { UserProfileModal } from '@/components/hub/UserProfileModal'
 
@@ -83,7 +83,6 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
   const [profilePubkey, setProfilePubkey] = useState<string | null>(null)
   const [timeFilterIdx, setTimeFilterIdx] = useState(1) // Default: 48h
   const [showTimeDropdown, setShowTimeDropdown] = useState(false)
-  const [multiSelect, setMultiSelect] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [adding, setAdding] = useState(false)
   const [addError, setAddError] = useState<string | null>(null)
@@ -192,16 +191,12 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
   }, [requests, search, getProfile])
 
   const toggleSelect = (pk: string) => {
-    if (multiSelect) {
-      setSelected(prev => {
-        const next = new Set(prev)
-        if (next.has(pk)) next.delete(pk)
-        else next.add(pk)
-        return next
-      })
-    } else {
-      setSelected(prev => prev.has(pk) ? new Set() : new Set([pk]))
-    }
+    setSelected(prev => {
+      const next = new Set(prev)
+      if (next.has(pk)) next.delete(pk)
+      else next.add(pk)
+      return next
+    })
   }
 
   const markStep = async (step: string) => {
@@ -474,19 +469,6 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
               )}
             </div>
 
-            {/* Multi-select toggle */}
-            <button
-              onClick={() => { setMultiSelect(!multiSelect); setSelected(new Set()) }}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs transition-colors cursor-pointer
-                ${multiSelect
-                  ? 'bg-primary/10 border-primary/30 text-primary'
-                  : 'bg-secondary/50 border-border text-muted-foreground hover:text-foreground'
-                }`}
-            >
-              <Users size={12} />
-              Multi-select
-            </button>
-
             <div className="flex-1" />
 
             <span className="text-xs text-muted-foreground">
@@ -538,31 +520,31 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
                         : 'hover:bg-secondary/50 border border-transparent'
                       }`}
                   >
-                    {multiSelect && (
-                      <div className="shrink-0">
-                        {isSelected
-                          ? <CheckSquare size={16} className="text-primary" />
-                          : <Square size={16} className="text-muted-foreground" />
-                        }
-                      </div>
-                    )}
-                    <div
-                      className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer hover:opacity-80 transition-opacity"
+                    <div className="shrink-0">
+                      {isSelected
+                        ? <CheckSquare size={16} className="text-primary" />
+                        : <Square size={16} className="text-muted-foreground" />
+                      }
+                    </div>
+                    <Avatar
+                      className="h-9 w-9 shrink-0 cursor-pointer hover:opacity-80 transition-opacity"
                       onClick={(e) => { e.stopPropagation(); setProfilePubkey(req.pubkey) }}
                       title="View profile"
                     >
-                      <Avatar className="h-9 w-9 shrink-0">
-                        {profile?.picture && <AvatarImage src={profile.picture} />}
-                        <AvatarFallback className="text-xs bg-primary/20 text-primary">
-                          {displayName.slice(0, 2).toUpperCase()}
-                        </AvatarFallback>
-                      </Avatar>
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium text-foreground truncate hover:underline">{displayName}</p>
-                        <p className="text-xs text-muted-foreground font-mono truncate">
-                          {truncateNpub(npubStr, 16)}
-                        </p>
-                      </div>
+                      {profile?.picture && <AvatarImage src={profile.picture} />}
+                      <AvatarFallback className="text-xs bg-primary/20 text-primary">
+                        {displayName.slice(0, 2).toUpperCase()}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="min-w-0 flex-1">
+                      <p
+                        className="text-sm font-medium text-foreground truncate hover:underline cursor-pointer w-fit"
+                        onClick={(e) => { e.stopPropagation(); setProfilePubkey(req.pubkey) }}
+                        title="View profile"
+                      >{displayName}</p>
+                      <p className="text-xs text-muted-foreground font-mono truncate">
+                        {truncateNpub(npubStr, 5)}
+                      </p>
                     </div>
                     <div className="flex flex-col items-end gap-0.5 shrink-0">
                       <span className="text-[10px] text-muted-foreground">{timeAgo}</span>
@@ -570,11 +552,6 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
                         <span className="text-[10px] text-amber-400">Processing needed: {req.powBits}</span>
                       )}
                     </div>
-                    {!multiSelect && isSelected && (
-                      <div className="w-5 h-5 rounded-full bg-primary flex items-center justify-center shrink-0">
-                        <Check size={10} className="text-white" />
-                      </div>
-                    )}
                   </button>
                 )
               })}
