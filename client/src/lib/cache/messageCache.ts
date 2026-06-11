@@ -11,7 +11,7 @@
 import type { ChatMessage } from '@/stores/messageStore'
 
 const DB_NAME = 'den-chat-messages'
-const DB_VERSION = 2
+const DB_VERSION = 3
 const STORE_NAME = 'messages'
 
 /** 100 MB per hub limit (approximate, based on JSON byte size) */
@@ -39,12 +39,23 @@ function openDB(): Promise<IDBDatabase> {
       }
 
       if (oldVersion >= 1 && oldVersion < 2) {
-        // Migration: add dTag+pubkey index for cache dedup on write
+        // Migration: add dTag+pubkey index for cache dedup on write.
+        // Also clear all existing data — old caches may contain stale pre-edit/pre-delete
+        // versions that would never get cleaned up (no new write targets them).
+        // The cache repopulates from relays on next subscription.
         const tx = (event.target as IDBOpenDBRequest).transaction!
         const store = tx.objectStore(STORE_NAME)
+        store.clear()
         if (!store.indexNames.contains('by_dtag_pubkey')) {
           store.createIndex('by_dtag_pubkey', ['dTag', 'pubkey'], { unique: false })
         }
+      }
+
+      if (oldVersion >= 2 && oldVersion < 3) {
+        // Migration v2→v3: clear stale cache data for users who upgraded to v2
+        // before the cache-wipe was added to the v1→v2 migration.
+        const tx = (event.target as IDBOpenDBRequest).transaction!
+        tx.objectStore(STORE_NAME).clear()
       }
     }
 
