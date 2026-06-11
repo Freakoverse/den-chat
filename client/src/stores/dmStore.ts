@@ -780,18 +780,30 @@ function insertMessage(
       existing.oldestWrapTimestamp = msg.wrapCreatedAt
     }
     // Only count as unread if the message is newer than the persisted lastRead
+    // AND the user is NOT currently viewing this conversation
     if (!isMine) {
-      const lastRead = useNotificationStore.getState().dm17Unreads[counterparty]?.lastRead ?? 0
-      if (msg.createdAt > lastRead) {
-        existing.unread++
+      const activeConv = useDMStore.getState().activeConversation
+      if (activeConv === counterparty) {
+        // User is viewing this conversation — mark read immediately, don't increment badge
+        useNotificationStore.getState().markDmRead(counterparty, 'nip17')
+      } else {
+        const lastRead = useNotificationStore.getState().dm17Unreads[counterparty]?.lastRead ?? 0
+        if (msg.createdAt > lastRead) {
+          existing.unread++
+        }
       }
     }
   } else {
     // For new conversations, check lastRead before setting initial unread
     let initialUnread = 0
     if (!isMine) {
-      const lastRead = useNotificationStore.getState().dm17Unreads[counterparty]?.lastRead ?? 0
-      if (msg.createdAt > lastRead) initialUnread = 1
+      const activeConv = useDMStore.getState().activeConversation
+      if (activeConv === counterparty) {
+        useNotificationStore.getState().markDmRead(counterparty, 'nip17')
+      } else {
+        const lastRead = useNotificationStore.getState().dm17Unreads[counterparty]?.lastRead ?? 0
+        if (msg.createdAt > lastRead) initialUnread = 1
+      }
     }
     conversations.set(counterparty, {
       pubkey: counterparty,

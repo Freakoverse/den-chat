@@ -244,6 +244,88 @@ export function fetchChannelLatest(
 }
 
 /**
+ * Fetch messages that mention the current user, across all channels of a hub.
+ * Runs once per hub on subscription setup — catches @mentions the user missed
+ * while offline. Uses relay-queryable p tags (individual) and M tags (group).
+ *
+ * @param hubDTag - Hub d-tag
+ * @param myPubkey - Current user's hex pubkey
+ * @param myRoleIds - Role IDs the current user holds (for role mention matching)
+ * @param sinceTimestamp - Only fetch mentions newer than this (typically lastRead)
+ */
+export function fetchMentionsCatchUp(
+  hubDTag: string,
+  myPubkey: string,
+  myRoleIds: string[],
+  sinceTimestamp: number
+): Promise<number> {
+  const hubs = useHubStore.getState().hubs
+  const hub = hubs[hubDTag]
+  if (!hub) return Promise.resolve(0)
+
+  const addMessage = useMessageStore.getState().addMessage
+  const minPow = hub.minPow || 0
+
+  const relays = [...new Set([...hub.generalRelays, ...hub.filterRelays])].filter(Boolean)
+  if (relays.length === 0) return Promise.resolve(0)
+
+  let count = 0
+  const handleEvent = (event: Event) => {
+    // Skip own messages
+    if (event.pubkey === myPubkey) return
+    const msg = parseMessage(event)
+    if (!msg) return
+    if (minPow > 0 && countLeadingZeroBits(event.id) < minPow) return
+    addMessage(msg)
+    cacheMessageWithDedup(msg).catch(() => {})
+    count++
+  }
+
+  // Build two one-shot subscriptions:
+  // 1. Direct mentions: messages with p tag matching our pubkey
+  const directPromise = new Promise<void>((resolve) => {
+    const sub = subscribeToRelays(
+      relays,
+      {
+        kinds: [KINDS.MESSAGE],
+        '#h': [hubDTag],
+        '#p': [myPubkey],
+        since: sinceTimestamp,
+        limit: 100,
+      },
+      handleEvent,
+      () => { sub.close(); resolve() }
+    )
+    setTimeout(() => { sub.close(); resolve() }, 15000)
+  })
+
+  // 2. Group mentions: messages with M tag matching @all, @here, or user's roles
+  const mTagValues = ['all', 'here', ...myRoleIds.map(id => `role:${id}`)]
+  const groupPromise = new Promise<void>((resolve) => {
+    const sub = subscribeToRelays(
+      relays,
+      {
+        kinds: [KINDS.MESSAGE],
+        '#h': [hubDTag],
+        '#M': mTagValues,
+        since: sinceTimestamp,
+        limit: 100,
+      },
+      handleEvent,
+      () => { sub.close(); resolve() }
+    )
+    setTimeout(() => { sub.close(); resolve() }, 15000)
+  })
+
+  return Promise.all([directPromise, groupPromise]).then(() => {
+    if (count > 0) {
+      console.log(`[HubSubs] Mention catch-up: ${count} mention(s) for hub ${hubDTag} since ${new Date(sinceTimestamp * 1000).toISOString()}`)
+    }
+    return count
+  })
+}
+
+/**
  * Fetch newer messages for a specific hub+channel (scroll-down in time-travel).
  * Queries relays for messages created after `sinceTimestamp` with limit: PAGE_SIZE.
  * Adds to message store. Returns count of messages received.
@@ -859,6 +941,78 @@ export function useHubSubscriptions() {
             import('@/lib/cache/messageCache').then(({ cacheMessagesWithDedup }) => {
               cacheMessagesWithDedup(initialBuffer).catch(() => {})
             })
+          }
+
+          // After initial fetch, run mention catch-up for each hub in this batch.
+          // Fetches messages that @-mention the current user (via p/M tags) since
+          // their oldest last-read timestamp, so missed mentions surface as unreads.
+          const myPubkey = useUserStore.getState().pubkey
+          if (myPubkey) {
+            const notifState = useNotificationStore.getState()
+            const hubMembers = useHubStore.getState().hubMembers
+
+            for (const hubDTag of batch.hubDTags) {
+              // Determine user's role IDs in this hub
+              const member = hubMembers[hubDTag]?.find(m => m.pubkey === myPubkey)
+              const roleIds = member?.roles
+                ? member.roles.split('|').filter(Boolean)
+                : []
+
+              // Determine since timestamp: oldest lastRead across all channels,
+              // or fall back to 7 days ago for hubs we've never read
+              const hubUnreads = notifState.hubUnreads[hubDTag]
+              let sinceTs = now - 7 * 24 * 60 * 60 // default: 7 days ago
+              if (hubUnreads) {
+                const readTimes = Object.values(hubUnreads)
+                  .map(u => u.lastRead)
+                  .filter(t => t > 0)
+                if (readTimes.length > 0) {
+                  sinceTs = Math.min(...readTimes)
+                }
+              }
+
+              fetchMentionsCatchUp(hubDTag, myPubkey, roleIds, sinceTs)
+                .then((mentionCount) => {
+                  if (mentionCount > 0) {
+                    // Mention events are already in the store via addMessage.
+                    // The notification badges will update when the user opens
+                    // the channel and detectMentionType runs during decryption.
+                    // For hub-level badge, trigger a background mention scan.
+                    import('@/lib/cache/messageCache').then(async () => {
+                      // Scan newly added mention messages for notification enrichment
+                      const messages = useMessageStore.getState().messages[hubDTag]
+                      if (!messages) return
+                      for (const [channelId, channelMsgs] of Object.entries(messages)) {
+                        for (const msg of channelMsgs) {
+                          if (msg.createdAt <= sinceTs) continue
+                          if (msg.pubkey === myPubkey) continue
+                          // Check if this message has p/M tags mentioning us
+                          if (!msg.rawEvent) continue
+                          try {
+                            const raw = JSON.parse(msg.rawEvent)
+                            const hasPTag = raw.tags?.some((t: string[]) => t[0] === 'p' && t[1] === myPubkey)
+                            const hasMTag = raw.tags?.some((t: string[]) => {
+                              if (t[0] !== 'M') return false
+                              if (t[1] === 'all' || t[1] === 'here') return true
+                              return roleIds.some(rid => t[1] === `role:${rid}`)
+                            })
+                            if (hasPTag || hasMTag) {
+                              const mentionType = hasPTag ? 'personal'
+                                : raw.tags?.some((t: string[]) => t[0] === 'M' && t[1] === 'all') ? 'everyone'
+                                : raw.tags?.some((t: string[]) => t[0] === 'M' && t[1] === 'here') ? 'here'
+                                : 'role'
+                              notifState.incrementChannelUnread(
+                                hubDTag, channelId, msg.createdAt, mentionType
+                              )
+                            }
+                          } catch { /* skip */ }
+                        }
+                      }
+                    }).catch(() => {})
+                  }
+                })
+                .catch(() => {})
+            }
           }
         }
       )

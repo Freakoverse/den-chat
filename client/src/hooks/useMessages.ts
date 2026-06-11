@@ -18,6 +18,7 @@ export type { Attachment }
 import { publishEventProgressive, publishToSpecificRelays } from '@/lib/nostr/relay-pool'
 import { getPublishRelays } from '@/stores/postingBehaviourStore'
 import { signWithSigner, mineAndSign, createMessageEvent, createDeletionEvent, createDeletedMessageEvent, createReactionEvent, createEditHintEvent } from '@/lib/nostr/events'
+import { nip19 } from 'nostr-tools'
 import { KINDS, STANDARD_KINDS } from '@/lib/crypto/constants'
 import { aesEncrypt, aesDecrypt } from '@/lib/crypto/aes'
 import { deriveChannelKey } from '@/lib/crypto/hkdf'
@@ -56,6 +57,59 @@ export interface ChatMessage {
 
 /** Stable empty array to avoid Zustand selector returning new reference each render */
 const EMPTY_MESSAGES: RawChatMessage[] = []
+
+/**
+ * Extract relay-queryable mention tags from plaintext message content.
+ * Returns { mentionPubkeys, mentionGroups } to pass to createMessageEvent.
+ *
+ * - Individual @npub1... → hex pubkey in mentionPubkeys (one p tag each)
+ * - @everyone → 'all' in mentionGroups (M tag)
+ * - @here → 'here' in mentionGroups (M tag)
+ * - @roleName → 'role:<roleId>' in mentionGroups (M tag)
+ */
+function extractMentionTags(
+  text: string,
+  hubDTag: string
+): { mentionPubkeys: string[]; mentionGroups: string[] } {
+  const mentionPubkeys: string[] = []
+  const mentionGroups: string[] = []
+
+  // Extract @npub mentions (inserted by the autocomplete as @npub1...)
+  const npubPattern = /@(npub1[a-zA-Z0-9]+)/g
+  let match: RegExpExecArray | null
+  while ((match = npubPattern.exec(text)) !== null) {
+    try {
+      const { type, data } = nip19.decode(match[1])
+      if (type === 'npub' && typeof data === 'string' && !mentionPubkeys.includes(data)) {
+        mentionPubkeys.push(data)
+      }
+    } catch { /* invalid npub — skip */ }
+  }
+
+  // Group mentions: @everyone, @here
+  if (/(^|[^a-zA-Z0-9_])@everyone(?=[^a-zA-Z0-9_]|$)/i.test(text)) {
+    mentionGroups.push('all')
+  }
+  if (/(^|[^a-zA-Z0-9_])@here(?=[^a-zA-Z0-9_]|$)/i.test(text)) {
+    mentionGroups.push('here')
+  }
+
+  // Role mentions: @roleName (match against hub's role definitions)
+  const hub = useHubStore.getState().hubs[hubDTag]
+  if (hub?.roles) {
+    for (const role of hub.roles) {
+      if (role.name.toLowerCase() === 'everyone') continue // handled by @everyone above
+      // Use word-boundary matching to avoid false positives
+      const escaped = role.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      const roleRegex = new RegExp(`(^|[^a-zA-Z0-9_])@${escaped}(?=[^a-zA-Z0-9_]|$)`, 'i')
+      if (roleRegex.test(text)) {
+        mentionGroups.push(`role:${role.roleId}`)
+      }
+    }
+  }
+
+  return { mentionPubkeys, mentionGroups }
+}
 
 export function useMessages(hubDTag: string | null, channelId: string | null) {
   const [decryptedMessages, setDecryptedMessages] = useState<ChatMessage[]>([])
@@ -423,7 +477,10 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
     const minPow = hub.minPow || 0
     const epoch = hub.epoch || 1
 
-    let unsigned = createMessageEvent(content, hubDTag, channelId, epoch, replyTo, undefined, rootRef, nsfw, isThread, facilitator, !!forumFields)
+    // Extract mention tags from plaintext for relay-queryable p and M tags
+    const { mentionPubkeys, mentionGroups } = extractMentionTags(text, hubDTag!)
+
+    let unsigned = createMessageEvent(content, hubDTag, channelId, epoch, replyTo, undefined, rootRef, nsfw, isThread, facilitator, !!forumFields, mentionPubkeys.length > 0 ? mentionPubkeys : undefined, mentionGroups.length > 0 ? mentionGroups : undefined)
 
     // Tag with the original publication time — edits carry this forward so
     // all clients can order the message at its original position
@@ -600,7 +657,10 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
     const minPow = hub?.minPow || 0
     const epoch = hub?.epoch || 1
     // Re-publish with same d-tag — relay replaces the previous version
-    let unsigned = createMessageEvent(content, hubDTag, channelId, epoch, replyToObj, dTag, rootRef, undefined, undefined, undefined, !!forumFields)
+    // Extract mention tags from edited text for relay-queryable p and M tags
+    const { mentionPubkeys, mentionGroups } = extractMentionTags(newText, hubDTag!)
+
+    let unsigned = createMessageEvent(content, hubDTag, channelId, epoch, replyToObj, dTag, rootRef, undefined, undefined, undefined, !!forumFields, mentionPubkeys.length > 0 ? mentionPubkeys : undefined, mentionGroups.length > 0 ? mentionGroups : undefined)
 
     // Carry forward published_at from the original message so the edited
     // version stays at its original position in the timeline for all clients.

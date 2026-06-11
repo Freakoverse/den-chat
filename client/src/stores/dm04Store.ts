@@ -1104,6 +1104,9 @@ function addDM04ToConversations(
   const lastRead = useNotificationStore.getState().dm04Unreads[counterparty]?.lastRead ?? 0
   const isAlreadyRead = lastRead > 0 && msg.createdAt <= lastRead
 
+  // Check if the user is currently viewing this conversation
+  const isActiveConv = useDM04Store.getState().activeConversation === counterparty
+
   const existing = conversations.get(counterparty)
   if (existing) {
     // Dedup by id
@@ -1118,6 +1121,17 @@ function addDM04ToConversations(
       newMessages = newMessages.slice(newMessages.length - MAX_PER_CONVERSATION)
     }
 
+    // If user is viewing this conversation, mark read immediately instead of incrementing badge
+    let newUnread = existing.unread
+    if (!msg.isMine) {
+      if (isActiveConv) {
+        newUnread = 0
+        useNotificationStore.getState().markDmRead(counterparty, 'nip04')
+      } else if (!isAlreadyRead) {
+        newUnread = existing.unread + 1
+      }
+    }
+
     conversations.set(counterparty, {
       ...existing,
       messages: newMessages,
@@ -1126,15 +1140,18 @@ function addDM04ToConversations(
         ? msg.content.slice(0, 80)
         : existing.lastMessagePreview,
       oldestTimestamp: msg.createdAt < existing.oldestTimestamp ? msg.createdAt : existing.oldestTimestamp,
-      unread: !msg.isMine && !isAlreadyRead ? existing.unread + 1 : existing.unread,
+      unread: newUnread,
     })
   } else {
+    if (isActiveConv && !msg.isMine) {
+      useNotificationStore.getState().markDmRead(counterparty, 'nip04')
+    }
     conversations.set(counterparty, {
       pubkey: counterparty,
       messages: [msg],
       lastMessageAt: msg.createdAt,
       lastMessagePreview: msg.content.slice(0, 80),
-      unread: msg.isMine || isAlreadyRead ? 0 : 1,
+      unread: msg.isMine || isAlreadyRead || isActiveConv ? 0 : 1,
       oldestTimestamp: msg.createdAt,
       hasMore: true,
     })

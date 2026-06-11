@@ -134,7 +134,9 @@ export function createMessageEvent(
   nsfw?: boolean,
   isThread?: boolean,
   facilitator?: string,
-  isForum?: boolean
+  isForum?: boolean,
+  mentionPubkeys?: string[],
+  mentionGroups?: string[]
 ): UnsignedEvent {
   const tags: Tag[] = [
     ['d', dTag || crypto.randomUUID()],
@@ -178,6 +180,19 @@ export function createMessageEvent(
     tags.push(['forum'])
   }
 
+  // Individual @user mentions — one p tag per mentioned pubkey (relay-queryable via #p)
+  if (mentionPubkeys && mentionPubkeys.length > 0) {
+    for (const pk of mentionPubkeys) {
+      tags.push(['p', pk])
+    }
+  }
+
+  // Group mentions — @all, @here, @role:roleId (relay-queryable via #M)
+  if (mentionGroups && mentionGroups.length > 0) {
+    for (const group of mentionGroups) {
+      tags.push(['M', group])
+    }
+  }
 
   return createUnsignedEvent(KINDS.MESSAGE, content, tags)
 }
