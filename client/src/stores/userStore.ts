@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { setDraftUser } from '@/stores/draftStore'
 
 export type AuthMethod = 'upv2' | 'pc55' | 'nip46' | 'nsec' | 'seed' | null
 
@@ -57,10 +58,13 @@ export const useUserStore = create<UserState>((set) => ({
   seedPhrase: null,
   accountIndex: 0,
 
-  login: (pubkey, method, privateKey = null) =>
-    set({ isAuthenticated: true, pubkey, authMethod: method, privateKey }),
+  login: (pubkey, method, privateKey = null) => {
+    setDraftUser(pubkey)
+    set({ isAuthenticated: true, pubkey, authMethod: method, privateKey })
+  },
 
   logout: () => {
+    setDraftUser('')
     const currentState = useUserStore.getState()
     if (currentState.signer?.close) {
       currentState.signer.close()

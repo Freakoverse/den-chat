@@ -42,6 +42,7 @@ import { useNotificationStore } from '@/stores/notificationStore'
 import { useUnreadDivider } from '@/hooks/useUnreadDivider'
 import { NewMessagesDivider } from '@/components/chat/NewMessagesDivider'
 import { UnreadBanner } from '@/components/chat/UnreadBanner'
+import { getDraft, setDraft, clearDraft, dm04DraftKey } from '@/stores/draftStore'
 
 /* ─── Helpers ─── */
 
@@ -118,7 +119,17 @@ export function DM04ChatView({ recipientPubkey, onSwitchProtocol, onBack }: { re
   const registryOnlyContacts = useDM04Store((s) => s.registryOnlyContacts)
   const { getProfile } = useProfileCache()
 
-  const [message, setMessage] = useState('')
+  const _dm04Key = dm04DraftKey(recipientPubkey)
+  const [message, setMessage] = useState(() => getDraft(_dm04Key))
+  // Load correct draft when switching conversations
+  const _prevDm04Key = useRef(_dm04Key)
+  useEffect(() => {
+    if (_prevDm04Key.current !== _dm04Key) {
+      _prevDm04Key.current = _dm04Key
+      setMessage(getDraft(_dm04Key))
+    }
+  }, [_dm04Key])
+  useEffect(() => { setDraft(_dm04Key, message) }, [_dm04Key, message])
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
   const [replyContext, setReplyContext] = useState<ReplyContext | null>(null)
@@ -357,6 +368,7 @@ export function DM04ChatView({ recipientPubkey, onSwitchProtocol, onBack }: { re
 
     const tempId = `opt-${Date.now()}-${Math.random().toString(36).slice(2)}`
     setMessage('')
+    clearDraft(_dm04Key)
 
     // Add optimistic message immediately
     setOptimisticMessages((prev) => [

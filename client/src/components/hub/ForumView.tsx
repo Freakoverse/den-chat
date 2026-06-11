@@ -7,6 +7,7 @@
  */
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
+import { getForumDraft, setForumDraft, clearDraft, forumDraftKey } from '@/stores/draftStore'
 import { useHubStore } from '@/stores/hubStore'
 import { useUserStore } from '@/stores/userStore'
 import { useBlockStore } from '@/stores/blockStore'
@@ -415,6 +416,8 @@ export function ForumView() {
           signer={signer}
           privateKey={privateKey}
           hub={hub}
+          hubDTag={activeHubId || ''}
+          channelId={activeChannelId || ''}
         />
       )}
 
@@ -1288,16 +1291,25 @@ interface CreateForumPostModalProps {
   signer: any
   privateKey: string | null
   hub: any
+  hubDTag: string
+  channelId: string
 }
 
-function CreateForumPostModal({ onClose, sendMessage, canPublish, signer, privateKey, hub }: CreateForumPostModalProps) {
-  const [title, setTitle] = useState('')
-  const [body, setBody] = useState('')
-  const [tags, setTags] = useState<string[]>([])
-  const [tagInput, setTagInput] = useState('')
-  const [featuredImage, setFeaturedImage] = useState('')
+function CreateForumPostModal({ onClose, sendMessage, canPublish, signer, privateKey, hub, hubDTag, channelId }: CreateForumPostModalProps) {
+  const _forumKey = forumDraftKey(hubDTag, channelId)
+  const _saved = useMemo(() => getForumDraft(_forumKey), [_forumKey])
+  const [title, setTitle] = useState(() => _saved?.title ?? '')
+  const [body, setBody] = useState(() => _saved?.body ?? '')
+  const [tags, setTags] = useState<string[]>(() => _saved?.tags ?? [])
+  const [tagInput, setTagInput] = useState(() => _saved?.tagInput ?? '')
+  const [featuredImage, setFeaturedImage] = useState(() => _saved?.featuredImage ?? '')
   const [publishing, setPublishing] = useState(false)
-  const [isNsfw, setIsNsfw] = useState(false)
+  const [isNsfw, setIsNsfw] = useState(() => _saved?.isNsfw ?? false)
+
+  // Persist forum draft on every field change
+  useEffect(() => {
+    setForumDraft(_forumKey, { title, body, tags, tagInput, featuredImage, isNsfw })
+  }, [_forumKey, title, body, tags, tagInput, featuredImage, isNsfw])
   const [showToolbar, setShowToolbar] = useState(false)
   const [showEmoji, setShowEmoji] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -1536,7 +1548,8 @@ function CreateForumPostModal({ onClose, sendMessage, canPublish, signer, privat
         undefined, // facilitator
         { title, featuredImage: featuredImage || undefined, tags: tags.length > 0 ? tags : undefined }
       )
-      // Clean up file previews
+      // Clean up file previews + clear draft
+      clearDraft(_forumKey)
       pendingFiles.forEach((f) => { if (f.previewUrl) URL.revokeObjectURL(f.previewUrl) })
       if (featuredPreview) URL.revokeObjectURL(featuredPreview)
       onClose()

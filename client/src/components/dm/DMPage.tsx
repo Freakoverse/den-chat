@@ -11,6 +11,7 @@
  */
 
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { getDraft, setDraft, clearDraft, dm17DraftKey } from '@/stores/draftStore'
 import { createPortal } from 'react-dom'
 import { useUserStore } from '@/stores/userStore'
 import { useDMStore, type DMMessage } from '@/stores/dmStore'
@@ -534,7 +535,17 @@ function DMChatView({ recipientPubkey, onSwitchProtocol, onBack }: { recipientPu
   const loadingOlder = useDMStore((s) => s.loadingOlder)
   const { getProfile } = useProfileCache()
 
-  const [message, setMessage] = useState('')
+  const _dm17Key = dm17DraftKey(recipientPubkey)
+  const [message, setMessage] = useState(() => getDraft(_dm17Key))
+  // Load correct draft when switching conversations
+  const _prevDm17Key = useRef(_dm17Key)
+  useEffect(() => {
+    if (_prevDm17Key.current !== _dm17Key) {
+      _prevDm17Key.current = _dm17Key
+      setMessage(getDraft(_dm17Key))
+    }
+  }, [_dm17Key])
+  useEffect(() => { setDraft(_dm17Key, message) }, [_dm17Key, message])
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -681,6 +692,7 @@ function DMChatView({ recipientPubkey, onSwitchProtocol, onBack }: { recipientPu
     }
 
     setMessage('')
+    clearDraft(_dm17Key)
 
     const tempId = `opt-${Date.now()}-${Math.random().toString(36).slice(2)}`
     setOptimisticMessages((prev) => [

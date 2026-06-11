@@ -515,10 +515,18 @@ export const MessageContent = memo(function MessageContent({ content, suffix, on
   /** Renders all embeds/previews collected during the last markdown pass */
   const DeferredEmbeds = useCallback(() => {
     const items = collectedEmbedsRef.current
-    if (items.length === 0) return null
+    // Deduplicate by href — React StrictMode re-invokes the Markdown render,
+    // causing the `a` handler to push the same URL multiple times.
+    const seen = new Set<string>()
+    const unique = items.filter(item => {
+      if (seen.has(item.href)) return false
+      seen.add(item.href)
+      return true
+    })
+    if (unique.length === 0) return null
     return (
       <>
-        {items.map((item, i) =>
+        {unique.map((item, i) =>
           item.type === 'embed'
             ? <div key={`embed-${i}`} className="mt-1"><Embed embed={item.embed!} maxWidth={400} /></div>
             : <LinkPreview key={`preview-${i}`} href={item.href} />

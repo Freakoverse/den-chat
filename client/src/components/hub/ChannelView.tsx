@@ -1,4 +1,5 @@
 import { useHubStore } from '@/stores/hubStore'
+import { getDraft, setDraft, clearDraft, hubDraftKey, hubThreadDraftKey } from '@/stores/draftStore'
 import { useDnnStore } from '@/stores/dnnStore'
 import { formatDnnId } from '@/lib/dnn/formatDnnId'
 import { useMessageStore } from '@/stores/messageStore'
@@ -4324,10 +4325,21 @@ export interface MessageInputProps {
   dragContainerRef?: React.RefObject<HTMLDivElement | null>
   hideReplyBanner?: boolean
   canPublish?: boolean
+  threadRootRef?: string
 }
 
-export function MessageInput({ hubDTag, channelId, channelName, optimisticMessages, setOptimisticMessages, replyContext, onCancelReply, dragContainerRef, hideReplyBanner, canPublish = true }: MessageInputProps) {
-  const [message, setMessage] = useState('')
+export function MessageInput({ hubDTag, channelId, channelName, optimisticMessages, setOptimisticMessages, replyContext, onCancelReply, dragContainerRef, hideReplyBanner, canPublish = true, threadRootRef }: MessageInputProps) {
+  const draftKey = threadRootRef ? hubThreadDraftKey(hubDTag, channelId, threadRootRef) : hubDraftKey(hubDTag, channelId)
+  const [message, setMessage] = useState(() => getDraft(draftKey))
+  // Load correct draft when switching channels
+  const _prevDraftKey = useRef(draftKey)
+  useEffect(() => {
+    if (_prevDraftKey.current !== draftKey) {
+      _prevDraftKey.current = draftKey
+      setMessage(getDraft(draftKey))
+    }
+  }, [draftKey])
+  useEffect(() => { setDraft(draftKey, message) }, [draftKey, message])
   const [showEmoji, setShowEmoji] = useState(false)
   const [showToolbar, setShowToolbar] = useState(false)
   const [showTimestamp, setShowTimestamp] = useState(false)
@@ -4836,6 +4848,7 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
       },
     ])
     setMessage('')
+    clearDraft(draftKey)
     // Clean up file previews and known-hash tracking
     pendingFiles.forEach((f) => { if (f.previewUrl) URL.revokeObjectURL(f.previewUrl) })
     setPendingFiles([])
@@ -6629,6 +6642,7 @@ function ThreadModal({ parentMsg, threadReplies, hubDTag, channelId, getProfile,
           dragContainerRef={modalContainerRef}
           hideReplyBanner={!inThreadReply}
           canPublish={canPublish}
+          threadRootRef={parentMsg.dTag}
         />
 
         {/* Delete confirmation */}

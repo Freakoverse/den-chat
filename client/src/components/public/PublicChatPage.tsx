@@ -4,6 +4,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { getDraft, setDraft, clearDraft, pcDraftKey } from '@/stores/draftStore'
 import { usePublicChatStore, type PublicChatMessage, type PCStoredReaction } from '@/stores/publicChatStore'
 import { useNotificationStore } from '@/stores/notificationStore'
 import { useUserStore } from '@/stores/userStore'
@@ -670,7 +671,17 @@ function PublicChatView({ topic, pendingHighlightId, onHighlightConsumed }: { to
   const myProfile = myPubkey ? getProfile(myPubkey) : null
   const myDisplayName = myProfile?.display_name || myProfile?.name || (myPubkey ? truncateNpub(nip19.npubEncode(myPubkey)) : 'You')
 
-  const [message, setMessage] = useState('')
+  const _pcKey = pcDraftKey(topic)
+  const [message, setMessage] = useState(() => getDraft(_pcKey))
+  // Load correct draft when switching topics
+  const _prevPcKey = useRef(_pcKey)
+  useEffect(() => {
+    if (_prevPcKey.current !== _pcKey) {
+      _prevPcKey.current = _pcKey
+      setMessage(getDraft(_pcKey))
+    }
+  }, [_pcKey])
+  useEffect(() => { setDraft(_pcKey, message) }, [_pcKey, message])
   const [sending, setSending] = useState(false)
   const [sendingContent, setSendingContent] = useState('')
   const [isNsfw, setIsNsfw] = useState(false)
@@ -851,6 +862,7 @@ function PublicChatView({ topic, pendingHighlightId, onHighlightConsumed }: { to
     setPendingGifs([])
 
     setMessage('')
+    clearDraft(_pcKey)
     setSendingContent(content || (sentStickers.length > 0 ? ':sticker:' : sentGifs.length > 0 ? 'GIF' : ''))
 
     try {
