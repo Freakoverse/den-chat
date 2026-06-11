@@ -286,16 +286,60 @@ export async function uploadToBlossomServers(
   getAbortSignal?: () => AbortSignal | undefined,
 ): Promise<{ hash: string; successCount: number; serverUrls: string[] }> {
   const allServers = servers || blossomServers.getServers()
-  // Shuffle all servers and try them until we get 3 successes or exhaust all
   const shuffled = [...allServers].sort(() => Math.random() - 0.5)
   const targetCount = 3
   const hash = computeHash(data)
   const authHeader = await createAuthHeader('upload', hash, signer, privateKey)
 
+  // ── Parallel mode (no progress callback) — fire all servers at once ──
+  // Used by tree/index metadata uploads where files are tiny and we just
+  // need 3 successes ASAP. Eliminates sequential blocking on CORS failures.
+  if (!onProgress) {
+    const serverUrls: string[] = []
+
+    const results = await Promise.allSettled(
+      shuffled.map(async (server) => {
+        // Quick HEAD check first (2s timeout)
+        try {
+          const headRes = await fetch(`${server}/${hash}`, {
+            method: 'HEAD',
+            signal: AbortSignal.timeout(2000),
+          }).catch(() => null)
+          if (headRes?.ok) return server // already exists
+        } catch { /* proceed to upload */ }
+
+        // Upload via fetch (simpler than XHR, no progress needed)
+        const res = await fetch(`${normalize(server)}/upload`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': contentType,
+            'Authorization': authHeader,
+          },
+          body: new Blob([data.buffer as ArrayBuffer], { type: contentType }),
+          signal: AbortSignal.timeout(15000),
+        })
+        if (res.ok) return server
+        throw new Error(`${res.status}`)
+      })
+    )
+
+    for (const r of results) {
+      if (r.status === 'fulfilled' && r.value) {
+        serverUrls.push(normalize(r.value))
+      }
+    }
+
+    if (serverUrls.length === 0) {
+      throw new Error('Upload failed: no Blossom servers accepted the file')
+    }
+
+    return { hash, successCount: serverUrls.length, serverUrls }
+  }
+
+  // ── Sequential mode (with progress) — used for user-facing file uploads ──
   let successCount = 0
   const serverUrls: string[] = []
 
-  // Sequential upload — try all servers, stop once we reach targetCount successes
   for (let i = 0; i < shuffled.length; i++) {
     if (successCount >= targetCount) break
     const server = shuffled[i]
@@ -312,7 +356,7 @@ export async function uploadToBlossomServers(
         // File already exists on this server — skip upload
         successCount++
         serverUrls.push(normalize(server))
-        onProgress?.({
+        onProgress({
           serverUrl: server,
           serverIndex: i,
           totalServers: shuffled.length,
@@ -327,7 +371,7 @@ export async function uploadToBlossomServers(
     } catch { /* HEAD check failed — proceed with upload */ }
 
     // Report starting this server
-    onProgress?.({
+    onProgress({
       serverUrl: server,
       serverIndex: i,
       totalServers: shuffled.length,
@@ -342,7 +386,7 @@ export async function uploadToBlossomServers(
       data,
       authHeader,
       contentType,
-      (progress) => onProgress?.(progress),
+      (progress) => onProgress(progress),
       i,
       shuffled.length,
       signal,
@@ -351,7 +395,7 @@ export async function uploadToBlossomServers(
     if (ok) {
       successCount++
       serverUrls.push(normalize(server))
-      onProgress?.({
+      onProgress({
         serverUrl: server,
         serverIndex: i,
         totalServers: shuffled.length,
