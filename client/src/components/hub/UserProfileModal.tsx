@@ -44,7 +44,7 @@ import { useDnnStore } from '@/stores/dnnStore'
 import { isDnnId } from '@/lib/dnn/dnnUtils'
 import { formatDnnId } from '@/lib/dnn/formatDnnId'
 import { getPermissionsForUser } from '@/lib/hub/permissions'
-import { useProfileCache } from '@/hooks/useProfileCache'
+import { useProfileCache, updateCachedProfile } from '@/hooks/useProfileCache'
 
 /** Banner image with blossom fallback */
 function BlossomBannerImg({ src }: { src: string }) {
@@ -244,6 +244,8 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
           }
           setProfileData(data)
           setEditProfile(data)
+          // Push into global profile cache so all components (hub chat, member list, etc.) update
+          updateCachedProfile(displayPubkey, parsed)
         } catch { /* ignore */ }
       }
       setLoaded(true)
@@ -327,6 +329,17 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
       })
 
       setProfileData(editProfile)
+      // Update global profile cache so all components reflect the new profile
+      updateCachedProfile(myPubkey, {
+        name: editProfile.name,
+        display_name: editProfile.display_name,
+        about: editProfile.about,
+        picture: editProfile.picture,
+        banner: editProfile.banner,
+        nip05: editProfile.nip05,
+        website: editProfile.website,
+        lud16: editProfile.lud16,
+      })
       setEditing(false)
     } catch (err) {
       console.error('Failed to publish profile:', err)

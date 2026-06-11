@@ -4,7 +4,8 @@
  * Returns a function `getProfile(pubkey)` that:
  * - Returns cached profile immediately if available
  * - Triggers a background fetch if not cached
- * - Re-renders the component when the profile arrives
+ * - Re-fetches stale profiles (>1 hour) in the background (stale-while-revalidate)
+ * - Re-renders the component when the profile arrives or updates
  *
  * Uses a global in-memory cache shared across all components.
  */
@@ -25,8 +26,16 @@ export interface NostrProfile {
   lud16?: string
 }
 
-/** Global profile cache: pubkey → profile */
-const profileCache = new Map<string, NostrProfile>()
+interface CachedEntry {
+  profile: NostrProfile
+  fetchedAt: number // Date.now() timestamp
+}
+
+/** Stale-while-revalidate TTL: 1 hour */
+const PROFILE_TTL_MS = 60 * 60 * 1000
+
+/** Global profile cache: pubkey → { profile, fetchedAt } */
+const profileCache = new Map<string, CachedEntry>()
 
 /** Pubkeys currently being fetched (avoid duplicate requests) */
 const pendingFetches = new Set<string>()
@@ -41,8 +50,22 @@ function notifyListeners(pubkey: string) {
   }
 }
 
+/** Store a profile in the cache, notify listeners, and trigger side effects */
+function setCachedEntry(pubkey: string, profile: NostrProfile) {
+  profileCache.set(pubkey, { profile, fetchedAt: Date.now() })
+  notifyListeners(pubkey)
+  // Pre-cache avatar image as blob URL for instant rendering
+  if (profile.picture) {
+    preCacheImage(profile.picture)
+  }
+  // Trigger DNN verification if nip05 is present
+  if (profile.nip05) {
+    useDnnStore.getState().verifyPubkey(pubkey, profile.nip05)
+  }
+}
+
 async function fetchProfile(pubkey: string) {
-  if (profileCache.has(pubkey) || pendingFetches.has(pubkey)) return
+  if (pendingFetches.has(pubkey)) return
   pendingFetches.add(pubkey)
 
   try {
@@ -57,20 +80,11 @@ async function fetchProfile(pubkey: string) {
       const latest = events.sort((a, b) => b.created_at - a.created_at)[0]
       try {
         const profile: NostrProfile = JSON.parse(latest.content)
-        profileCache.set(pubkey, profile)
-        notifyListeners(pubkey)
-        // Pre-cache avatar image as blob URL for instant rendering
-        if (profile.picture) {
-          preCacheImage(profile.picture)
-        }
-        // Trigger DNN verification if nip05 is present
-        if (profile.nip05) {
-          useDnnStore.getState().verifyPubkey(pubkey, profile.nip05)
-        }
+        setCachedEntry(pubkey, profile)
       } catch { /* ignore parse errors */ }
     } else {
-      // Mark as empty so we don't refetch
-      profileCache.set(pubkey, {})
+      // Mark as empty so we don't refetch constantly
+      profileCache.set(pubkey, { profile: {}, fetchedAt: Date.now() })
       notifyListeners(pubkey)
     }
   } catch {
@@ -109,9 +123,24 @@ export function useProfileCache() {
       if (!pendingFetches.has(pubkey)) {
         fetchProfile(pubkey)
       }
+
+      return undefined
     }
 
-    return cached
+    // Stale-while-revalidate: return cached data immediately, but kick off
+    // a background re-fetch if the entry is older than the TTL
+    if (Date.now() - cached.fetchedAt > PROFILE_TTL_MS && !pendingFetches.has(pubkey)) {
+      // Register listener so this component re-renders if the profile changed
+      const cb = () => {
+        if (mountedRef.current) setTick((t) => t + 1)
+      }
+      if (!listeners.has(pubkey)) listeners.set(pubkey, new Set())
+      listeners.get(pubkey)!.add(cb)
+
+      fetchProfile(pubkey)
+    }
+
+    return cached.profile
   }, [])
 
   return { getProfile }
@@ -121,5 +150,14 @@ export function useProfileCache() {
  * Get the display name for a pubkey from cache (non-hook version for simple usage)
  */
 export function getCachedProfile(pubkey: string): NostrProfile | undefined {
-  return profileCache.get(pubkey)
+  return profileCache.get(pubkey)?.profile
+}
+
+/**
+ * Update the global profile cache from external sources (e.g. UserProfileModal).
+ * Pushes the profile into the cache and notifies all listening components,
+ * causing them to re-render with the updated name/avatar.
+ */
+export function updateCachedProfile(pubkey: string, profile: NostrProfile) {
+  setCachedEntry(pubkey, profile)
 }
