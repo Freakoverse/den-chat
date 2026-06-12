@@ -519,10 +519,7 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
     onPhase?.('publishing', { confirmed: 0, total: 0 }, sentDTag)
     const eventId = signed.id
 
-    // Inject own message into the local store on first relay confirmation
-    // so it appears even if the real-time subscription is stale (e.g. after
-    // HMR or WebSocket reconnect). Deferred until confirmed > 0 to avoid
-    // phantom messages if all relays reject the event.
+    // Build the store message and self-decrypt entry
     const publishedAtTag = signed.tags.find((t: string[]) => t[0] === 'published_at')
     const ownMsg: import('@/stores/messageStore').ChatMessage = {
       id: signed.id,
@@ -543,71 +540,79 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
       clientTag: isClientTagEnabled() ? 'DEN Chat' : undefined,
       facilitator: facilitator,
     }
-    let injected = false
 
-    // Use progressive publishing — fires callback on each relay confirm
-    // Compute relay list from posting behaviour settings + hub relays
+    // ── Instant local injection (before publish) ──
+    // Inject into the message store + self-decrypt cache immediately so the
+    // message renders without waiting for any relay confirmation.
+    useMessageStore.getState().addMessage(ownMsg)
+    import('@/lib/cache/messageCache').then(({ cacheMessageWithDedup }) => {
+      cacheMessageWithDedup(ownMsg).catch(() => {})
+    })
+
+    const selfMsg: ChatMessage = {
+      id: signed.id,
+      dTag: ownMsg.dTag,
+      pubkey: signed.pubkey,
+      content: text,          // use original user text, not JSON-wrapped plaintext
+      timestamp: ownMsg.createdAt,
+      replyTo: ownMsg.replyTo,
+      rootRef: rootRef,
+      deleted: false,
+      decrypted: true,
+      isThread: isThread,
+      rawEvent: ownMsg.rawEvent,
+      attachments: (attachments && attachments.length > 0) ? attachments : undefined,
+      nsfw: nsfw,
+      clientTag: ownMsg.clientTag,
+      facilitator: facilitator,
+      isForum: !!forumFields,
+      title: forumFields?.title,
+      featuredImage: forumFields?.featuredImage,
+      forumTags: forumFields?.tags,
+    }
+    selfDecryptedRef.current.set(ownMsg.dTag, selfMsg)
+
+    // Immediately merge into current decrypted messages so it renders now
+    setDecryptedMessages((prev) => {
+      if (prev.some((m) => m.dTag === ownMsg.dTag && m.pubkey === signed.pubkey)) return prev
+      return [...prev, selfMsg].sort((a, b) => a.timestamp - b.timestamp)
+    })
+
+    // ── Fire-and-forget publish ──
+    // Publish in the background — the message is already visible locally.
+    // Progress callbacks update relay indicators; if ALL relays reject,
+    // the onPhase callback notifies the component to show a failed state.
     const hubRelays = hub?.generalRelays || []
     const publishRelays = getPublishRelays(hubRelays)
     const { setRelayProgress, clearRelayProgress } = useMessageStore.getState()
-    await publishEventProgressive(signed, (confirmed, total, acceptedRelays) => {
-      setRelayProgress(eventId, confirmed, total, acceptedRelays)
-      onPhase?.('publishing', { confirmed, total })
 
-      // On first relay acceptance, inject into local store + cache
-      if (!injected && confirmed > 0) {
-        injected = true
+    // Seed relay progress at 0/N immediately so the counter is visible
+    // from the moment the message appears — no gap where it looks "published"
+    setRelayProgress(eventId, 0, publishRelays.length, [])
+    onPhase?.('publishing', { confirmed: 0, total: publishRelays.length })
 
-        useMessageStore.getState().addMessage(ownMsg)
-        import('@/lib/cache/messageCache').then(({ cacheMessageWithDedup }) => {
-          cacheMessageWithDedup(ownMsg).catch(() => {})
-        })
+    ;(async () => {
+      try {
+        const accepted = await publishEventProgressive(signed, (confirmed, total, acceptedRelays) => {
+          setRelayProgress(eventId, confirmed, total, acceptedRelays)
+          onPhase?.('publishing', { confirmed, total })
+        }, publishRelays)
 
-        // Inject pre-decrypted version into the self-decrypt cache so the
-        // message appears immediately without waiting for the async decrypt
-        // pipeline (which may be repeatedly interrupted during startup).
-        const selfMsg: ChatMessage = {
-          id: signed.id,
-          dTag: ownMsg.dTag,
-          pubkey: signed.pubkey,
-          content: text,          // use original user text, not JSON-wrapped plaintext
-          timestamp: ownMsg.createdAt,
-          replyTo: ownMsg.replyTo,
-          rootRef: rootRef,
-          deleted: false,
-          decrypted: true,
-          isThread: isThread,
-          rawEvent: ownMsg.rawEvent,
-          attachments: (attachments && attachments.length > 0) ? attachments : undefined,
-          nsfw: nsfw,
-          clientTag: ownMsg.clientTag,
-          facilitator: facilitator,
-          isForum: !!forumFields,
-          title: forumFields?.title,
-          featuredImage: forumFields?.featuredImage,
-          forumTags: forumFields?.tags,
+        if (accepted.length === 0) {
+          // All relays rejected — remove from local store to avoid phantom message
+          useMessageStore.getState().removeMessage(hubDTag!, channelId!, ownMsg.dTag)
+          selfDecryptedRef.current.delete(ownMsg.dTag)
+          setDecryptedMessages((prev) => prev.filter((m) => !(m.dTag === ownMsg.dTag && m.pubkey === signed.pubkey)))
+          onPhase?.('publishing', { confirmed: 0, total: publishRelays.length })
+          throw new Error('Message rejected by all relays')
         }
-        selfDecryptedRef.current.set(ownMsg.dTag, selfMsg)
 
-        // Immediately merge into current decrypted messages so it renders now
-        setDecryptedMessages((prev) => {
-          // Skip if already present (e.g. from a fast decrypt pipeline)
-          if (prev.some((m) => m.dTag === ownMsg.dTag && m.pubkey === signed.pubkey)) return prev
-          return [...prev, selfMsg].sort((a, b) => a.timestamp - b.timestamp)
-        })
+        // Auto-clear the relay progress indicator after 5 seconds
+        setTimeout(() => clearRelayProgress(eventId), 5000)
+      } catch (err) {
+        console.error('[useMessages] Background publish failed:', err)
       }
-    }, publishRelays)
-
-    // If no relay accepted the event, throw so the caller can show the
-    // existing "failed" UI state instead of silently dropping the message
-    if (!injected) {
-      throw new Error('Message rejected by all relays')
-    }
-
-    // Auto-clear the relay progress indicator after 5 seconds
-    setTimeout(() => {
-      clearRelayProgress(eventId)
-    }, 5000)
+    })()
   }, [hubDTag, channelId, signer, privateKey, pubkey, getChannelKey])
 
   // Edit a message — re-publish with the same d-tag (relay replaces the old version)

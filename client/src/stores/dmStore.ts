@@ -396,6 +396,11 @@ export const useDMStore = create<DMState>((set, get) => ({
         }
       }
 
+      // Start relay discovery in parallel with gift-wrap creation (non-blocking)
+      const publishRelays = getPublishRelays()
+      const { discoverRecipientRelays } = await import('@/lib/nostr/relayDiscovery')
+      const relayDiscoveryPromise = discoverRecipientRelays(recipientPubkey, publishRelays)
+
       const wraps = await createGiftWrap(
         content,
         recipientPubkey,
@@ -417,60 +422,11 @@ export const useDMStore = create<DMState>((set, get) => ({
         return { processedWrapIds }
       })
 
-      // Publish to relays computed from posting behaviour settings
-      const publishRelays = getPublishRelays()
-      // Discover recipient's preferred relays (NIP-65 + DM relay list + DNN metadata)
-      const { discoverRecipientRelays } = await import('@/lib/nostr/relayDiscovery')
-      const extraRelays = await discoverRecipientRelays(recipientPubkey, publishRelays)
-      const recipientRelays = extraRelays.length > 0
-        ? [...publishRelays, ...extraRelays]
-        : publishRelays
-
-      if (extraRelays.length > 0) {
-        console.log(`[DM] Merging ${extraRelays.length} recipient relay(s):`, extraRelays)
-      }
-
-      // Publish gift wrap for recipient (to merged relays including their preferred relays)
-      onProgress?.('publishing')
-      const allRelays = [...new Set([...recipientRelays, ...publishRelays])]
-      const totalRelays = allRelays.length
-      let cumulativeConfirmed = 0
-
-      // Publish recipient wrap with progressive tracking
-      await publishEventProgressive(
-        wraps.wrapForRecipient as unknown as Event,
-        (confirmed, _total, acceptedRelays) => {
-          cumulativeConfirmed = confirmed
-          const selfWrapId = wrapSelfId || 'self'
-          get().setRelayProgress(selfWrapId, cumulativeConfirmed, totalRelays, acceptedRelays)
-          onProgress?.('publishing', { confirmed: cumulativeConfirmed, total: totalRelays })
-        },
-        recipientRelays,
-      )
-      // Self-copy goes to own relays only — add to cumulative count
-      const recipientConfirmed = cumulativeConfirmed
-      await publishEventProgressive(
-        wraps.wrapForSelf as unknown as Event,
-        (confirmed, _total, acceptedRelays) => {
-          const selfWrapId = wrapSelfId || 'self'
-          const prev = get().relayProgress[selfWrapId]
-          const mergedRelays = [...(prev?.acceptedRelays || []), ...(acceptedRelays || [])]
-          get().setRelayProgress(selfWrapId, recipientConfirmed + confirmed, totalRelays, mergedRelays)
-          onProgress?.('publishing', { confirmed: recipientConfirmed + confirmed, total: totalRelays })
-        },
-        publishRelays,
-      )
-
-      // Auto-clear relay progress after 5 seconds
-      const progressId = wrapSelfId || 'self'
-      setTimeout(() => {
-        get().clearRelayProgress(progressId)
-      }, 5000)
-
       // Remove from pending if it was there
       get().removePendingConversation(recipientPubkey)
 
-      // Add the message locally using the pre-captured sendTime
+      // Add the message locally BEFORE publishing so it appears instantly
+      // (same pattern as hub chat — don't wait for relay confirmation)
       const msg: DMMessage = {
         id: wrapSelfId || crypto.randomUUID(),
         content,
@@ -515,6 +471,60 @@ export const useDMStore = create<DMState>((set, get) => ({
         }
         return { conversations }
       })
+
+      // Publish entirely in background — relay discovery + publish don't block the return
+      ;(async () => {
+        try {
+          const extraRelays = await relayDiscoveryPromise
+          const recipientRelays = extraRelays.length > 0
+            ? [...publishRelays, ...extraRelays]
+            : publishRelays
+
+          if (extraRelays.length > 0) {
+            console.log(`[DM] Merging ${extraRelays.length} recipient relay(s):`, extraRelays)
+          }
+
+          onProgress?.('publishing')
+          const allRelays = [...new Set([...recipientRelays, ...publishRelays])]
+          const totalRelays = allRelays.length
+          let recipientConfirmed = 0
+          let selfConfirmed = 0
+          const allAcceptedRelays: string[] = []
+
+          await Promise.all([
+            publishEventProgressive(
+              wraps.wrapForRecipient as unknown as Event,
+              (confirmed, _total, acceptedRelays) => {
+                recipientConfirmed = confirmed
+                allAcceptedRelays.push(...(acceptedRelays || []))
+                const selfWrapId = wrapSelfId || 'self'
+                get().setRelayProgress(selfWrapId, recipientConfirmed + selfConfirmed, totalRelays, [...allAcceptedRelays])
+                onProgress?.('publishing', { confirmed: recipientConfirmed + selfConfirmed, total: totalRelays })
+              },
+              recipientRelays,
+            ),
+            publishEventProgressive(
+              wraps.wrapForSelf as unknown as Event,
+              (confirmed, _total, acceptedRelays) => {
+                selfConfirmed = confirmed
+                allAcceptedRelays.push(...(acceptedRelays || []))
+                const selfWrapId = wrapSelfId || 'self'
+                get().setRelayProgress(selfWrapId, recipientConfirmed + selfConfirmed, totalRelays, [...allAcceptedRelays])
+                onProgress?.('publishing', { confirmed: recipientConfirmed + selfConfirmed, total: totalRelays })
+              },
+              publishRelays,
+            ),
+          ])
+
+          // Auto-clear relay progress after 5 seconds
+          const progressId = wrapSelfId || 'self'
+          setTimeout(() => {
+            get().clearRelayProgress(progressId)
+          }, 5000)
+        } catch (err) {
+          console.error('[DM] Relay publish failed:', err)
+        }
+      })()
 
       return { rumorId }
     } catch (err) {

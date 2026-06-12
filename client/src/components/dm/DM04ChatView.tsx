@@ -278,7 +278,6 @@ export function DM04ChatView({ recipientPubkey, onSwitchProtocol, onBack }: { re
   useEffect(() => {
     if (optimisticMessages.length === 0) return
     const toRemove = optimisticMessages.filter((opt) =>
-      opt.status === 'published' &&
       mainMessages.some((m) =>
         m.isMine &&
         m.content === opt.content &&
@@ -287,10 +286,10 @@ export function DM04ChatView({ recipientPubkey, onSwitchProtocol, onBack }: { re
     )
     if (toRemove.length > 0) {
       const removeIds = new Set(toRemove.map((o) => o.tempId))
-      // 600ms delay so the checkmark is visible briefly
+      // Small delay so the transition is visible briefly
       const timer = setTimeout(() => {
         setOptimisticMessages((prev) => prev.filter((m) => !removeIds.has(m.tempId)))
-      }, 600)
+      }, 300)
       return () => clearTimeout(timer)
     }
   }, [mainMessages, optimisticMessages])
@@ -657,9 +656,9 @@ export function DM04ChatView({ recipientPubkey, onSwitchProtocol, onBack }: { re
 
               {/* Optimistic messages (hub-chat-style publishing/relay progress) */}
               {optimisticMessages.filter((o) =>
-                !(o.status === 'published' && mainMessages.some((m) =>
+                !mainMessages.some((m) =>
                   m.isMine && m.content === o.content && Math.abs(m.createdAt - o.timestamp) < 10
-                ))
+                )
               ).map((optMsg) => (
                 <div
                   key={optMsg.tempId}

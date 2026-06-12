@@ -12,6 +12,12 @@
 import { fetchEvents } from '@/lib/nostr/relay-pool'
 import { STANDARD_KINDS } from '@/lib/crypto/constants'
 
+/** TTL for cached relay discovery results (5 minutes) */
+const RELAY_CACHE_TTL_MS = 5 * 60 * 1000
+
+/** Cache of discovered network relays keyed by recipient pubkey */
+const relayCache = new Map<string, { relays: string[]; ts: number }>()
+
 /**
  * Discover a recipient's preferred relays from NIP-65, DM relay list, and DNN metadata.
  * Returns relay URLs that are NOT already in `existingRelays`.
@@ -27,6 +33,33 @@ export async function discoverRecipientRelays(
   const existingSet = new Set(existingRelays.map((r) => r.replace(/\/$/, '')))
   const discovered = new Set<string>()
 
+  // Check cache for recent network-discovered relays
+  const cached = relayCache.get(recipientPubkey)
+  if (cached && Date.now() - cached.ts < RELAY_CACHE_TTL_MS) {
+    // Use cached network relays (skip network fetch)
+    for (const relay of cached.relays) {
+      const url = relay.replace(/\/$/, '')
+      if (!existingSet.has(url)) discovered.add(relay)
+    }
+
+    // DNN lookup is local — always run even on cache hit
+    try {
+      const { useDnnStore } = await import('@/stores/dnnStore')
+      const dnnRelays = useDnnStore.getState().getRelaysForPubkey(recipientPubkey)
+      for (const relay of dnnRelays) {
+        const url = relay.replace(/\/$/, '')
+        if (!existingSet.has(url)) discovered.add(relay)
+      }
+    } catch {
+      // DNN store not available — skip
+    }
+
+    return Array.from(discovered)
+  }
+
+  // Track all network-discovered relays (before filtering) for caching
+  const networkDiscovered = new Set<string>()
+
   try {
     // Fetch NIP-65 relay list and DM relay list in parallel
     const [relayListEvents, dmRelayListEvents] = await Promise.allSettled([
@@ -39,6 +72,7 @@ export async function discoverRecipientRelays(
       const event = relayListEvents.value[0]
       for (const tag of event.tags) {
         if (tag[0] === 'r' && tag[1]) {
+          networkDiscovered.add(tag[1])
           const url = tag[1].replace(/\/$/, '')
           if (!existingSet.has(url)) discovered.add(tag[1])
         }
@@ -50,6 +84,7 @@ export async function discoverRecipientRelays(
       const event = dmRelayListEvents.value[0]
       for (const tag of event.tags) {
         if (tag[0] === 'relay' && tag[1]) {
+          networkDiscovered.add(tag[1])
           const url = tag[1].replace(/\/$/, '')
           if (!existingSet.has(url)) discovered.add(tag[1])
         }
@@ -57,6 +92,11 @@ export async function discoverRecipientRelays(
     }
   } catch {
     // Non-fatal — return whatever we found so far
+  }
+
+  // Cache all network-discovered relays (before existingRelays filtering)
+  if (networkDiscovered.size > 0) {
+    relayCache.set(recipientPubkey, { relays: Array.from(networkDiscovered), ts: Date.now() })
   }
 
   // DNN-discovered relays (from verified DNN ID metadata)

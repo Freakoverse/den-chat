@@ -501,6 +501,12 @@ export const useDM04Store = create<DM04State>((set, get) => ({
 
     try {
       const sendTime = Math.floor(Date.now() / 1000)
+
+      // Start relay discovery in parallel with encryption (non-blocking)
+      const publishRelays = getPublishRelays()
+      const { discoverRecipientRelays } = await import('@/lib/nostr/relayDiscovery')
+      const relayDiscoveryPromise = discoverRecipientRelays(recipientPubkey, publishRelays)
+
       const encrypted = await encryptNip04(content, recipientPubkey, signer, privateKey)
 
       const tags: [string, ...string[]][] = [
@@ -518,35 +524,56 @@ export const useDM04Store = create<DM04State>((set, get) => ({
         tags.push(['thread'])
       }
 
-      // NIP-04-encrypt emoji tags
+      // NIP-04-encrypt emoji, sticker, and GIF tags in parallel
+      const tagEncryptionPromises: Promise<[string, ...string[]]>[] = []
+
       if (emojiTags && emojiTags.length > 0) {
         for (const tag of emojiTags) {
-          const encSc = await encryptNip04(tag[1], recipientPubkey, signer, privateKey)
-          const encUrl = await encryptNip04(tag[2], recipientPubkey, signer, privateKey)
-          const encSet = tag[3] ? await encryptNip04(tag[3], recipientPubkey, signer, privateKey) : ''
-          tags.push(['emoji', encSc, encUrl, ...(encSet ? [encSet] : [])])
+          tagEncryptionPromises.push(
+            (async (): Promise<[string, ...string[]]> => {
+              const [encSc, encUrl, encSet] = await Promise.all([
+                encryptNip04(tag[1], recipientPubkey, signer, privateKey),
+                encryptNip04(tag[2], recipientPubkey, signer, privateKey),
+                tag[3] ? encryptNip04(tag[3], recipientPubkey, signer, privateKey) : Promise.resolve(''),
+              ])
+              return ['emoji', encSc, encUrl, ...(encSet ? [encSet] : [])] as [string, ...string[]]
+            })()
+          )
         }
       }
 
-      // NIP-04-encrypt sticker tags
       if (stickerTags && stickerTags.length > 0) {
         for (const tag of stickerTags) {
-          const encSc = await encryptNip04(tag[1], recipientPubkey, signer, privateKey)
-          const encUrl = await encryptNip04(tag[2], recipientPubkey, signer, privateKey)
-          const encSet = tag[3] ? await encryptNip04(tag[3], recipientPubkey, signer, privateKey) : ''
-          tags.push(['sticker', encSc, encUrl, ...(encSet ? [encSet] : [])])
+          tagEncryptionPromises.push(
+            (async (): Promise<[string, ...string[]]> => {
+              const [encSc, encUrl, encSet] = await Promise.all([
+                encryptNip04(tag[1], recipientPubkey, signer, privateKey),
+                encryptNip04(tag[2], recipientPubkey, signer, privateKey),
+                tag[3] ? encryptNip04(tag[3], recipientPubkey, signer, privateKey) : Promise.resolve(''),
+              ])
+              return ['sticker', encSc, encUrl, ...(encSet ? [encSet] : [])] as [string, ...string[]]
+            })()
+          )
         }
       }
 
-      // NIP-04-encrypt GIF tags
       if (gifTags && gifTags.length > 0) {
         for (const tag of gifTags) {
-          const encName = await encryptNip04(tag[1], recipientPubkey, signer, privateKey)
-          const encUrl = await encryptNip04(tag[2], recipientPubkey, signer, privateKey)
-          const encNsfw = tag[3] ? await encryptNip04(tag[3], recipientPubkey, signer, privateKey) : ''
-          tags.push(['j', encName, encUrl, ...(encNsfw ? [encNsfw] : [])])
+          tagEncryptionPromises.push(
+            (async (): Promise<[string, ...string[]]> => {
+              const [encName, encUrl, encNsfw] = await Promise.all([
+                encryptNip04(tag[1], recipientPubkey, signer, privateKey),
+                encryptNip04(tag[2], recipientPubkey, signer, privateKey),
+                tag[3] ? encryptNip04(tag[3], recipientPubkey, signer, privateKey) : Promise.resolve(''),
+              ])
+              return ['j', encName, encUrl, ...(encNsfw ? [encNsfw] : [])] as [string, ...string[]]
+            })()
+          )
         }
       }
+
+      const encryptedTags = await Promise.all(tagEncryptionPromises)
+      tags.push(...encryptedTags)
 
       // Client tag
       if (typeof window !== 'undefined' && localStorage.getItem('den-chat-client-tag') !== 'false') {
@@ -561,38 +588,11 @@ export const useDM04Store = create<DM04State>((set, get) => ({
         processedIds: new Set(s.processedIds).add(signed.id),
       }))
 
-      // Publish with progressive relay tracking
-      onPhase?.('publishing')
-      const publishRelays = getPublishRelays()
-      // Discover recipient's preferred relays (NIP-65 + DM relay list + DNN metadata)
-      const { discoverRecipientRelays } = await import('@/lib/nostr/relayDiscovery')
-      const extraRelays = await discoverRecipientRelays(recipientPubkey, publishRelays)
-      const allRelays = extraRelays.length > 0
-        ? [...publishRelays, ...extraRelays]
-        : publishRelays
-
-      if (extraRelays.length > 0) {
-        console.log(`[DM04] Merging ${extraRelays.length} recipient relay(s):`, extraRelays)
-      }
-
-      await publishEventProgressive(
-        signed,
-        (confirmed, total, acceptedRelays) => {
-          get().setRelayProgress(signed.id, confirmed, total, acceptedRelays)
-          onPhase?.('publishing', { confirmed, total })
-        },
-        allRelays.length > 0 ? allRelays : undefined,
-      )
-
-      // Auto-clear relay progress after 5 seconds
-      setTimeout(() => {
-        get().clearRelayProgress(signed.id)
-      }, 5000)
-
       // Remove from pending
       get().removePendingConversation(recipientPubkey)
 
-      // Add locally
+      // Add the message locally BEFORE publishing so it appears instantly
+      // (same pattern as hub chat — don't wait for relay confirmation)
       const msg: DM04Message = {
         id: signed.id,
         content,
@@ -639,6 +639,38 @@ export const useDM04Store = create<DM04State>((set, get) => ({
         }
         return { conversations }
       })
+
+      // Publish entirely in background — relay discovery + publish don't block the return
+      ;(async () => {
+        try {
+          const extraRelays = await relayDiscoveryPromise
+          const allRelays = extraRelays.length > 0
+            ? [...publishRelays, ...extraRelays]
+            : publishRelays
+
+          if (extraRelays.length > 0) {
+            console.log(`[DM04] Merging ${extraRelays.length} recipient relay(s):`, extraRelays)
+          }
+
+          onPhase?.('publishing')
+
+          await publishEventProgressive(
+            signed,
+            (confirmed, total, acceptedRelays) => {
+              get().setRelayProgress(signed.id, confirmed, total, acceptedRelays)
+              onPhase?.('publishing', { confirmed, total })
+            },
+            allRelays.length > 0 ? allRelays : undefined,
+          )
+
+          // Auto-clear relay progress after 5 seconds
+          setTimeout(() => {
+            get().clearRelayProgress(signed.id)
+          }, 5000)
+        } catch (err) {
+          console.error('[DM04] Relay publish failed:', err)
+        }
+      })()
     } catch (err) {
       console.error('[DM04] Failed to send message:', err)
       throw err

@@ -634,11 +634,10 @@ function DMChatView({ recipientPubkey, onSwitchProtocol, onBack }: { recipientPu
     prevMsgCountRef.current = messages.length
   }, [messages.length])
 
-  // Reconcile optimistic messages with store
+  // Reconcile optimistic messages with store — remove when real message appears
   useEffect(() => {
     if (optimisticMessages.length === 0) return
     const toRemove = optimisticMessages.filter((opt) =>
-      opt.status === 'published' &&
       messages.some((m) =>
         m.isMine &&
         m.content === opt.content &&
@@ -647,9 +646,10 @@ function DMChatView({ recipientPubkey, onSwitchProtocol, onBack }: { recipientPu
     )
     if (toRemove.length > 0) {
       const removeIds = new Set(toRemove.map((o) => o.tempId))
-      setTimeout(() => {
+      const timer = setTimeout(() => {
         setOptimisticMessages((prev) => prev.filter((m) => !removeIds.has(m.tempId)))
-      }, 600)
+      }, 300)
+      return () => clearTimeout(timer)
     }
   }, [messages, optimisticMessages])
 
@@ -955,9 +955,9 @@ function DMChatView({ recipientPubkey, onSwitchProtocol, onBack }: { recipientPu
             })}
             {/* Optimistic messages */}
             {optimisticMessages.filter((o) =>
-              !(o.status === 'published' && messages.some((m) =>
+              !messages.some((m) =>
                 m.isMine && m.content === o.content && Math.abs(m.createdAt - o.timestamp) < 10
-              ))
+              )
             ).map((optMsg) => {
               const myProfile = getProfile(myPubkey || '')
               const myDisplayName = myProfile?.display_name || myProfile?.name || (myPubkey ? truncateNpub(nip19.npubEncode(myPubkey), 8) : 'You')

@@ -24,6 +24,7 @@ import {
   subscribeEvents,
   publishEvent,
   publishEventProgressive,
+  getRelays,
 } from '@/lib/nostr/relay-pool'
 import { parseZapReceipt, type ZapInfo } from '@/lib/nostr/zap'
 import type { ISigner } from '@/stores/userStore'
@@ -587,28 +588,40 @@ export const usePublicChatStore = create<PublicChatState>((set, get) => ({
     // Mine PoW + sign (with automatic retry if signer invalidates PoW)
     const signed = await mineAndSign(unsigned, difficulty, pubkey, signer, privateKey)
 
-    // Publish with progress tracking — inject on first relay confirmation
-    // (matches hub chat pattern: instant UI feedback, safe against phantom messages)
-    let injected = false
-    await publishEventProgressive(
-      signed,
-      (confirmed, total, acceptedRelays) => {
-        get().setRelayProgress(signed.id, confirmed, total, acceptedRelays)
-        if (!injected && confirmed > 0) {
-          injected = true
-          const msg = parsePublicChatEvent(signed)
-          if (msg) get().addMessage(msg)
+    // ── Instant local injection (before publish) ──
+    const msg = parsePublicChatEvent(signed)
+    if (msg) get().addMessage(msg)
+
+    // ── Fire-and-forget publish ──
+    // Publish in the background — the message is already visible locally.
+    // If ALL relays reject, roll back the local insertion.
+
+    // Seed relay progress at 0/N immediately so the counter is visible
+    // from the moment the message appears — no gap where it looks "published"
+    const relayCount = getRelays().length
+    get().setRelayProgress(signed.id, 0, relayCount, [])
+
+    ;(async () => {
+      try {
+        const accepted = await publishEventProgressive(
+          signed,
+          (confirmed, total, acceptedRelays) => {
+            get().setRelayProgress(signed.id, confirmed, total, acceptedRelays)
+          },
+        )
+
+        if (accepted.length === 0 && msg) {
+          // All relays rejected — remove phantom message
+          get().removeMessage(msg.topic, msg.id)
+          throw new Error('Message rejected by all relays')
         }
-      },
-    )
 
-    // If no relay accepted the event, throw so the caller can show error UI
-    if (!injected) {
-      throw new Error('Message rejected by all relays')
-    }
-
-    // Clear progress after a delay
-    setTimeout(() => get().clearRelayProgress(signed.id), 5000)
+        // Clear progress after a delay
+        setTimeout(() => get().clearRelayProgress(signed.id), 5000)
+      } catch (err) {
+        console.error('[PublicChat] Background publish failed:', err)
+      }
+    })()
   },
 
   // ── Message management ──
