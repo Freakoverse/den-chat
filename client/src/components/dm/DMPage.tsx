@@ -57,6 +57,7 @@ import { useNotificationStore } from '@/stores/notificationStore'
 import { useUnreadDivider } from '@/hooks/useUnreadDivider'
 import { NewMessagesDivider } from '@/components/chat/NewMessagesDivider'
 import { UnreadBanner } from '@/components/chat/UnreadBanner'
+import { discoverRecipientRelays } from '@/lib/nostr/relayDiscovery'
 
 /* ═══════════════════════════════════════════ */
 /*  HELPERS                                    */
@@ -771,7 +772,6 @@ function DMChatView({ recipientPubkey, onSwitchProtocol, onBack }: { recipientPu
         const publishRelays = getPublishRelays()
 
         // Discover recipient's preferred relays (NIP-65 + DM relay list + DNN metadata)
-        const { discoverRecipientRelays } = await import('@/lib/nostr/relayDiscovery')
         const extraRelays = await discoverRecipientRelays(recipientPubkey, publishRelays)
         const recipientRelays = extraRelays.length > 0
           ? [...publishRelays, ...extraRelays]

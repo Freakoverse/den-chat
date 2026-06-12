@@ -19,6 +19,7 @@ import { useFollowStore } from '@/stores/followStore'
 import { playSoundEffect } from '@/lib/voice/soundEffects'
 import type { ISigner } from '@/stores/userStore'
 import type { Event } from 'nostr-tools'
+import { discoverRecipientRelays } from '@/lib/nostr/relayDiscovery'
 
 /** Unix timestamp (seconds) of when this session started — sounds only play for messages after this */
 const dmSessionStartTime = Math.floor(Date.now() / 1000)
@@ -398,7 +399,6 @@ export const useDMStore = create<DMState>((set, get) => ({
 
       // Start relay discovery in parallel with gift-wrap creation (non-blocking)
       const publishRelays = getPublishRelays()
-      const { discoverRecipientRelays } = await import('@/lib/nostr/relayDiscovery')
       const relayDiscoveryPromise = discoverRecipientRelays(recipientPubkey, publishRelays)
 
       const wraps = await createGiftWrap(

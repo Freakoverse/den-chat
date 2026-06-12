@@ -32,6 +32,7 @@ import {
 import type { ISigner } from '@/stores/userStore'
 import type { Event } from 'nostr-tools'
 import { playSoundEffect } from '@/lib/voice/soundEffects'
+import { discoverRecipientRelays } from '@/lib/nostr/relayDiscovery'
 
 /** Unix timestamp (seconds) of when this session started — DM sounds only play for messages after this */
 const dm04SessionStartTime = Math.floor(Date.now() / 1000)
@@ -504,7 +505,6 @@ export const useDM04Store = create<DM04State>((set, get) => ({
 
       // Start relay discovery in parallel with encryption (non-blocking)
       const publishRelays = getPublishRelays()
-      const { discoverRecipientRelays } = await import('@/lib/nostr/relayDiscovery')
       const relayDiscoveryPromise = discoverRecipientRelays(recipientPubkey, publishRelays)
 
       const encrypted = await encryptNip04(content, recipientPubkey, signer, privateKey)
