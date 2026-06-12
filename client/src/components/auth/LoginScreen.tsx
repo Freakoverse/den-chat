@@ -2084,12 +2084,12 @@ export function LoginScreen() {
 
           <div className="w-full flex flex-col gap-2">
             {/* External signer row — Local | Connect | Extension */}
-            <div className="w-full flex gap-2">
+            <div className="w-full flex flex-wrap gap-2">
               {/* NIP-PC55: Local Signer — always visible */}
               <Button
                 variant="outline"
                 onClick={handleLocalLogin}
-                className="flex-1 gap-1.5 text-xs"
+                className="grow gap-1.5 text-xs"
                 disabled={loading === 'pc55'}
               >
                 {loading === 'pc55' ? (
@@ -2104,7 +2104,7 @@ export function LoginScreen() {
               <Button
                 variant="outline"
                 onClick={openNip46Dialog}
-                className="flex-1 gap-1.5 text-xs"
+                className="grow gap-1.5 text-xs"
               >
                 <Link2 size={14} />
                 Connect
@@ -2115,7 +2115,7 @@ export function LoginScreen() {
                 <Button
                   variant="outline"
                   onClick={handleNip07Login}
-                  className="flex-1 gap-1.5 text-xs"
+                  className="grow gap-1.5 text-xs"
                   disabled={loading === 'nip07'}
                 >
                   {loading === 'nip07' ? (
