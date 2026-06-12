@@ -1092,6 +1092,12 @@ function DM04MessageRow({
   const hideBlockedCompletely = useBlockStore((s) => s.hideBlockedCompletely)
   const mutedWords = useBlockStore((s) => s.mutedWords)
 
+  // Relay progress — dim own messages that haven't been accepted by any relay yet
+  const relayPending = useDM04Store((s) => {
+    const p = s.relayProgress[msg.id]
+    return p && p.confirmed === 0
+  })
+
   const senderProfile = getProfile(msg.senderPubkey)
   const displayName = senderProfile?.display_name || senderProfile?.name || truncateNpub(nip19.npubEncode(msg.senderPubkey))
 
@@ -1170,7 +1176,7 @@ function DM04MessageRow({
               return (
                 <>
                   {filteredContent && (
-                    <div className="text-sm text-foreground/90 break-words prose-sm [&_p]:m-0 [&_pre]:my-1 [&_code]:text-xs">
+                    <div className={`text-sm text-foreground/90 break-words prose-sm [&_p]:m-0 [&_pre]:my-1 [&_code]:text-xs transition-opacity ${relayPending ? 'opacity-50' : ''}`}>
                       <MessageContent content={filteredContent} emojiTags={msg.emojiTags} mutedWords={mutedWords} suffix={msg.isMine ? <DM04RelayProgressIndicator eventId={msg.id} /> : undefined} />
                     </div>
                   )}

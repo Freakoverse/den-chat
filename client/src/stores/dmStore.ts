@@ -473,6 +473,12 @@ export const useDMStore = create<DMState>((set, get) => ({
       })
 
       // Publish entirely in background — relay discovery + publish don't block the return
+      // Seed relay progress at 0/N immediately so the counter is visible
+      // from the moment the message appears — no gap where it looks "published"
+      const progressId = wrapSelfId || 'self'
+      get().setRelayProgress(progressId, 0, publishRelays.length, [])
+      onProgress?.('publishing', { confirmed: 0, total: publishRelays.length })
+
       ;(async () => {
         try {
           const extraRelays = await relayDiscoveryPromise
@@ -517,7 +523,6 @@ export const useDMStore = create<DMState>((set, get) => ({
           ])
 
           // Auto-clear relay progress after 5 seconds
-          const progressId = wrapSelfId || 'self'
           setTimeout(() => {
             get().clearRelayProgress(progressId)
           }, 5000)

@@ -641,6 +641,11 @@ export const useDM04Store = create<DM04State>((set, get) => ({
       })
 
       // Publish entirely in background — relay discovery + publish don't block the return
+      // Seed relay progress at 0/N immediately so the counter is visible
+      // from the moment the message appears — no gap where it looks "published"
+      get().setRelayProgress(signed.id, 0, publishRelays.length, [])
+      onPhase?.('publishing', { confirmed: 0, total: publishRelays.length })
+
       ;(async () => {
         try {
           const extraRelays = await relayDiscoveryPromise

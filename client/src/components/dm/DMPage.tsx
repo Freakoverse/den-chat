@@ -1498,6 +1498,12 @@ function DMMessageContent({ msg, showDateSep, isGrouped, senderProfile, displayN
   onShowProfile: () => void
 }) {
   const mutedWords = useBlockStore((s) => s.mutedWords)
+
+  // Relay progress — dim own messages that haven't been accepted by any relay yet
+  const relayPending = useDMStore((s) => {
+    const p = s.relayProgress[msg.id]
+    return p && p.confirmed === 0
+  })
   return (
     <div>
       {showDateSep && (
@@ -1546,7 +1552,7 @@ function DMMessageContent({ msg, showDateSep, isGrouped, senderProfile, displayN
             return (
               <>
                 {filteredContent && (
-                  <div className="text-sm text-foreground/90 break-words prose-sm [&_p]:m-0 [&_pre]:my-1 [&_code]:text-xs">
+                  <div className={`text-sm text-foreground/90 break-words prose-sm [&_p]:m-0 [&_pre]:my-1 [&_code]:text-xs transition-opacity ${relayPending ? 'opacity-50' : ''}`}>
                     <MessageContent content={filteredContent} emojiTags={msg.emojiTags} mutedWords={mutedWords} suffix={msg.isMine ? <DMRelayProgressIndicator eventId={msg.id} /> : undefined} />
                   </div>
                 )}

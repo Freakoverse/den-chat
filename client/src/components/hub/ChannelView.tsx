@@ -3178,6 +3178,12 @@ export function ChatMessageRow({
 
   const shouldBlurBlocked = isBlockedUser && !blockedRevealed
 
+  // Relay progress — dim own messages that haven't been accepted by any relay yet
+  const relayPending = useMessageStore((s) => {
+    const p = s.relayProgress[msg.id]
+    return p && p.confirmed === 0
+  })
+
   // Content media grouping — extract consecutive image URL groups from text
   const baseContent = msg.gifTags && msg.gifTags.length > 0
     ? msg.content.split('\n').filter((l: string) => !msg.gifTags!.some(([, u]: [string, string, string]) => l.trim() === u)).join('\n').trim()
@@ -3362,7 +3368,7 @@ export function ChatMessageRow({
             </div>
           ) : (
             <>
-              <div className="text-sm text-foreground/90 break-words">
+              <div className={`text-sm text-foreground/90 break-words transition-opacity ${relayPending ? 'opacity-50' : ''}`}>
                 <MessageContent content={contentForRender} onProfileClick={onOpenProfile} emojiTags={msg.emojiTags} mutedWords={mutedWords} disableLinkPreviews={!authorCanEmbed} disableHubInviteCards={!authorCanInvite} hubRoleNames={hubRoleNames} suffix={
                   <>
                     {msg.edited && <span className="text-[10px] text-muted-foreground ml-1"> (edited)</span>}
@@ -3626,7 +3632,6 @@ export function ChatMessageRow({
                   </TooltipContent>
                 </Tooltip>
               )}
-              <RelayProgressIndicator eventId={msg.id} />
               {isHidden && canHide && (
                 <button
                   onClick={() => setHiddenPreviewRevealed(false)}
@@ -3654,7 +3659,7 @@ export function ChatMessageRow({
             </div>
           ) : (
             <>
-              <div className="text-sm text-foreground/90 break-words">
+              <div className={`text-sm text-foreground/90 break-words transition-opacity ${relayPending ? 'opacity-50' : ''}`}>
                 <MessageContent content={contentForRender} onProfileClick={onOpenProfile} emojiTags={msg.emojiTags} mutedWords={mutedWords} disableLinkPreviews={!authorCanEmbed} disableHubInviteCards={!authorCanInvite} hubRoleNames={hubRoleNames} suffix={
                   <>
                     {msg.edited && <span className="text-[10px] text-muted-foreground ml-1"> (edited)</span>}
