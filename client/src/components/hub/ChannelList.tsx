@@ -9,7 +9,7 @@ import { BlossomImage } from '@/components/ui/BlossomImage'
 import { useState, useCallback, useEffect, useRef, useMemo, type ReactNode } from 'react'
 import { Separator } from '@/components/ui/separator'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
-import { PRESENCE_CONSTANTS } from '@/lib/voice/types'
+
 import { useVoiceStore } from '@/stores/voiceStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { useCachedImageUrl } from '@/lib/imageCache'
@@ -187,7 +187,7 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
       return cat.channels.some((c) => canViewChannel(c.channelId))
     })
 
-  const hasVoiceChannels = hub.channels.some((c) => c.type === 'voice')
+
 
   // On mobile, selecting a channel also transitions to chat view
   const handleSelectChannel = (channelId: string) => {
@@ -212,7 +212,7 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
             <div className="absolute inset-0 bg-gradient-to-t from-black to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 ease-in-out" />
             {/* Hub name — positioned over the gradient */}
             <div className="absolute bottom-0 left-0 right-0 flex items-center px-3 py-2 gap-2">
-              {hasVoiceChannels && <VoicePresenceRing />}
+
               <button
                 onClick={() => setShowInfo(true)}
                 className="font-semibold text-sm truncate text-white flex-1 text-left rounded-md px-2 py-0.5 drop-shadow-sm transition-all duration-300 hover:bg-white/10 cursor-pointer"
@@ -224,7 +224,7 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
         ) : (
           /* No banner — simple header with hub name */
           <div className="flex items-center gap-2 px-4 h-12 min-h-12 border-b border-border bg-secondary/30">
-            {hasVoiceChannels && <VoicePresenceRing />}
+
             <button
               onClick={() => setShowInfo(true)}
               className="font-semibold text-sm truncate text-foreground hover:underline cursor-pointer"
@@ -1024,80 +1024,3 @@ function UserVolumeModal({
   )
 }
 
-/* ─── VoicePresenceRing — 60s countdown ring for voice presence ─── */
-
-const CYCLE_MS = PRESENCE_CONSTANTS.STALE_TIMEOUT_MS // 60_000
-
-function VoicePresenceRing() {
-  const [progress, setProgress] = useState(0)
-  const startRef = useRef(Date.now())
-
-  useEffect(() => {
-    const tick = () => {
-      const elapsed = (Date.now() - startRef.current) % CYCLE_MS
-      setProgress(elapsed / CYCLE_MS)
-    }
-    tick()
-    const id = setInterval(tick, 1000)
-    return () => clearInterval(id)
-  }, [])
-
-  // Reset start reference when cycle completes
-  useEffect(() => {
-    if (progress >= 0.99) {
-      startRef.current = Date.now()
-    }
-  }, [progress])
-
-  const remaining = Math.ceil((1 - progress) * (CYCLE_MS / 1000))
-
-  // SVG circle math
-  const size = 14
-  const strokeWidth = 1.5
-  const radius = (size - strokeWidth) / 2
-  const circumference = 2 * Math.PI * radius
-  const dashOffset = circumference * (1 - progress)
-
-  return (
-    <TooltipProvider delayDuration={200}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <div className="shrink-0 cursor-default" aria-label="Voice presence check countdown">
-            <svg width={size} height={size} className="block">
-              {/* Background ring */}
-              <circle
-                cx={size / 2}
-                cy={size / 2}
-                r={radius}
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={strokeWidth}
-                className="text-muted-foreground/20"
-              />
-              {/* Progress arc */}
-              <circle
-                cx={size / 2}
-                cy={size / 2}
-                r={radius}
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={strokeWidth}
-                strokeDasharray={circumference}
-                strokeDashoffset={dashOffset}
-                strokeLinecap="round"
-                className="text-emerald-500/70 transition-[stroke-dashoffset] duration-1000 ease-linear"
-                style={{ transform: 'rotate(-90deg)', transformOrigin: 'center' }}
-              />
-            </svg>
-          </div>
-        </TooltipTrigger>
-        <TooltipContent side="bottom" className="max-w-[220px] text-center">
-          <p className="text-xs font-medium">Active check</p>
-          <p className="text-[10px] text-muted-foreground mt-0.5">
-            Users in voice are verified every 60s — if they disconnect, they'll be removed automatically
-          </p>
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
-  )
-}
