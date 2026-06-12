@@ -139,6 +139,11 @@ export function DM04ChatView({ recipientPubkey, onSwitchProtocol, onBack }: { re
   const [deleteModalMsg, setDeleteModalMsg] = useState<DM04Message | null>(null)
   const [rawEventData, setRawEventData] = useState<{ rawJson: string; decryptedContent: string } | null>(null)
   const [optimisticMessages, setOptimisticMessages] = useState<OptimisticDM04[]>([])
+
+  // Clear optimistic messages when switching conversations (component is reused, not remounted)
+  useEffect(() => {
+    setOptimisticMessages([])
+  }, [recipientPubkey])
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const messagesContainerRef = useRef<HTMLDivElement>(null)
   const chatContainerRef = useRef<HTMLDivElement>(null)

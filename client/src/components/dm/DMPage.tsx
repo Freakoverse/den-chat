@@ -567,6 +567,11 @@ function DMChatView({ recipientPubkey, onSwitchProtocol, onBack }: { recipientPu
   // ─── Optimistic messages ───
   const [optimisticMessages, setOptimisticMessages] = useState<OptimisticDM17[]>([])
 
+  // Clear optimistic messages when switching conversations (component is reused, not remounted)
+  useEffect(() => {
+    setOptimisticMessages([])
+  }, [recipientPubkey])
+
   // ─── Sticker click modal state ───
   const [clickedSticker, setClickedSticker] = useState<{ shortcode: string; url: string; setAddress: string | null } | null>(null)
   const [stickerDiscoverSearch, setStickerDiscoverSearch] = useState<{ search: string; author: string } | null>(null)
