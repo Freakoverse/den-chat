@@ -385,11 +385,47 @@ export const usePublicChatStore = create<PublicChatState>((set, get) => ({
     // Close existing sub if any
     state._sub?.close()
 
+    // Buffer messages during initial load, flush once on EOSE
+    let initialPhase = true
+    const buffer: PublicChatMessage[] = []
+
     const sub = subscribeEvents(
       { kinds: [KINDS.PUBLIC_CHAT], '#t': [topic.toLowerCase()], limit: PAGE_SIZE },
       (event) => {
         const msg = parsePublicChatEvent(event)
-        if (msg) get().addMessage(msg)
+        if (!msg) return
+
+        if (initialPhase) {
+          buffer.push(msg)
+        } else {
+          get().addMessage(msg)
+        }
+      },
+      // onEose — flush buffer in a single state update
+      () => {
+        initialPhase = false
+        if (buffer.length > 0) {
+          set(s => {
+            const normalized = topic.toLowerCase()
+            const existing = s.messages[normalized] || []
+
+            // Deduplicate against existing messages
+            const existingIds = new Set(existing.map(m => m.id))
+            const newMsgs = buffer.filter(m => !existingIds.has(m.id))
+
+            if (newMsgs.length === 0) return s
+
+            let merged = [...existing, ...newMsgs].sort((a, b) => a.createdAt - b.createdAt)
+
+            // FIFO cap
+            if (merged.length > MAX_PER_TOPIC) {
+              merged = merged.slice(merged.length - MAX_PER_TOPIC)
+            }
+
+            return { messages: { ...s.messages, [normalized]: merged } }
+          })
+          buffer.length = 0
+        }
       },
     )
 

@@ -1130,6 +1130,7 @@ function PublicChatView({ topic, pendingHighlightId, onHighlightConsumed }: { to
             }
             setDeleteModalMsg(null)
           }}
+          progressSteps={['Sending deletion request...']}
         />
       )}
 
@@ -1191,6 +1192,11 @@ function PublicMessageRow({ msg, showDateSep, isGrouped, onReply, onRequestDelet
   const profile = getProfile(msg.pubkey)
   const npub = nip19.npubEncode(msg.pubkey)
   const displayName = profile?.display_name || profile?.name || truncateNpub(npub, 8)
+
+  // Relay progress — gray-to-white publishing transition
+  const relayProgress = usePublicChatStore((s) => s.relayProgress[msg.id])
+  const isPublishing = !!relayProgress && relayProgress.confirmed < relayProgress.total
+  const hasConfirmation = !!relayProgress && relayProgress.confirmed > 0
 
   const [nsfwRevealed, setNsfwRevealed] = useState(false)
   const [mediaPreview, setMediaPreview] = useState(false)
@@ -1300,7 +1306,7 @@ function PublicMessageRow({ msg, showDateSep, isGrouped, onReply, onRequestDelet
         </div>
       )}
 
-      <div className={`group relative flex gap-3 px-2 hover:bg-accent/30 rounded-lg transition-colors ${isGrouped ? '' : 'py-2'} ${highlighted ? 'bg-primary/10' : ''} ${isMentioned && !highlighted ? 'bg-amber-500/[0.08]' : ''}`}>
+      <div className={`group relative flex gap-3 px-2 hover:bg-accent/30 rounded-lg transition-all duration-300 ${isGrouped ? '' : 'py-2'} ${highlighted ? 'bg-primary/10' : ''} ${isMentioned && !highlighted ? 'bg-amber-500/[0.08]' : ''} ${isPublishing && !hasConfirmation ? 'opacity-50' : isPublishing ? 'opacity-75' : ''}`}>
         {/* Avatar or timestamp gutter */}
         {isGrouped ? (
           <div className="w-10 shrink-0 flex items-center justify-end">
@@ -1367,7 +1373,7 @@ function PublicMessageRow({ msg, showDateSep, isGrouped, onReply, onRequestDelet
             <>
               {strippedContent && (
                 <div className="text-sm text-foreground break-words">
-                  <MessageContent content={strippedContent} emojiTags={msg.emojiTags} onProfileClick={(pk) => onOpenProfile?.(pk)} disableLinkPreviews={!showLinkPreviews} disableCustomEmojis={!showCustomEmojis} disableMedia={!showMedia} mutedWords={hideMutedWords ? mutedWords : undefined} />
+                  <MessageContent content={strippedContent} emojiTags={msg.emojiTags} onProfileClick={(pk) => onOpenProfile?.(pk)} disableLinkPreviews={!showLinkPreviews} disableCustomEmojis={!showCustomEmojis} disableMedia={!showMedia} mutedWords={hideMutedWords ? mutedWords : undefined} suffix={msg.pubkey === myPubkey ? <PCRelayProgressIndicator eventId={msg.id} /> : undefined} />
                 </div>
               )}
               {/* Media disabled placeholder (above media so it doesn't jump when preview loads) */}
@@ -1512,6 +1518,59 @@ function PublicMessageRow({ msg, showDateSep, isGrouped, onReply, onRequestDelet
         <PublicMessageActions msg={msg} onReply={onReply} onRequestDelete={onRequestDelete} onAddReaction={onAddReaction} />
       </div>
     </>
+  )
+}
+
+/* ═══════════════════════════════════════════ */
+/*  RELAY PROGRESS INDICATOR                   */
+/* ═══════════════════════════════════════════ */
+
+function PCRelayProgressIndicator({ eventId }: { eventId: string }) {
+  const progress = usePublicChatStore((s) => s.relayProgress[eventId])
+  const [showPopover, setShowPopover] = useState(false)
+  const popRef = useRef<HTMLDivElement>(null)
+
+  // Close popover on click outside
+  useEffect(() => {
+    if (!showPopover) return
+    const handler = (e: MouseEvent) => {
+      if (popRef.current && !popRef.current.contains(e.target as Node)) setShowPopover(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [showPopover])
+
+  if (!progress) return null
+  const done = progress.confirmed >= progress.total
+  return (
+    <span className="relative inline-flex items-center">
+      <button
+        onClick={(e) => { e.stopPropagation(); setShowPopover(!showPopover) }}
+        className={`text-[10px] inline-flex items-center gap-1 ml-1 cursor-pointer hover:text-muted-foreground transition-colors ${done ? 'text-muted-foreground/40' : 'text-muted-foreground/70'}`}
+      >
+        {!done && <Loader2 size={9} className="animate-spin" />}
+        {progress.confirmed}/{progress.total}
+      </button>
+      {showPopover && (
+        <div ref={popRef} className="absolute bottom-full left-0 mb-1 z-50 bg-popover border border-border rounded-lg shadow-xl p-2.5 min-w-[200px]" onClick={(e) => e.stopPropagation()}>
+          <p className="text-[10px] font-medium text-foreground mb-1.5">Relay Status</p>
+          <div className="space-y-1">
+            {progress.acceptedRelays.map((url) => (
+              <div key={url} className="flex items-center gap-2">
+                <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
+                <span className="text-[10px] text-muted-foreground font-mono truncate">{url.replace('wss://', '')}</span>
+              </div>
+            ))}
+            {progress.confirmed < progress.total && (
+              <div className="flex items-center gap-2">
+                <Loader2 size={8} className="animate-spin text-muted-foreground/50 shrink-0" />
+                <span className="text-[10px] text-muted-foreground/50">{progress.total - progress.confirmed} pending...</span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </span>
   )
 }
 
