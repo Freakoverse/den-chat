@@ -222,6 +222,7 @@ export function DM04ChatView({ recipientPubkey, onSwitchProtocol, onBack }: { re
     dismissBanner: dismissUnreadBanner,
     jumpToDivider: jumpToNewMsgDivider,
     shouldInsertDivider,
+    dividerHidden,
   } = useUnreadDivider(dm04LastRead, mainMessages, (m) => m.createdAt, `dm04:${recipientPubkey}`, myPubkey, (m) => m.senderPubkey)
 
   // Thread replies map: parentId -> thread replies
@@ -606,7 +607,7 @@ export function DM04ChatView({ recipientPubkey, onSwitchProtocol, onBack }: { re
                 return (
                   <div key={msg.id}>
                     {shouldInsertDivider(msg.createdAt, prev ? prev.createdAt : null, msg.senderPubkey) && (
-                      <NewMessagesDivider ref={newMsgDividerRef} />
+                      <NewMessagesDivider ref={newMsgDividerRef} hidden={dividerHidden} />
                     )}
                     <DM04MessageRow
                       msg={msg}

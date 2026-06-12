@@ -18,6 +18,7 @@ import { useRef, useState, useEffect, useCallback } from 'react'
  *   dismissBanner: Callback to manually hide the banner
  *   jumpToDivider: Callback to scroll to the divider element
  *   shouldShowDivider: (msgTimestamp, prevMsgTimestamp) => boolean — check if the divider should be inserted before a message
+ *   dividerHidden: Whether the divider has been auto-hidden after being viewed
  * }
  */
 export function useUnreadDivider<T>(
@@ -41,12 +42,21 @@ export function useUnreadDivider<T>(
   const dividerRef = useRef<HTMLDivElement>(null)
   const [bannerDismissed, setBannerDismissed] = useState(false)
   const [dividerOffScreen, setDividerOffScreen] = useState(false)
+  const [dividerHidden, setDividerHidden] = useState(false)
+  const fadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Reset dismissed state when channel changes
+  // Reset state when channel changes
   useEffect(() => {
     setBannerDismissed(false)
     setDividerOffScreen(false)
+    setDividerHidden(false)
+    if (fadeTimerRef.current) { clearTimeout(fadeTimerRef.current); fadeTimerRef.current = null }
   }, [channelKey])
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => { if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current) }
+  }, [])
 
   // Count unread messages (those with timestamp > snapshot, excluding own messages)
   const unreadCount = snapshot > 0
@@ -59,6 +69,7 @@ export function useUnreadDivider<T>(
     : 0
 
   // IntersectionObserver to track if the divider is visible
+  // When visible, start a 5-second auto-hide timer for the divider
   useEffect(() => {
     const el = dividerRef.current
     if (!el || unreadCount === 0) {
@@ -68,14 +79,32 @@ export function useUnreadDivider<T>(
 
     const observer = new IntersectionObserver(
       ([entry]) => {
-        setDividerOffScreen(!entry.isIntersecting)
+        const isVisible = entry.isIntersecting
+        setDividerOffScreen(!isVisible)
+
+        if (isVisible && !dividerHidden) {
+          // Start 5-second auto-hide timer when divider becomes visible
+          if (!fadeTimerRef.current) {
+            fadeTimerRef.current = setTimeout(() => {
+              setDividerHidden(true)
+              setBannerDismissed(true)
+              fadeTimerRef.current = null
+            }, 5000)
+          }
+        } else if (!isVisible) {
+          // Cancel timer if the user scrolls the divider off-screen again
+          if (fadeTimerRef.current) {
+            clearTimeout(fadeTimerRef.current)
+            fadeTimerRef.current = null
+          }
+        }
       },
       { threshold: 0 }
     )
 
     observer.observe(el)
     return () => observer.disconnect()
-  }, [unreadCount, channelKey])
+  }, [unreadCount, channelKey, dividerHidden])
 
   const showBanner = unreadCount > 0 && dividerOffScreen && !bannerDismissed
 
@@ -85,6 +114,8 @@ export function useUnreadDivider<T>(
 
   const jumpToDivider = useCallback(() => {
     dividerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    // Auto-dismiss the banner after jumping — the divider's 5-second timer will handle itself
+    setBannerDismissed(true)
   }, [])
 
   /**
@@ -114,5 +145,7 @@ export function useUnreadDivider<T>(
     dismissBanner,
     jumpToDivider,
     shouldInsertDivider,
+    dividerHidden,
   }
 }
+

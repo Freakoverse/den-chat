@@ -670,6 +670,7 @@ function MessageList({ hubDTag, channelId, channelName, optimisticMessages, setO
     dismissBanner: dismissUnreadBanner,
     jumpToDivider: jumpToNewMsgDivider,
     shouldInsertDivider,
+    dividerHidden,
   } = useUnreadDivider(channelLastRead, messages, (m) => m.timestamp, `${hubDTag}:${channelId}`, myPubkey, (m) => m.pubkey)
 
   const handleHideMessage = useCallback(async (targetRef: string, targetPubkey: string, targetKind: number, isAddressable: boolean) => {
@@ -1586,7 +1587,7 @@ function MessageList({ hubDTag, channelId, channelName, optimisticMessages, setO
                 return (
                   <div key={msg.id} id={`msg-${msg.id}`}>
                     {showDateSep && <DateSeparator timestamp={msg.timestamp} />}
-                    {insertNewMsgDivider && <NewMessagesDivider ref={newMsgDividerRef} />}
+                    {insertNewMsgDivider && <NewMessagesDivider ref={newMsgDividerRef} hidden={dividerHidden} />}
                     <ChatMessageRow
                       msg={msg}
                       hubDTag={hubDTag}

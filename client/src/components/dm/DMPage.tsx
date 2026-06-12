@@ -612,6 +612,7 @@ function DMChatView({ recipientPubkey, onSwitchProtocol, onBack }: { recipientPu
     dismissBanner: dismissUnreadBanner,
     jumpToDivider: jumpToNewMsgDivider,
     shouldInsertDivider,
+    dividerHidden,
   } = useUnreadDivider(dm17LastRead, messages, (m) => m.createdAt, `dm17:${recipientPubkey}`, myPubkey, (m) => m.isMine ? (myPubkey || '') : recipientPubkey)
 
   // Track whether user is near bottom (column-reverse: scrollTop=0 is bottom)
@@ -940,7 +941,7 @@ function DMChatView({ recipientPubkey, onSwitchProtocol, onBack }: { recipientPu
               return (
                 <div key={msg.id}>
                   {shouldInsertDivider(msg.createdAt, prev ? prev.createdAt : null, senderPubkey || undefined) && (
-                    <NewMessagesDivider ref={newMsgDividerRef} />
+                    <NewMessagesDivider ref={newMsgDividerRef} hidden={dividerHidden} />
                   )}
                   <DMMessageRow
                     msg={msg}

@@ -747,6 +747,7 @@ function PublicChatView({ topic, pendingHighlightId, onHighlightConsumed }: { to
     dismissBanner: dismissUnreadBanner,
     jumpToDivider: jumpToNewMsgDivider,
     shouldInsertDivider,
+    dividerHidden,
   } = useUnreadDivider(pcLastRead, filteredMessages, (m) => m.createdAt, `pc:${topic}`, myPubkey, (m) => m.pubkey)
 
 
@@ -972,7 +973,7 @@ function PublicChatView({ topic, pendingHighlightId, onHighlightConsumed }: { to
                 return (
                   <div key={msg.id} id={`pc-msg-${msg.id}`}>
                     {shouldInsertDivider(msg.createdAt, prev ? prev.createdAt : null, msg.pubkey) && (
-                      <NewMessagesDivider ref={newMsgDividerRef} />
+                      <NewMessagesDivider ref={newMsgDividerRef} hidden={dividerHidden} />
                     )}
                     <PublicMessageRow
                       msg={msg}

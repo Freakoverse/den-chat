@@ -14,8 +14,57 @@
 import { useState, useEffect, useCallback, useRef, createContext, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import {
-  Copy, Scissors, ClipboardPaste, MousePointerClick, Link, Image, TextSelect, Bell, CheckCheck,
+  Copy, Scissors, ClipboardPaste, MousePointerClick, Link, Image, TextSelect, Bell, CheckCheck, Download, Film, Volume2,
 } from 'lucide-react'
+
+/** Trigger a browser "Save As" dialog for the given URL */
+function downloadMediaUrl(url: string, fallbackName?: string) {
+  const filename = fallbackName || url.split('/').pop()?.split('?')[0] || 'download'
+  const ext = filename.includes('.') ? filename.split('.').pop()!.toLowerCase() : ''
+
+  // MIME type map for the save dialog file-type filter
+  const mimeMap: Record<string, string> = {
+    png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
+    webp: 'image/webp', svg: 'image/svg+xml', avif: 'image/avif',
+    mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime', mkv: 'video/x-matroska',
+    mp3: 'audio/mpeg', ogg: 'audio/ogg', wav: 'audio/wav', flac: 'audio/flac', m4a: 'audio/mp4',
+  }
+
+  fetch(url)
+    .then((r) => r.blob())
+    .then(async (blob) => {
+      // Try the File System Access API for a proper "Save As" dialog
+      if ('showSaveFilePicker' in window) {
+        try {
+          const accept: Record<string, string[]> = {}
+          const mime = mimeMap[ext] || blob.type || 'application/octet-stream'
+          accept[mime] = ext ? [`.${ext}`] : []
+          const handle = await (window as any).showSaveFilePicker({
+            suggestedName: filename,
+            types: [{ description: 'Media file', accept }],
+          })
+          const writable = await handle.createWritable()
+          await writable.write(blob)
+          await writable.close()
+          return
+        } catch (err: any) {
+          // User cancelled the dialog — just bail silently
+          if (err?.name === 'AbortError') return
+          // Otherwise fall through to legacy approach
+        }
+      }
+      // Legacy fallback — auto-downloads to default location
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(blob)
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      setTimeout(() => { URL.revokeObjectURL(a.href); a.remove() }, 100)
+    })
+    .catch(() => {
+      window.open(url, '_blank', 'noopener,noreferrer')
+    })
+}
 
 interface MenuItem {
   label: string
@@ -113,6 +162,14 @@ export function ContextMenuProvider({ children }: { children: ReactNode }) {
       const imgEl = target.closest('img') as HTMLImageElement | null
       const imgSrc = imgEl?.src
 
+      // Check if right-clicked on a video
+      const videoEl = target.closest('video') as HTMLVideoElement | null
+      const videoSrc = videoEl ? (videoEl.currentSrc || videoEl.src || videoEl.querySelector('source')?.src) : null
+
+      // Check if right-clicked on audio
+      const audioEl = target.closest('audio') as HTMLAudioElement | null
+      const audioSrc = audioEl ? (audioEl.currentSrc || audioEl.src || audioEl.querySelector('source')?.src) : null
+
       // --- Text selection actions ---
       if (hasSelection) {
         if (isEditable) {
@@ -193,10 +250,60 @@ export function ContextMenuProvider({ children }: { children: ReactNode }) {
       if (imgSrc) {
         if (items.length > 0) items.push({ separator: true })
         items.push({
+          label: 'Download Image',
+          icon: <Download size={14} />,
+          action: () => {
+            downloadMediaUrl(imgSrc)
+            close()
+          },
+        })
+        items.push({
           label: 'Copy Image Address',
           icon: <Image size={14} />,
           action: () => {
             navigator.clipboard.writeText(imgSrc).catch(() => {})
+            close()
+          },
+        })
+      }
+
+      // --- Video actions ---
+      if (videoSrc) {
+        if (items.length > 0) items.push({ separator: true })
+        items.push({
+          label: 'Download Video',
+          icon: <Download size={14} />,
+          action: () => {
+            downloadMediaUrl(videoSrc)
+            close()
+          },
+        })
+        items.push({
+          label: 'Copy Video Address',
+          icon: <Film size={14} />,
+          action: () => {
+            navigator.clipboard.writeText(videoSrc).catch(() => {})
+            close()
+          },
+        })
+      }
+
+      // --- Audio actions ---
+      if (audioSrc) {
+        if (items.length > 0) items.push({ separator: true })
+        items.push({
+          label: 'Download Audio',
+          icon: <Download size={14} />,
+          action: () => {
+            downloadMediaUrl(audioSrc)
+            close()
+          },
+        })
+        items.push({
+          label: 'Copy Audio Address',
+          icon: <Volume2 size={14} />,
+          action: () => {
+            navigator.clipboard.writeText(audioSrc).catch(() => {})
             close()
           },
         })
