@@ -1373,6 +1373,7 @@ function DMMessageRow({ msg, showDateSep, isGrouped, senderProfile, displayName,
               )}
             </div>
           )}
+          <div className="max-h-[600px] overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
           {shouldBlurBlocked ? (
             <div className="flex items-center gap-2.5 py-1.5 px-3 my-1 rounded-lg bg-muted/50 border border-border/50">
               <ShieldBan size={14} className="text-destructive/70 shrink-0" />
@@ -1475,6 +1476,7 @@ function DMMessageRow({ msg, showDateSep, isGrouped, senderProfile, displayName,
               hasTextContent={!!msg.content}
             />
           )}
+          </div>
           {isBlockedUser && blockedRevealed && (
             <button
               onClick={() => setBlockedRevealed(false)}
@@ -1541,6 +1543,7 @@ function DMMessageContent({ msg, showDateSep, isGrouped, senderProfile, displayN
               )}
             </div>
           )}
+          <div className="max-h-[600px] overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
           {(() => {
             // Extract GIF URLs from content — render them via DMGifStarOverlay (with star + blossom failover)
             const gifUrlRegex = /https?:\/\/\S+\.gif(?:\?\S*)?/gi
@@ -1628,6 +1631,7 @@ function DMMessageContent({ msg, showDateSep, isGrouped, senderProfile, displayN
               hasTextContent={!!msg.content}
             />
           )}
+          </div>
         </div>
       </div>
     </div>

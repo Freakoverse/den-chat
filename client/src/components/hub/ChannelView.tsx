@@ -3342,6 +3342,7 @@ export function ChatMessageRow({
         </div>
 
         <div className="min-w-0 flex-1">
+          <div className="max-h-[600px] overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
           {isEditing ? (
             <EditField text={editText} onChange={setEditText} onCancel={() => { cancelEdit(); setRemovedAttachmentHashes(new Set()) }} unchanged={editUnchanged} onSave={() => { onSaveEdit(msg, editText, removedAttachmentHashes); setRemovedAttachmentHashes(new Set()) }} />
           ) : !msg.decrypted && !msg.deleted ? (
@@ -3492,6 +3493,7 @@ export function ChatMessageRow({
               </div>
             )
           })()}
+          </div>
           <ReactionBar reactions={reactions} messageId={msg.id} onAddReaction={onAddReaction}>
             <ZapTotalBadge hubDTag={hubDTag} messageId={msg.dTag ? `36943:${msg.pubkey}:${msg.dTag}` : msg.id} onOpenProfile={onOpenProfile} />
           </ReactionBar>
@@ -3644,6 +3646,7 @@ export function ChatMessageRow({
               )}
             </span>
           </div>
+          <div className="max-h-[600px] overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
           {isEditing ? (
             <EditField text={editText} onChange={setEditText} onCancel={() => { cancelEdit(); setRemovedAttachmentHashes(new Set()) }} unchanged={editUnchanged} onSave={() => { onSaveEdit(msg, editText, removedAttachmentHashes); setRemovedAttachmentHashes(new Set()) }} />
           ) : !msg.decrypted && !msg.deleted ? (
@@ -3783,6 +3786,7 @@ export function ChatMessageRow({
               </div>
             )
           })()}
+          </div>
           <ReactionBar reactions={reactions} messageId={msg.id} onAddReaction={onAddReaction} rawReactions={rawReactions} onOpenProfile={onOpenProfile}>
             <ZapTotalBadge hubDTag={hubDTag} messageId={msg.dTag ? `36943:${msg.pubkey}:${msg.dTag}` : msg.id} onOpenProfile={onOpenProfile} />
           </ReactionBar>
