@@ -29,6 +29,7 @@ export interface ResolvedPermissions {
   mention_here: boolean
   mention_roles: boolean
   create_polls: boolean
+  create_calendar_events: boolean
   connect_voice: boolean
   speak: boolean
   stream_video: boolean
@@ -51,6 +52,7 @@ export const PERMISSION_KEYS: (keyof ResolvedPermissions)[] = [
   'mention_here',
   'mention_roles',
   'create_polls',
+  'create_calendar_events',
   'connect_voice',
   'speak',
   'stream_video',
@@ -73,6 +75,7 @@ export const PERMISSION_LABELS: Record<keyof ResolvedPermissions, string> = {
   mention_here: 'Mention @here',
   mention_roles: 'Mention @roles',
   create_polls: 'Create Polls',
+  create_calendar_events: 'Create Calendar Events',
   connect_voice: 'Connect to Voice',
   speak: 'Speak in Voice',
   stream_video: 'Stream Video',
@@ -95,6 +98,7 @@ export const PERMISSION_DESCRIPTIONS: Record<keyof ResolvedPermissions, string> 
   mention_here: '@here mentions from this role trigger notifications',
   mention_roles: 'Can use @role mentions to notify all members of a role',
   create_polls: 'Can create polls in hub channels',
+  create_calendar_events: 'Can create and publish calendar events in this hub',
   connect_voice: 'Can join voice channels in this hub',
   speak: 'Can unmute and transmit audio in voice channels',
   stream_video: 'Can screen share in voice channels',
@@ -123,6 +127,7 @@ export const DEFAULT_EVERYONE_PERMISSIONS: ResolvedPermissions = {
   mention_here: false,
   mention_roles: false,
   create_polls: true,
+  create_calendar_events: false,
   connect_voice: true,
   speak: true,
   stream_video: true,
@@ -145,6 +150,7 @@ export const FULL_PERMISSIONS: ResolvedPermissions = {
   mention_here: true,
   mention_roles: true,
   create_polls: true,
+  create_calendar_events: true,
   connect_voice: true,
   speak: true,
   stream_video: true,
@@ -299,6 +305,7 @@ export function usePermissions(hubDTag?: string, channelId?: string): ResolvedPe
       mention_here: false,
       mention_roles: false,
       create_polls: false,
+      create_calendar_events: false,
       connect_voice: false,
       speak: false,
       stream_video: false,
