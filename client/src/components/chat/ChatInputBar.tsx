@@ -35,6 +35,13 @@ import { VoiceNoteModal } from '@/components/chat/VoiceNoteModal'
 import type { UploadProgress } from '@/lib/blossom'
 import type { ISigner } from '@/stores/userStore'
 
+/* ─── Constants ─── */
+
+/** Maximum message content length (characters) — shared across all chat types */
+export const MESSAGE_MAX_LENGTH = 5120
+/** Show the character counter when remaining chars ≤ this threshold */
+export const MESSAGE_CHAR_WARN_THRESHOLD = 256
+
 /* ─── Types ─── */
 
 export type PendingFile = {
@@ -426,11 +433,17 @@ export function ChatInputBar({
   const hasPendingOrUploading = pendingFiles.some((f) => f.status === 'pending' || f.status === 'uploading' || f.status === 'encrypting')
   const allFilesSuccess = pendingFiles.length > 0 && pendingFiles.every((f) => f.status === 'success')
 
+  // Character limit
+  const charsRemaining = MESSAGE_MAX_LENGTH - message.length
+  const isOverLimit = charsRemaining < 0
+  const showCharCounter = charsRemaining <= MESSAGE_CHAR_WARN_THRESHOLD
+
   const showSend = canSendOverride !== undefined
-    ? canSendOverride
-    : ((message.trim() || allFilesSuccess) && !hasPendingOrUploading && !hasFailedFiles && !sending)
+    ? (canSendOverride && !isOverLimit)
+    : ((message.trim() || allFilesSuccess) && !hasPendingOrUploading && !hasFailedFiles && !sending && !isOverLimit)
 
   const handleSend = useCallback(() => {
+    if (isOverLimit) return
     // Build attachments from successful uploads
     const attachments: FileAttachment[] = pendingFiles
       .filter((f) => f.status === 'success' && f.hash)
@@ -499,7 +512,7 @@ export function ChatInputBar({
     }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      if (showSend) handleSend()
+      if (showSend && !isOverLimit) handleSend()
     }
   }
 
@@ -960,6 +973,15 @@ export function ChatInputBar({
             style={{ maxHeight: '500px', overflowY: 'auto' }}
             rows={1}
           />
+
+          {/* Character counter */}
+          {showCharCounter && (
+            <span className={`text-[11px] font-mono tabular-nums select-none transition-colors min-[1081px]:order-1 max-[1080px]:order-[2] ${
+              isOverLimit ? 'text-red-400 font-semibold' : charsRemaining <= 100 ? 'text-amber-400' : 'text-muted-foreground/60'
+            }`}>
+              {charsRemaining}
+            </span>
+          )}
 
           {/* Send button */}
           {showSend && (

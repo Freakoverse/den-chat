@@ -73,6 +73,7 @@ import { useUnreadDivider } from '@/hooks/useUnreadDivider'
 import { NewMessagesDivider } from '@/components/chat/NewMessagesDivider'
 import { UnreadBanner } from '@/components/chat/UnreadBanner'
 import { useMobile } from '@/hooks/useMobile'
+import { MESSAGE_MAX_LENGTH, MESSAGE_CHAR_WARN_THRESHOLD } from '@/components/chat/ChatInputBar'
 
 /** Optimistic message -- shown immediately before publish confirms */
 export interface OptimisticMessage {
@@ -4238,8 +4239,12 @@ function EditField({ text, onChange, onCancel, unchanged, onSave }: {
     }
   }, [])
 
+  const isEditOverLimit = text.length > MESSAGE_MAX_LENGTH
+  const editCharsRemaining = MESSAGE_MAX_LENGTH - text.length
+  const showEditCharCounter = editCharsRemaining <= MESSAGE_CHAR_WARN_THRESHOLD
+
   const handleSave = async () => {
-    if (saving || unchanged || !text.trim()) return
+    if (saving || unchanged || !text.trim() || isEditOverLimit) return
     setSaving(true)
     try {
       await onSave()
@@ -4278,7 +4283,7 @@ function EditField({ text, onChange, onCancel, unchanged, onSave }: {
             }
             return
           }
-          if (e.key === 'Enter' && !e.shiftKey && !unchanged && text.trim() && !saving) {
+          if (e.key === 'Enter' && !e.shiftKey && !unchanged && text.trim() && !saving && !isEditOverLimit) {
             e.preventDefault()
             handleSave()
           }
@@ -4296,9 +4301,16 @@ function EditField({ text, onChange, onCancel, unchanged, onSave }: {
         >
           Cancel
         </button>
+        {showEditCharCounter && (
+          <span className={`text-[11px] font-mono tabular-nums select-none transition-colors ${
+            isEditOverLimit ? 'text-red-400 font-semibold' : editCharsRemaining <= 100 ? 'text-amber-400' : 'text-muted-foreground/60'
+          }`}>
+            {editCharsRemaining}
+          </span>
+        )}
         <button
           onClick={handleSave}
-          disabled={unchanged || !text.trim() || saving}
+          disabled={unchanged || !text.trim() || saving || isEditOverLimit}
           className="px-3 py-0.5 rounded bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/80 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
         >
           {saving ? (
@@ -4797,7 +4809,12 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
   const hasFailedFiles = pendingFiles.some((f) => f.status === 'failed')
   const hasPendingOrUploading = pendingFiles.some((f) => f.status === 'pending' || f.status === 'uploading' || f.status === 'encrypting')
   const allFilesSuccess = pendingFiles.length > 0 && pendingFiles.every((f) => f.status === 'success')
-  const canSend = (message.trim() || allFilesSuccess || pendingStickers.length > 0 || pendingGifs.length > 0) && !hasPendingOrUploading && !hasFailedFiles
+  const canSend = (message.trim() || allFilesSuccess || pendingStickers.length > 0 || pendingGifs.length > 0) && !hasPendingOrUploading && !hasFailedFiles && message.length <= MESSAGE_MAX_LENGTH
+
+  // Character limit
+  const charsRemaining = MESSAGE_MAX_LENGTH - message.length
+  const isOverLimit = charsRemaining < 0
+  const showCharCounter = charsRemaining <= MESSAGE_CHAR_WARN_THRESHOLD
 
   // Detect custom emoji shortcodes in current message for preview
   const detectedEmojis = useMemo(() => {
@@ -5014,7 +5031,7 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
     }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      if (canSend) handleSend()
+      if (canSend && !isOverLimit) handleSend()
     }
   }
 
@@ -5634,6 +5651,15 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
             style={{ maxHeight: '500px', overflowY: 'auto' }}
             rows={1}
           />
+
+          {/* Character counter */}
+          {showCharCounter && (
+            <span className={`text-[11px] font-mono tabular-nums select-none transition-colors min-[1081px]:order-1 max-[1080px]:order-[2] ${
+              isOverLimit ? 'text-red-400 font-semibold' : charsRemaining <= 100 ? 'text-amber-400' : 'text-muted-foreground/60'
+            }`}>
+              {charsRemaining}
+            </span>
+          )}
 
           {canSend && (
             <Button onClick={handleSend} size="icon" className="h-8 w-8 min-[1081px]:order-1 max-[1080px]:order-[2]">
