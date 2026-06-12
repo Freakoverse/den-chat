@@ -23,7 +23,7 @@ import { UserHubSettingsModal } from '@/components/hub/UserHubSettingsModal'
 import { UserPanel } from '@/components/ui/UserPanel'
 import { ResizablePanel } from '@/components/ui/ResizablePanel'
 import { CalendarPanel } from '@/components/hub/CalendarPanel'
-import { useCalendar } from '@/hooks/useCalendar'
+import { useCalendar, isEventLive } from '@/hooks/useCalendar'
 
 export function ChannelList({ isModBanned = false, isMobile = false }: { isModBanned?: boolean; isMobile?: boolean } = {}) {
   const activeHubId = useHubStore((s) => s.activeHubId)
@@ -119,8 +119,17 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
   // Join request count (creator only)
   const joinRequestCount = useJoinRequestCount(hub, hubMembers, isCreator)
 
-  // Live calendar events
-  const { liveEventCount } = useCalendar(activeHubId)
+  // Live calendar events — filtered by create_calendar_events permission
+  const { decryptedEvents } = useCalendar(activeHubId)
+  const liveEventCount = useMemo(() => {
+    if (!hub || !decryptedEvents.length) return 0
+    return decryptedEvents.filter((event) => {
+      if (!isEventLive(event)) return false
+      if (event.pubkey === hub.creatorPubkey) return true
+      const eventPerms = getPermissionsForUser(hub, event.pubkey, hubMembers)
+      return eventPerms.create_calendar_events
+    }).length
+  }, [decryptedEvents, hub, hubMembers])
 
   // Show loading skeleton immediately when a hub is selected but data hasn't loaded yet
   if (!hub) {

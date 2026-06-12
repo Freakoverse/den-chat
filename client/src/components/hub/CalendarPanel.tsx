@@ -18,6 +18,8 @@ import { X, CalendarDays, Plus, ChevronLeft, ChevronRight, Loader2, Radio, Clock
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
+import { usePermissions, getPermissionsForUser } from '@/lib/hub/permissions'
+import { useHubStore } from '@/stores/hubStore'
 
 interface CalendarPanelProps {
   hubDTag: string
@@ -47,6 +49,23 @@ export function CalendarPanel({ hubDTag, open, onClose }: CalendarPanelProps) {
     decryptRsvps,
   } = useCalendar(hubDTag)
 
+  // Permission check: can the current user create calendar events?
+  const perms = usePermissions(hubDTag)
+  const canCreate = perms.create_calendar_events
+
+  // Filter out events from users who don't have the create_calendar_events permission
+  const hub = useHubStore((s) => s.hubs[hubDTag])
+  const hubMembers = useHubStore((s) => s.hubMembers[hubDTag])
+  const permittedEvents = useMemo(() => {
+    if (!hub) return decryptedEvents
+    return decryptedEvents.filter((event) => {
+      // Hub creator always has full permissions
+      if (event.pubkey === hub.creatorPubkey) return true
+      const eventPerms = getPermissionsForUser(hub, event.pubkey, hubMembers)
+      return eventPerms.create_calendar_events
+    })
+  }, [decryptedEvents, hub, hubMembers])
+
   const [tab, setTab] = useState<PanelTab>(liveEventCount > 0 ? 'live' : 'upcoming')
   const [page, setPage] = useState(1)
   const [showCreate, setShowCreate] = useState(false)
@@ -70,8 +89,8 @@ export function CalendarPanel({ hubDTag, open, onClose }: CalendarPanelProps) {
   // Sorted events
   const sortedByStart = useMemo(
     () =>
-      [...decryptedEvents].sort((a, b) => a.startTimestamp - b.startTimestamp),
-    [decryptedEvents]
+      [...permittedEvents].sort((a, b) => a.startTimestamp - b.startTimestamp),
+    [permittedEvents]
   )
 
   const nowTs = Math.floor(Date.now() / 1000)
@@ -136,7 +155,7 @@ export function CalendarPanel({ hubDTag, open, onClose }: CalendarPanelProps) {
   // Event counts per day
   const eventCountsByDay = useMemo(() => {
     const counts: Record<number, number> = {}
-    for (const event of decryptedEvents) {
+    for (const event of permittedEvents) {
       const startDate = new Date(event.startTimestamp * 1000)
       const endDate = event.endTimestamp
         ? new Date(event.endTimestamp * 1000)
@@ -160,7 +179,7 @@ export function CalendarPanel({ hubDTag, open, onClose }: CalendarPanelProps) {
       }
     }
     return counts
-  }, [decryptedEvents, viewYear, viewMonth])
+  }, [permittedEvents, viewYear, viewMonth])
 
   // Events for selected day
   const selectedDayEvents = useMemo(() => {
@@ -249,17 +268,19 @@ export function CalendarPanel({ hubDTag, open, onClose }: CalendarPanelProps) {
               <CalendarDays size={18} className="text-primary" />
               <h3 className="text-base font-semibold text-foreground">Events</h3>
               <span className="text-xs text-muted-foreground/60">
-                {decryptedEvents.length} event{decryptedEvents.length !== 1 ? 's' : ''}
+                {permittedEvents.length} event{permittedEvents.length !== 1 ? 's' : ''}
               </span>
             </div>
             <div className="flex items-center gap-2">
-              <Button
-                size="sm"
-                className="h-7 text-xs"
-                onClick={() => setShowCreate(true)}
-              >
-                <Plus size={13} className="mr-1" /> Create Event
-              </Button>
+              {canCreate && (
+                <Button
+                  size="sm"
+                  className="h-7 text-xs"
+                  onClick={() => setShowCreate(true)}
+                >
+                  <Plus size={13} className="mr-1" /> Create Event
+                </Button>
+              )}
               <button
                 onClick={onClose}
                 className="p-1 rounded cursor-pointer text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors"
@@ -355,7 +376,7 @@ export function CalendarPanel({ hubDTag, open, onClose }: CalendarPanelProps) {
                         tab === 'upcoming' ? 'No upcoming events' :
                           'No past events'}
                     </p>
-                    {tab === 'upcoming' && (
+                    {tab === 'upcoming' && canCreate && (
                       <p className="text-xs text-muted-foreground/50 mt-1">
                         Create one to get started
                       </p>
