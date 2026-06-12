@@ -309,7 +309,135 @@ export function VideoEmbed({ src }: { src: string }) {
   const blossom = useBlossomMedia(src)
   const [failed, setFailed] = useState(false)
 
-  useEffect(() => { setFailed(false) }, [src])
+  // Cache-and-play state
+  const [cacheState, setCacheState] = useState<'idle' | 'downloading' | 'done' | 'error' | 'too-large'>('idle')
+  const [cacheProgress, setCacheProgress] = useState(0) // 0-100
+  const [cacheLoaded, setCacheLoaded] = useState(0)  // bytes downloaded
+  const [cacheTotal, setCacheTotal] = useState(0)     // total bytes (from content-length)
+  const [cacheBlobUrl, setCacheBlobUrl] = useState<string | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
+  const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const MAX_PREVIEW_BYTES = 50 * 1024 * 1024 // 50 MB
+
+  const formatBytes = (bytes: number): string => {
+    if (bytes < 1024) return `${bytes} B`
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  }
+
+  useEffect(() => {
+    setFailed(false)
+    setCacheState('idle')
+    setCacheProgress(0)
+    setCacheLoaded(0)
+    setCacheTotal(0)
+    if (errorTimerRef.current) { clearTimeout(errorTimerRef.current); errorTimerRef.current = null }
+    // Revoke old blob URL on src change
+    if (cacheBlobUrl) { URL.revokeObjectURL(cacheBlobUrl); setCacheBlobUrl(null) }
+  }, [src]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Revoke blob URL on unmount
+  useEffect(() => {
+    return () => {
+      if (cacheBlobUrl) URL.revokeObjectURL(cacheBlobUrl)
+      abortRef.current?.abort()
+      if (errorTimerRef.current) clearTimeout(errorTimerRef.current)
+    }
+  }, [cacheBlobUrl])
+
+  const showError = (type: 'error' | 'too-large' = 'error') => {
+    setCacheState(type)
+    setCacheProgress(0)
+    abortRef.current = null
+    errorTimerRef.current = setTimeout(() => { setCacheState('idle'); errorTimerRef.current = null }, 4000)
+  }
+
+  /** Stream-read a fetch response into a blob URL */
+  const streamToBlob = async (res: Response, signal: AbortSignal): Promise<string | null | 'too-large'> => {
+    if (!res.ok || !res.body) return null
+
+    const contentLength = Number(res.headers.get('content-length') || 0)
+    const contentType = res.headers.get('content-type') || 'video/mp4'
+
+    // Size cap — reject before downloading if server reports size
+    if (contentLength > MAX_PREVIEW_BYTES) {
+      setCacheTotal(contentLength)
+      return 'too-large'
+    }
+
+    setCacheTotal(contentLength)
+    const reader = res.body.getReader()
+    const chunks: Uint8Array[] = []
+    let loaded = 0
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      chunks.push(value)
+      loaded += value.length
+      setCacheLoaded(loaded)
+
+      // Runtime cap — abort if actual bytes exceed limit (covers missing content-length)
+      if (loaded > MAX_PREVIEW_BYTES) {
+        reader.cancel()
+        setCacheTotal(loaded)
+        return 'too-large'
+      }
+
+      if (contentLength > 0) {
+        setCacheProgress(Math.round((loaded / contentLength) * 100))
+      }
+    }
+
+    if (signal.aborted) return null
+
+    const blob = new Blob(chunks, { type: contentType })
+    return URL.createObjectURL(blob)
+  }
+
+  const handleCacheAndPlay = async () => {
+    if (cacheState === 'downloading') return
+    const controller = new AbortController()
+    abortRef.current = controller
+    setCacheState('downloading')
+    setCacheProgress(0)
+
+    const resolvedUrl = blossom.src || src
+
+    try {
+      const res = await fetch(resolvedUrl, {
+        signal: controller.signal,
+        referrerPolicy: 'no-referrer',
+      })
+
+      const result = await streamToBlob(res, controller.signal)
+      if (result === 'too-large') {
+        showError('too-large')
+        return
+      }
+      if (result) {
+        setCacheBlobUrl(result)
+        setCacheState('done')
+        abortRef.current = null
+        return
+      }
+
+      showError()
+    } catch (err: unknown) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        setCacheState('idle')
+        setCacheProgress(0)
+      } else {
+        showError()
+      }
+      abortRef.current = null
+    }
+  }
+
+  const handleCancelCache = () => {
+    abortRef.current?.abort()
+  }
 
   if (blossom.error === 'not-found') {
     return (
@@ -322,22 +450,84 @@ export function VideoEmbed({ src }: { src: string }) {
 
   const resolvedSrc = blossom.src || src
 
+  // Cached blob ready — play inline
+  if (cacheState === 'done' && cacheBlobUrl) {
+    return (
+      <div className="relative inline-block mt-1 max-w-[400px]">
+        <video
+          src={cacheBlobUrl}
+          controls
+          autoPlay
+          className="w-full max-w-[400px] max-h-[300px] rounded-lg border border-border"
+        />
+      </div>
+    )
+  }
+
   if (failed) {
     return (
-      <a
-        href={src}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="flex items-center gap-2 px-3 py-2 mt-1 rounded-lg border border-border bg-secondary/40 hover:bg-secondary/80 transition-colors max-w-[400px] group"
-      >
+      <div className="flex items-center gap-2 px-3 py-2 mt-1 rounded-lg border border-border bg-secondary/40 max-w-[400px]">
         <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
           <Download size={18} className="text-primary" />
         </div>
         <div className="flex-1 min-w-0">
           <p className="text-sm text-foreground font-medium truncate">Video link</p>
-          <p className="text-xs text-muted-foreground truncate group-hover:text-primary transition-colors">{src.split('/').pop()?.split('?')[0] || 'Open video'}</p>
+          <p className="text-xs text-muted-foreground truncate">{src.split('/').pop()?.split('?')[0] || 'Video'}</p>
+          {/* Download progress bar */}
+          {cacheState === 'downloading' && (
+            <div className="mt-1.5">
+              <div className="flex items-center gap-2">
+                <div className="flex-1 h-1 rounded-full bg-border overflow-hidden">
+                  <div
+                    className="h-full bg-primary rounded-full transition-all duration-200"
+                    style={{ width: `${cacheProgress}%` }}
+                  />
+                </div>
+                <span className="text-[10px] text-muted-foreground tabular-nums shrink-0">{cacheProgress}%</span>
+              </div>
+              {cacheTotal > 0 && (
+                <p className="text-[10px] text-muted-foreground mt-0.5 tabular-nums">{formatBytes(cacheLoaded)} / {formatBytes(cacheTotal)}</p>
+              )}
+            </div>
+          )}
+          {cacheState === 'error' && (
+            <p className="text-[11px] text-destructive mt-0.5">Preview blocked by server</p>
+          )}
+          {cacheState === 'too-large' && (
+            <p className="text-[11px] text-destructive mt-0.5">Too large to preview ({formatBytes(cacheTotal)})</p>
+          )}
         </div>
-      </a>
+        <div className="flex items-center gap-1 shrink-0">
+          {cacheState === 'downloading' ? (
+            <button
+              onClick={handleCancelCache}
+              className="w-8 h-8 rounded-lg flex items-center justify-center text-destructive hover:bg-destructive/10 transition-colors cursor-pointer"
+              title="Cancel"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          ) : (
+            <>
+              <a
+                href={src}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary/80 transition-colors"
+                title="Download"
+              >
+                <Download size={15} />
+              </a>
+              <button
+                onClick={handleCacheAndPlay}
+                className="w-8 h-8 rounded-lg flex items-center justify-center text-primary hover:bg-primary/10 transition-colors cursor-pointer"
+                title="Preview — download and play inline"
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8" fill="currentColor" stroke="none"/></svg>
+              </button>
+            </>
+          )}
+        </div>
+      </div>
     )
   }
 

@@ -258,6 +258,13 @@ export function SettingsPage() {
 /* ─────────── General ─────────── */
 
 function GeneralTab() {
+  const myPubkey = useUserStore((s) => s.pubkey)
+  const { getProfile } = useProfileCache()
+  const profile = myPubkey ? getProfile(myPubkey) : undefined
+  const displayName = profile?.display_name || profile?.name || 'Anonymous'
+  const npub = myPubkey ? nip19.npubEncode(myPubkey) : ''
+  const [profileModalOpen, setProfileModalOpen] = useState(false)
+
   const [clientTag, setClientTag] = useState(() =>
     typeof window !== 'undefined' ? localStorage.getItem('den-chat-client-tag') !== 'false' : true
   )
@@ -273,6 +280,27 @@ function GeneralTab() {
       <h3 className="text-lg font-semibold mb-4">General</h3>
 
       <div className="space-y-4">
+        {/* User Profile Card */}
+        <button
+          onClick={() => setProfileModalOpen(true)}
+          className="flex items-center gap-3 w-full px-3 py-3 rounded-lg border border-border bg-secondary/30 hover:bg-secondary/50 transition-colors cursor-pointer text-left group"
+        >
+          <Avatar className="w-11 h-11 shrink-0 ring-2 ring-primary/20 group-hover:ring-primary/40 transition-all">
+            <AvatarImage src={profile?.picture} alt={displayName} />
+            <AvatarFallback className="bg-primary/10 text-primary text-sm font-medium">
+              {displayName.slice(0, 2).toUpperCase()}
+            </AvatarFallback>
+          </Avatar>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-foreground truncate">{displayName}</p>
+            <p className="text-[11px] text-muted-foreground font-mono truncate">{truncateNpub(npub)}</p>
+          </div>
+          <span className="flex items-center gap-1.5 text-xs text-primary font-medium shrink-0 opacity-70 group-hover:opacity-100 transition-opacity">
+            <Pencil size={12} />
+            Edit User Profile
+          </span>
+        </button>
+
         {/* Client tag */}
         <div className="flex items-center justify-between px-3 py-3 rounded-lg border border-border bg-secondary/30">
           <div>
@@ -293,6 +321,14 @@ function GeneralTab() {
           </button>
         </div>
       </div>
+
+      {/* User Profile Modal — opens in edit mode */}
+      <UserProfileModal
+        open={profileModalOpen}
+        onClose={() => setProfileModalOpen(false)}
+        targetPubkey={myPubkey}
+        startEditing
+      />
     </div>
   )
 }
