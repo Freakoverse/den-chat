@@ -477,6 +477,26 @@ export function ChatInputBar({
         return
       }
     }
+    // Tab without emoji autocomplete → insert 3 spaces for markdown indentation
+    if (e.key === 'Tab') {
+      e.preventDefault()
+      const ta = textareaRef.current
+      if (ta) {
+        const start = ta.selectionStart
+        const end = ta.selectionEnd
+        const spaces = '   '
+        const before = message.substring(0, start)
+        const after = message.substring(end)
+        onMessageChange(`${before}${spaces}${after}`)
+        requestAnimationFrame(() => {
+          ta.focus()
+          const pos = start + spaces.length
+          ta.setSelectionRange(pos, pos)
+          autoResize(ta)
+        })
+      }
+      return
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       if (showSend) handleSend()

@@ -793,8 +793,8 @@ export const MessageContent = memo(function MessageContent({ content, suffix, on
         </TooltipProvider>
       )
     },
-    ul: ({ children }) => <ul className="list-disc list-inside mb-3 last:mb-0">{children}</ul>,
-    ol: ({ children }) => <ol className="list-decimal list-inside mb-3 last:mb-0">{children}</ol>,
+    ul: ({ children }) => <ul className="list-disc list-outside pl-5 mb-3 last:mb-0">{children}</ul>,
+    ol: ({ children }) => <ol className="list-decimal list-outside pl-5 mb-3 last:mb-0">{children}</ol>,
     li: ({ children }) => <li>{children}</li>,
     pre: ({ children }) => <>{children}</>,
     code: ({ className, children }) => {

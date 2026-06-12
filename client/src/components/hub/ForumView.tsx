@@ -1799,6 +1799,25 @@ function CreateForumPostModal({ onClose, sendMessage, canPublish, signer, privat
               ref={bodyRef}
               value={body}
               onChange={(e) => setBody(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Tab') {
+                  e.preventDefault()
+                  const ta = bodyRef.current
+                  if (ta) {
+                    const start = ta.selectionStart
+                    const end = ta.selectionEnd
+                    const spaces = '   '
+                    const before = body.substring(0, start)
+                    const after = body.substring(end)
+                    setBody(`${before}${spaces}${after}`)
+                    requestAnimationFrame(() => {
+                      ta.focus()
+                      const pos = start + spaces.length
+                      ta.setSelectionRange(pos, pos)
+                    })
+                  }
+                }
+              }}
               placeholder="Write your post content..."
               rows={8}
               className={cn(
@@ -2306,6 +2325,25 @@ function EditForumPostModal({ post, onClose, editMessage, signer, privateKey, hu
               ref={bodyRef}
               value={body}
               onChange={(e) => setBody(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Tab') {
+                  e.preventDefault()
+                  const ta = bodyRef.current
+                  if (ta) {
+                    const start = ta.selectionStart
+                    const end = ta.selectionEnd
+                    const spaces = '   '
+                    const before = body.substring(0, start)
+                    const after = body.substring(end)
+                    setBody(`${before}${spaces}${after}`)
+                    requestAnimationFrame(() => {
+                      ta.focus()
+                      const pos = start + spaces.length
+                      ta.setSelectionRange(pos, pos)
+                    })
+                  }
+                }
+              }}
               placeholder="Write your post content..."
               rows={8}
               className={cn(

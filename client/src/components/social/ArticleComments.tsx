@@ -478,6 +478,24 @@ function CommentComposeBox({ articleEvent, aCoordinate, replyTo, onPosted, compa
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Tab') {
+      e.preventDefault()
+      const ta = textareaRef.current
+      if (ta) {
+        const start = ta.selectionStart
+        const end = ta.selectionEnd
+        const spaces = '   '
+        const before = text.substring(0, start)
+        const after = text.substring(end)
+        setText(`${before}${spaces}${after}`)
+        requestAnimationFrame(() => {
+          ta.focus()
+          const pos = start + spaces.length
+          ta.setSelectionRange(pos, pos)
+        })
+      }
+      return
+    }
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
       e.preventDefault()
       handlePost()

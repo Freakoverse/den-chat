@@ -496,7 +496,27 @@ export function LongFormWritePage() {
               <EmojiPickerPopover anchorRef={emojiButtonRef} onClose={() => setShowEmoji(false)}
                 onSelect={(emoji) => { setBody(prev => prev + emoji); setShowEmoji(false); bodyRef.current?.focus() }} />
             )}
-            <textarea ref={bodyRef} value={body} onChange={(e) => setBody(e.target.value)} placeholder="Write your article content in markdown..."
+            <textarea ref={bodyRef} value={body} onChange={(e) => setBody(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Tab') {
+                  e.preventDefault()
+                  const ta = bodyRef.current
+                  if (ta) {
+                    const start = ta.selectionStart
+                    const end = ta.selectionEnd
+                    const spaces = '   '
+                    const before = body.substring(0, start)
+                    const after = body.substring(end)
+                    setBody(`${before}${spaces}${after}`)
+                    requestAnimationFrame(() => {
+                      ta.focus()
+                      const pos = start + spaces.length
+                      ta.setSelectionRange(pos, pos)
+                    })
+                  }
+                }
+              }}
+              placeholder="Write your article content in markdown..."
               rows={16} className="w-full px-3 py-2 rounded-b-lg border border-input border-t-0 bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:border-primary/40 transition-colors resize-y font-mono" />
             <div className="flex items-center justify-end mt-1">
               <span className="text-[10px] text-muted-foreground">{body.split(/\s+/).filter(Boolean).length} words</span>

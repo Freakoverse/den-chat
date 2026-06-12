@@ -4253,6 +4253,25 @@ function EditField({ text, onChange, onCancel, unchanged, onSave }: {
         }}
         onKeyDown={(e) => {
           if (e.key === 'Escape') onCancel()
+          if (e.key === 'Tab') {
+            e.preventDefault()
+            const ta = ref.current
+            if (ta) {
+              const start = ta.selectionStart
+              const end = ta.selectionEnd
+              const spaces = '   '
+              const before = text.substring(0, start)
+              const after = text.substring(end)
+              onChange(`${before}${spaces}${after}`)
+              requestAnimationFrame(() => {
+                ta.focus()
+                const pos = start + spaces.length
+                ta.setSelectionRange(pos, pos)
+                autoResize(ta)
+              })
+            }
+            return
+          }
           if (e.key === 'Enter' && !e.shiftKey && !unchanged && text.trim() && !saving) {
             e.preventDefault()
             handleSave()
@@ -4966,6 +4985,26 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
         emojiStartRef.current = null
         return
       }
+    }
+    // Tab without autocomplete → insert 3 spaces for markdown indentation
+    if (e.key === 'Tab') {
+      e.preventDefault()
+      const ta = textareaRef.current
+      if (ta) {
+        const start = ta.selectionStart
+        const end = ta.selectionEnd
+        const spaces = '   '
+        const before = message.substring(0, start)
+        const after = message.substring(end)
+        setMessage(`${before}${spaces}${after}`)
+        requestAnimationFrame(() => {
+          ta.focus()
+          const pos = start + spaces.length
+          ta.setSelectionRange(pos, pos)
+          autoResize(ta)
+        })
+      }
+      return
     }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
