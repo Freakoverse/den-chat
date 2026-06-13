@@ -15,6 +15,16 @@ fn main() {
         if std::env::var("WEBKIT_DISABLE_COMPOSITING_MODE").is_err() {
             unsafe { std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1") };
         }
+        // Strip xapp-gtk3-module from GTK_MODULES — this module only exists on
+        // Mint/Debian/Ubuntu. On Arch/CachyOS it's absent, causing GTK critical
+        // warnings and potential WebKitWebProcess crashes (blank window).
+        if let Ok(modules) = std::env::var("GTK_MODULES") {
+            let filtered: Vec<&str> = modules
+                .split(':')
+                .filter(|m| !m.contains("xapp-gtk3-module"))
+                .collect();
+            unsafe { std::env::set_var("GTK_MODULES", filtered.join(":")) };
+        }
     }
 
     den_chat_lib::run()
