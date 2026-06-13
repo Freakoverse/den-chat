@@ -16,6 +16,8 @@ import { create } from 'zustand'
 const MAX_PER_CHANNEL = 1000
 /** Max total messages across all hubs/channels in memory */
 const MAX_GLOBAL = 20000
+/** Max processed reaction IDs to track (dedup set) — cleared when exceeded */
+const MAX_PROCESSED_REACTIONS = 50000
 
 /** Blossom file attachment metadata — used in message JSON payload */
 export interface Attachment {
@@ -108,6 +110,8 @@ interface MessageState {
   removeReaction: (hubDTag: string, targetMsgId: string, emoji: string, pubkey: string) => void
   /** Mark a reaction event ID as processed */
   markReactionProcessed: (eventId: string) => boolean // returns false if already processed
+  /** Clear all messages, reactions, and tracking data for a hub (e.g. when leaving/removing it) */
+  clearHubData: (hubDTag: string) => void
 }
 
 export const useMessageStore = create<MessageState>((set, get) => ({
@@ -171,6 +175,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
 
       // Global FIFO cap
       const newMessages = { ...state.messages, [msg.hubDTag]: { ...hubMsgs, [msg.channelId]: updated } }
+      let newReactions = state.reactions
       if (insertionOrder.length > MAX_GLOBAL) {
         const excess = insertionOrder.length - MAX_GLOBAL
         const toEvict = new Set(insertionOrder.slice(0, excess))
@@ -185,9 +190,22 @@ export const useMessageStore = create<MessageState>((set, get) => ({
             }
           }
         }
+        // Clean up reactions for evicted messages
+        newReactions = { ...state.reactions }
+        for (const [hd, hubReactions] of Object.entries(newReactions)) {
+          const cleaned = { ...hubReactions }
+          let changed = false
+          for (const msgId of Object.keys(cleaned)) {
+            if (toEvict.has(msgId)) {
+              delete cleaned[msgId]
+              changed = true
+            }
+          }
+          if (changed) newReactions[hd] = cleaned
+        }
       }
 
-      return { messages: newMessages, _insertionOrder: insertionOrder }
+      return { messages: newMessages, _insertionOrder: insertionOrder, reactions: newReactions }
     }),
 
   setMessages: (hubDTag, channelId, msgs) =>
@@ -203,18 +221,47 @@ export const useMessageStore = create<MessageState>((set, get) => ({
       // Add new IDs to insertion order (skip duplicates)
       const existingIds = new Set(state._insertionOrder)
       const newIds = sorted.map(m => m.id).filter(id => !existingIds.has(id))
-      const insertionOrder = [...state._insertionOrder, ...newIds]
+      let insertionOrder = [...state._insertionOrder, ...newIds]
 
-      return {
-        messages: {
-          ...state.messages,
-          [hubDTag]: {
-            ...hubMsgs,
-            [channelId]: sorted,
-          },
+      const newMessages = {
+        ...state.messages,
+        [hubDTag]: {
+          ...hubMsgs,
+          [channelId]: sorted,
         },
-        _insertionOrder: insertionOrder,
       }
+
+      // Global FIFO cap (same eviction as addMessage)
+      let newReactions = state.reactions
+      if (insertionOrder.length > MAX_GLOBAL) {
+        const excess = insertionOrder.length - MAX_GLOBAL
+        const toEvict = new Set(insertionOrder.slice(0, excess))
+        insertionOrder = insertionOrder.slice(excess)
+        for (const [hd, channels] of Object.entries(newMessages)) {
+          for (const [ch, chMsgs] of Object.entries(channels)) {
+            const filtered = chMsgs.filter((m: ChatMessage) => !toEvict.has(m.id))
+            if (filtered.length !== chMsgs.length) {
+              if (!newMessages[hd]) newMessages[hd] = { ...channels }
+              newMessages[hd][ch] = filtered
+            }
+          }
+        }
+        // Clean up reactions for evicted messages
+        newReactions = { ...state.reactions }
+        for (const [hd, hubReactions] of Object.entries(newReactions)) {
+          const cleaned = { ...hubReactions }
+          let changed = false
+          for (const msgId of Object.keys(cleaned)) {
+            if (toEvict.has(msgId)) {
+              delete cleaned[msgId]
+              changed = true
+            }
+          }
+          if (changed) newReactions[hd] = cleaned
+        }
+      }
+
+      return { messages: newMessages, _insertionOrder: insertionOrder, reactions: newReactions }
     }),
 
   clearUnread: (hubDTag) =>
@@ -340,8 +387,35 @@ export const useMessageStore = create<MessageState>((set, get) => ({
   markReactionProcessed: (eventId) => {
     const state = get()
     if (state.processedReactionIds.has(eventId)) return false
-    set({ processedReactionIds: new Set(state.processedReactionIds).add(eventId) })
+    let newSet = new Set(state.processedReactionIds).add(eventId)
+    // Cap: clear when too large (re-processing is safe due to emoji+pubkey dedup in addReaction)
+    if (newSet.size > MAX_PROCESSED_REACTIONS) {
+      newSet = new Set([eventId])
+    }
+    set({ processedReactionIds: newSet })
     return true
   },
+
+  clearHubData: (hubDTag) =>
+    set((state) => {
+      // Remove all messages for this hub
+      const { [hubDTag]: _removedMsgs, ...restMessages } = state.messages
+      // Remove all reactions for this hub
+      const { [hubDTag]: _removedRxns, ...restReactions } = state.reactions
+      // Remove evicted message IDs from insertion order
+      const evictedIds = _removedMsgs
+        ? new Set(Object.values(_removedMsgs).flatMap((ch) => ch.map((m) => m.id)))
+        : new Set<string>()
+      // Remove unread count for this hub
+      const { [hubDTag]: _removedUnread, ...restUnread } = state.unreadCounts
+      return {
+        messages: restMessages,
+        reactions: restReactions,
+        unreadCounts: restUnread,
+        _insertionOrder: evictedIds.size > 0
+          ? state._insertionOrder.filter((id) => !evictedIds.has(id))
+          : state._insertionOrder,
+      }
+    }),
 }))
 

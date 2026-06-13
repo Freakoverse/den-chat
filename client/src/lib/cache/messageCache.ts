@@ -5,7 +5,8 @@
  * Provides:
  *  - Write-through caching (new messages saved immediately)
  *  - Bulk load on startup (all messages for all hubs)
- *  - Per-hub size limit: 100MB max, prunes oldest when exceeded
+ *  - Per-hub size limit: 10MB max, prunes oldest when exceeded
+ *  - Global size limit: 300MB max, prunes oldest from largest hubs
  */
 
 import type { ChatMessage } from '@/stores/messageStore'
@@ -14,8 +15,10 @@ const DB_NAME = 'den-chat-messages'
 const DB_VERSION = 3
 const STORE_NAME = 'messages'
 
-/** 100 MB per hub limit (approximate, based on JSON byte size) */
-const MAX_HUB_BYTES = 100 * 1024 * 1024
+/** 10 MB per hub limit (approximate, based on JSON byte size) */
+const MAX_HUB_BYTES = 10 * 1024 * 1024
+/** 300 MB global limit across all hubs */
+const MAX_GLOBAL_BYTES = 300 * 1024 * 1024
 
 let dbPromise: Promise<IDBDatabase> | null = null
 
@@ -377,13 +380,69 @@ function estimateMessageSize(msg: ChatMessage): number {
 }
 
 /**
- * Run all pruning: size-based for each hub.
+ * Enforce global size limit across all hubs.
+ * If total IndexedDB message size exceeds MAX_GLOBAL_BYTES, prune oldest
+ * messages from the largest hubs until within budget.
+ */
+export async function pruneGlobalBySize(): Promise<number> {
+  try {
+    const db = await openDB()
+    const tx = db.transaction(STORE_NAME, 'readonly')
+    const store = tx.objectStore(STORE_NAME)
+    const request = store.getAll()
+
+    const all: ChatMessage[] = await new Promise((resolve, reject) => {
+      request.onsuccess = () => resolve(request.result || [])
+      request.onerror = () => reject(request.error)
+    })
+
+    let totalBytes = 0
+    for (const msg of all) {
+      totalBytes += estimateMessageSize(msg)
+    }
+
+    if (totalBytes <= MAX_GLOBAL_BYTES) return 0
+
+    // Sort all messages oldest first, delete until under global limit
+    const sorted = all.sort((a, b) => a.createdAt - b.createdAt)
+    let pruned = 0
+
+    const tx2 = db.transaction(STORE_NAME, 'readwrite')
+    const store2 = tx2.objectStore(STORE_NAME)
+
+    for (const msg of sorted) {
+      if (totalBytes <= MAX_GLOBAL_BYTES) break
+      store2.delete(msg.id)
+      totalBytes -= estimateMessageSize(msg)
+      pruned++
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      tx2.oncomplete = () => resolve()
+      tx2.onerror = () => reject(tx2.error)
+    })
+
+    return pruned
+  } catch (err) {
+    console.warn('[MessageCache] Failed to prune globally by size:', err)
+    return 0
+  }
+}
+
+/**
+ * Run all pruning: per-hub size limits, then global size limit.
  */
 export async function pruneAll(hubDTags: string[]): Promise<void> {
+  // Per-hub pruning
   for (const dTag of hubDTags) {
     const sizePruned = await pruneHubBySize(dTag)
     if (sizePruned > 0) {
-      console.log(`[MessageCache] Pruned ${sizePruned} messages from hub ${dTag.slice(0, 8)}... (size limit)`)
+      console.log(`[MessageCache] Pruned ${sizePruned} messages from hub ${dTag.slice(0, 8)}... (per-hub size limit)`)
     }
+  }
+  // Global pruning
+  const globalPruned = await pruneGlobalBySize()
+  if (globalPruned > 0) {
+    console.log(`[MessageCache] Pruned ${globalPruned} messages globally (global size limit)`)
   }
 }

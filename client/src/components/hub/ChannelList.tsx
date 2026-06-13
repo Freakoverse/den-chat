@@ -355,6 +355,9 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
                   const remainingEntries = hubStore.hubEntries.filter(e => e.dTag !== hub.dTag)
                   const currentFolders = hubStore.folders
                   hubStore.removeHubEntry(hub.dTag)
+                  // Clean up in-memory messages, reactions, and unread counts for this hub
+                  const { useMessageStore: getMsgStore } = await import('@/stores/messageStore')
+                  getMsgStore.getState().clearHubData(hub.dTag)
                   const hubListEv = createHubListEvent(
                     remainingEntries.map(e => ({ dTag: e.dTag, relayHint: e.relayHint, position: e.position, folderId: e.folderId })),
                     currentFolders,

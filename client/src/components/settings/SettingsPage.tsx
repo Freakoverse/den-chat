@@ -5,6 +5,7 @@ import { useUserStore, type ISigner } from '@/stores/userStore'
 import { useHubStore, type HubStatus, type HubFolder } from '@/stores/hubStore'
 import { useBlockStore } from '@/stores/blockStore'
 import { useFollowStore } from '@/stores/followStore'
+import { useMessageStore } from '@/stores/messageStore'
 import { useUserListsStore } from '@/stores/userListsStore'
 import { usePostingBehaviourStore } from '@/stores/postingBehaviourStore'
 import { useNavigationStore } from '@/stores/navigationStore'
@@ -4541,6 +4542,8 @@ function MyHubsTab() {
   const handleRemoveFromList = (dTag: string) => {
     const remaining = hubEntries.filter((e) => e.dTag !== dTag)
     removeHubEntry(dTag)
+    // Clean up in-memory messages, reactions, and unread counts for this hub
+    useMessageStore.getState().clearHubData(dTag)
     storeSnapshotRef.current = serialize(remaining, folders)
     setConfirmRemove(null)
   }
