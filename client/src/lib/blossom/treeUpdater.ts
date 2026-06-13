@@ -44,6 +44,8 @@ export interface SafeTreeUpdateResult {
   newEpoch: number
   /** Hashes that were cleaned up (best-effort deleted) */
   cleanedUpHashes: string[]
+  /** The created_at of the signed event (for +1 pattern on future updates) */
+  eventCreatedAt?: number
 }
 
 // ─── Main ───
@@ -183,6 +185,7 @@ export async function safeTreeUpdate(params: SafeTreeUpdateParams): Promise<Safe
   // ── Step 7: Re-publish hub event ──
   // When skipPublish is true, the caller will publish its own hub event
   // with updated data (e.g., bumped groupedRoles epochs after group rotation).
+  let publishedCreatedAt: number | undefined
   if (!skipPublish) {
     const unsignedEvent = buildHubEvent({
       dTag: hub.dTag,
@@ -203,9 +206,10 @@ export async function safeTreeUpdate(params: SafeTreeUpdateParams): Promise<Safe
       discoverable: hub.discoverable,
       groupedRoles: hub.groupedRoles,
       publishedAt: hub.publishedAt,
-
+      eventCreatedAt: hub.eventCreatedAt,
     })
     const signedEvent = await signWithSigner(unsignedEvent, signer, privateKey)
+    publishedCreatedAt = signedEvent.created_at
     await publishToSpecificRelays(
       getPublishRelays([...hub.generalRelays, ...hub.filterRelays]),
       signedEvent,
@@ -238,7 +242,7 @@ export async function safeTreeUpdate(params: SafeTreeUpdateParams): Promise<Safe
 
   console.log(`safeTreeUpdate: success. New index: ${newIndexHash}, cleaned up ${cleanedUpHashes.length} old files`)
 
-  return { newIndexHash, newEpoch: epoch, cleanedUpHashes }
+  return { newIndexHash, newEpoch: epoch, cleanedUpHashes, eventCreatedAt: publishedCreatedAt }
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -489,6 +493,7 @@ export async function safePaginatedTreeUpdate(params: SafePaginatedTreeUpdatePar
   }
 
   // ── Step 9: Re-publish hub event ──
+  let publishedCreatedAt: number | undefined
   if (!skipPublish) {
     onStep?.('Signing hub event')
     const unsignedEvent = buildHubEvent({
@@ -510,9 +515,10 @@ export async function safePaginatedTreeUpdate(params: SafePaginatedTreeUpdatePar
       discoverable: hub.discoverable,
       groupedRoles: hub.groupedRoles,
       publishedAt: hub.publishedAt,
-
+      eventCreatedAt: hub.eventCreatedAt,
     })
     const signedEvent = await signWithSigner(unsignedEvent, signer, privateKey)
+    publishedCreatedAt = signedEvent.created_at
     onStep?.('Publishing to relays')
     await publishToSpecificRelays(
       getPublishRelays([...hub.generalRelays, ...hub.filterRelays]),
@@ -557,7 +563,7 @@ export async function safePaginatedTreeUpdate(params: SafePaginatedTreeUpdatePar
 
   console.log(`safePaginatedTreeUpdate: success. New index: ${newIndexHash}, cleaned up ${cleanedUpHashes.length} old files`)
 
-  return { newIndexHash, newEpoch: epoch, cleanedUpHashes }
+  return { newIndexHash, newEpoch: epoch, cleanedUpHashes, eventCreatedAt: publishedCreatedAt }
 }
 
 // ─── Helpers ───

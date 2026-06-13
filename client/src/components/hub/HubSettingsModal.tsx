@@ -739,7 +739,7 @@ export function HubSettingsModal({ open, onClose, hub }: HubSettingsModalProps) 
         discoverable: editDiscoverable,
         groupedRoles: newGroupedRoles.length > 0 ? newGroupedRoles : undefined,
         publishedAt: hub.publishedAt,
-
+        eventCreatedAt: hub.eventCreatedAt,
       })
 
       const signedEvent = await signWithSigner(unsignedEvent, signer, privateKey)
@@ -767,6 +767,7 @@ export function HubSettingsModal({ open, onClose, hub }: HubSettingsModalProps) 
         discoverable: editDiscoverable,
         groupedRoles: newGroupedRoles.length > 0 ? newGroupedRoles : undefined,
         indexFileHash: currentIndexHash,
+        eventCreatedAt: signedEvent.created_at,
       })
 
       await markStep('Done')
@@ -3209,6 +3210,7 @@ function SecurityPage({ hub }: { hub: HubData }) {
         discoverable: hub.discoverable,
         groupedRoles: updatedGroupedRoles,
         publishedAt: hub.publishedAt,
+        eventCreatedAt: hub.eventCreatedAt,
       })
       const signedEvent = await signWithSigner(unsignedEvent, signer, privateKey)
       await publishToSpecificRelays(getPublishRelays([...hub.generalRelays, ...hub.filterRelays]), signedEvent)
@@ -3712,7 +3714,7 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
         discoverable: hub.discoverable,
         groupedRoles: hub.groupedRoles,
         publishedAt: hub.publishedAt,
-
+        eventCreatedAt: hub.eventCreatedAt,
       })
       const signedEvent = await signWithSigner(unsignedEvent, signer, privateKey)
       await pubToRelays(getPublishRelays([...hub.generalRelays, ...hub.filterRelays]), signedEvent)
@@ -3720,7 +3722,7 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
 
       // Update local store — only after publish succeeds for consistency
       setHubBanList(hub.dTag, remaining)
-      useHubStore.getState().setHubData(hub.dTag, { ...hub, indexFileHash: newIndexHash })
+      useHubStore.getState().setHubData(hub.dTag, { ...hub, indexFileHash: newIndexHash, eventCreatedAt: signedEvent.created_at })
       setSelected(new Set())
 
       await markStep('Done')
@@ -3900,7 +3902,7 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
         discoverable: hub.discoverable,
         groupedRoles: hub.groupedRoles,
         publishedAt: hub.publishedAt,
-
+        eventCreatedAt: hub.eventCreatedAt,
       })
       const signedEvent = await signWithSigner(unsignedEvent, signer, privateKey)
       await pubToRelays(getPublishRelays([...hub.generalRelays, ...hub.filterRelays]), signedEvent)
@@ -3926,7 +3928,7 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
           ...deferredNewMembers.map((pk: string) => ({ pubkey: pk, roles: 'everyone' })),
         ])
       }
-      useHubStore.getState().setHubData(hub.dTag, { ...hub, indexFileHash: newIndexHash })
+      useHubStore.getState().setHubData(hub.dTag, { ...hub, indexFileHash: newIndexHash, eventCreatedAt: signedEvent.created_at })
       setSelected(new Set())
 
       await markStep('Done')
@@ -4209,11 +4211,11 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
                                             minPow: hub.minPow || undefined, nsfw: hub.nsfw || undefined,
                                             discoverable: hub.discoverable, groupedRoles: hub.groupedRoles,
                                             publishedAt: hub.publishedAt,
-                                    
+                                            eventCreatedAt: hub.eventCreatedAt,
                                           })
                                           const signed = await signFn(evt, signer, privateKey)
                                           await pubRelays(getPublishRelays([...hub.generalRelays, ...hub.filterRelays]), signed)
-                                          useHubStore.getState().setHubData(hub.dTag, { ...hub, indexFileHash: newIdxHash })
+                                          useHubStore.getState().setHubData(hub.dTag, { ...hub, indexFileHash: newIdxHash, eventCreatedAt: signed.created_at })
                                         }
 
                                         // Update local members
@@ -5644,6 +5646,7 @@ function MembersPage({ hub, onFooterState }: { hub: HubData; onFooterState: (sta
         indexBytes, signer, privateKey, hub.blossomServers, 'text/plain',
       )
       const result = { newIndexHash }
+      let lastPublishedCreatedAt: number | undefined
 
       // Publish hub event if no group trees to rotate
       if (!skipPublish) {
@@ -5666,10 +5669,11 @@ function MembersPage({ hub, onFooterState }: { hub: HubData; onFooterState: (sta
           discoverable: hub.discoverable,
           groupedRoles: hub.groupedRoles,
           publishedAt: hub.publishedAt,
-  
+          eventCreatedAt: hub.eventCreatedAt,
         })
         const signedEvent = await signWithSigner(unsignedEvent, signer, privateKey)
         await publishToSpecificRelays(getPublishRelays([...hub.generalRelays, ...hub.filterRelays]), signedEvent)
+        lastPublishedCreatedAt = signedEvent.created_at
       }
       markStepDone('Uploading member tree')
 
@@ -5929,10 +5933,11 @@ function MembersPage({ hub, onFooterState }: { hub: HubData; onFooterState: (sta
             discoverable: hub.discoverable,
             groupedRoles: updatedGroupedRoles,
             publishedAt: hub.publishedAt,
-    
+            eventCreatedAt: hub.eventCreatedAt,
           })
           const signedEvent = await signWithSigner(unsignedEvent, signer, privateKey)
           await publishToSpecificRelays(getPublishRelays([...hub.generalRelays, ...hub.filterRelays]), signedEvent)
+          lastPublishedCreatedAt = signedEvent.created_at
           markStepDone('Publishing hub update')
 
           // Flush deferred group secrets to store — only after publish succeeds
@@ -5952,6 +5957,7 @@ function MembersPage({ hub, onFooterState }: { hub: HubData; onFooterState: (sta
         ...hub,
         indexFileHash: finalIndexHash,
         ...(groupedRoles.length > 0 ? { groupedRoles: updatedGroupedRoles } : {}),
+        eventCreatedAt: lastPublishedCreatedAt ?? hub.eventCreatedAt,
       })
 
       await markStep('Done')

@@ -478,7 +478,7 @@ export function ChannelDescriptionModal({ channelId, channelName, description, i
         discoverable: hub.discoverable,
         groupedRoles: hub.groupedRoles,
         publishedAt: hub.publishedAt,
-
+        eventCreatedAt: hub.eventCreatedAt,
       })
 
       const signedEvent = await signWithSigner(unsignedEvent, signer, privateKey)
@@ -488,6 +488,7 @@ export function ChannelDescriptionModal({ channelId, channelName, description, i
       setHubData(activeHubId, {
         ...hub,
         channels: updatedChannels,
+        eventCreatedAt: signedEvent.created_at,
       })
 
       setEditing(false)

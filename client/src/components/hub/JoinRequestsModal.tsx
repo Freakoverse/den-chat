@@ -404,7 +404,7 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
         ...pubkeysToAdd.map(pk => ({ pubkey: pk, roles: 'everyone' })),
       ]
       setHubMembers(hub.dTag, newMembers)
-      setHubData(hub.dTag, { ...hub, indexFileHash: result.newIndexHash })
+      setHubData(hub.dTag, { ...hub, indexFileHash: result.newIndexHash, eventCreatedAt: result.eventCreatedAt ?? hub.eventCreatedAt })
 
       setAddedCount(count)
       setRequests(prev => prev.filter(r => !selected.has(r.pubkey)))

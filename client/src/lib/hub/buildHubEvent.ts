@@ -33,7 +33,9 @@ interface BuildHubEventOptions {
   groupedRoles?: GroupedRole[]
   /** Original publication timestamp — preserved across updates for ordering */
   publishedAt?: number
-
+  /** Previous event's created_at — used for +1 replacement so edits don't
+   *  bump the hub to the top of discover feeds (same pattern as message edits) */
+  eventCreatedAt?: number
 }
 
 /** Validate hub event data against relay size limits. Throws on violation. */
@@ -81,7 +83,7 @@ export function buildHubEvent(opts: BuildHubEventOptions) {
   const {
     dTag, name, description, epoch, icon, banner, tags,
     relays, blossomServers, indexFileHash, channels, categories, roles, minPow, nsfw, discoverable, groupedRoles,
-    publishedAt
+    publishedAt, eventCreatedAt
   } = opts
 
   // Build event tags
@@ -163,7 +165,10 @@ export function buildHubEvent(opts: BuildHubEventOptions) {
     plugins: {},
   }
 
-  const unsigned = createUnsignedEvent(KINDS.HUB_EVENT, JSON.stringify(contentObj), eventTags)
+  // Use previous created_at + 1 on updates so the hub doesn't jump to the
+  // top of discover feeds. First publish (no eventCreatedAt) uses wall-clock.
+  const createdAt = eventCreatedAt != null ? eventCreatedAt + 1 : undefined
+  const unsigned = createUnsignedEvent(KINDS.HUB_EVENT, JSON.stringify(contentObj), eventTags, createdAt)
 
   // Add published_at tag — preserves original creation time across updates
   if (publishedAt) {

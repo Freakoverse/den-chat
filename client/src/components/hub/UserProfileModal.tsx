@@ -864,7 +864,7 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
         discoverable: hub.discoverable,
         groupedRoles: updatedGroupedRoles.length > 0 ? updatedGroupedRoles : hub.groupedRoles,
         publishedAt: hub.publishedAt,
-
+        eventCreatedAt: hub.eventCreatedAt,
       })
       const signedEvent = await signFn(unsignedEvent, signer, privateKey)
       await pubToRelays(getPublishRelays([...hub.generalRelays, ...hub.filterRelays]), signedEvent)
@@ -876,6 +876,7 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
         indexFileHash: newIndexHash,
         epoch: newEpoch,
         groupedRoles: updatedGroupedRoles.length > 0 ? updatedGroupedRoles : hub.groupedRoles,
+        eventCreatedAt: signedEvent.created_at,
       })
 
       // Best-effort cleanup of old Blossom files
