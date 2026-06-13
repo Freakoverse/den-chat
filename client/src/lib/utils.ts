@@ -9,6 +9,16 @@ export function isTauri(): boolean {
   return '__TAURI__' in window
 }
 
+/**
+ * Detect mobile OS (Android / iOS) via userAgent.
+ * NOT viewport-based — desktop users on narrow windows still return false.
+ */
+export function isMobileOS(): boolean {
+  if (typeof navigator === 'undefined') return false
+  const ua = navigator.userAgent || ''
+  return /android/i.test(ua) || /iphone|ipad|ipod/i.test(ua)
+}
+
 export function truncateNpub(npub: string, chars = 8): string {
   if (npub.length <= chars * 2 + 3) return npub
   return `${npub.slice(0, chars)}...${npub.slice(-chars)}`

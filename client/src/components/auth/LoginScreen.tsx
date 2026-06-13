@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useUserStore } from '@/stores/userStore'
-import { isTauri } from '@/lib/utils'
+import { isTauri, isMobileOS } from '@/lib/utils'
 import { ADMIN_PUBKEY, StorageKey } from '@/lib/constants'
 import { fetchReplaceable, fetchEvents, publishToSpecificRelays, getRelayList } from '@/lib/nostr/relay-pool'
 import { MonitorSmartphone, Import, Plus, Loader2, AlertCircle, Link2, KeyRound, Copy, Check, AppWindow, ChevronDown, ChevronLeft, ChevronRight, X, Shield, ShieldAlert, ExternalLink, User, Lock, Eye, EyeOff, GitBranch, Sprout, KeySquare, Download, FileUp, BookOpen, Camera, Settings2, XCircle, FileText, Package, LockOpen, Globe, RefreshCw, Rocket } from 'lucide-react'
@@ -122,6 +122,7 @@ export function LoginScreen() {
   const setSigner = useUserStore((s) => s.setSigner)
   const localSignerName = useUserStore((s) => s.localSignerName)
   const isDesktop = isTauri()
+  const isMobile = isMobileOS()
 
   const [screen, setScreen] = useState<Screen>('main')
   const [username, setUsername] = useState('')
@@ -2085,20 +2086,22 @@ export function LoginScreen() {
           <div className="w-full flex flex-col gap-2">
             {/* External signer row — Local | Connect | Extension */}
             <div className="w-full flex flex-wrap gap-2">
-              {/* NIP-PC55: Local Signer — always visible */}
-              <Button
-                variant="outline"
-                onClick={handleLocalLogin}
-                className="grow gap-1.5 text-xs"
-                disabled={loading === 'pc55'}
-              >
-                {loading === 'pc55' ? (
-                  <Loader2 size={14} className="animate-spin" />
-                ) : (
-                  <MonitorSmartphone size={14} />
-                )}
-                Local
-              </Button>
+              {/* NIP-PC55: Local Signer — hidden on mobile OS */}
+              {!isMobile && (
+                <Button
+                  variant="outline"
+                  onClick={handleLocalLogin}
+                  className="grow gap-1.5 text-xs"
+                  disabled={loading === 'pc55'}
+                >
+                  {loading === 'pc55' ? (
+                    <Loader2 size={14} className="animate-spin" />
+                  ) : (
+                    <MonitorSmartphone size={14} />
+                  )}
+                  Local
+                </Button>
+              )}
 
               {/* NIP-46: Connect / Bunker */}
               <Button
@@ -2110,8 +2113,8 @@ export function LoginScreen() {
                 Connect
               </Button>
 
-              {/* NIP-07: Browser Extension - browser only */}
-              {!isDesktop && (
+              {/* NIP-07: Browser Extension — browser only, hidden on mobile OS */}
+              {!isDesktop && !isMobile && (
                 <Button
                   variant="outline"
                   onClick={handleNip07Login}
