@@ -12,7 +12,7 @@ import { createPortal } from 'react-dom'
 import EmojiPickerReact, { EmojiStyle, Theme } from 'emoji-picker-react'
 import { Smile, Sparkles, Users, Plus, Trash2, Loader2, Upload, Search, X, FolderPlus, Image, AlertTriangle, Check, Compass, ShieldQuestion } from 'lucide-react'
 import { useEmojiStore, getEmojiUploadLimitBytes, hasOversizedEmoji, type CustomEmoji, type EmojiSet } from '@/stores/emojiStore'
-import { publishEmojiSet, publishEmojiSubscriptions, discoverEmojiSets, fetchEmojiSetByAddress, deleteEmojiSet } from '@/lib/nostr/customEmoji'
+import { publishEmojiSet, publishEmojiSubscriptions, discoverEmojiSets, fetchEmojiSetByAddress, deleteEmojiSet, fetchEmojiSetsByAuthor } from '@/lib/nostr/customEmoji'
 import { uploadToBlossomServers, computeHash } from '@/lib/blossom'
 import { getUploadBlossoms } from '@/stores/postingBehaviourStore'
 import { useUserStore } from '@/stores/userStore'
@@ -166,7 +166,7 @@ export function EmojiPickerPopover({ anchorRef, onClose, onSelect }: Props) {
       {/* Tab content */}
       <div ref={contentRef} className="flex-1 overflow-hidden">
         {tab === 'discover' && (
-          <DiscoverEmojiTab />
+          <DiscoverEmojiTab onPickerClose={onClose} />
         )}
         {tab === 'basic' && (
           <EmojiPickerReact
@@ -369,8 +369,9 @@ function MineTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcode:
           <Tooltip>
             <TooltipTrigger asChild>
               <button
+                disabled={myEmojiSets.length === 0}
                 onClick={() => { const next = !showUpload; setShowUpload(next); if (next) { setShowNewSet(false); if (!uploadTargetSet && myEmojiSets.length > 0) setUploadTargetSet(myEmojiSets[0].dTag) } }}
-                className="p-1.5 rounded-md text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--muted)/0.5)] transition-colors cursor-pointer"
+                className={`p-1.5 rounded-md transition-colors ${myEmojiSets.length === 0 ? 'text-[hsl(var(--muted-foreground)/0.3)] cursor-not-allowed' : 'text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--muted)/0.5)] cursor-pointer'}`}
               >
                 <Plus size={14} />
               </button>
@@ -654,8 +655,10 @@ function EmojiUploadForm({ sets, targetSet, onTargetChange, onDone }: {
   }, [preview])
 
   return (
-    <div className="px-2 py-2 border-b border-[hsl(var(--border))] bg-[hsl(var(--muted)/0.15)] space-y-1.5">
+    <div className="px-2 py-2 border-b border-[hsl(var(--border))] bg-[hsl(var(--muted)/0.15)] space-y-2">
+      {/* Row 1: Set selector */}
       <div className="flex items-center gap-1.5">
+        <span className="text-[10px] text-[hsl(var(--muted-foreground))] shrink-0">Set:</span>
         <CustomSelect
           value={targetSet}
           onChange={onTargetChange}
@@ -664,39 +667,57 @@ function EmojiUploadForm({ sets, targetSet, onTargetChange, onDone }: {
         />
       </div>
 
+      {/* Row 2: File select + preview */}
       <div className="flex items-center gap-1.5">
         <input type="file" ref={fileInputRef} accept="image/*" className="hidden" onChange={handleFileSelect} />
         <button
           onClick={() => fileInputRef.current?.click()}
-          className="h-7 px-2 rounded-md text-xs bg-[hsl(var(--secondary))] border border-[hsl(var(--border))] text-[hsl(var(--foreground))] hover:bg-[hsl(var(--muted)/0.5)] transition-colors cursor-pointer flex items-center gap-1"
+          className="h-7 px-2.5 rounded-md text-xs bg-[hsl(var(--secondary))] border border-[hsl(var(--border))] text-[hsl(var(--foreground))] hover:bg-[hsl(var(--muted)/0.5)] transition-colors cursor-pointer flex items-center gap-1.5 shrink-0"
         >
           <Upload size={11} />
           {file ? 'Change' : 'Select Image'}
         </button>
         {preview && (
-          <img src={preview} alt="Preview" className="w-7 h-7 rounded border border-[hsl(var(--border))] object-contain bg-[hsl(var(--muted)/0.3)]" />
+          <img src={preview} alt="Preview" className="w-7 h-7 rounded border border-[hsl(var(--border))] object-contain bg-[hsl(var(--muted)/0.3)] shrink-0" />
         )}
+        {file && (
+          <span className="text-[10px] text-[hsl(var(--muted-foreground))] truncate">{file.name}</span>
+        )}
+      </div>
+
+      {/* Row 3: Shortcode + NSFW + Add */}
+      <div className="flex items-center gap-1.5">
         <input
           value={shortcode}
           onChange={(e) => setShortcode(e.target.value.replace(/[^a-zA-Z0-9_-]/g, ''))}
           placeholder="shortcode"
-          className="flex-1 h-7 px-2 rounded-md text-xs bg-[hsl(var(--background))] border border-[hsl(var(--border))] text-[hsl(var(--foreground))] placeholder:text-[hsl(var(--muted-foreground))] focus:outline-none font-mono"
+          className="flex-1 h-7 px-2 rounded-md text-xs bg-[hsl(var(--background))] border border-[hsl(var(--border))] text-[hsl(var(--foreground))] placeholder:text-[hsl(var(--muted-foreground))] focus:outline-none font-mono min-w-0"
         />
         <button
           onClick={() => setNsfw(!nsfw)}
-          className={`h-7 px-1.5 rounded-md text-[10px] font-medium transition-colors cursor-pointer ${nsfw ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-muted/30 text-muted-foreground border border-border'}`}
+          className={`h-7 px-1.5 rounded-md text-[10px] font-medium transition-colors cursor-pointer shrink-0 ${nsfw ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-muted/30 text-muted-foreground border border-border'}`}
         >
           {nsfw ? 'NSFW' : 'SFW'}
         </button>
         <button
           onClick={handleUpload}
           disabled={!file || !shortcode.trim() || uploading}
-          className="h-7 px-2.5 rounded-md bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] text-xs font-medium hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50 flex items-center gap-1"
+          className="h-7 px-3 rounded-md bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] text-xs font-medium hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50 flex items-center gap-1 shrink-0"
         >
           {uploading ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
           {uploading ? `${uploadProgress}%` : 'Add'}
         </button>
       </div>
+
+      {/* Upload progress bar */}
+      {uploading && (
+        <div className="h-1 rounded-full bg-[hsl(var(--muted)/0.3)] overflow-hidden">
+          <div
+            className="h-full bg-[hsl(var(--primary))] rounded-full transition-all duration-300"
+            style={{ width: `${uploadProgress}%` }}
+          />
+        </div>
+      )}
 
       {error && (
         <div className="flex items-center gap-1 text-[10px] text-red-400">
@@ -921,7 +942,7 @@ function OthersTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcod
 
 /* ═══════════ Discover Tab ═══════════ */
 
-function DiscoverEmojiTab() {
+function DiscoverEmojiTab({ onPickerClose }: { onPickerClose?: () => void }) {
   const subscriptionAddresses = useEmojiStore((s) => s.subscriptionAddresses)
   const addSubscription = useEmojiStore((s) => s.addSubscription)
   const nsfwEnabled = useEmojiStore((s) => s.nsfwEnabled)
@@ -938,7 +959,9 @@ function DiscoverEmojiTab() {
   const [searchMode, setSearchMode] = useState<'name' | 'author'>('name')
   const [broad, setBroad] = useState(false)
   const [publishingAddr, setPublishingAddr] = useState<string | null>(null)
-  const [profilePubkey, setProfilePubkey] = useState<string | null>(null)
+  const [visibleCount, setVisibleCount] = useState(10)
+  const sentinelRef = useRef<HTMLDivElement>(null)
+  const scrollContainerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     setLoading(true)
@@ -952,6 +975,11 @@ function DiscoverEmojiTab() {
       console.error('Failed to discover emoji sets:', err)
     }).finally(() => setLoading(false))
   }, [myPubkey, broad])
+
+  // Reset visible count when filters change
+  useEffect(() => {
+    setVisibleCount(10)
+  }, [search, searchMode, broad])
 
   const filtered = useMemo(() => {
     let result = discovered.filter((s) => !blockedPubkeys.has(s.pubkey))
@@ -979,6 +1007,27 @@ function DiscoverEmojiTab() {
     }
     return result
   }, [discovered, search, searchMode, getProfile, blockedPubkeys, nsfwEnabled, untaggedAsNsfw])
+
+  const visibleSets = useMemo(() => filtered.slice(0, visibleCount), [filtered, visibleCount])
+  const hasMore = visibleCount < filtered.length
+
+  // IntersectionObserver to load more sets when sentinel comes into view
+  useEffect(() => {
+    const sentinel = sentinelRef.current
+    const container = scrollContainerRef.current
+    if (!sentinel || !container || !hasMore) return
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          setVisibleCount((prev) => prev + 10)
+        }
+      },
+      { root: container, rootMargin: '100px' }
+    )
+    observer.observe(sentinel)
+    return () => observer.disconnect()
+  }, [hasMore, filtered])
 
   const handleSubscribe = async (set: EmojiSet) => {
     const addr = `30030:${set.pubkey}:${set.dTag}`
@@ -1045,7 +1094,7 @@ function DiscoverEmojiTab() {
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto p-2 space-y-2">
+      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto p-2 space-y-2">
         {loading ? (
           <div className="flex items-center justify-center py-8">
             <Loader2 size={18} className="animate-spin text-[hsl(var(--muted-foreground))]" />
@@ -1056,61 +1105,61 @@ function DiscoverEmojiTab() {
             <p className="text-[10px] mt-1 opacity-60">Try again later as more users publish emoji sets.</p>
           </div>
         ) : (
-          filtered.map((set) => {
-            const addr = `30030:${set.pubkey}:${set.dTag}`
-            const isSubscribed = subscriptionAddresses.includes(addr)
-            const isPublishing = publishingAddr === addr
-            const profile = getProfile(set.pubkey)
-            const authorName = profile?.display_name || profile?.name || truncateNpub(nip19.npubEncode(set.pubkey))
+          <>
+            {visibleSets.map((set) => {
+              const addr = `30030:${set.pubkey}:${set.dTag}`
+              const isSubscribed = subscriptionAddresses.includes(addr)
+              const isPublishing = publishingAddr === addr
+              const profile = getProfile(set.pubkey)
+              const authorName = profile?.display_name || profile?.name || truncateNpub(nip19.npubEncode(set.pubkey))
 
-            return (
-              <div key={addr} className="rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--secondary)/0.2)] p-2">
-                <div className="flex items-center justify-between mb-1">
-                  <div className="min-w-0">
-                    <p className="text-xs font-semibold text-[hsl(var(--foreground))] truncate">{set.name}</p>
-                    <p className="text-[10px] text-[hsl(var(--muted-foreground))]">
-                      by <button onClick={() => setProfilePubkey(set.pubkey)} className="text-[hsl(var(--primary))] hover:underline cursor-pointer">{authorName}</button> · {set.emojis.length} emoji{set.emojis.length !== 1 ? 's' : ''}
-                    </p>
+              return (
+                <div key={addr} className="rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--secondary)/0.2)] p-2">
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold text-[hsl(var(--foreground))] truncate">{set.name}</p>
+                      <p className="text-[10px] text-[hsl(var(--muted-foreground))]">
+                        by <button onClick={() => { window.dispatchEvent(new CustomEvent('open-profile-modal', { detail: set.pubkey })); onPickerClose?.() }} className="text-[hsl(var(--primary))] hover:underline cursor-pointer">{authorName}</button> · {set.emojis.length} emoji{set.emojis.length !== 1 ? 's' : ''}
+                      </p>
+                    </div>
+                    {isSubscribed ? (
+                      <span className="text-[10px] text-[hsl(var(--primary))] font-medium shrink-0 flex items-center gap-1">
+                        <Check size={10} /> Subscribed
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() => handleSubscribe(set)}
+                        disabled={isPublishing}
+                        className="shrink-0 px-2.5 py-1 rounded-md bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] text-[10px] font-medium disabled:opacity-50 cursor-pointer"
+                      >
+                        {isPublishing ? <Loader2 size={10} className="animate-spin" /> : 'Subscribe'}
+                      </button>
+                    )}
                   </div>
-                  {isSubscribed ? (
-                    <span className="text-[10px] text-[hsl(var(--primary))] font-medium shrink-0 flex items-center gap-1">
-                      <Check size={10} /> Subscribed
-                    </span>
-                  ) : (
-                    <button
-                      onClick={() => handleSubscribe(set)}
-                      disabled={isPublishing}
-                      className="shrink-0 px-2.5 py-1 rounded-md bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] text-[10px] font-medium disabled:opacity-50 cursor-pointer"
-                    >
-                      {isPublishing ? <Loader2 size={10} className="animate-spin" /> : 'Subscribe'}
-                    </button>
-                  )}
+                  {/* Preview grid */}
+                  <div className="flex flex-wrap gap-0.5">
+                    {set.emojis.slice(0, 12).map((e) => (
+                      <img key={e.shortcode} src={e.url} alt={`:${e.shortcode}:`} title={`:${e.shortcode}:`} className="w-6 h-6 object-contain rounded" loading="lazy" />
+                    ))}
+                    {set.emojis.length > 12 && (
+                      <span className="w-6 h-6 flex items-center justify-center text-[9px] text-[hsl(var(--muted-foreground))] font-medium">
+                        +{set.emojis.length - 12}
+                      </span>
+                    )}
+                  </div>
                 </div>
-                {/* Preview grid */}
-                <div className="flex flex-wrap gap-0.5">
-                  {set.emojis.slice(0, 12).map((e) => (
-                    <img key={e.shortcode} src={e.url} alt={`:${e.shortcode}:`} title={`:${e.shortcode}:`} className="w-6 h-6 object-contain rounded" loading="lazy" />
-                  ))}
-                  {set.emojis.length > 12 && (
-                    <span className="w-6 h-6 flex items-center justify-center text-[9px] text-[hsl(var(--muted-foreground))] font-medium">
-                      +{set.emojis.length - 12}
-                    </span>
-                  )}
-                </div>
+              )
+            })}
+            {/* Scroll sentinel + load-more indicator */}
+            {hasMore && (
+              <div ref={sentinelRef} className="flex items-center justify-center py-3">
+                <Loader2 size={14} className="animate-spin text-[hsl(var(--muted-foreground))]" />
+                <span className="ml-1.5 text-[10px] text-[hsl(var(--muted-foreground))]">Loading more…</span>
               </div>
-            )
-          })
+            )}
+          </>
         )}
       </div>
-
-      {profilePubkey && createPortal(
-        <UserProfileModal
-          open={!!profilePubkey}
-          onClose={() => setProfilePubkey(null)}
-          targetPubkey={profilePubkey}
-        />,
-        document.body
-      )}
     </div>
   )
 }
@@ -1133,12 +1182,43 @@ export function EmojiDiscoveryModal({ onClose, initialSearch = '', initialAuthor
   const [publishingAddr, setPublishingAddr] = useState<string | null>(null)
   const [profilePubkey, setProfilePubkey] = useState<string | null>(null)
   const blockedPubkeys = useBlockStore((s) => s.blockedPubkeys)
+  const [visibleCount, setVisibleCount] = useState(10)
+  const modalSentinelRef = useRef<HTMLDivElement>(null)
+  const modalScrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     setLoading(true)
-    discoverEmojiSets(100, broad).then(async (found) => {
-      // Filter out sets with any emoji > 1 MB (unless allowed)
-      const sizeChecks = await Promise.all(found.map(async (s) => {
+
+    // When opened with an initial author (e.g. from "Find this set"), do a targeted
+    // fetch for that author's sets in parallel with the generic discovery query.
+    // This ensures the specific set is always found even if it's not in the top N results.
+    let authorPubkey: string | null = null
+    if (initialAuthor) {
+      try {
+        if (initialAuthor.startsWith('npub1')) {
+          const decoded = nip19.decode(initialAuthor)
+          if (decoded.type === 'npub') authorPubkey = decoded.data as string
+        } else {
+          authorPubkey = initialAuthor // assume hex pubkey
+        }
+      } catch { /* ignore invalid npub */ }
+    }
+
+    const discoverPromise = discoverEmojiSets(100, broad)
+    const authorPromise = authorPubkey ? fetchEmojiSetsByAuthor(authorPubkey).catch(() => [] as EmojiSet[]) : Promise.resolve([] as EmojiSet[])
+
+    Promise.all([discoverPromise, authorPromise]).then(async ([discovered, authorSets]) => {
+      // Merge author sets into discovered, deduplicating by pubkey:dTag
+      const seen = new Set<string>()
+      const merged: EmojiSet[] = []
+      for (const s of [...authorSets, ...discovered]) {
+        const key = `${s.pubkey}:${s.dTag}`
+        if (seen.has(key)) continue
+        seen.add(key)
+        merged.push(s)
+      }
+      // Filter out sets with any emoji > 1 MB
+      const sizeChecks = await Promise.all(merged.map(async (s) => {
         const oversized = await hasOversizedEmoji(s.emojis)
         return oversized ? null : s
       }))
@@ -1146,7 +1226,7 @@ export function EmojiDiscoveryModal({ onClose, initialSearch = '', initialAuthor
     }).catch((err) => {
       console.error('Failed to discover emoji sets:', err)
     }).finally(() => setLoading(false))
-  }, [myPubkey, broad])
+  }, [myPubkey, broad, initialAuthor])
 
   const filtered = useMemo(() => {
     let result = sets.filter((s) => !blockedPubkeys.has(s.pubkey))
@@ -1173,6 +1253,32 @@ export function EmojiDiscoveryModal({ onClose, initialSearch = '', initialAuthor
     }
     return result
   }, [sets, search, authorFilter, getProfile])
+
+  // Reset visible count when filters change
+  useEffect(() => {
+    setVisibleCount(10)
+  }, [search, authorFilter, broad])
+
+  const visibleSets = useMemo(() => filtered.slice(0, visibleCount), [filtered, visibleCount])
+  const hasMore = visibleCount < filtered.length
+
+  // IntersectionObserver to load more sets when sentinel comes into view
+  useEffect(() => {
+    const sentinel = modalSentinelRef.current
+    const container = modalScrollRef.current
+    if (!sentinel || !container || !hasMore) return
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          setVisibleCount((prev) => prev + 10)
+        }
+      },
+      { root: container, rootMargin: '100px' }
+    )
+    observer.observe(sentinel)
+    return () => observer.disconnect()
+  }, [hasMore, filtered])
 
   const handleToggleSubscription = async (set: EmojiSet) => {
     const addr = `30030:${set.pubkey}:${set.dTag}`
@@ -1246,7 +1352,7 @@ export function EmojiDiscoveryModal({ onClose, initialSearch = '', initialAuthor
             </div>
 
             {/* Content */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-3">
+            <div ref={modalScrollRef} className="flex-1 overflow-y-auto p-4 space-y-3">
               {loading ? (
                 <div className="flex items-center justify-center py-8">
                   <Loader2 size={20} className="animate-spin text-[hsl(var(--muted-foreground))]" />
@@ -1257,56 +1363,65 @@ export function EmojiDiscoveryModal({ onClose, initialSearch = '', initialAuthor
                   <p className="text-xs mt-1 opacity-60">Try again later as more users publish their emoji sets.</p>
                 </div>
               ) : (
-                filtered.map((set) => {
-                  const addr = `30030:${set.pubkey}:${set.dTag}`
-                  const isSubscribed = subscriptionAddresses.includes(addr)
-                  const isPublishing = publishingAddr === addr
-                  const profile = getProfile(set.pubkey)
-                  const authorName = profile?.display_name || profile?.name || truncateNpub(nip19.npubEncode(set.pubkey))
+                <>
+                  {visibleSets.map((set) => {
+                    const addr = `30030:${set.pubkey}:${set.dTag}`
+                    const isSubscribed = subscriptionAddresses.includes(addr)
+                    const isPublishing = publishingAddr === addr
+                    const profile = getProfile(set.pubkey)
+                    const authorName = profile?.display_name || profile?.name || truncateNpub(nip19.npubEncode(set.pubkey))
 
-                  return (
-                    <div key={addr} className="rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--secondary)/0.2)] p-3">
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="min-w-0">
-                          <p className="text-sm font-semibold text-[hsl(var(--foreground))] truncate">{set.name}</p>
-                          <p className="text-[10px] text-[hsl(var(--muted-foreground))]">
-                            by <button onClick={() => setProfilePubkey(set.pubkey)} className="text-[hsl(var(--primary))] hover:underline cursor-pointer">{authorName}</button> · {set.emojis.length} emoji{set.emojis.length !== 1 ? 's' : ''}
-                          </p>
+                    return (
+                      <div key={addr} className="rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--secondary)/0.2)] p-3">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold text-[hsl(var(--foreground))] truncate">{set.name}</p>
+                            <p className="text-[10px] text-[hsl(var(--muted-foreground))]">
+                              by <button onClick={() => setProfilePubkey(set.pubkey)} className="text-[hsl(var(--primary))] hover:underline cursor-pointer">{authorName}</button> · {set.emojis.length} emoji{set.emojis.length !== 1 ? 's' : ''}
+                            </p>
+                          </div>
+                          <button
+                            onClick={() => handleToggleSubscription(set)}
+                            disabled={isPublishing}
+                            className={`shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer disabled:opacity-50 flex items-center gap-1.5 ${
+                              isSubscribed
+                                ? 'bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20'
+                                : 'bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] hover:opacity-90'
+                            }`}
+                          >
+                            {isPublishing ? <Loader2 size={11} className="animate-spin" /> : null}
+                            {isSubscribed ? 'Unsubscribe' : 'Subscribe'}
+                          </button>
                         </div>
-                        <button
-                          onClick={() => handleToggleSubscription(set)}
-                          disabled={isPublishing}
-                          className={`shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer disabled:opacity-50 flex items-center gap-1.5 ${
-                            isSubscribed
-                              ? 'bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20'
-                              : 'bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] hover:opacity-90'
-                          }`}
-                        >
-                          {isPublishing ? <Loader2 size={11} className="animate-spin" /> : null}
-                          {isSubscribed ? 'Unsubscribe' : 'Subscribe'}
-                        </button>
+                        {/* Emoji preview */}
+                        <div className="flex flex-wrap gap-1 max-h-[60px] overflow-hidden">
+                          {set.emojis.slice(0, 16).map((e) => (
+                            <img
+                              key={e.shortcode}
+                              src={e.url}
+                              alt={`:${e.shortcode}:`}
+                              title={`:${e.shortcode}:`}
+                              className="w-7 h-7 object-contain rounded"
+                              loading="lazy"
+                            />
+                          ))}
+                          {set.emojis.length > 16 && (
+                            <span className="w-7 h-7 flex items-center justify-center text-[10px] text-[hsl(var(--muted-foreground))] font-medium">
+                              +{set.emojis.length - 16}
+                            </span>
+                          )}
+                        </div>
                       </div>
-                      {/* Emoji preview */}
-                      <div className="flex flex-wrap gap-1 max-h-[60px] overflow-hidden">
-                        {set.emojis.slice(0, 16).map((e) => (
-                          <img
-                            key={e.shortcode}
-                            src={e.url}
-                            alt={`:${e.shortcode}:`}
-                            title={`:${e.shortcode}:`}
-                            className="w-7 h-7 object-contain rounded"
-                            loading="lazy"
-                          />
-                        ))}
-                        {set.emojis.length > 16 && (
-                          <span className="w-7 h-7 flex items-center justify-center text-[10px] text-[hsl(var(--muted-foreground))] font-medium">
-                            +{set.emojis.length - 16}
-                          </span>
-                        )}
-                      </div>
+                    )
+                  })}
+                  {/* Scroll sentinel + load-more indicator */}
+                  {hasMore && (
+                    <div ref={modalSentinelRef} className="flex items-center justify-center py-3">
+                      <Loader2 size={14} className="animate-spin text-[hsl(var(--muted-foreground))]" />
+                      <span className="ml-1.5 text-[10px] text-[hsl(var(--muted-foreground))]">Loading more…</span>
                     </div>
-                  )
-                })
+                  )}
+                </>
               )}
             </div>
           </div>

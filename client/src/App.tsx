@@ -10,6 +10,30 @@ import { useStartup } from './hooks/useStartup'
 import { useDeepLink } from './hooks/useDeepLink'
 import { StorageKey } from './lib/constants'
 import { ContextMenuProvider } from './components/ui/ContextMenu'
+import { UserProfileModal } from './components/hub/UserProfileModal'
+
+/** Listens for 'open-profile-modal' custom events and renders a UserProfileModal at the app root. */
+function GlobalProfileModalListener() {
+  const [pubkey, setPubkey] = useState<string | null>(null)
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const pk = (e as CustomEvent).detail as string
+      if (pk) setPubkey(pk)
+    }
+    window.addEventListener('open-profile-modal', handler)
+    return () => window.removeEventListener('open-profile-modal', handler)
+  }, [])
+
+  if (!pubkey) return null
+  return (
+    <UserProfileModal
+      open={true}
+      onClose={() => setPubkey(null)}
+      targetPubkey={pubkey}
+    />
+  )
+}
 
 const skipSplash = localStorage.getItem(StorageKey.SKIP_SPLASH) === 'true'
 
@@ -62,6 +86,7 @@ export default function App() {
       {showApp ? <AppLayout /> : <LoginScreen />}
       {!splashDone && <SplashScreen onComplete={handleSplashComplete} />}
       <UpdateToast />
+      <GlobalProfileModalListener />
       <SignerGuardBanner />
       {showOverlay && (
         <div

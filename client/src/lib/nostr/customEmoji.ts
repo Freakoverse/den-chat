@@ -11,12 +11,13 @@
  *   - "a" tags: ["a", "30030:pubkey:dtag"] for each subscribed set
  */
 
-import { fetchEvents, fetchReplaceable, publishToSpecificRelays } from '@/lib/nostr/relay-pool'
+import { fetchEvents, fetchReplaceable, publishToSpecificRelays, fetchEventsFromRelays, getRelays } from '@/lib/nostr/relay-pool'
 import { createUnsignedEvent, signWithSigner } from '@/lib/nostr/events'
 import type { ISigner } from '@/stores/userStore'
 import type { EmojiSet, CustomEmoji } from '@/stores/emojiStore'
 import type { Event } from 'nostr-tools'
 import { getPublishRelays } from '@/stores/postingBehaviourStore'
+import { useUserListsStore } from '@/stores/userListsStore'
 
 const KIND_EMOJI_SET = 30030
 const KIND_LIST = 30000
@@ -80,7 +81,7 @@ export async function fetchEmojiSubscriptions(pubkey: string): Promise<string[]>
     .map((t) => t[1])
 }
 
-/** Fetch a specific emoji set by address (30030:pubkey:dtag) */
+/** Fetch a specific emoji set by address (30030:pubkey:dtag). Queries user relays as fallback. */
 export async function fetchEmojiSetByAddress(address: string): Promise<EmojiSet | null> {
   const parts = address.split(':')
   if (parts.length < 3) return null
@@ -91,7 +92,21 @@ export async function fetchEmojiSetByAddress(address: string): Promise<EmojiSet 
 
   if (kind !== KIND_EMOJI_SET) return null
 
-  const event = await fetchReplaceable(pubkey, KIND_EMOJI_SET, dTag)
+  // Try client relays first
+  let event = await fetchReplaceable(pubkey, KIND_EMOJI_SET, dTag)
+
+  // If not found, try user NIP-65 relays as fallback
+  if (!event) {
+    const userRelays = useUserListsStore.getState().userRelays
+    const clientRelays = getRelays()
+    const extraRelays = userRelays.filter((r) => !clientRelays.includes(r))
+    if (extraRelays.length > 0) {
+      const filter = { authors: [pubkey], kinds: [KIND_EMOJI_SET], '#d': [dTag], limit: 1 }
+      const events = await fetchEventsFromRelays(extraRelays, filter).catch(() => [])
+      event = events[0] ?? null
+    }
+  }
+
   if (!event) return null
 
   // Use broad parser — other users' sets may not have ["t", "emoji"]
@@ -126,7 +141,9 @@ function parseEmojiSetEventBroad(event: Event): EmojiSet | null {
   }
 }
 
-/** Discover emoji sets from the network. When broad=true, skips relay #t filter but still client-side filters for emoji content. */
+/** Discover emoji sets from the network. When broad=true, skips relay #t filter but still client-side filters for emoji content.
+ *  Also queries user NIP-65 relays to find recently published sets that may not be on default relays yet.
+ */
 export async function discoverEmojiSets(limit = 50, broad = false): Promise<EmojiSet[]> {
   const filter: Record<string, any> = {
     kinds: [KIND_EMOJI_SET],
@@ -136,12 +153,22 @@ export async function discoverEmojiSets(limit = 50, broad = false): Promise<Emoj
     filter['#t'] = ['emoji']
   }
 
-  const events = await fetchEvents(filter)
+  // Query both client relays and user NIP-65 relays in parallel
+  const userRelays = useUserListsStore.getState().userRelays
+  const clientRelays = getRelays()
+  const extraRelays = userRelays.filter((r) => !clientRelays.includes(r))
 
-  const sets: EmojiSet[] = []
+  const fetches: Promise<Event[]>[] = [fetchEvents(filter)]
+  if (extraRelays.length > 0) {
+    fetches.push(fetchEventsFromRelays(extraRelays, filter).catch(() => []))
+  }
+
+  const results = await Promise.all(fetches)
+  const allEvents = results.flat()
+
   // Deduplicate by pubkey:dTag (keep latest)
   const seen = new Map<string, Event>()
-  for (const ev of events) {
+  for (const ev of allEvents) {
     const dTag = ev.tags.find((t) => t[0] === 'd')?.[1]
     if (!dTag) continue
     const key = `${ev.pubkey}:${dTag}`
@@ -152,11 +179,50 @@ export async function discoverEmojiSets(limit = 50, broad = false): Promise<Emoj
   }
 
   const parser = broad ? parseEmojiSetEventBroad : parseEmojiSetEvent
+  const sets: EmojiSet[] = []
   for (const ev of seen.values()) {
     const parsed = parser(ev)
     if (parsed && parsed.emojis.length > 0) sets.push(parsed)
   }
 
+  return sets
+}
+
+/** Fetch all emoji sets by a specific author. Queries both client and user relays. */
+export async function fetchEmojiSetsByAuthor(pubkey: string): Promise<EmojiSet[]> {
+  const filter = {
+    kinds: [KIND_EMOJI_SET],
+    authors: [pubkey],
+  }
+
+  const userRelays = useUserListsStore.getState().userRelays
+  const clientRelays = getRelays()
+  const extraRelays = userRelays.filter((r) => !clientRelays.includes(r))
+
+  const fetches: Promise<Event[]>[] = [fetchEvents(filter)]
+  if (extraRelays.length > 0) {
+    fetches.push(fetchEventsFromRelays(extraRelays, filter).catch(() => []))
+  }
+
+  const results = await Promise.all(fetches)
+  const allEvents = results.flat()
+
+  // Deduplicate by dTag (keep latest)
+  const seen = new Map<string, Event>()
+  for (const ev of allEvents) {
+    const dTag = ev.tags.find((t) => t[0] === 'd')?.[1]
+    if (!dTag) continue
+    const existing = seen.get(dTag)
+    if (!existing || ev.created_at > existing.created_at) {
+      seen.set(dTag, ev)
+    }
+  }
+
+  const sets: EmojiSet[] = []
+  for (const ev of seen.values()) {
+    const parsed = parseEmojiSetEventBroad(ev)
+    if (parsed && parsed.emojis.length > 0) sets.push(parsed)
+  }
   return sets
 }
 

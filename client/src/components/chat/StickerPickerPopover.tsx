@@ -124,7 +124,7 @@ export function StickerPickerPopover({ anchorRef, onClose, onSelect }: Props) {
 
         {/* Tab content */}
         <div className="flex-1 overflow-y-auto">
-          {tab === 'discover' && <DiscoverStickerTab />}
+          {tab === 'discover' && <DiscoverStickerTab onPickerClose={onClose} />}
           {tab === 'mine' && <MineStickerTab onSelect={onSelect} />}
           {tab === 'others' && <OthersStickerTab onSelect={onSelect} />}
         </div>
@@ -270,6 +270,7 @@ function MineStickerTab({ onSelect }: { onSelect: (s: { shortcode: string; url: 
           <Tooltip>
             <TooltipTrigger asChild>
               <button
+                disabled={mySets.length === 0}
                 onClick={() => {
                   const next = !showAddSticker
                   setShowAddSticker(next)
@@ -278,7 +279,7 @@ function MineStickerTab({ onSelect }: { onSelect: (s: { shortcode: string; url: 
                     if (mySets.length > 0 && !expandedSet) setExpandedSet(mySets[0].dTag)
                   }
                 }}
-                className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors cursor-pointer"
+                className={`p-1.5 rounded-md transition-colors ${mySets.length === 0 ? 'text-muted-foreground/30 cursor-not-allowed' : 'text-muted-foreground hover:text-foreground hover:bg-muted/50 cursor-pointer'}`}
               >
                 <Plus size={14} />
               </button>
@@ -765,7 +766,7 @@ function StickerSetCard({
 
 /* ═══════════ Discover Tab ═══════════ */
 
-function DiscoverStickerTab() {
+function DiscoverStickerTab({ onPickerClose }: { onPickerClose?: () => void }) {
   const subscriptionAddresses = useStickerStore((s) => s.subscriptionAddresses)
   const nsfwEnabled = useStickerStore((s) => s.nsfwEnabled)
   const untaggedAsNsfw = useStickerStore((s) => s.untaggedAsNsfw)
@@ -780,11 +781,13 @@ function DiscoverStickerTab() {
   const [search, setSearch] = useState('')
   const [searchMode, setSearchMode] = useState<'name' | 'author'>('name')
   const [publishingAddr, setPublishingAddr] = useState<string | null>(null)
-  const [profilePubkey, setProfilePubkey] = useState<string | null>(null)
+  const [visibleCount, setVisibleCount] = useState(10)
+  const sentinelRef = useRef<HTMLDivElement>(null)
+  const scrollContainerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     setLoading(true)
-    discoverStickerSets(50)
+    discoverStickerSets(100)
       .then(async (sets) => {
         const okSets: StickerSet[] = []
         for (const s of sets) {
@@ -795,6 +798,11 @@ function DiscoverStickerTab() {
       })
       .finally(() => setLoading(false))
   }, [myPubkey])
+
+  // Reset visible count when filters change
+  useEffect(() => {
+    setVisibleCount(10)
+  }, [search, searchMode])
 
   const filtered = useMemo(() => {
     let result = discovered.filter((s) => !blockedPubkeys.has(s.pubkey))
@@ -822,6 +830,27 @@ function DiscoverStickerTab() {
     }
     return result
   }, [discovered, search, searchMode, getProfile, blockedPubkeys, nsfwEnabled, untaggedAsNsfw])
+
+  const visibleSets = useMemo(() => filtered.slice(0, visibleCount), [filtered, visibleCount])
+  const hasMore = visibleCount < filtered.length
+
+  // IntersectionObserver to load more sets when sentinel comes into view
+  useEffect(() => {
+    const sentinel = sentinelRef.current
+    const container = scrollContainerRef.current
+    if (!sentinel || !container || !hasMore) return
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          setVisibleCount((prev) => prev + 10)
+        }
+      },
+      { root: container, rootMargin: '100px' }
+    )
+    observer.observe(sentinel)
+    return () => observer.disconnect()
+  }, [hasMore, filtered])
 
   const handleSubscribe = async (set: StickerSet) => {
     const addr = `30030:${set.pubkey}:${set.dTag}`
@@ -872,7 +901,7 @@ function DiscoverStickerTab() {
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto p-2 space-y-2">
+      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto p-2 space-y-2">
         {loading ? (
           <div className="flex items-center justify-center py-8">
             <Loader2 size={18} className="animate-spin text-muted-foreground" />
@@ -883,67 +912,67 @@ function DiscoverStickerTab() {
             <p className="text-[10px] mt-1 opacity-60">Try again later as more users publish sticker sets.</p>
           </div>
         ) : (
-          filtered.map((set) => {
-            const addr = `30030:${set.pubkey}:${set.dTag}`
-            const isSubscribed = subscriptionAddresses.includes(addr)
-            const isPublishing = publishingAddr === addr
-            const profile = getProfile(set.pubkey)
-            const authorName = profile?.display_name || profile?.name || truncateNpub(nip19.npubEncode(set.pubkey))
+          <>
+            {visibleSets.map((set) => {
+              const addr = `30030:${set.pubkey}:${set.dTag}`
+              const isSubscribed = subscriptionAddresses.includes(addr)
+              const isPublishing = publishingAddr === addr
+              const profile = getProfile(set.pubkey)
+              const authorName = profile?.display_name || profile?.name || truncateNpub(nip19.npubEncode(set.pubkey))
 
-            return (
-              <div key={addr} className="rounded-lg border border-border bg-secondary/20 p-2.5">
-                <div className="flex items-center justify-between mb-1.5">
-                  <div className="min-w-0">
-                    <p className="text-xs font-semibold text-foreground truncate">{set.name}</p>
-                    <p className="text-[10px] text-muted-foreground">
-                      by <button onClick={() => setProfilePubkey(set.pubkey)} className="text-primary hover:underline cursor-pointer">{authorName}</button> · {set.stickers.length} stickers
-                    </p>
-                  </div>
-                  {isSubscribed ? (
-                    <span className="text-[10px] text-primary font-medium shrink-0 flex items-center gap-1">
-                      <Check size={10} /> Subscribed
-                    </span>
-                  ) : (
-                    <button
-                      onClick={() => handleSubscribe(set)}
-                      disabled={isPublishing}
-                      className="shrink-0 px-2.5 py-1 rounded-md bg-primary text-primary-foreground text-[10px] font-medium disabled:opacity-50 cursor-pointer"
-                    >
-                      {isPublishing ? <Loader2 size={10} className="animate-spin" /> : 'Subscribe'}
-                    </button>
-                  )}
-                </div>
-                {/* Preview grid */}
-                <div className="flex flex-wrap gap-1">
-                  {set.stickers.slice(0, 6).map((st) => (
-                    <img
-                      key={st.shortcode}
-                      src={st.url}
-                      alt={`:${st.shortcode}:`}
-                      className="w-9 h-9 object-contain rounded border border-border/30"
-                      loading="lazy"
-                    />
-                  ))}
-                  {set.stickers.length > 6 && (
-                    <div className="w-9 h-9 rounded border border-border/30 flex items-center justify-center text-[10px] text-muted-foreground">
-                      +{set.stickers.length - 6}
+              return (
+                <div key={addr} className="rounded-lg border border-border bg-secondary/20 p-2.5">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold text-foreground truncate">{set.name}</p>
+                      <p className="text-[10px] text-muted-foreground">
+                        by <button onClick={() => { window.dispatchEvent(new CustomEvent('open-profile-modal', { detail: set.pubkey })); onPickerClose?.() }} className="text-primary hover:underline cursor-pointer">{authorName}</button> · {set.stickers.length} stickers
+                      </p>
                     </div>
-                  )}
+                    {isSubscribed ? (
+                      <span className="text-[10px] text-primary font-medium shrink-0 flex items-center gap-1">
+                        <Check size={10} /> Subscribed
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() => handleSubscribe(set)}
+                        disabled={isPublishing}
+                        className="shrink-0 px-2.5 py-1 rounded-md bg-primary text-primary-foreground text-[10px] font-medium disabled:opacity-50 cursor-pointer"
+                      >
+                        {isPublishing ? <Loader2 size={10} className="animate-spin" /> : 'Subscribe'}
+                      </button>
+                    )}
+                  </div>
+                  {/* Preview grid */}
+                  <div className="flex flex-wrap gap-1">
+                    {set.stickers.slice(0, 6).map((st) => (
+                      <img
+                        key={st.shortcode}
+                        src={st.url}
+                        alt={`:${st.shortcode}:`}
+                        className="w-9 h-9 object-contain rounded border border-border/30"
+                        loading="lazy"
+                      />
+                    ))}
+                    {set.stickers.length > 6 && (
+                      <div className="w-9 h-9 rounded border border-border/30 flex items-center justify-center text-[10px] text-muted-foreground">
+                        +{set.stickers.length - 6}
+                      </div>
+                    )}
+                  </div>
                 </div>
+              )
+            })}
+            {/* Scroll sentinel + load-more indicator */}
+            {hasMore && (
+              <div ref={sentinelRef} className="flex items-center justify-center py-3">
+                <Loader2 size={14} className="animate-spin text-muted-foreground" />
+                <span className="ml-1.5 text-[10px] text-muted-foreground">Loading more…</span>
               </div>
-            )
-          })
+            )}
+          </>
         )}
       </div>
-
-      {profilePubkey && createPortal(
-        <UserProfileModal
-          open={!!profilePubkey}
-          onClose={() => setProfilePubkey(null)}
-          targetPubkey={profilePubkey}
-        />,
-        document.body
-      )}
     </div>
   )
 }

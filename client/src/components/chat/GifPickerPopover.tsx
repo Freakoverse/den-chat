@@ -37,7 +37,7 @@ import { uploadToBlossomServers, computeHash } from '@/lib/blossom'
 import { getUploadBlossoms } from '@/stores/postingBehaviourStore'
 import { useUserStore } from '@/stores/userStore'
 import { useBlockStore } from '@/stores/blockStore'
-import { UserProfileModal } from '@/components/hub/UserProfileModal'
+
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { truncateNpub } from '@/lib/utils'
 import { nip19 } from 'nostr-tools'
@@ -146,9 +146,9 @@ export function GifPickerPopover({ anchorRef, onClose, onSelect }: Props) {
 
         {/* Tab content */}
         <div className="flex-1 overflow-y-auto">
-          {tab === 'discover' && <DiscoverGifTab onSelect={onSelect} />}
+          {tab === 'discover' && <DiscoverGifTab onSelect={onSelect} onPickerClose={onClose} />}
           {tab === 'mine' && <MineGifTab onSelect={onSelect} />}
-          {tab === 'others' && <OthersGifTab onSelect={onSelect} />}
+          {tab === 'others' && <OthersGifTab onSelect={onSelect} onPickerClose={onClose} />}
           {tab === 'favorites' && <FavoritesGifTab onSelect={onSelect} />}
         </div>
       </div>
@@ -213,7 +213,7 @@ function filterNsfwGifs(gifs: GifEntry[]): GifEntry[] {
 
 /* ═══════════ Discover Tab ═══════════ */
 
-function DiscoverGifTab({ onSelect }: { onSelect: (g: { name: string; url: string; nsfw: boolean }) => void }) {
+function DiscoverGifTab({ onSelect, onPickerClose }: { onSelect: (g: { name: string; url: string; nsfw: boolean }) => void; onPickerClose?: () => void }) {
   const myPubkey = useUserStore((s) => s.pubkey)
   const signer = useUserStore((s) => s.signer)
   const privateKey = useUserStore((s) => s.privateKey)
@@ -231,7 +231,7 @@ function DiscoverGifTab({ onSelect }: { onSelect: (g: { name: string; url: strin
   const [publishingAddr, setPublishingAddr] = useState<string | null>(null)
   const [viewingCollection, setViewingCollection] = useState<GifCollection | null>(null)
   const [searchMode, setSearchMode] = useState<'g' | 'd'>('g')
-  const [profilePubkey, setProfilePubkey] = useState<string | null>(null)
+
   const blockedPubkeys = useBlockStore((s) => s.blockedPubkeys)
   const { getProfile } = useProfileCache()
 
@@ -481,7 +481,7 @@ function DiscoverGifTab({ onSelect }: { onSelect: (g: { name: string; url: strin
                       <div className="flex items-center justify-between mb-2">
                         <div className="min-w-0">
                           <p className="text-xs font-semibold text-foreground truncate">{collection.name}</p>
-                          <p className="text-[10px] text-muted-foreground">by <button onClick={() => setProfilePubkey(collection.pubkey)} className="text-primary hover:underline cursor-pointer">{authorName}</button> · {collection.gifs.length} GIF{collection.gifs.length !== 1 ? 's' : ''}</p>
+                          <p className="text-[10px] text-muted-foreground">by <button onClick={() => { window.dispatchEvent(new CustomEvent('open-profile-modal', { detail: collection.pubkey })); onPickerClose?.() }} className="text-primary hover:underline cursor-pointer">{authorName}</button> · {collection.gifs.length} GIF{collection.gifs.length !== 1 ? 's' : ''}</p>
                         </div>
                         <div className="flex items-center gap-1 shrink-0">
                           <button
@@ -541,7 +541,7 @@ function DiscoverGifTab({ onSelect }: { onSelect: (g: { name: string; url: strin
               <div className="min-w-0">
                 <p className="text-sm font-semibold text-foreground truncate">{viewingCollection.name}</p>
                 <p className="text-[10px] text-muted-foreground">
-                  by <button onClick={() => setProfilePubkey(viewingCollection.pubkey)} className="text-primary hover:underline cursor-pointer">{(() => {
+                  by <button onClick={() => { window.dispatchEvent(new CustomEvent('open-profile-modal', { detail: viewingCollection.pubkey })); setViewingCollection(null); onPickerClose?.() }} className="text-primary hover:underline cursor-pointer">{(() => {
                     const profile = getProfile(viewingCollection.pubkey)
                     return profile?.display_name || profile?.name || truncateNpub(nip19.npubEncode(viewingCollection.pubkey))
                   })()}</button> · {viewingCollection.gifs.length} GIF{viewingCollection.gifs.length !== 1 ? 's' : ''}
@@ -599,15 +599,6 @@ function DiscoverGifTab({ onSelect }: { onSelect: (g: { name: string; url: strin
             })()}
           </div>
         </div>,
-        document.body
-      )}
-
-      {profilePubkey && createPortal(
-        <UserProfileModal
-          open={!!profilePubkey}
-          onClose={() => setProfilePubkey(null)}
-          targetPubkey={profilePubkey}
-        />,
         document.body
       )}
     </>
@@ -697,6 +688,7 @@ function MineGifTab({ onSelect }: { onSelect: (g: { name: string; url: string; n
           <Tooltip>
             <TooltipTrigger asChild>
               <button
+                disabled={myCollections.length === 0}
                 onClick={() => {
                   const next = !showAddGif
                   setShowAddGif(next)
@@ -705,7 +697,7 @@ function MineGifTab({ onSelect }: { onSelect: (g: { name: string; url: string; n
                     if (myCollections.length > 0 && !expandedCollection) setExpandedCollection(myCollections[0].dTag)
                   }
                 }}
-                className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors cursor-pointer"
+                className={`p-1.5 rounded-md transition-colors ${myCollections.length === 0 ? 'text-muted-foreground/30 cursor-not-allowed' : 'text-muted-foreground hover:text-foreground hover:bg-muted/50 cursor-pointer'}`}
               >
                 <Plus size={14} />
               </button>
@@ -796,7 +788,7 @@ function MineGifTab({ onSelect }: { onSelect: (g: { name: string; url: string; n
 
 /* ═══════════ Others Tab ═══════════ */
 
-function OthersGifTab({ onSelect }: { onSelect: (g: { name: string; url: string; nsfw: boolean }) => void }) {
+function OthersGifTab({ onSelect, onPickerClose }: { onSelect: (g: { name: string; url: string; nsfw: boolean }) => void; onPickerClose?: () => void }) {
   const subscribedCollections = useGifStore((s) => s.subscribedCollections)
   const subscriptionAddresses = useGifStore((s) => s.subscriptionAddresses)
   const nsfwEnabled = useGifStore((s) => s.nsfwEnabled)
@@ -807,7 +799,7 @@ function OthersGifTab({ onSelect }: { onSelect: (g: { name: string; url: string;
   const [searchMode, setSearchMode] = useState<'items' | 'sets'>('items')
   const [unsubscribing, setUnsubscribing] = useState<string | null>(null)
   const { getProfile } = useProfileCache()
-  const [profilePubkey, setProfilePubkey] = useState<string | null>(null)
+
   const blockedPubkeys = useBlockStore((s) => s.blockedPubkeys)
 
   const visibleCollections = useMemo(() =>
@@ -935,7 +927,7 @@ function OthersGifTab({ onSelect }: { onSelect: (g: { name: string; url: string;
                       <div className="min-w-0">
                         <p className="text-xs font-semibold text-foreground truncate">{col.name}</p>
                         <p className="text-[10px] text-muted-foreground">
-                          by <button onClick={() => setProfilePubkey(col.pubkey)} className="text-primary hover:underline cursor-pointer">{authorName}</button> · {col.gifs.length} GIF{col.gifs.length !== 1 ? 's' : ''}
+                          by <button onClick={() => { window.dispatchEvent(new CustomEvent('open-profile-modal', { detail: col.pubkey })); onPickerClose?.() }} className="text-primary hover:underline cursor-pointer">{authorName}</button> · {col.gifs.length} GIF{col.gifs.length !== 1 ? 's' : ''}
                         </p>
                       </div>
                       <button
@@ -1025,15 +1017,6 @@ function OthersGifTab({ onSelect }: { onSelect: (g: { name: string; url: string;
         </div>
 
       </div>
-
-      {profilePubkey && createPortal(
-        <UserProfileModal
-          open={!!profilePubkey}
-          onClose={() => setProfilePubkey(null)}
-          targetPubkey={profilePubkey}
-        />,
-        document.body
-      )}
     </>
   )
 }
@@ -1531,7 +1514,7 @@ export function GifDiscoveryModal({ onClose, initialSearch = '' }: { onClose: ()
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [authorFilter, setAuthorFilter] = useState('')
   const [publishingAddr, setPublishingAddr] = useState<string | null>(null)
-  const [profilePubkey, setProfilePubkey] = useState<string | null>(null)
+
   const blockedPubkeys = useBlockStore((s) => s.blockedPubkeys)
 
   useEffect(() => {
@@ -1676,7 +1659,7 @@ export function GifDiscoveryModal({ onClose, initialSearch = '' }: { onClose: ()
                       <div className="flex items-center justify-between mb-2">
                         <div className="min-w-0">
                           <p className="text-sm font-semibold text-foreground truncate">{collection.name}</p>
-                          <p className="text-[10px] text-muted-foreground">by <button onClick={() => setProfilePubkey(collection.pubkey)} className="text-primary hover:underline cursor-pointer">{authorName}</button> · {collection.gifs.length} GIFs</p>
+                          <p className="text-[10px] text-muted-foreground">by <button onClick={() => { window.dispatchEvent(new CustomEvent('open-profile-modal', { detail: collection.pubkey })); onClose() }} className="text-primary hover:underline cursor-pointer">{authorName}</button> · {collection.gifs.length} GIFs</p>
                         </div>
                         {isSubscribed ? (
                           <span className="text-[10px] text-primary font-medium shrink-0 flex items-center gap-1">
@@ -1716,15 +1699,6 @@ export function GifDiscoveryModal({ onClose, initialSearch = '' }: { onClose: ()
             </div>
           </div>
         </div>,
-        document.body
-      )}
-
-      {profilePubkey && createPortal(
-        <UserProfileModal
-          open={!!profilePubkey}
-          onClose={() => setProfilePubkey(null)}
-          targetPubkey={profilePubkey}
-        />,
         document.body
       )}
     </>
