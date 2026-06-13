@@ -22,6 +22,7 @@ import { MessageContent } from '@/components/chat/MessageContent'
 import { ContentMediaGroupsWithGallery, extractContentMediaGroups } from '@/components/chat/ContentMediaGrouping'
 import { DeleteConfirmDialog, ReactionBar, type Reaction } from '@/components/hub/ChannelView'
 import { EmojiPickerPopover } from '@/components/chat/EmojiPickerPopover'
+import { ScrollableContent } from '../chat/ScrollableContent'
 import { ZapModal } from '@/components/hub/ZapModal'
 import { ZapListModal } from '@/components/hub/ZapListModal'
 import { UserProfileModal } from '@/components/hub/UserProfileModal'
@@ -1358,7 +1359,7 @@ function PublicMessageRow({ msg, showDateSep, isGrouped, onReply, onRequestDelet
               )}
             </div>
           )}
-          <div className="max-h-[600px] overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
+          <ScrollableContent>
           {shouldBlurMsg ? (
             <div className="flex items-center gap-2.5 py-1.5 px-3 my-1 rounded-lg bg-muted/50 border border-border/50">
               <AlertTriangle size={14} className="text-amber-500 shrink-0" />
@@ -1499,7 +1500,7 @@ function PublicMessageRow({ msg, showDateSep, isGrouped, onReply, onRequestDelet
               )}
             </>
           )}
-          </div>
+          </ScrollableContent>
 
           {/* Reaction bar + Zap badge — inside content div so it renders below message text */}
           {onAddReaction && (

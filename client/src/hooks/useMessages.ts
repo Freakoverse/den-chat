@@ -852,6 +852,24 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
       }
       cacheMessageWithDedup(deletedCacheMsg).catch(() => {})
     })
+
+    // Publish ephemeral deletion hint (kind 26943) to notify other connected clients.
+    // Reuses the same edit hint event — receivers re-fetch the dTag and get the
+    // deleted version, removing the message from their UI in real-time.
+    // Fire-and-forget — hint failure should not affect the deletion itself.
+    const minPow = hub?.minPow || 0
+    const hintUnsigned = createEditHintEvent(hubDTag!, dTag, channelId!)
+    mineAndSign(hintUnsigned, minPow, pubkey, signer, privateKey)
+      .then((hintSigned) => {
+        console.log(`[DeleteHint] Publishing hint id=${hintSigned.id.slice(0, 12)}… kind=${hintSigned.kind} to ${publishRelays.length} relays`)
+        return publishToSpecificRelays(publishRelays, hintSigned)
+      })
+      .then((accepted) => {
+        console.log(`[DeleteHint] Hint accepted by ${accepted.length}/${publishRelays.length} relays: ${accepted.join(', ')}`)
+      })
+      .catch((err) => {
+        console.error(`[DeleteHint] Hint publish FAILED:`, err)
+      })
   }, [hubDTag, channelId, signer, privateKey, pubkey])
 
   // Publish a reaction (kind 7) to a message

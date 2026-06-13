@@ -42,6 +42,7 @@ import { useNotificationStore } from '@/stores/notificationStore'
 import { useUnreadDivider } from '@/hooks/useUnreadDivider'
 import { NewMessagesDivider } from '@/components/chat/NewMessagesDivider'
 import { UnreadBanner } from '@/components/chat/UnreadBanner'
+import { ScrollableContent } from '../chat/ScrollableContent'
 import { getDraft, setDraft, clearDraft, dm04DraftKey } from '@/stores/draftStore'
 
 /* ─── Helpers ─── */
@@ -1152,7 +1153,7 @@ function DM04MessageRow({
           </div>
         )}
 
-        <div className="max-h-[600px] overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
+        <ScrollableContent>
         {shouldBlurBlocked ? (
           <div className="flex items-center gap-2.5 py-1.5 px-3 my-1 rounded-lg bg-muted/50 border border-border/50">
             <ShieldBan size={14} className="text-destructive/70 shrink-0" />
@@ -1244,7 +1245,7 @@ function DM04MessageRow({
             )}
           </>
         )}
-        </div>
+        </ScrollableContent>
 
         {!isMine && isBlockedUser && blockedRevealed && (
           <button

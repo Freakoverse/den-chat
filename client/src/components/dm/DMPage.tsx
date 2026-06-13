@@ -36,6 +36,7 @@ import {
   AlertTriangle, Download, Star, ChevronLeft, Check,
 } from 'lucide-react'
 import { MessageContent } from '@/components/chat/MessageContent'
+import { ScrollableContent } from '../chat/ScrollableContent'
 import { ContentMediaGroupsWithGallery, extractContentMediaGroups } from '@/components/chat/ContentMediaGrouping'
 import { ImageGallery } from '@/components/social/RichContent'
 import { DnnBadge } from '@/components/ui/DnnBadge'
@@ -1373,7 +1374,7 @@ function DMMessageRow({ msg, showDateSep, isGrouped, senderProfile, displayName,
               )}
             </div>
           )}
-          <div className="max-h-[600px] overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
+          <ScrollableContent>
           {shouldBlurBlocked ? (
             <div className="flex items-center gap-2.5 py-1.5 px-3 my-1 rounded-lg bg-muted/50 border border-border/50">
               <ShieldBan size={14} className="text-destructive/70 shrink-0" />
@@ -1476,7 +1477,7 @@ function DMMessageRow({ msg, showDateSep, isGrouped, senderProfile, displayName,
               hasTextContent={!!msg.content}
             />
           )}
-          </div>
+          </ScrollableContent>
           {isBlockedUser && blockedRevealed && (
             <button
               onClick={() => setBlockedRevealed(false)}
@@ -1543,7 +1544,7 @@ function DMMessageContent({ msg, showDateSep, isGrouped, senderProfile, displayN
               )}
             </div>
           )}
-          <div className="max-h-[600px] overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
+          <ScrollableContent>
           {(() => {
             // Extract GIF URLs from content — render them via DMGifStarOverlay (with star + blossom failover)
             const gifUrlRegex = /https?:\/\/\S+\.gif(?:\?\S*)?/gi
@@ -1631,7 +1632,7 @@ function DMMessageContent({ msg, showDateSep, isGrouped, senderProfile, displayN
               hasTextContent={!!msg.content}
             />
           )}
-          </div>
+          </ScrollableContent>
         </div>
       </div>
     </div>

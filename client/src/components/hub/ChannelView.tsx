@@ -74,6 +74,7 @@ import { NewMessagesDivider } from '@/components/chat/NewMessagesDivider'
 import { UnreadBanner } from '@/components/chat/UnreadBanner'
 import { useMobile } from '@/hooks/useMobile'
 import { MESSAGE_MAX_LENGTH, MESSAGE_CHAR_WARN_THRESHOLD } from '@/components/chat/ChatInputBar'
+import { ScrollableContent } from '@/components/chat/ScrollableContent'
 
 /** Optimistic message -- shown immediately before publish confirms */
 export interface OptimisticMessage {
@@ -3342,7 +3343,7 @@ export function ChatMessageRow({
         </div>
 
         <div className="min-w-0 flex-1">
-          <div className="max-h-[600px] overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
+          <ScrollableContent>
           {isEditing ? (
             <EditField text={editText} onChange={setEditText} onCancel={() => { cancelEdit(); setRemovedAttachmentHashes(new Set()) }} unchanged={editUnchanged} onSave={() => { onSaveEdit(msg, editText, removedAttachmentHashes); setRemovedAttachmentHashes(new Set()) }} />
           ) : !msg.decrypted && !msg.deleted ? (
@@ -3493,7 +3494,7 @@ export function ChatMessageRow({
               </div>
             )
           })()}
-          </div>
+          </ScrollableContent>
           <ReactionBar reactions={reactions} messageId={msg.id} onAddReaction={onAddReaction}>
             <ZapTotalBadge hubDTag={hubDTag} messageId={msg.dTag ? `36943:${msg.pubkey}:${msg.dTag}` : msg.id} onOpenProfile={onOpenProfile} />
           </ReactionBar>
@@ -3646,7 +3647,7 @@ export function ChatMessageRow({
               )}
             </span>
           </div>
-          <div className="max-h-[600px] overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
+          <ScrollableContent>
           {isEditing ? (
             <EditField text={editText} onChange={setEditText} onCancel={() => { cancelEdit(); setRemovedAttachmentHashes(new Set()) }} unchanged={editUnchanged} onSave={() => { onSaveEdit(msg, editText, removedAttachmentHashes); setRemovedAttachmentHashes(new Set()) }} />
           ) : !msg.decrypted && !msg.deleted ? (
@@ -3786,7 +3787,7 @@ export function ChatMessageRow({
               </div>
             )
           })()}
-          </div>
+          </ScrollableContent>
           <ReactionBar reactions={reactions} messageId={msg.id} onAddReaction={onAddReaction} rawReactions={rawReactions} onOpenProfile={onOpenProfile}>
             <ZapTotalBadge hubDTag={hubDTag} messageId={msg.dTag ? `36943:${msg.pubkey}:${msg.dTag}` : msg.id} onOpenProfile={onOpenProfile} />
           </ReactionBar>
