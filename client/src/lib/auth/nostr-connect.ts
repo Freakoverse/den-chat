@@ -29,7 +29,7 @@ export function generateNostrConnectDetails(relays: string[] = DEFAULT_RELAYS): 
   const connectionString = createNostrConnectURI({
     clientPubkey: getPublicKey(privKey),
     relays,
-    secret: Math.random().toString(36).substring(7),
+    secret: Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, '0')).join(''),
     name: 'DEN Chat',
     url: window.location.origin,
   })
@@ -50,13 +50,15 @@ export class NostrConnectSigner {
    * Login using a nostrconnect:// connection string.
    * This call BLOCKS until the remote signer connects via the relay.
    * No manual "I've connected" button needed.
+   *
+   * @param abortSignal Optional AbortSignal to cancel the connection attempt
    */
-  async login(connectionString: string): Promise<{ bunkerString: string | null; pubkey: string }> {
+  async login(connectionString: string, abortSignal?: AbortSignal): Promise<{ bunkerString: string | null; pubkey: string }> {
     this.signer = await NBunkerSigner.fromURI(this.clientSecretKey, connectionString, {
       onauth: (url) => {
         window.open(url, '_blank')
       },
-    })
+    }, abortSignal || 60_000)
 
     this.bunkerString = toBunkerURL(this.signer.bp)
     this.pubkey = await this.signer.getPublicKey()

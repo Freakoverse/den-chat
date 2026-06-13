@@ -141,6 +141,7 @@ export function LoginScreen() {
   const [connectDetails, setConnectDetails] = useState<ReturnType<typeof generateNostrConnectDetails> | null>(null)
   const [connectError, setConnectError] = useState<string | null>(null)
   const [connectPending, setConnectPending] = useState(false)
+  const connectAbortRef = useRef<AbortController | null>(null)
   const [copied, setCopied] = useState(false)
   const [showTerms, setShowTerms] = useState(false)
   const [showGuide, setShowGuide] = useState(false)
@@ -422,7 +423,7 @@ export function LoginScreen() {
   const bgImageUrl = activeBg?.image || null
 
   const clearError = () => { setError(null); setConnectError(null) }
-  const goBack = () => { setScreen('main'); clearError(); setConnectDetails(null) }
+  const goBack = () => { connectAbortRef.current?.abort(); setScreen('main'); clearError(); setConnectDetails(null); setConnectPending(false) }
 
   // ─── UPV2 Login (main form) ───
   const handleUPV2Login = async () => {
@@ -524,27 +525,37 @@ export function LoginScreen() {
   const handleNostrConnectLogin = useCallback(async () => {
     if (!connectDetails) return
 
+    // Abort any previous attempt
+    connectAbortRef.current?.abort()
+    const abortController = new AbortController()
+    connectAbortRef.current = abortController
+
     setConnectPending(true)
     setConnectError(null)
     try {
       const signer = new NostrConnectSigner(connectDetails.privKey)
-      const { pubkey } = await signer.login(connectDetails.connectionString)
+      const { pubkey } = await signer.login(connectDetails.connectionString, abortController.signal)
+      if (abortController.signal.aborted) return
       setSigner(signer)
       login(pubkey, 'nip46')
     } catch (err) {
+      if (abortController.signal.aborted) return
       setConnectError(
         err instanceof Error
-          ? `${err.message}. Please reload and try again.`
-          : 'Connection failed. Please reload and try again.'
+          ? `${err.message}. Tap Retry or go back and try again.`
+          : 'Connection failed. Tap Retry or go back and try again.'
       )
       setConnectPending(false)
     }
   }, [connectDetails, setSigner, login])
 
-  // Auto-start nostr connect when dialog opens
+  // Auto-start nostr connect when dialog opens (StrictMode-safe: abort on cleanup)
   useEffect(() => {
     if (screen === 'nip46' && connectDetails) {
       handleNostrConnectLogin()
+    }
+    return () => {
+      connectAbortRef.current?.abort()
     }
   }, [screen, connectDetails, handleNostrConnectLogin])
 
@@ -1814,8 +1825,24 @@ export function LoginScreen() {
               )}
 
               {connectError && (
-                <div className="flex items-center gap-2 text-sm text-destructive">
-                  <AlertCircle size={14} className="shrink-0" /> {connectError}
+                <div className="flex flex-col items-center gap-2">
+                  <div className="flex items-center gap-2 text-sm text-destructive">
+                    <AlertCircle size={14} className="shrink-0" /> {connectError}
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      // Regenerate details with a fresh secret + keys, then retry
+                      const details = generateNostrConnectDetails()
+                      setConnectDetails(details)
+                      setConnectError(null)
+                      setConnectPending(true)
+                    }}
+                    className="gap-1.5"
+                  >
+                    <RefreshCw size={13} /> Retry
+                  </Button>
                 </div>
               )}
             </div>

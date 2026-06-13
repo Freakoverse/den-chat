@@ -253,7 +253,12 @@ class UPV2Service {
   }
 
   /**
-   * Poll relays for a response matching expected action + session
+   * Wait for a signer response using relay subscriptions (push-based).
+   *
+   * Uses pool.subscribeMany for near-instant event delivery instead of polling.
+   * Also performs an initial querySync to catch events that arrived before
+   * the subscription was established (race condition prevention).
+   * A 2-second safety-net re-query handles unreliable relays that drop subscriptions.
    */
   /* eslint-disable @typescript-eslint/no-explicit-any */
   private async pollForResponse(
@@ -263,59 +268,109 @@ class UPV2Service {
   ): Promise<any> {
     const minTime = (requestTime || Math.floor(Date.now() / 1000)) - 15
     const startTime = Math.floor(Date.now() / 1000) - 30
-    const endTime = Date.now() + timeoutMs
     const processedIds = new Set<string>()
 
-    while (Date.now() < endTime) {
-      try {
-        const filter: any = {
-          kinds: [UPV2_KIND, 24133],
-          '#p': [loginPk],
-          since: startTime,
-        }
-
-        const events = await this.pool.querySync(relays, filter)
-
-        for (const event of events) {
-          if (processedIds.has(event.id)) continue
-          processedIds.add(event.id)
-
-          try {
-            if ((event.created_at || 0) < minTime) continue
-
-            const conversationKey = nip44.v2.utils.getConversationKey(
-              hexToBytes(loginSk),
-              event.pubkey,
-            )
-            const decrypted = nip44.v2.decrypt(event.content, conversationKey)
-            const payload = JSON.parse(decrypted)
-
-            if (event.kind === UPV2_KIND) {
-              const actionTag = event.tags.find((t: string[]) => t[0] === 'a')
-              const eventSessionTag = event.tags.find((t: string[]) => t[0] === 's')
-              const eventNonceTag = event.tags.find((t: string[]) => t[0] === 'n')
-
-              if (sessionId && (!eventSessionTag?.[1] || eventSessionTag[1] !== sessionId)) continue
-              if (nonce && (!eventNonceTag?.[1] || eventNonceTag[1] !== nonce)) continue
-
-              if (actionTag?.[1] === expectedAction) return payload
-              if (actionTag?.[1] === 'error') return null
-            } else if (event.kind === 24133) {
-              if (expectedAction === 'signed_event' && payload.result) {
-                const signedEvent = typeof payload.result === 'string' ? JSON.parse(payload.result) : payload.result
-                return { event: signedEvent }
-              } else if (payload.error) {
-                return null
-              }
-            }
-          } catch { /* skip malformed */ }
-        }
-      } catch { /* query error */ }
-
-      await new Promise((r) => setTimeout(r, 500))
+    const filter: any = {
+      kinds: [UPV2_KIND, 24133],
+      '#p': [loginPk],
+      since: startTime,
     }
 
-    return null
+    return new Promise<any>((resolve) => {
+      let settled = false
+      let sub: { close: () => void } | null = null
+      let safetyInterval: ReturnType<typeof setInterval> | null = null
+
+      const cleanup = () => {
+        if (settled) return
+        settled = true
+        sub?.close()
+        if (safetyInterval) clearInterval(safetyInterval)
+      }
+
+      const finish = (result: any) => {
+        if (settled) return
+        cleanup()
+        resolve(result)
+      }
+
+      // Timeout — resolve null if no response in time
+      setTimeout(() => finish(null), timeoutMs)
+
+      /**
+       * Try to match a single event against expected action/session/nonce.
+       * Returns the parsed payload if matched, undefined if not.
+       */
+      const tryMatchEvent = (event: any): any => {
+        if (processedIds.has(event.id)) return undefined
+        processedIds.add(event.id)
+
+        try {
+          if ((event.created_at || 0) < minTime) return undefined
+
+          const conversationKey = nip44.v2.utils.getConversationKey(
+            hexToBytes(loginSk),
+            event.pubkey,
+          )
+          const decrypted = nip44.v2.decrypt(event.content, conversationKey)
+          const payload = JSON.parse(decrypted)
+
+          if (event.kind === UPV2_KIND) {
+            const actionTag = event.tags.find((t: string[]) => t[0] === 'a')
+            const eventSessionTag = event.tags.find((t: string[]) => t[0] === 's')
+            const eventNonceTag = event.tags.find((t: string[]) => t[0] === 'n')
+
+            if (sessionId && (!eventSessionTag?.[1] || eventSessionTag[1] !== sessionId)) return undefined
+            if (nonce && (!eventNonceTag?.[1] || eventNonceTag[1] !== nonce)) return undefined
+
+            if (actionTag?.[1] === expectedAction) return payload
+            if (actionTag?.[1] === 'error') return null // explicit null = error
+          } else if (event.kind === 24133) {
+            if (expectedAction === 'signed_event' && payload.result) {
+              const signedEvent = typeof payload.result === 'string' ? JSON.parse(payload.result) : payload.result
+              return { event: signedEvent }
+            } else if (payload.error) {
+              return null
+            }
+          }
+        } catch { /* skip malformed */ }
+        return undefined
+      }
+
+      // 1. Set up push-based subscription for real-time events
+      try {
+        sub = this.pool.subscribeMany(relays, filter, {
+          onevent: (event: any) => {
+            if (settled) return
+            const result = tryMatchEvent(event)
+            if (result !== undefined) finish(result)
+          },
+        })
+      } catch {
+        // Subscription setup failed — fall through to safety-net polling
+      }
+
+      // 2. Initial querySync to catch events that arrived before subscription
+      this.pool.querySync(relays, filter).then((events) => {
+        if (settled) return
+        for (const event of events) {
+          const result = tryMatchEvent(event)
+          if (result !== undefined) { finish(result); return }
+        }
+      }).catch(() => { /* ignore query errors */ })
+
+      // 3. Safety-net re-query every 2s for relays that don't push reliably
+      safetyInterval = setInterval(async () => {
+        if (settled) return
+        try {
+          const events = await this.pool.querySync(relays, filter)
+          for (const event of events) {
+            const result = tryMatchEvent(event)
+            if (result !== undefined) { finish(result); return }
+          }
+        } catch { /* ignore */ }
+      }, 2000)
+    })
   }
 
   private async sendUPV2Event(
