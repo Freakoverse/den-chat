@@ -359,10 +359,9 @@ export function DM04ChatView({ recipientPubkey, onSwitchProtocol, onBack }: { re
 
     let content = text
     if (attachments && attachments.length > 0) {
-      const links = attachments.map((a) => {
-        const ext = a.type ? `.${a.type.split('/')[1]?.split('+')[0] || 'bin'}` : ''
-        return `https://blossom.primal.net/${a.hash}${ext}`
-      })
+      // Bare hash URL — standard Blossom format (BUD-01), universally supported.
+      // useBlossomMedia handles server failover across all configured servers.
+      const links = attachments.map((a) => `https://blossom.primal.net/${a.hash}`)
       content = content ? `${content}\n${links.join('\n')}` : links.join('\n')
     }
 
@@ -1560,10 +1559,7 @@ function DM04ThreadModal({ parentMsg, threadReplies, recipientPubkey, getProfile
 
     let content = text
     if (attachments && attachments.length > 0) {
-      const links = attachments.map((a) => {
-        const ext = a.type ? `.${a.type.split('/')[1]?.split('+')[0] || 'bin'}` : ''
-        return `https://blossom.primal.net/${a.hash}${ext}`
-      })
+      const links = attachments.map((a) => `https://blossom.primal.net/${a.hash}`)
       content = content ? `${content}\n${links.join('\n')}` : links.join('\n')
     }
 
