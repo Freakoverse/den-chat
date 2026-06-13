@@ -72,6 +72,7 @@ import {
   getRenderLimit, setRenderLimit, resetRenderLimits, getRenderLimitDefault,
   LIMIT_MAX_SLIDER, type RenderLimitCategory,
 } from '@/lib/imageSizeGuard'
+import { MAX_HUB_LIST_ENTRIES, MAX_HUB_FOLDERS, FOLDER_NAME_MAX } from '@/lib/hub/hubLimits'
 
 /* ─────────── types ─────────── */
 
@@ -4544,6 +4545,7 @@ function MyHubsTab() {
 
   // ── Add created hub back to list (local only — user must publish) ──
   const handleAddToList = (dTag: string) => {
+    if (hubEntries.length >= MAX_HUB_LIST_ENTRIES) return
     const hub = hubs[dTag]
     if (!hub) return
     const relayHint = hub.generalRelays[0] || ''
@@ -4643,7 +4645,8 @@ function MyHubsTab() {
 
   // ── Folder management (local-only) ──
   const addFolder = () => {
-    const name = newFolderName.trim()
+    if (folders.length >= MAX_HUB_FOLDERS) return
+    const name = newFolderName.trim().slice(0, FOLDER_NAME_MAX)
     if (!name) return
     const newFolder: HubFolder = { id: crypto.randomUUID(), name, position: folders.length, color: FOLDER_COLORS[folders.length % FOLDER_COLORS.length] }
     const newFolders = [...folders, newFolder]
@@ -4656,7 +4659,7 @@ function MyHubsTab() {
     updateLocal(updatedEntries, newFolders)
   }
   const renameFolder = (folderId: string) => {
-    const name = editFolderName.trim()
+    const name = editFolderName.trim().slice(0, FOLDER_NAME_MAX)
     if (!name) return
     const newFolders = folders.map(f => f.id === folderId ? { ...f, name } : f)
     updateLocal(hubEntries, newFolders)
@@ -4826,7 +4829,7 @@ function MyHubsTab() {
           className={`flex-1 px-3 py-1.5 rounded-md text-sm font-medium transition-colors cursor-pointer
             ${subTab === 'hublist' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
         >
-          Hub List ({hubEntries.length})
+          Hub List ({hubEntries.length}/{MAX_HUB_LIST_ENTRIES})
         </button>
         <button
           onClick={() => setSubTab('created')}
@@ -4897,7 +4900,8 @@ function MyHubsTab() {
                           <input
                             autoFocus
                             value={editFolderName}
-                            onChange={(e) => setEditFolderName(e.target.value)}
+                            onChange={(e) => setEditFolderName(e.target.value.slice(0, FOLDER_NAME_MAX))}
+                            maxLength={FOLDER_NAME_MAX}
                             onKeyDown={(e) => { if (e.key === 'Enter') renameFolder(folder.id); if (e.key === 'Escape') setEditingFolder(null) }}
                             onBlur={() => renameFolder(folder.id)}
                             className="text-xs font-semibold uppercase tracking-wide text-foreground bg-transparent outline-none flex-1 border-b border-primary"
@@ -4984,18 +4988,36 @@ function MyHubsTab() {
           )}
 
           {/* Create folder */}
-          <div className="flex items-center gap-2 mt-1">
-            <FolderPlus size={14} className="text-muted-foreground shrink-0" />
-            <input
-              placeholder="New folder name..."
-              className="flex-1 h-7 rounded-md border border-input bg-background px-2 text-xs placeholder:text-muted-foreground focus:outline-none"
-              value={newFolderName}
-              onChange={(e) => setNewFolderName(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && addFolder()}
-            />
+          {/* Folder counter */}
+          <div className="flex items-center justify-between mt-2 mb-1">
+            <span className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
+              <FolderPlus size={13} />
+              Folders
+            </span>
+            <span className={`text-[11px] font-mono tabular-nums select-none transition-colors ${folders.length >= MAX_HUB_FOLDERS ? 'text-amber-400' : 'text-muted-foreground/60'}`}>
+              {folders.length}/{MAX_HUB_FOLDERS}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="flex-1 relative">
+              <input
+                placeholder={folders.length >= MAX_HUB_FOLDERS ? 'Folder limit reached' : 'New folder name...'}
+                className="w-full h-7 rounded-md border border-input bg-background px-2 pr-12 text-xs placeholder:text-muted-foreground focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+                value={newFolderName}
+                onChange={(e) => setNewFolderName(e.target.value.slice(0, FOLDER_NAME_MAX))}
+                maxLength={FOLDER_NAME_MAX}
+                onKeyDown={(e) => e.key === 'Enter' && addFolder()}
+                disabled={folders.length >= MAX_HUB_FOLDERS}
+              />
+              {newFolderName.length > 0 && (
+                <span className={`absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-mono tabular-nums select-none ${newFolderName.length >= FOLDER_NAME_MAX ? 'text-amber-400' : 'text-muted-foreground/50'}`}>
+                  {newFolderName.length}/{FOLDER_NAME_MAX}
+                </span>
+              )}
+            </div>
             <button
               onClick={addFolder}
-              disabled={!newFolderName.trim()}
+              disabled={!newFolderName.trim() || folders.length >= MAX_HUB_FOLDERS}
               className="h-7 px-3 rounded-md bg-secondary text-xs text-foreground hover:bg-accent transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Add
@@ -5078,11 +5100,11 @@ function MyHubsTab() {
                     {!inList && !isDeleted && (
                       <button
                         onClick={() => handleAddToList(entry.dTag)}
-                        disabled={isAdding}
+                        disabled={isAdding || hubEntries.length >= MAX_HUB_LIST_ENTRIES}
                         className="flex items-center gap-1 text-xs text-primary font-medium hover:text-primary/80 transition-colors cursor-pointer px-3 py-1.5 rounded-md bg-primary/10 hover:bg-primary/20 border border-primary/30 disabled:opacity-50"
                       >
                         {isAdding ? <Loader2 size={12} className="animate-spin" /> : <ListPlus size={12} />}
-                        {isAdding ? 'Adding...' : 'Add to Hub List'}
+                        {hubEntries.length >= MAX_HUB_LIST_ENTRIES ? 'Hub limit reached' : isAdding ? 'Adding...' : 'Add to Hub List'}
                       </button>
                     )}
                     {isDeleted && (

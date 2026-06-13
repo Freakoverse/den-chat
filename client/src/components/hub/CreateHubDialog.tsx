@@ -13,7 +13,7 @@ import { Separator } from '@/components/ui/separator'
 import { Loader2, Plus, Hash, X, Camera, ImageIcon, Check, AlertTriangle, XCircle, ChevronDown, Trash2, Info, Lightbulb, KeyRound, Upload, FileSignature, Radio, ListPlus, Database, CheckCircle2 } from 'lucide-react'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
-import { HUB_NAME_MAX, HUB_DESCRIPTION_MAX, MAX_GENERAL_RELAYS, MAX_BLOSSOM_SERVERS } from '@/lib/hub/hubLimits'
+import { HUB_NAME_MAX, HUB_DESCRIPTION_MAX, MAX_GENERAL_RELAYS, MAX_BLOSSOM_SERVERS, MAX_HUB_LIST_ENTRIES } from '@/lib/hub/hubLimits'
 import { useUserStore } from '@/stores/userStore'
 import { useHubStore } from '@/stores/hubStore'
 import { useUserListsStore } from '@/stores/userListsStore'
@@ -410,6 +410,10 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
   const handleCreate = async () => {
     if (!name.trim()) {
       setError('Hub name is required')
+      return
+    }
+    if (hubEntries.length >= MAX_HUB_LIST_ENTRIES) {
+      setError(`Hub limit reached (${MAX_HUB_LIST_ENTRIES}). Remove hubs from Settings → My Hubs before creating new ones.`)
       return
     }
     if (!pubkey || (!signer && !privateKey)) {
@@ -1187,7 +1191,7 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
             <Button variant="outline" onClick={onClose} className="flex-1" disabled={loading}>
               Cancel
             </Button>
-            <Button onClick={handleCreate} className="flex-1" disabled={loading || name.length > HUB_NAME_MAX || description.length > HUB_DESCRIPTION_MAX}>
+            <Button onClick={handleCreate} className="flex-1" disabled={loading || name.length > HUB_NAME_MAX || description.length > HUB_DESCRIPTION_MAX || hubEntries.length >= MAX_HUB_LIST_ENTRIES}>
               {loading ? <Loader2 size={16} className="animate-spin" /> : 'Create Hub'}
             </Button>
           </div>

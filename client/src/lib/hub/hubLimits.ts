@@ -24,3 +24,8 @@ export const MAX_ROLES = 50
 export const MAX_TOPIC_TAGS = 10
 export const MAX_GENERAL_RELAYS = 10
 export const MAX_BLOSSOM_SERVERS = 10
+
+// ── User Hub-List Limits ───────────────────────────────────────────
+export const MAX_HUB_LIST_ENTRIES = 200
+export const MAX_HUB_FOLDERS = 50
+export const FOLDER_NAME_MAX = 100
