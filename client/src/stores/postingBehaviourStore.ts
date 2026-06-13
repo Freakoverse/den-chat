@@ -110,18 +110,22 @@ export function getUploadBlossoms(hubBlossoms?: string[]): string[] {
   const limit = state.limitBlossomsPerList ? 3 : Infinity
   const result = new Set<string>()
 
-  // Client blossom servers
-  const clientServers = blossomServers.getServers()
-  pickRandom(clientServers, limit).forEach((s) => result.add(s))
-
-  // User blossom servers
-  const userBlossoms = useUserListsStore.getState().userBlossoms
-  if (userBlossoms.length > 0) {
-    pickRandom(userBlossoms, limit).forEach((s) => result.add(s))
+  // Client blossom servers — respects the same toggle as client relays
+  if (state.postToClientRelays) {
+    const clientServers = blossomServers.getServers()
+    pickRandom(clientServers, limit).forEach((s) => result.add(s))
   }
 
-  // Hub blossom servers
-  if (hubBlossoms && hubBlossoms.length > 0) {
+  // User blossom servers — respects the same toggle as user relays
+  if (state.postToUserRelays) {
+    const userBlossoms = useUserListsStore.getState().userBlossoms
+    if (userBlossoms.length > 0) {
+      pickRandom(userBlossoms, limit).forEach((s) => result.add(s))
+    }
+  }
+
+  // Hub blossom servers — respects the same toggle as hub relays
+  if (state.postToHubRelays && hubBlossoms && hubBlossoms.length > 0) {
     pickRandom(hubBlossoms, limit).forEach((s) => result.add(s))
   }
 
