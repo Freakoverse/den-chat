@@ -1715,7 +1715,7 @@ function NetworkTab() {
 
   const addRelay = () => {
     const trimmed = newRelay.trim()
-    if (!trimmed || clientRelays.some((r) => r.url === trimmed)) return
+    if (!trimmed || !trimmed.startsWith('wss://') || clientRelays.some((r) => r.url === trimmed)) return
     saveClientRelays([...clientRelays, { url: trimmed, enabled: true }])
     setNewRelay('')
   }
@@ -1735,7 +1735,7 @@ function NetworkTab() {
 
   const addBlossom = () => {
     const trimmed = newBlossom.trim()
-    if (!trimmed || clientBlossom.some((s) => s.url === trimmed)) return
+    if (!trimmed || !trimmed.startsWith('https://') || clientBlossom.some((s) => s.url === trimmed)) return
     saveClientBlossom([...clientBlossom, { url: trimmed, enabled: true }])
     setNewBlossom('')
   }
@@ -1847,12 +1847,15 @@ function NetworkTab() {
                 onChange={(e) => setNewRelay(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && addRelay()}
                 placeholder="wss://relay.example.com"
-                className="flex-1 h-9 rounded-lg border border-input bg-background px-3 text-sm placeholder:text-muted-foreground focus:outline-none"
+                className={`flex-1 h-9 rounded-lg border bg-background px-3 text-sm placeholder:text-muted-foreground focus:outline-none ${newRelay.trim() && !newRelay.trim().startsWith('wss://') ? 'border-destructive/60 text-destructive' : 'border-input'}`}
               />
               <button onClick={addRelay} className="h-9 px-3 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors cursor-pointer flex items-center gap-1.5">
                 <Plus size={14} /> Add
               </button>
             </div>
+            {newRelay.trim() && !newRelay.trim().startsWith('wss://') && (
+              <p className="text-[11px] text-destructive mt-0.5">Relay URL must start with wss://</p>
+            )}
             {clientRelays.every((r) => !r.enabled) && (
               <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/30">
                 <AlertTriangle size={14} className="text-amber-500 shrink-0 mt-0.5" />
@@ -1899,12 +1902,15 @@ function NetworkTab() {
                 onChange={(e) => setNewBlossom(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && addBlossom()}
                 placeholder="https://blossom.example.com"
-                className="flex-1 h-9 rounded-lg border border-input bg-background px-3 text-sm placeholder:text-muted-foreground focus:outline-none"
+                className={`flex-1 h-9 rounded-lg border bg-background px-3 text-sm placeholder:text-muted-foreground focus:outline-none ${newBlossom.trim() && !newBlossom.trim().startsWith('https://') ? 'border-destructive/60 text-destructive' : 'border-input'}`}
               />
               <button onClick={addBlossom} className="h-9 px-3 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors cursor-pointer flex items-center gap-1.5">
                 <Plus size={14} /> Add
               </button>
             </div>
+            {newBlossom.trim() && !newBlossom.trim().startsWith('https://') && (
+              <p className="text-[11px] text-destructive mt-0.5">Blossom URL must start with https://</p>
+            )}
             {clientBlossom.every((s) => !s.enabled) && (
               <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/30">
                 <AlertTriangle size={14} className="text-amber-500 shrink-0 mt-0.5" />
@@ -2900,7 +2906,7 @@ function UserRelayListSection() {
 
   const addRelay = () => {
     const trimmed = newRelay.trim()
-    if (!trimmed || relays.includes(trimmed)) return
+    if (!trimmed || !trimmed.startsWith('wss://') || relays.includes(trimmed)) return
     setRelayList([...relays, trimmed])
     setNewRelay('')
   }
@@ -2985,12 +2991,15 @@ function UserRelayListSection() {
               onChange={(e) => setNewRelay(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && addRelay()}
               placeholder="wss://relay.example.com"
-              className="flex-1 h-9 rounded-lg border border-input bg-background px-3 text-sm placeholder:text-muted-foreground focus:outline-none"
+              className={`flex-1 h-9 rounded-lg border bg-background px-3 text-sm placeholder:text-muted-foreground focus:outline-none ${newRelay.trim() && !newRelay.trim().startsWith('wss://') ? 'border-destructive/60 text-destructive' : 'border-input'}`}
             />
             <button onClick={addRelay} className="h-9 px-3 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors cursor-pointer flex items-center gap-1.5">
               <Plus size={14} /> Add
             </button>
           </div>
+          {newRelay.trim() && !newRelay.trim().startsWith('wss://') && (
+            <p className="text-[11px] text-destructive mt-0.5">Relay URL must start with wss://</p>
+          )}
           <div className="flex items-center gap-2">
             <button
               onClick={handlePublish}
@@ -3039,7 +3048,7 @@ function UserBlossomListSection() {
 
   const addServer = () => {
     const trimmed = newServer.trim()
-    if (!trimmed || servers.includes(trimmed)) return
+    if (!trimmed || !trimmed.startsWith('https://') || servers.includes(trimmed)) return
     setServerList([...servers, trimmed])
     setNewServer('')
   }
@@ -3124,12 +3133,15 @@ function UserBlossomListSection() {
               onChange={(e) => setNewServer(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && addServer()}
               placeholder="https://blossom.example.com"
-              className="flex-1 h-9 rounded-lg border border-input bg-background px-3 text-sm placeholder:text-muted-foreground focus:outline-none"
+              className={`flex-1 h-9 rounded-lg border bg-background px-3 text-sm placeholder:text-muted-foreground focus:outline-none ${newServer.trim() && !newServer.trim().startsWith('https://') ? 'border-destructive/60 text-destructive' : 'border-input'}`}
             />
             <button onClick={addServer} className="h-9 px-3 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors cursor-pointer flex items-center gap-1.5">
               <Plus size={14} /> Add
             </button>
           </div>
+          {newServer.trim() && !newServer.trim().startsWith('https://') && (
+            <p className="text-[11px] text-destructive mt-0.5">Blossom URL must start with https://</p>
+          )}
           <div className="flex items-center gap-2">
             <button
               onClick={handlePublish}

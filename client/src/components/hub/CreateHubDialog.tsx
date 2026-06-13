@@ -13,6 +13,7 @@ import { Separator } from '@/components/ui/separator'
 import { Loader2, Plus, Hash, X, Camera, ImageIcon, Check, AlertTriangle, XCircle, ChevronDown, Trash2, Info, Lightbulb, KeyRound, Upload, FileSignature, Radio, ListPlus, Database, CheckCircle2 } from 'lucide-react'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
+import { HUB_NAME_MAX, HUB_DESCRIPTION_MAX, MAX_GENERAL_RELAYS, MAX_BLOSSOM_SERVERS } from '@/lib/hub/hubLimits'
 import { useUserStore } from '@/stores/userStore'
 import { useHubStore } from '@/stores/hubStore'
 import { useUserListsStore } from '@/stores/userListsStore'
@@ -743,19 +744,35 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
           </div>
 
           <div>
-            <label className="text-sm font-medium text-foreground mb-1 block">Hub Name</label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-sm font-medium text-foreground">Hub Name</label>
+              <span className={`text-[11px] font-mono tabular-nums select-none transition-colors ${
+                name.length > HUB_NAME_MAX ? 'text-red-400 font-semibold' : name.length > HUB_NAME_MAX - 20 ? 'text-amber-400' : 'text-muted-foreground/60'
+              }`}>
+                {name.length}/{HUB_NAME_MAX}
+              </span>
+            </div>
             <Input
               placeholder="My Awesome Hub"
               value={name}
+              maxLength={HUB_NAME_MAX}
               onChange={(e) => { setName(e.target.value); setError(null) }}
             />
           </div>
 
           <div>
-            <label className="text-sm font-medium text-foreground mb-1 block">Description</label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-sm font-medium text-foreground">Description</label>
+              <span className={`text-[11px] font-mono tabular-nums select-none transition-colors ${
+                description.length > HUB_DESCRIPTION_MAX ? 'text-red-400 font-semibold' : description.length > HUB_DESCRIPTION_MAX - 100 ? 'text-amber-400' : 'text-muted-foreground/60'
+              }`}>
+                {description.length}/{HUB_DESCRIPTION_MAX}
+              </span>
+            </div>
             <textarea
               placeholder="What's this hub about?"
               value={description}
+              maxLength={HUB_DESCRIPTION_MAX}
               onChange={(e) => setDescription(e.target.value)}
               rows={3}
               className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50 resize-none"
@@ -836,6 +853,16 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
                 </div>
 
                 <Separator className="my-2" />
+
+                {/* Relay header with counter */}
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-semibold text-foreground">Relays</h4>
+                  <span className={`text-[11px] font-mono tabular-nums select-none transition-colors ${
+                    getSelectedRelays().length >= MAX_GENERAL_RELAYS ? 'text-amber-400' : 'text-muted-foreground/60'
+                  }`}>
+                    {getSelectedRelays().length}/{MAX_GENERAL_RELAYS}
+                  </span>
+                </div>
 
                 {/* Info note */}
                 <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-primary/5 border border-primary/20">
@@ -956,7 +983,7 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
                         if (e.key === 'Enter') {
                           e.preventDefault()
                           const trimmed = customRelayInput.trim()
-                          if (!trimmed) return
+                          if (!trimmed || !trimmed.startsWith('wss://')) return
                           const allUrls = [...clientRelayEntries, ...userRelayEntries, ...customRelayEntries].map(r => r.url)
                           if (allUrls.includes(trimmed)) return
                           setCustomRelayEntries([...customRelayEntries, { url: trimmed, enabled: true, type: 'general' }])
@@ -964,13 +991,13 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
                         }
                       }}
                       placeholder="wss://relay.example.com"
-                      className="flex-1 h-7 rounded-md border border-input bg-background px-2 text-xs placeholder:text-muted-foreground focus:outline-none"
+                      className={`flex-1 h-7 rounded-md border bg-background px-2 text-xs placeholder:text-muted-foreground focus:outline-none ${customRelayInput.trim() && !customRelayInput.trim().startsWith('wss://') ? 'border-destructive/60 text-destructive' : 'border-input'}`}
                     />
                     <button
                       type="button"
                       onClick={() => {
                         const trimmed = customRelayInput.trim()
-                        if (!trimmed) return
+                        if (!trimmed || !trimmed.startsWith('wss://')) return
                         const allUrls = [...clientRelayEntries, ...userRelayEntries, ...customRelayEntries].map(r => r.url)
                         if (allUrls.includes(trimmed)) return
                         setCustomRelayEntries([...customRelayEntries, { url: trimmed, enabled: true, type: 'general' }])
@@ -981,6 +1008,9 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
                       <Plus size={12} /> Add
                     </button>
                   </div>
+                  {customRelayInput.trim() && !customRelayInput.trim().startsWith('wss://') && (
+                    <p className="text-[11px] text-destructive mt-0.5">Relay URL must start with wss://</p>
+                  )}
                 </div>
 
                 {/* Tip */}
@@ -992,6 +1022,15 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
                 <Separator className="my-2" />
 
                 {/* ── Blossom Servers ── */}
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-semibold text-foreground">Blossom Servers</h4>
+                  <span className={`text-[11px] font-mono tabular-nums select-none transition-colors ${
+                    getSelectedBlossoms().length >= MAX_BLOSSOM_SERVERS ? 'text-amber-400' : 'text-muted-foreground/60'
+                  }`}>
+                    {getSelectedBlossoms().length}/{MAX_BLOSSOM_SERVERS}
+                  </span>
+                </div>
+
                 <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-primary/5 border border-primary/20">
                   <Info size={14} className="text-primary shrink-0 mt-0.5" />
                   <p className="text-[11px] text-muted-foreground leading-relaxed">
@@ -1107,7 +1146,7 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
                         if (e.key === 'Enter') {
                           e.preventDefault()
                           const trimmed = customBlossomInput.trim()
-                          if (!trimmed) return
+                          if (!trimmed || !trimmed.startsWith('https://')) return
                           const allUrls = [...clientBlossomEntries, ...userBlossomEntries, ...customBlossomEntries].map(s => s.url)
                           if (allUrls.includes(trimmed)) return
                           setCustomBlossomEntries([...customBlossomEntries, { url: trimmed, enabled: true }])
@@ -1115,13 +1154,13 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
                         }
                       }}
                       placeholder="https://blossom.example.com"
-                      className="flex-1 h-7 rounded-md border border-input bg-background px-2 text-xs placeholder:text-muted-foreground focus:outline-none"
+                      className={`flex-1 h-7 rounded-md border bg-background px-2 text-xs placeholder:text-muted-foreground focus:outline-none ${customBlossomInput.trim() && !customBlossomInput.trim().startsWith('https://') ? 'border-destructive/60 text-destructive' : 'border-input'}`}
                     />
                     <button
                       type="button"
                       onClick={() => {
                         const trimmed = customBlossomInput.trim()
-                        if (!trimmed) return
+                        if (!trimmed || !trimmed.startsWith('https://')) return
                         const allUrls = [...clientBlossomEntries, ...userBlossomEntries, ...customBlossomEntries].map(s => s.url)
                         if (allUrls.includes(trimmed)) return
                         setCustomBlossomEntries([...customBlossomEntries, { url: trimmed, enabled: true }])
@@ -1132,6 +1171,9 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
                       <Plus size={12} /> Add
                     </button>
                   </div>
+                  {customBlossomInput.trim() && !customBlossomInput.trim().startsWith('https://') && (
+                    <p className="text-[11px] text-destructive mt-0.5">Blossom URL must start with https://</p>
+                  )}
                 </div>
               </div>
             )}
@@ -1145,7 +1187,7 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
             <Button variant="outline" onClick={onClose} className="flex-1" disabled={loading}>
               Cancel
             </Button>
-            <Button onClick={handleCreate} className="flex-1" disabled={loading}>
+            <Button onClick={handleCreate} className="flex-1" disabled={loading || name.length > HUB_NAME_MAX || description.length > HUB_DESCRIPTION_MAX}>
               {loading ? <Loader2 size={16} className="animate-spin" /> : 'Create Hub'}
             </Button>
           </div>

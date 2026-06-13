@@ -49,6 +49,7 @@ import { PERMISSION_KEYS, PERMISSION_LABELS, PERMISSION_DESCRIPTIONS, DISABLED_P
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
 import { Pagination } from '@/components/ui/Pagination'
 import { CustomSelect } from '@/components/ui/custom-select'
+import { HUB_NAME_MAX, HUB_DESCRIPTION_MAX, CHANNEL_NAME_MAX, CATEGORY_NAME_MAX, ROLE_NAME_MAX, TOPIC_TAG_MAX, MAX_CHANNELS, MAX_CATEGORIES, MAX_ROLES, MAX_TOPIC_TAGS, MAX_GENERAL_RELAYS, MAX_BLOSSOM_SERVERS } from '@/lib/hub/hubLimits'
 
 const EMPTY_REPORTS: HubReport[] = []
 
@@ -1522,14 +1523,29 @@ function GeneralPage({
 
           <div className="flex-1 flex flex-col gap-3 max-[1080px]:w-full">
             <div>
-              <label className="text-sm font-medium text-foreground mb-1 block">Hub Name</label>
-              <Input value={editName} onChange={(e) => setEditName(e.target.value)} />
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-sm font-medium text-foreground">Hub Name</label>
+                <span className={`text-[11px] font-mono tabular-nums select-none transition-colors ${
+                  editName.length > HUB_NAME_MAX ? 'text-red-400 font-semibold' : editName.length > HUB_NAME_MAX - 20 ? 'text-amber-400' : 'text-muted-foreground/60'
+                }`}>
+                  {editName.length}/{HUB_NAME_MAX}
+                </span>
+              </div>
+              <Input value={editName} onChange={(e) => setEditName(e.target.value)} maxLength={HUB_NAME_MAX} />
             </div>
             <div>
-              <label className="text-sm font-medium text-foreground mb-1 block">Description</label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-sm font-medium text-foreground">Description</label>
+                <span className={`text-[11px] font-mono tabular-nums select-none transition-colors ${
+                  editDescription.length > HUB_DESCRIPTION_MAX ? 'text-red-400 font-semibold' : editDescription.length > HUB_DESCRIPTION_MAX - 100 ? 'text-amber-400' : 'text-muted-foreground/60'
+                }`}>
+                  {editDescription.length}/{HUB_DESCRIPTION_MAX}
+                </span>
+              </div>
               <textarea
                 value={editDescription}
                 onChange={(e) => setEditDescription(e.target.value)}
+                maxLength={HUB_DESCRIPTION_MAX}
                 placeholder="What's this hub about?"
                 rows={3}
                 className="flex w-full rounded-md border border-input bg-background px-2 py-1 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50 resize-none"
@@ -1551,9 +1567,16 @@ function GeneralPage({
 
         {/* Tags */}
         <div>
-          <label className="text-sm font-medium text-foreground mb-2 flex items-center gap-1.5">
-            <Tag size={14} /> Tags
-          </label>
+          <div className="flex items-center justify-between mb-2">
+            <label className="text-sm font-medium text-foreground flex items-center gap-1.5">
+              <Tag size={14} /> Tags
+            </label>
+            <span className={`text-[11px] font-mono tabular-nums select-none transition-colors ${
+              editTags.length >= MAX_TOPIC_TAGS ? 'text-amber-400' : 'text-muted-foreground/60'
+            }`}>
+              {editTags.length}/{MAX_TOPIC_TAGS}
+            </span>
+          </div>
           <div className="flex flex-wrap gap-1.5 mb-2">
             {editTags.map((tag) => (
               <span key={tag} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-primary/10 text-primary text-xs font-medium">
@@ -1567,26 +1590,41 @@ function GeneralPage({
           </div>
           <div className="flex items-center gap-1">
             <Input
-              placeholder="Add tag..."
+              placeholder={editTags.length >= MAX_TOPIC_TAGS ? 'Tag limit reached' : 'Add tag...'}
               className="text-xs"
               value={newTag}
+              maxLength={TOPIC_TAG_MAX}
+              disabled={editTags.length >= MAX_TOPIC_TAGS}
               onChange={(e) => setNewTag(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
                   const t = newTag.trim().toLowerCase()
-                  if (t && !editTags.includes(t)) { setEditTags([...editTags, t]); setNewTag('') }
+                  if (t && !editTags.includes(t) && editTags.length < MAX_TOPIC_TAGS) { setEditTags([...editTags, t]); setNewTag('') }
                 }
               }}
             />
-            <Button
-              variant="ghost" size="sm" className="h-7 w-7 p-0 shrink-0"
-              onClick={() => {
-                const t = newTag.trim().toLowerCase()
-                if (t && !editTags.includes(t)) { setEditTags([...editTags, t]); setNewTag('') }
-              }}
-            >
-              <Plus size={14} />
-            </Button>
+            {newTag.length > 0 && (
+              <span className={`text-[10px] font-mono tabular-nums select-none shrink-0 ${
+                newTag.length >= TOPIC_TAG_MAX ? 'text-amber-400' : 'text-muted-foreground/40'
+              }`}>
+                {newTag.length}/{TOPIC_TAG_MAX}
+              </span>
+            )}
+            {editTags.length >= MAX_TOPIC_TAGS ? (
+              <Tip text={`Maximum of ${MAX_TOPIC_TAGS} tags reached`}>
+                <span><Button variant="ghost" size="sm" className="h-7 w-7 p-0 shrink-0 opacity-40 cursor-not-allowed" disabled><Plus size={14} /></Button></span>
+              </Tip>
+            ) : (
+              <Button
+                variant="ghost" size="sm" className="h-7 w-7 p-0 shrink-0"
+                onClick={() => {
+                  const t = newTag.trim().toLowerCase()
+                  if (t && !editTags.includes(t)) { setEditTags([...editTags, t]); setNewTag('') }
+                }}
+              >
+                <Plus size={14} />
+              </Button>
+            )}
           </div>
         </div>
 
@@ -1808,14 +1846,22 @@ function ChannelsPage({ editCategories, setEditCategories, editChannels, setEdit
       <GripVertical size={14} className="text-muted-foreground/50 shrink-0" />
       {ch.type === 'voice' ? <Volume2 size={16} className="text-emerald-400 shrink-0" /> : ch.type === 'forum' ? <MessagesSquare size={16} className="text-muted-foreground shrink-0" /> : ch.type === 'announcement' ? <Megaphone size={16} className="text-muted-foreground shrink-0" /> : <Hash size={16} className="text-muted-foreground shrink-0" />}
       {editingChannelId === ch.channelId ? (
-        <input
-          autoFocus
-          value={editingChannelName}
-          onChange={(e) => setEditingChannelName(e.target.value)}
-          onBlur={commitEditChannel}
-          onKeyDown={(e) => { if (e.key === 'Enter') commitEditChannel(); if (e.key === 'Escape') cancelEditChannel() }}
-          className="flex-1 bg-transparent text-foreground text-sm outline-none px-2 py-1 rounded-sm"
-        />
+        <div className="flex-1 flex items-center gap-1.5">
+          <input
+            autoFocus
+            value={editingChannelName}
+            onChange={(e) => setEditingChannelName(e.target.value)}
+            onBlur={commitEditChannel}
+            onKeyDown={(e) => { if (e.key === 'Enter') commitEditChannel(); if (e.key === 'Escape') cancelEditChannel() }}
+            maxLength={CHANNEL_NAME_MAX}
+            className="flex-1 bg-transparent text-foreground text-sm outline-none px-2 py-1 rounded-sm"
+          />
+          <span className={`text-[10px] font-mono tabular-nums select-none shrink-0 ${
+            editingChannelName.length >= CHANNEL_NAME_MAX ? 'text-amber-400' : 'text-muted-foreground/40'
+          }`}>
+            {editingChannelName.length}/{CHANNEL_NAME_MAX}
+          </span>
+        </div>
       ) : (
         <Tip text="Double-click to rename" side="bottom">
           <span
@@ -1836,11 +1882,19 @@ function ChannelsPage({ editCategories, setEditCategories, editChannels, setEdit
   const renderAddChannel = (categoryId: string | null) => {
     const key = categoryId || '__uncategorized'
     const selectedType = newChannelTypes[key] || 'chat'
+    const atChannelLimit = editChannels.length >= MAX_CHANNELS
     return (
       <div className="flex items-center gap-1 mt-1">
-        <Input placeholder="channel-name" className="text-xs" value={newChannelNames[key] || ''}
+        <Input placeholder={atChannelLimit ? 'Channel limit reached' : 'channel-name'} className="text-xs" value={newChannelNames[key] || ''}
+          maxLength={CHANNEL_NAME_MAX}
+          disabled={atChannelLimit}
           onChange={(e) => setNewChannelNames({ ...newChannelNames, [key]: e.target.value })}
-          onKeyDown={(e) => e.key === 'Enter' && addChannel(categoryId)} />
+          onKeyDown={(e) => e.key === 'Enter' && !atChannelLimit && addChannel(categoryId)} />
+        {(newChannelNames[key] || '').length > 0 && (
+          <span className={`text-[10px] font-mono tabular-nums select-none shrink-0 ${(newChannelNames[key] || '').length >= CHANNEL_NAME_MAX ? 'text-amber-400' : 'text-muted-foreground/40'}`}>
+            {(newChannelNames[key] || '').length}/{CHANNEL_NAME_MAX}
+          </span>
+        )}
         <CustomSelect
           value={selectedType}
           onChange={(val) => setNewChannelTypes({ ...newChannelTypes, [key]: val as 'chat' | 'forum' | 'announcement' | 'voice' })}
@@ -1851,7 +1905,13 @@ function ChannelsPage({ editCategories, setEditCategories, editChannels, setEdit
             { value: 'voice', label: 'Voice' },
           ]}
         />
-        <Button variant="ghost" size="sm" className="h-7 w-7 p-0 shrink-0" onClick={() => addChannel(categoryId)}><Plus size={14} /></Button>
+        {atChannelLimit ? (
+          <Tip text={`Maximum of ${MAX_CHANNELS} channels reached`}>
+            <span><Button variant="ghost" size="sm" className="h-7 w-7 p-0 shrink-0 opacity-40 cursor-not-allowed" disabled><Plus size={14} /></Button></span>
+          </Tip>
+        ) : (
+          <Button variant="ghost" size="sm" className="h-7 w-7 p-0 shrink-0" onClick={() => addChannel(categoryId)}><Plus size={14} /></Button>
+        )}
       </div>
     )
   }
@@ -1874,7 +1934,21 @@ function ChannelsPage({ editCategories, setEditCategories, editChannels, setEdit
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <label className="text-sm font-medium text-foreground mb-2 block">Categories & Channels</label>
+        <div className="flex items-center justify-between mb-2">
+          <label className="text-sm font-medium text-foreground">Categories & Channels</label>
+          <div className="flex items-center gap-3">
+            <span className={`text-[11px] font-mono tabular-nums select-none transition-colors ${
+              editChannels.length >= MAX_CHANNELS ? 'text-amber-400' : 'text-muted-foreground/60'
+            }`}>
+              {editChannels.length}/{MAX_CHANNELS} channels
+            </span>
+            <span className={`text-[11px] font-mono tabular-nums select-none transition-colors ${
+              editCategories.length >= MAX_CATEGORIES ? 'text-amber-400' : 'text-muted-foreground/60'
+            }`}>
+              {editCategories.length}/{MAX_CATEGORIES} categories
+            </span>
+          </div>
+        </div>
 
         {/* Uncategorized channels */}
         <div
@@ -1911,14 +1985,22 @@ function ChannelsPage({ editCategories, setEditCategories, editChannels, setEdit
                     {isCollapsed ? <ChevronRight size={14} className="text-muted-foreground" /> : <ChevronDown size={14} className="text-muted-foreground" />}
                   </button>
                   {editingCategoryId === cat.categoryId ? (
-                    <input
-                      autoFocus
-                      value={editingCategoryName}
-                      onChange={(e) => setEditingCategoryName(e.target.value)}
-                      onBlur={commitEditCategory}
-                      onKeyDown={(e) => { if (e.key === 'Enter') commitEditCategory(); if (e.key === 'Escape') cancelEditCategory() }}
-                      className="flex-1 bg-transparent text-xs font-semibold uppercase tracking-wide text-muted-foreground outline-none px-1 py-0.5 rounded-sm"
-                    />
+                    <div className="flex-1 flex items-center gap-1.5">
+                      <input
+                        autoFocus
+                        value={editingCategoryName}
+                        onChange={(e) => setEditingCategoryName(e.target.value)}
+                        onBlur={commitEditCategory}
+                        onKeyDown={(e) => { if (e.key === 'Enter') commitEditCategory(); if (e.key === 'Escape') cancelEditCategory() }}
+                        maxLength={CATEGORY_NAME_MAX}
+                        className="flex-1 bg-transparent text-xs font-semibold uppercase tracking-wide text-muted-foreground outline-none px-1 py-0.5 rounded-sm"
+                      />
+                      <span className={`text-[10px] font-mono tabular-nums select-none shrink-0 ${
+                        editingCategoryName.length >= CATEGORY_NAME_MAX ? 'text-amber-400' : 'text-muted-foreground/40'
+                      }`}>
+                        {editingCategoryName.length}/{CATEGORY_NAME_MAX}
+                      </span>
+                    </div>
                   ) : (
                     <Tip text="Double-click to rename" side="bottom">
                       <span
@@ -1946,9 +2028,22 @@ function ChannelsPage({ editCategories, setEditCategories, editChannels, setEdit
 
         {/* Add category */}
         <div className="flex items-center gap-1 mt-2">
-          <Input placeholder="New category name" className="text-xs" value={newCategoryName}
-            onChange={(e) => setNewCategoryName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addCategory()} />
-          <Button variant="ghost" size="sm" className="h-7 w-7 p-0 shrink-0" onClick={addCategory}><Plus size={14} /></Button>
+          <Input placeholder={editCategories.length >= MAX_CATEGORIES ? 'Category limit reached' : 'New category name'} className="text-xs" value={newCategoryName}
+            maxLength={CATEGORY_NAME_MAX}
+            disabled={editCategories.length >= MAX_CATEGORIES}
+            onChange={(e) => setNewCategoryName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && editCategories.length < MAX_CATEGORIES && addCategory()} />
+          {newCategoryName.length > 0 && (
+            <span className={`text-[10px] font-mono tabular-nums select-none shrink-0 ${newCategoryName.length >= CATEGORY_NAME_MAX ? 'text-amber-400' : 'text-muted-foreground/40'}`}>
+              {newCategoryName.length}/{CATEGORY_NAME_MAX}
+            </span>
+          )}
+          {editCategories.length >= MAX_CATEGORIES ? (
+            <Tip text={`Maximum of ${MAX_CATEGORIES} categories reached`}>
+              <span><Button variant="ghost" size="sm" className="h-7 w-7 p-0 shrink-0 opacity-40 cursor-not-allowed" disabled><Plus size={14} /></Button></span>
+            </Tip>
+          ) : (
+            <Button variant="ghost" size="sm" className="h-7 w-7 p-0 shrink-0" onClick={addCategory}><Plus size={14} /></Button>
+          )}
         </div>
       </div>
     </div>
@@ -2539,7 +2634,16 @@ function RolesPage({ hub, editRoles, setEditRoles, editChannels, editCategories,
             {/* Role name */}
             <div className="flex items-center gap-3">
               <div className="flex-1">
-                <label className="text-xs text-muted-foreground mb-1 block">Role Name</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs text-muted-foreground">Role Name</label>
+                  {!isEveryone && isCreator && (
+                    <span className={`text-[10px] font-mono tabular-nums select-none transition-colors ${
+                      role.name.length >= ROLE_NAME_MAX ? 'text-amber-400' : 'text-muted-foreground/40'
+                    }`}>
+                      {role.name.length}/{ROLE_NAME_MAX}
+                    </span>
+                  )}
+                </div>
                 {isEveryone || !isCreator ? (
                   <span className="text-sm text-foreground">{role.name}</span>
                 ) : (
@@ -2548,6 +2652,7 @@ function RolesPage({ hub, editRoles, setEditRoles, editChannels, editCategories,
                     onChange={(e) => updateRole(role.roleId, { name: e.target.value })}
                     className="text-sm h-8"
                     placeholder="Role name"
+                    maxLength={ROLE_NAME_MAX}
                   />
                 )}
               </div>
@@ -2722,6 +2827,16 @@ function RolesPage({ hub, editRoles, setEditRoles, editChannels, editCategories,
 
   return (
     <div className="flex flex-col gap-3">
+      {/* Roles counter */}
+      <div className="flex items-center justify-between">
+        <span className="text-sm font-medium text-foreground">Roles</span>
+        <span className={`text-[11px] font-mono tabular-nums select-none transition-colors ${
+          editRoles.length >= MAX_ROLES ? 'text-amber-400' : 'text-muted-foreground/60'
+        }`}>
+          {editRoles.length}/{MAX_ROLES}
+        </span>
+      </div>
+
       {/* Everyone role (always first) */}
       {sortedRoles.everyone.map(renderRoleCard)}
 
@@ -2739,13 +2854,27 @@ function RolesPage({ hub, editRoles, setEditRoles, editChannels, editCategories,
 
       {/* Add role button */}
       {isCreator && (
-        <button
-          onClick={addRole}
-          className="flex items-center justify-center gap-1.5 py-2.5 rounded-lg border border-dashed border-border text-sm text-muted-foreground hover:text-foreground hover:border-primary/50 transition-colors cursor-pointer"
-        >
-          <Plus size={14} />
-          Add Role
-        </button>
+        editRoles.length >= MAX_ROLES ? (
+          <Tip text={`Maximum of ${MAX_ROLES} roles reached`}>
+            <span>
+              <button
+                disabled
+                className="flex items-center justify-center gap-1.5 py-2.5 rounded-lg border border-dashed border-border text-sm text-muted-foreground opacity-40 cursor-not-allowed w-full"
+              >
+                <Plus size={14} />
+                Add Role
+              </button>
+            </span>
+          </Tip>
+        ) : (
+          <button
+            onClick={addRole}
+            className="flex items-center justify-center gap-1.5 py-2.5 rounded-lg border border-dashed border-border text-sm text-muted-foreground hover:text-foreground hover:border-primary/50 transition-colors cursor-pointer"
+          >
+            <Plus size={14} />
+            Add Role
+          </button>
+        )
       )}
 
       {!isCreator && (
@@ -4235,6 +4364,7 @@ function NetworkPage({ hub, editRelays, setEditRelays, editBlossoms, setEditBlos
   const availableUserBlossoms = userBlossoms.filter(url => !editBlossoms.includes(url))
 
   const addRelay = (url: string) => {
+    if (editRelays.length >= MAX_GENERAL_RELAYS) return
     if (!editRelays.includes(url)) {
       setEditRelays([...editRelays, url])
     }
@@ -4245,13 +4375,15 @@ function NetworkPage({ hub, editRelays, setEditRelays, editBlossoms, setEditBlos
   }
 
   const addCustomRelay = () => {
+    if (editRelays.length >= MAX_GENERAL_RELAYS) return
     const trimmed = customRelayInput.trim()
-    if (!trimmed || editRelays.includes(trimmed)) return
+    if (!trimmed || !trimmed.startsWith('wss://') || editRelays.includes(trimmed)) return
     setEditRelays([...editRelays, trimmed])
     setCustomRelayInput('')
   }
 
   const addBlossom = (url: string) => {
+    if (editBlossoms.length >= MAX_BLOSSOM_SERVERS) return
     if (!editBlossoms.includes(url)) {
       setEditBlossoms([...editBlossoms, url])
     }
@@ -4262,8 +4394,9 @@ function NetworkPage({ hub, editRelays, setEditRelays, editBlossoms, setEditBlos
   }
 
   const addCustomBlossom = () => {
+    if (editBlossoms.length >= MAX_BLOSSOM_SERVERS) return
     const trimmed = customBlossomInput.trim()
-    if (!trimmed || editBlossoms.includes(trimmed)) return
+    if (!trimmed || !trimmed.startsWith('https://') || editBlossoms.includes(trimmed)) return
     setEditBlossoms([...editBlossoms, trimmed])
     setCustomBlossomInput('')
   }
@@ -4271,7 +4404,14 @@ function NetworkPage({ hub, editRelays, setEditRelays, editBlossoms, setEditBlos
   return (
     <div className="space-y-6">
       {/* ═══════════════ RELAYS SECTION ═══════════════ */}
-      <h3 className="text-base font-bold text-foreground">Relays</h3>
+      <div className="flex items-center justify-between">
+        <h3 className="text-base font-bold text-foreground">Relays</h3>
+        <span className={`text-[11px] font-mono tabular-nums select-none transition-colors ${
+          editRelays.length >= MAX_GENERAL_RELAYS ? 'text-amber-400' : 'text-muted-foreground/60'
+        }`}>
+          {editRelays.length}/{MAX_GENERAL_RELAYS}
+        </span>
+      </div>
 
       {/* Info note */}
       <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-primary/5 border border-primary/20">
@@ -4329,7 +4469,8 @@ function NetworkPage({ hub, editRelays, setEditRelays, editBlossoms, setEditBlos
                   <span className="text-xs text-muted-foreground font-mono truncate flex-1">{url}</span>
                   <button
                     onClick={() => addRelay(url)}
-                    className="text-xs text-primary hover:text-primary/80 font-medium cursor-pointer flex items-center gap-0.5"
+                    disabled={editRelays.length >= MAX_GENERAL_RELAYS}
+                    className={cn('text-xs font-medium flex items-center gap-0.5', editRelays.length >= MAX_GENERAL_RELAYS ? 'text-muted-foreground/40 cursor-not-allowed' : 'text-primary hover:text-primary/80 cursor-pointer')}
                   >
                     <Plus size={12} /> Add
                   </button>
@@ -4362,7 +4503,8 @@ function NetworkPage({ hub, editRelays, setEditRelays, editBlossoms, setEditBlos
                   <span className="text-xs text-muted-foreground font-mono truncate flex-1">{url}</span>
                   <button
                     onClick={() => addRelay(url)}
-                    className="text-xs text-primary hover:text-primary/80 font-medium cursor-pointer flex items-center gap-0.5"
+                    disabled={editRelays.length >= MAX_GENERAL_RELAYS}
+                    className={cn('text-xs font-medium flex items-center gap-0.5', editRelays.length >= MAX_GENERAL_RELAYS ? 'text-muted-foreground/40 cursor-not-allowed' : 'text-primary hover:text-primary/80 cursor-pointer')}
                   >
                     <Plus size={12} /> Add
                   </button>
@@ -4387,16 +4529,33 @@ function NetworkPage({ hub, editRelays, setEditRelays, editBlossoms, setEditBlos
             value={customRelayInput}
             onChange={(e) => setCustomRelayInput(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && addCustomRelay()}
-            placeholder="wss://relay.example.com"
-            className="flex-1 h-9 rounded-lg border border-input bg-background px-3 text-sm placeholder:text-muted-foreground focus:outline-none"
+            placeholder={editRelays.length >= MAX_GENERAL_RELAYS ? 'Relay limit reached' : 'wss://relay.example.com'}
+            disabled={editRelays.length >= MAX_GENERAL_RELAYS}
+            className={`flex-1 h-9 rounded-lg border bg-background px-3 text-sm placeholder:text-muted-foreground focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed ${customRelayInput.trim() && !customRelayInput.trim().startsWith('wss://') ? 'border-destructive/60 text-destructive' : 'border-input'}`}
           />
-          <button
-            onClick={addCustomRelay}
-            className="h-9 px-3 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors cursor-pointer flex items-center gap-1.5"
-          >
-            <Plus size={14} /> Add
-          </button>
+          {editRelays.length >= MAX_GENERAL_RELAYS ? (
+            <Tip text={`Maximum of ${MAX_GENERAL_RELAYS} relays reached`}>
+              <span>
+                <button
+                  disabled
+                  className="h-9 px-3 rounded-lg bg-primary/50 text-primary-foreground text-sm font-medium opacity-40 cursor-not-allowed flex items-center gap-1.5"
+                >
+                  <Plus size={14} /> Add
+                </button>
+              </span>
+            </Tip>
+          ) : (
+            <button
+              onClick={addCustomRelay}
+              className="h-9 px-3 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors cursor-pointer flex items-center gap-1.5"
+            >
+              <Plus size={14} /> Add
+            </button>
+          )}
         </div>
+        {customRelayInput.trim() && !customRelayInput.trim().startsWith('wss://') && (
+          <p className="text-[11px] text-destructive">Relay URL must start with wss://</p>
+        )}
       </section>
 
       {/* Warning note */}
@@ -4409,7 +4568,14 @@ function NetworkPage({ hub, editRelays, setEditRelays, editBlossoms, setEditBlos
 
       {/* ═══════════════ BLOSSOM SERVERS SECTION ═══════════════ */}
       <Separator className="my-4" />
-      <h3 className="text-base font-bold text-foreground">Blossom Servers</h3>
+      <div className="flex items-center justify-between">
+        <h3 className="text-base font-bold text-foreground">Blossom Servers</h3>
+        <span className={`text-[11px] font-mono tabular-nums select-none transition-colors ${
+          editBlossoms.length >= MAX_BLOSSOM_SERVERS ? 'text-amber-400' : 'text-muted-foreground/60'
+        }`}>
+          {editBlossoms.length}/{MAX_BLOSSOM_SERVERS}
+        </span>
+      </div>
 
       {/* Info note */}
       <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-primary/5 border border-primary/20">
@@ -4466,7 +4632,8 @@ function NetworkPage({ hub, editRelays, setEditRelays, editBlossoms, setEditBlos
                   <span className="text-xs text-muted-foreground font-mono truncate flex-1">{url}</span>
                   <button
                     onClick={() => addBlossom(url)}
-                    className="text-xs text-primary hover:text-primary/80 font-medium cursor-pointer flex items-center gap-0.5"
+                    disabled={editBlossoms.length >= MAX_BLOSSOM_SERVERS}
+                    className={cn('text-xs font-medium flex items-center gap-0.5', editBlossoms.length >= MAX_BLOSSOM_SERVERS ? 'text-muted-foreground/40 cursor-not-allowed' : 'text-primary hover:text-primary/80 cursor-pointer')}
                   >
                     <Plus size={12} /> Add
                   </button>
@@ -4499,7 +4666,8 @@ function NetworkPage({ hub, editRelays, setEditRelays, editBlossoms, setEditBlos
                   <span className="text-xs text-muted-foreground font-mono truncate flex-1">{url}</span>
                   <button
                     onClick={() => addBlossom(url)}
-                    className="text-xs text-primary hover:text-primary/80 font-medium cursor-pointer flex items-center gap-0.5"
+                    disabled={editBlossoms.length >= MAX_BLOSSOM_SERVERS}
+                    className={cn('text-xs font-medium flex items-center gap-0.5', editBlossoms.length >= MAX_BLOSSOM_SERVERS ? 'text-muted-foreground/40 cursor-not-allowed' : 'text-primary hover:text-primary/80 cursor-pointer')}
                   >
                     <Plus size={12} /> Add
                   </button>
@@ -4524,16 +4692,33 @@ function NetworkPage({ hub, editRelays, setEditRelays, editBlossoms, setEditBlos
             value={customBlossomInput}
             onChange={(e) => setCustomBlossomInput(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && addCustomBlossom()}
-            placeholder="https://blossom.example.com"
-            className="flex-1 h-9 rounded-lg border border-input bg-background px-3 text-sm placeholder:text-muted-foreground focus:outline-none"
+            placeholder={editBlossoms.length >= MAX_BLOSSOM_SERVERS ? 'Blossom limit reached' : 'https://blossom.example.com'}
+            disabled={editBlossoms.length >= MAX_BLOSSOM_SERVERS}
+            className={`flex-1 h-9 rounded-lg border bg-background px-3 text-sm placeholder:text-muted-foreground focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed ${customBlossomInput.trim() && !customBlossomInput.trim().startsWith('https://') ? 'border-destructive/60 text-destructive' : 'border-input'}`}
           />
-          <button
-            onClick={addCustomBlossom}
-            className="h-9 px-3 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors cursor-pointer flex items-center gap-1.5"
-          >
-            <Plus size={14} /> Add
-          </button>
+          {editBlossoms.length >= MAX_BLOSSOM_SERVERS ? (
+            <Tip text={`Maximum of ${MAX_BLOSSOM_SERVERS} blossom servers reached`}>
+              <span>
+                <button
+                  disabled
+                  className="h-9 px-3 rounded-lg bg-primary/50 text-primary-foreground text-sm font-medium opacity-40 cursor-not-allowed flex items-center gap-1.5"
+                >
+                  <Plus size={14} /> Add
+                </button>
+              </span>
+            </Tip>
+          ) : (
+            <button
+              onClick={addCustomBlossom}
+              className="h-9 px-3 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors cursor-pointer flex items-center gap-1.5"
+            >
+              <Plus size={14} /> Add
+            </button>
+          )}
         </div>
+        {customBlossomInput.trim() && !customBlossomInput.trim().startsWith('https://') && (
+          <p className="text-[11px] text-destructive">Blossom URL must start with https://</p>
+        )}
       </section>
 
       {/* Warning note */}
