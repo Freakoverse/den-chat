@@ -253,13 +253,13 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
 
       {/* Action items */}
       {!isModBanned && (
-        <div className="flex flex-col gap-1 px-2 py-1.5 border-b border-border bg-secondary/30">
+        <div className="flex flex-wrap gap-1 px-2 py-1.5 border-b border-border bg-secondary/30">
           {(() => {
             const canInvite = isCreator || (pubkey && hub ? getPermissionsForUser(hub, pubkey, hubMembers).create_invite : false)
             return canInvite ? (
               <button
                 onClick={() => setShowInvite(true)}
-                className="w-full flex items-center gap-2 px-2 py-1 rounded-md text-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-colors cursor-pointer"
+                className="flex-1 flex items-center gap-2 px-2 py-1 rounded-md text-left text-sm whitespace-nowrap text-muted-foreground hover:text-foreground hover:bg-accent transition-colors cursor-pointer"
               >
                 <UserPlus size={16} />
                 <span>Invite</span>
@@ -268,7 +268,7 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
           })()}
           <button
             onClick={() => setShowEvents(true)}
-            className="w-full flex items-center gap-2 px-2 py-1 rounded-md text-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-colors cursor-pointer"
+            className="flex-1 flex items-center gap-2 px-2 py-1 rounded-md text-left text-sm whitespace-nowrap text-muted-foreground hover:text-foreground hover:bg-accent transition-colors cursor-pointer"
           >
             <CalendarDays size={16} />
             <span>Events</span>
@@ -283,14 +283,14 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
             <>
               <button
                 onClick={() => setShowSettings(true)}
-                className="w-full flex items-center gap-2 px-2 py-1 rounded-md text-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-colors cursor-pointer"
+                className="flex-1 flex items-center gap-2 px-2 py-1 rounded-md text-left text-sm whitespace-nowrap text-muted-foreground hover:text-foreground hover:bg-accent transition-colors cursor-pointer"
               >
                 <Settings size={16} />
                 <span>Hub Settings</span>
               </button>
               <button
                 onClick={() => { markJoinRequestsSeen(hub!.dTag); setShowJoinRequests(true) }}
-                className="w-full flex items-center gap-2 px-2 py-1 rounded-md text-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-colors cursor-pointer"
+                className="flex-1 flex items-center gap-2 px-2 py-1 rounded-md text-left text-sm whitespace-nowrap text-muted-foreground hover:text-foreground hover:bg-accent transition-colors cursor-pointer"
               >
                 <Inbox size={16} />
                 <span>Join Requests</span>
@@ -304,7 +304,7 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
           )}
           <button
             onClick={() => setShowUserSettings(true)}
-            className="w-full flex items-center gap-2 px-2 py-1 rounded-md text-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-colors cursor-pointer"
+            className="flex-1 flex items-center gap-2 px-2 py-1 rounded-md text-left text-sm whitespace-nowrap text-muted-foreground hover:text-foreground hover:bg-accent transition-colors cursor-pointer"
           >
             <SlidersHorizontal size={13} />
             <span>User Hub Settings</span>
@@ -370,7 +370,7 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
                 }
               }}
               disabled={rescinding}
-              className="w-full flex items-center gap-2 px-2 py-1 rounded-md text-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-colors cursor-pointer disabled:opacity-50"
+              className="flex-1 flex items-center gap-2 px-2 py-1 rounded-md text-left text-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
             >
               {rescinding ? <Loader2 size={16} className="animate-spin" /> : <Undo2 size={16} />}
               <span>{rescinding ? 'Rescinding...' : 'Rescind Join Request'}</span>

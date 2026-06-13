@@ -76,7 +76,7 @@ import { MAX_HUB_LIST_ENTRIES, MAX_HUB_FOLDERS, FOLDER_NAME_MAX } from '@/lib/hu
 
 /* ─────────── types ─────────── */
 
-type Tab = 'general' | 'preferences' | 'voice-video' | 'network' | 'keybinds' | 'game-chat' | 'my-hubs' | 'social-network' | 'moderation' | 'security' | 'updates' | 'about' | 'faq' | 'guides' | 'advertisements' | 'premium' | 'admin'
+type Tab = 'general' | 'preferences' | 'voice-video' | 'network' | 'keybinds' | 'game-chat' | 'my-hubs' | 'social-network' | 'moderation' | 'security' | 'dnn' | 'updates' | 'about' | 'faq' | 'guides' | 'advertisements' | 'premium' | 'admin'
 
 const TABS: { id: Tab; label: string; icon: React.ReactNode; separatorBefore?: boolean; tooltip?: string }[] = [
   { id: 'general', label: 'General', icon: <Settings size={18} />, tooltip: 'Profile, language, and appearance' },
@@ -89,6 +89,7 @@ const TABS: { id: Tab; label: string; icon: React.ReactNode; separatorBefore?: b
   { id: 'social-network', label: 'Social Network', icon: <Users size={18} />, tooltip: 'Follows, mutes, and web of trust' },
   { id: 'moderation', label: 'Moderation', icon: <ShieldCheck size={18} />, tooltip: 'Block lists and content filters' },
   { id: 'security', label: 'Security', icon: <Shield size={18} />, tooltip: 'Keys, seed phrase, and encryption' },
+  { id: 'dnn', label: 'DNN', icon: <Activity size={18} />, tooltip: 'Decentralized node network' },
   { id: 'updates', label: 'Updates', icon: <Download size={18} />, separatorBefore: true, tooltip: 'Available builds and downloads' },
   { id: 'faq', label: 'FAQ', icon: <HelpCircle size={18} />, tooltip: 'Frequently asked questions' },
   { id: 'guides', label: 'Guides', icon: <BookOpen size={18} />, tooltip: 'Video tutorials and walkthroughs' },
@@ -242,6 +243,7 @@ export function SettingsPage() {
             {tab === 'social-network' && <SocialNetworkTab />}
             {tab === 'moderation' && <ModerationTab />}
             {tab === 'security' && <SecurityTab />}
+            {tab === 'dnn' && <DnnTab />}
             {tab === 'updates' && <UpdatesTab />}
             {tab === 'faq' && <FaqTab />}
             {tab === 'guides' && <GuidesTab />}
@@ -5847,6 +5849,20 @@ function UpdateBanner() {
           </button>
         </div>
       )}
+    </div>
+  )
+}
+
+function DnnTab() {
+  return (
+    <div className="flex flex-col items-center justify-center py-24 px-6 text-center">
+      <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center mb-4">
+        <Activity size={28} className="text-primary" />
+      </div>
+      <h2 className="text-lg font-semibold text-foreground mb-2">Decentralized Node Network</h2>
+      <p className="text-sm text-muted-foreground max-w-sm">
+        Coming soon. DNN settings and node management will be available here in a future update.
+      </p>
     </div>
   )
 }
