@@ -17,7 +17,8 @@ import { subscribeToRelays } from '@/lib/nostr/relay-pool'
 import { buildRelayIndex } from '@/lib/nostr/buildRelayIndex'
 import { KINDS, STANDARD_KINDS } from '@/lib/crypto/constants'
 import {
-  loadAllCachedMessages,
+  loadCachedMessagesForHub,
+  loadRemainingCachedMessagesProgressive,
   cacheMessageWithDedup,
   pruneAll,
 } from '@/lib/cache/messageCache'
@@ -716,23 +717,55 @@ export function useHubSubscriptions() {
   // Whether cache has been loaded
   const cacheLoadedRef = useRef(false)
 
-  // Load cached messages from IndexedDB on startup (once)
+  // Load cached messages from IndexedDB on startup (progressive: active hub first)
   useEffect(() => {
     if (cacheLoadedRef.current) return
     cacheLoadedRef.current = true
 
-    loadAllCachedMessages().then((cached) => {
-      if (cached.length > 0) {
-        const editedCount = cached.filter(m => m.edited).length
-        console.log(`[HubSubs] Loaded ${cached.length} cached messages from IndexedDB (${editedCount} edited)`)
-        for (const msg of cached) {
-          // Validate PoW on cached messages
-          const hub = hubsRef.current[msg.hubDTag]
-          const minPow = hub?.minPow || 0
-          if (minPow > 0 && countLeadingZeroBits(msg.id) < minPow) continue
-          addMessageRef.current(msg)
+    const ingestCached = (cached: import('@/stores/messageStore').ChatMessage[]) => {
+      for (const msg of cached) {
+        const hub = hubsRef.current[msg.hubDTag]
+        const minPow = hub?.minPow || 0
+        if (minPow > 0 && countLeadingZeroBits(msg.id) < minPow) continue
+        addMessageRef.current(msg)
+      }
+    }
+
+    // Phase 1: Load active hub first (fast, indexed read)
+    const activeHub = localStorage.getItem('den_last_active_hub')
+    const loadedHubs = new Set<string>()
+
+    const loadActiveFirst = async () => {
+      if (activeHub) {
+        const activeCached = await loadCachedMessagesForHub(activeHub)
+        if (activeCached.length > 0) {
+          console.log(`[HubSubs] Cache phase 1: ${activeCached.length} messages for active hub ${activeHub.slice(0, 8)}…`)
+          ingestCached(activeCached)
+          loadedHubs.add(activeHub)
         }
       }
+
+      // Phase 2: Load remaining hubs progressively in the background
+      // Reads 5 hubs at a time via by_hub index, yields between chunks
+      setTimeout(async () => {
+        try {
+          const allHubDTags = Object.keys(hubsRef.current)
+          const totalLoaded = await loadRemainingCachedMessagesProgressive(
+            loadedHubs,
+            allHubDTags,
+            (chunkMsgs) => ingestCached(chunkMsgs),
+          )
+          if (totalLoaded > 0) {
+            console.log(`[HubSubs] Cache phase 2: ${totalLoaded} messages across remaining hubs (progressive)`)
+          }
+        } catch (err) {
+          console.warn('[HubSubs] Failed to load remaining cached messages:', err)
+        }
+      }, 50)
+    }
+
+    loadActiveFirst().catch((err) => {
+      console.warn('[HubSubs] Failed to load active hub cache:', err)
     })
   }, [])
 
@@ -946,73 +979,94 @@ export function useHubSubscriptions() {
           // After initial fetch, run mention catch-up for each hub in this batch.
           // Fetches messages that @-mention the current user (via p/M tags) since
           // their oldest last-read timestamp, so missed mentions surface as unreads.
+          //
+          // ── Throttled: process 10 hubs at a time with 200ms gaps ──
+          // Without throttling, 200 hubs would fire 400 simultaneous subscriptions
+          // (2 per hub: direct #p + group #M) which can overwhelm relays.
           const myPubkey = useUserStore.getState().pubkey
           if (myPubkey) {
             const notifState = useNotificationStore.getState()
             const hubMembers = useHubStore.getState().hubMembers
 
-            for (const hubDTag of batch.hubDTags) {
-              // Determine user's role IDs in this hub
-              const member = hubMembers[hubDTag]?.find(m => m.pubkey === myPubkey)
-              const roleIds = member?.roles
-                ? member.roles.split('|').filter(Boolean)
-                : []
+            const MENTION_BATCH_SIZE = 10
+            const MENTION_BATCH_DELAY_MS = 200
 
-              // Determine since timestamp: oldest lastRead across all channels,
-              // or fall back to 7 days ago for hubs we've never read
-              const hubUnreads = notifState.hubUnreads[hubDTag]
-              let sinceTs = now - 7 * 24 * 60 * 60 // default: 7 days ago
-              if (hubUnreads) {
-                const readTimes = Object.values(hubUnreads)
-                  .map(u => u.lastRead)
-                  .filter(t => t > 0)
-                if (readTimes.length > 0) {
-                  sinceTs = Math.min(...readTimes)
+            // Sort: active hub first so its mentions resolve instantly
+            const activeHub = activeHubIdRef.current
+            const sortedHubDTags = [...batch.hubDTags].sort((a, b) => {
+              if (a === activeHub) return -1
+              if (b === activeHub) return 1
+              return 0
+            })
+
+            const processMentionBatch = async (hubDTags: string[]) => {
+              const promises = hubDTags.map((hubDTag) => {
+                const member = hubMembers[hubDTag]?.find(m => m.pubkey === myPubkey)
+                const roleIds = member?.roles
+                  ? member.roles.split('|').filter(Boolean)
+                  : []
+
+                const hubUnreads = notifState.hubUnreads[hubDTag]
+                let sinceTs = now - 7 * 24 * 60 * 60
+                if (hubUnreads) {
+                  const readTimes = Object.values(hubUnreads)
+                    .map(u => u.lastRead)
+                    .filter(t => t > 0)
+                  if (readTimes.length > 0) {
+                    sinceTs = Math.min(...readTimes)
+                  }
+                }
+
+                return fetchMentionsCatchUp(hubDTag, myPubkey, roleIds, sinceTs)
+                  .then((mentionCount) => {
+                    if (mentionCount > 0) {
+                      import('@/lib/cache/messageCache').then(async () => {
+                        const messages = useMessageStore.getState().messages[hubDTag]
+                        if (!messages) return
+                        for (const [channelId, channelMsgs] of Object.entries(messages)) {
+                          for (const msg of channelMsgs) {
+                            if (msg.createdAt <= sinceTs) continue
+                            if (msg.pubkey === myPubkey) continue
+                            if (!msg.rawEvent) continue
+                            try {
+                              const raw = JSON.parse(msg.rawEvent)
+                              const hasPTag = raw.tags?.some((t: string[]) => t[0] === 'p' && t[1] === myPubkey)
+                              const hasMTag = raw.tags?.some((t: string[]) => {
+                                if (t[0] !== 'M') return false
+                                if (t[1] === 'all' || t[1] === 'here') return true
+                                return roleIds.some(rid => t[1] === `role:${rid}`)
+                              })
+                              if (hasPTag || hasMTag) {
+                                const mentionType = hasPTag ? 'personal'
+                                  : raw.tags?.some((t: string[]) => t[0] === 'M' && t[1] === 'all') ? 'everyone'
+                                  : raw.tags?.some((t: string[]) => t[0] === 'M' && t[1] === 'here') ? 'here'
+                                  : 'role'
+                                notifState.incrementChannelUnread(
+                                  hubDTag, channelId, msg.createdAt, mentionType
+                                )
+                              }
+                            } catch { /* skip */ }
+                          }
+                        }
+                      }).catch(() => {})
+                    }
+                  })
+                  .catch(() => {})
+              })
+              await Promise.all(promises)
+            }
+
+            // Stagger: process MENTION_BATCH_SIZE hubs, wait, repeat
+            ;(async () => {
+              for (let i = 0; i < sortedHubDTags.length; i += MENTION_BATCH_SIZE) {
+                const chunk = sortedHubDTags.slice(i, i + MENTION_BATCH_SIZE)
+                await processMentionBatch(chunk)
+                // Yield between batches (skip delay after last batch)
+                if (i + MENTION_BATCH_SIZE < sortedHubDTags.length) {
+                  await new Promise(r => setTimeout(r, MENTION_BATCH_DELAY_MS))
                 }
               }
-
-              fetchMentionsCatchUp(hubDTag, myPubkey, roleIds, sinceTs)
-                .then((mentionCount) => {
-                  if (mentionCount > 0) {
-                    // Mention events are already in the store via addMessage.
-                    // The notification badges will update when the user opens
-                    // the channel and detectMentionType runs during decryption.
-                    // For hub-level badge, trigger a background mention scan.
-                    import('@/lib/cache/messageCache').then(async () => {
-                      // Scan newly added mention messages for notification enrichment
-                      const messages = useMessageStore.getState().messages[hubDTag]
-                      if (!messages) return
-                      for (const [channelId, channelMsgs] of Object.entries(messages)) {
-                        for (const msg of channelMsgs) {
-                          if (msg.createdAt <= sinceTs) continue
-                          if (msg.pubkey === myPubkey) continue
-                          // Check if this message has p/M tags mentioning us
-                          if (!msg.rawEvent) continue
-                          try {
-                            const raw = JSON.parse(msg.rawEvent)
-                            const hasPTag = raw.tags?.some((t: string[]) => t[0] === 'p' && t[1] === myPubkey)
-                            const hasMTag = raw.tags?.some((t: string[]) => {
-                              if (t[0] !== 'M') return false
-                              if (t[1] === 'all' || t[1] === 'here') return true
-                              return roleIds.some(rid => t[1] === `role:${rid}`)
-                            })
-                            if (hasPTag || hasMTag) {
-                              const mentionType = hasPTag ? 'personal'
-                                : raw.tags?.some((t: string[]) => t[0] === 'M' && t[1] === 'all') ? 'everyone'
-                                : raw.tags?.some((t: string[]) => t[0] === 'M' && t[1] === 'here') ? 'here'
-                                : 'role'
-                              notifState.incrementChannelUnread(
-                                hubDTag, channelId, msg.createdAt, mentionType
-                              )
-                            }
-                          } catch { /* skip */ }
-                        }
-                      }
-                    }).catch(() => {})
-                  }
-                })
-                .catch(() => {})
-            }
+            })()
           }
         }
       )

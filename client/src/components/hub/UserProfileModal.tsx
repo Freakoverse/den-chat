@@ -274,6 +274,8 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
   // Reset on close / auto-enter edit mode
   useEffect(() => {
     if (!open) {
+      setProfileData(EMPTY_PROFILE)
+      setEditProfile(EMPTY_PROFILE)
       setEditing(false)
       setLoaded(false)
       setShowDropdown(false)

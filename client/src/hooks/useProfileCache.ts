@@ -64,33 +64,84 @@ function setCachedEntry(pubkey: string, profile: NostrProfile) {
   }
 }
 
-async function fetchProfile(pubkey: string) {
-  if (pendingFetches.has(pubkey)) return
-  pendingFetches.add(pubkey)
+/** ── Batched profile fetching ──
+ * Instead of firing one relay query per pubkey, collect requests over
+ * a short window (BATCH_DELAY_MS) and fire one combined query.
+ * Max batch size of 50 prevents oversized relay filters.
+ */
+const BATCH_DELAY_MS = 100
+const MAX_BATCH_SIZE = 50
+let batchQueue: string[] = []
+let batchTimer: ReturnType<typeof setTimeout> | null = null
 
-  try {
-    const events = await fetchEvents({
-      kinds: [0],
-      authors: [pubkey],
-      limit: 1,
+function flushProfileBatch() {
+  batchTimer = null
+  if (batchQueue.length === 0) return
+
+  // Take current batch and reset queue
+  const batch = batchQueue.splice(0, MAX_BATCH_SIZE)
+
+  // If there are leftovers (queue > MAX_BATCH_SIZE), schedule another flush
+  if (batchQueue.length > 0) {
+    batchTimer = setTimeout(flushProfileBatch, BATCH_DELAY_MS)
+  }
+
+  // Mark all as pending
+  for (const pk of batch) pendingFetches.add(pk)
+
+  fetchEvents({
+    kinds: [0],
+    authors: batch,
+  })
+    .then((events) => {
+      // Group by author, keep newest per author
+      const latestByAuthor = new Map<string, typeof events[0]>()
+      for (const event of events) {
+        const existing = latestByAuthor.get(event.pubkey)
+        if (!existing || event.created_at > existing.created_at) {
+          latestByAuthor.set(event.pubkey, event)
+        }
+      }
+
+      // Process results
+      for (const pubkey of batch) {
+        const event = latestByAuthor.get(pubkey)
+        if (event) {
+          try {
+            const profile: NostrProfile = JSON.parse(event.content)
+            setCachedEntry(pubkey, profile)
+          } catch { /* ignore parse errors */ }
+        } else {
+          // No event found — mark as empty so we don't refetch constantly
+          profileCache.set(pubkey, { profile: {}, fetchedAt: Date.now() })
+          notifyListeners(pubkey)
+        }
+      }
     })
+    .catch(() => {
+      // Failed to fetch — don't cache, allow retry
+    })
+    .finally(() => {
+      for (const pk of batch) pendingFetches.delete(pk)
+    })
+}
 
-    if (events.length > 0) {
-      // Use the most recent event
-      const latest = events.sort((a, b) => b.created_at - a.created_at)[0]
-      try {
-        const profile: NostrProfile = JSON.parse(latest.content)
-        setCachedEntry(pubkey, profile)
-      } catch { /* ignore parse errors */ }
-    } else {
-      // Mark as empty so we don't refetch constantly
-      profileCache.set(pubkey, { profile: {}, fetchedAt: Date.now() })
-      notifyListeners(pubkey)
-    }
-  } catch {
-    // Failed to fetch, don't cache — allow retry
-  } finally {
-    pendingFetches.delete(pubkey)
+function scheduleFetchProfile(pubkey: string) {
+  if (pendingFetches.has(pubkey)) return
+  if (batchQueue.includes(pubkey)) return
+
+  batchQueue.push(pubkey)
+
+  // Start or reset the batch timer
+  if (!batchTimer) {
+    batchTimer = setTimeout(flushProfileBatch, BATCH_DELAY_MS)
+  }
+
+  // If batch is full, flush immediately
+  if (batchQueue.length >= MAX_BATCH_SIZE) {
+    clearTimeout(batchTimer)
+    batchTimer = null
+    flushProfileBatch()
   }
 }
 
@@ -119,9 +170,9 @@ export function useProfileCache() {
       if (!listeners.has(pubkey)) listeners.set(pubkey, new Set())
       listeners.get(pubkey)!.add(cb)
 
-      // Trigger background fetch if not already in progress
+      // Trigger batched background fetch if not already in progress
       if (!pendingFetches.has(pubkey)) {
-        fetchProfile(pubkey)
+        scheduleFetchProfile(pubkey)
       }
 
       return undefined
@@ -137,7 +188,7 @@ export function useProfileCache() {
       if (!listeners.has(pubkey)) listeners.set(pubkey, new Set())
       listeners.get(pubkey)!.add(cb)
 
-      fetchProfile(pubkey)
+      scheduleFetchProfile(pubkey)
     }
 
     return cached.profile

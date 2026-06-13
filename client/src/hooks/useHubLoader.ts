@@ -599,17 +599,24 @@ export function useHubLoader() {
 
     if (toLoad.length === 0) return
 
-    // ── Phase 5: Prioritize last-active hub ──
-    // Read the last-active hub from localStorage and sort it to the front of the queue.
-    // This ensures the hub the user was last viewing loads first.
+    // ── Phase 5: Prioritize hub processing order ──
+    // 1. Last-active hub loads first (the hub the user was viewing)
+    // 2. Remaining hubs sorted by sidebar position (hubEntries order),
+    //    so hubs visible at the top of the sidebar load before offscreen ones.
     const lastActiveHub = localStorage.getItem('den_last_active_hub')
-    if (lastActiveHub) {
-      toLoad.sort((a, b) => {
-        if (a.dTag === lastActiveHub) return -1
-        if (b.dTag === lastActiveHub) return 1
-        return 0
-      })
+    const positionMap = new Map<string, number>()
+    for (let i = 0; i < hubEntries.length; i++) {
+      positionMap.set(hubEntries[i].dTag, hubEntries[i].position ?? i)
     }
+    toLoad.sort((a, b) => {
+      // Active hub always first
+      if (a.dTag === lastActiveHub) return -1
+      if (b.dTag === lastActiveHub) return 1
+      // Then by sidebar position (lower position = higher in sidebar = loads first)
+      const posA = positionMap.get(a.dTag) ?? Infinity
+      const posB = positionMap.get(b.dTag) ?? Infinity
+      return posA - posB
+    })
 
     // Mark as loading to prevent duplicate fetches
     for (const entry of toLoad) {
@@ -642,10 +649,11 @@ export function useHubLoader() {
       }
 
       // ── Phase 4: Parallel hub processing with concurrency limit ──
-      // Process hubs in parallel (max 3 concurrent) instead of sequentially.
-      // Each hub involves multiple HTTP fetches + crypto, so parallelizing
-      // reduces total wall-clock time significantly.
-      const HUB_CONCURRENCY = 3
+      // Process hubs in parallel instead of sequentially.
+      // Each hub involves multiple I/O-bound HTTP fetches to Blossom + crypto,
+      // so higher concurrency significantly reduces wall-clock time.
+      // At 200 hubs: concurrency 10 → ~20 rounds vs 67 rounds at 3.
+      const HUB_CONCURRENCY = 10
 
       // Build ordered list of hubs to process (matching toLoad order for priority)
       const hubsToProcess: [string, Event][] = []

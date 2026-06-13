@@ -310,6 +310,147 @@ export async function loadAllCachedMessages(): Promise<ChatMessage[]> {
   }
 }
 
+/**
+ * Load cached messages for a SINGLE hub from IndexedDB using the `by_hub` index.
+ * Much faster than loading everything — only reads messages for one hub dTag.
+ * Returns deduplicated messages (newest per dTag+pubkey).
+ */
+export async function loadCachedMessagesForHub(hubDTag: string): Promise<ChatMessage[]> {
+  try {
+    const db = await openDB()
+    const tx = db.transaction(STORE_NAME, 'readonly')
+    const store = tx.objectStore(STORE_NAME)
+    const index = store.index('by_hub')
+    const range = IDBKeyRange.only(hubDTag)
+    const request = index.getAll(range)
+
+    const all: ChatMessage[] = await new Promise((resolve, reject) => {
+      request.onsuccess = () => resolve(request.result || [])
+      request.onerror = () => reject(request.error)
+    })
+
+    // Deduplicate: same dTag + pubkey = keep newest eventCreatedAt
+    const byKey = new Map<string, ChatMessage>()
+    const staleIds: string[] = []
+    for (const msg of all) {
+      const key = `${msg.dTag}:${msg.pubkey}`
+      const existing = byKey.get(key)
+      if (existing) {
+        const msgTs = msg.eventCreatedAt || msg.createdAt
+        const existingTs = existing.eventCreatedAt || existing.createdAt
+        if (msgTs > existingTs) {
+          staleIds.push(existing.id)
+          byKey.set(key, msg)
+        } else {
+          staleIds.push(msg.id)
+        }
+      } else {
+        byKey.set(key, msg)
+      }
+    }
+
+    // Background cleanup of stale entries
+    if (staleIds.length > 0) {
+      openDB().then(db2 => {
+        const tx2 = db2.transaction(STORE_NAME, 'readwrite')
+        const store2 = tx2.objectStore(STORE_NAME)
+        for (const id of staleIds) store2.delete(id)
+      }).catch(() => {})
+    }
+
+    return Array.from(byKey.values())
+  } catch (err) {
+    console.warn(`[MessageCache] Failed to load messages for hub ${hubDTag.slice(0, 8)}…:`, err)
+    return []
+  }
+}
+
+/**
+ * Progressively load cached messages for all hubs except excluded ones.
+ * Reads hub-by-hub via the `by_hub` index instead of a single `getAll()`,
+ * calling `onChunk` after each hub's messages are loaded so the caller
+ * can ingest them incrementally without blocking the main thread.
+ *
+ * @param excludeHubDTags - Hubs already loaded (e.g. active hub from phase 1)
+ * @param allHubDTags - All known hub dTags to load (from hubStore)
+ * @param onChunk - Called with each hub's deduplicated messages as they load
+ */
+export async function loadRemainingCachedMessagesProgressive(
+  excludeHubDTags: Set<string>,
+  allHubDTags: string[],
+  onChunk: (messages: ChatMessage[]) => void,
+): Promise<number> {
+  const hubsToLoad = allHubDTags.filter(dt => !excludeHubDTags.has(dt))
+  if (hubsToLoad.length === 0) return 0
+
+  let totalLoaded = 0
+  const HUBS_PER_TICK = 5 // Read 5 hubs per IDB transaction, then yield
+
+  for (let i = 0; i < hubsToLoad.length; i += HUBS_PER_TICK) {
+    const chunk = hubsToLoad.slice(i, i + HUBS_PER_TICK)
+
+    try {
+      const db = await openDB()
+
+      for (const hubDTag of chunk) {
+        const tx = db.transaction(STORE_NAME, 'readonly')
+        const store = tx.objectStore(STORE_NAME)
+        const index = store.index('by_hub')
+        const range = IDBKeyRange.only(hubDTag)
+        const request = index.getAll(range)
+
+        const hubMsgs: ChatMessage[] = await new Promise((resolve, reject) => {
+          request.onsuccess = () => resolve(request.result || [])
+          request.onerror = () => reject(request.error)
+        })
+
+        if (hubMsgs.length === 0) continue
+
+        // Deduplicate: same dTag + pubkey = keep newest eventCreatedAt
+        const byKey = new Map<string, ChatMessage>()
+        const staleIds: string[] = []
+        for (const msg of hubMsgs) {
+          const key = `${msg.dTag}:${msg.pubkey}`
+          const existing = byKey.get(key)
+          if (existing) {
+            const msgTs = msg.eventCreatedAt || msg.createdAt
+            const existingTs = existing.eventCreatedAt || existing.createdAt
+            if (msgTs > existingTs) {
+              staleIds.push(existing.id)
+              byKey.set(key, msg)
+            } else {
+              staleIds.push(msg.id)
+            }
+          } else {
+            byKey.set(key, msg)
+          }
+        }
+
+        // Background cleanup of stale entries
+        if (staleIds.length > 0) {
+          openDB().then(db2 => {
+            const tx2 = db2.transaction(STORE_NAME, 'readwrite')
+            const store2 = tx2.objectStore(STORE_NAME)
+            for (const id of staleIds) store2.delete(id)
+          }).catch(() => {})
+        }
+
+        const deduped = Array.from(byKey.values())
+        totalLoaded += deduped.length
+        onChunk(deduped)
+      }
+    } catch (err) {
+      console.warn('[MessageCache] Error loading chunk:', err)
+    }
+
+    // Yield to main thread between chunks
+    if (i + HUBS_PER_TICK < hubsToLoad.length) {
+      await new Promise(r => setTimeout(r, 0))
+    }
+  }
+
+  return totalLoaded
+}
 
 
 /**

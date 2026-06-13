@@ -1,14 +1,22 @@
 /**
- * In-memory Image Blob Cache
+ * Image Blob Cache — Two-layer architecture
  *
- * Caches remote images as blob:// URLs to prevent re-downloading when
- * components remount. Keyed by remote URL — if the URL changes
- * (e.g. profile picture update via kind:0), the new image is fetched
- * automatically as a cache miss.
+ * Layer 1: In-memory Map (URL → blob: URL) — instant, session-scoped
+ * Layer 2: Persistent Blossom cache (hash → blob) — survives restart, 100MB budget
+ * Layer 3: Network fetch (write-through to both layers)
  *
- * Only HTTP/HTTPS URLs are cached. blob:, data:, and relative URLs
- * are passed through unchanged.
+ * For Blossom/hash-based URLs: checks persistent cache before network fetch.
+ * For non-Blossom URLs: in-memory only (no content-addressing guarantee).
+ *
+ * All existing callers (useCachedImageUrl, preCacheImage, getCachedImageUrl)
+ * work unchanged — persistence is transparent.
  */
+
+import {
+  extractBlossomHash,
+  getFromPersistentCache,
+  putInPersistentCache,
+} from '@/lib/cache/blossomMediaCache'
 
 /** Remote URL → blob URL (or TOO_LARGE sentinel) */
 const blobCache = new Map<string, string>()
@@ -16,7 +24,7 @@ const blobCache = new Map<string, string>()
 /** Sentinel value indicating the image was too large */
 export const IMAGE_TOO_LARGE = '__too_large__'
 
-/** URLs currently being fetched */
+/** URLs currently being fetched (includes persistent cache lookups) */
 const pendingFetches = new Set<string>()
 
 /** Listeners waiting for a URL to be cached: url → Set<callback> */
@@ -34,6 +42,8 @@ function isCacheableUrl(url: string): boolean {
 
 /**
  * Get the cached blob URL for a remote URL, or undefined if not cached.
+ * Checks in-memory cache only (synchronous). For persistent cache hits,
+ * the blob is loaded asynchronously and the caller is notified via listener.
  */
 export function getCachedImageUrl(url: string): string | undefined {
   return blobCache.get(url)
@@ -42,6 +52,7 @@ export function getCachedImageUrl(url: string): string | undefined {
 /**
  * Pre-fetch and cache an image URL as a blob. Fire-and-forget.
  * Useful for pre-warming the cache (e.g. when a profile is fetched).
+ * For Blossom URLs, checks persistent cache before hitting the network.
  */
 export function preCacheImage(url: string): void {
   if (!isCacheableUrl(url) || blobCache.has(url) || pendingFetches.has(url) || failedUrls.has(url)) return
@@ -65,12 +76,31 @@ export function fetchAndCacheImage(url: string, onCached: () => void): void {
   }
 }
 
-/** Internal: perform the actual fetch and cache */
+/** Internal: perform the actual fetch and cache (with persistent L2 layer) */
 function _doFetch(url: string, maxBytes?: number): void {
   pendingFetches.add(url)
 
   const doFetch = async () => {
     try {
+      // ── L2: Check persistent Blossom cache before network ──
+      const blossomHash = extractBlossomHash(url)
+      if (blossomHash) {
+        const cachedBlob = await getFromPersistentCache(blossomHash)
+        if (cachedBlob) {
+          // Persistent cache hit — create blob URL and store in memory
+          if (maxBytes && cachedBlob.size > maxBytes) {
+            blobCache.set(url, IMAGE_TOO_LARGE)
+            _notifyListeners(url)
+            return
+          }
+          const blobUrl = URL.createObjectURL(cachedBlob)
+          blobCache.set(url, blobUrl)
+          _notifyListeners(url)
+          return
+        }
+      }
+
+      // ── L3: Network fetch ──
       const res = await fetch(url, { mode: 'cors' })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
 
@@ -110,6 +140,11 @@ function _doFetch(url: string, maxBytes?: number): void {
         const blobUrl = URL.createObjectURL(blob)
         blobCache.set(url, blobUrl)
         _notifyListeners(url)
+
+        // Write-through to persistent cache for Blossom URLs
+        if (blossomHash) {
+          putInPersistentCache(blossomHash, blob).catch(() => {})
+        }
         return
       }
 
@@ -123,6 +158,11 @@ function _doFetch(url: string, maxBytes?: number): void {
       const blobUrl = URL.createObjectURL(blob)
       blobCache.set(url, blobUrl)
       _notifyListeners(url)
+
+      // Write-through to persistent cache for Blossom URLs
+      if (blossomHash) {
+        putInPersistentCache(blossomHash, blob).catch(() => {})
+      }
     } catch {
       failedUrls.add(url)
     } finally {
@@ -147,10 +187,11 @@ import { useState, useEffect, useRef } from 'react'
 
 /**
  * React hook that returns the best available URL for an image:
- * - If a blob URL is cached → returns it instantly (no network)
- * - Otherwise → returns the original URL while fetching the blob in background
+ * - If a blob URL is cached (in-memory) → returns it instantly (no network)
+ * - Otherwise → returns the original URL while checking persistent cache / fetching
  * - Re-renders the component when the blob URL becomes available
  *
+ * For Blossom URLs, persistent cache hits are near-instant (disk read, no network).
  * Safe for non-HTTP URLs (blob:, data:, relative) — passes them through unchanged.
  */
 export function useCachedImageUrl(src: string | undefined, maxSizeMB?: number): string | undefined {
