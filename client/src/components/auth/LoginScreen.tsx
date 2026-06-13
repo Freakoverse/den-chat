@@ -932,7 +932,7 @@ export function LoginScreen() {
 
   // ── Background overlay card ──
   const bgSkeletonOverlay = bgLoading && (bgShowcaseEnabled || adShowcaseEnabled) ? (
-    <div className="absolute bottom-4 left-4 z-[5] max-w-[280px]">
+    <div className="fixed bottom-4 left-4 z-[5] max-w-[280px]">
       <div className="rounded-xl bg-black/60 backdrop-blur-md border border-white/10 p-3 space-y-2.5 animate-pulse">
         <div className="h-2.5 w-28 rounded bg-white/10" />
         <div className="flex items-center gap-2.5">
@@ -948,7 +948,7 @@ export function LoginScreen() {
   ) : null
 
   const bgOverlay = !bgLoading && activeBg ? (
-    <div className="absolute bottom-4 left-4 z-[5] max-w-[280px] animate-in fade-in duration-500">
+    <div className="fixed bottom-4 left-4 z-[5] max-w-[280px] animate-in fade-in duration-500">
       <div className="rounded-xl bg-black/60 backdrop-blur-md border border-white/10 p-3 space-y-2.5">
         <p className="text-[10px] text-white/50 uppercase tracking-wider font-medium">{isAd ? 'Advertisement' : 'Background Showcase'}</p>
         <div className="flex items-center gap-2.5">
@@ -987,8 +987,8 @@ export function LoginScreen() {
   // ────────────────────────────────────────────
   if (screen === 'import') {
     return (
-      <div className="flex items-center justify-center h-full bg-surface-background relative p-4 max-[1080px]:items-start">
-        {bgImageUrl && <BlossomImage src={bgImageUrl} alt="" className="absolute bottom-0 right-0 w-full h-full" imgClassName="object-right-bottom" />}
+      <div className="flex items-center justify-center h-full overflow-y-auto bg-surface-background relative p-4 max-[1080px]:items-start">
+        {bgImageUrl && <BlossomImage src={bgImageUrl} alt="" className="fixed inset-0 w-full h-full" imgClassName="object-right-bottom" />}
         {bgSkeletonOverlay}
         {bgOverlay}
         <Card className="w-full max-w-sm shadow-lg relative z-10">
@@ -1081,8 +1081,8 @@ export function LoginScreen() {
   // ────────────────────────────────────────────
   if (screen === 'import-pin') {
     return (
-      <div className="flex items-center justify-center h-full bg-surface-background relative p-4 max-[1080px]:items-start">
-        {bgImageUrl && <BlossomImage src={bgImageUrl} alt="" className="absolute bottom-0 right-0 w-full h-full" imgClassName="object-right-bottom" />}
+      <div className="flex items-center justify-center h-full overflow-y-auto bg-surface-background relative p-4 max-[1080px]:items-start">
+        {bgImageUrl && <BlossomImage src={bgImageUrl} alt="" className="fixed inset-0 w-full h-full" imgClassName="object-right-bottom" />}
         {bgSkeletonOverlay}
         {bgOverlay}
         <Card className="w-full max-w-sm shadow-lg relative z-10">
@@ -1152,8 +1152,8 @@ export function LoginScreen() {
   // ────────────────────────────────────────────
   if (screen === 'generate-pin') {
     return (
-      <div className="flex items-center justify-center h-full bg-surface-background relative p-4 max-[1080px]:items-start">
-        {bgImageUrl && <BlossomImage src={bgImageUrl} alt="" className="absolute bottom-0 right-0 w-full h-full" imgClassName="object-right-bottom" />}
+      <div className="flex items-center justify-center h-full overflow-y-auto bg-surface-background relative p-4 max-[1080px]:items-start">
+        {bgImageUrl && <BlossomImage src={bgImageUrl} alt="" className="fixed inset-0 w-full h-full" imgClassName="object-right-bottom" />}
         {bgSkeletonOverlay}
         {bgOverlay}
         <Card className="w-full max-w-sm shadow-lg relative z-10">
@@ -1225,8 +1225,8 @@ export function LoginScreen() {
   if (screen === 'derive-pin' && deriveSeedId) {
     const deriveSeed = savedSeeds.find((s) => s.id === deriveSeedId)
     return (
-      <div className="flex items-center justify-center h-full bg-surface-background relative p-4 max-[1080px]:items-start">
-        {bgImageUrl && <BlossomImage src={bgImageUrl} alt="" className="absolute bottom-0 right-0 w-full h-full" imgClassName="object-right-bottom" />}
+      <div className="flex items-center justify-center h-full overflow-y-auto bg-surface-background relative p-4 max-[1080px]:items-start">
+        {bgImageUrl && <BlossomImage src={bgImageUrl} alt="" className="fixed inset-0 w-full h-full" imgClassName="object-right-bottom" />}
         {bgSkeletonOverlay}
         {bgOverlay}
         <Card className="w-full max-w-sm shadow-lg relative z-10">
@@ -1280,8 +1280,8 @@ export function LoginScreen() {
   if (screen === 'seed-backup' && backupMnemonic) {
     const words = backupMnemonic.split(' ')
     return (
-      <div className="flex items-center justify-center h-full bg-surface-background relative p-4 max-[1080px]:items-start">
-        {bgImageUrl && <BlossomImage src={bgImageUrl} alt="" className="absolute bottom-0 right-0 w-full h-full" imgClassName="object-right-bottom" />}
+      <div className="flex items-center justify-center h-full overflow-y-auto bg-surface-background relative p-4 max-[1080px]:items-start">
+        {bgImageUrl && <BlossomImage src={bgImageUrl} alt="" className="fixed inset-0 w-full h-full" imgClassName="object-right-bottom" />}
         {bgSkeletonOverlay}
         {bgOverlay}
         <Card className="w-full max-w-md shadow-lg relative z-10">
@@ -1391,8 +1391,8 @@ export function LoginScreen() {
   if (screen === 'onboarding-profile') {
     const hasContent = profileName.trim() || profilePicUrl
     return (
-      <div className="flex items-center justify-center h-full bg-surface-background relative p-4 max-[1080px]:items-start">
-        {bgImageUrl && <BlossomImage src={bgImageUrl} alt="" className="absolute bottom-0 right-0 w-full h-full" imgClassName="object-right-bottom" />}
+      <div className="flex items-center justify-center h-full overflow-y-auto bg-surface-background relative p-4 max-[1080px]:items-start">
+        {bgImageUrl && <BlossomImage src={bgImageUrl} alt="" className="fixed inset-0 w-full h-full" imgClassName="object-right-bottom" />}
         {bgSkeletonOverlay}
         {bgOverlay}
         <Card className="w-full max-w-sm shadow-lg relative z-10">
@@ -1679,8 +1679,8 @@ export function LoginScreen() {
   // ────────────────────────────────────────────
   if (screen === 'pin-login' && selectedAccount) {
     return (
-      <div className="flex items-center justify-center h-full bg-surface-background relative p-4 max-[1080px]:items-start">
-        {bgImageUrl && <BlossomImage src={bgImageUrl} alt="" className="absolute bottom-0 right-0 w-full h-full" imgClassName="object-right-bottom" />}
+      <div className="flex items-center justify-center h-full overflow-y-auto bg-surface-background relative p-4 max-[1080px]:items-start">
+        {bgImageUrl && <BlossomImage src={bgImageUrl} alt="" className="fixed inset-0 w-full h-full" imgClassName="object-right-bottom" />}
         {bgSkeletonOverlay}
         {bgOverlay}
         <Card className="w-full max-w-sm shadow-lg relative z-10">
@@ -1761,8 +1761,8 @@ export function LoginScreen() {
   // ────────────────────────────────────────────
   if (screen === 'nip46') {
     return (
-      <div className="flex items-center justify-center h-full bg-surface-background relative p-4 max-[1080px]:items-start">
-        {bgImageUrl && <BlossomImage src={bgImageUrl} alt="" className="absolute bottom-0 right-0 w-full h-full" imgClassName="object-right-bottom" />}
+      <div className="flex items-center justify-center h-full overflow-y-auto bg-surface-background relative p-4 max-[1080px]:items-start">
+        {bgImageUrl && <BlossomImage src={bgImageUrl} alt="" className="fixed inset-0 w-full h-full" imgClassName="object-right-bottom" />}
         {bgSkeletonOverlay}
         {bgOverlay}
         <Card className="w-full max-w-sm shadow-lg relative z-10">
@@ -1860,8 +1860,8 @@ export function LoginScreen() {
   // ────────────────────────────────────────────
   if (screen === 'saved-accounts') {
     return (
-      <div className="flex items-center justify-center h-full bg-surface-background relative p-4 max-[1080px]:items-start">
-        {bgImageUrl && <BlossomImage src={bgImageUrl} alt="" className="absolute bottom-0 right-0 w-full h-full" imgClassName="object-right-bottom" />}
+      <div className="flex items-center justify-center h-full overflow-y-auto bg-surface-background relative p-4 max-[1080px]:items-start">
+        {bgImageUrl && <BlossomImage src={bgImageUrl} alt="" className="fixed inset-0 w-full h-full" imgClassName="object-right-bottom" />}
         {bgSkeletonOverlay}
         {bgOverlay}
         <Card className="w-full max-w-sm shadow-lg relative z-10">
@@ -2040,8 +2040,8 @@ export function LoginScreen() {
   // ─── Render: Main Login ───
   // ────────────────────────────────────────────
   return (
-    <div className="flex items-center justify-center h-full bg-surface-background relative p-4 max-[1080px]:items-start">
-      {bgImageUrl && <BlossomImage src={bgImageUrl} alt="" className="absolute bottom-0 right-0 w-full h-full" imgClassName="object-right-bottom" />}
+    <div className="flex items-center justify-center h-full overflow-y-auto bg-surface-background relative p-4 max-[1080px]:items-start">
+      {bgImageUrl && <BlossomImage src={bgImageUrl} alt="" className="fixed inset-0 w-full h-full" imgClassName="object-right-bottom" />}
       {bgSkeletonOverlay}
       {bgOverlay}
       <Card className="w-full max-w-sm shadow-lg relative z-10">
