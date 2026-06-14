@@ -6,7 +6,7 @@
  * bookmarks, or comments since it's an unpublished draft).
  */
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useSocialStore } from '@/stores/socialStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { fetchEvents } from '@/lib/nostr/relay-pool'
@@ -17,7 +17,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { DnnBadge } from '@/components/ui/DnnBadge'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Loader2, ArrowLeft, Pencil, Clock, BookOpen } from 'lucide-react'
+import { Loader2, ArrowLeft, Pencil, Clock, BookOpen, Copy, Check } from 'lucide-react'
 import { cn, truncateNpub, formatTimestamp } from '@/lib/utils'
 import { nip19 } from 'nostr-tools'
 import type { Event } from 'nostr-tools'
@@ -50,6 +50,38 @@ function MarkdownImage({ src, alt }: { src?: string; alt?: string }) {
         />
       )}
     </span>
+  )
+}
+
+/* ─── Code Block with Copy Button ─── */
+
+function ArticleCodeBlock({ children, language }: { children: React.ReactNode; language?: string }) {
+  const [copied, setCopied] = useState(false)
+  const preRef = useRef<HTMLPreElement>(null)
+
+  const handleCopy = () => {
+    const text = preRef.current?.textContent || ''
+    navigator.clipboard.writeText(text)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  return (
+    <div className="mb-4">
+      <div className="flex items-center justify-between px-3 py-1.5 rounded-t-lg bg-secondary/60 border border-border border-b-0">
+        <span className="text-[10px] text-muted-foreground/60 font-mono">{language || ''}</span>
+        <button
+          onClick={handleCopy}
+          className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+        >
+          {copied ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
+          {copied ? 'Copied!' : 'Copy'}
+        </button>
+      </div>
+      <pre ref={preRef} className="rounded-b-lg rounded-t-none bg-secondary/80 border border-border p-4 overflow-x-auto text-xs !mt-0">
+        {children}
+      </pre>
+    </div>
   )
 }
 
@@ -245,11 +277,12 @@ export function DraftPreviewPage() {
                     {children}
                   </a>
                 ),
-                pre: ({ children }) => (
-                  <pre className="rounded-lg bg-secondary/80 border border-border p-4 overflow-x-auto text-xs">
-                    {children}
-                  </pre>
-                ),
+                pre: ({ node, children }) => {
+                  const codeNode = (node?.children as any[])?.find((c: any) => c.tagName === 'code')
+                  const langClass = codeNode?.properties?.className?.[0] || ''
+                  const language = langClass.replace('language-', '')
+                  return <ArticleCodeBlock language={language}>{children}</ArticleCodeBlock>
+                },
                 code: ({ children, className }) => {
                   const isInline = !className
                   if (isInline) {

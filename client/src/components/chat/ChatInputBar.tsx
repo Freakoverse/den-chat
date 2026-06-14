@@ -603,6 +603,8 @@ export function ChatInputBar({
 
   // ─── Custom context menu for textarea (right-click → Paste with file support) ───
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null)
+  const [pasteHint, setPasteHint] = useState(false)
+  const pasteHintTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Use native listener so preventDefault() fires before the browser shows its own menu.
   useEffect(() => {
@@ -693,8 +695,11 @@ export function ChatInputBar({
         const text = await navigator.clipboard.readText()
         insertText(text)
       } catch {
-        // Everything failed — try native execCommand as last resort
-        execFallback()
+        // Everything failed — show hint to use Ctrl+V (Firefox blocks clipboard access)
+        textareaRef.current?.focus()
+        if (pasteHintTimer.current) clearTimeout(pasteHintTimer.current)
+        setPasteHint(true)
+        pasteHintTimer.current = setTimeout(() => setPasteHint(false), 3000)
       }
     }
   }, [addFiles, message, onMessageChange, autoResize])
@@ -714,9 +719,11 @@ export function ChatInputBar({
         })
       }
     } catch {
-      // Fallback for browsers without clipboard permission
-      const ta = textareaRef.current
-      if (ta) { ta.focus(); try { document.execCommand('paste') } catch { /* blocked */ } }
+      // Clipboard blocked (Firefox) — show hint
+      textareaRef.current?.focus()
+      if (pasteHintTimer.current) clearTimeout(pasteHintTimer.current)
+      setPasteHint(true)
+      pasteHintTimer.current = setTimeout(() => setPasteHint(false), 3000)
     }
   }, [message, onMessageChange, autoResize])
 
@@ -1262,6 +1269,15 @@ export function ChatInputBar({
               >
                 <ALargeSmall size={14} /> Select all
               </button>
+            </div>,
+            document.body
+          )}
+
+          {/* Paste hint — shown when browser blocks clipboard access (Firefox) */}
+          {pasteHint && createPortal(
+            <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-[9999] px-4 py-2 rounded-lg bg-popover border border-border shadow-lg flex items-center gap-2 animate-in fade-in slide-in-from-bottom-2 duration-200">
+              <ClipboardPaste size={14} className="text-amber-400 shrink-0" />
+              <span className="text-xs text-foreground/80">Your browser blocked paste — use <kbd className="px-1.5 py-0.5 rounded bg-secondary text-foreground text-[11px] font-mono mx-0.5">Ctrl+V</kbd> instead</span>
             </div>,
             document.body
           )}
