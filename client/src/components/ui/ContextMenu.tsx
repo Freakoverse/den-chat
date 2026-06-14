@@ -94,6 +94,14 @@ export function ContextMenuProvider({ children }: { children: ReactNode }) {
   const [menu, setMenu] = useState<ContextMenuState>({ visible: false, x: 0, y: 0, items: [] })
   const menuRef = useRef<HTMLDivElement>(null)
   const animatingOut = useRef(false)
+  const [pasteHint, setPasteHint] = useState(false)
+  const pasteHintTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const showPasteHint = useCallback(() => {
+    if (pasteHintTimer.current) clearTimeout(pasteHintTimer.current)
+    setPasteHint(true)
+    pasteHintTimer.current = setTimeout(() => setPasteHint(false), 3000)
+  }, [])
 
   const close = useCallback(() => {
     if (animatingOut.current) return
@@ -200,7 +208,8 @@ export function ContextMenuProvider({ children }: { children: ReactNode }) {
               const text = await navigator.clipboard.readText()
               document.execCommand('insertText', false, text)
             } catch {
-              document.execCommand('paste')
+              // Clipboard blocked (Firefox) — show hint to use Ctrl+V
+              showPasteHint()
             }
             close()
           },
@@ -426,6 +435,14 @@ export function ContextMenuProvider({ children }: { children: ReactNode }) {
           </div>,
           document.body
         )}
+      {/* Paste hint — shown when browser blocks clipboard access (Firefox) */}
+      {pasteHint && createPortal(
+        <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-[9999] px-4 py-2 rounded-lg bg-popover border border-border shadow-lg flex items-center gap-2 animate-in fade-in slide-in-from-bottom-2 duration-200">
+          <ClipboardPaste size={14} className="text-amber-400 shrink-0" />
+          <span className="text-xs text-foreground/80">Your browser blocked paste — use <kbd className="px-1.5 py-0.5 rounded bg-secondary text-foreground text-[11px] font-mono mx-0.5">Ctrl+V</kbd> instead</span>
+        </div>,
+        document.body
+      )}
     </ContextMenuContext.Provider>
   )
 }
