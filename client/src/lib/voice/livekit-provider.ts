@@ -42,6 +42,8 @@ export class LiveKitProvider implements VoiceProvider {
   private audioElements = new Map<string, HTMLAudioElement>()
   private outputDeviceId: string = ''  // saved output device for new audio elements
   private lk: any = null
+  private _connectedAt: number = 0   // timestamp when 'connected' was first reported
+  private _disconnectTimer: ReturnType<typeof setTimeout> | null = null
 
   // E2EE
   private e2eeKey: CryptoKey | null = null
@@ -58,21 +60,19 @@ export class LiveKitProvider implements VoiceProvider {
     this.setConnectionState('connecting')
 
     try {
-      // Dynamic import via variable to bypass Vite static analysis
-      // (livekit-client is an optional peer dep, not bundled by default)
-      const lkModule = 'livekit-client'
-      this.lk = await import(/* @vite-ignore */ lkModule)
+      // Dynamic import — livekit-client must be installed as a dependency
+      this.lk = await import('livekit-client')
 
       // Generate an access token client-side
       // NOTE: In production this would use the livekit-server-sdk or jose
       // For now, we generate a simple JWT with the API key/secret
       const token = await this.generateToken(identity, roomName)
 
-      // Create room with forced relay
+      // Create room with forced relay (LiveKit provides built-in TURN)
       this.room = new this.lk.Room({
         adaptiveStream: true,
         dynacast: true,
-        // Force TURN relay for IP privacy
+        // Force TURN relay for IP privacy — LiveKit Cloud provides its own TURN server
         rtcConfig: {
           iceTransportPolicy: 'relay',
         },
@@ -111,6 +111,9 @@ export class LiveKitProvider implements VoiceProvider {
     }
 
     this.participants.clear()
+    // Clean up timers
+    if (this._disconnectTimer) { clearTimeout(this._disconnectTimer); this._disconnectTimer = null }
+    this._connectedAt = 0
     this.setConnectionState('disconnected')
   }
 
@@ -423,15 +426,42 @@ export class LiveKitProvider implements VoiceProvider {
     })
 
     this.room.on(RoomEvent.ConnectionStateChanged, (state: string) => {
-      const mapped: ConnectionState =
-        state === 'connected'
-          ? 'connected'
-          : state === 'reconnecting'
-            ? 'reconnecting'
-            : state === 'disconnected'
-              ? 'disconnected'
-              : 'failed'
-      this.setConnectionState(mapped)
+      if (state === 'connected') {
+        if (this._disconnectTimer) { clearTimeout(this._disconnectTimer); this._disconnectTimer = null }
+        if (!this._connectedAt) this._connectedAt = Date.now()
+        this.setConnectionState('connected')
+      } else if (state === 'reconnecting') {
+        if (this._disconnectTimer) { clearTimeout(this._disconnectTimer); this._disconnectTimer = null }
+        this.setConnectionState('reconnecting')
+      } else if (state === 'disconnected') {
+        // Grace period: within 5s of first connect, treat brief disconnects as reconnecting
+        // (prevents UI flicker during initial WebRTC negotiation)
+        const sinceConnected = Date.now() - this._connectedAt
+        if (this._connectedAt && sinceConnected < 5000) {
+          console.log('[LK Provider] Transient disconnect within grace period — treating as reconnecting')
+          this.setConnectionState('reconnecting')
+          return
+        }
+        // After grace period, use a 3s delay (like Cloudflare) before reporting disconnect
+        if (!this._disconnectTimer) {
+          this._disconnectTimer = setTimeout(() => {
+            this._disconnectTimer = null
+            // Only fire if still disconnected
+            if (this.room) {
+              const currentState = (this.room as any).state
+              if (currentState === 'disconnected') {
+                this.setConnectionState('disconnected')
+              }
+            } else {
+              this.setConnectionState('disconnected')
+            }
+          }, 3000)
+          // Show reconnecting in the meantime
+          this.setConnectionState('reconnecting')
+        }
+      } else {
+        this.setConnectionState('failed')
+      }
     })
 
     // DataChannel: receive data messages from other participants
@@ -463,8 +493,7 @@ export class LiveKitProvider implements VoiceProvider {
     roomName: string,
   ): Promise<string> {
     try {
-      const joseModule = 'jose'
-      const jose = await import(/* @vite-ignore */ joseModule)
+      const jose = await import('jose')
 
       const secret = new TextEncoder().encode(this.config.lkApiSecret)
       const now = Math.floor(Date.now() / 1000)

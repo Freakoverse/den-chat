@@ -116,6 +116,7 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
   const [lkUrl, setLkUrl] = useState('')
   const [lkApiKey, setLkApiKey] = useState('')
   const [lkApiSecret, setLkApiSecret] = useState('')
+
   const [voiceHostStatus, setVoiceHostStatus] = useState<'available' | 'paused'>('available')
   const [voicePublishing, setVoicePublishing] = useState(false)
   const [voiceError, setVoiceError] = useState<string | null>(null)
@@ -161,6 +162,7 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
       setCfAppId(saved.cfAppId); setCfApiToken(saved.cfApiToken)
       setCfTurnKeyId(saved.cfTurnKeyId); setCfTurnToken(saved.cfTurnToken)
       setLkUrl(saved.lkUrl); setLkApiKey(saved.lkApiKey); setLkApiSecret(saved.lkApiSecret)
+
       setVoiceHostStatus(saved.status)
     } else {
       // Check if there's an existing published host event for this scope
@@ -177,6 +179,7 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
           setCfAppId(cfg.cfAppId || ''); setCfApiToken(cfg.cfApiToken || '')
           setCfTurnKeyId(cfg.cfTurnKeyId || ''); setCfTurnToken(cfg.cfTurnToken || '')
           setLkUrl(cfg.lkUrl || ''); setLkApiKey(cfg.lkApiKey || ''); setLkApiSecret(cfg.lkApiSecret || '')
+
           setVoiceHostStatus(myHost.status)
         } else if (myHost.encryptedContent) {
           // Config not yet decrypted — attempt on-demand decryption
@@ -184,6 +187,7 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
           setVoiceHostStatus(myHost.status)
           setCfAppId(''); setCfApiToken(''); setCfTurnKeyId(''); setCfTurnToken('')
           setLkUrl(''); setLkApiKey(''); setLkApiSecret('')
+
             // Async: try to decrypt now that secrets may be available
             ;(async () => {
               try {
@@ -238,6 +242,7 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
                   setCfTurnKeyId(c.cfTurnKeyId || ''); setCfTurnToken(c.cfTurnToken || '')
                 } else {
                   setLkUrl(c.lkUrl || ''); setLkApiKey(c.lkApiKey || ''); setLkApiSecret(c.lkApiSecret || '')
+
                 }
               } catch { /* decryption failed — user can republish */ }
             })()

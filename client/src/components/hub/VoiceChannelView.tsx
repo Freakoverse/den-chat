@@ -226,6 +226,7 @@ export function VoiceChannelView() {
   const channel = hub?.channels.find((c) => c.channelId === activeChannelId)
   const isConnected = connectionState === 'connected' && currentChannelId === activeChannelId
   const isConnecting = connectionState === 'connecting' && currentChannelId === activeChannelId
+  const isReconnecting = connectionState === 'reconnecting' && currentChannelId === activeChannelId
   const isDisconnecting = connectionState === 'disconnecting'
 
   // Speaking detection — use voiceStore's gate-aware speaking state
@@ -687,6 +688,12 @@ export function VoiceChannelView() {
               Connecting...
             </span>
           )}
+          {isReconnecting && (
+            <span className="flex items-center gap-1 text-xs text-amber-400/80 ml-2 animate-pulse shrink-0">
+              <Wifi size={12} />
+              Reconnecting...
+            </span>
+          )}
           {isDisconnecting && (
             <span className="flex items-center gap-1 text-xs text-red-400/80 ml-2 animate-pulse shrink-0">
               <Loader2 size={12} className="animate-spin" />
@@ -767,7 +774,7 @@ export function VoiceChannelView() {
       {!voiceChatMode && (
         <div className="flex-1 flex flex-col items-center justify-center p-6 gap-6 overflow-y-auto">
           {/* Not connected state */}
-          {!isConnected && !isConnecting && !isDisconnecting && (
+          {!isConnected && !isConnecting && !isReconnecting && !isDisconnecting && (
             <div className="flex flex-col w-full items-center gap-6 max-w-sm text-center">
               <div className="w-20 h-20 rounded-full bg-emerald-500/10 flex items-center justify-center">
                 <Volume2 size={36} className="text-emerald-400" />
@@ -982,7 +989,7 @@ export function VoiceChannelView() {
           )}
 
           {/* Connected state — tile grid */}
-          {(isConnected || isConnecting || isDisconnecting) && (
+          {(isConnected || isConnecting || isReconnecting || isDisconnecting) && (
             <div className="flex-1 w-full flex flex-col gap-2 overflow-hidden min-h-0">
 
               {/* Security warning — using hub-wide host for a private channel */}

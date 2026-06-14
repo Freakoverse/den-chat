@@ -392,6 +392,7 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
   isE2EE: false,
   _screenWatching: new Set<string>(),
   _cameraHidden: new Set<string>(),
+  _joinInProgress: false,
 
   // ── Actions ──
 
@@ -495,6 +496,7 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
       isScreenSharing: false,
       localVideoTrack: null,
       localScreenTrack: null,
+      _joinInProgress: true,
     })
 
     // Create provider based on config type
@@ -609,6 +611,14 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
         })
       },
       onConnectionStateChanged: (state) => {
+        // During the join flow, suppress backward state transitions from the SDK.
+        // The SDK may fire rapid connected→disconnected→connected events during
+        // initial negotiation, which causes the UI to flash. Only allow 'connected'
+        // through; the final state is set explicitly after mic setup completes.
+        if ((get() as any)._joinInProgress && state !== 'connected') {
+          console.log(`[VoiceStore] Suppressing '${state}' during join flow`)
+          return
+        }
         set({ connectionState: state })
       },
       onActiveSpeakerChanged: (ids) => {
@@ -804,6 +814,7 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
         currentHubDTag: null,
         currentHostPubkey: null,
         isE2EE: false,
+        _joinInProgress: false,
       })
       throw err
     }
@@ -1112,6 +1123,7 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
       myHeading: 0,
       mySphereRadius: SPATIAL_DEFAULTS.DEFAULT_SPHERE_RADIUS,
       spatialPanelOpen: false,
+      _joinInProgress: false,
     })
 
     // Play join sound for local user
