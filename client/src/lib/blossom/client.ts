@@ -185,14 +185,27 @@ function uploadToServerWithProgress(
     let startTime = Date.now()
     let lastLoaded = 0
     let responseTimeout: ReturnType<typeof setTimeout> | null = null
+    let connectTimeout: ReturnType<typeof setTimeout> | null = null
+    let stallTimeout: ReturnType<typeof setTimeout> | null = null
+    let hasReceivedProgress = false
 
-    const clearResponseTimeout = () => {
+    const clearAllTimeouts = () => {
       if (responseTimeout) { clearTimeout(responseTimeout); responseTimeout = null }
+      if (connectTimeout) { clearTimeout(connectTimeout); connectTimeout = null }
+      if (stallTimeout) { clearTimeout(stallTimeout); stallTimeout = null }
+    }
+
+    const abortAndResolve = (reason: string) => {
+      clearAllTimeouts()
+      console.warn(`Blossom: ${reason} for ${serverUrl}`)
+      signal?.removeEventListener('abort', handleAbort)
+      try { xhr.abort() } catch { /* ignore */ }
+      resolve(false)
     }
 
     // Handle abort signal
     const handleAbort = () => {
-      clearResponseTimeout()
+      clearAllTimeouts()
       try { xhr.abort() } catch { /* ignore */ }
       resolve(false)
     }
@@ -201,8 +214,29 @@ function uploadToServerWithProgress(
       signal.addEventListener('abort', handleAbort, { once: true })
     }
 
+    // 5s initial connection timeout — aborts if no progress received after send
+    connectTimeout = setTimeout(() => {
+      if (!hasReceivedProgress) {
+        abortAndResolve('connection timed out (no response within 5s)')
+      }
+    }, 5_000)
+
+    // Reset stall timer on each progress event
+    const resetStallTimeout = () => {
+      if (stallTimeout) clearTimeout(stallTimeout)
+      stallTimeout = setTimeout(() => {
+        abortAndResolve('upload stalled (no progress for 10s)')
+      }, 10_000)
+    }
+
     xhr.upload.onprogress = (event) => {
       if (event.lengthComputable) {
+        // Clear initial connection timeout on first progress
+        if (!hasReceivedProgress) {
+          hasReceivedProgress = true
+          if (connectTimeout) { clearTimeout(connectTimeout); connectTimeout = null }
+        }
+
         const now = Date.now()
         const elapsed = (now - startTime) / 1000 // seconds
         const speed = elapsed > 0 ? event.loaded / elapsed : 0
@@ -221,30 +255,32 @@ function uploadToServerWithProgress(
 
         // Start 15s response timeout once all bytes are uploaded
         if (event.loaded >= event.total && !responseTimeout) {
+          // All bytes sent — clear stall timer, start response timer
+          if (stallTimeout) { clearTimeout(stallTimeout); stallTimeout = null }
           responseTimeout = setTimeout(() => {
-            console.warn(`Blossom: server ${serverUrl} did not respond within 15s after upload completed`)
-            signal?.removeEventListener('abort', handleAbort)
-            try { xhr.abort() } catch { /* ignore */ }
-            resolve(false)
+            abortAndResolve('server did not respond within 15s after upload completed')
           }, 15_000)
+        } else {
+          // Mid-upload — reset 10s stall timer
+          resetStallTimeout()
         }
       }
     }
 
     xhr.onerror = () => {
-      clearResponseTimeout()
+      clearAllTimeouts()
       signal?.removeEventListener('abort', handleAbort)
       resolve(false)
     }
 
     xhr.onload = () => {
-      clearResponseTimeout()
+      clearAllTimeouts()
       signal?.removeEventListener('abort', handleAbort)
       resolve(xhr.status >= 200 && xhr.status < 300)
     }
 
     xhr.onabort = () => {
-      clearResponseTimeout()
+      clearAllTimeouts()
       signal?.removeEventListener('abort', handleAbort)
       resolve(false)
     }

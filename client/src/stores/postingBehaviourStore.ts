@@ -8,7 +8,7 @@
  */
 
 import { create } from 'zustand'
-import { getRelays } from '@/lib/nostr/relay-pool'
+import { getRelays, getRelayList } from '@/lib/nostr/relay-pool'
 import { useUserListsStore } from '@/stores/userListsStore'
 import { blossomServers } from '@/lib/blossom'
 
@@ -80,20 +80,27 @@ export function getPublishRelays(hubRelays?: string[]): string[] {
   const limit = state.limitRelaysPerList ? 3 : Infinity
   const result = new Set<string>()
 
-  // Client relays (from relay-pool, which reads localStorage)
+  // Build exclusion set: relays the user explicitly disabled in client settings
+  const disabledRelays = new Set(
+    getRelayList().filter((r) => !r.enabled).map((r) => r.url.replace(/\/+$/, ''))
+  )
+
+  // Client relays (from relay-pool, which reads localStorage — already filtered to enabled)
   if (state.postToClientRelays) {
     pickRandom(getRelays(), limit).forEach((r) => result.add(r))
   }
 
-  // User relays (NIP-65)
+  // User relays (NIP-65) — exclude any the user disabled in client settings
   if (state.postToUserRelays) {
     const userRelays = useUserListsStore.getState().userRelays
+      .filter((r) => !disabledRelays.has(r.replace(/\/+$/, '')))
     pickRandom(userRelays, limit).forEach((r) => result.add(r))
   }
 
-  // Hub relays
+  // Hub relays — exclude any the user disabled in client settings
   if (state.postToHubRelays && hubRelays && hubRelays.length > 0) {
-    pickRandom(hubRelays, limit).forEach((r) => result.add(r))
+    const filtered = hubRelays.filter((r) => !disabledRelays.has(r.replace(/\/+$/, '')))
+    pickRandom(filtered, limit).forEach((r) => result.add(r))
   }
 
   return Array.from(result)
@@ -110,23 +117,30 @@ export function getUploadBlossoms(hubBlossoms?: string[]): string[] {
   const limit = state.limitBlossomsPerList ? 3 : Infinity
   const result = new Set<string>()
 
-  // Client blossom servers — respects the same toggle as client relays
+  // Build exclusion set: blossom servers the user explicitly disabled in client settings
+  const disabledBlossoms = new Set(
+    blossomServers.getList().filter((s) => !s.enabled).map((s) => s.url.replace(/\/+$/, ''))
+  )
+
+  // Client blossom servers — respects the same toggle as client relays (already filtered to enabled)
   if (state.postToClientRelays) {
     const clientServers = blossomServers.getServers()
     pickRandom(clientServers, limit).forEach((s) => result.add(s))
   }
 
-  // User blossom servers — respects the same toggle as user relays
+  // User blossom servers — respects the same toggle as user relays, exclude disabled client servers
   if (state.postToUserRelays) {
     const userBlossoms = useUserListsStore.getState().userBlossoms
+      .filter((s) => !disabledBlossoms.has(s.replace(/\/+$/, '')))
     if (userBlossoms.length > 0) {
       pickRandom(userBlossoms, limit).forEach((s) => result.add(s))
     }
   }
 
-  // Hub blossom servers — respects the same toggle as hub relays
+  // Hub blossom servers — respects the same toggle as hub relays, exclude disabled client servers
   if (state.postToHubRelays && hubBlossoms && hubBlossoms.length > 0) {
-    pickRandom(hubBlossoms, limit).forEach((s) => result.add(s))
+    const filtered = hubBlossoms.filter((s) => !disabledBlossoms.has(s.replace(/\/+$/, '')))
+    pickRandom(filtered, limit).forEach((s) => result.add(s))
   }
 
   return Array.from(result)
