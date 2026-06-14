@@ -5110,13 +5110,9 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null)
 
   // Use native listener so preventDefault() fires before the browser shows its own menu.
-  // Firefox fires proper paste events from its native context menu (unlike Chrome)
-  // and its Clipboard API requires an extra permission prompt — so skip the custom
-  // menu on Firefox and let its native context menu handle paste.
   useEffect(() => {
     const ta = textareaRef.current
     if (!ta) return
-    if (/firefox/i.test(navigator.userAgent)) return
     const onCtx = (e: MouseEvent) => {
       e.preventDefault()
       e.stopPropagation()
