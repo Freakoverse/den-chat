@@ -1,5 +1,5 @@
 import { useHubStore } from '@/stores/hubStore'
-import { getDraft, setDraft, clearDraft, hubDraftKey, hubThreadDraftKey } from '@/stores/draftStore'
+import { getDraft, setDraft, clearDraft, hubDraftKey, hubThreadDraftKey, getFileDraft, setFileDraft, clearFileDraft } from '@/stores/draftStore'
 import { useDnnStore } from '@/stores/dnnStore'
 import { formatDnnId } from '@/lib/dnn/formatDnnId'
 import { useMessageStore } from '@/stores/messageStore'
@@ -17,7 +17,7 @@ import { useDecryptedMedia, getDecryptedBlobUrl } from '@/hooks/useDecryptedMedi
 import { UserProfileModal } from '@/components/hub/UserProfileModal'
 import { HubSettingsModal } from '@/components/hub/HubSettingsModal'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
-import { Hash, Megaphone, Users, Pin, PinOff, Bell, Search, Send, Plus, Smile, Sticker, Check, X, RotateCcw, Pencil, Reply, MoreVertical, Copy, MessageSquarePlus, Trash2, Loader2, Zap, Code, Bold, Italic, Strikethrough, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, Link, CodeSquare, ALargeSmall, Clipboard, ClipboardCheck, Upload, FileIcon, Download, Image, Paperclip, AlertTriangle, AlertCircle, Eye, EyeOff, ShieldBan, ShieldAlert, ShieldOff, Lock, LockOpen, Settings, ArrowDown, ArrowLeft, ImagePlay, Star, Vote, Clock, Flag, Shield, Globe, Radio, History, BadgeCheck, Mic, WifiOff } from 'lucide-react'
+import { Hash, Megaphone, Users, Pin, PinOff, Bell, Search, Send, Plus, Smile, Sticker, Check, X, RotateCcw, Pencil, Reply, MoreVertical, Copy, MessageSquarePlus, Trash2, Loader2, Zap, Code, Bold, Italic, Strikethrough, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, Link, CodeSquare, ALargeSmall, Clipboard, ClipboardCheck, ClipboardPaste, Upload, FileIcon, Download, Image, Paperclip, AlertTriangle, AlertCircle, Eye, EyeOff, ShieldBan, ShieldAlert, ShieldOff, Lock, LockOpen, Settings, ArrowDown, ArrowLeft, ImagePlay, Star, Vote, Clock, Flag, Shield, Globe, Radio, History, BadgeCheck, Mic, WifiOff, Scissors, Type } from 'lucide-react'
 import { useState, useEffect, useRef, useCallback, memo, useMemo, Fragment } from 'react'
 import { createPortal } from 'react-dom'
 import { Button } from '@/components/ui/button'
@@ -4417,7 +4417,14 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
   const timestampButtonRef = useRef<HTMLButtonElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const uploadAbortRef = useRef<AbortController | null>(null)
-  const knownHashesRef = useRef<Set<string>>(new Set())
+  const knownHashesRef = useRef<Set<string>>((() => {
+    // Pre-populate known hashes from restored draft files
+    const s = new Set<string>()
+    for (const f of getFileDraft(draftKey)) {
+      if (f.hash) s.add(f.hash)
+    }
+    return s
+  })())
 
   type PendingFile = {
     id: string
@@ -4434,7 +4441,35 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
       originalHash: string
     }
   }
-  const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([])
+  const [pendingFiles, setPendingFiles] = useState<PendingFile[]>(() => getFileDraft(draftKey) as unknown as PendingFile[])
+
+  // ─── File Draft Persistence ───
+  const pendingFilesRef = useRef(pendingFiles)
+  pendingFilesRef.current = pendingFiles
+
+  const _prevFileDraftKey = useRef(draftKey)
+  useEffect(() => {
+    if (_prevFileDraftKey.current !== draftKey) {
+      // Switching context — save old files, load new
+      if (_prevFileDraftKey.current) setFileDraft(_prevFileDraftKey.current, pendingFilesRef.current as any)
+      _prevFileDraftKey.current = draftKey
+      const restored = getFileDraft(draftKey) as unknown as PendingFile[]
+      setPendingFiles(restored)
+      // Update known hashes
+      knownHashesRef.current.clear()
+      for (const f of restored) {
+        if (f.hash) knownHashesRef.current.add(f.hash)
+      }
+    }
+  }, [draftKey])
+
+  // Save files to draft store on unmount
+  useEffect(() => {
+    return () => {
+      setFileDraft(draftKey, pendingFilesRef.current as any)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftKey])
   const [isUploading, setIsUploading] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
   const [fileSizeWarning, setFileSizeWarning] = useState<{ names: string[]; limitMb: number } | null>(null)
@@ -4903,6 +4938,7 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
     setPendingStickers([])
     setPendingGifs([])
     knownHashesRef.current.clear()
+    clearFileDraft(draftKey)
     if (textareaRef.current) textareaRef.current.style.height = 'auto'
     setIsNsfw(false)
     onCancelReply()
@@ -5041,6 +5077,173 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
     }
   }
 
+  // ─── Paste-to-attach: document-level listener for Ctrl+V ───
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      const cd = e.clipboardData
+      if (!cd) return
+      const files: File[] = []
+      if (cd.items) {
+        for (let i = 0; i < cd.items.length; i++) {
+          const item = cd.items[i]
+          if (item.kind === 'file') {
+            const file = item.getAsFile()
+            if (file) files.push(file)
+          }
+        }
+      }
+      if (files.length === 0 && cd.files && cd.files.length > 0) {
+        for (let i = 0; i < cd.files.length; i++) {
+          files.push(cd.files[i])
+        }
+      }
+      if (files.length > 0) {
+        e.preventDefault()
+        addFiles(files)
+      }
+    }
+    document.addEventListener('paste', onPaste)
+    return () => document.removeEventListener('paste', onPaste)
+  }, [addFiles])
+
+  // ─── Custom context menu for textarea (right-click → Paste with file support) ───
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null)
+
+  // Use native listener so preventDefault() fires before the browser shows its own menu
+  useEffect(() => {
+    const ta = textareaRef.current
+    if (!ta) return
+    const onCtx = (e: MouseEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      setCtxMenu({ x: e.clientX, y: e.clientY })
+    }
+    ta.addEventListener('contextmenu', onCtx)
+    return () => ta.removeEventListener('contextmenu', onCtx)
+  }, [])
+
+  // Close context menu on click-away / scroll / Escape
+  useEffect(() => {
+    if (!ctxMenu) return
+    const close = () => setCtxMenu(null)
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close() }
+    window.addEventListener('mousedown', close)
+    window.addEventListener('scroll', close, true)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('mousedown', close)
+      window.removeEventListener('scroll', close, true)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [ctxMenu])
+
+  const ctxPaste = useCallback(async () => {
+    setCtxMenu(null)
+    try {
+      // Use Clipboard API to read files/images
+      if (navigator.clipboard && typeof navigator.clipboard.read === 'function') {
+        const items = await navigator.clipboard.read()
+        const files: File[] = []
+        for (const item of items) {
+          for (const type of item.types) {
+            if (type.startsWith('image/')) {
+              const blob = await item.getType(type)
+              const ext = type.split('/')[1] || 'png'
+              const file = new File([blob], `image.${ext}`, { type })
+              files.push(file)
+            }
+          }
+        }
+        if (files.length > 0) {
+          addFiles(files)
+          return
+        }
+        // No images — try pasting text
+        const text = await navigator.clipboard.readText()
+        if (text && textareaRef.current) {
+          const ta = textareaRef.current
+          const start = ta.selectionStart
+          const end = ta.selectionEnd
+          const before = message.slice(0, start)
+          const after = message.slice(end)
+          setMessage(before + text + after)
+          requestAnimationFrame(() => {
+            ta.selectionStart = ta.selectionEnd = start + text.length
+            autoResize(ta)
+          })
+        }
+      }
+    } catch {
+      // Fallback: try text-only paste
+      try {
+        const text = await navigator.clipboard.readText()
+        if (text && textareaRef.current) {
+          const ta = textareaRef.current
+          const start = ta.selectionStart
+          const end = ta.selectionEnd
+          const before = message.slice(0, start)
+          const after = message.slice(end)
+          setMessage(before + text + after)
+          requestAnimationFrame(() => {
+            ta.selectionStart = ta.selectionEnd = start + text.length
+            autoResize(ta)
+          })
+        }
+      } catch { /* clipboard permission denied */ }
+    }
+  }, [addFiles, message, setMessage, autoResize])
+
+  const ctxPasteTextOnly = useCallback(async () => {
+    setCtxMenu(null)
+    try {
+      const text = await navigator.clipboard.readText()
+      if (text && textareaRef.current) {
+        const ta = textareaRef.current
+        const start = ta.selectionStart
+        const end = ta.selectionEnd
+        const before = message.slice(0, start)
+        const after = message.slice(end)
+        setMessage(before + text + after)
+        requestAnimationFrame(() => {
+          ta.selectionStart = ta.selectionEnd = start + text.length
+          autoResize(ta)
+        })
+      }
+    } catch { /* clipboard permission denied */ }
+  }, [message, setMessage, autoResize])
+
+  const ctxCut = useCallback(() => {
+    setCtxMenu(null)
+    const ta = textareaRef.current
+    if (!ta) return
+    const start = ta.selectionStart
+    const end = ta.selectionEnd
+    if (start === end) return
+    const selected = message.slice(start, end)
+    navigator.clipboard.writeText(selected)
+    setMessage(message.slice(0, start) + message.slice(end))
+    requestAnimationFrame(() => {
+      ta.selectionStart = ta.selectionEnd = start
+      autoResize(ta)
+    })
+  }, [message, setMessage, autoResize])
+
+  const ctxCopy = useCallback(() => {
+    setCtxMenu(null)
+    const ta = textareaRef.current
+    if (!ta) return
+    const selected = message.slice(ta.selectionStart, ta.selectionEnd)
+    if (selected) navigator.clipboard.writeText(selected)
+  }, [message])
+
+  const ctxSelectAll = useCallback(() => {
+    setCtxMenu(null)
+    const ta = textareaRef.current
+    if (!ta) return
+    ta.focus()
+    ta.selectionStart = 0
+    ta.selectionEnd = message.length
+  }, [message])
 
   // ─── Drag & Drop (scoped to dragContainerRef) ───
 
@@ -5657,6 +5860,61 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
             style={{ maxHeight: '500px', overflowY: 'auto' }}
             rows={1}
           />
+
+          {/* Custom context menu (right-click) */}
+          {ctxMenu && createPortal(
+            <div
+              ref={(el) => {
+                if (!el) return
+                const rect = el.getBoundingClientRect()
+                let x = ctxMenu.x
+                let y = ctxMenu.y
+                if (x + rect.width > window.innerWidth) x = window.innerWidth - rect.width - 4
+                if (x < 4) x = 4
+                if (y + rect.height > window.innerHeight) y = ctxMenu.y - rect.height
+                if (y < 4) y = 4
+                el.style.left = `${x}px`
+                el.style.top = `${y}px`
+                el.style.opacity = '1'
+              }}
+              className="fixed z-[9999] w-48 bg-popover border border-border rounded-md shadow-lg p-1 flex flex-col gap-1"
+              style={{ left: -9999, top: -9999, opacity: 0 }}
+              onMouseDown={(e) => e.stopPropagation()}
+            >
+              <button
+                onMouseDown={(e) => { e.stopPropagation(); ctxCut() }}
+                className="flex items-center gap-2 w-full px-3 py-1.5 text-sm text-foreground/80 hover:bg-accent/50 cursor-pointer transition-colors rounded-md"
+              >
+                <Scissors size={14} /> Cut
+              </button>
+              <button
+                onMouseDown={(e) => { e.stopPropagation(); ctxCopy() }}
+                className="flex items-center gap-2 w-full px-3 py-1.5 text-sm text-foreground/80 hover:bg-accent/50 cursor-pointer transition-colors rounded-md"
+              >
+                <Copy size={14} /> Copy
+              </button>
+              <button
+                onMouseDown={(e) => { e.stopPropagation(); ctxPaste() }}
+                className="flex items-center gap-2 w-full px-3 py-1.5 text-sm text-foreground/80 hover:bg-accent/50 cursor-pointer transition-colors rounded-md"
+              >
+                <ClipboardPaste size={14} /> Paste
+              </button>
+              <button
+                onMouseDown={(e) => { e.stopPropagation(); ctxPasteTextOnly() }}
+                className="flex items-center gap-2 w-full px-3 py-1.5 text-sm text-foreground/80 hover:bg-accent/50 cursor-pointer transition-colors rounded-md"
+              >
+                <Type size={14} /> Paste as text
+              </button>
+              <div className="h-px bg-border mx-2" />
+              <button
+                onMouseDown={(e) => { e.stopPropagation(); ctxSelectAll() }}
+                className="flex items-center gap-2 w-full px-3 py-1.5 text-sm text-foreground/80 hover:bg-accent/50 cursor-pointer transition-colors rounded-md"
+              >
+                <ALargeSmall size={14} /> Select all
+              </button>
+            </div>,
+            document.body
+          )}
 
           {/* Character counter */}
           {showCharCounter && (

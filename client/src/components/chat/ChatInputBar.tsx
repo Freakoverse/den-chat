@@ -14,12 +14,13 @@
 
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import { createPortal } from 'react-dom'
+import { getFileDraft, setFileDraft, clearFileDraft } from '@/stores/draftStore'
 import {
   Send, Smile, Sticker, Bold, Italic, Strikethrough,
   Heading1, Heading2, Heading3, Heading4, Heading5, Heading6,
   List, ListOrdered, Link, Code, CodeSquare, ALargeSmall, Eye,
   Plus, Upload, Loader2, FileIcon, X, AlertTriangle, ImagePlay, ShieldOff,
-  Clock, Mic, Lock, LockOpen,
+  Clock, Mic, Lock, LockOpen, Scissors, ClipboardPaste, Copy, Type,
 } from 'lucide-react'
 import { EmojiPickerPopover } from '@/components/chat/EmojiPickerPopover'
 import { StickerPickerPopover } from '@/components/chat/StickerPickerPopover'
@@ -130,6 +131,13 @@ interface ChatInputBarProps {
    * Used by NIP-17 DMs where encryption is mandatory.
    */
   forceEncrypt?: boolean
+  /**
+   * Key used to persist pending file attachments across navigation.
+   * Should match the text draft key (e.g. dm17:<pubkey>, hub:<dtag>:<channel>).
+   * When provided, files are saved to an in-memory store on unmount and
+   * restored on mount so they survive switching conversations.
+   */
+  draftKey?: string
 }
 
 /* ─── Helpers ─── */
@@ -174,6 +182,7 @@ export function ChatInputBar({
   hideUploadWarning = false,
   encryptBeforeUpload = false,
   forceEncrypt = false,
+  draftKey,
 }: ChatInputBarProps) {
   const [showEmoji, setShowEmoji] = useState(false)
   const [showSticker, setShowSticker] = useState(false)
@@ -191,12 +200,50 @@ export function ChatInputBar({
 
   const textareaRef = externalTextareaRef || internalTextareaRef
 
-  // File upload state
-  const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([])
+  // File upload state — initialise from draft store if draftKey provided
+  const [pendingFiles, setPendingFiles] = useState<PendingFile[]>(() => draftKey ? getFileDraft(draftKey) : [])
   const [isUploading, setIsUploading] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
   const [fileSizeWarning, setFileSizeWarning] = useState<{ names: string[]; limitMb: number } | null>(null)
-  const knownHashesRef = useRef<Set<string>>(new Set())
+  const knownHashesRef = useRef<Set<string>>((() => {
+    // Pre-populate known hashes from restored draft files
+    const s = new Set<string>()
+    if (draftKey) {
+      for (const f of getFileDraft(draftKey)) {
+        if (f.hash) s.add(f.hash)
+      }
+    }
+    return s
+  })())
+
+  // ─── File Draft Persistence ───
+  // Save pending files to in-memory draft store whenever draftKey changes or on unmount
+  const pendingFilesRef = useRef(pendingFiles)
+  pendingFilesRef.current = pendingFiles
+
+  const _prevDraftKey = useRef(draftKey)
+  useEffect(() => {
+    if (_prevDraftKey.current !== draftKey) {
+      // Switching context — save old files, load new
+      if (_prevDraftKey.current) setFileDraft(_prevDraftKey.current, pendingFilesRef.current)
+      _prevDraftKey.current = draftKey
+      const restored = draftKey ? getFileDraft(draftKey) : []
+      setPendingFiles(restored)
+      // Update known hashes
+      knownHashesRef.current.clear()
+      for (const f of restored) {
+        if (f.hash) knownHashesRef.current.add(f.hash)
+      }
+    }
+  }, [draftKey])
+
+  // Save files to draft store on unmount
+  useEffect(() => {
+    return () => {
+      if (draftKey) setFileDraft(draftKey, pendingFilesRef.current)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftKey])
   // Encryption toggle — defaults to encryptBeforeUpload prop, user can toggle
   const [encryptUploads, setEncryptUploads] = useState(() => {
     if (forceEncrypt) return true
@@ -462,8 +509,9 @@ export function ChatInputBar({
       pendingFiles.forEach((f) => { if (f.previewUrl) URL.revokeObjectURL(f.previewUrl) })
       setPendingFiles([])
       knownHashesRef.current.clear()
+      if (draftKey) clearFileDraft(draftKey)
     }
-  }, [onSend, pendingFiles])
+  }, [onSend, pendingFiles, draftKey])
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     // :emoji: autocomplete keyboard handling
@@ -515,6 +563,174 @@ export function ChatInputBar({
       if (showSend && !isOverLimit) handleSend()
     }
   }
+
+  // ─── Paste-to-attach: document-level listener ───
+  // Listen on document so right-click→Paste works even after the context
+  // menu steals focus away from the textarea.  Only file pastes are
+  // intercepted — plain-text pastes flow through normally.
+  useEffect(() => {
+    if (!enableFileUpload) return
+    const onPaste = (e: ClipboardEvent) => {
+      const cd = e.clipboardData
+      if (!cd) return
+      const files: File[] = []
+      if (cd.items) {
+        for (let i = 0; i < cd.items.length; i++) {
+          const item = cd.items[i]
+          if (item.kind === 'file') {
+            const file = item.getAsFile()
+            if (file) files.push(file)
+          }
+        }
+      }
+      if (files.length === 0 && cd.files && cd.files.length > 0) {
+        for (let i = 0; i < cd.files.length; i++) {
+          files.push(cd.files[i])
+        }
+      }
+      if (files.length > 0) {
+        e.preventDefault()
+        addFiles(files)
+      }
+    }
+    document.addEventListener('paste', onPaste)
+    return () => document.removeEventListener('paste', onPaste)
+  }, [enableFileUpload, addFiles])
+
+  // ─── Custom context menu for textarea (right-click → Paste with file support) ───
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null)
+
+  // Use native listener so preventDefault() fires before the browser shows its own menu
+  useEffect(() => {
+    const ta = textareaRef.current
+    if (!enableFileUpload || !ta) return
+    const onCtx = (e: MouseEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      setCtxMenu({ x: e.clientX, y: e.clientY })
+    }
+    ta.addEventListener('contextmenu', onCtx)
+    return () => ta.removeEventListener('contextmenu', onCtx)
+  }, [enableFileUpload])
+
+  useEffect(() => {
+    if (!ctxMenu) return
+    const close = () => setCtxMenu(null)
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close() }
+    window.addEventListener('mousedown', close)
+    window.addEventListener('scroll', close, true)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('mousedown', close)
+      window.removeEventListener('scroll', close, true)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [ctxMenu])
+
+  const ctxPaste = useCallback(async () => {
+    setCtxMenu(null)
+    try {
+      if (navigator.clipboard && typeof navigator.clipboard.read === 'function') {
+        const items = await navigator.clipboard.read()
+        const files: File[] = []
+        for (const item of items) {
+          for (const type of item.types) {
+            if (type.startsWith('image/')) {
+              const blob = await item.getType(type)
+              const ext = type.split('/')[1] || 'png'
+              const file = new File([blob], `image.${ext}`, { type })
+              files.push(file)
+            }
+          }
+        }
+        if (files.length > 0) {
+          addFiles(files)
+          return
+        }
+        const text = await navigator.clipboard.readText()
+        if (text && textareaRef.current) {
+          const ta = textareaRef.current
+          const start = ta.selectionStart
+          const end = ta.selectionEnd
+          const before = message.slice(0, start)
+          const after = message.slice(end)
+          onMessageChange(before + text + after)
+          requestAnimationFrame(() => {
+            ta.selectionStart = ta.selectionEnd = start + text.length
+            autoResize(ta)
+          })
+        }
+      }
+    } catch {
+      try {
+        const text = await navigator.clipboard.readText()
+        if (text && textareaRef.current) {
+          const ta = textareaRef.current
+          const start = ta.selectionStart
+          const end = ta.selectionEnd
+          const before = message.slice(0, start)
+          const after = message.slice(end)
+          onMessageChange(before + text + after)
+          requestAnimationFrame(() => {
+            ta.selectionStart = ta.selectionEnd = start + text.length
+            autoResize(ta)
+          })
+        }
+      } catch { /* clipboard permission denied */ }
+    }
+  }, [addFiles, message, onMessageChange, autoResize])
+
+  const ctxPasteTextOnly = useCallback(async () => {
+    setCtxMenu(null)
+    try {
+      const text = await navigator.clipboard.readText()
+      if (text && textareaRef.current) {
+        const ta = textareaRef.current
+        const start = ta.selectionStart
+        const end = ta.selectionEnd
+        const before = message.slice(0, start)
+        const after = message.slice(end)
+        onMessageChange(before + text + after)
+        requestAnimationFrame(() => {
+          ta.selectionStart = ta.selectionEnd = start + text.length
+          autoResize(ta)
+        })
+      }
+    } catch { /* clipboard permission denied */ }
+  }, [message, onMessageChange, autoResize])
+
+  const ctxCut = useCallback(() => {
+    setCtxMenu(null)
+    const ta = textareaRef.current
+    if (!ta) return
+    const start = ta.selectionStart
+    const end = ta.selectionEnd
+    if (start === end) return
+    const selected = message.slice(start, end)
+    navigator.clipboard.writeText(selected)
+    onMessageChange(message.slice(0, start) + message.slice(end))
+    requestAnimationFrame(() => {
+      ta.selectionStart = ta.selectionEnd = start
+      autoResize(ta)
+    })
+  }, [message, onMessageChange, autoResize])
+
+  const ctxCopy = useCallback(() => {
+    setCtxMenu(null)
+    const ta = textareaRef.current
+    if (!ta) return
+    const selected = message.slice(ta.selectionStart, ta.selectionEnd)
+    if (selected) navigator.clipboard.writeText(selected)
+  }, [message])
+
+  const ctxSelectAll = useCallback(() => {
+    setCtxMenu(null)
+    const ta = textareaRef.current
+    if (!ta) return
+    ta.focus()
+    ta.selectionStart = 0
+    ta.selectionEnd = message.length
+  }, [message])
 
   // ─── Drag & Drop (scoped to dragContainerRef) ───
 
@@ -973,6 +1189,61 @@ export function ChatInputBar({
             style={{ maxHeight: '500px', overflowY: 'auto' }}
             rows={1}
           />
+
+          {/* Custom context menu (right-click) */}
+          {ctxMenu && createPortal(
+            <div
+              ref={(el) => {
+                if (!el) return
+                const rect = el.getBoundingClientRect()
+                let x = ctxMenu.x
+                let y = ctxMenu.y
+                if (x + rect.width > window.innerWidth) x = window.innerWidth - rect.width - 4
+                if (x < 4) x = 4
+                if (y + rect.height > window.innerHeight) y = ctxMenu.y - rect.height
+                if (y < 4) y = 4
+                el.style.left = `${x}px`
+                el.style.top = `${y}px`
+                el.style.opacity = '1'
+              }}
+              className="fixed z-[9999] w-48 bg-popover border border-border rounded-md shadow-lg p-1 flex flex-col gap-1"
+              style={{ left: -9999, top: -9999, opacity: 0 }}
+              onMouseDown={(e) => e.stopPropagation()}
+            >
+              <button
+                onMouseDown={(e) => { e.stopPropagation(); ctxCut() }}
+                className="flex items-center gap-2 w-full px-3 py-1.5 text-sm text-foreground/80 hover:bg-accent/50 cursor-pointer transition-colors rounded-md"
+              >
+                <Scissors size={14} /> Cut
+              </button>
+              <button
+                onMouseDown={(e) => { e.stopPropagation(); ctxCopy() }}
+                className="flex items-center gap-2 w-full px-3 py-1.5 text-sm text-foreground/80 hover:bg-accent/50 cursor-pointer transition-colors rounded-md"
+              >
+                <Copy size={14} /> Copy
+              </button>
+              <button
+                onMouseDown={(e) => { e.stopPropagation(); ctxPaste() }}
+                className="flex items-center gap-2 w-full px-3 py-1.5 text-sm text-foreground/80 hover:bg-accent/50 cursor-pointer transition-colors rounded-md"
+              >
+                <ClipboardPaste size={14} /> Paste
+              </button>
+              <button
+                onMouseDown={(e) => { e.stopPropagation(); ctxPasteTextOnly() }}
+                className="flex items-center gap-2 w-full px-3 py-1.5 text-sm text-foreground/80 hover:bg-accent/50 cursor-pointer transition-colors rounded-md"
+              >
+                <Type size={14} /> Paste as text
+              </button>
+              <div className="h-px bg-border mx-2" />
+              <button
+                onMouseDown={(e) => { e.stopPropagation(); ctxSelectAll() }}
+                className="flex items-center gap-2 w-full px-3 py-1.5 text-sm text-foreground/80 hover:bg-accent/50 cursor-pointer transition-colors rounded-md"
+              >
+                <ALargeSmall size={14} /> Select all
+              </button>
+            </div>,
+            document.body
+          )}
 
           {/* Character counter */}
           {showCharCounter && (

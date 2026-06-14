@@ -150,3 +150,32 @@ function _evictIfNeeded(store: Record<string, DraftValue>) {
     delete store[keys[i]]
   }
 }
+
+// ══════════════════════════════════════════════════════════════════════
+//  FILE ATTACHMENT DRAFTS — In-memory only (File objects can't be
+//  serialised to localStorage). Persist during the session across
+//  navigation but NOT across page reloads.
+// ══════════════════════════════════════════════════════════════════════
+
+import type { PendingFile } from '@/components/chat/ChatInputBar'
+
+const _fileDrafts = new Map<string, PendingFile[]>()
+
+/** Retrieve pending file attachments for a draft key. */
+export function getFileDraft(key: string): PendingFile[] {
+  return _fileDrafts.get(key) || []
+}
+
+/** Save pending file attachments for a draft key. Clears the entry when the array is empty. */
+export function setFileDraft(key: string, files: PendingFile[]) {
+  if (files.length === 0) {
+    _fileDrafts.delete(key)
+  } else {
+    _fileDrafts.set(key, files)
+  }
+}
+
+/** Clear file attachment draft for a key. */
+export function clearFileDraft(key: string) {
+  _fileDrafts.delete(key)
+}
