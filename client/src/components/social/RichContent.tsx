@@ -375,8 +375,8 @@ function MediaImage({ src, className, style, onClick }: {
   const [error, setError] = useState(false)
   const [overridden, setOverridden] = useState(false)
 
-  // Reset states when src changes
-  useEffect(() => { setLoaded(false); setError(false); setOverridden(false) }, [src])
+  // Reset states when src changes or blossom fails over to a new server
+  useEffect(() => { setLoaded(false); setError(false); setOverridden(false) }, [src, blossom.src])
 
   // Size limit exceeded
   if (blossom.sizeExceeded && !overridden) {
@@ -427,7 +427,7 @@ function MediaImage({ src, className, style, onClick }: {
           style={loaded ? style : { ...style, position: 'absolute', top: 0, left: 0, width: '100%' }}
           loading="lazy"
           onLoad={() => { setLoaded(true); setError(false) }}
-          onError={() => setError(true)}
+          onError={() => { blossom.onImgError(); setError(true) }}
           onClick={onClick}
         />
       )}
@@ -574,6 +574,7 @@ function GalleryImage({ src, loaded, onLoad }: {
       className={`max-w-[90vw] max-h-[90vh] object-contain rounded-lg transition-opacity duration-300 ${loaded ? 'opacity-100' : 'opacity-0'}`}
       onClick={(e) => e.stopPropagation()}
       onLoad={onLoad}
+      onError={blossom.onImgError}
     />
   )
 }

@@ -49,8 +49,8 @@ function MarkdownImage({ src, alt }: { src?: string; alt?: string }) {
   const [errored, setErrored] = useState(false)
   const [overridden, setOverridden] = useState(false)
 
-  // Reset state when the underlying source changes
-  useEffect(() => { setLoaded(false); setErrored(false); setOverridden(false) }, [src])
+  // Reset state when the underlying source changes or blossom fails over
+  useEffect(() => { setLoaded(false); setErrored(false); setOverridden(false) }, [src, blossom.src])
 
   if (!src) return null
 
@@ -88,7 +88,7 @@ function MarkdownImage({ src, alt }: { src?: string; alt?: string }) {
           loading="eager"
           decoding="async"
           onLoad={() => setLoaded(true)}
-          onError={() => setErrored(true)}
+          onError={() => { blossom.onImgError(); setErrored(true) }}
         />
       )}
 

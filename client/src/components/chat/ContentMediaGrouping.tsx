@@ -110,7 +110,8 @@ export function ContentMediaImage({ src, className, style, onClick }: {
   const [error, setError] = useState(false)
   const [overridden, setOverridden] = useState(false)
 
-  useEffect(() => { setLoaded(false); setError(false); setOverridden(false) }, [src])
+  // Reset on src prop change or blossom server failover
+  useEffect(() => { setLoaded(false); setError(false); setOverridden(false) }, [src, blossom.src])
 
   // Size limit exceeded
   if (blossom.sizeExceeded && !overridden) {
@@ -156,7 +157,7 @@ export function ContentMediaImage({ src, className, style, onClick }: {
           loading="lazy"
           onClick={onClick}
           onLoad={() => { setLoaded(true); setError(false) }}
-          onError={() => setError(true)}
+          onError={() => { blossom.onImgError(); setError(true) }}
         />
       )}
       {loaded && blossom.verified !== 'verified' && blossom.expectedHash && (

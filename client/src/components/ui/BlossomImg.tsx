@@ -53,6 +53,7 @@ export function BlossomImg({ src, alt, className, style, loading = 'lazy', onCli
         loading={loading}
         onClick={onClick}
         onLoad={() => setLoaded(true)}
+        onError={blossom.onImgError}
         {...rest}
       />
       {showBadge && blossom.verified !== 'verified' && blossom.expectedHash && (

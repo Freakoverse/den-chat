@@ -256,8 +256,8 @@ function BlossomImage({ src, alt, className }: { src: string; alt?: string; clas
   const [loaded, setLoaded] = useState(false)
   const [error, setError] = useState(false)
 
-  // Reset states when src changes
-  useEffect(() => { setLoaded(false); setError(false) }, [src])
+  // Reset states when src changes or blossom fails over to a new server
+  useEffect(() => { setLoaded(false); setError(false) }, [src, blossom.src])
 
   if (blossom.error === 'not-found') {
     return (
@@ -288,7 +288,7 @@ function BlossomImage({ src, alt, className }: { src: string; alt?: string; clas
         alt={alt || ''}
         className={`${className || 'w-full max-w-[400px] max-h-[300px] rounded-lg border border-border object-contain'} transition-opacity duration-300 ${loaded ? 'opacity-100' : 'opacity-0 h-0 overflow-hidden'}`}
         onLoad={() => { setLoaded(true); setError(false) }}
-        onError={() => setError(true)}
+        onError={() => { blossom.onImgError(); setError(true) }}
       />
       {loaded && blossom.verified !== 'verified' && blossom.expectedHash && (
         <VerificationBadge

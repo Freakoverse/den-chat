@@ -111,6 +111,8 @@ export type BlossomMediaState = {
   sizeExceeded: boolean
   /** Detected file size in bytes (from HEAD Content-Length), or undefined */
   detectedSize: number | undefined
+  /** Call when <img> onError fires — advances to the next blossom server */
+  onImgError: () => void
 }
 
 // ── Global cache for verified hashes (avoid re-verifying the same file) ──
@@ -175,6 +177,7 @@ export function useBlossomMedia(originalUrl: string | undefined, maxSizeMB?: num
     setError(false)
     setVerified('pending')
     setServerIdx(0)
+    imgErrorIdxRef.current = 0
     setSizeExceeded(false)
     setDetectedSize(undefined)
 
@@ -348,6 +351,25 @@ export function useBlossomMedia(originalUrl: string | undefined, maxSizeMB?: num
     }
   }, [parsed])
 
+  // ── Failover on <img> load error: try next server ──
+  const imgErrorIdxRef = useRef(0)
+  const onImgError = useCallback(() => {
+    if (!parsed || servers.length === 0) return
+    imgErrorIdxRef.current++
+    // Walk through remaining servers to find one that's different from current
+    for (let i = imgErrorIdxRef.current; i < servers.length; i++) {
+      const nextUrl = `${servers[i].replace(/\/+$/, '')}/${parsed.hash}${parsed.ext}`
+      if (nextUrl !== currentSrc) {
+        imgErrorIdxRef.current = i
+        setCurrentSrc(nextUrl)
+        setServerIdx(i)
+        return
+      }
+    }
+    // All servers exhausted — set error so component can show fallback
+    setError('not-found')
+  }, [parsed, servers, currentSrc])
+
   // ── Non-blossom URL: standalone size check ──
   const [nonBlossomSizeExceeded, setNonBlossomSizeExceeded] = useState(false)
   const [nonBlossomSize, setNonBlossomSize] = useState<number | undefined>(undefined)
@@ -384,6 +406,7 @@ export function useBlossomMedia(originalUrl: string | undefined, maxSizeMB?: num
       acceptVerifiedUrl: () => {},
       sizeExceeded: nonBlossomSizeExceeded,
       detectedSize: nonBlossomSize,
+      onImgError: () => {},
     }
   }
 
@@ -401,6 +424,7 @@ export function useBlossomMedia(originalUrl: string | undefined, maxSizeMB?: num
     acceptVerifiedUrl,
     sizeExceeded,
     detectedSize,
+    onImgError,
   }
 }
 

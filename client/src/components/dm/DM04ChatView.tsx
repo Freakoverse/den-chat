@@ -30,6 +30,7 @@ import { DnnBadge } from '@/components/ui/DnnBadge'
 import { useGifStore } from '@/stores/gifStore'
 import { publishGifFavorites } from '@/lib/nostr/customGif'
 import { ChatInputBar, type FileAttachment } from '@/components/chat/ChatInputBar'
+import { getUploadBlossoms } from '@/stores/postingBehaviourStore'
 import { EmojiPickerPopover, EmojiDiscoveryModal } from '@/components/chat/EmojiPickerPopover'
 import { StickerPickerPopover, StickerDiscoveryModal } from '@/components/chat/StickerPickerPopover'
 import { DeleteConfirmDialog, RawEventModal } from '@/components/hub/ChannelView'
@@ -48,6 +49,18 @@ import { getDraft, setDraft, clearDraft, dm04DraftKey } from '@/stores/draftStor
 /* ─── Helpers ─── */
 
 const GROUP_WINDOW_S = 5 * 60
+
+/** Map common MIME types to file extensions (for blossom URL suffix) */
+function mimeToExt(mime: string): string {
+  const map: Record<string, string> = {
+    'image/jpeg': '.jpg', 'image/png': '.png', 'image/gif': '.gif',
+    'image/webp': '.webp', 'image/svg+xml': '.svg', 'image/bmp': '.bmp',
+    'video/mp4': '.mp4', 'video/webm': '.webm', 'video/quicktime': '.mov',
+    'audio/mpeg': '.mp3', 'audio/ogg': '.ogg', 'audio/wav': '.wav',
+    'audio/flac': '.flac', 'audio/aac': '.aac', 'audio/mp4': '.m4a',
+  }
+  return map[mime] || ''
+}
 
 /** Extract NIP-30 emoji tags from a raw event JSON string */
 function extractDM04EmojiTags(rawEvent?: string): [string, string, string?][] | undefined {
@@ -359,9 +372,11 @@ export function DM04ChatView({ recipientPubkey, onSwitchProtocol, onBack }: { re
 
     let content = text
     if (attachments && attachments.length > 0) {
-      // Bare hash URL — standard Blossom format (BUD-01), universally supported.
+      // Use configured blossom server + file extension for maximum compatibility.
       // useBlossomMedia handles server failover across all configured servers.
-      const links = attachments.map((a) => `https://blossom.primal.net/${a.hash}`)
+      const servers = getUploadBlossoms()
+      const baseUrl = servers[0]?.replace(/\/+$/, '') || 'https://blossom.primal.net'
+      const links = attachments.map((a) => `${baseUrl}/${a.hash}${mimeToExt(a.type)}`)
       content = content ? `${content}\n${links.join('\n')}` : links.join('\n')
     }
 
@@ -1560,7 +1575,9 @@ function DM04ThreadModal({ parentMsg, threadReplies, recipientPubkey, getProfile
 
     let content = text
     if (attachments && attachments.length > 0) {
-      const links = attachments.map((a) => `https://blossom.primal.net/${a.hash}`)
+      const servers = getUploadBlossoms()
+      const baseUrl = servers[0]?.replace(/\/+$/, '') || 'https://blossom.primal.net'
+      const links = attachments.map((a) => `${baseUrl}/${a.hash}${mimeToExt(a.type)}`)
       content = content ? `${content}\n${links.join('\n')}` : links.join('\n')
     }
 

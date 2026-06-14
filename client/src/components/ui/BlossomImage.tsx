@@ -30,8 +30,8 @@ export function BlossomImage({ src, alt, className, imgClassName, fallback, maxS
   const [imgError, setImgError] = useState(false)
   const [overridden, setOverridden] = useState(false)
 
-  // Reset loaded/error state when src changes
-  useEffect(() => { setLoaded(false); setImgError(false); setOverridden(false) }, [src])
+  // Reset loaded/error state when src changes or blossom fails over to a new server
+  useEffect(() => { setLoaded(false); setImgError(false); setOverridden(false) }, [src, blossom.src])
 
   const resolvedSrc = blossom.src || src
   const cachedSrc = useCachedImageUrl(resolvedSrc)
@@ -73,7 +73,7 @@ export function BlossomImage({ src, alt, className, imgClassName, fallback, maxS
           className={`w-full h-full object-cover transition-opacity duration-300 ${loaded ? 'opacity-100' : 'opacity-0'}${imgClassName ? ` ${imgClassName}` : ''}`}
           loading="lazy"
           onLoad={() => setLoaded(true)}
-          onError={() => setImgError(true)}
+          onError={() => { blossom.onImgError(); setImgError(true) }}
         />
       )}
     </div>
