@@ -21,6 +21,7 @@ import {
   Info, UserPlus, Zap, AlertTriangle, Loader2, Check, Hash, X,
 } from 'lucide-react'
 import { HubJoinWarningModal, isJoinWarningDismissed } from '@/components/hub/HubJoinWarningModal'
+import { MAX_HUB_LIST_ENTRIES } from '@/lib/hub/hubLimits'
 
 interface HubEventCardProps {
   /** naddr data */
@@ -51,6 +52,7 @@ export function HubEventCard({ identifier, pubkey, relays }: HubEventCardProps) 
   const [showAllTags, setShowAllTags] = useState(false)
   const [showInfoModal, setShowInfoModal] = useState(false)
   const [showJoinWarning, setShowJoinWarning] = useState(false)
+  const [showHubLimitModal, setShowHubLimitModal] = useState(false)
 
   // Check if already a member/entry
   const isAlreadyInList = hubEntries.some(e => e.dTag === identifier)
@@ -147,6 +149,12 @@ export function HubEventCard({ identifier, pubkey, relays }: HubEventCardProps) 
 
   const handleRequestJoin = async () => {
     if (!myPubkey || !hubData || joining) return
+
+    // Check hub list limit before joining
+    if (!isAlreadyInList && hubEntries.length >= MAX_HUB_LIST_ENTRIES) {
+      setShowHubLimitModal(true)
+      return
+    }
 
     // Show warning modal if not dismissed
     if (!isJoinWarningDismissed()) {
@@ -410,6 +418,40 @@ export function HubEventCard({ identifier, pubkey, relays }: HubEventCardProps) 
         onClose={() => setShowJoinWarning(false)}
         onConfirm={doJoin}
       />
+
+      {/* Hub limit reached modal */}
+      {showHubLimitModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center px-2"
+          onClick={() => setShowHubLimitModal(false)}
+        >
+          <div className="absolute inset-0 bg-black/60" />
+          <div
+            className="relative z-10 w-full max-w-sm rounded-xl border border-border bg-background shadow-2xl animate-in fade-in-0 zoom-in-95 p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex flex-col items-center text-center gap-3">
+              <div className="w-12 h-12 rounded-full bg-amber-500/10 flex items-center justify-center">
+                <AlertTriangle size={24} className="text-amber-500" />
+              </div>
+              <h3 className="text-base font-semibold text-foreground">Hub Limit Reached</h3>
+              <p className="text-sm text-muted-foreground leading-relaxed">
+                You've reached the maximum of <span className="font-semibold text-foreground">{MAX_HUB_LIST_ENTRIES}</span> hubs
+                in your hub list. Remove some hubs from <span className="font-medium text-foreground">Settings → My Hubs</span> before
+                joining new ones.
+              </p>
+              <div className="flex items-center gap-2 w-full mt-1">
+                <button
+                  onClick={() => setShowHubLimitModal(false)}
+                  className="flex-1 px-4 py-2 rounded-lg text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors cursor-pointer"
+                >
+                  Got it
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
