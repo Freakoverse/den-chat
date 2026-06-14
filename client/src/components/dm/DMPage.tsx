@@ -50,6 +50,7 @@ import { StickerPickerPopover, StickerDiscoveryModal } from '@/components/chat/S
 import { BlossomImg } from '@/components/ui/BlossomImg'
 import { getEmojiMap } from '@/stores/emojiStore'
 import { decryptFile } from '@/lib/crypto/fileEncryption'
+import { downloadFromBlossom } from '@/lib/blossom/client'
 import { CustomAudioPlayer } from '@/components/ui/CustomAudioPlayer'
 import { createFileGiftWrap } from '@/lib/nostr/nip17'
 
@@ -784,8 +785,11 @@ function DMChatView({ recipientPubkey, onSwitchProtocol, onBack }: { recipientPu
           if (!attachment.encryption) continue
 
           // Build Blossom URL from the ciphertext hash
-          const serverHost = blossomServers[0]?.replace(/^https?:\/\//, '') || 'blossom.primal.net'
-          const fileUrl = `https://${serverHost}/${attachment.hash}`
+          // Prefer the server where the file was actually uploaded (from ChatInputBar)
+          const uploadedServer = attachment.serverUrls?.[0]?.replace(/\/+$/, '')
+          const fallbackServer = blossomServers[0]?.replace(/\/+$/, '') || 'https://blossom.primal.net'
+          const baseUrl = uploadedServer || fallbackServer
+          const fileUrl = `${baseUrl}/${attachment.hash}`
 
           // Create kind 15 gift wrap with file metadata
           const fileWraps = await createFileGiftWrap(
@@ -1668,10 +1672,19 @@ function useDecryptedBlob(messageId: string, fileUrl: string, mimeType: string |
         setLoading(true)
         setError(null)
 
-        const response = await fetch(fileUrl)
-        if (!response.ok) throw new Error(`Failed to fetch file: ${response.status}`)
-
-        const cipherBytes = new Uint8Array(await response.arrayBuffer())
+        // Extract hash from blossom URL and use multi-server failover download.
+        // The fileUrl may point to a server that doesn't have the file (upload shuffles randomly),
+        // so downloadFromBlossom tries all configured servers.
+        const urlHash = fileUrl.split('/').pop()?.replace(/\.[^.]+$/, '') // strip any extension
+        let cipherBytes: Uint8Array
+        if (urlHash && /^[a-f0-9]{64}$/i.test(urlHash)) {
+          cipherBytes = await downloadFromBlossom(urlHash)
+        } else {
+          // Fallback: direct fetch for non-blossom URLs
+          const response = await fetch(fileUrl)
+          if (!response.ok) throw new Error(`Failed to fetch file: ${response.status}`)
+          cipherBytes = new Uint8Array(await response.arrayBuffer())
+        }
         const plainBytes = await decryptFile(cipherBytes, decryptionKey, decryptionNonce)
 
         if (cancelled) return

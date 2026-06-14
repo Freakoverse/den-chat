@@ -50,6 +50,7 @@ export type PendingFile = {
   file: File
   status: 'pending' | 'uploading' | 'encrypting' | 'success' | 'failed'
   hash?: string
+  serverUrls?: string[]
   progress?: UploadProgress
   previewUrl?: string
   /** Encryption metadata (populated when encryptBeforeUpload is true) */
@@ -67,6 +68,8 @@ export interface FileAttachment {
   type: string
   name: string
   size: number
+  /** Blossom servers where the file was successfully uploaded */
+  serverUrls?: string[]
   /** Encryption metadata (present when file was encrypted before upload) */
   encryption?: {
     keyHex: string
@@ -459,14 +462,14 @@ export function ChatInputBar({
         // Resolve blossom servers at upload time from posting behaviour settings
         const servers = getUploadBlossoms(hubBlossomServers)
 
-        const { hash } = await uploadToBlossomServers(
+        const { hash, serverUrls } = await uploadToBlossomServers(
           data, signer || null, privateKey || null, servers, contentType,
           (progress) => {
             setPendingFiles((prev) => prev.map((f) => f.id === pf.id ? { ...f, progress: { ...progress } } : f))
           },
           () => { const c = new AbortController(); uploadAbortRef.current = c; return c.signal },
         )
-        setPendingFiles((prev) => prev.map((f) => f.id === pf.id ? { ...f, status: 'success' as const, hash, progress: undefined, encryption: encMeta } : f))
+        setPendingFiles((prev) => prev.map((f) => f.id === pf.id ? { ...f, status: 'success' as const, hash, serverUrls, progress: undefined, encryption: encMeta } : f))
       } catch {
         setPendingFiles((prev) => prev.map((f) => f.id === pf.id ? { ...f, status: 'failed' as const, progress: undefined } : f))
       }
@@ -499,6 +502,7 @@ export function ChatInputBar({
         type: f.file.type || 'application/octet-stream',
         name: f.file.name,
         size: f.file.size,
+        ...(f.serverUrls ? { serverUrls: f.serverUrls } : {}),
         ...(f.encryption ? { encryption: f.encryption } : {}),
       }))
 
