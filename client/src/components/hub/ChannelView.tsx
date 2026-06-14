@@ -5139,8 +5139,31 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
 
   const ctxPaste = useCallback(async () => {
     setCtxMenu(null)
+
+    // Helper: insert text into the textarea at cursor
+    const insertText = (text: string) => {
+      const ta = textareaRef.current
+      if (!ta || !text) return
+      const start = ta.selectionStart
+      const end = ta.selectionEnd
+      setMessage(message.slice(0, start) + text + message.slice(end))
+      requestAnimationFrame(() => {
+        ta.selectionStart = ta.selectionEnd = start + text.length
+        autoResize(ta)
+      })
+    }
+
+    // Helper: last-resort fallback — focus textarea and trigger native paste
+    // which fires the document-level paste event our listener catches
+    const execFallback = () => {
+      const ta = textareaRef.current
+      if (!ta) return
+      ta.focus()
+      try { document.execCommand('paste') } catch { /* blocked */ }
+    }
+
     try {
-      // Use Clipboard API to read files/images
+      // 1. Try Clipboard API read() for images/files
       if (navigator.clipboard && typeof navigator.clipboard.read === 'function') {
         const items = await navigator.clipboard.read()
         const files: File[] = []
@@ -5158,38 +5181,28 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
           addFiles(files)
           return
         }
-        // No images — try pasting text
+        // No images found — paste text
         const text = await navigator.clipboard.readText()
-        if (text && textareaRef.current) {
-          const ta = textareaRef.current
-          const start = ta.selectionStart
-          const end = ta.selectionEnd
-          const before = message.slice(0, start)
-          const after = message.slice(end)
-          setMessage(before + text + after)
-          requestAnimationFrame(() => {
-            ta.selectionStart = ta.selectionEnd = start + text.length
-            autoResize(ta)
-          })
-        }
+        insertText(text)
+        return
       }
+      // clipboard.read not available — try readText
+      if (navigator.clipboard && typeof navigator.clipboard.readText === 'function') {
+        const text = await navigator.clipboard.readText()
+        insertText(text)
+        return
+      }
+      // No Clipboard API at all — execCommand fallback
+      execFallback()
     } catch {
-      // Fallback: try text-only paste
+      // clipboard.read() or readText() threw (permission denied / unsupported)
       try {
         const text = await navigator.clipboard.readText()
-        if (text && textareaRef.current) {
-          const ta = textareaRef.current
-          const start = ta.selectionStart
-          const end = ta.selectionEnd
-          const before = message.slice(0, start)
-          const after = message.slice(end)
-          setMessage(before + text + after)
-          requestAnimationFrame(() => {
-            ta.selectionStart = ta.selectionEnd = start + text.length
-            autoResize(ta)
-          })
-        }
-      } catch { /* clipboard permission denied */ }
+        insertText(text)
+      } catch {
+        // Everything failed — try native execCommand as last resort
+        execFallback()
+      }
     }
   }, [addFiles, message, setMessage, autoResize])
 
@@ -5201,15 +5214,17 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
         const ta = textareaRef.current
         const start = ta.selectionStart
         const end = ta.selectionEnd
-        const before = message.slice(0, start)
-        const after = message.slice(end)
-        setMessage(before + text + after)
+        setMessage(message.slice(0, start) + text + message.slice(end))
         requestAnimationFrame(() => {
           ta.selectionStart = ta.selectionEnd = start + text.length
           autoResize(ta)
         })
       }
-    } catch { /* clipboard permission denied */ }
+    } catch {
+      // Fallback for browsers without clipboard permission
+      const ta = textareaRef.current
+      if (ta) { ta.focus(); try { document.execCommand('paste') } catch { /* blocked */ } }
+    }
   }, [message, setMessage, autoResize])
 
   const ctxCut = useCallback(() => {

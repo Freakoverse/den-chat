@@ -629,7 +629,30 @@ export function ChatInputBar({
 
   const ctxPaste = useCallback(async () => {
     setCtxMenu(null)
+
+    // Helper: insert text into the textarea at cursor
+    const insertText = (text: string) => {
+      const ta = textareaRef.current
+      if (!ta || !text) return
+      const start = ta.selectionStart
+      const end = ta.selectionEnd
+      onMessageChange(message.slice(0, start) + text + message.slice(end))
+      requestAnimationFrame(() => {
+        ta.selectionStart = ta.selectionEnd = start + text.length
+        autoResize(ta)
+      })
+    }
+
+    // Helper: last-resort fallback — focus textarea and trigger native paste
+    const execFallback = () => {
+      const ta = textareaRef.current
+      if (!ta) return
+      ta.focus()
+      try { document.execCommand('paste') } catch { /* blocked */ }
+    }
+
     try {
+      // 1. Try Clipboard API read() for images/files
       if (navigator.clipboard && typeof navigator.clipboard.read === 'function') {
         const items = await navigator.clipboard.read()
         const files: File[] = []
@@ -647,36 +670,28 @@ export function ChatInputBar({
           addFiles(files)
           return
         }
+        // No images found — paste text
         const text = await navigator.clipboard.readText()
-        if (text && textareaRef.current) {
-          const ta = textareaRef.current
-          const start = ta.selectionStart
-          const end = ta.selectionEnd
-          const before = message.slice(0, start)
-          const after = message.slice(end)
-          onMessageChange(before + text + after)
-          requestAnimationFrame(() => {
-            ta.selectionStart = ta.selectionEnd = start + text.length
-            autoResize(ta)
-          })
-        }
+        insertText(text)
+        return
       }
+      // clipboard.read not available — try readText
+      if (navigator.clipboard && typeof navigator.clipboard.readText === 'function') {
+        const text = await navigator.clipboard.readText()
+        insertText(text)
+        return
+      }
+      // No Clipboard API at all — execCommand fallback
+      execFallback()
     } catch {
+      // clipboard.read() or readText() threw (permission denied / unsupported)
       try {
         const text = await navigator.clipboard.readText()
-        if (text && textareaRef.current) {
-          const ta = textareaRef.current
-          const start = ta.selectionStart
-          const end = ta.selectionEnd
-          const before = message.slice(0, start)
-          const after = message.slice(end)
-          onMessageChange(before + text + after)
-          requestAnimationFrame(() => {
-            ta.selectionStart = ta.selectionEnd = start + text.length
-            autoResize(ta)
-          })
-        }
-      } catch { /* clipboard permission denied */ }
+        insertText(text)
+      } catch {
+        // Everything failed — try native execCommand as last resort
+        execFallback()
+      }
     }
   }, [addFiles, message, onMessageChange, autoResize])
 
@@ -688,15 +703,17 @@ export function ChatInputBar({
         const ta = textareaRef.current
         const start = ta.selectionStart
         const end = ta.selectionEnd
-        const before = message.slice(0, start)
-        const after = message.slice(end)
-        onMessageChange(before + text + after)
+        onMessageChange(message.slice(0, start) + text + message.slice(end))
         requestAnimationFrame(() => {
           ta.selectionStart = ta.selectionEnd = start + text.length
           autoResize(ta)
         })
       }
-    } catch { /* clipboard permission denied */ }
+    } catch {
+      // Fallback for browsers without clipboard permission
+      const ta = textareaRef.current
+      if (ta) { ta.focus(); try { document.execCommand('paste') } catch { /* blocked */ } }
+    }
   }, [message, onMessageChange, autoResize])
 
   const ctxCut = useCallback(() => {
