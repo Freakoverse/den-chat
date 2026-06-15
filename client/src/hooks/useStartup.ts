@@ -364,5 +364,24 @@ export function useStartup() {
       })
     }, 5000)
   }, [isAuthenticated, activeHubId])
+
+  // ─── Hub member-list Blossom redundancy (cooperative mirroring) ───
+  // When the user opens a hub, check that its member-list files (index, spine/
+  // tree, history, ban pages, own leaf page) exist on ≥3 Blossom servers, and
+  // re-upload any that are under-replicated. Any member helps keep them alive.
+  // Keyed on the active hub's index hash so it re-runs after epoch/member changes.
+  const activeIndexHash = useHubStore((s) => (s.activeHubId ? s.hubs[s.activeHubId]?.indexFileHash : undefined))
+  useEffect(() => {
+    if (!isAuthenticated || !pubkey || !activeHubId || !activeIndexHash) return
+    const hubId = activeHubId
+    const viewer = pubkey
+    // Cancel on hub change so drive-by hubs (passed through in <8s) aren't checked.
+    const timer = setTimeout(() => {
+      import('@/lib/blossom/blossomRedundancy').then(({ ensureBlossomRedundancy }) => {
+        ensureBlossomRedundancy(hubId, viewer)
+      })
+    }, 8000)
+    return () => clearTimeout(timer)
+  }, [isAuthenticated, pubkey, activeHubId, activeIndexHash])
 }
 
