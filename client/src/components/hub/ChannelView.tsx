@@ -6615,6 +6615,34 @@ function ThreadModal({ parentMsg, threadReplies, hubDTag, channelId, getProfile,
   const [pendingUnreact, setPendingUnreact] = useState<{ messageId: string; emoji: string; eventId: string } | null>(null)
   const [optimisticMessages, setOptimisticMessages] = useState<OptimisticMessage[]>([])
 
+  // Reconcile optimistic thread replies with the real messages (mirrors the main
+  // channel): once the real reply (matching sentDTag) lands in threadReplies, drop
+  // the optimistic bubble after a brief delay so the ✓ stays visible momentarily.
+  useEffect(() => {
+    if (optimisticMessages.length === 0 || threadReplies.length === 0) return
+    const toRemove = optimisticMessages.filter((opt) =>
+      opt.sentDTag && opt.status === 'published' && threadReplies.some((m) => m.dTag === opt.sentDTag && m.pubkey === myPubkey)
+    )
+    if (toRemove.length > 0) {
+      const timer = setTimeout(() => {
+        const ids = new Set(toRemove.map((m) => m.tempId))
+        setOptimisticMessages((prev) => prev.filter((m) => !ids.has(m.tempId)))
+      }, 600)
+      return () => clearTimeout(timer)
+    }
+  }, [threadReplies, optimisticMessages, myPubkey])
+
+  // Safety: drop any optimistic reply stuck in 'published' for >60s (orphan cleanup).
+  useEffect(() => {
+    const stale = optimisticMessages.filter((m) =>
+      m.status === 'published' && (Date.now() / 1000 - m.timestamp) > 60
+    )
+    if (stale.length > 0) {
+      const ids = new Set(stale.map((m) => m.tempId))
+      setOptimisticMessages((prev) => prev.filter((m) => !ids.has(m.tempId)))
+    }
+  }, [optimisticMessages])
+
   // Reply context: null = replying to thread parent (default), set = replying to specific message
   const [inThreadReply, setInThreadReply] = useState<ReplyContext | null>(null)
   const [profileModalPubkey, setProfileModalPubkey] = useState<string | null>(null)
@@ -6918,8 +6946,8 @@ function ThreadModal({ parentMsg, threadReplies, hubDTag, channelId, getProfile,
               )
             })}
 
-            {/* Optimistic messages */}
-            {optimisticMessages.filter((o) => o.channelId === channelId).map((optMsg) => (
+            {/* Optimistic messages — hide once the real reply (matching sentDTag) arrives */}
+            {optimisticMessages.filter((o) => o.channelId === channelId && !(o.sentDTag && threadReplies.some((m) => m.dTag === o.sentDTag && m.pubkey === myPubkey))).map((optMsg) => (
               <div
                 key={optMsg.tempId}
                 className={`flex gap-3 mt-4 py-1 px-2 rounded-md -mx-2 transition-opacity ${optMsg.status === 'published' ? 'opacity-70' : 'opacity-50'}`}
