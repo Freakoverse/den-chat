@@ -1139,7 +1139,14 @@ function DiscoverEmojiTab({ onPickerClose }: { onPickerClose?: () => void }) {
                   {/* Preview grid */}
                   <div className="flex flex-wrap gap-0.5">
                     {set.emojis.slice(0, 12).map((e) => (
-                      <img key={e.shortcode} src={e.url} alt={`:${e.shortcode}:`} title={`:${e.shortcode}:`} className="w-6 h-6 object-contain rounded" loading="lazy" />
+                      <TooltipProvider key={e.shortcode} delayDuration={200}>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <img src={e.url} alt={`:${e.shortcode}:`} className="w-6 h-6 object-contain rounded" loading="lazy" />
+                          </TooltipTrigger>
+                          <TooltipContent side="bottom" className="text-xs z-[310]">:{e.shortcode}:</TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
                     ))}
                     {set.emojis.length > 12 && (
                       <span className="w-6 h-6 flex items-center justify-center text-[9px] text-[hsl(var(--muted-foreground))] font-medium">
@@ -1396,14 +1403,19 @@ export function EmojiDiscoveryModal({ onClose, initialSearch = '', initialAuthor
                         {/* Emoji preview */}
                         <div className="flex flex-wrap gap-1 max-h-[60px] overflow-hidden">
                           {set.emojis.slice(0, 16).map((e) => (
-                            <img
-                              key={e.shortcode}
-                              src={e.url}
-                              alt={`:${e.shortcode}:`}
-                              title={`:${e.shortcode}:`}
-                              className="w-7 h-7 object-contain rounded"
-                              loading="lazy"
-                            />
+                            <TooltipProvider key={e.shortcode} delayDuration={200}>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <img
+                                    src={e.url}
+                                    alt={`:${e.shortcode}:`}
+                                    className="w-7 h-7 object-contain rounded"
+                                    loading="lazy"
+                                  />
+                                </TooltipTrigger>
+                                <TooltipContent side="bottom" className="text-xs z-[320]">:{e.shortcode}:</TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
                           ))}
                           {set.emojis.length > 16 && (
                             <span className="w-7 h-7 flex items-center justify-center text-[10px] text-[hsl(var(--muted-foreground))] font-medium">
