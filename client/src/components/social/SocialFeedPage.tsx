@@ -844,9 +844,11 @@ function SocialNotificationView({ onOpenProfile, onOpenThread }: {
           })
         }
 
-        // Process reactions
+        // Process reactions — pre-filter by k tag when available (NIP-25)
         for (const event of reactions) {
           if (event.pubkey === myPubkey) continue
+          const kTag = event.tags.find(t => t[0] === 'k')
+          if (kTag && kTag[1] !== '1') continue // fast-path: skip non-kind-1 reactions
           notifs.push({
             id: event.id,
             type: 'reaction',
@@ -855,9 +857,11 @@ function SocialNotificationView({ onOpenProfile, onOpenThread }: {
           })
         }
 
-        // Process reposts
+        // Process reposts — kind 6 is specifically for kind 1, but filter just in case
         for (const event of reposts) {
           if (event.pubkey === myPubkey) continue
+          const kTag = event.tags.find(t => t[0] === 'k')
+          if (kTag && kTag[1] !== '1') continue
           notifs.push({
             id: event.id,
             type: 'repost',
@@ -866,8 +870,10 @@ function SocialNotificationView({ onOpenProfile, onOpenThread }: {
           })
         }
 
-        // Process zaps
+        // Process zaps — pre-filter by k tag when available
         for (const event of zaps) {
+          const kTag = event.tags.find(t => t[0] === 'k')
+          if (kTag && kTag[1] !== '1') continue
           notifs.push({
             id: event.id,
             type: 'zap',
@@ -879,26 +885,40 @@ function SocialNotificationView({ onOpenProfile, onOpenThread }: {
         // Sort newest first
         notifs.sort((a, b) => b.createdAt - a.createdAt)
 
-        // Resolve referenced posts for reactions/reposts
+        // Resolve referenced posts for reactions/reposts/zaps to confirm kind 1
         const refIds = new Set<string>()
         for (const n of notifs) {
-          if (n.type === 'reaction' || n.type === 'repost') {
+          if (n.type === 'reaction' || n.type === 'repost' || n.type === 'zap') {
             const eTag = n.event.tags.find(t => t[0] === 'e')
             if (eTag?.[1]) refIds.add(eTag[1])
           }
         }
         if (refIds.size > 0) {
-          const resolved = await fetchEvents({ ids: [...refIds].slice(0, 50), limit: 50 })
+          const resolved = await fetchEvents({ ids: [...refIds].slice(0, 80), limit: 80 })
           const resolvedMap = new Map(resolved.map(e => [e.id, e]))
           for (const n of notifs) {
-            if (n.type === 'reaction' || n.type === 'repost') {
+            if (n.type === 'reaction' || n.type === 'repost' || n.type === 'zap') {
               const eTag = n.event.tags.find(t => t[0] === 'e')
               if (eTag?.[1]) n.sourceEvent = resolvedMap.get(eTag[1])
             }
           }
         }
 
-        setNotifications(notifs)
+        // Filter: only keep notifications that target kind 1 posts
+        // Mentions/replies are inherently kind 1. For reactions/reposts/zaps,
+        // drop any whose resolved source event is not kind 1.
+        const kind1Only = notifs.filter(n => {
+          if (n.type === 'mention' || n.type === 'reply') return true
+          // If we resolved the source event, check its kind
+          if (n.sourceEvent) return n.sourceEvent.kind === 1
+          // If source couldn't be resolved but had a k tag = "1", keep it
+          const kTag = n.event.tags.find(t => t[0] === 'k')
+          if (kTag?.[1] === '1') return true
+          // No k tag and no resolved source — drop (can't confirm it's kind 1)
+          return false
+        })
+
+        setNotifications(kind1Only)
       } catch (err) {
         console.error('[Social] Failed to fetch notifications:', err)
       } finally {
