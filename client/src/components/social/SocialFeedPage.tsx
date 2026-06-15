@@ -788,6 +788,11 @@ interface SocialNotification {
   event: Event        // the notification event itself
   sourceEvent?: Event // the referenced post (resolved)
   createdAt: number
+  // Zap-specific — parsed from the kind 9735 receipt (the receipt's own pubkey
+  // is the wallet/LNURL service, NOT the zapper, so we resolve the real sender).
+  zapSenderPubkey?: string
+  zapAmount?: number
+  zapMessage?: string
 }
 
 function SocialNotificationView({ onOpenProfile, onOpenThread }: {
@@ -870,15 +875,22 @@ function SocialNotificationView({ onOpenProfile, onOpenThread }: {
           })
         }
 
-        // Process zaps — pre-filter by k tag when available
+        // Process zaps — parse the receipt to get the REAL zapper (the receipt's
+        // own pubkey is the wallet service), the amount, and the comment.
         for (const event of zaps) {
           const kTag = event.tags.find(t => t[0] === 'k')
           if (kTag && kTag[1] !== '1') continue
+          const zapInfo = parseZapReceipt(event)
+          if (!zapInfo) continue // unparseable receipt — skip
+          if (zapInfo.senderPubkey === myPubkey) continue // ignore self-zaps
           notifs.push({
             id: event.id,
             type: 'zap',
             event,
             createdAt: event.created_at,
+            zapSenderPubkey: zapInfo.senderPubkey,
+            zapAmount: zapInfo.amount,
+            zapMessage: zapInfo.message,
           })
         }
 
@@ -1004,8 +1016,10 @@ function SocialNotificationRow({ notif, socialSeenAt, onOpenProfile, onOpenThrea
   onOpenThread: (eventId: string) => void
 }) {
   const { getProfile } = useProfileCache()
-  const profile = getProfile(notif.event.pubkey)
-  const npub = nip19.npubEncode(notif.event.pubkey)
+  // For zaps, the actor is the parsed zapper — NOT the receipt's wallet pubkey.
+  const actorPubkey = (notif.type === 'zap' && notif.zapSenderPubkey) || notif.event.pubkey
+  const profile = getProfile(actorPubkey)
+  const npub = nip19.npubEncode(actorPubkey)
   const displayName = profile?.display_name || profile?.name || truncateNpub(npub, 8)
   const isUnread = notif.createdAt > socialSeenAt
 
@@ -1019,7 +1033,11 @@ function SocialNotificationRow({ notif, socialSeenAt, onOpenProfile, onOpenThrea
       color: 'text-pink-400',
     },
     repost: { icon: <Repeat2 size={14} />, label: 'reposted your post', color: 'text-green-400' },
-    zap: { icon: <Zap size={14} />, label: 'zapped you', color: 'text-yellow-400' },
+    zap: {
+      icon: <Zap size={14} />,
+      label: notif.zapAmount ? `zapped you ${notif.zapAmount.toLocaleString()} sats` : 'zapped you',
+      color: 'text-yellow-400',
+    },
   }
   const config = typeConfig[notif.type]
 
@@ -1069,12 +1087,12 @@ function SocialNotificationRow({ notif, socialSeenAt, onOpenProfile, onOpenThrea
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5 flex-wrap">
           <span
-            onClick={(e) => { e.stopPropagation(); onOpenProfile(notif.event.pubkey) }}
+            onClick={(e) => { e.stopPropagation(); onOpenProfile(actorPubkey) }}
             className="text-sm font-semibold text-foreground hover:underline cursor-pointer"
           >
             {displayName}
           </span>
-          <DnnBadge pubkey={notif.event.pubkey} />
+          <DnnBadge pubkey={actorPubkey} />
           <span className="text-xs text-muted-foreground">{config.label}</span>
           <span className="text-[11px] text-muted-foreground/60">· {formatTimestamp(notif.createdAt)}</span>
         </div>
@@ -1086,8 +1104,15 @@ function SocialNotificationRow({ notif, socialSeenAt, onOpenProfile, onOpenThrea
           </p>
         )}
 
-        {/* Source post preview for reactions/reposts */}
-        {(notif.type === 'reaction' || notif.type === 'repost') && notif.sourceEvent && (
+        {/* Zap comment (from the zap request), if any */}
+        {notif.type === 'zap' && notif.zapMessage && (
+          <p className="text-sm text-foreground/70 mt-1 line-clamp-2 break-words">
+            {notif.zapMessage.slice(0, 200)}
+          </p>
+        )}
+
+        {/* Source post preview — for reactions, reposts, and zaps (what was zapped) */}
+        {(notif.type === 'reaction' || notif.type === 'repost' || notif.type === 'zap') && notif.sourceEvent && (
           <p className="text-xs text-muted-foreground mt-1 line-clamp-2 break-words pl-2 border-l-2 border-border/50">
             {notif.sourceEvent.content.slice(0, 150)}
           </p>
