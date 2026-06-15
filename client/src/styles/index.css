@@ -124,10 +124,12 @@
 
 /* ─── Base Layer ─── */
 
-* {
-  border-color: hsl(var(--border));
-  text-rendering: optimizeLegibility;
-  -webkit-tap-highlight-color: transparent;
+@layer base {
+  * {
+    border-color: hsl(var(--border));
+    text-rendering: optimizeLegibility;
+    -webkit-tap-highlight-color: transparent;
+  }
 }
 
 html {

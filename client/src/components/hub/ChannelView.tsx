@@ -2691,7 +2691,7 @@ function GifStarOverlay({ att, ext, url, imgIdx, matchingGTag, allServers, setGa
         wrapperClassName={inGrid ? "relative w-full h-full" : undefined}
         className={inGrid
           ? "w-full h-full object-cover cursor-pointer hover:brightness-110 transition-all"
-          : "w-full max-w-[400px] max-h-[300px] rounded-lg border border-border object-contain cursor-pointer hover:brightness-110 transition-all"
+          : "max-w-[400px] max-h-[300px] rounded-lg border border-transparent hover:border-border object-contain cursor-pointer hover:brightness-110 transition-all"
         }
         onClick={() => setGalleryIndex(imgIdx >= 0 ? imgIdx : 0)}
       />
@@ -2841,7 +2841,7 @@ function AttachmentRenderer({ attachments, hubDTag, gifTags }: { attachments: At
                 ext={ext}
                 type={att.type}
                 alt={att.name}
-                className="w-full max-w-[400px] max-h-[300px] rounded-lg border border-border object-contain cursor-pointer hover:brightness-110 transition-all"
+                className="max-w-[400px] max-h-[300px] rounded-lg border border-transparent hover:border-border object-contain cursor-pointer hover:brightness-110 transition-all"
                 onClick={() => setGalleryIndex(imgIdx >= 0 ? imgIdx : 0)}
                 encryption={att.encryption}
               />
@@ -2898,7 +2898,7 @@ function AttachmentRenderer({ attachments, hubDTag, gifTags }: { attachments: At
               ext={block.ext}
               type={block.att.type}
               tag="video"
-              className="w-full max-w-[400px] max-h-[300px] rounded-lg border border-border"
+              className="max-w-[400px] max-h-[300px] rounded-lg border border-transparent hover:border-border transition-colors"
               encryption={block.att.encryption}
             />
           )

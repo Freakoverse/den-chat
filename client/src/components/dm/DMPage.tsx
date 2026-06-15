@@ -122,7 +122,7 @@ export function DMGifStarOverlay({ name, url, nsfw }: { name: string; url: strin
       <img
         src={blossom.src || url}
         alt={name || 'GIF'}
-        className={`max-w-[400px] max-[1080px]:max-w-full max-h-[300px] rounded-lg border border-border object-contain hover:brightness-110 transition-all ${nsfw === 'nsfw' ? 'blur-lg hover:blur-none' : ''} ${!loaded ? 'opacity-0 h-0 overflow-hidden block' : ''}`}
+        className={`max-w-[400px] max-[1080px]:max-w-full max-h-[300px] rounded-lg border border-transparent hover:border-border transition-colors object-contain hover:brightness-110 transition-all ${nsfw === 'nsfw' ? 'blur-lg hover:blur-none' : ''} ${!loaded ? 'opacity-0 h-0 overflow-hidden block' : ''}`}
         onLoad={() => setLoaded(true)}
       />
       {loaded && blossom.verified !== 'verified' && blossom.expectedHash && (
@@ -1753,7 +1753,7 @@ function EncryptedFileAttachment({ messageId, fileUrl, mimeType, decryptionKey, 
         <img
           src={blobUrl}
           alt="Encrypted attachment"
-          className={`rounded-lg max-w-[400px] max-[1080px]:max-w-full max-h-[300px] object-contain cursor-pointer hover:brightness-110 transition-all border border-border ${hasTextContent ? 'mt-2' : ''}`}
+          className={`rounded-lg max-w-[400px] max-[1080px]:max-w-full max-h-[300px] object-contain cursor-pointer hover:brightness-110 transition-all border border-transparent hover:border-border ${hasTextContent ? 'mt-2' : ''}`}
           loading="lazy"
           onClick={() => setGalleryOpen(true)}
         />
@@ -1773,7 +1773,7 @@ function EncryptedFileAttachment({ messageId, fileUrl, mimeType, decryptionKey, 
       <video
         src={blobUrl}
         controls
-        className={`rounded-lg max-w-[400px] max-[1080px]:max-w-full max-h-[300px] border border-border ${hasTextContent ? 'mt-2' : ''}`}
+        className={`rounded-lg max-w-[400px] max-[1080px]:max-w-full max-h-[300px] border border-transparent hover:border-border transition-colors ${hasTextContent ? 'mt-2' : ''}`}
       />
     )
   }

@@ -286,7 +286,7 @@ function BlossomImage({ src, alt, className }: { src: string; alt?: string; clas
       <img
         src={resolvedSrc}
         alt={alt || ''}
-        className={`${className || 'w-full max-w-[400px] max-h-[300px] rounded-lg border border-border object-contain'} transition-opacity duration-300 ${loaded ? 'opacity-100' : 'opacity-0 h-0 overflow-hidden'}`}
+        className={`${className || 'max-w-[400px] max-h-[300px] rounded-lg border border-transparent hover:border-border transition-colors object-contain'} transition-opacity duration-300 ${loaded ? 'opacity-100' : 'opacity-0 h-0 overflow-hidden'}`}
         onLoad={() => { setLoaded(true); setError(false) }}
         onError={() => { blossom.onImgError(); setError(true) }}
       />
@@ -458,7 +458,7 @@ export function VideoEmbed({ src }: { src: string }) {
           src={cacheBlobUrl}
           controls
           autoPlay
-          className="w-full max-w-[400px] max-h-[300px] rounded-lg border border-border"
+          className="max-w-[400px] max-h-[300px] rounded-lg border border-transparent hover:border-border transition-colors"
         />
       </div>
     )
@@ -536,7 +536,7 @@ export function VideoEmbed({ src }: { src: string }) {
       <video
         src={resolvedSrc}
         controls
-        className="w-full max-w-[400px] max-h-[300px] rounded-lg border border-border"
+        className="max-w-[400px] max-h-[300px] rounded-lg border border-transparent hover:border-border transition-colors"
         preload="none"
         onError={() => setFailed(true)}
       />

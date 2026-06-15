@@ -190,7 +190,7 @@ export function ContentMediaGroups({ groups, galleryImages, onGalleryOpen }: {
             <ContentMediaImage
               key={`cg-${gi}`}
               src={url}
-              className="rounded-lg mt-2 w-full max-w-[400px] max-[1080px]:max-w-full max-h-[300px] object-contain cursor-pointer hover:brightness-110 transition-all border border-border"
+              className="rounded-lg mt-2 max-w-[400px] max-[1080px]:max-w-full max-h-[300px] object-contain cursor-pointer hover:brightness-110 transition-all border border-transparent hover:border-border"
               onClick={() => onGalleryOpen(url)}
             />
           )
