@@ -269,14 +269,48 @@ export function useStartup() {
     document.addEventListener('visibilitychange', handleVisibility)
 
     // ─── Deferred event redundancy check (personal events) ───
-    // 30s after startup, verify that critical user events exist on ≥3 hardcoded relays.
+    // 30s after startup, verify that critical user events exist on all user relays.
     // If not, rebroadcast them (no signing needed — events are self-authenticating).
     const redundancyTimer = setTimeout(() => {
       import('@/lib/nostr/eventRedundancy').then(({ ensureAddressableRedundancy }) => {
         // Personal events — authored by the current user
         ensureAddressableRedundancy(STANDARD_KINDS.USER_METADATA, pubkey)           // kind 0 — profile
+        ensureAddressableRedundancy(STANDARD_KINDS.CONTACT_LIST, pubkey)            // kind 3 — follow list
+        ensureAddressableRedundancy(10000, pubkey)                                  // kind 10000 — mute/block list
         ensureAddressableRedundancy(STANDARD_KINDS.RELAY_LIST, pubkey)              // kind 10002 — relay list
+        ensureAddressableRedundancy(STANDARD_KINDS.BLOSSOM_SERVER_LIST, pubkey)     // kind 10063 — blossom servers
         ensureAddressableRedundancy(KINDS.USER_HUB_LIST, pubkey)                   // kind 16942 — hub list
+
+        // Emoji sets (kind 30030) — user's own sets, dynamic d-tags
+        for (const set of useEmojiStore.getState().myEmojiSets) {
+          ensureAddressableRedundancy(30030, pubkey, set.dTag)
+        }
+        // Emoji subscriptions (kind 30000, d=emoji-subscriptions)
+        if (useEmojiStore.getState().subscriptionAddresses.length > 0) {
+          ensureAddressableRedundancy(30000, pubkey, 'emoji-subscriptions')
+        }
+
+        // Sticker sets (kind 30030) — user's own sets, dynamic d-tags
+        for (const set of useStickerStore.getState().myStickerSets) {
+          ensureAddressableRedundancy(30030, pubkey, set.dTag)
+        }
+        // Sticker subscriptions (kind 30000, d=sticker-subscriptions)
+        if (useStickerStore.getState().subscriptionAddresses.length > 0) {
+          ensureAddressableRedundancy(30000, pubkey, 'sticker-subscriptions')
+        }
+
+        // GIF collections (kind 30030) — user's own collections, dynamic d-tags
+        for (const col of useGifStore.getState().myGifCollections) {
+          ensureAddressableRedundancy(30030, pubkey, col.dTag)
+        }
+        // GIF subscriptions (kind 30000, d=gif-subscriptions)
+        if (useGifStore.getState().subscriptionAddresses.length > 0) {
+          ensureAddressableRedundancy(30000, pubkey, 'gif-subscriptions')
+        }
+        // GIF favorites (kind 30000, d=gif-favorites)
+        if (useGifStore.getState().favorites.length > 0) {
+          ensureAddressableRedundancy(30000, pubkey, 'gif-favorites')
+        }
 
         // Admin NIP-78 application data — authored by the admin pubkey
         // Any authenticated user helps keep these alive via cooperative rebroadcasting

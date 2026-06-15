@@ -2,8 +2,13 @@
  * eventRedundancy — Cooperative event rebroadcasting
  *
  * Ensures critical Nostr events (profiles, relay lists, hub lists, hub events)
- * exist on at least 3 hardcoded relays. If an event is missing from some relays
- * (e.g. due to DB purges), it rebroadcasts the already-signed event — no signing needed.
+ * exist on all of the user's configured relays. If an event is missing from some
+ * relays (e.g. due to DB purges), it rebroadcasts the already-signed event —
+ * no signing needed.
+ *
+ * Relay sources (deduplicated):
+ *   1. Client relays — from Settings > Network > Relays (enabled only)
+ *   2. User relays  — NIP-65 relay list (kind 10002), if available
  *
  * Two categories:
  *   Personal events: checked once on startup (30s delay)
@@ -12,11 +17,10 @@
  * Tasks are queued and processed sequentially to avoid relay flooding.
  */
 
-import { fetchEventsFromRelays, publishToSpecificRelays, getDefaultRelays } from './relay-pool'
+import { fetchEventsFromRelays, publishToSpecificRelays, getRelays } from './relay-pool'
 import { useUserListsStore } from '@/stores/userListsStore'
 import type { Event, Filter } from 'nostr-tools'
 
-const REDUNDANCY_TARGET = 3
 const RELAY_TIMEOUT_MS = 8_000
 
 /** Events already checked this session — keyed by "kind:pubkey:dTag" */
@@ -51,15 +55,38 @@ function eventKey(kind: number, pubkey: string, dTag?: string): string {
   return dTag ? `${kind}:${pubkey}:${dTag}` : `${kind}:${pubkey}`
 }
 
+/** Build a deduplicated relay list from client relays + user NIP-65 relays */
+function getAllRelays(): string[] {
+  const seen = new Set<string>()
+  const result: string[] = []
+
+  const add = (url: string) => {
+    const normalized = url.replace(/\/+$/, '')
+    if (!seen.has(normalized)) {
+      seen.add(normalized)
+      result.push(url)
+    }
+  }
+
+  // Client relays (Settings > Network > Relays, enabled only)
+  for (const r of getRelays()) add(r)
+
+  // User NIP-65 relays (kind 10002)
+  for (const r of useUserListsStore.getState().userRelays) add(r)
+
+  return result
+}
+
 /**
- * Core: check a single event's presence across hardcoded relays and rebroadcast if needed.
+ * Core: check a single event's presence across all user relays and rebroadcast if needed.
  */
 async function checkAndRebroadcast(filter: Filter, key: string): Promise<void> {
-  const hardcodedRelays = getDefaultRelays()
+  const relays = getAllRelays()
+  if (relays.length === 0) return
 
-  // Query each hardcoded relay individually (in parallel, each with 8s timeout)
+  // Query each relay individually (in parallel, each with 8s timeout)
   const results = await Promise.allSettled(
-    hardcodedRelays.map(async (relay) => {
+    relays.map(async (relay) => {
       const events = await Promise.race([
         fetchEventsFromRelays([relay], filter),
         new Promise<Event[]>((_, reject) =>
@@ -77,7 +104,7 @@ async function checkAndRebroadcast(filter: Filter, key: string): Promise<void> {
 
   for (let i = 0; i < results.length; i++) {
     const result = results[i]
-    const relay = hardcodedRelays[i]
+    const relay = relays[i]
 
     if (result.status === 'fulfilled' && result.value.events.length > 0) {
       presentOn.push(relay)
@@ -92,56 +119,35 @@ async function checkAndRebroadcast(filter: Filter, key: string): Promise<void> {
   }
 
   console.log(
-    `[EventRedundancy] ${key}: found on ${presentOn.length}/${hardcodedRelays.length} hardcoded relays` +
+    `[EventRedundancy] ${key}: found on ${presentOn.length}/${relays.length} relays` +
     (missingFrom.length > 0 ? ` (missing: ${missingFrom.join(', ')})` : '')
   )
 
-  if (presentOn.length >= REDUNDANCY_TARGET || !bestEvent) {
-    return // Sufficient redundancy, or event not found anywhere
+  if (missingFrom.length === 0 || !bestEvent) {
+    return // Present on all relays, or event not found anywhere
   }
 
-  // Rebroadcast to missing hardcoded relays
-  const rebroadcastedTo: string[] = []
-  if (missingFrom.length > 0) {
-    try {
-      const accepted = await publishToSpecificRelays(missingFrom, bestEvent)
-      rebroadcastedTo.push(...accepted)
-    } catch (err) {
-      console.warn(`[EventRedundancy] Failed to rebroadcast to hardcoded relays:`, err)
+  // Rebroadcast to all relays that are missing the event
+  try {
+    const accepted = await publishToSpecificRelays(missingFrom, bestEvent)
+    if (accepted.length > 0) {
+      console.log(`[EventRedundancy] ${key}: rebroadcasted to ${accepted.length} relay(s):`, accepted)
     }
-  }
-
-  // If still under target, try user's NIP-65 relay list as overflow
-  const totalCoverage = presentOn.length + rebroadcastedTo.length
-  if (totalCoverage < REDUNDANCY_TARGET) {
-    const userRelays = useUserListsStore.getState().userRelays
-    const alreadyTried = new Set([...presentOn, ...rebroadcastedTo, ...missingFrom])
-    const untried = userRelays.filter(r => !alreadyTried.has(r))
-
-    if (untried.length > 0) {
-      const needed = REDUNDANCY_TARGET - totalCoverage
-      const targets = untried.slice(0, needed)
-      try {
-        const accepted = await publishToSpecificRelays(targets, bestEvent)
-        rebroadcastedTo.push(...accepted)
-      } catch (err) {
-        console.warn(`[EventRedundancy] Failed to rebroadcast to user relays:`, err)
-      }
+    const finalCoverage = presentOn.length + accepted.length
+    if (finalCoverage < relays.length) {
+      console.warn(`[EventRedundancy] ${key}: only on ${finalCoverage}/${relays.length} relays after rebroadcast`)
     }
-  }
-
-  if (rebroadcastedTo.length > 0) {
-    console.log(`[EventRedundancy] ${key}: rebroadcasted to ${rebroadcastedTo.length} relay(s):`, rebroadcastedTo)
-  } else if (presentOn.length < REDUNDANCY_TARGET) {
-    console.warn(`[EventRedundancy] ${key}: could not achieve ${REDUNDANCY_TARGET}-relay redundancy (only on ${presentOn.length})`)
+  } catch (err) {
+    console.warn(`[EventRedundancy] Failed to rebroadcast ${key}:`, err)
   }
 }
 
 // ── Public API ──
 
 /**
- * Ensure an addressable/replaceable event exists on at least 3 hardcoded relays.
- * Enqueued for sequential processing. Skips if already checked this session.
+ * Ensure an addressable/replaceable event exists on all user relays
+ * (client relays + NIP-65 relays). Enqueued for sequential processing.
+ * Skips if already checked this session.
  *
  * @param kind   Event kind
  * @param pubkey Event author pubkey
