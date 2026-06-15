@@ -43,6 +43,6 @@ export function formatTimestamp(timestamp: number): string {
     return `Yesterday ${date.toLocaleTimeString([], timeOpts)}`
   }
 
-  return date.toLocaleDateString([], { month: 'short', day: 'numeric' }) +
+  return date.toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' }) +
     ' ' + date.toLocaleTimeString([], timeOpts)
 }
