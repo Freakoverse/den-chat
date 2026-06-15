@@ -94,6 +94,7 @@ export function ContextMenuProvider({ children }: { children: ReactNode }) {
   const [menu, setMenu] = useState<ContextMenuState>({ visible: false, x: 0, y: 0, items: [] })
   const menuRef = useRef<HTMLDivElement>(null)
   const animatingOut = useRef(false)
+  const targetEditableRef = useRef<HTMLElement | null>(null)
   const [pasteHint, setPasteHint] = useState(false)
   const pasteHintTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -160,7 +161,10 @@ export function ContextMenuProvider({ children }: { children: ReactNode }) {
       const items: MenuEntry[] = []
       const selection = window.getSelection()
       const hasSelection = selection && selection.toString().trim().length > 0
-      const isEditable = target.closest('input, textarea, [contenteditable="true"]') !== null
+      const editableEl = target.closest('input, textarea, [contenteditable="true"]') as HTMLElement | null
+      const isEditable = editableEl !== null
+      // Store the editable element so paste/cut/selectAll can re-focus it
+      targetEditableRef.current = editableEl
 
       // Check if right-clicked on a link
       const linkEl = target.closest('a[href]') as HTMLAnchorElement | null
@@ -184,7 +188,7 @@ export function ContextMenuProvider({ children }: { children: ReactNode }) {
           items.push({
             label: 'Cut',
             icon: <Scissors size={14} />,
-            action: () => { document.execCommand('cut'); close() },
+            action: () => { targetEditableRef.current?.focus(); document.execCommand('cut'); close() },
           })
         }
         items.push({
@@ -204,6 +208,8 @@ export function ContextMenuProvider({ children }: { children: ReactNode }) {
           label: 'Paste',
           icon: <ClipboardPaste size={14} />,
           action: async () => {
+            // Re-focus the original field so execCommand targets it, not the menu
+            targetEditableRef.current?.focus()
             try {
               const text = await navigator.clipboard.readText()
               document.execCommand('insertText', false, text)
@@ -223,9 +229,10 @@ export function ContextMenuProvider({ children }: { children: ReactNode }) {
           label: 'Select All',
           icon: <TextSelect size={14} />,
           action: () => {
-            const editableEl = target.closest('input, textarea, [contenteditable="true"]') as HTMLInputElement | HTMLTextAreaElement | null
-            if (editableEl && 'select' in editableEl) {
-              editableEl.select()
+            const el = targetEditableRef.current as HTMLInputElement | HTMLTextAreaElement | null
+            if (el && 'select' in el) {
+              el.focus()
+              el.select()
             } else {
               document.execCommand('selectAll')
             }

@@ -601,14 +601,23 @@ export function ChatInputBar({
     return () => document.removeEventListener('paste', onPaste)
   }, [enableFileUpload, addFiles])
 
-  // ─── Custom context menu for textarea — DISABLED ───
-  // The global ContextMenuProvider (ContextMenu.tsx) now handles right-click
-  // on the textarea.  Its paste action uses execCommand('insertText') which
-  // works across all browsers including Firefox.
-  const [ctxMenu, _setCtxMenu] = useState<{ x: number; y: number } | null>(null)
-  const setCtxMenu = _setCtxMenu // keep references valid for existing code
+  // ─── Custom context menu for textarea (right-click → Paste with file support) ───
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null)
   const [pasteHint, setPasteHint] = useState(false)
   const pasteHintTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Use native listener so preventDefault() fires before the browser shows its own menu.
+  useEffect(() => {
+    const ta = textareaRef.current
+    if (!enableFileUpload || !ta) return
+    const onCtx = (e: MouseEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      setCtxMenu({ x: e.clientX, y: e.clientY })
+    }
+    ta.addEventListener('contextmenu', onCtx)
+    return () => ta.removeEventListener('contextmenu', onCtx)
+  }, [enableFileUpload])
 
   useEffect(() => {
     if (!ctxMenu) return
