@@ -6689,7 +6689,9 @@ function ThreadModal({ parentMsg, threadReplies, hubDTag, channelId, getProfile,
   }, [initialScrollToId])
 
   const startEdit = useCallback((msg: ChatMessage) => {
-    setEditingId(msg.dTag)
+    // editingId is matched against msg.id in the row (isEditing = editingId === msg.id),
+    // so it must be the event id — not the d-tag. saveEdit still publishes via msg.dTag.
+    setEditingId(msg.id)
     setEditText(msg.content)
   }, [])
 
