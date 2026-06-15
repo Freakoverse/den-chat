@@ -13,7 +13,9 @@
  */
 
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
-import { blossomServers } from '@/lib/blossom'
+import { blossomServers, downloadFromBlossom, computeHash } from '@/lib/blossom'
+import { parseDecryptionFragment, type FileDecryptionInfo } from '@/lib/blossom/encMediaUrl'
+import { decryptFile } from '@/lib/crypto/fileEncryption'
 import { setCachedSize, hasSizeOverride, checkImageSize as headCheckSize } from '@/lib/imageSizeGuard'
 
 // ── Blossom URL detection ──
@@ -32,6 +34,16 @@ interface BlossomParsed {
   hash: string
   ext: string         // e.g. ".jpg" or "" (bare hash)
   originServer: string // e.g. "https://blossom.primal.net"
+  /** AES-GCM decryption params, present when the URL carries a #dk&dn&doh fragment */
+  enc?: FileDecryptionInfo
+}
+
+/** Minimal ext → MIME map for building decrypted blobs (image/video/audio). */
+const EXT_MIME: Record<string, string> = {
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif',
+  '.webp': 'image/webp', '.svg': 'image/svg+xml', '.bmp': 'image/bmp',
+  '.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime',
+  '.mp3': 'audio/mpeg', '.ogg': 'audio/ogg', '.wav': 'audio/wav', '.m4a': 'audio/mp4',
 }
 
 /**
@@ -66,6 +78,7 @@ function parseBlossomUrl(url: string): BlossomParsed | null {
       hash,
       ext,
       originServer: `${parsed.protocol}//${parsed.host}`,
+      enc: parsed.hash ? parseDecryptionFragment(parsed.hash) || undefined : undefined,
     }
   } catch {
     return null
@@ -118,6 +131,11 @@ export type BlossomMediaState = {
 // ── Global cache for verified hashes (avoid re-verifying the same file) ──
 const verifiedCache = new Map<string, { serverUrl: string }>()
 
+// ── Global cache for decrypted attachments (ciphertextHash → blob: URL) ──
+// Object URLs live for the session (mirrors NIP-17's decrypted-blob cache) so
+// the same file isn't downloaded+decrypted twice across remounts/components.
+const decryptedMediaCache = new Map<string, string>()
+
 /**
  * Hook that provides optimistic blossom media rendering with background hash verification.
  * Returns a direct URL immediately so the browser can render/stream natively.
@@ -156,9 +174,66 @@ export function useBlossomMedia(originalUrl: string | undefined, maxSizeMB?: num
     return `${servers[idx].replace(/\/+$/, '')}/${parsed.hash}${parsed.ext}`
   }, [parsed, servers])
 
+  // ── Phase 0: Encrypted attachment — download ciphertext, decrypt, serve blob URL ──
+  // Encrypted files can't be rendered natively (the bytes are ciphertext), so the
+  // optimistic HEAD/native-src path below is skipped for them.
+  useEffect(() => {
+    if (!parsed || !parsed.enc || servers.length === 0) return
+    const enc = parsed.enc
+    const cipherHash = parsed.hash
+    let cancelled = false
+
+    // Already decrypted this session — reuse the cached blob URL.
+    const cachedBlob = decryptedMediaCache.get(cipherHash)
+    if (cachedBlob) {
+      setCurrentSrc(cachedBlob)
+      setVerified('verified')
+      setLoading(false)
+      setError(false)
+      return
+    }
+
+    setLoading(true)
+    setError(false)
+    setVerified('pending')
+
+    ;(async () => {
+      try {
+        // Download the ciphertext by hash with multi-server failover (origin first).
+        const cipherBytes = await downloadFromBlossom(cipherHash, servers)
+        if (cancelled) return
+        const plainBytes = await decryptFile(cipherBytes, enc.keyHex, enc.nonceHex)
+        if (cancelled) return
+
+        // Integrity: the decrypted bytes should match the original plaintext hash.
+        const tampered = enc.originalHashHex
+          ? computeHash(plainBytes) !== enc.originalHashHex.toLowerCase()
+          : false
+
+        const mime = EXT_MIME[parsed.ext.toLowerCase()] || 'application/octet-stream'
+        const blob = new Blob([plainBytes.slice() as Uint8Array<ArrayBuffer>], { type: mime })
+        const url = URL.createObjectURL(blob)
+        decryptedMediaCache.set(cipherHash, url)
+
+        if (!cancelled) {
+          setCurrentSrc(url)
+          setVerified(tampered ? 'tampered' : 'verified')
+          setLoading(false)
+        }
+      } catch {
+        if (!cancelled) {
+          setError('not-found')
+          setLoading(false)
+        }
+      }
+    })()
+
+    return () => { cancelled = true }
+  }, [parsed, servers])
+
   // ── Phase 1: Find a responsive server (HEAD) and set src immediately ──
   useEffect(() => {
-    if (!parsed || servers.length === 0) return
+    if (!parsed || parsed.enc || servers.length === 0) return
     cancelRef.current = false
     verifyingRef.current = false
 

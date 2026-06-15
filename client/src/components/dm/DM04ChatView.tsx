@@ -30,6 +30,7 @@ import { DnnBadge } from '@/components/ui/DnnBadge'
 import { useGifStore } from '@/stores/gifStore'
 import { publishGifFavorites } from '@/lib/nostr/customGif'
 import { ChatInputBar, type FileAttachment } from '@/components/chat/ChatInputBar'
+import { appendDecryptionFragment } from '@/lib/blossom/encMediaUrl'
 import { getUploadBlossoms } from '@/stores/postingBehaviourStore'
 import { EmojiPickerPopover, EmojiDiscoveryModal } from '@/components/chat/EmojiPickerPopover'
 import { StickerPickerPopover, StickerDiscoveryModal } from '@/components/chat/StickerPickerPopover'
@@ -376,7 +377,12 @@ export function DM04ChatView({ recipientPubkey, onSwitchProtocol, onBack }: { re
       // useBlossomMedia handles server failover across all configured servers.
       const servers = getUploadBlossoms()
       const baseUrl = servers[0]?.replace(/\/+$/, '') || 'https://blossom.primal.net'
-      const links = attachments.map((a) => `${baseUrl}/${a.hash}${mimeToExt(a.type)}`)
+      const links = attachments.map((a) => {
+        const url = `${baseUrl}/${a.hash}${mimeToExt(a.type)}`
+        // Encrypted upload: carry the per-file AES key in a fragment so the
+        // recipient can decrypt. Stays private inside the NIP-04-encrypted body.
+        return a.encryption ? appendDecryptionFragment(url, a.encryption) : url
+      })
       content = content ? `${content}\n${links.join('\n')}` : links.join('\n')
     }
 
@@ -1577,7 +1583,12 @@ function DM04ThreadModal({ parentMsg, threadReplies, recipientPubkey, getProfile
     if (attachments && attachments.length > 0) {
       const servers = getUploadBlossoms()
       const baseUrl = servers[0]?.replace(/\/+$/, '') || 'https://blossom.primal.net'
-      const links = attachments.map((a) => `${baseUrl}/${a.hash}${mimeToExt(a.type)}`)
+      const links = attachments.map((a) => {
+        const url = `${baseUrl}/${a.hash}${mimeToExt(a.type)}`
+        // Encrypted upload: carry the per-file AES key in a fragment so the
+        // recipient can decrypt. Stays private inside the NIP-04-encrypted body.
+        return a.encryption ? appendDecryptionFragment(url, a.encryption) : url
+      })
       content = content ? `${content}\n${links.join('\n')}` : links.join('\n')
     }
 

@@ -756,13 +756,13 @@ export const MessageContent = memo(function MessageContent({ content, suffix, on
       if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(href)) {
         href = 'https://' + href
       }
-      if (!effectiveDisableMedia && /\.(jpg|jpeg|png|gif|webp|svg|bmp)(\?.*)?$/i.test(href)) {
+      if (!effectiveDisableMedia && /\.(jpg|jpeg|png|gif|webp|svg|bmp)(\?[^#]*)?(#.*)?$/i.test(href)) {
         return <BlossomImage src={href} alt={String(children) || ''} />
       }
-      if (!effectiveDisableMedia && /\.(mp4|webm|mov|avi|mkv)(\?.*)?$/i.test(href)) {
+      if (!effectiveDisableMedia && /\.(mp4|webm|mov|avi|mkv)(\?[^#]*)?(#.*)?$/i.test(href)) {
         return <VideoEmbed src={href} />
       }
-      if (!effectiveDisableMedia && /\.(mp3|ogg|wav|flac|aac|m4a)(\?.*)?$/i.test(href)) {
+      if (!effectiveDisableMedia && /\.(mp3|ogg|wav|flac|aac|m4a)(\?[^#]*)?(#.*)?$/i.test(href)) {
         return <AudioEmbed src={href} />
       }
       // Embeddable URLs (YouTube, Twitch, Kick, Twitter/X, Spotify, Steam, TikTok)

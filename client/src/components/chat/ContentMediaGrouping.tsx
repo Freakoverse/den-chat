@@ -14,9 +14,10 @@ import { ImageTooLarge } from '@/components/ui/ImageTooLarge'
 
 /* ────────────── URL detection helpers ────────────── */
 
-const CONTENT_IMAGE_RE = /\.(jpg|jpeg|png|gif|webp|svg|bmp)(\?[^\s]*)?$/i
+// Trailing (#...) tolerates the encrypted-attachment fragment (#dk&dn&doh).
+const CONTENT_IMAGE_RE = /\.(jpg|jpeg|png|gif|webp|svg|bmp)(\?[^\s#]*)?(#[^\s]*)?$/i
 /** Blossom server URLs with a bare sha256 hash path (no file extension) */
-const CONTENT_BLOSSOM_SIMPLE = /^https?:\/\/(blossom\.(primal\.net|band|nostr\.hu|data\.haus)|cdn\.sovbit\.host)\/[a-f0-9]{64}(\?[^\s]*)?$/i
+const CONTENT_BLOSSOM_SIMPLE = /^https?:\/\/(blossom\.(primal\.net|band|nostr\.hu|data\.haus)|cdn\.sovbit\.host)\/[a-f0-9]{64}(\?[^\s#]*)?(#[^\s]*)?$/i
 
 /** Check if a string is a single URL (starts with http(s), no spaces) */
 function isSingleUrl(s: string): boolean {
