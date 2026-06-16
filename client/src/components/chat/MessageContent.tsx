@@ -8,7 +8,7 @@
  */
 
 import { useState, useEffect, useMemo, memo, useCallback, useRef, Children, isValidElement, cloneElement } from 'react'
-import { Clipboard, ClipboardCheck, Download, Loader2, Check, Copy, Hash } from 'lucide-react'
+import { Download, Loader2, Check, Copy, Hash } from 'lucide-react'
 import { useBlossomMedia } from '@/hooks/useBlossomMedia'
 import { VerificationBadge } from '@/components/ui/VerificationBadge'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
@@ -607,7 +607,6 @@ function AudioEmbed({ src }: { src: string }) {
 
 export function CodeBlock({ code, language }: { code: string; language?: string }) {
   const [copied, setCopied] = useState(false)
-  const lines = code.split('\n')
 
   const handleCopy = () => {
     navigator.clipboard.writeText(code)
@@ -615,34 +614,20 @@ export function CodeBlock({ code, language }: { code: string; language?: string 
     setTimeout(() => setCopied(false), 2000)
   }
 
+  // Matches the long-form article code block: header (language + copy) over a plain <pre>.
   return (
-    <div className="relative group/code my-2 rounded-lg border border-border bg-[hsl(var(--secondary))] overflow-hidden">
-      {/* Header bar */}
-      <div className="flex items-center justify-between px-3 py-1 bg-secondary/60 border-b border-border text-[10px] text-muted-foreground">
-        <span>{language || 'text'}</span>
+    <div className="my-2">
+      <div className="flex items-center justify-between px-3 py-1.5 rounded-t-lg bg-secondary/60 border border-border border-b-0">
+        <span className="text-[10px] text-muted-foreground/60 font-mono">{language || ''}</span>
         <button
           onClick={handleCopy}
-          className="flex items-center gap-1 px-1.5 py-0.5 rounded cursor-pointer hover:text-foreground hover:bg-accent/50 transition-colors"
+          className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
         >
-          {copied ? <ClipboardCheck size={12} /> : <Clipboard size={12} />}
-          {copied ? 'Copied' : 'Copy'}
+          {copied ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
+          {copied ? 'Copied!' : 'Copy'}
         </button>
       </div>
-      {/* Code content */}
-      <div className="overflow-x-auto">
-        <table className="w-full text-xs font-mono leading-relaxed">
-          <tbody>
-            {lines.map((line, i) => (
-              <tr key={i} className="hover:bg-accent/20">
-                <td className="select-none text-right pr-3 pl-3 py-0 text-muted-foreground/40 w-[1%] whitespace-nowrap">
-                  {i + 1}
-                </td>
-                <td className="pr-4 py-0 whitespace-pre">{line || ' '}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <pre className="rounded-b-lg rounded-t-none bg-secondary/80 border border-border p-4 overflow-x-auto text-xs font-mono !mt-0">{code}</pre>
     </div>
   )
 }
