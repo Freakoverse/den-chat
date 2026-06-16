@@ -34,6 +34,10 @@ interface NavigationStore {
   /** Pending hub dTag for opening notification settings (set by context menu, consumed by ChannelList) */
   pendingHubNotifDTag: string | null
   setPendingHubNotifDTag: (dTag: string | null) => void
+
+  /** Pending hub dTag for opening the Voice Hosting tab in User Hub Settings (consumed by ChannelList) */
+  pendingHubVoiceHostingDTag: string | null
+  setPendingHubVoiceHostingDTag: (dTag: string | null) => void
 }
 
 export const useNavigationStore = create<NavigationStore>((set) => ({
@@ -53,5 +57,7 @@ export const useNavigationStore = create<NavigationStore>((set) => ({
   setShowMobileMembers: (show) => set({ showMobileMembers: show }),
   pendingHubNotifDTag: null,
   setPendingHubNotifDTag: (dTag) => set({ pendingHubNotifDTag: dTag }),
+  pendingHubVoiceHostingDTag: null,
+  setPendingHubVoiceHostingDTag: (dTag) => set({ pendingHubVoiceHostingDTag: dTag }),
 }))
 

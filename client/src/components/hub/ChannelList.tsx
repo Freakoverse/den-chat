@@ -44,7 +44,7 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
   const [rescinding, setRescinding] = useState(false)
   const [rescindDone, setRescindDone] = useState(false)
   const [showRescindConfirm, setShowRescindConfirm] = useState(false)
-  const [userSettingsInitialTab, setUserSettingsInitialTab] = useState<'messages' | 'notifications' | undefined>(undefined)
+  const [userSettingsInitialTab, setUserSettingsInitialTab] = useState<'messages' | 'notifications' | 'voice' | undefined>(undefined)
 
   // Watch for pending notification settings action from context menu
   const pendingHubNotifDTag = useNavigationStore((s) => s.pendingHubNotifDTag)
@@ -56,6 +56,17 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
       setShowUserSettings(true)
     }
   }, [pendingHubNotifDTag, hub, clearPendingNotif])
+
+  // Watch for pending voice-hosting settings action (from the voice channel view)
+  const pendingHubVoiceHostingDTag = useNavigationStore((s) => s.pendingHubVoiceHostingDTag)
+  const clearPendingVoiceHosting = useNavigationStore((s) => s.setPendingHubVoiceHostingDTag)
+  useEffect(() => {
+    if (pendingHubVoiceHostingDTag && hub && hub.dTag === pendingHubVoiceHostingDTag) {
+      clearPendingVoiceHosting(null)
+      setUserSettingsInitialTab('voice')
+      setShowUserSettings(true)
+    }
+  }, [pendingHubVoiceHostingDTag, hub, clearPendingVoiceHosting])
 
   const markChannelRead = useNotificationStore((s) => s.markChannelRead)
 

@@ -897,8 +897,14 @@ export function VoiceChannelView() {
                     No voice hosts available
                   </div>
                   <p className="text-xs text-muted-foreground/40 max-w-xs">
-                    A hub member needs to provide SFU hosting credentials via User Hub Settings
+                    A hub member needs to provide SFU hosting credentials via User Hub Settings → Voice Hosting.
                   </p>
+                  <button
+                    onClick={() => { if (hub) useNavigationStore.getState().setPendingHubVoiceHostingDTag(hub.dTag) }}
+                    className="mt-1 flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-sm font-medium hover:bg-emerald-500/25 transition-colors cursor-pointer"
+                  >
+                    <Volume2 size={14} /> Set Up Voice Hosting
+                  </button>
                 </div>
               )}
 
@@ -970,6 +976,17 @@ export function VoiceChannelView() {
                     </div>
                   )}
                 </div>
+              )}
+
+              {/* Subtle link to provide your own hosting when hosts already exist
+                  (inverse of the prominent no-host button, so only one shows) */}
+              {availableHosts.length > 0 && (
+                <button
+                  onClick={() => { if (hub) useNavigationStore.getState().setPendingHubVoiceHostingDTag(hub.dTag) }}
+                  className="flex items-center gap-1.5 text-xs text-muted-foreground/50 hover:text-muted-foreground underline underline-offset-2 transition-colors cursor-pointer"
+                >
+                  <Volume2 size={11} /> Provide voice hosting
+                </button>
               )}
 
               {/* Refresh hosts button — always visible */}
