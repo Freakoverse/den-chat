@@ -3766,6 +3766,7 @@ function SecurityTab() {
   const [showSeedRevealConfirm, setShowSeedRevealConfirm] = useState(false)
   const [seedRevealCountdown, setSeedRevealCountdown] = useState<number | null>(null)
   const seedRevealTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const [showSeedCopyConfirm, setShowSeedCopyConfirm] = useState(false)
 
   const startSeedRevealCountdown = () => {
     let remaining = 5
@@ -4083,7 +4084,7 @@ function SecurityTab() {
                   }} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-secondary/50 border border-border text-xs hover:bg-secondary transition-colors cursor-pointer">
                     {showSeedWords ? <><EyeOff size={14} /> Censor</> : <><Eye size={14} /> Uncensor</>}
                   </button>
-                  <button onClick={() => copyText(revealedSeed)} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-secondary/50 border border-border text-xs hover:bg-secondary transition-colors cursor-pointer">
+                  <button onClick={() => setShowSeedCopyConfirm(true)} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-secondary/50 border border-border text-xs hover:bg-secondary transition-colors cursor-pointer">
                     {copied ? <><Check size={14} /> Copied!</> : <><Copy size={14} /> Copy</>}
                   </button>
                   <button onClick={() => { setRevealedSeed(null); setShowSeedWords(false) }} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-secondary/50 border border-border text-xs hover:bg-secondary transition-colors cursor-pointer">
@@ -4404,6 +4405,41 @@ function SecurityTab() {
                 </button>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Seed copy-to-clipboard confirmation */}
+      {showSeedCopyConfirm && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center px-2 bg-black/70 backdrop-blur-sm animate-in fade-in duration-150"
+          onClick={() => setShowSeedCopyConfirm(false)}
+        >
+          <div
+            className="w-[400px] bg-card border border-border rounded-xl shadow-2xl p-5 flex flex-col items-center gap-4 text-center"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-12 h-12 rounded-full bg-destructive/10 flex items-center justify-center">
+              <AlertTriangle size={22} className="text-destructive" />
+            </div>
+            <h4 className="text-base font-bold text-foreground">Copy seed to clipboard?</h4>
+            <p className="text-xs text-muted-foreground">
+              Your clipboard can be read by other apps and clipboard-history tools, and may sync across your devices. Only copy if you're pasting it somewhere safe <strong>right now</strong> — and clear your clipboard afterward.
+            </p>
+            <div className="flex gap-2 w-full pt-1">
+              <button
+                onClick={() => setShowSeedCopyConfirm(false)}
+                className="flex-1 h-9 rounded-lg border border-border bg-secondary/50 text-sm hover:bg-secondary transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => { if (revealedSeed) copyText(revealedSeed); setShowSeedCopyConfirm(false) }}
+                className="flex items-center justify-center gap-2 flex-1 h-9 rounded-lg bg-destructive text-destructive-foreground text-sm font-medium hover:bg-destructive/90 transition-colors cursor-pointer"
+              >
+                <Copy size={14} /> Yes, copy
+              </button>
+            </div>
           </div>
         </div>
       )}

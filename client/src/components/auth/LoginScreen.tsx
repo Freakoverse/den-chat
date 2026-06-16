@@ -169,6 +169,7 @@ export function LoginScreen() {
   const [showRevealConfirm, setShowRevealConfirm] = useState(false)
   const [revealCountdown, setRevealCountdown] = useState<number | null>(null)
   const revealTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const [showCopyConfirm, setShowCopyConfirm] = useState(false)
 
   const startRevealCountdown = () => {
     let remaining = 5
@@ -1365,11 +1366,7 @@ export function LoginScreen() {
                 {showBackupWords ? <><EyeOff size={14} /> Censor</> : <><Eye size={14} /> Reveal</>}
               </button>
               <button
-                onClick={() => {
-                  navigator.clipboard.writeText(backupMnemonic)
-                  setBackupCopied(true)
-                  setTimeout(() => setBackupCopied(false), 2000)
-                }}
+                onClick={() => setShowCopyConfirm(true)}
                 className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-secondary/50 border border-border text-xs hover:bg-secondary transition-colors cursor-pointer"
               >
                 {backupCopied ? <><Check size={14} /> Copied!</> : <><Copy size={14} /> Copy</>}
@@ -1479,6 +1476,42 @@ export function LoginScreen() {
                   </Button>
                 </>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* Copy-seed confirmation */}
+        {showCopyConfirm && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-150"
+            onClick={() => setShowCopyConfirm(false)}
+          >
+            <div
+              className="w-full max-w-sm rounded-xl bg-card border border-border shadow-xl p-6 flex flex-col items-center gap-4 text-center"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-center w-12 h-12 rounded-full bg-destructive/10">
+                <AlertCircle size={22} className="text-destructive" />
+              </div>
+              <h3 className="text-lg font-bold text-foreground">Copy seed to clipboard?</h3>
+              <p className="text-sm text-muted-foreground">
+                Your clipboard can be read by other apps and clipboard-history tools, and may sync across your devices. Only copy if you're pasting it somewhere safe <strong>right now</strong> — and clear your clipboard afterward.
+              </p>
+              <div className="flex gap-2 w-full mt-1">
+                <Button variant="outline" className="flex-1" onClick={() => setShowCopyConfirm(false)}>Cancel</Button>
+                <Button
+                  variant="destructive"
+                  className="flex-1 gap-1.5"
+                  onClick={() => {
+                    navigator.clipboard.writeText(backupMnemonic)
+                    setBackupCopied(true)
+                    setShowCopyConfirm(false)
+                    setTimeout(() => setBackupCopied(false), 2000)
+                  }}
+                >
+                  <Copy size={14} /> Yes, copy
+                </Button>
+              </div>
             </div>
           </div>
         )}
