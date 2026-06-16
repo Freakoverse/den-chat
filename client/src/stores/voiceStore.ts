@@ -106,6 +106,11 @@ interface VoiceStoreState {
   _dcLastSeen: Record<string, number>
   _heartbeatInterval: ReturnType<typeof setInterval> | null
   _micGainNode: GainNode | null  // Live-adjustable mic gain node
+  // Mic pipeline handles — kept so setInputDevice can hot-swap the source mid-call
+  _vadCtx: AudioContext | null
+  _micSource: MediaStreamAudioSourceNode | null
+  _micAnalyser: AnalyserNode | null
+  _micPostSourceNode: AudioNode | null  // first node the source feeds (rnnoise or mic-gain)
 
   /** Whether to show the chat view overlay on the voice channel */
   voiceChatMode: boolean
@@ -162,6 +167,7 @@ interface VoiceStoreState {
 
   /** Set audio output device for remote audio playback (live, mid-call) */
   setOutputDevice: (deviceId: string) => Promise<void>
+  setInputDevice: (deviceId: string) => Promise<void>
 
   /** Update spatial position */
   updatePosition: (x: number, y: number) => void
@@ -388,6 +394,10 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
   _dcLastSeen: {},
   _heartbeatInterval: null,
   _micGainNode: null,
+  _vadCtx: null,
+  _micSource: null,
+  _micAnalyser: null,
+  _micPostSourceNode: null,
   voiceChatMode: false,
   isE2EE: false,
   _screenWatching: new Set<string>(),
@@ -851,7 +861,22 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
           autoGainControl: useBrowserNC,
         }
       } catch { }
-      const rawStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints })
+      // Try the configured (possibly non-default) mic; if it's gone/unavailable the
+      // { exact } constraint throws, so fall back to the system default rather than
+      // failing the whole join.
+      let rawStream: MediaStream
+      try {
+        rawStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints })
+      } catch (err) {
+        if (typeof audioConstraints === 'object' && audioConstraints && 'deviceId' in audioConstraints) {
+          console.warn('[VoiceStore] Configured mic unavailable, falling back to default:', err)
+          const fallback = { ...(audioConstraints as MediaTrackConstraints) }
+          delete fallback.deviceId
+          rawStream = await navigator.mediaDevices.getUserMedia({ audio: fallback })
+        } else {
+          throw err
+        }
+      }
 
       // Expose the raw mic track so the UI speaking-detection hook can clone it.
       // (Firefox blocks opening a second getUserMedia stream to the same device.)
@@ -895,7 +920,16 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
       const micGainNode = vadCtx.createGain()
       micGainNode.gain.value = micGainValue
       gateInput.connect(micGainNode)
-      set({ _micGainNode: micGainNode })
+      // The node the source feeds: rnnoise (when active) else mic-gain directly.
+      // Kept (with the ctx/analyser) so setInputDevice can swap the source live.
+      const micPostSourceNode: AudioNode = gateInput === source ? micGainNode : gateInput
+      set({
+        _micGainNode: micGainNode,
+        _vadCtx: vadCtx,
+        _micSource: source,
+        _micAnalyser: analyser,
+        _micPostSourceNode: micPostSourceNode,
+      })
 
       // Read voice mode and settings early — needed for initial gate state
       let voiceMode: 'activity' | 'alwaysOn' | 'pushToTalk' = 'activity'
@@ -1298,6 +1332,10 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
       _spatialEngine: null,
       myHeading: 0,
       _micGainNode: null,
+      _vadCtx: null,
+      _micSource: null,
+      _micAnalyser: null,
+      _micPostSourceNode: null,
       _dcSessionToPubkey: {},
       _screenWatching: new Set<string>(),
       _cameraHidden: new Set<string>(),
@@ -1531,6 +1569,56 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
     if (provider) {
       await provider.setOutputDevice(deviceId)
       console.log(`[VoiceStore] Output device set to: ${deviceId || '(default)'}`)
+    }
+  },
+
+  setInputDevice: async (deviceId) => {
+    const { _vadCtx, _micSource, _micAnalyser, _micPostSourceNode, localAudioTrack } = get()
+    // No live pipeline (not in a call) — nothing to swap; the next join reads the
+    // saved device from settings.
+    if (!_vadCtx || !_micSource || !_micAnalyser || !_micPostSourceNode) return
+    try {
+      // Match the join constraints: the browser noise-suppression flags must stay
+      // consistent with the pipeline that's already built.
+      let noiseMode: 'off' | 'basic' | 'rnnoise' = 'rnnoise'
+      try {
+        const vs = JSON.parse(localStorage.getItem('den-chat-voice-settings') || '{}')
+        noiseMode = typeof vs.noiseCancellation === 'boolean'
+          ? (vs.noiseCancellation ? 'basic' : 'off')
+          : (vs.noiseSuppression ?? 'rnnoise')
+      } catch { }
+      const useBrowserNC = noiseMode === 'basic'
+      const base: MediaTrackConstraints = {
+        noiseSuppression: useBrowserNC,
+        echoCancellation: true,
+        autoGainControl: useBrowserNC,
+      }
+      // Try the requested device; fall back to default if it's unavailable.
+      let newStream: MediaStream
+      try {
+        newStream = await navigator.mediaDevices.getUserMedia({
+          audio: deviceId ? { ...base, deviceId: { exact: deviceId } } : base,
+        })
+      } catch (err) {
+        console.warn('[VoiceStore] Requested mic unavailable, falling back to default:', err)
+        newStream = await navigator.mediaDevices.getUserMedia({ audio: base })
+      }
+
+      // Swap the source feeding the (unchanged) VAD analyser + gate/destination chain,
+      // so the already-published track keeps flowing from the new mic — no republish.
+      const newSource = _vadCtx.createMediaStreamSource(newStream)
+      _micSource.disconnect()
+      newSource.connect(_micAnalyser)
+      newSource.connect(_micPostSourceNode)
+
+      // Stop the old raw mic track now that nothing reads from it, and expose the new
+      // one for the speaking-detection hook to re-clone.
+      localAudioTrack?.stop()
+      const newRawTrack = newStream.getAudioTracks()[0] || null
+      set({ _micSource: newSource, localAudioTrack: newRawTrack })
+      console.log(`[VoiceStore] Input device switched to: ${deviceId || '(default)'}`)
+    } catch (err) {
+      console.warn('[VoiceStore] Failed to switch input device:', err)
     }
   },
 

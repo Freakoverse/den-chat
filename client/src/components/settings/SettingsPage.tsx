@@ -773,6 +773,15 @@ const VOICE_DEFAULTS: VoiceSettings = {
   screenShareFps: 30,
 }
 
+/**
+ * Whether this webview can route audio output to a non-default device
+ * (HTMLMediaElement.setSinkId). Present in Chromium (Windows WebView2), but absent
+ * in WebKit-based webviews (macOS WKWebView, Linux WebKitGTK) — there the system
+ * default output is always used regardless of the in-app selection.
+ */
+const OUTPUT_DEVICE_SELECTION_SUPPORTED =
+  typeof HTMLMediaElement !== 'undefined' && 'setSinkId' in HTMLMediaElement.prototype
+
 function loadVoiceSettings(): VoiceSettings {
   try {
     const raw = localStorage.getItem(VOICE_SETTINGS_KEY)
@@ -1227,7 +1236,12 @@ function VoiceVideoTab() {
             <label className="text-sm font-medium text-foreground">Input Device</label>
             <DeviceSelect
               value={settings.inputDeviceId}
-              onChange={(val) => { update({ inputDeviceId: val }); if (isTesting) { stopMicTest() } }}
+              onChange={(val) => {
+                update({ inputDeviceId: val })
+                if (isTesting) { stopMicTest() }
+                // Apply immediately to an active voice call (mirrors output device)
+                useVoiceStore.getState().setInputDevice(val)
+              }}
               placeholder="Default"
               options={inputDevices.map((d) => ({
                 value: d.deviceId,
@@ -1250,6 +1264,12 @@ function VoiceVideoTab() {
                 label: d.label || `Speaker ${d.deviceId.slice(0, 8)}...`,
               }))}
             />
+            {!OUTPUT_DEVICE_SELECTION_SUPPORTED && (
+              <p className="flex items-start gap-1.5 text-[11px] text-amber-500/90">
+                <AlertTriangle size={12} className="shrink-0 mt-0.5" />
+                <span>This app build can&apos;t switch the output device — your system&apos;s default output is always used. Change it in your OS sound settings.</span>
+              </p>
+            )}
           </div>
         </div>
 
