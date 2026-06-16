@@ -949,10 +949,14 @@ export const MessageContent = memo(function MessageContent({ content, suffix, on
                 : <span key={`${i}-${j}`}>{renderMarkdown(s.value)}</span>
             )
           }
-          // If the text segment is simple (no markdown block syntax), render inline
-          // to avoid <p> tags pushing content to a new line after mentions
+          // If the text segment is simple (no markdown block syntax and no URLs),
+          // render inline to avoid <p> tags pushing content to a new line after
+          // mentions. Segments containing a URL must go through markdown so the link
+          // stays clickable and its preview/embed renders (the inline path doesn't
+          // linkify) — otherwise a link after an @mention renders as plain text.
           const hasBlockSyntax = /^(\s*(#{1,6}\s|[-*]\s|\d+\.\s|>|```|---|\|))|\n\n/m.test(seg.value)
-          if (!hasBlockSyntax) {
+          const hasUrl = /(https?:\/\/|www\.)\S/i.test(seg.value)
+          if (!hasBlockSyntax && !hasUrl) {
             return <span key={i}>{emojifyTimestampAndMention(seg.value, emojiTags, hubRoleNames)}</span>
           }
           return <span key={i}>{renderMarkdown(seg.value)}</span>
