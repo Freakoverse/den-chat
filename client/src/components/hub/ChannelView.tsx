@@ -1644,7 +1644,7 @@ function MessageList({ hubDTag, channelId, channelName, optimisticMessages, setO
                       return (
                         <button
                           onClick={() => setThreadModalParent(msg)}
-                          className="flex items-center gap-2 ml-12 mt-0.5 mb-1 px-3 py-1.5 rounded-md bg-primary/5 hover:bg-primary/10 border border-primary/15 transition-colors cursor-pointer group"
+                          className="flex flex-wrap items-center gap-x-2 gap-y-1 ml-12 mt-0.5 mb-1 px-3 py-1.5 rounded-md bg-primary/5 hover:bg-primary/10 border border-primary/15 transition-colors cursor-pointer group"
                         >
                           <MessageSquarePlus size={14} className="text-primary/70 shrink-0" />
                           <span className="text-xs font-semibold text-primary">{threadReplies.length} {threadReplies.length === 1 ? 'Thread Reply' : 'Thread Replies'}</span>
