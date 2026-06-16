@@ -5792,6 +5792,7 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
               onSelect={(sticker) => {
                 setPendingStickers((prev) => [...prev, sticker])
                 setShowSticker(false)
+                textareaRef.current?.focus()
               }}
             />
           )}
@@ -5814,6 +5815,7 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
               onSelect={(gif) => {
                 setPendingGifs((prev) => [...prev, gif])
                 setShowGif(false)
+                textareaRef.current?.focus()
               }}
             />
           )}

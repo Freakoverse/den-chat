@@ -1146,6 +1146,7 @@ export function ChatInputBar({
                   onSelect={(sticker) => {
                     onStickerSelect(sticker)
                     setShowSticker(false)
+                    textareaRef.current?.focus()
                   }}
                 />
               )}
@@ -1172,6 +1173,7 @@ export function ChatInputBar({
                   onSelect={(gif) => {
                     onGifSelect(gif)
                     setShowGif(false)
+                    textareaRef.current?.focus()
                   }}
                 />
               )}
