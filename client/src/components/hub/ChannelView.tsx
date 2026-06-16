@@ -68,6 +68,8 @@ import { formatSats, type ZapInfo } from '@/lib/nostr/zap'
 import { ReactionListModal, type ReactionInfo } from '@/components/social/ReactionListModal'
 import { ReportModal } from '@/components/hub/ReportModal'
 import { usePermissions, getPermissionsForUser } from '@/lib/hub/permissions'
+import { useMentionAutocomplete } from './useMentionAutocomplete'
+import { MentionSuggestionsDropdown } from './MentionSuggestionsDropdown'
 import { useNotificationStore } from '@/stores/notificationStore'
 import { useUnreadDivider } from '@/hooks/useUnreadDivider'
 import { NewMessagesDivider } from '@/components/chat/NewMessagesDivider'
@@ -3346,7 +3348,7 @@ export function ChatMessageRow({
         <div className="min-w-0 flex-1">
           <ScrollableContent>
           {isEditing ? (
-            <EditField text={editText} onChange={setEditText} onCancel={() => { cancelEdit(); setRemovedAttachmentHashes(new Set()) }} unchanged={editUnchanged} onSave={() => { onSaveEdit(msg, editText, removedAttachmentHashes); setRemovedAttachmentHashes(new Set()) }} />
+            <EditField text={editText} onChange={setEditText} onCancel={() => { cancelEdit(); setRemovedAttachmentHashes(new Set()) }} unchanged={editUnchanged} onSave={() => { onSaveEdit(msg, editText, removedAttachmentHashes); setRemovedAttachmentHashes(new Set()) }} hubDTag={hubDTag} channelId={channelId} />
           ) : !msg.decrypted && !msg.deleted ? (
             <EncryptedMessageCard hubDTag={hubDTag} />
           ) : shouldBlurBlocked ? (
@@ -3650,7 +3652,7 @@ export function ChatMessageRow({
           </div>
           <ScrollableContent>
           {isEditing ? (
-            <EditField text={editText} onChange={setEditText} onCancel={() => { cancelEdit(); setRemovedAttachmentHashes(new Set()) }} unchanged={editUnchanged} onSave={() => { onSaveEdit(msg, editText, removedAttachmentHashes); setRemovedAttachmentHashes(new Set()) }} />
+            <EditField text={editText} onChange={setEditText} onCancel={() => { cancelEdit(); setRemovedAttachmentHashes(new Set()) }} unchanged={editUnchanged} onSave={() => { onSaveEdit(msg, editText, removedAttachmentHashes); setRemovedAttachmentHashes(new Set()) }} hubDTag={hubDTag} channelId={channelId} />
           ) : !msg.decrypted && !msg.deleted ? (
             <EncryptedMessageCard hubDTag={hubDTag} />
           ) : shouldBlurMsg ? (
@@ -4220,12 +4222,14 @@ export function DeleteConfirmDialog({ onConfirm, onCancel, title, description, p
 
 /* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Inline Edit Field â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
-function EditField({ text, onChange, onCancel, unchanged, onSave }: {
+function EditField({ text, onChange, onCancel, unchanged, onSave, hubDTag, channelId }: {
   text: string
   onChange: (v: string) => void
   onCancel: () => void
   unchanged: boolean
   onSave: () => void
+  hubDTag: string
+  channelId: string
 }) {
   const ref = useRef<HTMLTextAreaElement>(null)
   const [saving, setSaving] = useState(false)
@@ -4233,6 +4237,9 @@ function EditField({ text, onChange, onCancel, unchanged, onSave }: {
     el.style.height = 'auto'
     el.style.height = `${Math.min(el.scrollHeight, 300)}px`
   }, [])
+
+  // @mention autocomplete (people / @everyone / @here / roles) — same as the composer
+  const mention = useMentionAutocomplete({ hubDTag, channelId, text, setText: onChange, textareaRef: ref, autoResize })
 
   useEffect(() => {
     if (ref.current) {
@@ -4267,8 +4274,11 @@ function EditField({ text, onChange, onCancel, unchanged, onSave }: {
         onChange={(e) => {
           onChange(e.target.value)
           autoResize(e.target)
+          mention.updateMentionQuery(e.target.value, e.target.selectionStart)
         }}
         onKeyDown={(e) => {
+          // Let the mention dropdown consume nav keys (arrows/enter/tab/escape) first
+          if (mention.handleMentionKeyDown(e)) return
           if (e.key === 'Escape') onCancel()
           if (e.key === 'Tab') {
             e.preventDefault()
@@ -4298,6 +4308,13 @@ function EditField({ text, onChange, onCancel, unchanged, onSave }: {
         className="w-full bg-secondary rounded-md px-2 py-1 text-sm resize-none outline-none border border-border focus:border-primary transition-colors text-foreground disabled:opacity-50"
         style={{ maxHeight: '300px', overflowY: 'auto' }}
         rows={1}
+      />
+      <MentionSuggestionsDropdown
+        suggestions={mention.mentionSuggestions}
+        activeIndex={mention.mentionIndex}
+        onSelect={mention.applyMention}
+        onHover={mention.setMentionIndex}
+        anchorRef={ref}
       />
       <div className="flex items-center gap-2 text-xs">
         <button
