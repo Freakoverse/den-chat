@@ -1205,20 +1205,12 @@ function MessageList({ hubDTag, channelId, channelName, optimisticMessages, setO
   }, [getProfile, onReply])
 
   const handleThreadReply = useCallback((msg: ChatMessage) => {
-    const profile = getProfile(msg.pubkey)
-    const name = profile?.display_name || profile?.name || truncateNpub(nip19.npubEncode(msg.pubkey))
-    // Always use THIS message as the thread root — don't inherit its own rootRef.
-    // This means thread-replying to a reply creates a thread under the reply, not the original root.
-    const root = `36943:${msg.pubkey}:${msg.dTag}`
-    onThreadReply({
-      dTag: msg.dTag,
-      pubkey: msg.pubkey,
-      displayName: name,
-      preview: msg.content.slice(0, 80),
-      rootRef: root,
-      isThread: true,
-    })
-  }, [getProfile, onThreadReply])
+    // Open the thread modal for this message and let the user reply in its own input,
+    // rather than hooking the reply into the main composer. Replying in the main
+    // composer adds an optimistic message to the main list, which scrolls the channel
+    // to the bottom on send — losing the user's scroll position.
+    setThreadModalParent(msg)
+  }, [])
 
   const addReaction = useCallback((messageId: string, emoji: string, customUrl?: string) => {
     // Gate on add_reactions permission
