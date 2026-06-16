@@ -3762,6 +3762,37 @@ function SecurityTab() {
   const [revealedSeed, setRevealedSeed] = useState<string | null>(null)
   const [showSeedWords, setShowSeedWords] = useState(false)
 
+  // Uncensor confirmation + 5s countdown (guards against shoulder-surfing)
+  const [showSeedRevealConfirm, setShowSeedRevealConfirm] = useState(false)
+  const [seedRevealCountdown, setSeedRevealCountdown] = useState<number | null>(null)
+  const seedRevealTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const startSeedRevealCountdown = () => {
+    let remaining = 5
+    setSeedRevealCountdown(remaining)
+    if (seedRevealTimerRef.current) clearInterval(seedRevealTimerRef.current)
+    seedRevealTimerRef.current = setInterval(() => {
+      remaining -= 1
+      if (remaining <= 0) {
+        if (seedRevealTimerRef.current) { clearInterval(seedRevealTimerRef.current); seedRevealTimerRef.current = null }
+        setSeedRevealCountdown(null)
+        setShowSeedRevealConfirm(false)
+        setShowSeedWords(true)
+      } else {
+        setSeedRevealCountdown(remaining)
+      }
+    }, 1000)
+  }
+
+  const cancelSeedReveal = () => {
+    if (seedRevealTimerRef.current) { clearInterval(seedRevealTimerRef.current); seedRevealTimerRef.current = null }
+    setSeedRevealCountdown(null)
+    setShowSeedRevealConfirm(false)
+  }
+
+  // Clear any pending reveal countdown on unmount
+  useEffect(() => () => { if (seedRevealTimerRef.current) clearInterval(seedRevealTimerRef.current) }, [])
+
   // Reveal nsec
   const [revealedNsec, setRevealedNsec] = useState<string | null>(null)
 
@@ -4041,7 +4072,15 @@ function SecurityTab() {
                   ))}
                 </div>
                 <div className="flex gap-2 flex-wrap">
-                  <button onClick={() => setShowSeedWords(!showSeedWords)} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-secondary/50 border border-border text-xs hover:bg-secondary transition-colors cursor-pointer">
+                  <button onClick={() => {
+                    if (showSeedWords) {
+                      setShowSeedWords(false)
+                    } else {
+                      // Uncensoring is gated behind an "are you sure" + countdown
+                      setSeedRevealCountdown(null)
+                      setShowSeedRevealConfirm(true)
+                    }
+                  }} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-secondary/50 border border-border text-xs hover:bg-secondary transition-colors cursor-pointer">
                     {showSeedWords ? <><EyeOff size={14} /> Censor</> : <><Eye size={14} /> Uncensor</>}
                   </button>
                   <button onClick={() => copyText(revealedSeed)} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-secondary/50 border border-border text-xs hover:bg-secondary transition-colors cursor-pointer">
@@ -4305,6 +4344,66 @@ function SecurityTab() {
                 <Trash2 size={14} /> Delete Account & Seed
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Seed uncensor confirmation + countdown */}
+      {showSeedRevealConfirm && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center px-2 bg-black/70 backdrop-blur-sm animate-in fade-in duration-150"
+          onClick={seedRevealCountdown === null ? () => setShowSeedRevealConfirm(false) : undefined}
+        >
+          <div
+            className="w-[400px] bg-card border border-border rounded-xl shadow-2xl p-5 flex flex-col items-center gap-4 text-center"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {seedRevealCountdown === null ? (
+              <>
+                <div className="w-12 h-12 rounded-full bg-destructive/10 flex items-center justify-center">
+                  <AlertTriangle size={22} className="text-destructive" />
+                </div>
+                <h4 className="text-base font-bold text-foreground">Reveal your secret keys?</h4>
+                <p className="text-xs text-muted-foreground">
+                  These 24 words <strong>are</strong> your account. Anyone who sees them — over your shoulder, on a screen share, or in a screenshot — gains <strong className="text-destructive">full and permanent control</strong> of your identity and funds. There is no recovery and no undo.
+                </p>
+                <p className="text-[11px] text-muted-foreground">Make sure no one is watching your screen and nothing is recording.</p>
+                <div className="flex gap-2 w-full pt-1">
+                  <button
+                    onClick={() => setShowSeedRevealConfirm(false)}
+                    className="flex-1 h-9 rounded-lg border border-border bg-secondary/50 text-sm hover:bg-secondary transition-colors cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={startSeedRevealCountdown}
+                    className="flex items-center justify-center gap-2 flex-1 h-9 rounded-lg bg-destructive text-destructive-foreground text-sm font-medium hover:bg-destructive/90 transition-colors cursor-pointer"
+                  >
+                    <Eye size={14} /> Yes, show
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="relative flex items-center justify-center w-16 h-16">
+                  <svg className="animate-spin h-16 w-16 text-destructive/30" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                  <span key={seedRevealCountdown} className="absolute text-2xl font-bold text-foreground tabular-nums animate-in zoom-in-50 fade-in duration-300">
+                    {seedRevealCountdown}
+                  </span>
+                </div>
+                <h4 className="text-base font-bold text-foreground">Showing keys in {seedRevealCountdown}…</h4>
+                <p className="text-xs text-muted-foreground">Last chance — make sure no one can see your screen.</p>
+                <button
+                  onClick={cancelSeedReveal}
+                  className="flex items-center justify-center gap-2 w-full h-9 rounded-lg border border-border bg-secondary/50 text-sm hover:bg-secondary transition-colors cursor-pointer"
+                >
+                  <EyeOff size={14} /> Wait, never mind
+                </button>
+              </>
+            )}
           </div>
         </div>
       )}

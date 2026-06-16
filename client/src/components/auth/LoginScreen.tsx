@@ -165,6 +165,37 @@ export function LoginScreen() {
   const [backupDownloading, setBackupDownloading] = useState(false)
   const [backupDownloaded, setBackupDownloaded] = useState(false)
 
+  // Reveal-seed confirmation + 5s countdown (guards against shoulder-surfing)
+  const [showRevealConfirm, setShowRevealConfirm] = useState(false)
+  const [revealCountdown, setRevealCountdown] = useState<number | null>(null)
+  const revealTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const startRevealCountdown = () => {
+    let remaining = 5
+    setRevealCountdown(remaining)
+    if (revealTimerRef.current) clearInterval(revealTimerRef.current)
+    revealTimerRef.current = setInterval(() => {
+      remaining -= 1
+      if (remaining <= 0) {
+        if (revealTimerRef.current) { clearInterval(revealTimerRef.current); revealTimerRef.current = null }
+        setRevealCountdown(null)
+        setShowRevealConfirm(false)
+        setShowBackupWords(true)
+      } else {
+        setRevealCountdown(remaining)
+      }
+    }, 1000)
+  }
+
+  const cancelReveal = () => {
+    if (revealTimerRef.current) { clearInterval(revealTimerRef.current); revealTimerRef.current = null }
+    setRevealCountdown(null)
+    setShowRevealConfirm(false)
+  }
+
+  // Clear any pending reveal countdown on unmount
+  useEffect(() => () => { if (revealTimerRef.current) clearInterval(revealTimerRef.current) }, [])
+
   // File import (encrypted backup)
   const [fileImportPassword, setFileImportPassword] = useState('')
   const [fileImportError, setFileImportError] = useState<string | null>(null)
@@ -1320,7 +1351,15 @@ export function LoginScreen() {
 
             <div className="flex gap-2 w-full">
               <button
-                onClick={() => setShowBackupWords(!showBackupWords)}
+                onClick={() => {
+                  if (showBackupWords) {
+                    setShowBackupWords(false)
+                  } else {
+                    // Revealing is gated behind an "are you sure" + countdown
+                    setRevealCountdown(null)
+                    setShowRevealConfirm(true)
+                  }
+                }}
                 className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-secondary/50 border border-border text-xs hover:bg-secondary transition-colors cursor-pointer"
               >
                 {showBackupWords ? <><EyeOff size={14} /> Censor</> : <><Eye size={14} /> Reveal</>}
@@ -1392,6 +1431,57 @@ export function LoginScreen() {
             </Button>
           </CardContent>
         </Card>
+
+        {/* Reveal-seed confirmation + countdown */}
+        {showRevealConfirm && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-150"
+            onClick={revealCountdown === null ? () => setShowRevealConfirm(false) : undefined}
+          >
+            <div
+              className="w-full max-w-sm rounded-xl bg-card border border-border shadow-xl p-6 flex flex-col items-center gap-4 text-center"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {revealCountdown === null ? (
+                <>
+                  <div className="flex items-center justify-center w-12 h-12 rounded-full bg-destructive/10">
+                    <AlertCircle size={22} className="text-destructive" />
+                  </div>
+                  <h3 className="text-lg font-bold text-foreground">Reveal your secret keys?</h3>
+                  <p className="text-sm text-muted-foreground">
+                    These 24 words <strong>are</strong> your account. Anyone who sees them — over your shoulder, on a screen share, or in a screenshot — gains <strong className="text-destructive">full and permanent control</strong> of your identity and funds. There is no recovery and no undo.
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Make sure no one is watching your screen and nothing is recording.
+                  </p>
+                  <div className="flex gap-2 w-full mt-1">
+                    <Button variant="outline" className="flex-1" onClick={() => setShowRevealConfirm(false)}>Cancel</Button>
+                    <Button variant="destructive" className="flex-1 gap-1.5" onClick={startRevealCountdown}>
+                      <Eye size={14} /> Yes, show
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="relative flex items-center justify-center w-16 h-16">
+                    <svg className="animate-spin h-16 w-16 text-destructive/30" viewBox="0 0 24 24" fill="none">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    <span key={revealCountdown} className="absolute text-2xl font-bold text-foreground tabular-nums animate-in zoom-in-50 fade-in duration-300">
+                      {revealCountdown}
+                    </span>
+                  </div>
+                  <h3 className="text-lg font-bold text-foreground">Showing keys in {revealCountdown}…</h3>
+                  <p className="text-sm text-muted-foreground">Last chance — make sure no one can see your screen.</p>
+                  <Button variant="outline" className="w-full gap-1.5" onClick={cancelReveal}>
+                    <EyeOff size={14} /> Wait, never mind
+                  </Button>
+                </>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     )
   }
