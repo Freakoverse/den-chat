@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef, Fragment } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef, Fragment, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { useTheme } from '@/providers/ThemeProvider'
 import { useUserStore, type ISigner } from '@/stores/userStore'
@@ -6564,6 +6564,38 @@ function GuidesTab() {
 
 /* ── Guide Reader Modal ─────────────────────────────────────── */
 
+/** Code block with a header (language label + Copy button) and bottom spacing.
+ *  Mirrors ArticleCodeBlock in the social long-form reader. */
+function GuideCodeBlock({ children, language }: { children: ReactNode; language?: string }) {
+  const [copied, setCopied] = useState(false)
+  const preRef = useRef<HTMLPreElement>(null)
+
+  const handleCopy = () => {
+    const text = preRef.current?.textContent || ''
+    navigator.clipboard.writeText(text)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  return (
+    <div className="mb-4">
+      <div className="flex items-center justify-between px-3 py-1.5 rounded-t-lg bg-secondary/60 border border-border border-b-0">
+        <span className="text-[10px] text-muted-foreground/60 font-mono">{language || ''}</span>
+        <button
+          onClick={handleCopy}
+          className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+        >
+          {copied ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
+          {copied ? 'Copied!' : 'Copy'}
+        </button>
+      </div>
+      <pre ref={preRef} className="rounded-b-lg rounded-t-none bg-secondary/80 border border-border p-4 overflow-x-auto text-xs !mt-0">
+        {children}
+      </pre>
+    </div>
+  )
+}
+
 function GuideReaderModal({ guide, onClose }: { guide: ResolvedGuide; onClose: () => void }) {
   // Close on Escape
   useEffect(() => {
@@ -6624,11 +6656,13 @@ function GuideReaderModal({ guide, onClose }: { guide: ResolvedGuide; onClose: (
                         {children}
                       </a>
                     ),
-                    pre: ({ children }) => (
-                      <pre className="rounded-lg bg-secondary/80 border border-border p-4 overflow-x-auto text-xs">
-                        {children}
-                      </pre>
-                    ),
+                    pre: ({ node, children }) => {
+                      // Extract the language from the code child in the AST
+                      const codeNode = (node?.children as any[])?.find((c: any) => c.tagName === 'code')
+                      const langClass = codeNode?.properties?.className?.[0] || ''
+                      const language = langClass.replace('language-', '')
+                      return <GuideCodeBlock language={language}>{children}</GuideCodeBlock>
+                    },
                     code: ({ children, className }) => {
                       const isInline = !className
                       if (isInline) {
