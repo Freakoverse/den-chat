@@ -764,7 +764,7 @@ const VOICE_DEFAULTS: VoiceSettings = {
   outputDeviceId: '',
   cameraDeviceId: '',
   voiceMode: 'activity',
-  inputSensitivity: 10,
+  inputSensitivity: 1.5,
   releaseDelay: 0.3,
   pushToTalkKey: 'KeyV',
   noiseSuppression: 'rnnoise',
@@ -797,9 +797,9 @@ function saveVoiceSettings(s: VoiceSettings) {
 export function getVoiceSensitivity(): number {
   try {
     const raw = localStorage.getItem(VOICE_SETTINGS_KEY)
-    if (raw) return (JSON.parse(raw).inputSensitivity ?? 10) * 0.5 // slider 0-20 → RMS 0-10
+    if (raw) return (JSON.parse(raw).inputSensitivity ?? 1.5) * 0.5 // slider 0-20 → RMS 0-10
   } catch { }
-  return 10 * 0.5 // default 10 → RMS 5
+  return 1.5 * 0.5 // default 1.5 → RMS 0.75
 }
 
 /** Exported so voiceStore can read the selected camera device */
@@ -1378,18 +1378,18 @@ function VoiceVideoTab() {
                   {settings.inputSensitivity % 1 === 0 ? settings.inputSensitivity : settings.inputSensitivity.toFixed(1)}
                 </span>
 
-                {settings.inputSensitivity !== 10 && (
+                {settings.inputSensitivity !== 1.5 && (
                   <TooltipProvider delayDuration={300}>
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <button
-                          onClick={() => update({ inputSensitivity: 10 })}
+                          onClick={() => update({ inputSensitivity: 1.5 })}
                           className="p-1 rounded text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
                         >
                           <RotateCcw size={14} />
                         </button>
                       </TooltipTrigger>
-                      <TooltipContent side="top" className="text-xs">Reset to default (10)</TooltipContent>
+                      <TooltipContent side="top" className="text-xs">Reset to default (1.5)</TooltipContent>
                     </Tooltip>
                   </TooltipProvider>
                 )}

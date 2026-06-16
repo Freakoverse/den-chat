@@ -1044,7 +1044,7 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
             let holdMs = HOLD_MS
             try {
               const vs = JSON.parse(localStorage.getItem('den-chat-voice-settings') || '{}')
-              threshold = (vs.inputSensitivity ?? 10) * 0.5 // slider 0-20 → RMS 0-10
+              threshold = (vs.inputSensitivity ?? 1.5) * 0.5 // slider 0-20 → RMS 0-10
               holdMs = Math.round((vs.releaseDelay ?? 0.3) * 1000)
             } catch { }
 
