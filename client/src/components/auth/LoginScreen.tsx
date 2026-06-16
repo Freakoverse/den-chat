@@ -1992,7 +1992,7 @@ export function LoginScreen() {
               <Button
                 variant="outline"
                 onClick={() => { setScreen('import'); clearError() }}
-                className="flex-1 gap-1.5"
+                className="gap-1.5"
               >
                 <Import size={14} />
                 Import
@@ -2000,10 +2000,10 @@ export function LoginScreen() {
               <Button
                 variant="outline"
                 onClick={openGenerateFlow}
-                className="flex-1 gap-1.5"
+                className="w-full gap-1.5"
               >
                 <Plus size={14} />
-                Generate
+                Generate Account
               </Button>
             </div>
           </CardContent>
@@ -2177,7 +2177,7 @@ export function LoginScreen() {
                   <Button
                     variant="outline"
                     onClick={() => { setScreen('import'); clearError() }}
-                    className="flex-1 gap-1.5 text-xs"
+                    className="gap-1.5 text-xs"
                   >
                     <Import size={14} />
                     Import
@@ -2185,10 +2185,10 @@ export function LoginScreen() {
                   <Button
                     variant="outline"
                     onClick={openGenerateFlow}
-                    className="flex-1 gap-1.5 text-xs"
+                    className="w-full gap-1.5 text-xs"
                   >
                     <Plus size={14} />
-                    Generate
+                    Generate Account
                   </Button>
                 </div>
               )
