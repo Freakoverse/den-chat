@@ -407,6 +407,14 @@ select:focus-visible {
   border-radius: 4px !important;
 }
 
+/* Slim the Firefox scrollbar and reserve its gutter so the emoji rows (which the
+   library positions absolutely from a measured width) don't sit under an overlay
+   scrollbar. The real overflow fix is the reduced PICKER_WIDTH in the component. */
+.epr-body {
+  scrollbar-width: thin !important;
+  scrollbar-gutter: stable !important;
+}
+
 /* ── Custom Context Menu ── */
 
 @keyframes contextMenuIn {

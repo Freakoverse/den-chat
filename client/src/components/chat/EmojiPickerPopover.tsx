@@ -25,7 +25,12 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { Button } from '@/components/ui/button'
 import { CustomSelect } from '@/components/ui/custom-select'
 
-const PICKER_WIDTH = 340
+// emoji-picker-react lays its Basic-tab emojis out with JS-computed absolute
+// positions: columns = floor(width / 34px). At exactly 340 (= 10 × 34) Firefox
+// measures the full width (its overlay scrollbar isn't subtracted like Chromium's
+// classic one) and packs 10 columns, overflowing the right edge. Keeping the width
+// just under that threshold yields 9 columns in both browsers with room to spare.
+const PICKER_WIDTH = 330
 const PICKER_HEIGHT = 380
 const GAP = 8
 
