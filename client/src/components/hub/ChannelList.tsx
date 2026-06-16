@@ -43,6 +43,7 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
   const [showCreatorProfile, setShowCreatorProfile] = useState(false)
   const [rescinding, setRescinding] = useState(false)
   const [rescindDone, setRescindDone] = useState(false)
+  const [showRescindConfirm, setShowRescindConfirm] = useState(false)
   const [userSettingsInitialTab, setUserSettingsInitialTab] = useState<'messages' | 'notifications' | undefined>(undefined)
 
   // Watch for pending notification settings action from context menu
@@ -63,6 +64,66 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
   const secretsResolved = useHubStore((s) => activeHubId ? !!s.hubSecretsResolved[activeHubId] : false)
   // Show rescind button when: not creator, not a direct member, and secrets are resolved
   const showRescind = !isCreator && !isMember && secretsResolved && !rescindDone
+
+  // Withdraw the pending join request (confirmed via the rescind modal).
+  const handleRescind = useCallback(async () => {
+    if (!hub || !pubkey || rescinding) return
+    setRescinding(true)
+    try {
+      const { fetchEvents } = await import('@/lib/nostr/relay-pool')
+      const { publishToSpecificRelays } = await import('@/lib/nostr/relay-pool')
+      const { getPublishRelays } = await import('@/stores/postingBehaviourStore')
+      const { createDeletedJoinRequest, createDeletionEvent } = await import('@/lib/nostr/events')
+      const { signWithSigner: signFn } = await import('@/lib/nostr')
+      const { KINDS } = await import('@/lib/crypto/constants')
+      const { signer, privateKey } = useUserStore.getState()
+      const relays = [...hub.generalRelays, ...hub.filterRelays]
+      const publishRelays = getPublishRelays(relays)
+
+      // Fetch the existing join request to get its created_at
+      const existing = await fetchEvents({
+        kinds: [KINDS.JOIN_REQUEST],
+        authors: [pubkey],
+        '#d': [hub.dTag],
+        limit: 1,
+      })
+      const originalCreatedAt = existing.length > 0 ? existing[0].created_at : Math.floor(Date.now() / 1000)
+
+      // Step 1: Re-publish with deleted tag (created_at + 1)
+      const deleted = createDeletedJoinRequest(hub.dTag, hub.creatorPubkey, originalCreatedAt)
+      const signedDeleted = await signFn(deleted, signer, privateKey)
+      await publishToSpecificRelays(publishRelays, signedDeleted)
+
+      // Step 2: NIP-09 deletion request
+      const aRef = `${KINDS.JOIN_REQUEST}:${pubkey}:${hub.dTag}`
+      const deletionReq = createDeletionEvent([], [aRef], 'rescind join request')
+      const signedDeletion = await signFn(deletionReq, signer, privateKey)
+      await publishToSpecificRelays(publishRelays, signedDeletion)
+
+      // Step 3: Remove from user's hub list and publish
+      const { createHubListEvent } = await import('@/lib/nostr/events')
+      const hubStore = useHubStore.getState()
+      const remainingEntries = hubStore.hubEntries.filter(e => e.dTag !== hub.dTag)
+      const currentFolders = hubStore.folders
+      hubStore.removeHubEntry(hub.dTag)
+      // Clean up in-memory messages, reactions, and unread counts for this hub
+      const { useMessageStore: getMsgStore } = await import('@/stores/messageStore')
+      getMsgStore.getState().clearHubData(hub.dTag)
+      const hubListEv = createHubListEvent(
+        remainingEntries.map(e => ({ dTag: e.dTag, relayHint: e.relayHint, position: e.position, folderId: e.folderId })),
+        currentFolders,
+      )
+      const signedHubList = await signFn(hubListEv, signer, privateKey)
+      await publishToSpecificRelays(getPublishRelays(), signedHubList)
+
+      setRescindDone(true)
+      setShowRescindConfirm(false)
+    } catch (err) {
+      console.error('[ChannelList] Failed to rescind join request:', err)
+    } finally {
+      setRescinding(false)
+    }
+  }, [hub, pubkey, rescinding])
 
   // Mark the active channel as read whenever it changes
   useEffect(() => {
@@ -315,68 +376,11 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
           {/* Rescind join request — visible when not a direct member and secrets resolved */}
           {showRescind && (
             <button
-              onClick={async () => {
-                if (!hub || !pubkey || rescinding) return
-                setRescinding(true)
-                try {
-                  const { fetchEvents } = await import('@/lib/nostr/relay-pool')
-                  const { publishToSpecificRelays } = await import('@/lib/nostr/relay-pool')
-                  const { getPublishRelays } = await import('@/stores/postingBehaviourStore')
-                  const { createDeletedJoinRequest, createDeletionEvent } = await import('@/lib/nostr/events')
-                  const { signWithSigner: signFn } = await import('@/lib/nostr')
-                  const { KINDS, STANDARD_KINDS } = await import('@/lib/crypto/constants')
-                  const { signer, privateKey } = useUserStore.getState()
-                  const relays = [...hub.generalRelays, ...hub.filterRelays]
-                  const publishRelays = getPublishRelays(relays)
-
-                  // Fetch the existing join request to get its created_at
-                  const existing = await fetchEvents({
-                    kinds: [KINDS.JOIN_REQUEST],
-                    authors: [pubkey],
-                    '#d': [hub.dTag],
-                    limit: 1,
-                  })
-                  const originalCreatedAt = existing.length > 0 ? existing[0].created_at : Math.floor(Date.now() / 1000)
-
-                  // Step 1: Re-publish with deleted tag (created_at + 1)
-                  const deleted = createDeletedJoinRequest(hub.dTag, hub.creatorPubkey, originalCreatedAt)
-                  const signedDeleted = await signFn(deleted, signer, privateKey)
-                  await publishToSpecificRelays(publishRelays, signedDeleted)
-
-                  // Step 2: NIP-09 deletion request
-                  const aRef = `${KINDS.JOIN_REQUEST}:${pubkey}:${hub.dTag}`
-                  const deletionReq = createDeletionEvent([], [aRef], 'rescind join request')
-                  const signedDeletion = await signFn(deletionReq, signer, privateKey)
-                  await publishToSpecificRelays(publishRelays, signedDeletion)
-
-                  // Step 3: Remove from user's hub list and publish
-                  const { createHubListEvent } = await import('@/lib/nostr/events')
-                  const hubStore = useHubStore.getState()
-                  const remainingEntries = hubStore.hubEntries.filter(e => e.dTag !== hub.dTag)
-                  const currentFolders = hubStore.folders
-                  hubStore.removeHubEntry(hub.dTag)
-                  // Clean up in-memory messages, reactions, and unread counts for this hub
-                  const { useMessageStore: getMsgStore } = await import('@/stores/messageStore')
-                  getMsgStore.getState().clearHubData(hub.dTag)
-                  const hubListEv = createHubListEvent(
-                    remainingEntries.map(e => ({ dTag: e.dTag, relayHint: e.relayHint, position: e.position, folderId: e.folderId })),
-                    currentFolders,
-                  )
-                  const signedHubList = await signFn(hubListEv, signer, privateKey)
-                  await publishToSpecificRelays(getPublishRelays(), signedHubList)
-
-                  setRescindDone(true)
-                } catch (err) {
-                  console.error('[ChannelList] Failed to rescind join request:', err)
-                } finally {
-                  setRescinding(false)
-                }
-              }}
-              disabled={rescinding}
-              className="flex-1 flex items-center gap-2 px-2 py-1 rounded-md text-left text-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
+              onClick={() => setShowRescindConfirm(true)}
+              className="flex-1 flex items-center gap-2 px-2 py-1 rounded-md text-left text-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-colors cursor-pointer whitespace-nowrap"
             >
-              {rescinding ? <Loader2 size={16} className="animate-spin" /> : <Undo2 size={16} />}
-              <span>{rescinding ? 'Rescinding...' : 'Rescind Join Request'}</span>
+              <Undo2 size={16} />
+              <span>Rescind Join Request</span>
             </button>
           )}
         </div>
@@ -483,6 +487,37 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
           open={showEvents}
           onClose={() => setShowEvents(false)}
         />
+      )}
+
+      {/* Rescind join request confirmation */}
+      {showRescindConfirm && (
+        <div
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50"
+          onClick={() => { if (!rescinding) setShowRescindConfirm(false) }}
+        >
+          <div className="bg-card border border-border rounded-lg p-6 max-w-md w-full mx-4 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-lg font-semibold text-foreground mb-2">Rescind Join Request</h3>
+            <p className="text-sm text-muted-foreground mb-4">
+              Are you sure you want to rescind your join request? This withdraws your pending request and removes the hub from your list. You can request to join again later.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setShowRescindConfirm(false)}
+                disabled={rescinding}
+                className="px-3 py-1.5 rounded-md text-sm font-medium border border-border text-foreground hover:bg-accent transition-colors cursor-pointer disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleRescind}
+                disabled={rescinding}
+                className="px-3 py-1.5 rounded-md text-sm font-medium bg-destructive text-white hover:bg-destructive/90 transition-colors cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
+              >
+                {rescinding ? <><Loader2 size={14} className="animate-spin" /> Rescinding...</> : 'Yes, Rescind'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </Wrapper>
   )
