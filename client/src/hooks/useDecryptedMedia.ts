@@ -11,6 +11,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import type { Attachment } from '@/stores/messageStore'
+import { getFromPersistentCache, putInPersistentCache } from '@/lib/cache/blossomMediaCache'
 
 /* ─── Module-level cache ─── */
 
@@ -125,6 +126,40 @@ async function decryptFromServers(
 ): Promise<string> {
   const { decryptFile } = await import('@/lib/crypto/fileEncryption')
 
+  // Decrypt ciphertext bytes → verify plaintext hash → blob URL.
+  const finalize = async (cipherBytes: Uint8Array): Promise<string> => {
+    // Decrypt (→95%)
+    const plainBytes = await decryptFile(cipherBytes, enc.key, enc.nonce)
+    onProgress(95)
+
+    // Verify original (plaintext) hash (95–100%)
+    const hashBuf = await crypto.subtle.digest('SHA-256', plainBytes.slice() as Uint8Array<ArrayBuffer>)
+    const actualHash = Array.from(new Uint8Array(hashBuf))
+      .map(b => b.toString(16).padStart(2, '0'))
+      .join('')
+
+    if (actualHash !== enc.originalHash) {
+      console.warn(`⚠ Decrypted file hash mismatch: expected ${enc.originalHash}, got ${actualHash}`)
+      // Still return the blob — the user should see a warning but not be blocked
+    }
+
+    onProgress(100)
+    const blob = new Blob([plainBytes.slice() as Uint8Array<ArrayBuffer>], { type: attachment.type || 'application/octet-stream' })
+    return URL.createObjectURL(blob)
+  }
+
+  // 1. Persistent cache hit — we store the *ciphertext* keyed by its blossom hash
+  //    (privacy-safe: the plaintext never touches disk), so a cache hit skips the
+  //    network entirely and we just decrypt the cached bytes. Survives refresh.
+  try {
+    const cachedCipher = await getFromPersistentCache(attachment.hash)
+    if (cachedCipher) {
+      onProgress(90)
+      const cipherBytes = new Uint8Array(await cachedCipher.arrayBuffer())
+      return await finalize(cipherBytes)
+    }
+  } catch { /* fall through to network */ }
+
   for (let i = 0; i < servers.length; i++) {
     const baseUrl = servers[i].replace(/\/+$/, '')
     const url = `${baseUrl}/${attachment.hash}`
@@ -165,26 +200,10 @@ async function decryptFromServers(
         onProgress(90)
       }
 
-      // Decrypt (90–95%)
-      const plainBytes = await decryptFile(cipherBytes, enc.key, enc.nonce)
-      onProgress(95)
+      // Persist the ciphertext for next time (best-effort, never blocks).
+      putInPersistentCache(attachment.hash, new Blob([cipherBytes.slice() as Uint8Array<ArrayBuffer>])).catch(() => {})
 
-      // Verify original hash (95–100%)
-      const hashBuf = await crypto.subtle.digest('SHA-256', plainBytes.slice() as Uint8Array<ArrayBuffer>)
-      const actualHash = Array.from(new Uint8Array(hashBuf))
-        .map(b => b.toString(16).padStart(2, '0'))
-        .join('')
-
-      if (actualHash !== enc.originalHash) {
-        console.warn(`⚠ Decrypted file hash mismatch: expected ${enc.originalHash}, got ${actualHash}`)
-        // Still return the blob — the user should see a warning but not be blocked
-      }
-
-      onProgress(100)
-
-      // Create blob URL
-      const blob = new Blob([plainBytes.slice() as Uint8Array<ArrayBuffer>], { type: attachment.type || 'application/octet-stream' })
-      return URL.createObjectURL(blob)
+      return await finalize(cipherBytes)
     } catch (err) {
       console.warn(`Failed to decrypt from ${baseUrl}:`, err)
       continue
