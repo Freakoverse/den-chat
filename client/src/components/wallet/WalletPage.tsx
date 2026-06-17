@@ -396,6 +396,9 @@ function WalletDetailView({
   const setSelectedToken = useWalletStore((s) => s.setSelectedToken)
   const tokenBalances = useWalletStore((s) => s.tokenBalances[selectedChain])
   const fetchAllTokenBalances = useWalletStore((s) => s.fetchAllTokenBalances)
+  const btcTypeBalances = useWalletStore((s) => s.btcTypeBalances)
+  const fetchAllBitcoinBalances = useWalletStore((s) => s.fetchAllBitcoinBalances)
+  const derived = useWalletStore((s) => s.derived)
   const bitcoinAddressType = useWalletStore((s) => s.bitcoinAddressType)
   const setBitcoinAddressType = useWalletStore((s) => s.setBitcoinAddressType)
   const addressMode = useWalletStore((s) => s.addressMode)
@@ -413,6 +416,13 @@ function WalletDetailView({
       fetchBalance('bitcoin')
     }
   }, [address, selectedChain])
+
+  // Fetch balances for all three BTC address types so the selector boxes show them
+  useEffect(() => {
+    if (selectedChain === 'bitcoin' && derived) {
+      fetchAllBitcoinBalances()
+    }
+  }, [selectedChain, addressMode, derived])
 
   // Fetch tx history when chain or selected token changes
   useEffect(() => {
@@ -511,6 +521,7 @@ function WalletDetailView({
               if (address) {
                 if (selectedChain === 'bitcoin') {
                   fetchTransactions(selectedChain, address)
+                  fetchAllBitcoinBalances()
                 } else {
                   const contractAddr = activeTokenInfo?.contractAddress || undefined
                   fetchTransactions(selectedChain, address, contractAddr)
@@ -536,11 +547,15 @@ function WalletDetailView({
         {/* ── Bitcoin Address Type Selector ── */}
         {selectedChain === 'bitcoin' && (
           <div className="mb-4">
-            <div className="flex items-center gap-1.5">
-              {(['taproot', 'segwit'] as const).map((type) => {
+            <div className="flex items-center flex-wrap gap-1.5 pb-1">
+              {(['taproot', 'segwit', 'segwit-odd'] as const).map((type) => {
                 const isSelected = bitcoinAddressType === type
-                const label = type === 'taproot' ? 'Taproot' : 'SegWit'
-                const detail = type === 'taproot' ? 'bc1p…' : 'bc1q…'
+                const label = type === 'taproot' ? 'Taproot' : type === 'segwit' ? 'SegWit Even' : 'SegWit Odd'
+                const typeBal = btcTypeBalances[type]
+                const balStr = typeBal?.native ?? '0'
+                const detail = typeBal?.loading
+                  ? '…'
+                  : (balStr.length > 10 ? balStr.slice(0, 10) + '…' : balStr) + ' BTC'
                 return (
                   <button
                     key={type}

@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import {
-  deriveTaprootAddress, deriveSegwitAddress, deriveEvmAddress,
+  deriveTaprootAddress, deriveSegwitAddress, deriveSegwitOddAddress, deriveEvmAddress,
   deriveStandardEvmAddress, deriveStandardSegwitAddress,
   type Chain,
 } from '@/lib/crypto/derive'
@@ -77,13 +77,16 @@ interface WalletState {
   addresses: Partial<Record<Chain, string>>
   // Permanent snapshots (computed once at derive time, never mutated)
   btcTaprootAddress: string | null  // same in both modes (x-only)
-  btcSegwitAddress: string | null   // nostr-mode segwit
+  btcSegwitAddress: string | null   // nostr-mode segwit (even-y / 02)
+  btcSegwitOddAddress: string | null // segwit from odd-y (03) — same x-only key, other parity
   nostrEvmAddress: string | null    // EVM address from even-y pubkey
   // Standard (natural-parity) — only for nsec/seed users
   standardEvmAddress: string | null
   standardBtcSegwitAddress: string | null
   // Balance per chain (native token)
   balances: Partial<Record<Chain, BalanceInfo>>
+  // Native BTC balance per address type — for the Bitcoin address-type selector boxes
+  btcTypeBalances: Partial<Record<'taproot' | 'segwit' | 'segwit-odd', BalanceInfo>>
   // ERC-20 token balances: chain → contractAddress → formatted balance
   tokenBalances: Partial<Record<Chain, Record<string, { balance: string; balanceFull?: string; loading: boolean; error?: string }>>>
   // Transaction history per chain
@@ -92,8 +95,8 @@ interface WalletState {
   selectedChain: Chain
   // Selected token (null = native, or token symbol)
   selectedToken: string | null
-  // Bitcoin address type
-  bitcoinAddressType: 'taproot' | 'segwit'
+  // Bitcoin address type ('segwit' = even-y; 'segwit-odd' = odd-y)
+  bitcoinAddressType: 'taproot' | 'segwit' | 'segwit-odd'
   // Address derivation mode: nostr (even-y) or standard (natural parity)
   addressMode: 'nostr' | 'standard'
   // Whether addresses have been derived
@@ -102,12 +105,13 @@ interface WalletState {
   // Actions
   deriveAddresses: (pubkeyHex: string, privateKeyHex?: string | null) => void
   fetchBalance: (chain: Chain) => Promise<void>
+  fetchAllBitcoinBalances: () => Promise<void>
   fetchTokenBalance: (chain: EvmChain, token: TokenInfo, address: string) => Promise<void>
   fetchAllTokenBalances: (chain: EvmChain, address: string) => Promise<void>
   fetchTransactions: (chain: Chain, address: string, contractAddress?: string) => Promise<void>
   setSelectedChain: (chain: Chain) => void
   setSelectedToken: (token: string | null) => void
-  setBitcoinAddressType: (type: 'taproot' | 'segwit') => void
+  setBitcoinAddressType: (type: 'taproot' | 'segwit' | 'segwit-odd') => void
   setAddressMode: (mode: 'nostr' | 'standard') => void
   refreshAll: () => Promise<void>
 }
@@ -494,10 +498,12 @@ export const useWalletStore = create<WalletState>((set, get) => ({
   addresses: {},
   btcTaprootAddress: null,
   btcSegwitAddress: null,
+  btcSegwitOddAddress: null,
   nostrEvmAddress: null,
   standardEvmAddress: null,
   standardBtcSegwitAddress: null,
   balances: {},
+  btcTypeBalances: {},
   tokenBalances: {},
   transactions: {},
   selectedChain: 'bitcoin',
@@ -509,6 +515,7 @@ export const useWalletStore = create<WalletState>((set, get) => ({
   deriveAddresses: (pubkeyHex: string, privateKeyHex?: string | null) => {
     const btcTaprootAddr = deriveTaprootAddress(pubkeyHex)
     const btcSegwitAddr = deriveSegwitAddress(pubkeyHex)
+    const btcSegwitOddAddr = deriveSegwitOddAddress(pubkeyHex)
     const evmAddr = deriveEvmAddress(pubkeyHex)
 
     // Standard (natural-parity) addresses — only if we have the private key
@@ -530,6 +537,7 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       },
       btcTaprootAddress: btcTaprootAddr,
       btcSegwitAddress: btcSegwitAddr,
+      btcSegwitOddAddress: btcSegwitOddAddr,
       nostrEvmAddress: evmAddr,
       standardEvmAddress: stdEvmAddr,
       standardBtcSegwitAddress: stdBtcSegwit,
@@ -575,6 +583,46 @@ export const useWalletStore = create<WalletState>((set, get) => ({
         },
       }))
     }
+  },
+
+  // Fetch native BTC balance for ALL three address types at once, so the
+  // address-type selector boxes can show balances without switching to each
+  // (mirrors fetchAllTokenBalances for EVM tokens).
+  fetchAllBitcoinBalances: async () => {
+    const state = get()
+    // Even-segwit follows the nostr/standard mode; taproot + odd-segwit are x-only derived.
+    const evenAddr = state.addressMode === 'standard' && state.standardBtcSegwitAddress
+      ? state.standardBtcSegwitAddress
+      : state.btcSegwitAddress
+    const entries: Array<['taproot' | 'segwit' | 'segwit-odd', string | null]> = [
+      ['taproot', state.btcTaprootAddress],
+      ['segwit', evenAddr],
+      ['segwit-odd', state.btcSegwitOddAddress],
+    ]
+
+    // Mark each as loading
+    set((s) => {
+      const next = { ...s.btcTypeBalances }
+      for (const [type, addr] of entries) {
+        if (addr) next[type] = { native: next[type]?.native ?? '0', loading: true, error: undefined }
+      }
+      return { btcTypeBalances: next }
+    })
+
+    await Promise.all(entries.map(async ([type, addr]) => {
+      if (!addr) return
+      try {
+        const bal = await fetchBtcBalance(addr)
+        set((s) => ({ btcTypeBalances: { ...s.btcTypeBalances, [type]: bal } }))
+      } catch (err) {
+        set((s) => ({
+          btcTypeBalances: {
+            ...s.btcTypeBalances,
+            [type]: { native: '—', loading: false, error: err instanceof Error ? err.message : 'Failed to fetch balance' },
+          },
+        }))
+      }
+    }))
   },
 
   fetchTokenBalance: async (chain: EvmChain, token: TokenInfo, address: string) => {
@@ -683,7 +731,7 @@ export const useWalletStore = create<WalletState>((set, get) => ({
 
   setSelectedToken: (token: string | null) => set({ selectedToken: token }),
 
-  setBitcoinAddressType: (type: 'taproot' | 'segwit') => {
+  setBitcoinAddressType: (type: 'taproot' | 'segwit' | 'segwit-odd') => {
     const state = get()
     if (type === state.bitcoinAddressType) return
     // Pick the right address based on current address mode
@@ -692,6 +740,8 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       newAddr = state.addressMode === 'standard' && state.standardBtcSegwitAddress
         ? state.standardBtcSegwitAddress
         : state.btcSegwitAddress
+    } else if (type === 'segwit-odd') {
+      newAddr = state.btcSegwitOddAddress // odd-y segwit — same in both modes (x-only derived)
     } else {
       newAddr = state.btcTaprootAddress // taproot is same in both modes
     }
@@ -713,10 +763,12 @@ export const useWalletStore = create<WalletState>((set, get) => ({
     // Pick the EVM address for this mode
     const evmAddr = mode === 'standard' ? state.standardEvmAddress! : state.nostrEvmAddress!
 
-    // Pick the BTC address (taproot is always the same, segwit differs by mode)
+    // Pick the BTC address (taproot + odd-segwit are mode-independent; even-segwit differs by mode)
     const btcAddr = state.bitcoinAddressType === 'segwit'
       ? (mode === 'standard' ? state.standardBtcSegwitAddress! : state.btcSegwitAddress!)
-      : state.btcTaprootAddress!
+      : state.bitcoinAddressType === 'segwit-odd'
+        ? state.btcSegwitOddAddress!
+        : state.btcTaprootAddress!
 
     set({
       addressMode: mode,
