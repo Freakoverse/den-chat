@@ -236,16 +236,22 @@ export function HubSidebar({ activePage, onNavigate, compact = false }: { active
 
               {folderGroups.map((folder) => {
                 const isCollapsed = collapsedFolders.has(folder.id)
-                const hasActiveHub = folder.hubs.some(e => activePage === 'hubs' && activeHubId === e.dTag)
+                const activeIndex = folder.hubs.findIndex(e => activePage === 'hubs' && activeHubId === e.dTag)
+                const hasActiveHub = activeIndex !== -1
+                // Vertical center of the active hub inside the expanded pill:
+                //   p-1.5 top (6) + folder icon (h-11 = 44) + gap-1.5 (6) + i*(h-10 icon 40 + gap 6) + half icon (20)
+                const barTop = isCollapsed || !hasActiveHub ? '50%' : 76 + activeIndex * 46
 
                 return (
                   <div key={folder.id} className="relative flex flex-col items-center w-full">
-                    {/* Active hub indicator bar (outside container so it hugs sidebar edge) */}
+                    {/* Active hub indicator bar (outside container so it hugs sidebar edge;
+                        positioned at the active hub's vertical center, not the folder's). */}
                     <div
                       className={cn(
-                        'absolute left-0 top-1/2 -translate-y-1/2 w-1 rounded-r-full bg-foreground transition-all duration-200',
+                        'absolute left-0 -translate-y-1/2 w-1 rounded-r-full bg-foreground transition-all duration-200',
                         hasActiveHub ? (isCollapsed ? 'h-5' : 'h-10') : 'h-0'
                       )}
+                      style={{ top: barTop }}
                     />
 
                     {/* Folder pill container — snug fit around icons */}
