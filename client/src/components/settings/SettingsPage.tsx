@@ -984,9 +984,12 @@ function VoiceVideoTab() {
 
   // Mic test state
   const [isTesting, setIsTesting] = useState(false)
-  const [audioLevel, setAudioLevel] = useState(0)
   const testStreamRef = useRef<MediaStream | null>(null)
   const testCtxRef = useRef<AudioContext | null>(null)
+  // Loopback playback element — routes the test audio to the selected output via setSinkId
+  const testAudioRef = useRef<HTMLAudioElement | null>(null)
+  // Level meter bar, driven imperatively to avoid a React re-render every animation frame
+  const levelBarRef = useRef<HTMLDivElement | null>(null)
   // Ref to always have current sensitivity in the mic test RAF loop
   const sensitivityRef = useRef(settings.inputSensitivity)
   const releaseDelayRef = useRef(settings.releaseDelay)
@@ -1086,19 +1089,28 @@ function VoiceVideoTab() {
     }
     const constraints: MediaStreamConstraints = { audio: audioConstraints }
 
-    navigator.mediaDevices.getUserMedia(constraints).then(async (stream) => {
+    // Try the configured mic; if it's unavailable (unplugged/removed) the { exact }
+    // constraint throws, so fall back to the system default so the test still runs —
+    // mirrors the voice-join behaviour.
+    const acquireTestStream = async (): Promise<MediaStream> => {
+      try {
+        return await navigator.mediaDevices.getUserMedia(constraints)
+      } catch (err) {
+        if (freshSettings.inputDeviceId) {
+          console.warn('[MicTest] Configured mic unavailable, falling back to default:', err)
+          return await navigator.mediaDevices.getUserMedia({
+            audio: { noiseSuppression: useBrowserNC, echoCancellation: true, autoGainControl: useBrowserNC },
+          })
+        }
+        throw err
+      }
+    }
+
+    acquireTestStream().then(async (stream) => {
       testStreamRef.current = stream
       // RNNoise requires 48kHz
       const ctx = new AudioContext(noiseMode === 'rnnoise' ? { sampleRate: 48000 } : undefined)
 
-      // Route loopback audio to the selected output device
-      if (freshSettings.outputDeviceId && 'setSinkId' in ctx) {
-        try {
-          await (ctx as any).setSinkId(freshSettings.outputDeviceId)
-        } catch (err) {
-          console.warn('[MicTest] Failed to set output device:', err)
-        }
-      }
       const analyser = ctx.createAnalyser()
       analyser.fftSize = 512
       analyser.smoothingTimeConstant = 0.85
@@ -1136,7 +1148,24 @@ function VoiceVideoTab() {
       gainNode.gain.value = 0
       micGainNode.connect(delayNode)
       delayNode.connect(gainNode)
-      gainNode.connect(ctx.destination)
+
+      // Play the gated loopback through an <audio> element so it can be routed to
+      // the selected output device via setSinkId (AudioContext.setSinkId is
+      // unreliable; HTMLMediaElement.setSinkId is what the voice providers use).
+      const loopbackDest = ctx.createMediaStreamDestination()
+      gainNode.connect(loopbackDest)
+      const audioEl = new Audio()
+      audioEl.srcObject = loopbackDest.stream
+      audioEl.autoplay = true
+      testAudioRef.current = audioEl
+      if (freshSettings.outputDeviceId && 'setSinkId' in audioEl) {
+        try {
+          await (audioEl as HTMLAudioElement & { setSinkId: (id: string) => Promise<void> }).setSinkId(freshSettings.outputDeviceId)
+        } catch (err) {
+          console.warn('[MicTest] Failed to set output device:', err)
+        }
+      }
+      audioEl.play().catch(() => {})
 
       testCtxRef.current = ctx
 
@@ -1165,7 +1194,15 @@ function VoiceVideoTab() {
         rmsIdx++
         const rms = rmsHistory.reduce((a, b) => a + b, 0) / rmsHistory.length
 
-        setAudioLevel(Math.min(rms, 100))
+        // Drive the level meter imperatively (no React state) so the test doesn't
+        // re-render the settings page every frame — that was the source of the lag.
+        const bar = levelBarRef.current
+        if (bar) {
+          bar.style.width = `${Math.min(rms * 10, 100)}%`
+          bar.style.background = rms > sensitivityRef.current * 0.5
+            ? 'linear-gradient(90deg, #22c55e 0%, #4ade80 50%, #86efac 100%)'
+            : 'linear-gradient(90deg, #6b7280 0%, #9ca3af 100%)'
+        }
 
         const now = Date.now()
         const threshold = sensitivityRef.current * 0.5 // slider 0-20 → RMS 0-10
@@ -1195,10 +1232,15 @@ function VoiceVideoTab() {
   function stopMicTest() {
     cancelAnimationFrame(testRafRef.current)
     testStreamRef.current?.getTracks().forEach((t) => t.stop())
+    if (testAudioRef.current) {
+      testAudioRef.current.pause()
+      testAudioRef.current.srcObject = null
+      testAudioRef.current = null
+    }
     testCtxRef.current?.close()
     testStreamRef.current = null
     testCtxRef.current = null
-    setAudioLevel(0)
+    if (levelBarRef.current) levelBarRef.current.style.width = '0%'
     setIsTesting(false)
 
     // Restore pre-test mute/deafen state if we were in a voice call
@@ -1238,9 +1280,10 @@ function VoiceVideoTab() {
               value={settings.inputDeviceId}
               onChange={(val) => {
                 update({ inputDeviceId: val })
-                if (isTesting) { stopMicTest() }
                 // Apply immediately to an active voice call (mirrors output device)
                 useVoiceStore.getState().setInputDevice(val)
+                // Restart a running mic test so it switches to the new mic
+                if (isTesting) { stopMicTest(); setTimeout(() => startMicTest(), 100) }
               }}
               placeholder="Default"
               options={inputDevices.map((d) => ({
@@ -1257,6 +1300,11 @@ function VoiceVideoTab() {
                 update({ outputDeviceId: val })
                 // Apply immediately to active voice call
                 useVoiceStore.getState().setOutputDevice(val)
+                // Route a running mic test's loopback to the new output device too
+                const tAudio = testAudioRef.current as (HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> }) | null
+                if (isTesting && tAudio?.setSinkId) {
+                  tAudio.setSinkId(val).catch((err) => console.warn('[MicTest] Failed to set output device:', err))
+                }
               }}
               placeholder="Default"
               options={outputDevices.map((d) => ({
@@ -1290,15 +1338,13 @@ function VoiceVideoTab() {
 
             {/* Level meter */}
             <div className="flex-1 max-[1080px]:flex-none w-full h-6 rounded-md bg-secondary/50 border border-border overflow-hidden relative">
-              {/* Audio level bar */}
+              {/* Audio level bar — width/background driven imperatively in the RAF loop */}
               <div
+                ref={levelBarRef}
                 className="absolute inset-y-0 left-0 rounded-md transition-[width] duration-[50ms] ease-out"
                 style={{
-                  // Linear: audioLevel 0-10 → 0-100% bar width
-                  width: `${Math.min(audioLevel * 10, 100)}%`,
-                  background: audioLevel > settings.inputSensitivity * 0.5
-                    ? 'linear-gradient(90deg, #22c55e 0%, #4ade80 50%, #86efac 100%)'
-                    : 'linear-gradient(90deg, #6b7280 0%, #9ca3af 100%)',
+                  width: '0%',
+                  background: 'linear-gradient(90deg, #6b7280 0%, #9ca3af 100%)',
                 }}
               />
 
