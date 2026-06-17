@@ -183,6 +183,46 @@ interface LinkPreviewData {
 
 const previewCache = new Map<string, LinkPreviewData | null>()
 
+/**
+ * Only mounts its children once it scrolls near the viewport (IntersectionObserver).
+ * Lets a chat full of link previews / embeds defer their fetches + iframe loads until
+ * the user actually scrolls to them — important on slow connections. Once shown, it
+ * stays mounted (re-fetching on every scroll would be worse). A skeleton of `minHeight`
+ * reserves space to limit layout shift when the real content loads.
+ */
+function LazyInView({ minHeight = 0, skeleton = false, children }: { minHeight?: number; skeleton?: boolean; children: React.ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null)
+  const [visible, setVisible] = useState(false)
+
+  useEffect(() => {
+    if (visible) return
+    const el = ref.current
+    if (!el) return
+    const obs = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setVisible(true)
+          obs.disconnect()
+        }
+      },
+      { rootMargin: '200px 0px' }, // start loading a touch before it's on screen
+    )
+    obs.observe(el)
+    return () => obs.disconnect()
+  }, [visible])
+
+  if (visible) return <>{children}</>
+  // Embeds reserve their space with a shimmer; previews use a zero-footprint spacer
+  // (many resolve to nothing, so we avoid leaving an empty placeholder gap).
+  return (
+    <div
+      ref={ref}
+      className={skeleton ? 'media-skeleton rounded-lg max-w-[400px]' : undefined}
+      style={{ minHeight }}
+    />
+  )
+}
+
 export function LinkPreview({ href }: { href: string }) {
   const showLinkPreviews = usePreferencesStore((s) => s.showLinkPreviews)
   const [preview, setPreview] = useState<LinkPreviewData | null>(null)
@@ -703,8 +743,18 @@ export const MessageContent = memo(function MessageContent({ content, suffix, on
       <>
         {unique.map((item, i) =>
           item.type === 'embed'
-            ? <div key={`embed-${i}`} className="mt-1"><Embed embed={item.embed!} maxWidth={400} /></div>
-            : <LinkPreview key={`preview-${i}`} href={item.href} />
+            ? (
+              <div key={`embed-${i}`} className="mt-1">
+                <LazyInView skeleton minHeight={item.embed!.layout === 'video' ? 225 : (item.embed!.height ?? 200)}>
+                  <Embed embed={item.embed!} maxWidth={400} />
+                </LazyInView>
+              </div>
+            )
+            : (
+              <LazyInView key={`preview-${i}`}>
+                <LinkPreview href={item.href} />
+              </LazyInView>
+            )
         )}
       </>
     )
