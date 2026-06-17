@@ -1116,7 +1116,7 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm p-2" onClick={onClose}>
       <div
-        className={`bg-card rounded-2xl w-full max-h-[85vh] overflow-hidden shadow-2xl border border-border/50 animate-in fade-in-0 zoom-in-95 duration-200 transition-[max-width] ${editing ? 'max-w-[540px]' : 'max-w-[420px]'}`}
+        className={`bg-card rounded-2xl w-full max-h-[85vh] overflow-hidden shadow-2xl border border-border/50 animate-in fade-in-0 zoom-in-95 duration-200 transition-[max-width] ${editing ? 'max-w-[540px]' : 'max-w-lg'}`}
         onClick={(e) => e.stopPropagation()}
       >
         {/* ── Banner ── (hidden in edit mode) */}
