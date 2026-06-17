@@ -69,6 +69,33 @@ export function extractBlossomHash(url: string): string | null {
   }
 }
 
+// ─── Persistent storage ───
+
+/**
+ * Ask the browser to keep our cached media instead of treating it as evictable
+ * "best-effort" storage. Without this, Chrome (and other browsers) can wipe the
+ * Cache API / IndexedDB between sessions or under disk pressure — which is why
+ * the media cache "works" within a session on web but is empty on the next
+ * visit, while the Tauri desktop build (OS-level app storage) always persists.
+ *
+ * The browser decides whether to grant it: Chrome bases this on site engagement,
+ * being bookmarked, installed as a PWA, or having notification permission. Safe
+ * no-op where the API is unsupported. Call once on startup.
+ */
+export async function requestPersistentStorage(): Promise<boolean> {
+  try {
+    if (!navigator.storage?.persist) return false
+    if (await navigator.storage.persisted()) return true
+    const granted = await navigator.storage.persist()
+    console.log(
+      `[BlossomCache] Persistent storage ${granted ? 'granted' : 'denied — cache is best-effort and may be evicted by the browser'}`,
+    )
+    return granted
+  } catch {
+    return false
+  }
+}
+
 // ─── Cache API availability ───
 
 let cacheApiAvailable: boolean | null = null

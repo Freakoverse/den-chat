@@ -2,7 +2,13 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { ThemeProvider } from './providers/ThemeProvider'
 import App from './App'
+import { requestPersistentStorage } from './lib/cache/blossomMediaCache'
 import './styles/index.css'
+
+// Ask the browser to keep our media cache instead of evicting it between
+// sessions. Auto-granted in the Tauri webview; on web, Chrome grants it based
+// on engagement / install / bookmark. Fire-and-forget — never blocks startup.
+requestPersistentStorage()
 
 // ── Tauri: intercept external link clicks and open in system browser ──
 // In Tauri, <a target="_blank"> does nothing — links must go through the
