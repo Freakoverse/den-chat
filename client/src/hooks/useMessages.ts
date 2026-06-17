@@ -624,7 +624,8 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
     rootRef?: string,
     forumFields?: { title: string; featuredImage?: string; tags?: string[] },
     attachments?: Attachment[],
-    nsfw?: boolean
+    nsfw?: boolean,
+    isThread?: boolean
   ) => {
     if (!hubDTag || !channelId || (!signer && !privateKey)) return
 
@@ -665,7 +666,9 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
     // Extract mention tags from edited text for relay-queryable p and M tags
     const { mentionPubkeys, mentionGroups } = extractMentionTags(newText, hubDTag!)
 
-    let unsigned = createMessageEvent(content, hubDTag, channelId, epoch, replyToObj, dTag, rootRef, undefined, undefined, undefined, !!forumFields, mentionPubkeys.length > 0 ? mentionPubkeys : undefined, mentionGroups.length > 0 ? mentionGroups : undefined)
+    // Preserve nsfw + thread markers on edit — otherwise an edited thread-reply
+    // loses its ['thread'] tag and re-renders as a normal reply in the main chat.
+    let unsigned = createMessageEvent(content, hubDTag, channelId, epoch, replyToObj, dTag, rootRef, nsfw, isThread, undefined, !!forumFields, mentionPubkeys.length > 0 ? mentionPubkeys : undefined, mentionGroups.length > 0 ? mentionGroups : undefined)
 
     // Carry forward published_at from the original message so the edited
     // version stays at its original position in the timeline for all clients.

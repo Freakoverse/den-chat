@@ -1182,7 +1182,7 @@ function MessageList({ hubDTag, channelId, channelName, optimisticMessages, setO
         ? originalMsg.attachments.filter(a => !removedHashes.has(a.hash))
         : originalMsg.attachments
       // Pass replyTo, rootRef, attachments, and nsfw to preserve them on edit
-      await editMessage(originalMsg.dTag, newText, originalMsg.replyTo, originalMsg.rootRef, undefined, remainingAttachments, originalMsg.nsfw || undefined)
+      await editMessage(originalMsg.dTag, newText, originalMsg.replyTo, originalMsg.rootRef, undefined, remainingAttachments, originalMsg.nsfw || undefined, originalMsg.isThread || undefined)
       setEditingId(null)
       setEditText('')
     } catch (err) {
@@ -6596,7 +6596,7 @@ function ThreadModal({ parentMsg, threadReplies, hubDTag, channelId, getProfile,
     nsfw?: boolean,
     isThread?: boolean
   ) => Promise<void>
-  editMessage: (dTag: string, newContent: string, replyTo?: string, rootRef?: string, forumFields?: { title: string; featuredImage?: string; tags?: string[] }, attachments?: Attachment[], nsfw?: boolean) => Promise<void>
+  editMessage: (dTag: string, newContent: string, replyTo?: string, rootRef?: string, forumFields?: { title: string; featuredImage?: string; tags?: string[] }, attachments?: Attachment[], nsfw?: boolean, isThread?: boolean) => Promise<void>
   deleteMessage: (dTag: string) => Promise<void>
   publishReaction: (emoji: string, targetEventId: string, targetPubkey: string, targetDTag: string, customUrl?: string) => Promise<void>
   unreactReaction: (reactionEventId: string) => Promise<void>
@@ -6746,7 +6746,7 @@ function ThreadModal({ parentMsg, threadReplies, hubDTag, channelId, getProfile,
         ? msg.attachments.filter(a => !removedHashes.has(a.hash))
         : msg.attachments
       // Pass replyTo, rootRef, attachments, and nsfw to preserve them on edit
-      await editMessage(msg.dTag, newText, msg.replyTo, msg.rootRef, undefined, remainingAttachments, msg.nsfw || undefined)
+      await editMessage(msg.dTag, newText, msg.replyTo, msg.rootRef, undefined, remainingAttachments, msg.nsfw || undefined, msg.isThread || undefined)
       setEditingId(null)
       setEditText('')
     } catch (err) {
