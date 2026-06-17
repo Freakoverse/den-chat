@@ -2815,20 +2815,15 @@ function GuideModal({ open, onClose, isDesktop, onGenerate, onLocalSigner, onExt
               <ChevronRight size={16} className="text-muted-foreground shrink-0" />
             </button>
 
-            {/* Detailed Guide card */}
-            <button
-              onClick={() => { setTrack('detailed'); setPage(0) }}
-              className="w-full flex items-center gap-4 p-4 rounded-xl border border-border bg-secondary/30 hover:bg-secondary/50 hover:border-primary/30 transition-all cursor-pointer text-left group"
-            >
-              <div className="w-12 h-12 rounded-xl bg-secondary/60 flex items-center justify-center shrink-0 group-hover:bg-secondary/80 transition-colors">
-                <BookOpen size={24} className="text-muted-foreground" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <h3 className="text-sm font-semibold text-foreground">Detailed Guide</h3>
-                <p className="text-xs text-muted-foreground mt-0.5">Learn everything about how your account works</p>
-              </div>
-              <ChevronRight size={16} className="text-muted-foreground shrink-0" />
-            </button>
+            {/* Detailed Guide — de-emphasized text link so non-technical users go for Quick Start */}
+            <div className="text-center pt-1">
+              <button
+                onClick={() => { setTrack('detailed'); setPage(0) }}
+                className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2 transition-colors cursor-pointer"
+              >
+                Or read the detailed guide
+              </button>
+            </div>
           </div>
         )}
 
