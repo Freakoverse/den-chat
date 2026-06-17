@@ -8,7 +8,7 @@
 
 import { useState, useMemo } from 'react'
 import { useUserStore } from '@/stores/userStore'
-import { useDMStore } from '@/stores/dmStore'
+import { useDM04Store } from '@/stores/dm04Store'
 import { useFollowStore } from '@/stores/followStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -27,7 +27,8 @@ export function InviteModal({ open, onClose, hub }: InviteModalProps) {
   const myPubkey = useUserStore((s) => s.pubkey)
   const signer = useUserStore((s) => s.signer)
   const privateKey = useUserStore((s) => s.privateKey)
-  const sendMessage = useDMStore((s) => s.sendMessage)
+  // Send the invite as a NIP-04 DM (the simpler, more widely-supported DM type)
+  const sendMessage = useDM04Store((s) => s.sendMessage)
   const followedPubkeys = useFollowStore((s) => s.followedPubkeys)
   const { getProfile } = useProfileCache()
 
