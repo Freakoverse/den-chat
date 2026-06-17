@@ -73,6 +73,7 @@ import {
   getRenderLimit, setRenderLimit, resetRenderLimits, getRenderLimitDefault,
   LIMIT_MAX_SLIDER, type RenderLimitCategory,
 } from '@/lib/imageSizeGuard'
+import { getCacheBudgetMB, setCacheBudgetMB, getCacheStats, clearPersistentCache } from '@/lib/cache/blossomMediaCache'
 import { MAX_HUB_LIST_ENTRIES, MAX_HUB_FOLDERS, FOLDER_NAME_MAX } from '@/lib/hub/hubLimits'
 
 /* ─────────── types ─────────── */
@@ -512,6 +513,11 @@ function PreferencesTab() {
         {/* Sound Effects */}
         <SoundEffectsSection />
 
+        {/* Divider */}
+        <div className="h-px bg-border" />
+
+        {/* Media Cache */}
+        <MediaCacheSection />
 
       </div>
 
@@ -522,6 +528,95 @@ function PreferencesTab() {
         currentLanguage={language}
         onSelect={(code) => { setLanguage(code); setShowLangModal(false) }}
       />
+    </div>
+  )
+}
+
+/** Media cache budget slider + clear button (Preferences tab). */
+function MediaCacheSection() {
+  const [budgetMB, setBudgetMB] = useState(() => getCacheBudgetMB())
+  const [usageMB, setUsageMB] = useState<number | null>(null)
+  const [clearing, setClearing] = useState(false)
+  const commitTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const refreshUsage = useCallback(() => {
+    getCacheStats().then((s) => setUsageMB(s.totalSizeMB)).catch(() => {})
+  }, [])
+  useEffect(() => { refreshUsage() }, [refreshUsage])
+
+  const onSlide = (mb: number) => {
+    setBudgetMB(mb)
+    // Debounce the actual apply (persists + evicts excess) until the user settles
+    if (commitTimer.current) clearTimeout(commitTimer.current)
+    commitTimer.current = setTimeout(() => {
+      setCacheBudgetMB(mb).then(refreshUsage).catch(() => {})
+    }, 400)
+  }
+
+  const handleClear = async () => {
+    setClearing(true)
+    try { await clearPersistentCache() } finally { setClearing(false); refreshUsage() }
+  }
+
+  const pct = Math.min((budgetMB / 1024) * 100, 100)
+  const valueLabel = budgetMB === 0 ? 'Off' : budgetMB >= 1024 ? '1 GB' : `${budgetMB} MB`
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <label className="text-sm font-medium text-foreground">Media Storage</label>
+        <p className="text-xs text-muted-foreground">
+          Images and GIFs you've seen in chats, DMs, and posts are saved on this device so they load instantly next time (and after restarting) instead of downloading again. Bigger limit = more saved.
+        </p>
+      </div>
+
+      {/* Budget slider — 0 (off) … 1 GB, 5 MB steps */}
+      <div className="flex items-center gap-4 px-2 py-1 rounded-sm bg-secondary">
+        <div className="flex-1 relative h-6 flex items-center">
+          <div className="absolute left-0 right-0 h-2 rounded-full overflow-hidden">
+            <div className="absolute inset-0 bg-muted-foreground/20" />
+            <div className="absolute inset-y-0 left-0 bg-primary" style={{ width: `${pct}%` }} />
+          </div>
+          <div
+            className="absolute w-5 h-5 rounded-full bg-primary border-2 border-background shadow-lg pointer-events-none transition-all"
+            style={{ left: `calc(${pct}% - 10px)` }}
+          />
+          <input
+            type="range"
+            min={0}
+            max={1024}
+            step={5}
+            value={budgetMB}
+            onChange={(e) => onSlide(Number(e.target.value))}
+            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+          />
+        </div>
+        <span className="text-sm font-medium tabular-nums min-w-[60px] text-right text-foreground">
+          {valueLabel}
+        </span>
+      </div>
+
+      {/* Plain-language warning */}
+      <p className="text-[11px] text-amber-500/90">
+        {budgetMB === 0
+          ? 'Saving is off — nothing is kept on this device, so images download again every time you open a chat or post.'
+          : 'Choosing a smaller size (or Off) immediately deletes saved images to fit the new limit.'}
+      </p>
+
+      {/* Clear button + current usage */}
+      <div className="flex items-center gap-3">
+        <button
+          onClick={handleClear}
+          disabled={clearing}
+          className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border bg-secondary/50 text-xs hover:bg-secondary transition-colors cursor-pointer disabled:opacity-50"
+        >
+          <Trash2 size={14} />
+          {clearing ? 'Clearing…' : 'Clear Media Storage'}
+        </button>
+        {usageMB !== null && (
+          <span className="text-xs text-muted-foreground">Using {usageMB} MB</span>
+        )}
+      </div>
     </div>
   )
 }

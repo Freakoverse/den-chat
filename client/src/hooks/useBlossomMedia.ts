@@ -16,6 +16,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { blossomServers, downloadFromBlossom, computeHash } from '@/lib/blossom'
 import { parseDecryptionFragment, type FileDecryptionInfo } from '@/lib/blossom/encMediaUrl'
 import { decryptFile } from '@/lib/crypto/fileEncryption'
+import { getFromPersistentCache, putInPersistentCache } from '@/lib/cache/blossomMediaCache'
 import { setCachedSize, hasSizeOverride, checkImageSize as headCheckSize } from '@/lib/imageSizeGuard'
 
 // ── Blossom URL detection ──
@@ -199,8 +200,16 @@ export function useBlossomMedia(originalUrl: string | undefined, maxSizeMB?: num
 
     ;(async () => {
       try {
-        // Download the ciphertext by hash with multi-server failover (origin first).
-        const cipherBytes = await downloadFromBlossom(cipherHash, servers)
+        // Persistently cache the CIPHERTEXT (keyed by its hash) — disk stays encrypted,
+        // we just avoid re-downloading and decrypt fresh each load.
+        let cipherBytes: Uint8Array
+        const cachedCipher = await getFromPersistentCache(cipherHash)
+        if (cachedCipher) {
+          cipherBytes = new Uint8Array(await cachedCipher.arrayBuffer())
+        } else {
+          cipherBytes = await downloadFromBlossom(cipherHash, servers)
+          putInPersistentCache(cipherHash, new Blob([cipherBytes])).catch(() => {})
+        }
         if (cancelled) return
         const plainBytes = await decryptFile(cipherBytes, enc.keyHex, enc.nonceHex)
         if (cancelled) return
@@ -326,8 +335,9 @@ export function useBlossomMedia(originalUrl: string | undefined, maxSizeMB?: num
 
           const actualHash = await hashBlob(blob)
           if (actualHash === parsed.hash) {
-            // Verified! Cache it
+            // Verified! Cache it (in-memory server hint + persistent on-disk blob)
             verifiedCache.set(parsed.hash, { serverUrl: baseUrl })
+            putInPersistentCache(parsed.hash, blob).catch(() => {})
             if (!cancelRef.current) {
               // If verified from a different server, update src to the verified one
               if (i !== fromIdx) {
@@ -358,8 +368,32 @@ export function useBlossomMedia(originalUrl: string | undefined, maxSizeMB?: num
       verifyingRef.current = false
     }
 
-    findServer()
-    return () => { cancelRef.current = true }
+    // Persistent (on-disk) cache hit → serve instantly with no network round-trip.
+    // Falls back to the server-probe flow on a miss.
+    let cachedObjectUrl: string | null = null
+    ;(async () => {
+      const cachedBlob = await getFromPersistentCache(parsed.hash)
+      if (cancelRef.current) return
+      if (cachedBlob) {
+        if (limitBytes && !hasSizeOverride(originalUrl || '') && cachedBlob.size > limitBytes) {
+          setDetectedSize(cachedBlob.size)
+          setSizeExceeded(true)
+          setLoading(false)
+          return
+        }
+        cachedObjectUrl = URL.createObjectURL(cachedBlob)
+        setCurrentSrc(cachedObjectUrl)
+        setVerified('verified')
+        setLoading(false)
+        return
+      }
+      findServer()
+    })()
+
+    return () => {
+      cancelRef.current = true
+      if (cachedObjectUrl) URL.revokeObjectURL(cachedObjectUrl)
+    }
   }, [parsed, servers, buildUrl, limitBytes, originalUrl])
 
   // ── Manual retry (for recovery modal) ──

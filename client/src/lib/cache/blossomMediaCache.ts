@@ -18,7 +18,22 @@ const CACHE_NAME = 'den-blossom-media-v1'
 const META_DB_NAME = 'den-blossom-meta'
 const META_DB_VERSION = 1
 const META_STORE = 'entries'
-const MAX_CACHE_BYTES = 100 * 1024 * 1024 // 100MB
+const CACHE_BUDGET_KEY = 'den-media-cache-mb'
+const DEFAULT_BUDGET_MB = 500
+
+function loadBudgetBytes(): number {
+  try {
+    const raw = localStorage.getItem(CACHE_BUDGET_KEY)
+    if (raw !== null) {
+      const mb = Number(raw)
+      if (Number.isFinite(mb) && mb >= 0) return Math.round(mb) * 1024 * 1024
+    }
+  } catch { /* ignore */ }
+  return DEFAULT_BUDGET_MB * 1024 * 1024
+}
+
+// Current cache budget in bytes (0 = caching disabled). Mutated via setCacheBudgetMB.
+let cacheBudgetBytes = loadBudgetBytes()
 
 // Synthetic base URL for Cache API keys (Cache API requires valid URLs)
 const CACHE_KEY_PREFIX = 'https://blossom-local-cache/'
@@ -105,6 +120,7 @@ function openMetaDB(): Promise<IDBDatabase> {
  */
 export async function getFromPersistentCache(hash: string): Promise<Blob | null> {
   try {
+    if (cacheBudgetBytes <= 0) return null // caching disabled
     if (!(await isCacheApiAvailable())) return null
 
     const cache = await caches.open(CACHE_NAME)
@@ -128,6 +144,7 @@ export async function getFromPersistentCache(hash: string): Promise<Blob | null>
  */
 export async function putInPersistentCache(hash: string, blob: Blob): Promise<void> {
   try {
+    if (cacheBudgetBytes <= 0) return // caching disabled
     if (!(await isCacheApiAvailable())) return
 
     // Store blob via Cache API
@@ -197,7 +214,7 @@ function schedulePrune(): void {
 }
 
 /**
- * Evict least-recently-accessed entries until total size is under MAX_CACHE_BYTES.
+ * Evict least-recently-accessed entries until total size is under cacheBudgetBytes.
  * Runs in the background, never blocks rendering.
  */
 async function pruneCache(): Promise<void> {
@@ -213,7 +230,7 @@ async function pruneCache(): Promise<void> {
     })
 
     const totalSize = entries.reduce((sum, e) => sum + e.size, 0)
-    if (totalSize <= MAX_CACHE_BYTES) return
+    if (totalSize <= cacheBudgetBytes) return
 
     // Sort by lastAccessed ascending (oldest → evict first)
     entries.sort((a, b) => a.lastAccessed - b.lastAccessed)
@@ -222,7 +239,7 @@ async function pruneCache(): Promise<void> {
     const toEvict: string[] = []
 
     for (const entry of entries) {
-      if (currentSize <= MAX_CACHE_BYTES) break
+      if (currentSize <= cacheBudgetBytes) break
       toEvict.push(entry.hash)
       currentSize -= entry.size
     }
@@ -245,7 +262,7 @@ async function pruneCache(): Promise<void> {
     const freedMB = ((totalSize - currentSize) / 1024 / 1024).toFixed(1)
     console.log(
       `[BlossomCache] Pruned ${toEvict.length} entries, freed ${freedMB}MB ` +
-      `(${(currentSize / 1024 / 1024).toFixed(1)}MB / ${(MAX_CACHE_BYTES / 1024 / 1024).toFixed(0)}MB used)`
+      `(${(currentSize / 1024 / 1024).toFixed(1)}MB / ${(cacheBudgetBytes / 1024 / 1024).toFixed(0)}MB used)`
     )
   } catch {
     // Pruning is best-effort
@@ -293,4 +310,26 @@ export async function clearPersistentCache(): Promise<void> {
     tx.objectStore(META_STORE).clear()
   } catch { /* ok */ }
   console.log('[BlossomCache] Cache cleared')
+}
+
+// ─── Budget config (Settings UI) ───
+
+/** Current media-cache budget in MB (0 = caching off). */
+export function getCacheBudgetMB(): number {
+  return Math.round(cacheBudgetBytes / 1024 / 1024)
+}
+
+/**
+ * Set the media-cache budget in MB (0 = off). Persists the choice; when lowered
+ * it immediately evicts the now-excess media (or clears everything at 0).
+ */
+export async function setCacheBudgetMB(mb: number): Promise<void> {
+  const clamped = Math.max(0, Math.round(mb))
+  cacheBudgetBytes = clamped * 1024 * 1024
+  try { localStorage.setItem(CACHE_BUDGET_KEY, String(clamped)) } catch { /* ignore */ }
+  if (clamped === 0) {
+    await clearPersistentCache()
+  } else {
+    await pruneCache()
+  }
 }
