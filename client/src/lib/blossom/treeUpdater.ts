@@ -46,6 +46,14 @@ export interface SafeTreeUpdateResult {
   cleanedUpHashes: string[]
   /** The created_at of the signed event (for +1 pattern on future updates) */
   eventCreatedAt?: number
+  /** Blossom servers that accepted the new index file (subset of targetedServers). */
+  uploadedServers?: string[]
+  /** Blossom servers the upload targeted. */
+  targetedServers?: string[]
+  /** Relays that accepted the published hub event (subset of targetedRelays). */
+  publishedRelays?: string[]
+  /** Relays the hub event was published to. */
+  targetedRelays?: string[]
 }
 
 // ─── Main ───
@@ -478,7 +486,7 @@ export async function safePaginatedTreeUpdate(params: SafePaginatedTreeUpdatePar
     groupTrees && groupTrees.length > 0 ? groupTrees : undefined,
   )
   const indexBytes = new TextEncoder().encode(newIndexContent)
-  const { hash: newIndexHash } = await uploadToBlossomServers(
+  const { hash: newIndexHash, serverUrls: indexServerUrls } = await uploadToBlossomServers(
     indexBytes, signer, privateKey, hub.blossomServers, 'text/plain',
   )
 
@@ -494,6 +502,8 @@ export async function safePaginatedTreeUpdate(params: SafePaginatedTreeUpdatePar
 
   // ── Step 9: Re-publish hub event ──
   let publishedCreatedAt: number | undefined
+  let targetedRelays: string[] = []
+  let publishedRelays: string[] = []
   if (!skipPublish) {
     onStep?.('Signing hub event')
     const unsignedEvent = buildHubEvent({
@@ -520,10 +530,8 @@ export async function safePaginatedTreeUpdate(params: SafePaginatedTreeUpdatePar
     const signedEvent = await signWithSigner(unsignedEvent, signer, privateKey)
     publishedCreatedAt = signedEvent.created_at
     onStep?.('Publishing to relays')
-    await publishToSpecificRelays(
-      getPublishRelays([...hub.generalRelays, ...hub.filterRelays]),
-      signedEvent,
-    )
+    targetedRelays = getPublishRelays([...hub.generalRelays, ...hub.filterRelays])
+    publishedRelays = await publishToSpecificRelays(targetedRelays, signedEvent)
   }
 
   // ── Step 10: Cleanup old files ──
@@ -563,7 +571,16 @@ export async function safePaginatedTreeUpdate(params: SafePaginatedTreeUpdatePar
 
   console.log(`safePaginatedTreeUpdate: success. New index: ${newIndexHash}, cleaned up ${cleanedUpHashes.length} old files`)
 
-  return { newIndexHash, newEpoch: epoch, cleanedUpHashes, eventCreatedAt: publishedCreatedAt }
+  return {
+    newIndexHash,
+    newEpoch: epoch,
+    cleanedUpHashes,
+    eventCreatedAt: publishedCreatedAt,
+    uploadedServers: indexServerUrls,
+    targetedServers: hub.blossomServers,
+    publishedRelays,
+    targetedRelays,
+  }
 }
 
 // ─── Helpers ───

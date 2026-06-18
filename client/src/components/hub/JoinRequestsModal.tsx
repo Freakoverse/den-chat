@@ -23,7 +23,7 @@ import { truncateNpub, cn } from '@/lib/utils'
 import { nip19 } from 'nostr-tools'
 import { markJoinRequestsSeen } from '@/hooks/useJoinRequestCount'
 import {
-  X, Search, Loader2, Check, CheckSquare, Square, AlertTriangle, ChevronDown, UserPlus, RotateCw,
+  X, Search, Loader2, Check, CheckSquare, Square, AlertTriangle, ChevronDown, ChevronUp, UserPlus, RotateCw,
 } from 'lucide-react'
 import { UserProfileModal } from '@/components/hub/UserProfileModal'
 
@@ -87,6 +87,11 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
   const [adding, setAdding] = useState(false)
   const [addError, setAddError] = useState<string | null>(null)
   const [addedCount, setAddedCount] = useState(0)
+  // Where the member-list update actually landed (servers/relays), for the "Show details" panel
+  const [publishDetails, setPublishDetails] = useState<{
+    uploadedServers: string[]; targetedServers: string[]; publishedRelays: string[]; targetedRelays: string[]
+  } | null>(null)
+  const [showPublishDetails, setShowPublishDetails] = useState(false)
   // Progress tracking
   const [addStep, setAddStep] = useState<string | null>(null)
   const [addSteps, setAddSteps] = useState<string[]>([])
@@ -94,16 +99,8 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
   const addTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const addStepRef = useRef<string | null>(null)
 
-  // Auto-dismiss overlay on success after 1.5s
-  useEffect(() => {
-    if (addStep === 'Done' && !addError) {
-      const timer = setTimeout(() => {
-        setAddSteps([])
-        setAddStep(null)
-      }, 1500)
-      return () => clearTimeout(timer)
-    }
-  }, [addStep, addError])
+  // On success the overlay stays open showing the result + "Show details" until
+  // the user closes it (see the Done block below) — no auto-dismiss.
 
   // Fetch join requests
   const loadRequests = useCallback(async () => {
@@ -166,16 +163,24 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
     }
   }, [hub.dTag, hub.generalRelays, hub.creatorPubkey, hub.minPow, hubMembers.length, timeFilterIdx])
 
+  // Reset transient UI state ONLY when the modal opens — not when loadRequests'
+  // identity changes (e.g. hubMembers.length bumps after an approval), which
+  // would otherwise wipe the success overlay the moment a member is added.
   useEffect(() => {
-    if (open) {
-      markJoinRequestsSeen(hub.dTag)
-      loadRequests()
-      setSelected(new Set())
-      setAddedCount(0)
-      setAddError(null)
-      setAddStep(null)
-      setAddSteps([])
-    }
+    if (!open) return
+    markJoinRequestsSeen(hub.dTag)
+    setSelected(new Set())
+    setAddedCount(0)
+    setAddError(null)
+    setAddStep(null)
+    setAddSteps([])
+    setPublishDetails(null)
+    setShowPublishDetails(false)
+  }, [open, hub.dTag])
+
+  // (Re)load requests on open and whenever the relevant hub state changes.
+  useEffect(() => {
+    if (open) loadRequests()
   }, [open, loadRequests])
 
   // Filter by search
@@ -211,6 +216,8 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
     setAdding(true)
     setAddError(null)
     setAddedCount(0)
+    setPublishDetails(null)
+    setShowPublishDetails(false)
     setAddStep(null)
     setAddSteps([])
 
@@ -407,6 +414,12 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
       setHubData(hub.dTag, { ...hub, indexFileHash: result.newIndexHash, eventCreatedAt: result.eventCreatedAt ?? hub.eventCreatedAt })
 
       setAddedCount(count)
+      setPublishDetails({
+        uploadedServers: result.uploadedServers ?? [],
+        targetedServers: result.targetedServers ?? hub.blossomServers,
+        publishedRelays: result.publishedRelays ?? [],
+        targetedRelays: result.targetedRelays ?? [],
+      })
       setRequests(prev => prev.filter(r => !selected.has(r.pubkey)))
       setSelected(new Set())
 
@@ -657,6 +670,35 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
               })}
             </div>
 
+            {/* Success: optional details + close */}
+            {addStep === 'Done' && !addError && (
+              <div className="space-y-2">
+                {publishDetails && (
+                  <>
+                    <button
+                      onClick={() => setShowPublishDetails((v) => !v)}
+                      className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                    >
+                      {showPublishDetails ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                      {showPublishDetails ? 'Hide details' : 'Show details'}
+                    </button>
+                    {showPublishDetails && (
+                      <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-2.5 max-h-[220px] overflow-y-auto">
+                        <PublishDetailGroup title="Blossom servers" targeted={publishDetails.targetedServers} succeeded={publishDetails.uploadedServers} />
+                        <PublishDetailGroup title="Relays" targeted={publishDetails.targetedRelays} succeeded={publishDetails.publishedRelays} />
+                      </div>
+                    )}
+                  </>
+                )}
+                <button
+                  onClick={() => { setAddSteps([]); setAddStep(null); setShowPublishDetails(false) }}
+                  className="w-full h-9 text-sm rounded-lg font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
+            )}
+
             {/* Error: Retry + Dismiss */}
             {addError && (
               <div className="flex items-center gap-2">
@@ -689,6 +731,37 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
         onClose={() => setProfilePubkey(null)}
         targetPubkey={profilePubkey || undefined}
       />
+    </div>
+  )
+}
+
+/** Normalize a server/relay URL for comparison (drop protocol + trailing slash, lowercase). */
+function normalizeEndpoint(url: string): string {
+  return url.replace(/^[a-z]+:\/\//i, '').replace(/\/+$/, '').toLowerCase()
+}
+
+/** Lists each targeted server/relay with a ✓ (accepted) or ✗ (failed) marker. */
+function PublishDetailGroup({ title, targeted, succeeded }: { title: string; targeted: string[]; succeeded: string[] }) {
+  if (targeted.length === 0) return null
+  const ok = new Set(succeeded.map(normalizeEndpoint))
+  return (
+    <div className="space-y-1">
+      <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+        {title} <span className="font-normal normal-case text-muted-foreground/60">({succeeded.length}/{targeted.length})</span>
+      </p>
+      {targeted.map((url) => {
+        const accepted = ok.has(normalizeEndpoint(url))
+        return (
+          <div key={url} className="flex items-center gap-1.5 text-xs">
+            {accepted
+              ? <Check size={11} className="text-emerald-400 shrink-0" />
+              : <X size={11} className="text-destructive shrink-0" />}
+            <span className={cn('truncate', accepted ? 'text-foreground/80' : 'text-destructive')}>
+              {normalizeEndpoint(url)}
+            </span>
+          </div>
+        )
+      })}
     </div>
   )
 }
