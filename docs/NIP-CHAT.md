@@ -1953,6 +1953,116 @@ Edit hints SHOULD meet the same Proof of Work difficulty as the hub requires for
 
 ---
 
+### 6.14 Typing Indicator — Kind `26950`
+
+**Type**: Ephemeral Event (kind range 20000–29999 — relays forward to connected subscribers but do NOT persist)
+
+#### Purpose
+
+Provides a real-time "user is typing…" presence signal for hub channels and NIP-04 (kind `4`) direct messages, mirroring the familiar typing indicator of centralized chat apps. Because no central server tracks session state, each client broadcasts its own ephemeral typing signal, and receivers maintain a short-lived **local** timeout to decide who is currently typing.
+
+Typing indicators are a **separate kind** from the Message Edit Hint (`26943`) despite both being message-flow ephemeral signals. Typing is a high-frequency heartbeat (republished every few seconds while a user types), whereas edit hints are rare one-shots. A dedicated kind keeps the always-on edit-hint subscription free of typing traffic, permits relay-level filtering, and lets clients that disable the feature avoid the traffic entirely by simply not subscribing.
+
+Typing indicators are scoped to **hub channels and NIP-04 DMs only** — they are NOT used for NIP-17 DMs (gift-wrapping every heartbeat is prohibitively expensive) nor for public chat.
+
+#### Event Structure
+
+**Hub channel:**
+
+```json
+{
+  "kind": 26950,
+  "pubkey": "<typer_pubkey>",
+  "created_at": "<current_wall_clock_timestamp>",
+  "tags": [
+    ["h", "<hub_d_tag>"],
+    ["c", "<channel_id>"]
+  ],
+  "content": "",
+  "sig": "<signature>"
+}
+```
+
+**NIP-04 direct message:**
+
+```json
+{
+  "kind": 26950,
+  "pubkey": "<typer_pubkey>",
+  "created_at": "<current_wall_clock_timestamp>",
+  "tags": [
+    ["p", "<recipient_pubkey>"]
+  ],
+  "content": "",
+  "sig": "<signature>"
+}
+```
+
+| Tag | Required | Description |
+|-----|----------|-------------|
+| `h` | Hub only | Hub `d` tag. Scopes the signal to a hub for relay routing and subscriber filtering. |
+| `c` | Hub only | Channel UUID. Identifies which channel the user is typing in. |
+| `p` | DM only | Recipient pubkey. Ensures the signal reaches the recipient's inbox subscription. |
+| `typing` | No | Optional state marker. `["typing", "stop"]` tells receivers to clear the indicator immediately instead of waiting for the timeout. Its absence means actively typing. |
+
+The typer is identified by `event.pubkey`. The sender pubkey plus the `p` tag (DM) or `h`+`c` tags (hub) fully identify the conversation; no further routing data is required.
+
+#### Key Design Points
+
+- **`created_at` = current wall-clock time** — so the event passes real-time subscription `since` filters.
+- **`content` is empty** — the signal carries no data and is never encrypted. It is pure presence.
+- **Receiver-clock timeout (not the sender's clock).** Receivers MUST decide "still typing?" using their **own local receipt time**, not the event's `created_at`. This avoids clock-skew artifacts (a sender with a skewed clock producing a stuck-on or never-shown indicator). The `created_at` is used only to satisfy relay `since` filters and to discard obviously-stale events.
+- **Heartbeat cadence.** While a user is actively typing, the client SHOULD republish the signal on a fixed interval (RECOMMENDED ~3 seconds). It MUST NOT publish per keystroke.
+- **Display timeout.** A receiver SHOULD show a user as typing until it has received no heartbeat from them for a short window (RECOMMENDED ~7 seconds — roughly twice the heartbeat interval plus margin, so a single dropped event does not flicker the indicator off).
+- **Immediate clear.** A receiver MUST clear a user's typing state upon (a) receiving that user's actual message in the conversation, or (b) receiving a `["typing", "stop"]` signal from them.
+- **Self-exclusion.** Clients MUST NOT display their own typing signal.
+
+#### Client Behavior
+
+**Sender:**
+
+1. On the first change in an empty composer (or the first change after the last heartbeat lapsed), publish a typing signal immediately.
+2. While the composer remains non-empty and the user keeps editing, republish every ~3 seconds.
+3. Stop publishing when the composer becomes empty, loses focus, goes idle, or the message is sent. Clients MAY publish a single `["typing", "stop"]` signal at this point for instant clearing on receivers; otherwise the receiver timeout handles it.
+
+**Receiver:**
+
+1. **Verify the sender is authorized.** For hubs, ignore signals whose `pubkey` is not in the hub's member list. For DMs, apply the client's normal DM-accept policy.
+2. Record `last_seen[conversation][pubkey] = local_now` on each received signal (a `stop` signal clears the entry instead).
+3. Render the set of pubkeys whose `last_seen` is within the display timeout, excluding self, aggregated as "X is typing…", "X and Y are typing…", "X, Y, and N more are typing…".
+4. Expire entries past the display timeout, and clear an entry the moment that user's message arrives.
+
+#### Subscription
+
+Typing is subscribed on its **own filter**, scoped to the conversation currently in view, and only while the feature is enabled:
+
+```json
+// Hub — the open channel's hub
+{ "kinds": [26950], "#h": ["<hub_d_tag>"], "since": "<current_timestamp>" }
+// DM04 — the local user's inbox
+{ "kinds": [26950], "#p": ["<my_pubkey>"], "since": "<current_timestamp>" }
+```
+
+Because the kind is ephemeral, supporting relays forward matching events without storing them; non-supporting relays ignore them and the feature degrades to simply not showing typing indicators.
+
+#### User Setting
+
+Clients SHOULD expose a user setting (RECOMMENDED default: on) to disable typing indicators. When disabled, the client MUST NOT publish typing signals **and** SHOULD NOT open the typing subscription, so that turning the feature off eliminates both outbound and inbound typing traffic.
+
+#### Privacy
+
+A typing signal reveals that a pubkey is actively composing in a given hub/channel (or to a given DM recipient) at a given time — the same metadata surface already exposed by the Message Edit Hint (`26943`) and by NIP-04 message metadata, respectively. No message content is exposed. Privacy-sensitive users can suppress the signal entirely via the user setting above.
+
+#### Abuse & Rate Limiting
+
+Unlike the Message Edit Hint, a typing signal triggers **no downstream relay queries** on receivers — it only updates local presence state — so the query-amplification rationale for requiring Proof of Work does not apply. Because the signal is a frequent heartbeat, requiring meaningful per-heartbeat PoW would impose a continuous computational and battery cost on the sender for little benefit. Therefore:
+
+- Typing signals do NOT require PoW.
+- The sender's fixed heartbeat interval (~3 seconds) is the primary rate control; clients MUST throttle accordingly.
+- Relays MAY rate-limit ephemeral events per connection at their discretion.
+
+---
+
 ## 7. Member List Mechanics
 
 ### 7.1 Resolution Order
@@ -2258,6 +2368,7 @@ Mod/creator removes user from the LKH tree
 | `36942` | Hub Event | Addressable Replaceable | General relays |
 | `36943` | Message | Addressable Replaceable | Filter relays (if defined) or General relays |
 | `26943` | Message Edit Hint | Ephemeral | Filter relays (if defined) or General relays |
+| `26950` | Typing Indicator | Ephemeral | Filter/General relays (hub) · recipient's inbox relays (DM04) |
 | `36944` | Join Request | Addressable Replaceable | General relays & hub's relays |
 | `36945` | Channel Pin List | Addressable Replaceable | Filter relays (if defined) or General relays |
 | `36946` | Voice Host Availability | Addressable Replaceable | Filter relays (if defined) or General relays |

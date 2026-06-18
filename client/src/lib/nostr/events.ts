@@ -686,6 +686,48 @@ export function createEditHintEvent(
   return createUnsignedEvent(KINDS.MESSAGE_EDIT_HINT, '', tags)
 }
 
+// ── Typing Indicator (Kind 26950 — Ephemeral) ──
+
+/**
+ * Create an ephemeral typing-indicator event (Kind 26950) for a hub channel.
+ * Per NIP-CHAT §6.14: a transient "user is typing…" presence signal. Empty
+ * content, wall-clock created_at (so it passes real-time `since` filters).
+ *
+ * @param hubDTag   - Hub d tag (scopes the signal to a hub)
+ * @param channelId - Channel UUID the user is typing in
+ * @param stop      - If true, emits a ["typing","stop"] marker so receivers
+ *                    clear the indicator immediately instead of waiting out the timeout.
+ */
+export function createHubTypingEvent(
+  hubDTag: string,
+  channelId: string,
+  stop = false,
+): UnsignedEvent {
+  const tags: Tag[] = [
+    ['h', hubDTag],
+    ['c', channelId],
+  ]
+  if (stop) tags.push(['typing', 'stop'])
+  return createUnsignedEvent(KINDS.TYPING_INDICATOR, '', tags)
+}
+
+/**
+ * Create an ephemeral typing-indicator event (Kind 26950) for a NIP-04 DM.
+ * The `p` tag routes it to the recipient's inbox subscription. The typer is
+ * `event.pubkey`; sender + recipient fully identify the 1:1 conversation.
+ *
+ * @param recipientPubkey - The DM counterparty who should see the indicator
+ * @param stop            - If true, emits a ["typing","stop"] marker (see above)
+ */
+export function createDM04TypingEvent(
+  recipientPubkey: string,
+  stop = false,
+): UnsignedEvent {
+  const tags: Tag[] = [['p', recipientPubkey]]
+  if (stop) tags.push(['typing', 'stop'])
+  return createUnsignedEvent(KINDS.TYPING_INDICATOR, '', tags)
+}
+
 // ── Public Chat (Kind 1312) ──
 
 /**

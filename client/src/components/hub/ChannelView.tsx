@@ -32,6 +32,9 @@ import { buildHubEvent } from '@/lib/hub/buildHubEvent'
 import { signWithSigner } from '@/lib/nostr'
 import { publishToSpecificRelays, fetchEvents, fetchEventsFromRelays, getRelays } from '@/lib/nostr/relay-pool'
 import { getPublishRelays } from '@/stores/postingBehaviourStore'
+import { useTypingHeartbeat } from '@/hooks/useTypingHeartbeat'
+import { TypingIndicator } from '@/components/chat/TypingIndicator'
+import { hubTypingKey } from '@/stores/typingStore'
 import type { Channel, HubData, HubMember } from '@/stores/hubStore'
 import { uploadToBlossomServers, computeHash } from '@/lib/blossom'
 import type { UploadProgress } from '@/lib/blossom'
@@ -4409,6 +4412,20 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
   const hasSecret = !!(hubDTag && hubSecrets[hubDTag])
   const isEncrypted = hasSecret  // Always encrypt when key available
   const { sendMessage } = useMessages(hubDTag, channelId)
+
+  // ── Typing indicator heartbeat (NIP-CHAT §6.14) — main channel composer only ──
+  const _hubForTyping = useHubStore((s) => s.hubs[hubDTag])
+  const _typingRelays = useMemo(
+    () => getPublishRelays(_hubForTyping ? [..._hubForTyping.generalRelays, ..._hubForTyping.filterRelays] : []),
+    [hubDTag, _hubForTyping?.generalRelays, _hubForTyping?.filterRelays],
+  )
+  const typing = useTypingHeartbeat({ scope: 'hub', hubDTag, channelId, relays: _typingRelays })
+  const signalTyping = useCallback((value: string) => {
+    if (threadRootRef) return // thread typing isn't channel-scoped — skip
+    if (value.trim()) typing.notifyTyping()
+    else typing.notifyStop()
+  }, [threadRootRef, typing])
+
   const signer = useUserStore((s) => s.signer)
   const privateKey = useUserStore((s) => s.privateKey)
   const hub = useHubStore((s) => hubDTag ? s.hubs[hubDTag] : null)
@@ -4940,6 +4957,7 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
       },
     ])
     setMessage('')
+    typing.notifyStop()
     clearDraft(draftKey)
     // Clean up file previews and known-hash tracking
     pendingFiles.forEach((f) => { if (f.previewUrl) URL.revokeObjectURL(f.previewUrl) })
@@ -5339,6 +5357,14 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
           </div>
         </div>,
         dragContainerRef.current
+      )}
+
+      {!threadRootRef && (
+        <TypingIndicator
+          convKey={hubTypingKey(hubDTag, channelId)}
+          resolveName={(pk) => { const p = getProfile(pk); return p?.display_name || p?.name || `${pk.slice(0, 8)}…` }}
+          className="px-3 pb-1"
+        />
       )}
 
       <div
@@ -5875,6 +5901,7 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
               autoResize(e.target)
               updateMentionQuery(e.target.value, e.target.selectionStart)
               updateEmojiQuery(e.target.value, e.target.selectionStart)
+              signalTyping(e.target.value)
             }}
             onKeyDown={handleKeyDown}
             onClick={(e) => {

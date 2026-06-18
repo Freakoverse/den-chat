@@ -15,6 +15,7 @@ import { fetchReplaceable, fetchEvents } from '@/lib/nostr/relay-pool'
 import { KINDS } from '@/lib/crypto/constants'
 import { useHubLoader } from './useHubLoader'
 import { useHubSubscriptions } from './useHubSubscriptions'
+import { useTypingSubscription } from './useTypingSubscription'
 import { useExceptionSubscriptions } from './useExceptionSubscriptions'
 import { useModBanSubscription } from './useModBanSubscription'
 import { useHubEventSubscription } from './useHubEventSubscription'
@@ -336,6 +337,9 @@ export function useStartup() {
 
   // Subscribe to real-time messages for all loaded hubs
   useHubSubscriptions()
+
+  // Real-time typing indicators (hub channel in view + DM04 inbox)
+  useTypingSubscription()
 
   // Tier 2: Exception subscriptions for event kinds without #h tags (zaps, etc.)
   useExceptionSubscriptions()

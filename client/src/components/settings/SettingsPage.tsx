@@ -17,6 +17,7 @@ import { useWotStore } from '@/stores/wotStore'
 import { dnnService, type DnnNodeInfo } from '@/lib/dnn/dnnService'
 import { useVoiceStore } from '@/stores/voiceStore'
 import { usePreferencesStore, LANGUAGES, type LanguageCode } from '@/stores/preferencesStore'
+import { useTypingStore } from '@/stores/typingStore'
 import { StorageKey, ADMIN_NPUB, ADMIN_PUBKEY } from '@/lib/constants'
 import { STANDARD_KINDS, KINDS } from '@/lib/crypto/constants'
 import { blossomServers, uploadToBlossomServers, downloadFromBlossomWithProgress } from '@/lib/blossom'
@@ -505,6 +506,15 @@ function PreferencesTab() {
             <p className="text-xs text-muted-foreground">Render rich embeds for supported services like YouTube, Twitch, Twitter, Spotify, and Steam.</p>
           </div>
           <EmbedsToggleInline />
+        </div>
+
+        {/* Typing Indicators */}
+        <div className="flex items-center justify-between">
+          <div>
+            <label className="text-sm font-medium text-foreground">Typing Indicators</label>
+            <p className="text-xs text-muted-foreground">Show when others are typing in hub channels and DMs — and let them see when you are. Turning this off stops both.</p>
+          </div>
+          <TypingIndicatorToggleInline />
         </div>
 
         {/* Divider */}
@@ -3632,6 +3642,12 @@ function EmbedsToggleInline() {
   const showEmbeds = usePreferencesStore((s) => s.showEmbeds)
   const setShowEmbeds = usePreferencesStore((s) => s.setShowEmbeds)
   return <ToggleSwitch checked={showEmbeds} onChange={setShowEmbeds} />
+}
+
+function TypingIndicatorToggleInline() {
+  const enabled = useTypingStore((s) => s.enabled)
+  const setEnabled = useTypingStore((s) => s.setEnabled)
+  return <ToggleSwitch checked={enabled} onChange={setEnabled} />
 }
 
 function MediaPreferenceToggle() {

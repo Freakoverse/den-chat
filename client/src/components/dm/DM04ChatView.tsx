@@ -46,6 +46,10 @@ import { NewMessagesDivider } from '@/components/chat/NewMessagesDivider'
 import { UnreadBanner } from '@/components/chat/UnreadBanner'
 import { ScrollableContent } from '../chat/ScrollableContent'
 import { getDraft, setDraft, clearDraft, dm04DraftKey } from '@/stores/draftStore'
+import { getPublishRelays } from '@/stores/postingBehaviourStore'
+import { useTypingHeartbeat } from '@/hooks/useTypingHeartbeat'
+import { TypingIndicator } from '@/components/chat/TypingIndicator'
+import { dm04TypingKey } from '@/stores/typingStore'
 
 /* ─── Helpers ─── */
 
@@ -145,6 +149,15 @@ export function DM04ChatView({ recipientPubkey, onSwitchProtocol, onBack }: { re
     }
   }, [_dm04Key])
   useEffect(() => { setDraft(_dm04Key, message) }, [_dm04Key, message])
+
+  // ── Typing indicator heartbeat (NIP-CHAT §6.14) ──
+  const _typingRelays = useMemo(() => getPublishRelays(), [])
+  const typing = useTypingHeartbeat({ scope: 'dm04', recipientPubkey, relays: _typingRelays })
+  const signalTyping = useCallback((value: string) => {
+    if (value.trim()) typing.notifyTyping()
+    else typing.notifyStop()
+  }, [typing])
+
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
   const [replyContext, setReplyContext] = useState<ReplyContext | null>(null)
@@ -394,6 +407,7 @@ export function DM04ChatView({ recipientPubkey, onSwitchProtocol, onBack }: { re
 
     const tempId = `opt-${Date.now()}-${Math.random().toString(36).slice(2)}`
     setMessage('')
+    typing.notifyStop()
     clearDraft(_dm04Key)
 
     // Add optimistic message immediately
@@ -816,11 +830,18 @@ export function DM04ChatView({ recipientPubkey, onSwitchProtocol, onBack }: { re
         </div>
       )}
 
+      {/* Typing indicator */}
+      <TypingIndicator
+        convKey={dm04TypingKey(recipientPubkey)}
+        resolveName={(pk) => { const p = getProfile(pk); return p?.display_name || p?.name || truncateNpub(nip19.npubEncode(pk), 8) }}
+        className="px-4 pb-1"
+      />
+
       {/* Input */}
       <ChatInputBar
         draftKey={_dm04Key}
         message={message}
-        onMessageChange={setMessage}
+        onMessageChange={(v) => { setMessage(v); signalTyping(v) }}
         onSend={handleSend}
         disabled={!hasNip04}
         sending={sending}
