@@ -89,6 +89,17 @@ export class NostrConnectSigner {
     return this.signer.nip04Decrypt(pubkey, cipherText)
   }
 
+  /**
+   * NIP-04 encrypt/decrypt object — for NIP-04 (kind 4) DM support.
+   * The presence of this getter is how the app detects NIP-04 capability.
+   */
+  get nip04() {
+    return {
+      encrypt: (pubkey: string, plaintext: string) => this.nip04Encrypt(pubkey, plaintext),
+      decrypt: (pubkey: string, ciphertext: string) => this.nip04Decrypt(pubkey, ciphertext),
+    }
+  }
+
   async nip44Encrypt(pubkey: string, plainText: string): Promise<string> {
     if (!this.signer) throw new Error('Not logged in')
     return this.signer.nip44Encrypt(pubkey, plainText)
