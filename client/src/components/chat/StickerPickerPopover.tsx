@@ -22,8 +22,8 @@ import { truncateNpub } from '@/lib/utils'
 import { nip19 } from 'nostr-tools'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 
-const PICKER_WIDTH = 340
-const PICKER_HEIGHT = 380
+const PICKER_WIDTH = 376
+const PICKER_HEIGHT = 460
 const GAP = 8
 
 type Tab = 'discover' | 'mine' | 'others'
@@ -35,7 +35,7 @@ interface Props {
 }
 
 export function StickerPickerPopover({ anchorRef, onClose, onSelect }: Props) {
-  const [pos, setPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 })
+  const [pos, setPos] = useState<{ top: number; left: number; width: number }>({ top: 0, left: 0, width: PICKER_WIDTH })
   const [tab, setTab] = useState<Tab>('discover')
   const containerRef = useRef<HTMLDivElement>(null)
 
@@ -58,12 +58,14 @@ export function StickerPickerPopover({ anchorRef, onClose, onSelect }: Props) {
         : rect.bottom + GAP
     }
 
-    let left = rect.right - PICKER_WIDTH
+    // Clamp width to the viewport so the wider picker never overflows on mobile.
+    const width = Math.min(PICKER_WIDTH, vw - GAP * 2)
+    let left = rect.right - width
     if (left < GAP) left = rect.left
-    if (left + PICKER_WIDTH > vw - GAP) left = vw - PICKER_WIDTH - GAP
+    if (left + width > vw - GAP) left = vw - width - GAP
     left = Math.max(GAP, left)
 
-    setPos({ top, left })
+    setPos({ top, left, width })
   }, [anchorRef])
 
   useEffect(() => {
@@ -87,9 +89,9 @@ export function StickerPickerPopover({ anchorRef, onClose, onSelect }: Props) {
   }, [onClose, anchorRef])
 
   const tabItems: { id: Tab; label: string; icon: React.ReactNode }[] = [
-    { id: 'discover', label: 'Discover', icon: <Compass size={14} /> },
-    { id: 'mine', label: 'Mine', icon: <Sparkles size={14} /> },
-    { id: 'others', label: 'Others', icon: <Users size={14} /> },
+    { id: 'discover', label: 'Discover', icon: <Compass size={16} /> },
+    { id: 'mine', label: 'Mine', icon: <Sparkles size={16} /> },
+    { id: 'others', label: 'Others', icon: <Users size={16} /> },
   ]
 
   return createPortal(
@@ -98,7 +100,7 @@ export function StickerPickerPopover({ anchorRef, onClose, onSelect }: Props) {
       data-sticker-picker-portal
       onMouseDown={(e) => e.stopPropagation()}
       className="fixed z-[300]"
-      style={{ top: pos.top, left: pos.left, width: PICKER_WIDTH, height: PICKER_HEIGHT }}
+      style={{ top: pos.top, left: pos.left, width: pos.width, height: PICKER_HEIGHT }}
     >
       <div className="w-full h-full flex flex-col rounded-xl border border-border bg-background shadow-2xl overflow-hidden">
         {/* Tab bar */}
@@ -107,7 +109,7 @@ export function StickerPickerPopover({ anchorRef, onClose, onSelect }: Props) {
             <button
               key={t.id}
               onClick={(e) => { e.stopPropagation(); setTab(t.id) }}
-              className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-medium transition-colors cursor-pointer
+              className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-sm font-medium transition-colors cursor-pointer
                 ${tab === t.id
                   ? 'text-primary border-b-2 border-primary bg-primary/5'
                   : 'text-muted-foreground hover:text-foreground hover:bg-accent/30'
@@ -144,7 +146,7 @@ function StickerNsfwToggle() {
 
   return (
     <div className="flex items-center justify-between px-3 py-1.5 border-b border-border/50 bg-secondary/10 shrink-0">
-      <span className="text-[10px] text-muted-foreground">Include NSFW</span>
+      <span className="text-xs text-muted-foreground">Include NSFW</span>
       <div className="flex items-center gap-2">
         <TooltipProvider delayDuration={300}>
           <Tooltip>
@@ -208,7 +210,7 @@ function MineStickerTab({ onSelect }: { onSelect: (s: { shortcode: string; url: 
   // Flatten all stickers for search (with NSFW filtering)
   const allStickers = useMemo(() => {
     return mySets.flatMap((s) => {
-      const addr = `30030:${s.pubkey}:${s.dTag}`
+      const addr = `30031:${s.pubkey}:${s.dTag}`
       return filterNsfwStickers(s.stickers).map((st) => ({ ...st, setName: s.name, setDTag: s.dTag, setAddress: addr }))
     })
   }, [mySets, nsfwEnabled, untaggedAsNsfw])
@@ -222,14 +224,16 @@ function MineStickerTab({ onSelect }: { onSelect: (s: { shortcode: string; url: 
 
   const createSet = async () => {
     if (!newSetName.trim() || !pubkey) return
-    const dTag = newSetName.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-')
+    const name = newSetName.trim()
+    // Unique d-tag so two sets with the same name never overwrite each other on relays.
+    const dTag = crypto.randomUUID()
     setCreating(true)
     try {
-      await publishStickerSet(dTag, [], signer, privateKey)
+      await publishStickerSet(dTag, name, [], signer, privateKey)
       useStickerStore.getState().addMyStickerSet({
         pubkey,
         dTag,
-        name: dTag.replace(/[-_]/g, ' '),
+        name,
         stickers: [],
       })
       setNewSetName('')
@@ -247,12 +251,12 @@ function MineStickerTab({ onSelect }: { onSelect: (s: { shortcode: string; url: 
       {/* Search + actions bar */}
       <div className="flex items-center gap-1.5 px-2 py-1.5 border-b border-border">
         <div className="flex-1 relative">
-          <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search my stickers..."
-            className="w-full h-7 pl-7 pr-2 rounded-md text-xs bg-muted/30 border border-border text-foreground placeholder:text-muted-foreground focus:outline-none"
+            className="w-full h-9 pl-8 pr-2 rounded-md text-sm bg-muted/30 border border-border text-foreground placeholder:text-muted-foreground focus:outline-none"
           />
         </div>
         <TooltipProvider delayDuration={300}>
@@ -260,7 +264,7 @@ function MineStickerTab({ onSelect }: { onSelect: (s: { shortcode: string; url: 
             <TooltipTrigger asChild>
               <button
                 onClick={() => { setShowCreateInput(!showCreateInput); if (!showCreateInput) setShowAddSticker(false) }}
-                className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors cursor-pointer"
+                className="p-2 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors cursor-pointer"
               >
                 <FolderPlus size={14} />
               </button>
@@ -279,7 +283,7 @@ function MineStickerTab({ onSelect }: { onSelect: (s: { shortcode: string; url: 
                     if (mySets.length > 0 && !expandedSet) setExpandedSet(mySets[0].dTag)
                   }
                 }}
-                className={`p-1.5 rounded-md transition-colors ${mySets.length === 0 ? 'text-muted-foreground/30 cursor-not-allowed' : 'text-muted-foreground hover:text-foreground hover:bg-muted/50 cursor-pointer'}`}
+                className={`p-2 rounded-md transition-colors ${mySets.length === 0 ? 'text-muted-foreground/30 cursor-not-allowed' : 'text-muted-foreground hover:text-foreground hover:bg-muted/50 cursor-pointer'}`}
               >
                 <Plus size={14} />
               </button>
@@ -292,7 +296,7 @@ function MineStickerTab({ onSelect }: { onSelect: (s: { shortcode: string; url: 
       {/* Create set form */}
       {showCreateInput && (
         <div className="px-2 py-2 border-b border-border bg-muted/20">
-          <p className="text-[10px] text-muted-foreground mb-1.5">Create a new sticker set</p>
+          <p className="text-xs text-muted-foreground mb-1.5">Create a new sticker set</p>
           <div className="flex gap-1.5">
             <input
               autoFocus
@@ -300,12 +304,12 @@ function MineStickerTab({ onSelect }: { onSelect: (s: { shortcode: string; url: 
               onChange={(e) => setNewSetName(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') createSet(); if (e.key === 'Escape') setShowCreateInput(false) }}
               placeholder="Set name..."
-              className="flex-1 h-7 px-2 rounded-md text-xs bg-background border border-border text-foreground placeholder:text-muted-foreground focus:outline-none"
+              className="flex-1 h-9 px-3 rounded-md text-sm bg-background border border-border text-foreground placeholder:text-muted-foreground focus:outline-none"
             />
             <button
               onClick={createSet}
               disabled={!newSetName.trim() || creating}
-              className="h-7 px-2.5 rounded-md bg-primary text-primary-foreground text-xs font-medium hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50"
+              className="h-9 px-3 rounded-md bg-primary text-primary-foreground text-xs font-medium hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50"
             >
               {creating ? <Loader2 size={12} className="animate-spin" /> : 'Create'}
             </button>
@@ -358,7 +362,7 @@ function MineStickerTab({ onSelect }: { onSelect: (s: { shortcode: string; url: 
               isMine
               expanded={expandedSet === set.dTag || showAddSticker}
               onToggle={() => setExpandedSet(expandedSet === set.dTag ? null : set.dTag)}
-              onSelect={(shortcode, url) => onSelect({ shortcode, url, setAddress: `30030:${set.pubkey}:${set.dTag}` })}
+              onSelect={(shortcode, url) => onSelect({ shortcode, url, setAddress: `30031:${set.pubkey}:${set.dTag}` })}
             />
           ))
         )}
@@ -379,7 +383,7 @@ function OthersStickerTab({ onSelect }: { onSelect: (s: { shortcode: string; url
   // Flatten all subscribed stickers for item search (with NSFW filtering)
   const allStickers = useMemo(() => {
     return subscribedSets.flatMap((s) => {
-      const addr = `30030:${s.pubkey}:${s.dTag}`
+      const addr = `30031:${s.pubkey}:${s.dTag}`
       return filterNsfwStickers(s.stickers).map((st) => ({ ...st, setName: s.name, setAddress: addr }))
     })
   }, [subscribedSets, nsfwEnabled, untaggedAsNsfw])
@@ -403,12 +407,12 @@ function OthersStickerTab({ onSelect }: { onSelect: (s: { shortcode: string; url
       {/* Search + mode toggle + discover bar */}
       <div className="flex items-center gap-1.5 px-2 py-1.5 border-b border-border">
         <div className="flex-1 relative">
-          <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder={searchMode === 'items' ? 'Search stickers...' : 'Search sets...'}
-            className="w-full h-7 pl-7 pr-2 rounded-md text-xs bg-muted/30 border border-border text-foreground placeholder:text-muted-foreground focus:outline-none"
+            className="w-full h-9 pl-8 pr-2 rounded-md text-sm bg-muted/30 border border-border text-foreground placeholder:text-muted-foreground focus:outline-none"
           />
         </div>
         <TooltipProvider delayDuration={300}>
@@ -416,7 +420,7 @@ function OthersStickerTab({ onSelect }: { onSelect: (s: { shortcode: string; url
             <TooltipTrigger asChild>
               <button
                 onClick={() => setSearchMode(searchMode === 'items' ? 'sets' : 'items')}
-                className={`px-1.5 py-1 rounded-md text-[10px] font-medium transition-colors cursor-pointer ${searchMode === 'sets'
+                className={`px-1.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer ${searchMode === 'sets'
                   ? 'bg-primary/15 text-primary'
                   : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
                   }`}
@@ -469,7 +473,7 @@ function OthersStickerTab({ onSelect }: { onSelect: (s: { shortcode: string; url
             </div>
           ) : (
             filteredSets.map((set) => {
-              const addr = `30030:${set.pubkey}:${set.dTag}`
+              const addr = `30031:${set.pubkey}:${set.dTag}`
               return (
                 <StickerSetCard
                   key={addr}
@@ -484,7 +488,7 @@ function OthersStickerTab({ onSelect }: { onSelect: (s: { shortcode: string; url
           )
         ) : (
           subscribedSets.map((set) => {
-            const addr = `30030:${set.pubkey}:${set.dTag}`
+            const addr = `30031:${set.pubkey}:${set.dTag}`
             return (
               <StickerSetCard
                 key={addr}
@@ -573,7 +577,7 @@ function StickerSetCard({
         URL.revokeObjectURL(item.preview)
       }
 
-      await publishStickerSet(set.dTag, newStickers, signer, privateKey)
+      await publishStickerSet(set.dTag, set.name, newStickers, signer, privateKey)
       useStickerStore.getState().updateMyStickerSet(set.dTag, newStickers)
       setStaged([])
     } catch (err) {
@@ -585,7 +589,7 @@ function StickerSetCard({
 
   const removeSticker = async (shortcode: string) => {
     const updated = set.stickers.filter((s) => s.shortcode !== shortcode)
-    await publishStickerSet(set.dTag, updated, signer, privateKey)
+    await publishStickerSet(set.dTag, set.name, updated, signer, privateKey)
     useStickerStore.getState().updateMyStickerSet(set.dTag, updated)
   }
 
@@ -613,7 +617,7 @@ function StickerSetCard({
       >
         <div className="flex items-center gap-2 min-w-0">
           <span className="text-xs font-medium text-foreground truncate">{set.name}</span>
-          <span className="text-[10px] text-muted-foreground shrink-0">{set.stickers.length}</span>
+          <span className="text-xs text-muted-foreground shrink-0">{set.stickers.length}</span>
         </div>
         {isMine && (
           <div className="flex items-center gap-1 shrink-0">
@@ -663,7 +667,7 @@ function StickerSetCard({
       {/* Staged stickers (naming before upload) */}
       {staged.length > 0 && (
         <div className="px-2 py-2 space-y-1.5 border-t border-border/50 pt-2">
-          <p className="text-[10px] text-muted-foreground">Name your stickers and set NSFW before uploading:</p>
+          <p className="text-xs text-muted-foreground">Name your stickers and set NSFW before uploading:</p>
           {staged.map((item, i) => (
             <div key={i} className="flex items-center gap-2">
               <img src={item.preview} alt="" className="w-10 h-10 object-contain rounded shrink-0" />
@@ -671,11 +675,11 @@ function StickerSetCard({
                 value={item.shortcode}
                 onChange={(e) => updateStagedName(i, e.target.value)}
                 placeholder="Sticker name..."
-                className="flex-1 h-7 px-2 rounded-md text-xs bg-muted/30 border border-border text-foreground placeholder:text-muted-foreground focus:outline-none"
+                className="flex-1 h-9 px-3 rounded-md text-sm bg-muted/30 border border-border text-foreground placeholder:text-muted-foreground focus:outline-none"
               />
               <button
                 onClick={() => toggleStagedNsfw(i)}
-                className={`h-7 px-1.5 rounded-md text-[10px] font-medium transition-colors cursor-pointer ${item.nsfw ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-muted/30 text-muted-foreground border border-border'}`}
+                className={`h-9 px-2.5 rounded-md text-xs font-medium transition-colors cursor-pointer ${item.nsfw ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-muted/30 text-muted-foreground border border-border'}`}
               >
                 {item.nsfw ? 'NSFW' : 'SFW'}
               </button>
@@ -691,14 +695,14 @@ function StickerSetCard({
             <button
               onClick={confirmUpload}
               disabled={uploading || staged.every((s) => !s.shortcode.trim())}
-              className="flex-1 h-7 rounded-md bg-primary text-primary-foreground text-xs font-medium disabled:opacity-50 cursor-pointer flex items-center justify-center gap-1"
+              className="flex-1 h-9 rounded-md bg-primary text-primary-foreground text-sm font-medium disabled:opacity-50 cursor-pointer flex items-center justify-center gap-1"
             >
               {uploading ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
               Upload {staged.length} sticker{staged.length > 1 ? 's' : ''}
             </button>
             <button
               onClick={() => { staged.forEach((s) => URL.revokeObjectURL(s.preview)); setStaged([]) }}
-              className="h-7 px-2 rounded-md text-xs text-muted-foreground hover:text-foreground cursor-pointer"
+              className="h-9 px-3 rounded-md text-sm text-muted-foreground hover:text-foreground cursor-pointer"
             >
               Cancel
             </button>
@@ -853,7 +857,7 @@ function DiscoverStickerTab({ onPickerClose }: { onPickerClose?: () => void }) {
   }, [hasMore, filtered])
 
   const handleSubscribe = async (set: StickerSet) => {
-    const addr = `30030:${set.pubkey}:${set.dTag}`
+    const addr = `30031:${set.pubkey}:${set.dTag}`
     if (subscriptionAddresses.includes(addr)) return
     setPublishingAddr(addr)
     try {
@@ -872,12 +876,12 @@ function DiscoverStickerTab({ onPickerClose }: { onPickerClose?: () => void }) {
       {/* Search toolbar with mode toggle */}
       <div className="flex items-center gap-1.5 px-2 py-1.5 border-b border-border shrink-0">
         <div className="flex-1 relative">
-          <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder={searchMode === 'author' ? 'Search by author...' : 'Search sets...'}
-            className={`w-full h-7 pl-7 pr-2 rounded-md text-xs bg-muted/30 border border-border text-foreground placeholder:text-muted-foreground focus:outline-none ${searchMode === 'author' ? 'font-mono' : ''}`}
+            className="w-full h-9 pl-8 pr-2 rounded-md text-sm bg-muted/30 border border-border text-foreground placeholder:text-muted-foreground focus:outline-none"
           />
         </div>
         <TooltipProvider delayDuration={300}>
@@ -885,7 +889,7 @@ function DiscoverStickerTab({ onPickerClose }: { onPickerClose?: () => void }) {
             <TooltipTrigger asChild>
               <button
                 onClick={() => { setSearchMode(searchMode === 'name' ? 'author' : 'name'); setSearch('') }}
-                className={`p-1.5 rounded-md transition-colors cursor-pointer ${searchMode === 'author'
+                className={`p-2 rounded-md transition-colors cursor-pointer ${searchMode === 'author'
                   ? 'bg-primary/15 text-primary'
                   : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
                 }`}
@@ -909,12 +913,12 @@ function DiscoverStickerTab({ onPickerClose }: { onPickerClose?: () => void }) {
         ) : filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
             <p className="text-xs">{search ? 'No sets found' : 'No sticker sets discovered'}</p>
-            <p className="text-[10px] mt-1 opacity-60">Try again later as more users publish sticker sets.</p>
+            <p className="text-xs mt-1 opacity-60">Try again later as more users publish sticker sets.</p>
           </div>
         ) : (
           <>
             {visibleSets.map((set) => {
-              const addr = `30030:${set.pubkey}:${set.dTag}`
+              const addr = `30031:${set.pubkey}:${set.dTag}`
               const isSubscribed = subscriptionAddresses.includes(addr)
               const isPublishing = publishingAddr === addr
               const profile = getProfile(set.pubkey)
@@ -925,19 +929,19 @@ function DiscoverStickerTab({ onPickerClose }: { onPickerClose?: () => void }) {
                   <div className="flex items-center justify-between mb-1.5">
                     <div className="min-w-0">
                       <p className="text-xs font-semibold text-foreground truncate">{set.name}</p>
-                      <p className="text-[10px] text-muted-foreground">
+                      <p className="text-xs text-muted-foreground">
                         by <button onClick={() => { window.dispatchEvent(new CustomEvent('open-profile-modal', { detail: set.pubkey })); onPickerClose?.() }} className="text-primary hover:underline cursor-pointer">{authorName}</button> · {set.stickers.length} stickers
                       </p>
                     </div>
                     {isSubscribed ? (
-                      <span className="text-[10px] text-primary font-medium shrink-0 flex items-center gap-1">
+                      <span className="text-xs text-primary font-medium shrink-0 flex items-center gap-1">
                         <Check size={10} /> Subscribed
                       </span>
                     ) : (
                       <button
                         onClick={() => handleSubscribe(set)}
                         disabled={isPublishing}
-                        className="shrink-0 px-2.5 py-1 rounded-md bg-primary text-primary-foreground text-[10px] font-medium disabled:opacity-50 cursor-pointer"
+                        className="shrink-0 px-2.5 py-1 rounded-md bg-primary text-primary-foreground text-xs font-medium disabled:opacity-50 cursor-pointer"
                       >
                         {isPublishing ? <Loader2 size={10} className="animate-spin" /> : 'Subscribe'}
                       </button>
@@ -955,7 +959,7 @@ function DiscoverStickerTab({ onPickerClose }: { onPickerClose?: () => void }) {
                       />
                     ))}
                     {set.stickers.length > 6 && (
-                      <div className="w-9 h-9 rounded border border-border/30 flex items-center justify-center text-[10px] text-muted-foreground">
+                      <div className="w-9 h-9 rounded border border-border/30 flex items-center justify-center text-xs text-muted-foreground">
                         +{set.stickers.length - 6}
                       </div>
                     )}
@@ -967,7 +971,7 @@ function DiscoverStickerTab({ onPickerClose }: { onPickerClose?: () => void }) {
             {hasMore && (
               <div ref={sentinelRef} className="flex items-center justify-center py-3">
                 <Loader2 size={14} className="animate-spin text-muted-foreground" />
-                <span className="ml-1.5 text-[10px] text-muted-foreground">Loading more…</span>
+                <span className="ml-1.5 text-xs text-muted-foreground">Loading more…</span>
               </div>
             )}
           </>
@@ -1036,7 +1040,7 @@ export function StickerDiscoveryModal({ onClose, initialSearch = '', initialAuth
   }, [discovered, search, searchMode, getProfile, blockedPubkeys, nsfwEnabled, untaggedAsNsfw])
 
   const handleSubscribe = async (set: StickerSet) => {
-    const addr = `30030:${set.pubkey}:${set.dTag}`
+    const addr = `30031:${set.pubkey}:${set.dTag}`
     if (subscriptionAddresses.includes(addr)) return
     setPublishingAddr(addr)
     try {
@@ -1092,7 +1096,7 @@ export function StickerDiscoveryModal({ onClose, initialSearch = '', initialAuth
                 </div>
               ) : (
                 filtered.map((set) => {
-                  const addr = `30030:${set.pubkey}:${set.dTag}`
+                  const addr = `30031:${set.pubkey}:${set.dTag}`
                   const isSubscribed = subscriptionAddresses.includes(addr)
                   const isPublishing = publishingAddr === addr
                   const profile = getProfile(set.pubkey)
@@ -1102,10 +1106,10 @@ export function StickerDiscoveryModal({ onClose, initialSearch = '', initialAuth
                       <div className="flex items-center justify-between mb-2">
                         <div className="min-w-0">
                           <p className="text-sm font-semibold text-foreground truncate">{set.name}</p>
-                          <p className="text-[10px] text-muted-foreground">by <button onClick={() => setProfilePubkey(set.pubkey)} className="text-primary hover:underline cursor-pointer">{authorName}</button> · {set.stickers.length} stickers</p>
+                          <p className="text-xs text-muted-foreground">by <button onClick={() => setProfilePubkey(set.pubkey)} className="text-primary hover:underline cursor-pointer">{authorName}</button> · {set.stickers.length} stickers</p>
                         </div>
                         {isSubscribed ? (
-                          <span className="text-[10px] text-primary font-medium shrink-0 flex items-center gap-1"><Check size={10} /> Subscribed</span>
+                          <span className="text-xs text-primary font-medium shrink-0 flex items-center gap-1"><Check size={10} /> Subscribed</span>
                         ) : (
                           <button onClick={() => handleSubscribe(set)} disabled={isPublishing} className="shrink-0 px-3 py-1 rounded-md bg-primary text-primary-foreground text-xs font-medium disabled:opacity-50 cursor-pointer">
                             {isPublishing ? <Loader2 size={12} className="animate-spin" /> : 'Subscribe'}
@@ -1114,7 +1118,7 @@ export function StickerDiscoveryModal({ onClose, initialSearch = '', initialAuth
                       </div>
                       <div className="flex flex-wrap gap-1">
                         {set.stickers.slice(0, 8).map((st) => (<img key={st.shortcode} src={st.url} alt={`:${st.shortcode}:`} className="w-10 h-10 object-contain rounded border border-border/30" loading="lazy" />))}
-                        {set.stickers.length > 8 && (<div className="w-10 h-10 rounded border border-border/30 flex items-center justify-center text-[10px] text-muted-foreground">+{set.stickers.length - 8}</div>)}
+                        {set.stickers.length > 8 && (<div className="w-10 h-10 rounded border border-border/30 flex items-center justify-center text-xs text-muted-foreground">+{set.stickers.length - 8}</div>)}
                       </div>
                     </div>
                   )

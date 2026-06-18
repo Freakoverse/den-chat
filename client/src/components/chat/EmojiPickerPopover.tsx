@@ -30,8 +30,8 @@ import { CustomSelect } from '@/components/ui/custom-select'
 // measures the full width (its overlay scrollbar isn't subtracted like Chromium's
 // classic one) and packs 10 columns, overflowing the right edge. Keeping the width
 // just under that threshold yields 9 columns in both browsers with room to spare.
-const PICKER_WIDTH = 330
-const PICKER_HEIGHT = 380
+const PICKER_WIDTH = 376
+const PICKER_HEIGHT = 460
 const GAP = 8
 
 type Tab = 'discover' | 'basic' | 'mine' | 'others'
@@ -43,7 +43,7 @@ interface Props {
 }
 
 export function EmojiPickerPopover({ anchorRef, onClose, onSelect }: Props) {
-  const [pos, setPos] = useState<{ top: number; left: number; height: number }>({ top: 0, left: 0, height: PICKER_HEIGHT })
+  const [pos, setPos] = useState<{ top: number; left: number; height: number; width: number }>({ top: 0, left: 0, height: PICKER_HEIGHT, width: PICKER_WIDTH })
   const [tab, setTab] = useState<Tab>('basic')
   const containerRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
@@ -89,12 +89,14 @@ export function EmojiPickerPopover({ anchorRef, onClose, onSelect }: Props) {
     if (top < GAP) top = GAP
     if (top + height > vh - GAP) height = Math.max(200, vh - top - GAP)
 
-    let left = rect.right - PICKER_WIDTH
+    // Clamp width to the viewport so the wider picker never overflows on mobile.
+    const width = Math.min(PICKER_WIDTH, vw - GAP * 2)
+    let left = rect.right - width
     if (left < GAP) left = rect.left
-    if (left + PICKER_WIDTH > vw - GAP) left = vw - PICKER_WIDTH - GAP
+    if (left + width > vw - GAP) left = vw - width - GAP
     left = Math.max(GAP, left)
 
-    setPos({ top, left, height })
+    setPos({ top, left, height, width })
   }, [anchorRef])
 
   useEffect(() => {
@@ -132,10 +134,10 @@ export function EmojiPickerPopover({ anchorRef, onClose, onSelect }: Props) {
   }, [])
 
   const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
-    { id: 'basic', label: 'Basic', icon: <Smile size={14} /> },
-    { id: 'discover', label: 'Discover', icon: <Compass size={14} /> },
-    { id: 'mine', label: 'Mine', icon: <Sparkles size={14} /> },
-    { id: 'others', label: 'Others', icon: <Users size={14} /> },
+    { id: 'basic', label: 'Basic', icon: <Smile size={16} /> },
+    { id: 'discover', label: 'Discover', icon: <Compass size={16} /> },
+    { id: 'mine', label: 'Mine', icon: <Sparkles size={16} /> },
+    { id: 'others', label: 'Others', icon: <Users size={16} /> },
   ]
 
   return createPortal(
@@ -143,7 +145,7 @@ export function EmojiPickerPopover({ anchorRef, onClose, onSelect }: Props) {
       ref={containerRef}
       data-emoji-picker
       className="fixed z-[300] flex flex-col bg-[hsl(var(--background))] border border-[hsl(var(--border))] rounded-xl shadow-2xl overflow-hidden"
-      style={{ top: pos.top, left: pos.left, width: PICKER_WIDTH, height: pos.height }}
+      style={{ top: pos.top, left: pos.left, width: pos.width, height: pos.height }}
       onMouseDown={(e) => e.stopPropagation()}
       onClick={(e) => e.stopPropagation()}
     >
@@ -153,7 +155,7 @@ export function EmojiPickerPopover({ anchorRef, onClose, onSelect }: Props) {
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
-            className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-medium transition-colors cursor-pointer ${
+            className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-sm font-medium transition-colors cursor-pointer ${
               tab === t.id
                 ? 'text-[hsl(var(--primary))] border-b-2 border-[hsl(var(--primary))] bg-[hsl(var(--primary)/0.05)]'
                 : 'text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--muted)/0.3)]'
@@ -176,7 +178,7 @@ export function EmojiPickerPopover({ anchorRef, onClose, onSelect }: Props) {
         {tab === 'basic' && (
           <EmojiPickerReact
             theme={Theme.DARK}
-            width={PICKER_WIDTH}
+            width={pos.width}
             height={contentHeight}
             autoFocusSearch={false}
             emojiStyle={EmojiStyle.NATIVE}
@@ -191,12 +193,12 @@ export function EmojiPickerPopover({ anchorRef, onClose, onSelect }: Props) {
               '--epr-search-border-color': 'hsl(var(--border))',
               '--epr-search-input-text-color': 'hsl(var(--foreground))',
               '--epr-search-input-placeholder-color': 'hsl(var(--muted-foreground))',
-              '--epr-category-navigation-button-size': '24px',
-              '--epr-emoji-size': '24px',
-              '--epr-search-input-height': '28px',
-              '--epr-search-input-border-radius': '6px',
-              '--epr-header-padding': '6px 8px',
-              fontSize: '12px',
+              '--epr-category-navigation-button-size': '30px',
+              '--epr-emoji-size': '30px',
+              '--epr-search-input-height': '38px',
+              '--epr-search-input-border-radius': '8px',
+              '--epr-header-padding': '8px 10px',
+              fontSize: '14px',
               border: 'none',
               borderRadius: '0',
             } as React.CSSProperties}
@@ -225,7 +227,7 @@ function EmojiNsfwToggle() {
 
   return (
     <div className="flex items-center justify-between px-3 py-1.5 border-b border-border/50 bg-secondary/10 shrink-0">
-      <span className="text-[10px] text-muted-foreground">Include NSFW</span>
+      <span className="text-xs text-muted-foreground">Include NSFW</span>
       <div className="flex items-center gap-2">
         <TooltipProvider delayDuration={300}>
           <Tooltip>
@@ -302,9 +304,10 @@ function MineTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcode:
   const handleCreateSet = async () => {
     const name = newSetName.trim()
     if (!name || !pubkey) return
-    const dTag = name.toLowerCase().replace(/[^a-z0-9-_]/g, '-')
+    // Unique d-tag (not the slugified name) so two sets with the same name never overwrite each other.
+    const dTag = crypto.randomUUID()
     try {
-      await publishEmojiSet(dTag, [], signer, privateKey)
+      await publishEmojiSet(dTag, name, [], signer, privateKey)
       addMyEmojiSet({ pubkey, dTag, name, emojis: [] })
       setNewSetName('')
       setShowNewSet(false)
@@ -320,7 +323,7 @@ function MineTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcode:
     if (!set) return
     const newEmojis = set.emojis.filter((e) => e.shortcode !== shortcode)
     try {
-      await publishEmojiSet(setDTag, newEmojis, signer, privateKey)
+      await publishEmojiSet(setDTag, set.name, newEmojis, signer, privateKey)
       updateMyEmojiSet(setDTag, newEmojis)
     } catch (err) {
       console.error('Failed to delete emoji:', err)
@@ -351,12 +354,12 @@ function MineTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcode:
       {/* Search + actions bar */}
       <div className="flex items-center gap-1.5 px-2 py-1.5 border-b border-[hsl(var(--border))]">
         <div className="flex-1 relative">
-          <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-[hsl(var(--muted-foreground))]" />
+          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[hsl(var(--muted-foreground))]" />
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search my emojis..."
-            className="w-full h-7 pl-7 pr-2 rounded-md text-xs bg-[hsl(var(--muted)/0.3)] border border-[hsl(var(--border))] text-[hsl(var(--foreground))] placeholder:text-[hsl(var(--muted-foreground))] focus:outline-none"
+            className="w-full h-9 pl-8 pr-2 rounded-md text-sm bg-[hsl(var(--muted)/0.3)] border border-[hsl(var(--border))] text-[hsl(var(--foreground))] placeholder:text-[hsl(var(--muted-foreground))] focus:outline-none"
           />
         </div>
         <TooltipProvider delayDuration={300}>
@@ -364,7 +367,7 @@ function MineTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcode:
             <TooltipTrigger asChild>
               <button
                 onClick={() => { setShowNewSet(!showNewSet); if (!showNewSet) setShowUpload(false) }}
-                className="p-1.5 rounded-md text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--muted)/0.5)] transition-colors cursor-pointer"
+                className="p-2 rounded-md text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--muted)/0.5)] transition-colors cursor-pointer"
               >
                 <FolderPlus size={14} />
               </button>
@@ -376,7 +379,7 @@ function MineTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcode:
               <button
                 disabled={myEmojiSets.length === 0}
                 onClick={() => { const next = !showUpload; setShowUpload(next); if (next) { setShowNewSet(false); if (!uploadTargetSet && myEmojiSets.length > 0) setUploadTargetSet(myEmojiSets[0].dTag) } }}
-                className={`p-1.5 rounded-md transition-colors ${myEmojiSets.length === 0 ? 'text-[hsl(var(--muted-foreground)/0.3)] cursor-not-allowed' : 'text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--muted)/0.5)] cursor-pointer'}`}
+                className={`p-2 rounded-md transition-colors ${myEmojiSets.length === 0 ? 'text-[hsl(var(--muted-foreground)/0.3)] cursor-not-allowed' : 'text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--muted)/0.5)] cursor-pointer'}`}
               >
                 <Plus size={14} />
               </button>
@@ -389,20 +392,20 @@ function MineTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcode:
       {/* New set form */}
       {showNewSet && (
         <div className="px-2 py-2 border-b border-[hsl(var(--border))] bg-[hsl(var(--muted)/0.2)]">
-          <p className="text-[10px] text-[hsl(var(--muted-foreground))] mb-1.5">Create a new emoji set</p>
+          <p className="text-xs text-[hsl(var(--muted-foreground))] mb-1.5">Create a new emoji set</p>
           <div className="flex gap-1.5">
             <input
               value={newSetName}
               onChange={(e) => setNewSetName(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleCreateSet()}
               placeholder="Set name..."
-              className="flex-1 h-7 px-2 rounded-md text-xs bg-[hsl(var(--background))] border border-[hsl(var(--border))] text-[hsl(var(--foreground))] placeholder:text-[hsl(var(--muted-foreground))] focus:outline-none"
+              className="flex-1 h-9 px-3 rounded-md text-sm bg-[hsl(var(--background))] border border-[hsl(var(--border))] text-[hsl(var(--foreground))] placeholder:text-[hsl(var(--muted-foreground))] focus:outline-none"
               autoFocus
             />
             <button
               onClick={handleCreateSet}
               disabled={!newSetName.trim()}
-              className="h-7 px-2.5 rounded-md bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] text-xs font-medium hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50"
+              className="h-9 px-3 rounded-md bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] text-xs font-medium hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50"
             >
               Create
             </button>
@@ -440,7 +443,7 @@ function MineTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcode:
         ) : (
           <>
             {search ? (
-              <div className="grid grid-cols-8 gap-1">
+              <div className="grid grid-cols-7 gap-1.5">
                 {filtered.map((e) => (
                   <EmojiButton
                     key={`${e.setDTag}-${e.shortcode}`}
@@ -454,7 +457,7 @@ function MineTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcode:
               myEmojiSets.map((set) => (
                 <div key={set.dTag} className="mb-2">
                   <div className="flex items-center justify-between px-0.5 mb-1">
-                    <p className="text-[10px] font-semibold text-[hsl(var(--muted-foreground))] uppercase tracking-wider">
+                    <p className="text-xs font-semibold text-[hsl(var(--muted-foreground))] uppercase tracking-wider">
                       {set.name}
                     </p>
                     <TooltipProvider delayDuration={200}>
@@ -472,9 +475,9 @@ function MineTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcode:
                     </TooltipProvider>
                   </div>
                   {set.emojis.length === 0 ? (
-                    <p className="text-[10px] text-[hsl(var(--muted-foreground)/0.6)] italic px-0.5">Empty set — add emojis above</p>
+                    <p className="text-xs text-[hsl(var(--muted-foreground)/0.6)] italic px-0.5">Empty set — add emojis above</p>
                   ) : (
-                    <div className="grid grid-cols-8 gap-1">
+                    <div className="grid grid-cols-7 gap-1.5">
                       {set.emojis.map((e) => (
                         <EmojiButton
                           key={e.shortcode}
@@ -536,12 +539,12 @@ function EmojiButton({ emoji, onClick, onDelete }: {
           <TooltipTrigger asChild>
             <button
               onClick={onClick}
-              className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-[hsl(var(--muted)/0.5)] transition-colors cursor-pointer"
+              className="w-11 h-11 flex items-center justify-center rounded-md hover:bg-[hsl(var(--muted)/0.5)] transition-colors cursor-pointer"
             >
               <img
                 src={emoji.url}
                 alt={`:${emoji.shortcode}:`}
-                className="w-6 h-6 object-contain"
+                className="w-8 h-8 object-contain"
                 loading="lazy"
               />
             </button>
@@ -636,7 +639,7 @@ function EmojiUploadForm({ sets, targetSet, onTargetChange, onDone }: {
       const set = sets.find((s) => s.dTag === targetSet)
       if (set) {
         const newEmojis = [...set.emojis, { shortcode: sc, url, nsfw, tagged: true }]
-        await publishEmojiSet(targetSet, newEmojis, signer, privateKey)
+        await publishEmojiSet(targetSet, set.name, newEmojis, signer, privateKey)
         updateMyEmojiSet(targetSet, newEmojis)
       }
 
@@ -663,7 +666,7 @@ function EmojiUploadForm({ sets, targetSet, onTargetChange, onDone }: {
     <div className="px-2 py-2 border-b border-[hsl(var(--border))] bg-[hsl(var(--muted)/0.15)] space-y-2">
       {/* Row 1: Set selector */}
       <div className="flex items-center gap-1.5">
-        <span className="text-[10px] text-[hsl(var(--muted-foreground))] shrink-0">Set:</span>
+        <span className="text-xs text-[hsl(var(--muted-foreground))] shrink-0">Set:</span>
         <CustomSelect
           value={targetSet}
           onChange={onTargetChange}
@@ -677,7 +680,7 @@ function EmojiUploadForm({ sets, targetSet, onTargetChange, onDone }: {
         <input type="file" ref={fileInputRef} accept="image/*" className="hidden" onChange={handleFileSelect} />
         <button
           onClick={() => fileInputRef.current?.click()}
-          className="h-7 px-2.5 rounded-md text-xs bg-[hsl(var(--secondary))] border border-[hsl(var(--border))] text-[hsl(var(--foreground))] hover:bg-[hsl(var(--muted)/0.5)] transition-colors cursor-pointer flex items-center gap-1.5 shrink-0"
+          className="h-9 px-3 rounded-md text-xs bg-[hsl(var(--secondary))] border border-[hsl(var(--border))] text-[hsl(var(--foreground))] hover:bg-[hsl(var(--muted)/0.5)] transition-colors cursor-pointer flex items-center gap-1.5 shrink-0"
         >
           <Upload size={11} />
           {file ? 'Change' : 'Select Image'}
@@ -686,7 +689,7 @@ function EmojiUploadForm({ sets, targetSet, onTargetChange, onDone }: {
           <img src={preview} alt="Preview" className="w-7 h-7 rounded border border-[hsl(var(--border))] object-contain bg-[hsl(var(--muted)/0.3)] shrink-0" />
         )}
         {file && (
-          <span className="text-[10px] text-[hsl(var(--muted-foreground))] truncate">{file.name}</span>
+          <span className="text-xs text-[hsl(var(--muted-foreground))] truncate">{file.name}</span>
         )}
       </div>
 
@@ -696,18 +699,18 @@ function EmojiUploadForm({ sets, targetSet, onTargetChange, onDone }: {
           value={shortcode}
           onChange={(e) => setShortcode(e.target.value.replace(/[^a-zA-Z0-9_-]/g, ''))}
           placeholder="shortcode"
-          className="flex-1 h-7 px-2 rounded-md text-xs bg-[hsl(var(--background))] border border-[hsl(var(--border))] text-[hsl(var(--foreground))] placeholder:text-[hsl(var(--muted-foreground))] focus:outline-none font-mono min-w-0"
+          className="flex-1 h-9 px-3 rounded-md text-sm bg-[hsl(var(--background))] border border-[hsl(var(--border))] text-[hsl(var(--foreground))] placeholder:text-[hsl(var(--muted-foreground))] focus:outline-none font-mono min-w-0"
         />
         <button
           onClick={() => setNsfw(!nsfw)}
-          className={`h-7 px-1.5 rounded-md text-[10px] font-medium transition-colors cursor-pointer shrink-0 ${nsfw ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-muted/30 text-muted-foreground border border-border'}`}
+          className={`h-9 px-2.5 rounded-md text-xs font-medium transition-colors cursor-pointer shrink-0 ${nsfw ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-muted/30 text-muted-foreground border border-border'}`}
         >
           {nsfw ? 'NSFW' : 'SFW'}
         </button>
         <button
           onClick={handleUpload}
           disabled={!file || !shortcode.trim() || uploading}
-          className="h-7 px-3 rounded-md bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] text-xs font-medium hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50 flex items-center gap-1 shrink-0"
+          className="h-9 px-3.5 rounded-md bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] text-xs font-medium hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50 flex items-center gap-1 shrink-0"
         >
           {uploading ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
           {uploading ? `${uploadProgress}%` : 'Add'}
@@ -725,7 +728,7 @@ function EmojiUploadForm({ sets, targetSet, onTargetChange, onDone }: {
       )}
 
       {error && (
-        <div className="flex items-center gap-1 text-[10px] text-red-400">
+        <div className="flex items-center gap-1 text-xs text-red-400">
           <AlertTriangle size={10} className="shrink-0" />
           <span className="truncate">{error}</span>
         </div>
@@ -791,12 +794,12 @@ function OthersTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcod
       {/* Search + mode toggle + discover bar */}
       <div className="flex items-center gap-1.5 px-2 py-1.5 border-b border-[hsl(var(--border))]">
         <div className="flex-1 relative">
-          <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-[hsl(var(--muted-foreground))]" />
+          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[hsl(var(--muted-foreground))]" />
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder={searchMode === 'items' ? 'Search emojis...' : 'Search sets...'}
-            className="w-full h-7 pl-7 pr-2 rounded-md text-xs bg-[hsl(var(--muted)/0.3)] border border-[hsl(var(--border))] text-[hsl(var(--foreground))] placeholder:text-[hsl(var(--muted-foreground))] focus:outline-none"
+            className="w-full h-9 pl-8 pr-2 rounded-md text-sm bg-[hsl(var(--muted)/0.3)] border border-[hsl(var(--border))] text-[hsl(var(--foreground))] placeholder:text-[hsl(var(--muted-foreground))] focus:outline-none"
           />
         </div>
         <TooltipProvider delayDuration={300}>
@@ -804,7 +807,7 @@ function OthersTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcod
             <TooltipTrigger asChild>
               <button
                 onClick={() => setSearchMode(searchMode === 'items' ? 'sets' : 'items')}
-                className={`px-1.5 py-1 rounded-md text-[10px] font-medium transition-colors cursor-pointer ${
+                className={`px-1.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer ${
                   searchMode === 'sets'
                     ? 'bg-[hsl(var(--primary)/0.15)] text-[hsl(var(--primary))]'
                     : 'text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--muted)/0.5)]'
@@ -833,14 +836,14 @@ function OthersTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcod
               <p className="text-xs text-[hsl(var(--muted-foreground))]">No emojis matching "{search}"</p>
             </div>
           ) : (
-            <div className="grid grid-cols-8 gap-1">
+            <div className="grid grid-cols-7 gap-1.5">
               {filteredItems.map((e, i) => (
                 <TooltipProvider key={`${e.setDTag}-${e.shortcode}-${i}`} delayDuration={200}>
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
                         onClick={() => onSelect(`:${e.shortcode}:`, { shortcode: e.shortcode, url: e.url })}
-                        className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-[hsl(var(--muted)/0.5)] transition-colors cursor-pointer"
+                        className="w-11 h-11 flex items-center justify-center rounded-md hover:bg-[hsl(var(--muted)/0.5)] transition-colors cursor-pointer"
                       >
                         <img src={e.url} alt={`:${e.shortcode}:`} className="w-6 h-6 object-contain" loading="lazy" />
                       </button>
@@ -865,7 +868,7 @@ function OthersTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcod
               return (
                 <div key={`${set.pubkey}:${set.dTag}`} className="mb-2.5">
                   <div className="flex items-center gap-1 px-0.5 mb-1">
-                    <p className="text-[10px] font-semibold text-[hsl(var(--muted-foreground))] uppercase tracking-wider truncate">
+                    <p className="text-xs font-semibold text-[hsl(var(--muted-foreground))] uppercase tracking-wider truncate">
                       {set.name}
                     </p>
                     <span className="text-[9px] text-[hsl(var(--muted-foreground)/0.6)]">by {authorName}</span>
@@ -877,14 +880,14 @@ function OthersTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcod
                       {isUnsubscribing ? <Loader2 size={10} className="animate-spin" /> : 'Unsub'}
                     </button>
                   </div>
-                  <div className="grid grid-cols-8 gap-1">
+                  <div className="grid grid-cols-7 gap-1.5">
                     {set.emojis.map((e) => (
                       <TooltipProvider key={e.shortcode} delayDuration={200}>
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <button
                               onClick={() => onSelect(`:${e.shortcode}:`, { shortcode: e.shortcode, url: e.url })}
-                              className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-[hsl(var(--muted)/0.5)] transition-colors cursor-pointer"
+                              className="w-11 h-11 flex items-center justify-center rounded-md hover:bg-[hsl(var(--muted)/0.5)] transition-colors cursor-pointer"
                             >
                               <img src={e.url} alt={`:${e.shortcode}:`} className="w-6 h-6 object-contain" loading="lazy" />
                             </button>
@@ -907,7 +910,7 @@ function OthersTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcod
             return (
               <div key={`${set.pubkey}:${set.dTag}`} className="mb-2.5">
                 <div className="flex items-center gap-1 px-0.5 mb-1">
-                  <p className="text-[10px] font-semibold text-[hsl(var(--muted-foreground))] uppercase tracking-wider truncate">
+                  <p className="text-xs font-semibold text-[hsl(var(--muted-foreground))] uppercase tracking-wider truncate">
                     {set.name}
                   </p>
                   <span className="text-[9px] text-[hsl(var(--muted-foreground)/0.6)]">by {authorName}</span>
@@ -919,14 +922,14 @@ function OthersTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcod
                     {isUnsubscribing ? <Loader2 size={10} className="animate-spin" /> : 'Unsub'}
                   </button>
                 </div>
-                <div className="grid grid-cols-8 gap-1">
+                <div className="grid grid-cols-7 gap-1.5">
                   {set.emojis.map((e) => (
                     <TooltipProvider key={e.shortcode} delayDuration={200}>
                       <Tooltip>
                         <TooltipTrigger asChild>
                           <button
                             onClick={() => onSelect(`:${e.shortcode}:`, { shortcode: e.shortcode, url: e.url })}
-                            className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-[hsl(var(--muted)/0.5)] transition-colors cursor-pointer"
+                            className="w-11 h-11 flex items-center justify-center rounded-md hover:bg-[hsl(var(--muted)/0.5)] transition-colors cursor-pointer"
                           >
                             <img src={e.url} alt={`:${e.shortcode}:`} className="w-6 h-6 object-contain" loading="lazy" />
                           </button>
@@ -962,7 +965,6 @@ function DiscoverEmojiTab({ onPickerClose }: { onPickerClose?: () => void }) {
   const [discovered, setDiscovered] = useState<EmojiSet[]>([])
   const [search, setSearch] = useState('')
   const [searchMode, setSearchMode] = useState<'name' | 'author'>('name')
-  const [broad, setBroad] = useState(false)
   const [publishingAddr, setPublishingAddr] = useState<string | null>(null)
   const [visibleCount, setVisibleCount] = useState(10)
   const sentinelRef = useRef<HTMLDivElement>(null)
@@ -970,7 +972,7 @@ function DiscoverEmojiTab({ onPickerClose }: { onPickerClose?: () => void }) {
 
   useEffect(() => {
     setLoading(true)
-    discoverEmojiSets(100, broad).then(async (found) => {
+    discoverEmojiSets(100).then(async (found) => {
       const sizeChecks = await Promise.all(found.map(async (s) => {
         const oversized = await hasOversizedEmoji(s.emojis)
         return oversized ? null : s
@@ -979,12 +981,12 @@ function DiscoverEmojiTab({ onPickerClose }: { onPickerClose?: () => void }) {
     }).catch((err) => {
       console.error('Failed to discover emoji sets:', err)
     }).finally(() => setLoading(false))
-  }, [myPubkey, broad])
+  }, [myPubkey])
 
   // Reset visible count when filters change
   useEffect(() => {
     setVisibleCount(10)
-  }, [search, searchMode, broad])
+  }, [search, searchMode])
 
   const filtered = useMemo(() => {
     let result = discovered.filter((s) => !blockedPubkeys.has(s.pubkey))
@@ -1051,15 +1053,15 @@ function DiscoverEmojiTab({ onPickerClose }: { onPickerClose?: () => void }) {
 
   return (
     <div className="h-full flex flex-col">
-      {/* Search toolbar with mode toggle + broad toggle */}
+      {/* Search toolbar with mode toggle */}
       <div className="flex items-center gap-1 px-2 py-1.5 border-b border-[hsl(var(--border))] shrink-0">
         <div className="flex-1 relative">
-          <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-[hsl(var(--muted-foreground))]" />
+          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[hsl(var(--muted-foreground))]" />
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder={searchMode === 'author' ? 'Search by author...' : 'Search sets...'}
-            className={`w-full h-7 pl-7 pr-2 rounded-md text-xs bg-[hsl(var(--muted)/0.3)] border border-[hsl(var(--border))] text-[hsl(var(--foreground))] placeholder:text-[hsl(var(--muted-foreground))] focus:outline-none ${searchMode === 'author' ? 'font-mono' : ''}`}
+            className={`w-full h-9 pl-8 pr-2 rounded-md text-sm bg-[hsl(var(--muted)/0.3)] border border-[hsl(var(--border))] text-[hsl(var(--foreground))] placeholder:text-[hsl(var(--muted-foreground))] focus:outline-none ${searchMode === 'author' ? 'font-mono' : ''}`}
           />
         </div>
         <TooltipProvider delayDuration={300}>
@@ -1067,7 +1069,7 @@ function DiscoverEmojiTab({ onPickerClose }: { onPickerClose?: () => void }) {
             <TooltipTrigger asChild>
               <button
                 onClick={() => { setSearchMode(searchMode === 'name' ? 'author' : 'name'); setSearch('') }}
-                className={`p-1.5 rounded-md transition-colors cursor-pointer ${searchMode === 'author'
+                className={`p-2 rounded-md transition-colors cursor-pointer ${searchMode === 'author'
                   ? 'bg-[hsl(var(--primary)/0.15)] text-[hsl(var(--primary))]'
                   : 'text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--muted)/0.5)]'
                 }`}
@@ -1077,22 +1079,6 @@ function DiscoverEmojiTab({ onPickerClose }: { onPickerClose?: () => void }) {
             </TooltipTrigger>
             <TooltipContent side="bottom" className="text-xs z-[310]">
               {searchMode === 'author' ? 'Switch to name search' : 'Search by author'}
-            </TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={() => setBroad(!broad)}
-                className={`px-1.5 py-1 rounded-md text-[10px] font-medium transition-colors cursor-pointer ${broad
-                  ? 'bg-[hsl(var(--primary)/0.15)] text-[hsl(var(--primary))]'
-                  : 'text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--muted)/0.5)]'
-                }`}
-              >
-                {broad ? 'Broad' : 'Strict'}
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" className="text-xs z-[310]">
-              {broad ? 'Using broad search (all emoji tags)' : 'Using strict search (NIP-30 only)'}
             </TooltipContent>
           </Tooltip>
         </TooltipProvider>
@@ -1107,7 +1093,7 @@ function DiscoverEmojiTab({ onPickerClose }: { onPickerClose?: () => void }) {
         ) : filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-8 text-[hsl(var(--muted-foreground))]">
             <p className="text-xs">{search ? 'No sets found' : 'No emoji sets discovered'}</p>
-            <p className="text-[10px] mt-1 opacity-60">Try again later as more users publish emoji sets.</p>
+            <p className="text-xs mt-1 opacity-60">Try again later as more users publish emoji sets.</p>
           </div>
         ) : (
           <>
@@ -1123,19 +1109,19 @@ function DiscoverEmojiTab({ onPickerClose }: { onPickerClose?: () => void }) {
                   <div className="flex items-center justify-between mb-1">
                     <div className="min-w-0">
                       <p className="text-xs font-semibold text-[hsl(var(--foreground))] truncate">{set.name}</p>
-                      <p className="text-[10px] text-[hsl(var(--muted-foreground))]">
+                      <p className="text-xs text-[hsl(var(--muted-foreground))]">
                         by <button onClick={() => { window.dispatchEvent(new CustomEvent('open-profile-modal', { detail: set.pubkey })); onPickerClose?.() }} className="text-[hsl(var(--primary))] hover:underline cursor-pointer">{authorName}</button> · {set.emojis.length} emoji{set.emojis.length !== 1 ? 's' : ''}
                       </p>
                     </div>
                     {isSubscribed ? (
-                      <span className="text-[10px] text-[hsl(var(--primary))] font-medium shrink-0 flex items-center gap-1">
+                      <span className="text-xs text-[hsl(var(--primary))] font-medium shrink-0 flex items-center gap-1">
                         <Check size={10} /> Subscribed
                       </span>
                     ) : (
                       <button
                         onClick={() => handleSubscribe(set)}
                         disabled={isPublishing}
-                        className="shrink-0 px-2.5 py-1 rounded-md bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] text-[10px] font-medium disabled:opacity-50 cursor-pointer"
+                        className="shrink-0 px-2.5 py-1 rounded-md bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] text-xs font-medium disabled:opacity-50 cursor-pointer"
                       >
                         {isPublishing ? <Loader2 size={10} className="animate-spin" /> : 'Subscribe'}
                       </button>
@@ -1166,7 +1152,7 @@ function DiscoverEmojiTab({ onPickerClose }: { onPickerClose?: () => void }) {
             {hasMore && (
               <div ref={sentinelRef} className="flex items-center justify-center py-3">
                 <Loader2 size={14} className="animate-spin text-[hsl(var(--muted-foreground))]" />
-                <span className="ml-1.5 text-[10px] text-[hsl(var(--muted-foreground))]">Loading more…</span>
+                <span className="ml-1.5 text-xs text-[hsl(var(--muted-foreground))]">Loading more…</span>
               </div>
             )}
           </>
@@ -1183,7 +1169,6 @@ export function EmojiDiscoveryModal({ onClose, initialSearch = '', initialAuthor
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState(initialSearch)
   const [authorFilter, setAuthorFilter] = useState(initialAuthor)
-  const [broad, setBroad] = useState(false)
   const subscriptionAddresses = useEmojiStore((s) => s.subscriptionAddresses)
   const addSubscription = useEmojiStore((s) => s.addSubscription)
   const removeSubscription = useEmojiStore((s) => s.removeSubscription)
@@ -1216,7 +1201,7 @@ export function EmojiDiscoveryModal({ onClose, initialSearch = '', initialAuthor
       } catch { /* ignore invalid npub */ }
     }
 
-    const discoverPromise = discoverEmojiSets(100, broad)
+    const discoverPromise = discoverEmojiSets(100)
     const authorPromise = authorPubkey ? fetchEmojiSetsByAuthor(authorPubkey).catch(() => [] as EmojiSet[]) : Promise.resolve([] as EmojiSet[])
 
     Promise.all([discoverPromise, authorPromise]).then(async ([discovered, authorSets]) => {
@@ -1238,7 +1223,7 @@ export function EmojiDiscoveryModal({ onClose, initialSearch = '', initialAuthor
     }).catch((err) => {
       console.error('Failed to discover emoji sets:', err)
     }).finally(() => setLoading(false))
-  }, [myPubkey, broad, initialAuthor])
+  }, [myPubkey, initialAuthor])
 
   const filtered = useMemo(() => {
     let result = sets.filter((s) => !blockedPubkeys.has(s.pubkey))
@@ -1269,7 +1254,7 @@ export function EmojiDiscoveryModal({ onClose, initialSearch = '', initialAuthor
   // Reset visible count when filters change
   useEffect(() => {
     setVisibleCount(10)
-  }, [search, authorFilter, broad])
+  }, [search, authorFilter])
 
   const visibleSets = useMemo(() => filtered.slice(0, visibleCount), [filtered, visibleCount])
   const hasMore = visibleCount < filtered.length
@@ -1331,7 +1316,7 @@ export function EmojiDiscoveryModal({ onClose, initialSearch = '', initialAuthor
               </button>
             </div>
 
-            {/* Search + author filter + broad toggle */}
+            {/* Search + author filter */}
             <div className="px-4 py-4 border-b border-[hsl(var(--border))] space-y-3">
               <div className="relative">
                 <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[hsl(var(--muted-foreground))]" />
@@ -1351,15 +1336,6 @@ export function EmojiDiscoveryModal({ onClose, initialSearch = '', initialAuthor
                   placeholder="Filter by author (npub, name)..."
                   className="w-full h-8 pl-8 pr-3 rounded-lg text-sm bg-[hsl(var(--muted)/0.3)] border border-[hsl(var(--border))] text-[hsl(var(--foreground))] placeholder:text-[hsl(var(--muted-foreground))] focus:outline-none font-mono text-xs"
                 />
-              </div>
-              <div className="flex items-center gap-2 select-none">
-                <button
-                  onClick={() => setBroad(!broad)}
-                  className={`relative w-8 h-[18px] rounded-full transition-colors shrink-0 cursor-pointer ${broad ? 'bg-[hsl(var(--primary))]' : 'bg-[hsl(var(--muted-foreground)/0.3)]'}`}
-                >
-                  <span className={`absolute top-[2px] w-[14px] h-[14px] rounded-full bg-white shadow-sm transition-transform ${broad ? 'left-[16px]' : 'left-[2px]'}`} />
-                </button>
-                <span className="text-xs text-[hsl(var(--muted-foreground))]">Broad search</span>
               </div>
             </div>
 
@@ -1388,7 +1364,7 @@ export function EmojiDiscoveryModal({ onClose, initialSearch = '', initialAuthor
                         <div className="flex items-center justify-between mb-2">
                           <div className="min-w-0">
                             <p className="text-sm font-semibold text-[hsl(var(--foreground))] truncate">{set.name}</p>
-                            <p className="text-[10px] text-[hsl(var(--muted-foreground))]">
+                            <p className="text-xs text-[hsl(var(--muted-foreground))]">
                               by <button onClick={() => setProfilePubkey(set.pubkey)} className="text-[hsl(var(--primary))] hover:underline cursor-pointer">{authorName}</button> · {set.emojis.length} emoji{set.emojis.length !== 1 ? 's' : ''}
                             </p>
                           </div>
@@ -1423,7 +1399,7 @@ export function EmojiDiscoveryModal({ onClose, initialSearch = '', initialAuthor
                             </TooltipProvider>
                           ))}
                           {set.emojis.length > 16 && (
-                            <span className="w-7 h-7 flex items-center justify-center text-[10px] text-[hsl(var(--muted-foreground))] font-medium">
+                            <span className="w-7 h-7 flex items-center justify-center text-xs text-[hsl(var(--muted-foreground))] font-medium">
                               +{set.emojis.length - 16}
                             </span>
                           )}
@@ -1435,7 +1411,7 @@ export function EmojiDiscoveryModal({ onClose, initialSearch = '', initialAuthor
                   {hasMore && (
                     <div ref={modalSentinelRef} className="flex items-center justify-center py-3">
                       <Loader2 size={14} className="animate-spin text-[hsl(var(--muted-foreground))]" />
-                      <span className="ml-1.5 text-[10px] text-[hsl(var(--muted-foreground))]">Loading more…</span>
+                      <span className="ml-1.5 text-xs text-[hsl(var(--muted-foreground))]">Loading more…</span>
                     </div>
                   )}
                 </>

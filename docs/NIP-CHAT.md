@@ -2386,6 +2386,10 @@ Mod/creator removes user from the LKH tree
 | `13` | Seal (NIP-17) | Signed | Never published directly (inside gift wrap) |
 | `1059` | Gift Wrap (NIP-17) | Signed (throwaway key) | Sender's + recipient's relays (§17) |
 | `10050` | DM Relay List (NIP-17) | Replaceable | User's own relays |
+| `30030` | Emoji Set (NIP-30) | Addressable Replaceable | User's relays (§19) |
+| `30031` | Sticker Set | Addressable Replaceable | User's relays (§19) |
+| `30032` | GIF Collection | Addressable Replaceable | User's relays (§19) |
+| `30000` | Emoji/Sticker/GIF Subscription Lists (NIP-51) | Addressable Replaceable | User's relays (§19) |
 
 ---
 
@@ -2875,6 +2879,95 @@ Both systems use the same `AES-256-GCM` primitives from `fileEncryption.ts`, but
 - **Automated join approval** — bot-driven member file management
 - **Channel-specific member lists** — different membership than the hub
 - **Mesh list sync** — automated synchronization of mesh lists between facilitators
+
+---
+
+## 19. Custom Emoji, Sticker & GIF Sets
+
+DEN Chat lets users publish and subscribe to reusable sets of custom emoji, stickers, and GIFs. Each set is an **addressable replaceable** event identified by `(pubkey, kind, d-tag)`. Three distinct kinds keep the types from sharing a relay slot:
+
+| Kind | Type | Item tag |
+|------|------|----------|
+| `30030` | Emoji set (NIP-30) | `emoji` |
+| `30031` | Sticker set | `sticker` |
+| `30032` | GIF collection | `j` |
+
+### Set identity
+
+- The **`d` tag is a random UUIDv4**, not the set's name. Because relays key addressable events solely on `(pubkey, kind, d-tag)`, deriving the d-tag from the (slugified) name caused two sets with the same name — across types or within one — to overwrite each other on relays. A UUID guarantees uniqueness.
+- The display name lives in a **`title` tag**. Readers that encounter a legacy set without a `title` SHOULD fall back to de-slugging the `d` tag.
+- There is **no `t` type-discriminator tag** — the kind alone identifies the type.
+
+### Emoji set — Kind `30030`
+
+Standard NIP-30. The only DEN extension is an optional **4th element** on each `emoji` tag carrying an SFW/NSFW classification; NIP-30 readers ignore extra tag elements, so the set stays interoperable with other clients.
+
+```json
+{
+  "kind": 30030,
+  "pubkey": "<author_pubkey>",
+  "created_at": "<timestamp>",
+  "tags": [
+    ["d", "8a1c4e2b-9f7d-4a3e-bb21-1c2d3e4f5a6b"],
+    ["title", "Anime Reactions"],
+    ["emoji", "smug", "https://blossom.example/abc.png", "sfw"],
+    ["emoji", "lewd", "https://blossom.example/def.png", "nsfw"]
+  ],
+  "content": "",
+  "sig": "<signature>"
+}
+```
+
+Item tag: `["emoji", "<shortcode>", "<url>", "sfw"|"nsfw"?]`. The SFW/NSFW element is optional; absent means "untagged."
+
+### Sticker set — Kind `30031`
+
+Identical shape with `sticker` item tags:
+
+```json
+{
+  "kind": 30031,
+  "tags": [
+    ["d", "f4e9b7a0-3c8d-4e1f-9a2b-6d5c4b3a2f10"],
+    ["title", "Anime Reactions"],
+    ["sticker", "thumbsup", "https://blossom.example/stk1.webp", "sfw"]
+  ],
+  "content": ""
+}
+```
+
+### GIF collection — Kind `30032`
+
+Uses `j` item tags (not `g`, which is the NIP-52 geohash tag):
+
+```json
+{
+  "kind": 30032,
+  "tags": [
+    ["d", "2d7f1a93-5b6c-4d8e-8f01-3a4b5c6d7e8f"],
+    ["title", "Reaction GIFs"],
+    ["j", "clapping", "https://blossom.example/g1.gif", "sfw"]
+  ],
+  "content": ""
+}
+```
+
+### Deletion
+
+A set is deleted by publishing an empty replacement under the same `d` tag carrying a `["deleted", "true"]` tag and no item tags.
+
+### Subscription lists
+
+A user's subscriptions to *other* people's sets are stored as NIP-51 lists (kind `30000`), one per type, distinguished by `d` tag:
+
+| `d` tag | References |
+|---------|-----------|
+| `emoji-subscriptions` | `["a", "30030:<pubkey>:<dtag>"]` per subscribed set |
+| `sticker-subscriptions` | `["a", "30031:<pubkey>:<dtag>"]` per subscribed set |
+| `gif-subscriptions` | `["a", "30032:<pubkey>:<dtag>"]` per subscribed collection |
+| `gif-favorites` | `["j", "<name>", "<url>", "sfw"\|"nsfw"]` for individually favorited GIFs |
+
+Each `a` tag is an addressable reference to a subscribed set; clients fetch those sets by their `(kind, pubkey, d-tag)` coordinate.
 
 ---
 

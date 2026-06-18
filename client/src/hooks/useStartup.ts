@@ -291,18 +291,18 @@ export function useStartup() {
           ensureAddressableRedundancy(30000, pubkey, 'emoji-subscriptions')
         }
 
-        // Sticker sets (kind 30030) — user's own sets, dynamic d-tags
+        // Sticker sets (kind 30031) — user's own sets, dynamic d-tags
         for (const set of useStickerStore.getState().myStickerSets) {
-          ensureAddressableRedundancy(30030, pubkey, set.dTag)
+          ensureAddressableRedundancy(30031, pubkey, set.dTag)
         }
         // Sticker subscriptions (kind 30000, d=sticker-subscriptions)
         if (useStickerStore.getState().subscriptionAddresses.length > 0) {
           ensureAddressableRedundancy(30000, pubkey, 'sticker-subscriptions')
         }
 
-        // GIF collections (kind 30030) — user's own collections, dynamic d-tags
+        // GIF collections (kind 30032) — user's own collections, dynamic d-tags
         for (const col of useGifStore.getState().myGifCollections) {
-          ensureAddressableRedundancy(30030, pubkey, col.dTag)
+          ensureAddressableRedundancy(30032, pubkey, col.dTag)
         }
         // GIF subscriptions (kind 30000, d=gif-subscriptions)
         if (useGifStore.getState().subscriptionAddresses.length > 0) {

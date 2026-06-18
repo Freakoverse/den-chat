@@ -15,6 +15,7 @@ import { getDraft, setDraft, clearDraft, dm17DraftKey } from '@/stores/draftStor
 import { createPortal } from 'react-dom'
 import { useUserStore } from '@/stores/userStore'
 import { useDMStore, type DMMessage } from '@/stores/dmStore'
+import { setNameFromAddress } from '@/lib/customSets'
 import { useDM04Store } from '@/stores/dm04Store'
 import { DM04ChatView } from '@/components/dm/DM04ChatView'
 import { useBlockStore } from '@/stores/blockStore'
@@ -1127,7 +1128,7 @@ function DMChatView({ recipientPubkey, onSwitchProtocol, onBack }: { recipientPu
             {clickedEmoji.setAddress ? (
               <div className="space-y-2">
                 <p className="text-xs text-muted-foreground">
-                  This emoji is part of set <span className="font-mono text-foreground/80">{clickedEmoji.setAddress.split(':').slice(2).join(':').replace(/[-_]/g, ' ')}</span>
+                  This emoji is part of set <span className="font-mono text-foreground/80">{setNameFromAddress(clickedEmoji.setAddress)}</span>
                 </p>
                 <button
                   onClick={() => {
@@ -1187,7 +1188,7 @@ function DMChatView({ recipientPubkey, onSwitchProtocol, onBack }: { recipientPu
             {clickedSticker.setAddress ? (
               <div className="space-y-2">
                 <p className="text-xs text-muted-foreground">
-                  This sticker is part of set <span className="font-mono text-foreground/80">{clickedSticker.setAddress.split(':').slice(2).join(':').replace(/[-_]/g, ' ')}</span>
+                  This sticker is part of set <span className="font-mono text-foreground/80">{setNameFromAddress(clickedSticker.setAddress)}</span>
                 </p>
                 <button
                   onClick={() => {

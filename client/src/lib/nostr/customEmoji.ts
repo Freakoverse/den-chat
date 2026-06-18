@@ -1,10 +1,11 @@
 /**
  * customEmoji — NIP-30 custom emoji fetch/publish helpers
  *
- * Kind 30030: Emoji set (parameterized replaceable)
- *   - "d" tag: set identifier
- *   - "t" tag: "emoji" (type discriminator)
+ * Kind 30030: Emoji set (NIP-30, addressable replaceable)
+ *   - "d" tag: UUIDv4 set identifier
+ *   - "title" tag: display name
  *   - "emoji" tags: [shortcode, image-url, "sfw"|"nsfw" (optional)]
+ *     (the 4th SFW/NSFW element is a DEN extension; NIP-30 readers ignore it)
  *
  * Kind 30000: Lists (parameterized replaceable)
  *   - "d" tag: "emoji-subscriptions"
@@ -22,36 +23,16 @@ import { useUserListsStore } from '@/stores/userListsStore'
 const KIND_EMOJI_SET = 30030
 const KIND_LIST = 30000
 
-// ─── Parsing ───
-
-/** Parse a kind 30030 event into an EmojiSet */
-function parseEmojiSetEvent(event: Event): EmojiSet | null {
-  const dTag = event.tags.find((t) => t[0] === 'd')?.[1]
-  if (!dTag) return null
-
-  // Must have ["t", "emoji"] tag
-  const hasEmojiType = event.tags.some((t) => t[0] === 't' && t[1] === 'emoji')
-  if (!hasEmojiType) return null
-
-  const emojis: CustomEmoji[] = []
-  for (const tag of event.tags) {
-    if (tag[0] === 'emoji' && tag[1] && tag[2]) {
-      emojis.push({
-        shortcode: tag[1],
-        url: tag[2],
-        nsfw: tag[3] === 'nsfw',
-        tagged: tag[3] === 'sfw' || tag[3] === 'nsfw',
-      })
-    }
-  }
-
-  return {
-    pubkey: event.pubkey,
-    dTag,
-    name: dTag.replace(/[-_]/g, ' '),
-    emojis,
-  }
+/**
+ * Display name for a set: prefer the `title` tag (new sets), fall back to
+ * de-slugging the d-tag for legacy sets that were keyed by their slugified name.
+ */
+function setTitle(event: Event, dTag: string): string {
+  const title = event.tags.find((t) => t[0] === 'title')?.[1]
+  return title?.trim() || dTag.replace(/[-_]/g, ' ')
 }
+
+// ─── Parsing ───
 
 // ─── Fetching ───
 
@@ -136,21 +117,18 @@ function parseEmojiSetEventBroad(event: Event): EmojiSet | null {
   return {
     pubkey: event.pubkey,
     dTag,
-    name: dTag.replace(/[-_]/g, ' '),
+    name: setTitle(event, dTag),
     emojis,
   }
 }
 
-/** Discover emoji sets from the network. When broad=true, skips relay #t filter but still client-side filters for emoji content.
+/** Discover emoji sets (kind 30030) from the network.
  *  Also queries user NIP-65 relays to find recently published sets that may not be on default relays yet.
  */
-export async function discoverEmojiSets(limit = 50, broad = false): Promise<EmojiSet[]> {
+export async function discoverEmojiSets(limit = 50): Promise<EmojiSet[]> {
   const filter: Record<string, any> = {
     kinds: [KIND_EMOJI_SET],
     limit,
-  }
-  if (!broad) {
-    filter['#t'] = ['emoji']
   }
 
   // Query both client relays and user NIP-65 relays in parallel
@@ -178,10 +156,9 @@ export async function discoverEmojiSets(limit = 50, broad = false): Promise<Emoj
     }
   }
 
-  const parser = broad ? parseEmojiSetEventBroad : parseEmojiSetEvent
   const sets: EmojiSet[] = []
   for (const ev of seen.values()) {
-    const parsed = parser(ev)
+    const parsed = parseEmojiSetEventBroad(ev)
     if (parsed && parsed.emojis.length > 0) sets.push(parsed)
   }
 
@@ -231,13 +208,14 @@ export async function fetchEmojiSetsByAuthor(pubkey: string): Promise<EmojiSet[]
 /** Publish (create or update) an emoji set */
 export async function publishEmojiSet(
   dTag: string,
+  name: string,
   emojis: CustomEmoji[],
   signer: ISigner | null,
   privateKey: string | null
 ): Promise<void> {
   const tags: [string, ...string[]][] = [
     ['d', dTag],
-    ['t', 'emoji'],
+    ['title', name],
     ...emojis.map((e): [string, ...string[]] => ['emoji', e.shortcode, e.url, e.nsfw ? 'nsfw' : 'sfw']),
   ]
 
@@ -254,7 +232,6 @@ export async function publishEmojiSubscriptions(
 ): Promise<void> {
   const tags: [string, ...string[]][] = [
     ['d', 'emoji-subscriptions'],
-    ['t', 'emoji'],
     ...addresses.map((addr): [string, ...string[]] => ['a', addr]),
   ]
 
@@ -271,7 +248,6 @@ export async function deleteEmojiSet(
 ): Promise<void> {
   const tags: [string, ...string[]][] = [
     ['d', dTag],
-    ['t', 'emoji'],
     ['deleted', 'true'],
   ]
 

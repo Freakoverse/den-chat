@@ -1,11 +1,13 @@
 /**
  * customSticker — Sticker fetch/publish helpers (mirrors customEmoji.ts)
  *
- * Kind 30030 with ["t", "sticker"]:
+ * Kind 30031 (sticker set, addressable replaceable):
+ *   - "d" tag: UUIDv4 set identifier
+ *   - "title" tag: display name
  *   - "sticker" tags: [shortcode, image-url, "sfw"|"nsfw" (optional)]
  *
  * Kind 30000, d = "sticker-subscriptions":
- *   - "a" tags: ["a", "30030:pubkey:dtag"]
+ *   - "a" tags: ["a", "30031:pubkey:dtag"]
  */
 
 import { fetchEvents, fetchReplaceable, publishToSpecificRelays, fetchEventsFromRelays, getRelays } from '@/lib/nostr/relay-pool'
@@ -17,17 +19,23 @@ import { aesEncrypt, aesDecrypt } from '@/lib/crypto/aes'
 import { getPublishRelays } from '@/stores/postingBehaviourStore'
 import { useUserListsStore } from '@/stores/userListsStore'
 
-const KIND_STICKER_SET = 30030
+const KIND_STICKER_SET = 30031
 const KIND_LIST = 30000
+
+/**
+ * Display name for a set: prefer the `title` tag (new sets), fall back to
+ * de-slugging the d-tag for legacy sets keyed by their slugified name.
+ */
+function setTitle(event: Event, dTag: string): string {
+  const title = event.tags.find((t) => t[0] === 'title')?.[1]
+  return title?.trim() || dTag.replace(/[-_]/g, ' ')
+}
 
 // ─── Parsing ───
 
 function parseStickerSetEvent(event: Event): StickerSet | null {
   const dTag = event.tags.find((t) => t[0] === 'd')?.[1]
   if (!dTag) return null
-
-  const hasStickerType = event.tags.some((t) => t[0] === 't' && t[1] === 'sticker')
-  if (!hasStickerType) return null
 
   const stickers: CustomSticker[] = []
   for (const tag of event.tags) {
@@ -46,7 +54,7 @@ function parseStickerSetEvent(event: Event): StickerSet | null {
   return {
     pubkey: event.pubkey,
     dTag,
-    name: dTag.replace(/[-_]/g, ' '),
+    name: setTitle(event, dTag),
     stickers,
   }
 }
@@ -73,7 +81,7 @@ function parseStickerSetEventBroad(event: Event): StickerSet | null {
   return {
     pubkey: event.pubkey,
     dTag,
-    name: dTag.replace(/[-_]/g, ' '),
+    name: setTitle(event, dTag),
     stickers,
   }
 }
@@ -84,7 +92,6 @@ export async function fetchMyStickerSets(pubkey: string): Promise<StickerSet[]> 
   const events = await fetchEvents({
     kinds: [KIND_STICKER_SET],
     authors: [pubkey],
-    '#t': ['sticker'],
   })
 
   const sets: StickerSet[] = []
@@ -137,7 +144,6 @@ export async function fetchStickerSetByAddress(address: string): Promise<Sticker
 export async function discoverStickerSets(limit = 50): Promise<StickerSet[]> {
   const filter: Record<string, any> = {
     kinds: [KIND_STICKER_SET],
-    '#t': ['sticker'],
     limit,
   }
 
@@ -217,13 +223,14 @@ export async function fetchStickerSetsByAuthor(pubkey: string): Promise<StickerS
 
 export async function publishStickerSet(
   dTag: string,
+  name: string,
   stickers: CustomSticker[],
   signer: ISigner | null,
   privateKey: string | null
 ): Promise<void> {
   const tags: [string, ...string[]][] = [
     ['d', dTag],
-    ['t', 'sticker'],
+    ['title', name],
     ...stickers.map((s): [string, ...string[]] => ['sticker', s.shortcode, s.url, s.nsfw ? 'nsfw' : 'sfw']),
   ]
 
@@ -239,7 +246,6 @@ export async function publishStickerSubscriptions(
 ): Promise<void> {
   const tags: [string, ...string[]][] = [
     ['d', 'sticker-subscriptions'],
-    ['t', 'sticker'],
     ...addresses.map((addr): [string, ...string[]] => ['a', addr]),
   ]
 
@@ -255,7 +261,6 @@ export async function deleteStickerSet(
 ): Promise<void> {
   const tags: [string, ...string[]][] = [
     ['d', dTag],
-    ['t', 'sticker'],
     ['deleted', 'true'],
   ]
 

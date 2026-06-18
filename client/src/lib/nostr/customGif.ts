@@ -1,12 +1,14 @@
 /**
  * customGif — GIF fetch/publish helpers (mirrors customEmoji.ts / customSticker.ts)
  *
- * Kind 30030 with ["t", "gifs"]:
+ * Kind 30032 (GIF collection, addressable replaceable):
+ *   - "d" tag: UUIDv4 collection identifier
+ *   - "title" tag: display name
  *   - "j" tags: [name, image-url, "sfw"|"nsfw"]
  *   ("j" is used instead of "g" because "g" is the standard Nostr geohash tag per NIP-52)
  *
  * Kind 30000, d = "gif-subscriptions":
- *   - "a" tags: ["a", "30030:pubkey:dtag"] for each subscribed collection
+ *   - "a" tags: ["a", "30032:pubkey:dtag"] for each subscribed collection
  *
  * Kind 30000, d = "gif-favorites":
  *   - "j" tags: [name, url, "sfw"|"nsfw"] for individually favorited GIFs
@@ -20,8 +22,17 @@ import type { Event } from 'nostr-tools'
 import { aesEncrypt, aesDecrypt } from '@/lib/crypto/aes'
 import { getPublishRelays } from '@/stores/postingBehaviourStore'
 
-const KIND_GIF_SET = 30030
+const KIND_GIF_SET = 30032
 const KIND_LIST = 30000
+
+/**
+ * Display name for a collection: prefer the `title` tag (new sets), fall back to
+ * de-slugging the d-tag for legacy collections keyed by their slugified name.
+ */
+function setTitle(event: Event, dTag: string): string {
+  const title = event.tags.find((t) => t[0] === 'title')?.[1]
+  return title?.trim() || dTag.replace(/[-_]/g, ' ')
+}
 
 // ─── Parsing ───
 
@@ -29,9 +40,6 @@ const KIND_LIST = 30000
 function parseGifCollectionEvent(event: Event): GifCollection | null {
   const dTag = event.tags.find((t) => t[0] === 'd')?.[1]
   if (!dTag) return null
-
-  const hasGifType = event.tags.some((t) => t[0] === 't' && t[1] === 'gifs')
-  if (!hasGifType) return null
 
   const gifs: GifEntry[] = []
   for (const tag of event.tags) {
@@ -50,7 +58,7 @@ function parseGifCollectionEvent(event: Event): GifCollection | null {
   return {
     pubkey: event.pubkey,
     dTag,
-    name: dTag.replace(/[-_]/g, ' '),
+    name: setTitle(event, dTag),
     gifs,
   }
 }
@@ -62,7 +70,6 @@ export async function fetchMyGifCollections(pubkey: string): Promise<GifCollecti
   const events = await fetchEvents({
     kinds: [KIND_GIF_SET],
     authors: [pubkey],
-    '#t': ['gifs'],
   })
 
   const collections: GifCollection[] = []
@@ -123,7 +130,6 @@ export async function fetchGifCollectionByAddress(address: string): Promise<GifC
 export async function discoverGifCollections(limit = 50): Promise<GifCollection[]> {
   const events = await fetchEvents({
     kinds: [KIND_GIF_SET],
-    '#t': ['gifs'],
     limit,
   })
 
@@ -204,7 +210,6 @@ export async function searchGifCollectionsByDTag(query: string, limit = 50): Pro
   const events = await fetchEvents({
     kinds: [KIND_GIF_SET],
     '#d': [...searchValues],
-    '#t': ['gifs'],
     limit,
   })
 
@@ -233,13 +238,14 @@ export async function searchGifCollectionsByDTag(query: string, limit = 50): Pro
 /** Publish (create or update) a GIF collection */
 export async function publishGifCollection(
   dTag: string,
+  name: string,
   gifs: GifEntry[],
   signer: ISigner | null,
   privateKey: string | null
 ): Promise<void> {
   const tags: [string, ...string[]][] = [
     ['d', dTag],
-    ['t', 'gifs'],
+    ['title', name],
     ...gifs.map((g): [string, ...string[]] => ['j', g.name, g.url, g.nsfw ? 'nsfw' : 'sfw']),
   ]
 
@@ -256,7 +262,6 @@ export async function publishGifSubscriptions(
 ): Promise<void> {
   const tags: [string, ...string[]][] = [
     ['d', 'gif-subscriptions'],
-    ['t', 'gifs'],
     ...addresses.map((addr): [string, ...string[]] => ['a', addr]),
   ]
 
@@ -273,7 +278,6 @@ export async function publishGifFavorites(
 ): Promise<void> {
   const tags: [string, ...string[]][] = [
     ['d', 'gif-favorites'],
-    ['t', 'gifs'],
     ...favorites.map((g): [string, ...string[]] => ['j', g.name, g.url, g.nsfw ? 'nsfw' : 'sfw']),
   ]
 
@@ -290,7 +294,6 @@ export async function deleteGifCollection(
 ): Promise<void> {
   const tags: [string, ...string[]][] = [
     ['d', dTag],
-    ['t', 'gifs'],
     ['deleted', 'true'],
   ]
 

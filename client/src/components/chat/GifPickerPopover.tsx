@@ -43,8 +43,8 @@ import { truncateNpub } from '@/lib/utils'
 import { nip19 } from 'nostr-tools'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 
-const PICKER_WIDTH = 380
-const PICKER_HEIGHT = 440
+const PICKER_WIDTH = 396
+const PICKER_HEIGHT = 470
 const GAP = 8
 
 type Tab = 'discover' | 'mine' | 'others' | 'favorites'
@@ -56,7 +56,7 @@ interface Props {
 }
 
 export function GifPickerPopover({ anchorRef, onClose, onSelect }: Props) {
-  const [pos, setPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 })
+  const [pos, setPos] = useState<{ top: number; left: number; width: number }>({ top: 0, left: 0, width: PICKER_WIDTH })
   const [tab, setTab] = useState<Tab>('discover')
   const containerRef = useRef<HTMLDivElement>(null)
 
@@ -79,12 +79,14 @@ export function GifPickerPopover({ anchorRef, onClose, onSelect }: Props) {
         : rect.bottom + GAP
     }
 
-    let left = rect.right - PICKER_WIDTH
+    // Clamp width to the viewport so the wider picker never overflows on mobile.
+    const width = Math.min(PICKER_WIDTH, vw - GAP * 2)
+    let left = rect.right - width
     if (left < GAP) left = rect.left
-    if (left + PICKER_WIDTH > vw - GAP) left = vw - PICKER_WIDTH - GAP
+    if (left + width > vw - GAP) left = vw - width - GAP
     left = Math.max(GAP, left)
 
-    setPos({ top, left })
+    setPos({ top, left, width })
   }, [anchorRef])
 
   useEffect(() => {
@@ -108,9 +110,9 @@ export function GifPickerPopover({ anchorRef, onClose, onSelect }: Props) {
   }, [onClose, anchorRef])
 
   const tabItems: { id: Tab; label: string; icon: React.ReactNode }[] = [
-    { id: 'discover', label: 'Discover', icon: <Compass size={14} /> },
-    { id: 'mine', label: 'Mine', icon: <Sparkles size={14} /> },
-    { id: 'others', label: 'Others', icon: <Users size={14} /> },
+    { id: 'discover', label: 'Discover', icon: <Compass size={16} /> },
+    { id: 'mine', label: 'Mine', icon: <Sparkles size={16} /> },
+    { id: 'others', label: 'Others', icon: <Users size={16} /> },
     { id: 'favorites', label: 'Favorites', icon: <Star size={14} /> },
   ]
 
@@ -120,7 +122,7 @@ export function GifPickerPopover({ anchorRef, onClose, onSelect }: Props) {
       data-gif-picker-portal
       onMouseDown={(e) => e.stopPropagation()}
       className="fixed z-[300]"
-      style={{ top: pos.top, left: pos.left, width: PICKER_WIDTH, height: PICKER_HEIGHT }}
+      style={{ top: pos.top, left: pos.left, width: pos.width, height: PICKER_HEIGHT }}
     >
       <div className="w-full h-full flex flex-col rounded-xl border border-border bg-background shadow-2xl overflow-hidden">
         {/* Tab bar */}
@@ -129,7 +131,7 @@ export function GifPickerPopover({ anchorRef, onClose, onSelect }: Props) {
             <button
               key={t.id}
               onClick={(e) => { e.stopPropagation(); setTab(t.id) }}
-              className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-medium transition-colors cursor-pointer
+              className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-sm font-medium transition-colors cursor-pointer
                 ${tab === t.id
                   ? 'text-primary border-b-2 border-primary bg-primary/5'
                   : 'text-muted-foreground hover:text-foreground hover:bg-accent/30'
@@ -167,7 +169,7 @@ function NsfwToggle() {
 
   return (
     <div className="flex items-center justify-between px-3 py-1.5 border-b border-border/50 bg-secondary/10">
-      <span className="text-[10px] text-muted-foreground">Include NSFW</span>
+      <span className="text-xs text-muted-foreground">Include NSFW</span>
       <div className="flex items-center gap-2">
         <TooltipProvider delayDuration={300}>
           <Tooltip>
@@ -280,7 +282,7 @@ function DiscoverGifTab({ onSelect, onPickerClose }: { onSelect: (g: { name: str
     const result: { gif: GifEntry; collection: GifCollection; addr: string }[] = []
     for (const c of merged) {
       if (blockedPubkeys.has(c.pubkey)) continue
-      const addr = `30030:${c.pubkey}:${c.dTag}`
+      const addr = `30032:${c.pubkey}:${c.dTag}`
       for (const g of c.gifs) {
         if (!nsfwEnabled && g.nsfw) continue
         result.push({ gif: g, collection: c, addr })
@@ -333,7 +335,7 @@ function DiscoverGifTab({ onSelect, onPickerClose }: { onSelect: (g: { name: str
   }
 
   const handleSubscribe = async (collection: GifCollection) => {
-    const addr = `30030:${collection.pubkey}:${collection.dTag}`
+    const addr = `30032:${collection.pubkey}:${collection.dTag}`
     if (subscriptionAddresses.includes(addr)) return
     setPublishingAddr(addr)
     try {
@@ -353,12 +355,12 @@ function DiscoverGifTab({ onSelect, onPickerClose }: { onSelect: (g: { name: str
         {/* Search + mode toggle */}
         <div className="flex items-center gap-1.5 px-2 py-1.5 border-b border-border">
           <div className="flex-1 relative">
-            <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder={searchMode === 'g' ? 'Search GIFs...' : 'Search sets...'}
-              className="w-full h-7 pl-7 pr-2 rounded-md text-xs bg-muted/30 border border-border text-foreground placeholder:text-muted-foreground focus:outline-none"
+              className="w-full h-9 pl-8 pr-2 rounded-md text-sm bg-muted/30 border border-border text-foreground placeholder:text-muted-foreground focus:outline-none"
               autoFocus
             />
           </div>
@@ -367,7 +369,7 @@ function DiscoverGifTab({ onSelect, onPickerClose }: { onSelect: (g: { name: str
               <TooltipTrigger asChild>
                 <button
                   onClick={() => { setSearchMode(searchMode === 'g' ? 'd' : 'g'); setSearchResults([]) }}
-                  className={`px-1.5 py-1 rounded-md text-[10px] font-medium transition-colors cursor-pointer ${searchMode === 'd'
+                  className={`px-1.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer ${searchMode === 'd'
                       ? 'bg-primary/15 text-primary'
                       : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
                     }`}
@@ -385,7 +387,7 @@ function DiscoverGifTab({ onSelect, onPickerClose }: { onSelect: (g: { name: str
         <div className="flex-1 overflow-y-auto p-3 space-y-2">
 
           {searching && (
-            <div className="flex items-center gap-1.5 px-1 text-[10px] text-muted-foreground">
+            <div className="flex items-center gap-1.5 px-1 text-xs text-muted-foreground">
               <Loader2 size={10} className="animate-spin" />
               Searching relays...
             </div>
@@ -470,7 +472,7 @@ function DiscoverGifTab({ onSelect, onPickerClose }: { onSelect: (g: { name: str
             ) : (
               <div className="space-y-2">
                 {filteredCollections.map((collection) => {
-                  const addr = `30030:${collection.pubkey}:${collection.dTag}`
+                  const addr = `30032:${collection.pubkey}:${collection.dTag}`
                   const isSubscribed = subscriptionAddresses.includes(addr)
                   const isMine = collection.pubkey === myPubkey
                   const profile = getProfile(collection.pubkey)
@@ -481,12 +483,12 @@ function DiscoverGifTab({ onSelect, onPickerClose }: { onSelect: (g: { name: str
                       <div className="flex items-center justify-between mb-2">
                         <div className="min-w-0">
                           <p className="text-xs font-semibold text-foreground truncate">{collection.name}</p>
-                          <p className="text-[10px] text-muted-foreground">by <button onClick={() => { window.dispatchEvent(new CustomEvent('open-profile-modal', { detail: collection.pubkey })); onPickerClose?.() }} className="text-primary hover:underline cursor-pointer">{authorName}</button> · {collection.gifs.length} GIF{collection.gifs.length !== 1 ? 's' : ''}</p>
+                          <p className="text-xs text-muted-foreground">by <button onClick={() => { window.dispatchEvent(new CustomEvent('open-profile-modal', { detail: collection.pubkey })); onPickerClose?.() }} className="text-primary hover:underline cursor-pointer">{authorName}</button> · {collection.gifs.length} GIF{collection.gifs.length !== 1 ? 's' : ''}</p>
                         </div>
                         <div className="flex items-center gap-1 shrink-0">
                           <button
                             onClick={() => setViewingCollection(collection)}
-                            className="px-2 py-1 rounded text-[10px] font-medium bg-muted/50 text-foreground hover:bg-muted transition-colors cursor-pointer"
+                            className="px-2.5 py-1.5 rounded text-xs font-medium bg-muted/50 text-foreground hover:bg-muted transition-colors cursor-pointer"
                           >
                             View
                           </button>
@@ -494,13 +496,13 @@ function DiscoverGifTab({ onSelect, onPickerClose }: { onSelect: (g: { name: str
                             <button
                               onClick={() => handleSubscribe(collection)}
                               disabled={publishingAddr === addr}
-                              className="px-2 py-1 rounded text-[10px] font-medium bg-primary text-primary-foreground hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50"
+                              className="px-2.5 py-1.5 rounded text-xs font-medium bg-primary text-primary-foreground hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50"
                             >
                               {publishingAddr === addr ? '...' : '+Sub'}
                             </button>
                           )}
                           {isSubscribed && (
-                            <span className="flex items-center gap-0.5 text-[10px] text-primary font-medium">
+                            <span className="flex items-center gap-0.5 text-xs text-primary font-medium">
                               <Check size={10} /> Sub'd
                             </span>
                           )}
@@ -518,7 +520,7 @@ function DiscoverGifTab({ onSelect, onPickerClose }: { onSelect: (g: { name: str
                           </button>
                         ))}
                         {visibleGifs.length > 6 && (
-                          <div className="w-12 h-12 rounded border border-border/30 flex items-center justify-center text-[10px] text-muted-foreground">
+                          <div className="w-12 h-12 rounded border border-border/30 flex items-center justify-center text-xs text-muted-foreground">
                             +{visibleGifs.length - 6}
                           </div>
                         )}
@@ -540,7 +542,7 @@ function DiscoverGifTab({ onSelect, onPickerClose }: { onSelect: (g: { name: str
             <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-secondary/30">
               <div className="min-w-0">
                 <p className="text-sm font-semibold text-foreground truncate">{viewingCollection.name}</p>
-                <p className="text-[10px] text-muted-foreground">
+                <p className="text-xs text-muted-foreground">
                   by <button onClick={() => { window.dispatchEvent(new CustomEvent('open-profile-modal', { detail: viewingCollection.pubkey })); setViewingCollection(null); onPickerClose?.() }} className="text-primary hover:underline cursor-pointer">{(() => {
                     const profile = getProfile(viewingCollection.pubkey)
                     return profile?.display_name || profile?.name || truncateNpub(nip19.npubEncode(viewingCollection.pubkey))
@@ -576,7 +578,7 @@ function DiscoverGifTab({ onSelect, onPickerClose }: { onSelect: (g: { name: str
             </div>
             {/* Subscribe button */}
             {(() => {
-              const addr = `30030:${viewingCollection.pubkey}:${viewingCollection.dTag}`
+              const addr = `30032:${viewingCollection.pubkey}:${viewingCollection.dTag}`
               const isSubscribed = subscriptionAddresses.includes(addr)
               return (
                 <div className="px-4 py-3 border-t border-border bg-secondary/20">
@@ -625,7 +627,7 @@ function MineGifTab({ onSelect }: { onSelect: (g: { name: string; url: string; n
   // Flatten all GIFs for search
   const allGifs = useMemo(() => {
     return myCollections.flatMap((c) => {
-      const addr = `30030:${c.pubkey}:${c.dTag}`
+      const addr = `30032:${c.pubkey}:${c.dTag}`
       return filterNsfwGifs(c.gifs)
         .map((g) => ({ ...g, setName: c.name, setDTag: c.dTag, setAddress: addr }))
     })
@@ -640,14 +642,16 @@ function MineGifTab({ onSelect }: { onSelect: (g: { name: string; url: string; n
 
   const createCollection = async () => {
     if (!newCollectionName.trim() || !pubkey) return
-    const dTag = newCollectionName.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-')
+    const name = newCollectionName.trim()
+    // Unique d-tag so two collections with the same name never overwrite each other on relays.
+    const dTag = crypto.randomUUID()
     setCreating(true)
     try {
-      await publishGifCollection(dTag, [], signer, privateKey)
+      await publishGifCollection(dTag, name, [], signer, privateKey)
       useGifStore.getState().addMyGifCollection({
         pubkey,
         dTag,
-        name: dTag.replace(/[-_]/g, ' '),
+        name,
         gifs: [],
       })
       setNewCollectionName('')
@@ -665,12 +669,12 @@ function MineGifTab({ onSelect }: { onSelect: (g: { name: string; url: string; n
       {/* Search + actions bar */}
       <div className="flex items-center gap-1.5 px-2 py-1.5 border-b border-border">
         <div className="flex-1 relative">
-          <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search my GIFs..."
-            className="w-full h-7 pl-7 pr-2 rounded-md text-xs bg-muted/30 border border-border text-foreground placeholder:text-muted-foreground focus:outline-none"
+            className="w-full h-9 pl-8 pr-2 rounded-md text-sm bg-muted/30 border border-border text-foreground placeholder:text-muted-foreground focus:outline-none"
           />
         </div>
         <TooltipProvider delayDuration={300}>
@@ -678,7 +682,7 @@ function MineGifTab({ onSelect }: { onSelect: (g: { name: string; url: string; n
             <TooltipTrigger asChild>
               <button
                 onClick={() => { setShowCreateInput(!showCreateInput); if (!showCreateInput) setShowAddGif(false) }}
-                className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors cursor-pointer"
+                className="p-2 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors cursor-pointer"
               >
                 <FolderPlus size={14} />
               </button>
@@ -697,7 +701,7 @@ function MineGifTab({ onSelect }: { onSelect: (g: { name: string; url: string; n
                     if (myCollections.length > 0 && !expandedCollection) setExpandedCollection(myCollections[0].dTag)
                   }
                 }}
-                className={`p-1.5 rounded-md transition-colors ${myCollections.length === 0 ? 'text-muted-foreground/30 cursor-not-allowed' : 'text-muted-foreground hover:text-foreground hover:bg-muted/50 cursor-pointer'}`}
+                className={`p-2 rounded-md transition-colors ${myCollections.length === 0 ? 'text-muted-foreground/30 cursor-not-allowed' : 'text-muted-foreground hover:text-foreground hover:bg-muted/50 cursor-pointer'}`}
               >
                 <Plus size={14} />
               </button>
@@ -710,7 +714,7 @@ function MineGifTab({ onSelect }: { onSelect: (g: { name: string; url: string; n
       {/* Create collection form */}
       {showCreateInput && (
         <div className="px-2 py-2 border-b border-border bg-muted/20">
-          <p className="text-[10px] text-muted-foreground mb-1.5">Create a new GIF collection</p>
+          <p className="text-xs text-muted-foreground mb-1.5">Create a new GIF collection</p>
           <div className="flex gap-1.5">
             <input
               autoFocus
@@ -718,12 +722,12 @@ function MineGifTab({ onSelect }: { onSelect: (g: { name: string; url: string; n
               onChange={(e) => setNewCollectionName(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') createCollection(); if (e.key === 'Escape') setShowCreateInput(false) }}
               placeholder="Collection name..."
-              className="flex-1 h-7 px-2 rounded-md text-xs bg-background border border-border text-foreground placeholder:text-muted-foreground focus:outline-none"
+              className="flex-1 h-9 px-3 rounded-md text-sm bg-background border border-border text-foreground placeholder:text-muted-foreground focus:outline-none"
             />
             <button
               onClick={createCollection}
               disabled={!newCollectionName.trim() || creating}
-              className="h-7 px-2.5 rounded-md bg-primary text-primary-foreground text-xs font-medium hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50"
+              className="h-9 px-3 rounded-md bg-primary text-primary-foreground text-xs font-medium hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50"
             >
               {creating ? <Loader2 size={12} className="animate-spin" /> : 'Create'}
             </button>
@@ -810,7 +814,7 @@ function OthersGifTab({ onSelect, onPickerClose }: { onSelect: (g: { name: strin
   // Flatten all subscribed GIFs for item search
   const allGifs = useMemo(() => {
     return visibleCollections.flatMap((c) => {
-      const addr = `30030:${c.pubkey}:${c.dTag}`
+      const addr = `30032:${c.pubkey}:${c.dTag}`
       return filterNsfwGifs(c.gifs)
         .map((g) => ({ ...g, setName: c.name, setAddress: addr }))
     })
@@ -831,7 +835,7 @@ function OthersGifTab({ onSelect, onPickerClose }: { onSelect: (g: { name: strin
     : visibleCollections
 
   const handleUnsubscribe = async (collection: GifCollection) => {
-    const addr = `30030:${collection.pubkey}:${collection.dTag}`
+    const addr = `30032:${collection.pubkey}:${collection.dTag}`
     setUnsubscribing(addr)
     try {
       const updated = subscriptionAddresses.filter((a) => a !== addr)
@@ -850,12 +854,12 @@ function OthersGifTab({ onSelect, onPickerClose }: { onSelect: (g: { name: strin
         {/* Search + mode toggle + discover bar */}
         <div className="flex items-center gap-1.5 px-2 py-1.5 border-b border-border">
           <div className="flex-1 relative">
-            <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder={searchMode === 'items' ? 'Search GIFs...' : 'Search sets...'}
-              className="w-full h-7 pl-7 pr-2 rounded-md text-xs bg-muted/30 border border-border text-foreground placeholder:text-muted-foreground focus:outline-none"
+              className="w-full h-9 pl-8 pr-2 rounded-md text-sm bg-muted/30 border border-border text-foreground placeholder:text-muted-foreground focus:outline-none"
             />
           </div>
           <TooltipProvider delayDuration={300}>
@@ -863,7 +867,7 @@ function OthersGifTab({ onSelect, onPickerClose }: { onSelect: (g: { name: strin
               <TooltipTrigger asChild>
                 <button
                   onClick={() => setSearchMode(searchMode === 'items' ? 'sets' : 'items')}
-                  className={`px-1.5 py-1 rounded-md text-[10px] font-medium transition-colors cursor-pointer ${searchMode === 'sets'
+                  className={`px-1.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer ${searchMode === 'sets'
                       ? 'bg-primary/15 text-primary'
                       : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
                     }`}
@@ -916,7 +920,7 @@ function OthersGifTab({ onSelect, onPickerClose }: { onSelect: (g: { name: strin
               </div>
             ) : (
               filteredSets.map((col) => {
-                const addr = `30030:${col.pubkey}:${col.dTag}`
+                const addr = `30032:${col.pubkey}:${col.dTag}`
                 const profile = getProfile(col.pubkey)
                 const authorName = profile?.display_name || profile?.name || truncateNpub(nip19.npubEncode(col.pubkey))
                 const isUnsub = unsubscribing === addr
@@ -926,7 +930,7 @@ function OthersGifTab({ onSelect, onPickerClose }: { onSelect: (g: { name: strin
                     <div className="flex items-center justify-between mb-1.5">
                       <div className="min-w-0">
                         <p className="text-xs font-semibold text-foreground truncate">{col.name}</p>
-                        <p className="text-[10px] text-muted-foreground">
+                        <p className="text-xs text-muted-foreground">
                           by <button onClick={() => { window.dispatchEvent(new CustomEvent('open-profile-modal', { detail: col.pubkey })); onPickerClose?.() }} className="text-primary hover:underline cursor-pointer">{authorName}</button> · {col.gifs.length} GIF{col.gifs.length !== 1 ? 's' : ''}
                         </p>
                       </div>
@@ -954,7 +958,7 @@ function OthersGifTab({ onSelect, onPickerClose }: { onSelect: (g: { name: strin
                           </Tooltip>
                         ))}
                         {visibleGifs.length > 6 && (
-                          <div className="w-12 h-12 rounded border border-border/30 flex items-center justify-center text-[10px] text-muted-foreground">
+                          <div className="w-12 h-12 rounded border border-border/30 flex items-center justify-center text-xs text-muted-foreground">
                             +{visibleGifs.length - 6}
                           </div>
                         )}
@@ -966,7 +970,7 @@ function OthersGifTab({ onSelect, onPickerClose }: { onSelect: (g: { name: strin
             )
           ) : (
             visibleCollections.map((col) => {
-              const addr = `30030:${col.pubkey}:${col.dTag}`
+              const addr = `30032:${col.pubkey}:${col.dTag}`
               const profile = getProfile(col.pubkey)
               const authorName = profile?.display_name || profile?.name || truncateNpub(nip19.npubEncode(col.pubkey))
               const isUnsub = unsubscribing === addr
@@ -976,7 +980,7 @@ function OthersGifTab({ onSelect, onPickerClose }: { onSelect: (g: { name: strin
                   <div className="flex items-center justify-between mb-1.5">
                     <div className="min-w-0">
                       <p className="text-xs font-semibold text-foreground truncate">{col.name}</p>
-                      <p className="text-[10px] text-muted-foreground">
+                      <p className="text-xs text-muted-foreground">
                         by <button onClick={() => setProfilePubkey(col.pubkey)} className="text-primary hover:underline cursor-pointer">{authorName}</button> · {col.gifs.length} GIF{col.gifs.length !== 1 ? 's' : ''}
                       </p>
                     </div>
@@ -1004,7 +1008,7 @@ function OthersGifTab({ onSelect, onPickerClose }: { onSelect: (g: { name: strin
                         </Tooltip>
                       ))}
                       {visibleGifs.length > 6 && (
-                        <div className="w-12 h-12 rounded border border-border/30 flex items-center justify-center text-[10px] text-muted-foreground">
+                        <div className="w-12 h-12 rounded border border-border/30 flex items-center justify-center text-xs text-muted-foreground">
                           +{visibleGifs.length - 6}
                         </div>
                       )}
@@ -1060,12 +1064,12 @@ function FavoritesGifTab({ onSelect }: { onSelect: (g: { name: string; url: stri
       {/* Search */}
       <div className="flex items-center gap-1.5 px-2 py-1.5 border-b border-border">
         <div className="flex-1 relative">
-          <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search favorites..."
-            className="w-full h-7 pl-7 pr-2 rounded-md text-xs bg-muted/30 border border-border text-foreground placeholder:text-muted-foreground focus:outline-none"
+            className="w-full h-9 pl-8 pr-2 rounded-md text-sm bg-muted/30 border border-border text-foreground placeholder:text-muted-foreground focus:outline-none"
           />
         </div>
       </div>
@@ -1197,7 +1201,7 @@ function GifCollectionCard({
         URL.revokeObjectURL(item.preview)
       }
 
-      await publishGifCollection(collection.dTag, newGifs, signer, privateKey)
+      await publishGifCollection(collection.dTag, collection.name, newGifs, signer, privateKey)
       useGifStore.getState().updateMyGifCollection(collection.dTag, newGifs)
       setStaged([])
     } catch (err) {
@@ -1209,7 +1213,7 @@ function GifCollectionCard({
 
   const removeGif = async (url: string) => {
     const updated = collection.gifs.filter((g) => g.url !== url)
-    await publishGifCollection(collection.dTag, updated, signer, privateKey)
+    await publishGifCollection(collection.dTag, collection.name, updated, signer, privateKey)
     useGifStore.getState().updateMyGifCollection(collection.dTag, updated)
   }
 
@@ -1221,7 +1225,7 @@ function GifCollectionCard({
       if (isMine) {
         useGifStore.getState().removeMyGifCollection(collection.dTag)
       } else {
-        const addr = `30030:${collection.pubkey}:${collection.dTag}`
+        const addr = `30032:${collection.pubkey}:${collection.dTag}`
         useGifStore.getState().removeSubscription(addr)
         const updatedAddrs = useGifStore.getState().subscriptionAddresses
         await publishGifSubscriptions(updatedAddrs, signer, privateKey)
@@ -1244,8 +1248,8 @@ function GifCollectionCard({
       >
         <div className="flex items-center gap-2 min-w-0">
           <span className="text-xs font-medium text-foreground truncate">{collection.name}</span>
-          <span className="text-[10px] text-muted-foreground shrink-0">{collection.gifs.length}</span>
-          {!isMine && <span className="text-[10px] text-primary/60 shrink-0">subscribed</span>}
+          <span className="text-xs text-muted-foreground shrink-0">{collection.gifs.length}</span>
+          {!isMine && <span className="text-xs text-primary/60 shrink-0">subscribed</span>}
         </div>
         {isMine && (
           <div className="flex items-center gap-1 shrink-0">
@@ -1310,7 +1314,7 @@ function GifCollectionCard({
       {/* Staged GIFs (naming + NSFW flag before upload) */}
       {staged.length > 0 && (
         <div className="px-2 py-2 space-y-1.5 border-t border-border/50 pt-2">
-          <p className="text-[10px] text-muted-foreground">Name your GIFs and set NSFW before uploading:</p>
+          <p className="text-xs text-muted-foreground">Name your GIFs and set NSFW before uploading:</p>
           {staged.map((item, i) => (
             <div key={i} className="flex items-center gap-2">
               <img src={item.preview} alt="" className="w-10 h-10 object-cover rounded shrink-0" />
@@ -1318,11 +1322,11 @@ function GifCollectionCard({
                 value={item.name}
                 onChange={(e) => updateStagedName(i, e.target.value)}
                 placeholder="GIF name..."
-                className="flex-1 h-7 px-2 rounded-md text-xs bg-muted/30 border border-border text-foreground placeholder:text-muted-foreground focus:outline-none"
+                className="flex-1 h-9 px-3 rounded-md text-sm bg-muted/30 border border-border text-foreground placeholder:text-muted-foreground focus:outline-none"
               />
               <button
                 onClick={() => toggleStagedNsfw(i)}
-                className={`h-7 px-1.5 rounded-md text-[10px] font-medium transition-colors cursor-pointer ${item.nsfw ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-muted/30 text-muted-foreground border border-border'}`}
+                className={`h-9 px-2.5 rounded-md text-xs font-medium transition-colors cursor-pointer ${item.nsfw ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-muted/30 text-muted-foreground border border-border'}`}
               >
                 {item.nsfw ? 'NSFW' : 'SFW'}
               </button>
@@ -1338,14 +1342,14 @@ function GifCollectionCard({
             <button
               onClick={confirmUpload}
               disabled={uploading || staged.every((s) => !s.name.trim())}
-              className="flex-1 h-7 rounded-md bg-primary text-primary-foreground text-xs font-medium disabled:opacity-50 cursor-pointer flex items-center justify-center gap-1"
+              className="flex-1 h-9 rounded-md bg-primary text-primary-foreground text-sm font-medium disabled:opacity-50 cursor-pointer flex items-center justify-center gap-1"
             >
               {uploading ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
               Upload {staged.length} GIF{staged.length > 1 ? 's' : ''}
             </button>
             <button
               onClick={() => { staged.forEach((s) => URL.revokeObjectURL(s.preview)); setStaged([]) }}
-              className="h-7 px-2 rounded-md text-xs text-muted-foreground hover:text-foreground cursor-pointer"
+              className="h-9 px-3 rounded-md text-sm text-muted-foreground hover:text-foreground cursor-pointer"
             >
               Cancel
             </button>
@@ -1578,7 +1582,7 @@ export function GifDiscoveryModal({ onClose, initialSearch = '' }: { onClose: ()
   }, [discovered, searchResults, search, authorFilter, getProfile])
 
   const handleSubscribe = async (collection: GifCollection) => {
-    const addr = `30030:${collection.pubkey}:${collection.dTag}`
+    const addr = `30032:${collection.pubkey}:${collection.dTag}`
     if (subscriptionAddresses.includes(addr)) return
     setPublishingAddr(addr)
     try {
@@ -1647,7 +1651,7 @@ export function GifDiscoveryModal({ onClose, initialSearch = '' }: { onClose: ()
                 </div>
               ) : (
                 filtered.map((collection) => {
-                  const addr = `30030:${collection.pubkey}:${collection.dTag}`
+                  const addr = `30032:${collection.pubkey}:${collection.dTag}`
                   const isSubscribed = subscriptionAddresses.includes(addr)
                   const isPublishing = publishingAddr === addr
                   const profile = getProfile(collection.pubkey)
@@ -1659,10 +1663,10 @@ export function GifDiscoveryModal({ onClose, initialSearch = '' }: { onClose: ()
                       <div className="flex items-center justify-between mb-2">
                         <div className="min-w-0">
                           <p className="text-sm font-semibold text-foreground truncate">{collection.name}</p>
-                          <p className="text-[10px] text-muted-foreground">by <button onClick={() => { window.dispatchEvent(new CustomEvent('open-profile-modal', { detail: collection.pubkey })); onClose() }} className="text-primary hover:underline cursor-pointer">{authorName}</button> · {collection.gifs.length} GIFs</p>
+                          <p className="text-xs text-muted-foreground">by <button onClick={() => { window.dispatchEvent(new CustomEvent('open-profile-modal', { detail: collection.pubkey })); onClose() }} className="text-primary hover:underline cursor-pointer">{authorName}</button> · {collection.gifs.length} GIFs</p>
                         </div>
                         {isSubscribed ? (
-                          <span className="text-[10px] text-primary font-medium shrink-0 flex items-center gap-1">
+                          <span className="text-xs text-primary font-medium shrink-0 flex items-center gap-1">
                             <Check size={10} /> Subscribed
                           </span>
                         ) : (
@@ -1687,7 +1691,7 @@ export function GifDiscoveryModal({ onClose, initialSearch = '' }: { onClose: ()
                           />
                         ))}
                         {visibleGifs.length > 6 && (
-                          <div className="w-12 h-12 rounded border border-border/30 flex items-center justify-center text-[10px] text-muted-foreground">
+                          <div className="w-12 h-12 rounded border border-border/30 flex items-center justify-center text-xs text-muted-foreground">
                             +{visibleGifs.length - 6}
                           </div>
                         )}

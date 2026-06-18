@@ -120,7 +120,7 @@ export function getStickerMap(): Map<string, { url: string; setAddress: string }
 
   for (let i = subscribedSets.length - 1; i >= 0; i--) {
     const s = subscribedSets[i]
-    const addr = `30030:${s.pubkey}:${s.dTag}`
+    const addr = `30031:${s.pubkey}:${s.dTag}`
     for (const st of s.stickers) {
       map.set(st.shortcode, { url: st.url, setAddress: addr })
     }
@@ -128,7 +128,7 @@ export function getStickerMap(): Map<string, { url: string; setAddress: string }
 
   for (let i = myStickerSets.length - 1; i >= 0; i--) {
     const s = myStickerSets[i]
-    const addr = `30030:${s.pubkey}:${s.dTag}`
+    const addr = `30031:${s.pubkey}:${s.dTag}`
     for (const st of s.stickers) {
       map.set(st.shortcode, { url: st.url, setAddress: addr })
     }

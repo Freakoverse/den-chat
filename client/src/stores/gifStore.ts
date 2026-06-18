@@ -159,7 +159,7 @@ export function getGifMap(): Map<string, { url: string; nsfw: boolean; source: s
   // Subscribed collections (lowest priority)
   for (let i = subscribedCollections.length - 1; i >= 0; i--) {
     const c = subscribedCollections[i]
-    const addr = `30030:${c.pubkey}:${c.dTag}`
+    const addr = `30032:${c.pubkey}:${c.dTag}`
     for (const g of c.gifs) {
       if (g.name) map.set(g.name, { url: g.url, nsfw: g.nsfw, source: addr })
     }
@@ -168,7 +168,7 @@ export function getGifMap(): Map<string, { url: string; nsfw: boolean; source: s
   // Own collections
   for (let i = myGifCollections.length - 1; i >= 0; i--) {
     const c = myGifCollections[i]
-    const addr = `30030:${c.pubkey}:${c.dTag}`
+    const addr = `30032:${c.pubkey}:${c.dTag}`
     for (const g of c.gifs) {
       if (g.name) map.set(g.name, { url: g.url, nsfw: g.nsfw, source: addr })
     }

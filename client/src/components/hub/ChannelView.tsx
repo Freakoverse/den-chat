@@ -35,6 +35,7 @@ import { getPublishRelays } from '@/stores/postingBehaviourStore'
 import { useTypingHeartbeat } from '@/hooks/useTypingHeartbeat'
 import { TypingIndicator } from '@/components/chat/TypingIndicator'
 import { hubTypingKey } from '@/stores/typingStore'
+import { setNameFromAddress } from '@/lib/customSets'
 import type { Channel, HubData, HubMember } from '@/stores/hubStore'
 import { uploadToBlossomServers, computeHash } from '@/lib/blossom'
 import type { UploadProgress } from '@/lib/blossom'
@@ -6038,7 +6039,7 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
             {clickedEmoji.setAddress ? (
               <div className="space-y-2">
                 <p className="text-xs text-muted-foreground">
-                  This emoji is part of set <span className="font-mono text-foreground/80">{clickedEmoji.setAddress.split(':').slice(2).join(':').replace(/[-_]/g, ' ')}</span>
+                  This emoji is part of set <span className="font-mono text-foreground/80">{setNameFromAddress(clickedEmoji.setAddress)}</span>
                 </p>
                 <button
                   onClick={() => {
@@ -6109,7 +6110,7 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
             {clickedSticker.setAddress ? (
               <div className="space-y-2">
                 <p className="text-xs text-muted-foreground">
-                  This sticker is part of set <span className="font-mono text-foreground/80">{clickedSticker.setAddress.split(':').slice(2).join(':').replace(/[-_]/g, ' ')}</span>
+                  This sticker is part of set <span className="font-mono text-foreground/80">{setNameFromAddress(clickedSticker.setAddress)}</span>
                 </p>
                 <button
                   onClick={() => {
