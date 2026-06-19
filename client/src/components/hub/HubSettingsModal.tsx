@@ -5477,6 +5477,7 @@ function MembersPage({ hub, onFooterState }: { hub: HubData; onFooterState: (sta
 
   const [search, setSearch] = useState('')
   const [expandedPubkey, setExpandedPubkey] = useState<string | null>(null)
+  const [profilePubkey, setProfilePubkey] = useState<string | null>(null)
   const [stagedChanges, setStagedChanges] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -6009,10 +6010,16 @@ function MembersPage({ hub, onFooterState }: { hub: HubData; onFooterState: (sta
             <div key={member.pubkey} className={cn('rounded-lg border transition-colors', isChanged ? 'border-primary/30 bg-primary/5' : 'border-transparent hover:bg-secondary/30')}>
               <button onClick={() => setExpandedPubkey(isExpanded ? null : member.pubkey)}
                 className="flex items-center gap-3 w-full px-3 py-2.5 text-left cursor-pointer">
-                <Avatar className="h-8 w-8">
-                  {profile?.picture && <AvatarImage src={profile.picture} />}
-                  <AvatarFallback className="text-xs bg-primary/20 text-primary">{name.slice(0, 2).toUpperCase()}</AvatarFallback>
-                </Avatar>
+                <span
+                  onClick={(e) => { e.stopPropagation(); setProfilePubkey(member.pubkey) }}
+                  className="shrink-0 rounded-full cursor-pointer transition-all hover:ring-2 hover:ring-primary/40"
+                  title="View profile"
+                >
+                  <Avatar className="h-8 w-8">
+                    {profile?.picture && <AvatarImage src={profile.picture} />}
+                    <AvatarFallback className="text-xs bg-primary/20 text-primary">{name.slice(0, 2).toUpperCase()}</AvatarFallback>
+                  </Avatar>
+                </span>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-foreground truncate">{name}</p>
                   <div className="flex flex-wrap gap-1 mt-0.5">
@@ -6071,6 +6078,16 @@ function MembersPage({ hub, onFooterState }: { hub: HubData; onFooterState: (sta
           )
         })}
       </div>
+
+      {/* Member profile modal */}
+      {profilePubkey && createPortal(
+        <UserProfileModal
+          open={!!profilePubkey}
+          onClose={() => setProfilePubkey(null)}
+          targetPubkey={profilePubkey}
+        />,
+        document.body
+      )}
     </div>
   )
 }
