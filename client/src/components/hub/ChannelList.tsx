@@ -379,7 +379,7 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
             className="flex-1 flex items-center gap-2 px-2 py-1 rounded-md text-left text-sm whitespace-nowrap text-muted-foreground hover:text-foreground hover:bg-accent transition-colors cursor-pointer"
           >
             <SlidersHorizontal size={13} />
-            <span>User Hub Settings</span>
+            <span>User Settings</span>
             {hasVoiceEpochMismatch && (
               <AlertTriangle size={14} className="text-amber-400 ml-auto" />
             )}

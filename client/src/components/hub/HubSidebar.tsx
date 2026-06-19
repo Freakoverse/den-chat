@@ -8,7 +8,7 @@ import { useDM04Store } from '@/stores/dm04Store'
 import { useBlockStore } from '@/stores/blockStore'
 import { useWotStore } from '@/stores/wotStore'
 import { usePublicChatStore } from '@/stores/publicChatStore'
-import { Plus, MessageSquare, MessagesSquare, Settings, AtSign, Compass, HelpCircle, XCircle, FolderClosed, Search, Sparkles, X, Volume2, RefreshCw, Loader2, Wallet } from 'lucide-react'
+import { Plus, Pencil, MessageSquare, MessagesSquare, Settings, AtSign, Compass, HelpCircle, XCircle, FolderClosed, Search, Sparkles, X, Volume2, RefreshCw, Loader2, Wallet } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { BlossomImage } from '@/components/ui/BlossomImage'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
@@ -92,6 +92,7 @@ export function HubSidebar({ activePage, onNavigate, compact = false }: { active
   const [showCreateHub, setShowCreateHub] = useState(false)
   const showHubChoice = useNavigationStore((s) => s.showHubChoiceModal)
   const setShowHubChoice = useNavigationStore((s) => s.setShowHubChoiceModal)
+  const setSettingsTab = useNavigationStore((s) => s.setSettingsTab)
   const [isRefreshing, setIsRefreshing] = useState(false)
 
   // Retry fetching the hub list (kind 16942) from relays
@@ -376,6 +377,11 @@ export function HubSidebar({ activePage, onNavigate, compact = false }: { active
               {/* Add hub */}
               <HubIcon label="Join or Create Hub" isActive={false} onClick={() => setShowHubChoice(true)} isAction>
                 <Plus size={20} />
+              </HubIcon>
+
+              {/* Manage hub list */}
+              <HubIcon label="Manage My Hubs" isActive={false} onClick={() => { setSettingsTab('my-hubs'); onNavigate?.('settings') }}>
+                <Pencil size={18} />
               </HubIcon>
             </>
           )}

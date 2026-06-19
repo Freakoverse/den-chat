@@ -127,6 +127,7 @@ export interface Reaction {
   count: number
   reacted: boolean // did current user react with this
   customUrl?: string // URL for custom emoji (NIP-30)
+  pubkeys?: string[] // who reacted with this emoji (filtered set, for avatar previews)
 }
 
 /** Stable empty object to prevent Zustand selector from returning new reference each render */
@@ -201,7 +202,7 @@ export function useDecryptedReactions(hubDTag: string, getChannelKey: (epoch?: n
 
     const result: Record<string, Reaction[]> = {}
     for (const [msgId, stored] of Object.entries(storeReactions)) {
-      const grouped = new Map<string, { count: number; reacted: boolean; customUrl?: string }>()
+      const grouped = new Map<string, { count: number; reacted: boolean; customUrl?: string; pubkeys: string[] }>()
       for (const r of stored) {
         if (r.decrypted === false) continue
         // Filter out reactions from banned users
@@ -216,9 +217,10 @@ export function useDecryptedReactions(hubDTag: string, getChannelKey: (epoch?: n
         if (grouped.has(key)) {
           const g = grouped.get(key)!
           g.count++
+          if (!g.pubkeys.includes(r.pubkey)) g.pubkeys.push(r.pubkey)
           if (r.pubkey === myPubkey) g.reacted = true
         } else {
-          grouped.set(key, { count: 1, reacted: r.pubkey === myPubkey, customUrl: r.customUrl })
+          grouped.set(key, { count: 1, reacted: r.pubkey === myPubkey, customUrl: r.customUrl, pubkeys: [r.pubkey] })
         }
       }
       const arr = Array.from(grouped.entries()).map(([emoji, data]) => ({
@@ -226,6 +228,7 @@ export function useDecryptedReactions(hubDTag: string, getChannelKey: (epoch?: n
         count: data.count,
         reacted: data.reacted,
         customUrl: data.customUrl,
+        pubkeys: data.pubkeys,
       }))
       if (arr.length > 0) result[msgId] = arr
     }
@@ -3018,6 +3021,7 @@ export function ReactionBar({ reactions, messageId, onAddReaction, rawReactions,
   const [showPicker, setShowPicker] = useState(false)
   const [showReactionList, setShowReactionList] = useState(false)
   const addReactionBtnRef = useRef<HTMLButtonElement>(null)
+  const { getProfile } = useProfileCache()
 
   // Convert StoredReaction[] to ReactionInfo[] for the modal
   // NOTE: Must be above the early return to preserve hook ordering
@@ -3063,6 +3067,28 @@ export function ReactionBar({ reactions, messageId, onAddReaction, rawReactions,
             return r.emoji
           })()}</span>
           <span className="font-medium">{r.count}</span>
+          {r.pubkeys && r.pubkeys.length > 0 && (
+            <TooltipProvider delayDuration={200}>
+              <span className="inline-flex items-center -space-x-1 ml-0.5">
+                {r.pubkeys.slice(0, 3).map((pk) => {
+                  const p = getProfile(pk)
+                  const name = p?.display_name || p?.name || truncateNpub(nip19.npubEncode(pk), 10)
+                  return (
+                    <Tooltip key={pk}>
+                      <TooltipTrigger asChild>
+                        <span className="w-4 h-4 rounded-full overflow-hidden border border-background bg-secondary inline-flex items-center justify-center text-[7px] font-semibold text-muted-foreground shrink-0">
+                          {p?.picture
+                            ? <img src={p.picture} alt="" className="w-full h-full object-cover" />
+                            : name.slice(0, 1).toUpperCase()}
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" className="text-xs">{name}</TooltipContent>
+                    </Tooltip>
+                  )
+                })}
+              </span>
+            </TooltipProvider>
+          )}
         </button>
       ))}
       {/* Add reaction button — only show if there are reactions */}
