@@ -146,10 +146,22 @@ export function UpdateToast() {
     }
     document.addEventListener('visibilitychange', handleVisibility)
 
+    // Web only: a failed lazy-chunk load (vite:preloadError) means the user is on a
+    // stale build whose hashed assets no longer exist after a deploy — the most
+    // immediate "new version is live" signal. Surface the existing toast now instead
+    // of waiting for the next version.json poll. (Tauri bundles assets locally, so it
+    // never fires there, and a reload wouldn't update a desktop build anyway.)
+    const handlePreloadError = () => {
+      setUpdateAvailable(true)
+      checkWeb() // best-effort: fetch the new version string for the toast
+    }
+    if (!inTauri) window.addEventListener('vite:preloadError', handlePreloadError)
+
     return () => {
       clearTimeout(initialTimeout)
       if (intervalRef.current) clearInterval(intervalRef.current)
       document.removeEventListener('visibilitychange', handleVisibility)
+      if (!inTauri) window.removeEventListener('vite:preloadError', handlePreloadError)
     }
   }, [checkWeb, checkTauri])
 
