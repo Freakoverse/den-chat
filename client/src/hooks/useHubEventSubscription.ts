@@ -59,11 +59,13 @@ export function useHubEventSubscription() {
     const batches = buildRelayIndex(hubs)
     if (batches.length === 0) return
 
-    const now = Math.floor(Date.now() / 1000)
-
-    // Seed latestTs with current timestamp to avoid processing stale events on subscribe
+    // Seed each hub's last-seen timestamp to the version we already hold, NOT wall-clock.
+    // Re-published hub events use created_at = original + 1 (kept low so edits don't bump
+    // discover feeds), so a ban/settings update is only "newer" relative to our current
+    // copy — seeding to `now` would make every such update look stale and get ignored
+    // until the user refreshes (which is the exact bug this fixes).
     for (const dTag of Object.keys(hubs)) {
-      latestTsRef.current[dTag] = now - 1
+      latestTsRef.current[dTag] = hubs[dTag]?.eventCreatedAt || 0
     }
 
     const processHubEvent = async (event: Event) => {
@@ -309,9 +311,12 @@ export function useHubEventSubscription() {
       const sub = subscribeToRelays(
         [batch.relay],
         {
+          // No `since`: re-published hub events carry a low created_at (original + 1),
+          // so a `since: now` lower bound would filter them out. Hub events are
+          // addressable, so relays return only the latest version per coordinate —
+          // no history flood from omitting `since`.
           kinds: [KINDS.HUB_EVENT],
           '#d': batch.hubDTags,
-          since: now,
         },
         (event: Event) => {
           processHubEvent(event)

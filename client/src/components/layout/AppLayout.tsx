@@ -25,10 +25,14 @@ import { useUserStore } from '@/stores/userStore'
 import { useBlockStore } from '@/stores/blockStore'
 import { useWotStore } from '@/stores/wotStore'
 import { useMobile } from '@/hooks/useMobile'
-import { useMemo, useEffect } from 'react'
-import { ShieldAlert, LogOut, Plus, MessageSquare, AtSign, Compass, Settings, Home, X, Wallet } from 'lucide-react'
+import { useMemo, useEffect, useState } from 'react'
+import { ShieldAlert, LogOut, Plus, MessageSquare, AtSign, Compass, Settings, Home, X, Wallet, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { OfflineBanner } from '@/components/ui/OfflineBanner'
+import { createHubListEvent, signWithSigner } from '@/lib/nostr/events'
+import { publishToSpecificRelays } from '@/lib/nostr/relay-pool'
+import { getPublishRelays } from '@/stores/postingBehaviourStore'
+import { useMessageStore } from '@/stores/messageStore'
 
 export function AppLayout() {
   const activeHubId = useHubStore((s) => s.activeHubId)
@@ -143,7 +147,7 @@ export function AppLayout() {
           ) : activePage === 'hubs' && mobileView === 'chat' && activeHubId && activeChannelId ? (
             /* Full-screen chat view */
             <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
-              {isBanned ? (isHardBanned ? <HardBanOverlay /> : <ModBanOverlay />) : (
+              {isBanned ? (isHardBanned ? <HardBanOverlay dTag={activeHubId} /> : <ModBanOverlay />) : (
                 isVoiceChannel ? <VoiceChannelView /> : isForumChannel ? <ForumView /> : <ChannelView />
               )}
             </div>
@@ -206,11 +210,11 @@ export function AppLayout() {
           {activeHubId && <ChannelList isModBanned={isBanned} />}
           <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
             {activeHubId && activeChannelId ? (
-              isBanned ? (isHardBanned ? <HardBanOverlay /> : <ModBanOverlay />) : (
+              isBanned ? (isHardBanned ? <HardBanOverlay dTag={activeHubId} /> : <ModBanOverlay />) : (
                 isVoiceChannel ? <VoiceChannelView /> : isForumChannel ? <ForumView /> : <ChannelView />
               )
             ) : (
-              isBanned ? (isHardBanned ? <HardBanOverlay /> : <ModBanOverlay />) : <EmptyState hasHub={!!activeHubId} />
+              isBanned ? (isHardBanned ? <HardBanOverlay dTag={activeHubId} /> : <ModBanOverlay />) : <EmptyState hasHub={!!activeHubId} />
             )}
           </div>
           {activeHubId && activeChannelId && !isBanned && (
@@ -332,9 +336,38 @@ function ModBanOverlay() {
   )
 }
 
-function HardBanOverlay() {
-  const setActivePage = useNavigationStore((s) => s.setActivePage)
-  const setSettingsTab = useNavigationStore((s) => s.setSettingsTab)
+function HardBanOverlay({ dTag }: { dTag: string | null }) {
+  const [showConfirm, setShowConfirm] = useState(false)
+  const [leaving, setLeaving] = useState(false)
+  const hubEntries = useHubStore((s) => s.hubEntries)
+  const folders = useHubStore((s) => s.folders)
+  const removeHubEntry = useHubStore((s) => s.removeHubEntry)
+  const setActiveHub = useHubStore((s) => s.setActiveHub)
+  const signer = useUserStore((s) => s.signer)
+  const privateKey = useUserStore((s) => s.privateKey)
+
+  const handleLeave = async () => {
+    if (!dTag) return
+    setLeaving(true)
+    // Persist the updated hub list (kind 16942) — best-effort.
+    try {
+      const remaining = hubEntries.filter((e) => e.dTag !== dTag)
+      const ev = createHubListEvent(
+        remaining.map((e) => ({ dTag: e.dTag, relayHint: e.relayHint, position: e.position, folderId: e.folderId })),
+        folders,
+      )
+      const signed = await signWithSigner(ev, signer, privateKey)
+      await publishToSpecificRelays(getPublishRelays(), signed)
+    } catch (err) {
+      console.error('Failed to publish updated hub list:', err)
+    }
+    // Remove locally + leave the banned view regardless of publish outcome.
+    removeHubEntry(dTag)
+    useMessageStore.getState().clearHubData(dTag)
+    setActiveHub(null)
+    setLeaving(false)
+    setShowConfirm(false)
+  }
 
   return (
     <div className="flex-1 flex items-center justify-center bg-background">
@@ -353,16 +386,49 @@ function HardBanOverlay() {
           </p>
         </div>
         <button
-          onClick={() => {
-            setSettingsTab('my-hubs')
-            setActivePage('settings')
-          }}
+          onClick={() => setShowConfirm(true)}
           className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-secondary/60 border border-border/50 text-sm text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors cursor-pointer"
         >
           <LogOut size={14} />
           Leave Hub
         </button>
       </div>
+
+      {/* Confirm: remove from hub list */}
+      {showConfirm && (
+        <div
+          className="fixed inset-0 z-[300] flex items-center justify-center bg-black/60 backdrop-blur-sm"
+          onClick={() => { if (!leaving) setShowConfirm(false) }}
+        >
+          <div
+            className="bg-card rounded-xl border border-border shadow-2xl w-[320px] p-5 space-y-4 animate-in fade-in-0 zoom-in-95"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="space-y-1.5">
+              <h4 className="text-sm font-semibold text-foreground">Remove from hub list?</h4>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                This removes the hub from your list and clears its cached messages on this device. You can add it back later if you're unbanned.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowConfirm(false)}
+                disabled={leaving}
+                className="flex-1 h-9 text-sm rounded-lg font-medium text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors cursor-pointer disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleLeave}
+                disabled={leaving}
+                className="flex-1 h-9 text-sm rounded-lg font-medium bg-destructive text-white hover:bg-destructive/90 transition-colors cursor-pointer disabled:opacity-50 flex items-center justify-center gap-1.5"
+              >
+                {leaving ? <><Loader2 size={14} className="animate-spin" /> Removing…</> : 'Remove'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
