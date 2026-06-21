@@ -276,8 +276,11 @@ export function useStartup() {
             (e) => hub.hubSecretsResolved[e.dTag] && !hub.hubSecrets[e.dTag] && hub.hubSecretFailReason[e.dTag] === 'signer-issue',
           )
           if (hasTransientFailure) {
-            resetSignerGuard()
-            hub.bumpHubSecretRetry()
+            void (async () => {
+              try { if (typeof signer.reconnect === 'function') await signer.reconnect() } catch { /* best-effort */ }
+              resetSignerGuard()
+              hub.bumpHubSecretRetry()
+            })()
           }
         }
       }
@@ -288,17 +291,17 @@ export function useStartup() {
     // relay link disrupted by the login app-switch, so the first hub-secret
     // decrypts fail. A few seconds in, if any hub is still stuck on a signer
     // failure, reset the circuit breaker and retry once (bounded thereafter).
-    const signerRetryTimer = setTimeout(() => {
+    const signerRetryTimer = setTimeout(async () => {
       const { signer: s, privateKey: pk } = useUserStore.getState()
       if (!s || pk) return
       const hub = useHubStore.getState()
       const hasTransientFailure = hub.hubEntries.some(
         (e) => hub.hubSecretsResolved[e.dTag] && !hub.hubSecrets[e.dTag] && hub.hubSecretFailReason[e.dTag] === 'signer-issue',
       )
-      if (hasTransientFailure) {
-        resetSignerGuard()
-        hub.bumpHubSecretRetry()
-      }
+      if (!hasTransientFailure) return
+      try { if (typeof s.reconnect === 'function') await s.reconnect() } catch { /* best-effort */ }
+      resetSignerGuard()
+      hub.bumpHubSecretRetry()
     }, 8000)
 
     // ─── Deferred event redundancy check (personal events) ───

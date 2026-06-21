@@ -277,9 +277,10 @@ export function ChannelView({ hideHeader = false }: { hideHeader?: boolean } = {
   return (
     <div ref={channelContainerRef} className="flex flex-col h-full bg-background relative">
       {!hideHeader && <ChannelHeader channel={channel} channelId={activeChannelId!} isCreator={!!(hub && pubkey && hub.creatorPubkey === pubkey)} />}
-      {/* Loading overlay while blossom membership is being resolved */}
+      {/* Loading overlay while blossom membership is being resolved.
+          Starts below the 48px header (unless hidden) so the back button stays usable. */}
       {!secretsResolved && (
-        <div className="absolute inset-0 z-40 flex flex-col items-center justify-center bg-background/90 backdrop-blur-sm">
+        <div className={`absolute inset-x-0 bottom-0 ${hideHeader ? 'top-0' : 'top-12'} z-40 flex flex-col items-center justify-center bg-background/90 backdrop-blur-sm`}>
           <Loader2 size={28} className="animate-spin text-primary mb-3" />
           <span className="text-sm text-muted-foreground">Loading hub data...</span>
         </div>

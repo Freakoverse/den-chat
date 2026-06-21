@@ -11,11 +11,14 @@
  */
 
 import { useState, useEffect, useCallback } from 'react'
-import { WifiOff, RefreshCw, X } from 'lucide-react'
+import { WifiOff, RefreshCw, X, Loader2 } from 'lucide-react'
 import { resetSignerGuard } from '@/lib/auth/signerGuard'
+import { useUserStore } from '@/stores/userStore'
+import { useHubStore } from '@/stores/hubStore'
 
 export function SignerGuardBanner() {
   const [visible, setVisible] = useState(false)
+  const [retrying, setRetrying] = useState(false)
 
   useEffect(() => {
     const handler = () => setVisible(true)
@@ -23,10 +26,26 @@ export function SignerGuardBanner() {
     return () => window.removeEventListener('signer-circuit-open', handler)
   }, [])
 
-  const handleRetry = useCallback(() => {
-    resetSignerGuard()
-    window.location.reload()
-  }, [])
+  // Reconnect the remote signer in place (no full reload) and re-attempt the
+  // work that failed, instead of reloading the app (which re-runs login and,
+  // for nostrconnect, would spawn a fresh connection string).
+  const handleRetry = useCallback(async () => {
+    if (retrying) return
+    setRetrying(true)
+    try {
+      const { signer, privateKey } = useUserStore.getState()
+      if (signer && !privateKey && typeof signer.reconnect === 'function') {
+        await signer.reconnect()
+      }
+      resetSignerGuard()
+      useHubStore.getState().bumpHubSecretRetry()
+    } catch {
+      /* best-effort */
+    } finally {
+      setRetrying(false)
+      setVisible(false)
+    }
+  }, [retrying])
 
   if (!visible) return null
 
@@ -44,10 +63,11 @@ export function SignerGuardBanner() {
           <div className="flex items-center gap-2 mt-2.5 flex-wrap">
             <button
               onClick={handleRetry}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500 text-white text-xs font-medium hover:bg-amber-600 transition-colors cursor-pointer"
+              disabled={retrying}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500 text-white text-xs font-medium hover:bg-amber-600 transition-colors cursor-pointer disabled:opacity-60"
             >
-              <RefreshCw size={12} />
-              Reconnect & Retry
+              {retrying ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+              {retrying ? 'Reconnecting…' : 'Reconnect & Retry'}
             </button>
             <button
               onClick={() => setVisible(false)}

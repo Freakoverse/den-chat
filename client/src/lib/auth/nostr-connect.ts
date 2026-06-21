@@ -10,7 +10,7 @@
  */
 
 import { generateSecretKey, getPublicKey } from 'nostr-tools'
-import { BunkerSigner as NBunkerSigner, createNostrConnectURI, toBunkerURL } from 'nostr-tools/nip46'
+import { BunkerSigner as NBunkerSigner, createNostrConnectURI, toBunkerURL, parseBunkerInput } from 'nostr-tools/nip46'
 import { bytesToHex } from '@noble/hashes/utils'
 
 const DEFAULT_RELAYS = ['wss://relay.primal.net', 'wss://relay.damus.io', 'wss://nos.lol']
@@ -126,6 +126,23 @@ export class NostrConnectSigner {
 
   getBunkerString(): string | null {
     return this.bunkerString
+  }
+
+  /**
+   * Re-establish the relay subscription in place using the bunker string
+   * captured at login (no new nostrconnect:// handshake needed — the signer
+   * already approved us). Fixes the case where the PWA was backgrounded and the
+   * relay WebSocket got suspended.
+   */
+  async reconnect(): Promise<void> {
+    if (!this.bunkerString) return
+    const bunkerPointer = await parseBunkerInput(this.bunkerString)
+    if (!bunkerPointer) return
+    this.signer = NBunkerSigner.fromBunker(this.clientSecretKey, bunkerPointer, {
+      onauth: (url) => { window.open(url, '_blank') },
+    })
+    // Warm the connection in the background; don't block recovery on it.
+    this.signer.getPublicKey().catch(() => {})
   }
 
   close(): void {

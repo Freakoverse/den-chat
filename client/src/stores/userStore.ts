@@ -19,6 +19,9 @@ export interface ISigner {
     encrypt(pubkey: string, plaintext: string): Promise<string>
     decrypt(pubkey: string, ciphertext: string): Promise<string>
   }
+  /** Re-establish the underlying connection in place (e.g. NIP-46 relay link
+   *  after the PWA was suspended), without a full app reload. */
+  reconnect?(): Promise<void>
   close?(): void
 }
 

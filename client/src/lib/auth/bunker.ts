@@ -14,6 +14,7 @@ export class BunkerSigner {
   signer: NBunkerSigner | null = null
   private clientSecretKey: Uint8Array
   private pubkey: string | null = null
+  private bunkerUrl: string | null = null
 
   constructor(clientSecretKey?: string) {
     this.clientSecretKey = clientSecretKey ? hexToBytes(clientSecretKey) : generateSecretKey()
@@ -30,6 +31,7 @@ export class BunkerSigner {
     if (!bunkerPointer) {
       throw new Error('Invalid bunker URL')
     }
+    this.bunkerUrl = bunker
 
     this.signer = NBunkerSigner.fromBunker(this.clientSecretKey, bunkerPointer, {
       onauth: (url) => {
@@ -43,6 +45,23 @@ export class BunkerSigner {
 
     this.pubkey = await this.signer.getPublicKey()
     return this.pubkey
+  }
+
+  /**
+   * Re-establish the relay subscription from the stored bunker URL without a
+   * full reload (the previous WebSocket may have been suspended in the
+   * background). Re-creates the underlying signer with a fresh subscription and
+   * warms it; subsequent calls go through the new connection.
+   */
+  async reconnect(): Promise<void> {
+    if (!this.bunkerUrl) return
+    const bunkerPointer = await parseBunkerInput(this.bunkerUrl)
+    if (!bunkerPointer) return
+    this.signer = NBunkerSigner.fromBunker(this.clientSecretKey, bunkerPointer, {
+      onauth: (url) => { window.open(url, '_blank') },
+    })
+    // Warm the connection in the background; don't block recovery on it.
+    this.signer.getPublicKey().catch(() => {})
   }
 
   async getPublicKey(): Promise<string> {
