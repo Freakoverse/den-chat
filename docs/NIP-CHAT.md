@@ -2390,6 +2390,13 @@ Mod/creator removes user from the LKH tree
 | `30031` | Sticker Set | Addressable Replaceable | User's relays (§19) |
 | `30032` | GIF Collection | Addressable Replaceable | User's relays (§19) |
 | `30000` | Emoji/Sticker/GIF Subscription Lists (NIP-51) | Addressable Replaceable | User's relays (§19) |
+| `1111` | Forum Post & Comment (NIP-22) | Regular | User/community relays (§20) |
+| `7` | Forum Reaction (NIP-25) | Regular | User/community relays (§20) |
+| `34550` | Community Definition (NIP-72) | Addressable Replaceable | Community/user relays (§20) |
+| `4550` | Community Post Approval (NIP-72) | Regular | Community relays (§20) |
+| `10004` | Followed Communities (NIP-51) | Replaceable | User's relays (§20) |
+| `30044` | Word Community Profile (DEN) | Addressable (`d`=word) | Public relays (§20) |
+| `10044` | Followed Word Communities (DEN) | Replaceable | User's relays (§20) |
 
 ---
 
@@ -2968,6 +2975,145 @@ A user's subscriptions to *other* people's sets are stored as NIP-51 lists (kind
 | `gif-favorites` | `["j", "<name>", "<url>", "sfw"\|"nsfw"]` for individually favorited GIFs |
 
 Each `a` tag is an addressable reference to a subscribed set; clients fetch those sets by their `(kind, pubkey, d-tag)` coordinate.
+
+---
+
+## 20. Forum — Communities
+
+The Forum is a Reddit-style threaded-discussion surface in the social area. It supports **two distinct community types** that look the same in the UI but differ fundamentally in ownership and addressing. **They are intentionally separate** — posts in one type never appear in the other.
+
+| | **Word community** (UI tab: *Open*) | **Created community** (NIP-72, UI tab: *Moderated*) |
+|---|---|---|
+| Reference tag on posts | `["t", "<word>"]` | `["A"/"a", "34550:<creator>:<id>"]` |
+| Identity / handle | the word → **`w/<word>`** | the address → **`c/<naddr>`** |
+| How many "gaming"? | exactly **one**, global | **many** (one per creator) |
+| Definition event | none | kind `34550` |
+| Moderation | **none central** — client-side only | creator + moderators (kind `4550`) |
+| Followed-list kind | `10044` (DEN) | `10004` (NIP-51) |
+| Status | **Phase 1 (implemented)** | **Phase 2 (implemented)** |
+
+Both types use **kind `1111`** (NIP-22) for posts and comments, and **kind `7`** (NIP-25) for reactions. A post and its comments are distinguished by the parent-reference rules below (mirrors §6.x message/reply separation).
+
+### 20.1 Word Communities (Open)
+
+A word community is not a created object — there is **no definition event, no creator, and no central moderation**. The "community" is simply the set of all top-level kind-`1111` posts carrying `["t", "<word>"]`. There is exactly **one** community per word, globally. Its handle is **`w/<word>`** (a copy-able identifier, not a URL).
+
+This is the [Public Chat (§16)](#16-public-chat--kind-1312) topic model applied to threaded posts. **It does not collide with public chat:** public chat is kind `1312`, forum posts are kind `1111`, so every fetch is kind-pinned and the two never cross-populate even though they share the `t:<word>` namespace.
+
+#### Top-level post
+
+```json
+{
+  "kind": 1111,
+  "pubkey": "<author>",
+  "created_at": "<timestamp>",
+  "tags": [
+    ["t", "gaming"],
+    ["subject", "Best co-op games of 2026?"]
+  ],
+  "content": "<body markdown>",
+  "sig": "<sig>"
+}
+```
+
+- `["t", "<word>"]` — the word community (lowercase, relay-filterable). Normalized lowercase.
+- `["subject", "<title>"]` — the post title (NIP-14).
+- A top-level post carries **no parent reference** (no `e`/`E` tag). It is the root of its own thread.
+
+#### Comment
+
+Comments follow NIP-22 with the **post as the thread root**:
+
+```json
+{
+  "kind": 1111,
+  "tags": [
+    ["E", "<post-id>"], ["K", "1111"], ["P", "<post-author>"],
+    ["e", "<parent-id>"], ["k", "1111"], ["p", "<parent-author>"]
+  ],
+  "content": "<comment markdown>"
+}
+```
+
+- Uppercase `E`/`K`/`P` = root scope (the top-level post). Lowercase `e`/`k`/`p` = immediate parent (the post or a parent comment).
+- Comments **do not** carry the `["t", "<word>"]` tag — only the top-level post does.
+
+#### Fetching
+
+- **Top-level posts for a word:** `{ "kinds": [1111], "#t": ["gaming"] }` — returns only top-level posts (comments lack `t`).
+- **A post's full comment tree:** `{ "kinds": [1111], "#E": ["<post-id>"] }` — the whole subtree in one query; build nesting from the lowercase `e` parent tags.
+- **Reactions:** `{ "kinds": [7], "#e": ["<post-id>"] }` (see §20.3).
+
+#### Moderation
+
+Word communities have **no central moderation**. Filtering is purely client-side and reuses the exact stack used for Public Chat (§16):
+- **Proof of Work** threshold (per client setting),
+- **Web of Trust** scoring (a `forum` context, mirroring the `publicChat` context),
+- **Muted words**, and **blocked pubkeys** (NIP-51 kind `10000`).
+
+#### Followed words
+
+A user's subscribed word communities are stored in a **replaceable kind `10044`** event (DEN-specific; mirrors the shape of NIP-51 kind `10004`), one `["t", "<word>"]` tag per subscription. Latest-wins, no `d` tag.
+
+```json
+{ "kind": 10044, "tags": [["t", "gaming"], ["t", "nostr"], ["t", "bitcoin"]], "content": "" }
+```
+
+**Optional appearance (kind `30044`).** Word communities have no owner, so an appearance (picture / banner / description; the word itself is the name) is an **addressable** event keyed by `d = <word>`, one per author per word. Resolution is explicit, not automatic: a client renders **the viewer's own** 30044 for the word. That event either carries the appearance directly, or **delegates** to another author's via an `["a", "30044:<author>:<word>"]` tag (the editor's "From follows" tab lets you adopt and re-share an appearance published by someone you follow). With no 30044 for a word, nothing extra renders. This keeps metadata owner-free and fully under each viewer's control, without bloating the follow list. Picture/banner upload through the same Blossom flow as the rest of the app (size limit, progress, multiple servers), and every forum image renders through the shared failover + hash-verification component.
+
+```json
+// own appearance
+{ "kind": 30044, "tags": [["d","gaming"], ["picture","https://…"], ["banner","https://…"], ["description","All things gaming"]], "content": "" }
+// delegate to another author's appearance for "gaming"
+{ "kind": 30044, "tags": [["d","gaming"], ["a","30044:<author-pubkey>:gaming"]], "content": "" }
+```
+
+**List size cap.** Both follow/join lists are capped at **400 entries**. The binding constraint is the created-community list (kind `10004`): each `["a","34550:<64-hex>:<dtag>"]` entry is ~110 bytes, so 400 ≈ 44 KB of tags — safely inside a 64 KB relay event limit. The same count is applied to the word list (kind `10044`, ~30 bytes/entry), which is far smaller at that size.
+
+### 20.2 Created Communities (NIP-72)
+
+Standard [NIP-72](https://github.com/nostr-protocol/nips/blob/master/72.md):
+- **Definition:** kind `34550` — `d` (identifier), `name`, `description`, `image` (icon), `banner` (wide image), `["content-warning","nsfw"]` (optional adult flag), `["p", pubkey, "", "moderator"]`, `["relay", url]`. Address `34550:<creator>:<id>` → naddr → handle **`c/<naddr>`**. The creator is always an implicit moderator.
+- **Posts:** kind `1111`, top-level scoped to the community: `["A", addr] ["K", "34550"] ["P", creator]` (root) + `["a", addr] ["k", "34550"] ["p", creator]` (parent), `["subject", title]`, no `e`. So `{kinds:[1111], "#a":[addr]}` returns only top-level posts.
+- **Comments:** identical to word-community comments (kind `1111` with `E/e` thread tags) — a comment's root is the **post**, not the community.
+- **Approval:** moderators publish kind `4550` (content = the JSON of the approved post) referencing the post (`e`), author (`p`), post kind (`k`), and community (`a`). Clients honor approvals only from the community's defined moderators.
+- **Followed communities:** NIP-51 kind `10004` (`["a", "34550:…"]` tags) — interoperable with other NIP-72 clients.
+
+**Display rule:** a community feed has an **Approved / Pending** toggle anyone can switch. *Approved* lists moderator-approved posts (plus the viewer's *own*, so authors see their submission immediately); *Pending* lists not-yet-approved submissions. Moderators see an **Approve** action on pending posts; when a moderator posts, the client self-approves so it appears at once. The community header shows the **creator** (crown) and **moderators**; the creator can **Edit** the community (name/description/icon) and **add/remove moderators**, which republishes the kind-`34550` definition. The Moderated-tab home feed merges *approved* posts from the communities you've joined (kind `10004`).
+
+Because creation is owned, multiple communities can share a name (`c/<naddr-A>` and `c/<naddr-B>` both named "gaming"), each with its own creator and moderators.
+
+### 20.3 Reaction Sentiment & Sorting
+
+Forum reactions are kind `7` (NIP-25). To support up/down style sorting while remaining compatible with reactions from other clients, each reaction's `content` is classified into a **positive** or **negative** bucket. A fixed set of contents is treated as negative; **everything else (including `+`, empty, and unknown emoji) is positive**:
+
+```
+negative = { -, 👎, 💩, 💀, ☠️, 🤮, 🤢, 🤡, 😡, 😠, 🤬, 😤, 😒, 🙄,
+             😞, 😔, 😟, 😕, 🙁, ☹️, 😣, 😖, 😫, 😩, 😢, 😭, 💔, 🥴, 😬, 🖕 }
+```
+
+One reaction per author counts (latest wins). The two buckets are surfaced as **up / down** controls. Voting is **delete-then-react**: changing or removing a vote first publishes a NIP-09 (`kind 5`) deletion of the user's prior reaction, then (unless toggling off) publishes the new one — so a member always has at most one active reaction per target.
+
+Sort modes (all **best-effort**, reordering only what was fetched):
+- **New** — chronological by `created_at` (default).
+- **Top** — by `(positive − negative)` reaction count, descending.
+- **Hot** — by `(positive + negative)` total reaction count, descending.
+
+### 20.4 Client UI
+
+- **Left rail (Forum section):** `Feed` and `Notifications` nav items (mirrors Short Form). `Feed` opens the forum home.
+- **Notifications** (forum and long-form each have their own page, scoped to their own type so they never cross-notify): replies on your posts/comments shown individually, and reactions **aggregated into 24-hour buckets** (one summary card per day) so a vote burst doesn't flood the page. The forum page is split by the *Open* / *Moderated* tabs; the long-form page is a single list.
+- **Main feed:** tabbed by type, *Open* (word) and *Moderated* (NIP-72). With no community selected, *Open* shows the merged feed of your followed words and *Moderated* shows a community browser; selecting one forces its tab. Posts are labeled by source word (`w/…`) or community name.
+- **Right rail (context tools):**
+  - *Open:* `go to w/word`, your followed words, and a "from people you follow" discovery list (≤5 communities per followed person, ≤100 total, load-more).
+  - *Moderated:* `Create community`, `Open by handle` (paste a `c/naddr…`), your created and joined communities, and a `Discover` list of other communities.
+- **Handles** `w/<word>` and `c/<naddr>` are copy-able identifiers (resolved by pasting back into the client), not browser URLs. Long `c/naddr` handles are truncated in the UI but copy in full.
+- **Proof of Work** is adjustable via a shield-icon button (showing the current difficulty) that opens a slider modal with a *reset to default* — for both the posting difficulty and the minimum view difficulty.
+- **NSFW:** posts and communities are flagged with `["content-warning","nsfw"]` (NIP-36). A feed toggle (default *hidden*) shows/hides NSFW posts; the setting is shared across both tabs.
+- **Thread view:** opening a post shows a right column with its source — the word community (follow) or created community (icon/banner/description, copy handle, join) — so you can jump back to the source feed.
+- **Reply boxes** are multi-line text areas.
+- **Live updates:** the active feed subscribes to new posts, and a thread subscribes to new comments and reactions, ingesting them in real time.
+- **Render filter:** every post/comment passes the same gate as public chat: view-PoW threshold, blocked pubkeys, Web-of-Trust (`forum` context), and muted words. The same WoT threshold also drops below-threshold authors from **created-community discovery** (by creator) and from the **notification** pages (by actor). Word communities have no creator, so only their posts are WoT-filtered.
 
 ---
 

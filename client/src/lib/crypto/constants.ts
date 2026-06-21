@@ -22,6 +22,10 @@ export const KINDS = {
   USER_HUB_LIST: 16942,
   POLL: 1067,
   POLL_VOTE: 1017,
+  /** Forum post & comment (NIP-22, §20). Used for both word + NIP-72 communities. */
+  FORUM_POST: 1111,
+  /** Followed word-communities list (DEN-specific replaceable list, §20). */
+  FORUM_WORD_LIST: 10044,
   CALENDAR_TIME_EVENT: 31923,
   CALENDAR_RSVP: 31925,
   PUBLIC_CHAT: 1312,

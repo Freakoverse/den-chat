@@ -26,7 +26,8 @@ const DEFAULT_FILTERS: FeedFilters = {
 }
 
 export type SocialPage = 'feed' | 'thread' | 'profile'
-  | 'longform-feed' | 'longform-write' | 'longform-mine' | 'longform-drafts' | 'longform-read' | 'longform-bookmarks' | 'longform-draft-preview'
+  | 'longform-feed' | 'longform-write' | 'longform-mine' | 'longform-drafts' | 'longform-read' | 'longform-bookmarks' | 'longform-draft-preview' | 'longform-notifications'
+  | 'forum-feed' | 'forum-thread' | 'forum-notifications'
 
 /** Snapshot of navigable state for the back stack */
 interface NavSnapshot {
@@ -36,6 +37,9 @@ interface NavSnapshot {
   activeArticleNaddr: string | null
   editingArticleNaddr: string | null
   previewDraftNaddr: string | null
+  activeForumWord: string | null
+  activeForumCommunity: string | null
+  activeForumPostId: string | null
 }
 
 interface SocialState {
@@ -53,10 +57,22 @@ interface SocialState {
   editingArticleNaddr: string | null
   /** Draft naddr being previewed (for longform-draft-preview page) */
   previewDraftNaddr: string | null
+  /** Active forum word community (for forum-feed, decentralized tab) */
+  activeForumWord: string | null
+  /** Active forum created-community address `34550:pk:d` (centralized tab) */
+  activeForumCommunity: string | null
+  /** Active forum post id (for forum-thread) */
+  activeForumPostId: string | null
   /** Navigation back stack */
   navStack: NavSnapshot[]
 
   setActivePage: (page: SocialPage) => void
+  /** Open the forum home feed (clears any active community). */
+  openForumFeed: () => void
+  setActiveForumWord: (word: string) => void
+  /** Open a created (NIP-72) community by its `34550:pk:d` address. */
+  setActiveForumCommunity: (address: string) => void
+  setActiveForumThread: (postId: string) => void
   setPosts: (posts: Event[]) => void
   addPost: (post: Event) => void
   prependPosts: (posts: Event[]) => void
@@ -80,6 +96,9 @@ function snapshot(s: SocialState): NavSnapshot {
     activeArticleNaddr: s.activeArticleNaddr,
     editingArticleNaddr: s.editingArticleNaddr,
     previewDraftNaddr: s.previewDraftNaddr,
+    activeForumWord: s.activeForumWord,
+    activeForumCommunity: s.activeForumCommunity,
+    activeForumPostId: s.activeForumPostId,
   }
 }
 
@@ -94,9 +113,32 @@ export const useSocialStore = create<SocialState>((set) => ({
   activeArticleNaddr: null,
   editingArticleNaddr: null,
   previewDraftNaddr: null,
+  activeForumWord: null,
+  activeForumCommunity: null,
+  activeForumPostId: null,
   navStack: [],
 
   setActivePage: (page) => set({ activePage: page }),
+  openForumFeed: () => set({ activePage: 'forum-feed', activeForumWord: null, activeForumCommunity: null, activeForumPostId: null, navStack: [] }),
+  setActiveForumWord: (word) => set((s) => ({
+    navStack: [...s.navStack, snapshot(s)].slice(-MAX_NAV_STACK),
+    activePage: 'forum-feed',
+    activeForumWord: word.toLowerCase(),
+    activeForumCommunity: null,
+    activeForumPostId: null,
+  })),
+  setActiveForumCommunity: (address) => set((s) => ({
+    navStack: [...s.navStack, snapshot(s)].slice(-MAX_NAV_STACK),
+    activePage: 'forum-feed',
+    activeForumCommunity: address,
+    activeForumWord: null,
+    activeForumPostId: null,
+  })),
+  setActiveForumThread: (postId) => set((s) => ({
+    navStack: [...s.navStack, snapshot(s)].slice(-MAX_NAV_STACK),
+    activePage: 'forum-thread',
+    activeForumPostId: postId,
+  })),
 
   setPosts: (posts) => {
     let sorted = posts.sort((a, b) => b.created_at - a.created_at)
@@ -167,6 +209,9 @@ export const useSocialStore = create<SocialState>((set) => ({
     }
     if (s.activePage.startsWith('longform-')) {
       return { activePage: 'longform-feed' as SocialPage, activeArticleNaddr: null, editingArticleNaddr: null, previewDraftNaddr: null, navStack: [] }
+    }
+    if (s.activePage === 'forum-thread') {
+      return { activePage: 'forum-feed' as SocialPage, activeForumPostId: null, navStack: [] }
     }
     return { activePage: 'feed' as SocialPage, activeThreadId: null, activeProfilePubkey: null, navStack: [] }
   }),

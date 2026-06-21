@@ -23,7 +23,9 @@ import { LongFormWritePage } from '@/components/social/LongFormWritePage'
 import { LongFormMinePage } from '@/components/social/LongFormMinePage'
 import { LongFormDraftsPage } from '@/components/social/LongFormDraftsPage'
 import { LongFormBookmarksPage } from '@/components/social/LongFormBookmarksPage'
+import { LongFormNotificationsPage } from '@/components/social/LongFormNotificationsPage'
 import { DraftPreviewPage } from '@/components/social/DraftPreviewPage'
+import { ForumNav, ForumFeedPage, ForumThreadPage, ForumNotificationsPage } from '@/components/social/ForumView'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { Loader2, RefreshCw, Newspaper, Heart, Bookmark, User, SlidersHorizontal, X, ChevronDown, Bell, Repeat2, AtSign, Zap, MessageCircle, FileText, PenLine, FolderOpen, FileArchive, Video, Mail, Radio } from 'lucide-react'
 import type { SocialPage } from '@/stores/socialStore'
@@ -48,9 +50,10 @@ const PREFETCH_MARGIN = 800
 function SocialNav({ activeTab, activePage, onTabChange, onOpenProfile, onPageChange }: { activeTab: FeedTab; activePage: string; onTabChange: (tab: FeedTab) => void; onOpenProfile: () => void; onPageChange: (page: SocialPage) => void }) {
   const isProfile = activePage === 'profile'
   const isLongForm = activePage.startsWith('longform-')
-  const [shortFormOpen, setShortFormOpen] = useState(!isLongForm)
+  const isForum = activePage.startsWith('forum-')
+  const [shortFormOpen, setShortFormOpen] = useState(!isLongForm && !isForum)
   const [longFormOpen, setLongFormOpen] = useState(isLongForm)
-  const [forumOpen, setForumOpen] = useState(false)
+  const [forumOpen, setForumOpen] = useState(isForum)
   const [videoOpen, setVideoOpen] = useState(false)
   const [livestreamOpen, setLivestreamOpen] = useState(false)
   const [nmailOpen, setNmailOpen] = useState(false)
@@ -69,6 +72,7 @@ function SocialNav({ activeTab, activePage, onTabChange, onOpenProfile, onPageCh
     { id: 'longform-mine', label: 'My Articles', icon: <FolderOpen size={18} /> },
     { id: 'longform-drafts', label: 'Drafts', icon: <FileArchive size={18} /> },
     { id: 'longform-bookmarks', label: 'Bookmarks', icon: <Bookmark size={18} /> },
+    { id: 'longform-notifications', label: 'Notifications', icon: <Bell size={18} /> },
   ]
 
   return (
@@ -151,9 +155,7 @@ function SocialNav({ activeTab, activePage, onTabChange, onOpenProfile, onPageCh
         <span>Forum</span>
         <ChevronDown size={14} className={`transition-transform duration-200 ${forumOpen ? '' : '-rotate-90'}`} />
       </button>
-      {forumOpen && (
-        <p className="px-3 py-2 text-xs text-muted-foreground">coming soon</p>
-      )}
+      {forumOpen && <ForumNav />}
 
       {/* Videos accordion */}
       <button
@@ -463,7 +465,7 @@ export function SocialFeedPage() {
   )
 
   // Determine which section is active
-  const activeSection: 'short' | 'long' | 'forum' | 'video' = activePage.startsWith('longform-') ? 'long' : 'short'
+  const activeSection: 'short' | 'long' | 'forum' | 'video' = activePage.startsWith('longform-') ? 'long' : activePage.startsWith('forum-') ? 'forum' : 'short'
 
   // Mobile tab bar — shown only on mobile, with section switcher + contextual sub-tabs
   const MobileTabBar = (
@@ -617,8 +619,20 @@ export function SocialFeedPage() {
   if (activePage === 'longform-bookmarks') {
     return (<>{LeftPanel}<div className="flex-1 flex flex-col min-w-0 bg-background overflow-hidden">{MobileTabBar}<LongFormBookmarksPage /></div></>)
   }
+  if (activePage === 'longform-notifications') {
+    return (<>{LeftPanel}<div className="flex-1 flex flex-col min-w-0 bg-background overflow-hidden">{MobileTabBar}<LongFormNotificationsPage /></div></>)
+  }
   if (activePage === 'longform-draft-preview') {
     return (<>{LeftPanel}<div className="flex-1 flex flex-col min-w-0 bg-background overflow-hidden">{MobileTabBar}<DraftPreviewPage /></div></>)
+  }
+  if (activePage === 'forum-feed') {
+    return (<>{LeftPanel}<div className="flex-1 flex flex-col min-w-0 bg-background overflow-hidden">{MobileTabBar}<ForumFeedPage /></div></>)
+  }
+  if (activePage === 'forum-thread') {
+    return (<>{LeftPanel}<div className="flex-1 flex flex-col min-w-0 bg-background overflow-hidden">{MobileTabBar}<ForumThreadPage /></div></>)
+  }
+  if (activePage === 'forum-notifications') {
+    return (<>{LeftPanel}<div className="flex-1 flex flex-col min-w-0 bg-background overflow-hidden">{MobileTabBar}<ForumNotificationsPage /></div></>)
   }
 
   const tabTitles: Record<FeedTab, string> = { home: 'Social Feed', reactions: 'Reactions', bookmarks: 'Bookmarks', notifications: 'Notifications' }

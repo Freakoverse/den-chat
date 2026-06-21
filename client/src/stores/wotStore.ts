@@ -41,9 +41,10 @@ export interface WotSettings {
   applyPublicChat: boolean  // Filter public chat, default true
   applyHubChat: boolean     // Filter hub chat, default false
   applyDMs: boolean         // Filter DMs (NIP-17 & NIP-04), default true
+  applyForum: boolean       // Filter forum (word communities), default true
 }
 
-export type WotContext = 'social' | 'publicChat' | 'hubChat' | 'dms'
+export type WotContext = 'social' | 'publicChat' | 'hubChat' | 'dms' | 'forum'
 
 interface CachedScore {
   score: number
@@ -131,6 +132,7 @@ const DEFAULT_SETTINGS: WotSettings = {
   applyPublicChat: true,
   applyHubChat: false,
   applyDMs: true,
+  applyForum: true,
 }
 
 /* ─── Helpers ─── */
@@ -288,6 +290,7 @@ export const useWotStore = create<WotState>((set, get) => ({
       case 'publicChat': if (!settings.applyPublicChat) return false; break
       case 'hubChat': if (!settings.applyHubChat) return false; break
       case 'dms': if (!settings.applyDMs) return false; break
+      case 'forum': if (!settings.applyForum) return false; break
     }
 
     // Direct follow override — never hide people you follow
