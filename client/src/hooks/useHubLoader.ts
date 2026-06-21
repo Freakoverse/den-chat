@@ -567,7 +567,23 @@ export function useHubLoader() {
   const pubkey = useUserStore((s) => s.pubkey)
   const privateKey = useUserStore((s) => s.privateKey)
   const signer = useUserStore((s) => s.signer)
+  const hubSecretRetryNonce = useHubStore((s) => s.hubSecretRetryNonce)
   const loadedRef = useRef<Set<string>>(new Set())
+
+  // Retry trigger: when the secret-retry nonce bumps (e.g. remote signer
+  // reconnected on app resume), forget the "loaded" mark for hubs whose secret
+  // never decrypted (transient signer/connection failures only) so the main
+  // effect re-attempts them. Hubs with a secret, or permanently un-decryptable
+  // ones (not a member), are left alone.
+  useEffect(() => {
+    if (hubSecretRetryNonce === 0) return
+    const st = useHubStore.getState()
+    for (const entry of st.hubEntries) {
+      if (!st.hubSecrets[entry.dTag] && st.hubSecretFailReason[entry.dTag] !== 'not-a-member') {
+        loadedRef.current.delete(entry.dTag)
+      }
+    }
+  }, [hubSecretRetryNonce])
 
   // Clear loadedRef when auth identity changes so secrets can be re-fetched.
   // This handles the case where the signer (browser extension) connects late —
@@ -870,6 +886,6 @@ export function useHubLoader() {
         loadedRef.current.delete(entry.dTag)
       }
     })
-  }, [hubEntries, hubs, hubSecrets, setHubData, setHubStatus, setHubSecret, setHubMembers, pubkey, privateKey, signer, setEpochSecrets, setGroupEpochSecrets])
+  }, [hubEntries, hubs, hubSecrets, setHubData, setHubStatus, setHubSecret, setHubMembers, pubkey, privateKey, signer, setEpochSecrets, setGroupEpochSecrets, hubSecretRetryNonce])
 }
 

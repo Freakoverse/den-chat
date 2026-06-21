@@ -10,6 +10,7 @@
 import { useEffect } from 'react'
 import { useUserStore } from '@/stores/userStore'
 import { useHubStore, type HubEntry, type HubFolder } from '@/stores/hubStore'
+import { resetSignerGuard } from '@/lib/auth/signerGuard'
 import { discover } from '@/lib/auth/pc55'
 import { fetchReplaceable, fetchEvents } from '@/lib/nostr/relay-pool'
 import { KINDS } from '@/lib/crypto/constants'
@@ -265,9 +266,40 @@ export function useStartup() {
         if (!useDM04Store.getState().subscription) {
           useDM04Store.getState().startSubscription(pubkey, signer, privateKey)
         }
+        // Remote-signer recovery: while the PWA was backgrounded its relay link to
+        // the signer (NIP-46 etc.) may have been suspended, leaving hub secrets
+        // un-decrypted ("Loading hub data…"). On return, reset the signer circuit
+        // breaker and re-attempt any hub that failed to decrypt for a signer reason.
+        if (signer && !privateKey) {
+          const hub = useHubStore.getState()
+          const hasTransientFailure = hub.hubEntries.some(
+            (e) => hub.hubSecretsResolved[e.dTag] && !hub.hubSecrets[e.dTag] && hub.hubSecretFailReason[e.dTag] === 'signer-issue',
+          )
+          if (hasTransientFailure) {
+            resetSignerGuard()
+            hub.bumpHubSecretRetry()
+          }
+        }
       }
     }
     document.addEventListener('visibilitychange', handleVisibility)
+
+    // One-shot post-login recovery: same-device remote signers can have their
+    // relay link disrupted by the login app-switch, so the first hub-secret
+    // decrypts fail. A few seconds in, if any hub is still stuck on a signer
+    // failure, reset the circuit breaker and retry once (bounded thereafter).
+    const signerRetryTimer = setTimeout(() => {
+      const { signer: s, privateKey: pk } = useUserStore.getState()
+      if (!s || pk) return
+      const hub = useHubStore.getState()
+      const hasTransientFailure = hub.hubEntries.some(
+        (e) => hub.hubSecretsResolved[e.dTag] && !hub.hubSecrets[e.dTag] && hub.hubSecretFailReason[e.dTag] === 'signer-issue',
+      )
+      if (hasTransientFailure) {
+        resetSignerGuard()
+        hub.bumpHubSecretRetry()
+      }
+    }, 8000)
 
     // ─── Deferred event redundancy check (personal events) ───
     // 30s after startup, verify that critical user events exist on all user relays.
@@ -329,6 +361,7 @@ export function useStartup() {
       unsubHubStore()
       clearTimeout(dmFallbackTimer)
       clearTimeout(redundancyTimer)
+      clearTimeout(signerRetryTimer)
     }
   }, [isAuthenticated, pubkey])
 

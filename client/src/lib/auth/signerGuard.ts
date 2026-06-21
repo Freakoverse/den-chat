@@ -75,6 +75,24 @@ interface DomainState {
 
 const domains: Record<string, DomainState> = {}
 
+/**
+ * Reset every domain's circuit breaker + failure cache. Call this when the
+ * remote-signer link has likely been re-established (e.g. the PWA returned to
+ * the foreground after the relay WebSocket was suspended), so previously-failed
+ * decrypts get a fresh attempt instead of being blocked by a stale open circuit.
+ * In-flight queues are left untouched.
+ */
+export function resetSignerGuard() {
+  for (const key of Object.keys(domains)) {
+    const d = domains[key]
+    d.failedCiphertexts = []
+    d.failedSet.clear()
+    d.consecutiveFailures = 0
+    d.circuitOpen = false
+    d.circuitOpenUntil = 0
+  }
+}
+
 function getDomain(key: string): DomainState {
   if (!domains[key]) {
     domains[key] = {

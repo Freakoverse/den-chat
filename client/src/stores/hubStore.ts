@@ -153,9 +153,13 @@ export interface HubState {
    *  Allows consumers (e.g. useMessages) to react to secret updates without
    *  subscribing to the full secret objects (which would cause new references). */
   _secretsVersion: number
+  /** Bumped to force useHubLoader to re-attempt hubs whose secret failed to
+   *  decrypt (e.g. after a remote-signer reconnect on app resume). */
+  hubSecretRetryNonce: number
 
   /** Actions */
   setHubEntries: (entries: HubEntry[], folders: HubFolder[]) => void
+  bumpHubSecretRetry: () => void
   setHubListLoaded: (loaded: boolean) => void
   setHubData: (dTag: string, data: HubData) => void
   setHubStatus: (dTag: string, status: HubStatus) => void
@@ -210,6 +214,8 @@ export const useHubStore = create<HubState>((set) => ({
   hubPageCounts: {},
   hubSecretFailReason: {},
   _secretsVersion: 0,
+  hubSecretRetryNonce: 0,
+  bumpHubSecretRetry: () => set((state) => ({ hubSecretRetryNonce: state.hubSecretRetryNonce + 1 })),
 
   setHubEntries: (entries, folders) => set({ hubEntries: entries, folders, hubListLoaded: true }),
   setHubListLoaded: (loaded) => set({ hubListLoaded: loaded }),
