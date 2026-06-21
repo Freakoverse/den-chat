@@ -231,6 +231,15 @@ export function SettingsPage() {
                     </button>
                   </Fragment>
                 ))}
+                {/* Log out — mobile (desktop has it in the left nav) */}
+                <div className="mx-3 my-1 border-t border-border" />
+                <button
+                  onClick={() => { setMobileNavOpen(false); logout() }}
+                  className="flex items-center gap-3 w-full px-3 py-2 text-sm transition-colors cursor-pointer rounded-md text-destructive hover:bg-destructive hover:text-white"
+                >
+                  <LogOut size={18} />
+                  Log Out
+                </button>
               </div>
             )}
           </div>
