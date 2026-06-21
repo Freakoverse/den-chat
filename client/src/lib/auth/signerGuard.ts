@@ -22,6 +22,25 @@ import type { ISigner } from '@/stores/userStore'
 const MAX_CONSECUTIVE_FAILURES = 2
 const CIRCUIT_OPEN_DURATION_MS = 120_000 // 2 minutes (longer since threshold is lower)
 const FAILURE_CACHE_MAX = 500
+/**
+ * Max time to wait for ONE remote-signer encrypt/decrypt before giving up.
+ * Without this, a NIP-46 signer that never answers (e.g. the relay connection
+ * dropped while the PWA was backgrounded) hangs the serialized queue forever —
+ * which is what leaves hub loading stuck on "Loading hub data…". On timeout we
+ * reject with a message `isSignerRejection` recognises, so the circuit opens and
+ * the rest of the batch fast-fails instead of hanging.
+ */
+const SIGNER_CALL_TIMEOUT_MS = 20_000
+
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`Signer ${label} timed out after ${ms / 1000}s`)), ms)
+    p.then(
+      (v) => { clearTimeout(timer); resolve(v) },
+      (e) => { clearTimeout(timer); reject(e) },
+    )
+  })
+}
 
 /* ─── Error types ─── */
 
@@ -248,7 +267,7 @@ export async function guardedDecrypt(
     checkPreconditions(domain, protocol)
 
     try {
-      const result = await callSignerDecrypt(ciphertext, pubkey, signer, protocol)
+      const result = await withTimeout(callSignerDecrypt(ciphertext, pubkey, signer, protocol), SIGNER_CALL_TIMEOUT_MS, 'decrypt')
       onSuccess(domain)
       return result
     } catch (err) {
@@ -290,7 +309,7 @@ export async function guardedEncrypt(
     checkPreconditions(domain, protocol)
 
     try {
-      const result = await callSignerEncrypt(plaintext, pubkey, signer, protocol)
+      const result = await withTimeout(callSignerEncrypt(plaintext, pubkey, signer, protocol), SIGNER_CALL_TIMEOUT_MS, 'encrypt')
       onSuccess(domain)
       return result
     } catch (err) {
