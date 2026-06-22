@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { setDraftUser } from '@/stores/draftStore'
 
-export type AuthMethod = 'upv2' | 'pc55' | 'nip46' | 'nsec' | 'seed' | null
+export type AuthMethod = 'upv2' | 'pc55' | 'nip46' | 'nsec' | 'seed' | 'vault' | null
 
 /**
  * Generic signer interface — any auth method that can sign events

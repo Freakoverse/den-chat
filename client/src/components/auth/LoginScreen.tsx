@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input'
 import { Card, CardContent } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
 import { DenChatLogo } from '@/components/ui/DenChatLogo'
+import { VaultAuth } from '@/components/auth/VaultAuth'
 import { QRCodeSVG } from 'qrcode.react'
 import { isValidMnemonic } from '@/lib/auth'
 import { uploadToBlossomServers, blossomServers as blossomServerManager } from '@/lib/blossom'
@@ -155,6 +156,9 @@ export function LoginScreen() {
   const [pinHint, setPinHint] = useState('')
   const [showPin, setShowPin] = useState(false)
   const [accountName, setAccountName] = useState('')
+  // On mobile web (PWA), the vault flow is the primary login. `vaultMode` lets the
+  // user fall back to the other sign-in options (remote signer, etc.) if needed.
+  const [vaultMode, setVaultMode] = useState(!isDesktop && isMobile)
   const [backupMnemonic, setBackupMnemonic] = useState<string | null>(null)
   const [showBackupWords, setShowBackupWords] = useState(false)
   const [backupCopied, setBackupCopied] = useState(false)
@@ -1313,6 +1317,22 @@ export function LoginScreen() {
             <Button variant="ghost" onClick={goBack} className="w-full text-muted-foreground">Back</Button>
           </CardContent>
         </Card>
+      </div>
+    )
+  }
+
+  // ────────────────────────────────────────────
+  // ─── Render: Vault (mobile/PWA primary login) ───
+  // ────────────────────────────────────────────
+  if (vaultMode) {
+    return (
+      <div className="flex items-center justify-center h-full overflow-y-auto bg-surface-background relative p-4 max-[1080px]:items-start">
+        {bgImageUrl && <BlossomImage src={bgImageUrl} alt="" className="fixed inset-0 w-full h-full" imgClassName="object-right-bottom" />}
+        <div className="relative z-10 w-full max-w-sm py-8 space-y-4">
+          <div className="flex justify-center"><DenChatLogo className="h-9" /></div>
+          <VaultAuth />
+          <button onClick={() => setVaultMode(false)} className="block mx-auto text-xs text-muted-foreground hover:text-foreground cursor-pointer">Other sign-in options</button>
+        </div>
       </div>
     )
   }

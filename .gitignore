@@ -8,6 +8,9 @@ client/dist-ssr/
 # ── Landing page (separate repo — denchat.top) ──
 landing/
 
+# ── Vault (separate repo + origin — vault.denchat.top) ──
+vault/
+
 # ── Tauri ──
 src-tauri/target/
 src-tauri/gen/schemas/

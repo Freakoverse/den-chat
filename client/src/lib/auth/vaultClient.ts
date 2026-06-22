@@ -1,0 +1,126 @@
+/**
+ * vaultClient — talks to the isolated vault origin (vault.denchat.top) from the app.
+ *
+ * Embeds the vault as a hidden iframe and proxies key operations over postMessage.
+ * The private key lives entirely in the vault origin; the app only ever sends
+ * "sign this" / "decrypt this" requests and gets results back — so an XSS in the
+ * app can't read the key.
+ *
+ * The vault is local (no relays/network), in the same page process, so there's no
+ * connection to drop — no reconnect logic needed (unlike NIP-46).
+ */
+
+import type { ISigner } from '@/stores/userStore'
+import type { BackupPayloadV1 } from '@/lib/auth/backupCrypto'
+
+/** The vault's deployed origin. Must match the vault's ALLOWED_PARENT_ORIGINS pairing. */
+export const VAULT_ORIGIN = 'https://vault.denchat.top'
+
+/** Plaintext metadata for a stored account (no secrets). */
+export interface VaultAccount { pubkey: string; npub: string; name: string | null; createdAt: number }
+export interface VaultStatus { accounts: VaultAccount[]; active: string | null; unlocked: boolean; pubkey: string | null }
+
+const REQUEST_TIMEOUT = 30_000
+
+interface PendingRequest {
+  resolve: (v: unknown) => void
+  reject: (e: Error) => void
+  timer: ReturnType<typeof setTimeout>
+}
+
+class VaultClient {
+  private iframe: HTMLIFrameElement | null = null
+  private ready: Promise<void> | null = null
+  private readyResolve: (() => void) | null = null
+  private pending = new Map<string, PendingRequest>()
+  private seq = 0
+
+  /** Lazily create the iframe + message listener and wait for the vault handshake. */
+  private ensure(): Promise<void> {
+    if (this.ready) return this.ready
+    this.ready = new Promise<void>((resolve) => { this.readyResolve = resolve })
+
+    window.addEventListener('message', this.onMessage)
+
+    const iframe = document.createElement('iframe')
+    iframe.src = VAULT_ORIGIN + '/'
+    iframe.setAttribute('aria-hidden', 'true')
+    iframe.style.cssText = 'position:fixed;width:0;height:0;border:0;visibility:hidden;'
+    iframe.title = 'DEN Vault'
+    document.body.appendChild(iframe)
+    this.iframe = iframe
+
+    return this.ready
+  }
+
+  private onMessage = (e: MessageEvent) => {
+    if (e.origin !== VAULT_ORIGIN) return // only trust the vault origin
+    const msg = e.data
+    if (msg?.type === 'vault-ready') { this.readyResolve?.(); return }
+    if (typeof msg?.id !== 'string') return
+    const p = this.pending.get(msg.id)
+    if (!p) return
+    this.pending.delete(msg.id)
+    clearTimeout(p.timer)
+    if (msg.ok) p.resolve(msg.result)
+    else p.reject(new Error(msg.error || 'Vault error'))
+  }
+
+  /** Send an op to the vault and await its result. */
+  async call<T = unknown>(type: string, params?: unknown): Promise<T> {
+    await this.ensure()
+    const id = `r${++this.seq}`
+    const win = this.iframe?.contentWindow
+    if (!win) throw new Error('Vault not available')
+    return new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id)
+        reject(new Error('Vault request timed out'))
+      }, REQUEST_TIMEOUT)
+      this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject, timer })
+      win.postMessage({ id, type, params }, VAULT_ORIGIN)
+    })
+  }
+
+  // ── Lifecycle / identity management ──
+  status() { return this.call<VaultStatus>('status') }
+  listAccounts() { return this.call<VaultAccount[]>('listAccounts') }
+  generate() { return this.call<{ mnemonic: string; pubkey: string }>('generate') }
+  saveNew(mnemonic: string, pin: string, name?: string) { return this.call<{ pubkey: string }>('saveNew', { mnemonic, pin, name }) }
+  importBackup(payload: BackupPayloadV1, password: string, name?: string) { return this.call<{ pubkey: string }>('importBackup', { payload, password, name }) }
+  unlock(pubkey: string, pin: string) { return this.call<{ pubkey: string }>('unlock', { pubkey, pin }) }
+  lock() { return this.call('lock') }
+  removeAccount(pubkey: string, pin: string) { return this.call<{ ok: boolean }>('removeAccount', { pubkey, pin }) }
+  exportBackup(pubkey: string, pin: string) { return this.call<{ payload: BackupPayloadV1 }>('exportBackup', { pubkey, pin }) }
+
+  // ── ISigner-shaped operations ──
+  getPublicKey() { return this.call<string>('getPublicKey') }
+  signEvent(event: Record<string, unknown>) { return this.call<Record<string, unknown>>('signEvent', { event }) }
+  nip04Encrypt(pubkey: string, plaintext: string) { return this.call<string>('nip04Encrypt', { pubkey, plaintext }) }
+  nip04Decrypt(pubkey: string, ciphertext: string) { return this.call<string>('nip04Decrypt', { pubkey, ciphertext }) }
+  nip44Encrypt(pubkey: string, plaintext: string) { return this.call<string>('nip44Encrypt', { pubkey, plaintext }) }
+  nip44Decrypt(pubkey: string, ciphertext: string) { return this.call<string>('nip44Decrypt', { pubkey, ciphertext }) }
+}
+
+let singleton: VaultClient | null = null
+export function getVaultClient(): VaultClient {
+  if (!singleton) singleton = new VaultClient()
+  return singleton
+}
+
+/** Adapter so the rest of the app can use the vault as a standard ISigner. */
+export function vaultSigner(): ISigner {
+  const v = getVaultClient()
+  return {
+    getPublicKey: () => v.getPublicKey(),
+    signEvent: (draft) => v.signEvent(draft),
+    nip04: {
+      encrypt: (pubkey, plaintext) => v.nip04Encrypt(pubkey, plaintext),
+      decrypt: (pubkey, ciphertext) => v.nip04Decrypt(pubkey, ciphertext),
+    },
+    nip44: {
+      encrypt: (pubkey, plaintext) => v.nip44Encrypt(pubkey, plaintext),
+      decrypt: (pubkey, ciphertext) => v.nip44Decrypt(pubkey, ciphertext),
+    },
+  }
+}
