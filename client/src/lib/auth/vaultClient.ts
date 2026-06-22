@@ -34,6 +34,14 @@ class VaultClient {
   private readyResolve: (() => void) | null = null
   private pending = new Map<string, PendingRequest>()
   private seq = 0
+  /** Last-unlocked account — used to re-unlock after the vault auto-locks on idle. */
+  private activePubkey: string | null = null
+  /** App-provided handler that prompts the user for their PIN and unlocks. */
+  private unlockHandler: ((pubkey: string) => Promise<void>) | null = null
+
+  /** Register the re-unlock prompt (called by VaultLockGate). */
+  setUnlockHandler(fn: ((pubkey: string) => Promise<void>) | null) { this.unlockHandler = fn }
+  getActivePubkey() { return this.activePubkey }
 
   /** Lazily create the iframe + message listener and wait for the vault handshake. */
   private ensure(): Promise<void> {
@@ -82,24 +90,46 @@ class VaultClient {
     })
   }
 
+  /**
+   * Like call(), but if the vault has auto-locked on idle, prompt the user to
+   * re-enter their PIN (via the registered handler) and retry once. Used for the
+   * signer ops so a lock mid-session is transparent rather than a hard failure.
+   */
+  private async callWithRelock<T>(type: string, params?: unknown): Promise<T> {
+    try {
+      return await this.call<T>(type, params)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      if (/lock/i.test(msg) && this.unlockHandler && this.activePubkey) {
+        await this.unlockHandler(this.activePubkey)  // resolves once the user unlocks
+        return await this.call<T>(type, params)      // retry once
+      }
+      throw e
+    }
+  }
+
   // ── Lifecycle / identity management ──
   status() { return this.call<VaultStatus>('status') }
   listAccounts() { return this.call<VaultAccount[]>('listAccounts') }
   generate() { return this.call<{ mnemonic: string; pubkey: string }>('generate') }
   saveNew(mnemonic: string, pin: string, name?: string) { return this.call<{ pubkey: string }>('saveNew', { mnemonic, pin, name }) }
   importBackup(payload: BackupPayloadV1, password: string, name?: string) { return this.call<{ pubkey: string }>('importBackup', { payload, password, name }) }
-  unlock(pubkey: string, pin: string) { return this.call<{ pubkey: string }>('unlock', { pubkey, pin }) }
+  async unlock(pubkey: string, pin: string) {
+    const r = await this.call<{ pubkey: string }>('unlock', { pubkey, pin })
+    this.activePubkey = pubkey
+    return r
+  }
   lock() { return this.call('lock') }
   removeAccount(pubkey: string, pin: string) { return this.call<{ ok: boolean }>('removeAccount', { pubkey, pin }) }
   exportBackup(pubkey: string, pin: string) { return this.call<{ payload: BackupPayloadV1 }>('exportBackup', { pubkey, pin }) }
 
-  // ── ISigner-shaped operations ──
-  getPublicKey() { return this.call<string>('getPublicKey') }
-  signEvent(event: Record<string, unknown>) { return this.call<Record<string, unknown>>('signEvent', { event }) }
-  nip04Encrypt(pubkey: string, plaintext: string) { return this.call<string>('nip04Encrypt', { pubkey, plaintext }) }
-  nip04Decrypt(pubkey: string, ciphertext: string) { return this.call<string>('nip04Decrypt', { pubkey, ciphertext }) }
-  nip44Encrypt(pubkey: string, plaintext: string) { return this.call<string>('nip44Encrypt', { pubkey, plaintext }) }
-  nip44Decrypt(pubkey: string, ciphertext: string) { return this.call<string>('nip44Decrypt', { pubkey, ciphertext }) }
+  // ── ISigner-shaped operations (transparent re-unlock on idle-lock) ──
+  getPublicKey() { return this.callWithRelock<string>('getPublicKey') }
+  signEvent(event: Record<string, unknown>) { return this.callWithRelock<Record<string, unknown>>('signEvent', { event }) }
+  nip04Encrypt(pubkey: string, plaintext: string) { return this.callWithRelock<string>('nip04Encrypt', { pubkey, plaintext }) }
+  nip04Decrypt(pubkey: string, ciphertext: string) { return this.callWithRelock<string>('nip04Decrypt', { pubkey, ciphertext }) }
+  nip44Encrypt(pubkey: string, plaintext: string) { return this.callWithRelock<string>('nip44Encrypt', { pubkey, plaintext }) }
+  nip44Decrypt(pubkey: string, ciphertext: string) { return this.callWithRelock<string>('nip44Decrypt', { pubkey, ciphertext }) }
 }
 
 let singleton: VaultClient | null = null

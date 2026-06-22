@@ -12,6 +12,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
 import { DenChatLogo } from '@/components/ui/DenChatLogo'
 import { VaultAuth } from '@/components/auth/VaultAuth'
+import { vaultSigner } from '@/lib/auth/vaultClient'
 import { WarningCarousel } from '@/components/auth/WarningCarousel'
 import { PinInput } from '@/components/auth/PinInput'
 import { QRCodeSVG } from 'qrcode.react'
@@ -144,6 +145,8 @@ export function LoginScreen() {
   // ── Onboarding state (post-generate profile setup) ──
   const [onboardingPubkey, setOnboardingPubkey] = useState<string | null>(null)
   const [onboardingPrivateKey, setOnboardingPrivateKey] = useState<string | null>(null)
+  // When true, onboarding signs via the vault (no raw key) and finishes by logging in with 'vault'.
+  const [vaultOnboarding, setVaultOnboarding] = useState(false)
   const [profileName, setProfileName] = useState('')
   const [profilePicUrl, setProfilePicUrl] = useState('')
   const [picUploadStatus, setPicUploadStatus] = useState<'idle' | 'uploading' | 'success' | 'error'>('idle')
@@ -726,7 +729,7 @@ export function LoginScreen() {
       const enabledBlossoms = onboardBlossoms.filter(b => b.enabled).map(b => b.url)
       const servers = enabledBlossoms.length > 0 ? enabledBlossoms : undefined
       const { hash, serverUrls } = await uploadToBlossomServers(
-        data, null, onboardingPrivateKey, servers, file.type,
+        data, vaultOnboarding ? vaultSigner() : null, vaultOnboarding ? null : onboardingPrivateKey, servers, file.type,
         (p) => setPicUploadProgress({ ...p }),
         () => { const c = new AbortController(); picAbortRef.current = c; return c.signal },
       )
@@ -744,7 +747,10 @@ export function LoginScreen() {
 
   // ─── Onboarding: Publish profile + relay list + blossom list ───
   const handleOnboardingPublish = async () => {
-    if (!onboardingPubkey || !onboardingPrivateKey) return
+    if (!onboardingPubkey) return
+    if (!vaultOnboarding && !onboardingPrivateKey) return
+    const oSigner = vaultOnboarding ? vaultSigner() : null
+    const oPk = vaultOnboarding ? null : onboardingPrivateKey
     setPublishing(true)
     try {
       const enabledRelays = onboardRelays.filter(r => r.enabled)
@@ -760,18 +766,18 @@ export function LoginScreen() {
         ...(profilePicUrl ? { picture: profilePicUrl } : {}),
       })
       const profileUnsigned = createUnsignedEvent(0, profileContent, [])
-      const signedProfile = await signWithSigner(profileUnsigned, null, onboardingPrivateKey)
+      const signedProfile = await signWithSigner(profileUnsigned, oSigner, oPk)
 
       // 2. Kind 10002 — Relay list (NIP-65)
       const relayTags: [string, ...string[]][] = enabledRelays.map(r => ['r', r.url])
       const relayUnsigned = createUnsignedEvent(10002, '', relayTags)
-      const signedRelays = await signWithSigner(relayUnsigned, null, onboardingPrivateKey)
+      const signedRelays = await signWithSigner(relayUnsigned, oSigner, oPk)
 
       // 3. Kind 10063 — Blossom server list
       const enabledBlossoms = onboardBlossoms.filter(b => b.enabled)
       const blossomTags: [string, ...string[]][] = enabledBlossoms.map(b => ['server', b.url])
       const blossomUnsigned = createUnsignedEvent(10063, '', blossomTags)
-      const signedBlossoms = await signWithSigner(blossomUnsigned, null, onboardingPrivateKey)
+      const signedBlossoms = await signWithSigner(blossomUnsigned, oSigner, oPk)
 
       // Publish all 3 in parallel
       await Promise.allSettled([
@@ -783,28 +789,55 @@ export function LoginScreen() {
       console.error('Onboarding publish failed:', err)
     } finally {
       setPublishing(false)
-      // Navigate carousel to the just-created account
       const createdPubkey = onboardingPubkey
-      if (createdPubkey) {
-        for (let gi = 0; gi < accountGroups.length; gi++) {
-          const ai = accountGroups[gi].accounts.findIndex(a => a.pubkey === createdPubkey)
-          if (ai !== -1) { setSelectedSeedIdx(gi); setAccountIdx(ai); break }
+      if (vaultOnboarding) {
+        // Vault path: authenticate with the vault signer instead of the desktop carousel.
+        if (createdPubkey) finishVaultOnboarding(createdPubkey)
+      } else {
+        // Navigate carousel to the just-created account
+        if (createdPubkey) {
+          for (let gi = 0; gi < accountGroups.length; gi++) {
+            const ai = accountGroups[gi].accounts.findIndex(a => a.pubkey === createdPubkey)
+            if (ai !== -1) { setSelectedSeedIdx(gi); setAccountIdx(ai); break }
+          }
         }
+        // Clear sensitive state + navigate
+        setOnboardingPubkey(null)
+        setOnboardingPrivateKey(null)
+        setProfileName('')
+        setProfilePicUrl('')
+        setPicUploadStatus('idle')
+        setPicUploadProgress(null)
+        setPicUploadError(null)
+        setScreen('saved-accounts')
       }
-      // Clear sensitive state + navigate
-      setOnboardingPubkey(null)
-      setOnboardingPrivateKey(null)
-      setProfileName('')
-      setProfilePicUrl('')
-      setPicUploadStatus('idle')
-      setPicUploadProgress(null)
-      setPicUploadError(null)
-      setScreen('saved-accounts')
     }
+  }
+
+  // ─── Vault (route-b): hand a freshly-created vault account into the onboarding wizard ───
+  const handleVaultCreated = (pubkey: string) => {
+    setOnboardingPubkey(pubkey)
+    setOnboardingPrivateKey(null)
+    setVaultOnboarding(true)
+    setProfileName('')
+    setProfilePicUrl('')
+    setVaultMode(false)           // leave the vault gate so the onboarding screen renders
+    setScreen('onboarding-profile')
+  }
+  // Finish a vault onboarding: set the vault signer + authenticate (instead of the desktop carousel).
+  const finishVaultOnboarding = (pubkey: string) => {
+    setVaultOnboarding(false)
+    setOnboardingPubkey(null)
+    setProfileName('')
+    setProfilePicUrl('')
+    setPicUploadStatus('idle')
+    setSigner(vaultSigner())
+    login(pubkey, 'vault')
   }
 
   // ─── Onboarding: Skip ───
   const handleOnboardingSkip = () => {
+    if (vaultOnboarding) { if (onboardingPubkey) finishVaultOnboarding(onboardingPubkey); return }
     // Navigate carousel to the just-created account
     const createdPubkey = onboardingPubkey
     if (createdPubkey) {
@@ -1223,7 +1256,7 @@ export function LoginScreen() {
       <div className="flex items-center justify-center h-full overflow-y-auto bg-surface-background relative p-4 max-[1080px]:items-start">
         {bgImageUrl && <BlossomImage src={bgImageUrl} alt="" className="fixed inset-0 w-full h-full" imgClassName="object-right-bottom" />}
         <div className="relative z-10 w-full max-w-md py-8 space-y-4">
-          <VaultAuth />
+          <VaultAuth onCreated={handleVaultCreated} />
           <button onClick={() => setVaultMode(false)} className="block mx-auto text-xs text-muted-foreground hover:text-foreground cursor-pointer">Other sign-in options</button>
         </div>
       </div>
@@ -2249,6 +2282,7 @@ export function LoginScreen() {
         open={showGuide}
         onClose={() => setShowGuide(false)}
         isDesktop={isDesktop}
+        isMobile={isMobile}
         onGenerate={() => { setShowGuide(false); openGenerateFlow() }}
         onLocalSigner={() => { setShowGuide(false); handleLocalLogin() }}
         onExtension={() => { setShowGuide(false); handleNip07Login() }}
@@ -2603,10 +2637,11 @@ const GUIDE_PAGES: { title: string; icon: React.ReactNode; content: React.ReactN
   },
 ]
 
-function GuideModal({ open, onClose, isDesktop, onGenerate, onLocalSigner, onExtension }: {
+function GuideModal({ open, onClose, isDesktop, isMobile, onGenerate, onLocalSigner, onExtension }: {
   open: boolean
   onClose: () => void
   isDesktop: boolean
+  isMobile: boolean
   onGenerate: () => void
   onLocalSigner: () => void
   onExtension: () => void
@@ -2773,6 +2808,11 @@ function GuideModal({ open, onClose, isDesktop, onGenerate, onLocalSigner, onExt
                         Generate Account
                       </Button>
                     </>
+                  ) : isMobile ? (
+                    <Button onClick={onClose} className="w-full gap-2">
+                      <Check size={16} />
+                      Done
+                    </Button>
                   ) : (
                     <>
                       <Button variant="outline" onClick={onExtension} className="w-full gap-2">

@@ -32,6 +32,7 @@
     "emoji-picker-react": "^4.18.0",
     "framer-motion": "^12.38.0",
     "jose": "^6.2.3",
+    "jsqr": "^1.4.0",
     "livekit-client": "^2.19.2",
     "lru-cache": "^11.2.7",
     "lucide-react": "^0.577.0",

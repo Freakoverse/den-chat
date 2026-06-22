@@ -43,7 +43,7 @@ import {
   Settings, Palette, Globe, Shield, ShieldCheck, Info, Keyboard, MessageSquare, Users,
   Sun, Moon, Monitor, Plus, Minus, Trash2, Eye, EyeOff, Search,
   Copy, Check, Lock, FileDown, AlertTriangle, X, RotateCcw, RefreshCw,
-  Loader2, Send, HelpCircle, XCircle, UserMinus, ShieldOff, Tag, Download,
+  Loader2, Send, HelpCircle, XCircle, UserMinus, ShieldOff, Tag, Download, QrCode,
   GripVertical, FolderPlus, ChevronDown, ChevronRight, Pencil, ListPlus, Upload, Undo2,
   BookOpen, Mic, Volume2, Camera, MonitorPlay, Megaphone, Crown, Sparkles, Zap, Palette as PaletteIcon, BadgeCheck, MessageCircleOff, ArrowUp, ArrowDown, Heart, LogOut, Gamepad2, Activity, Save,
 } from 'lucide-react'
@@ -52,6 +52,8 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { truncateNpub } from '@/lib/utils'
 import { Input } from '@/components/ui/input'
 import { getVaultClient } from '@/lib/auth/vaultClient'
+import { PinInput } from '@/components/auth/PinInput'
+import { QRCodeSVG } from 'qrcode.react'
 import { UserPanel } from '@/components/ui/UserPanel'
 import { ResizablePanel } from '@/components/ui/ResizablePanel'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
@@ -3939,25 +3941,40 @@ function VaultSecuritySection({ pubkey, fingerprint }: { pubkey: string; fingerp
   const [exportPin, setExportPin] = useState('')
   const [exportErr, setExportErr] = useState('')
   const [exportBusy, setExportBusy] = useState(false)
+  const [qrText, setQrText] = useState<string | null>(null)
   const [showDelete, setShowDelete] = useState(false)
   const [deletePin, setDeletePin] = useState('')
   const [deleteConfirm, setDeleteConfirm] = useState('')
   const [deleteErr, setDeleteErr] = useState('')
   const [deleteBusy, setDeleteBusy] = useState(false)
 
-  const handleExport = async () => {
-    if (!exportPin) { setExportErr('Enter your PIN'); return }
+  // Decrypt + re-export the encrypted backup payload (PIN-gated). Shared by file + QR.
+  const getPayloadJson = async (): Promise<string | null> => {
+    if (!exportPin) { setExportErr('Enter your PIN'); return null }
     setExportBusy(true); setExportErr('')
     try {
       const { payload } = await getVaultClient().exportBackup(pubkey, exportPin)
-      const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a'); a.href = url; a.download = `den-backup-${Date.now()}.json`
-      document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url)
-      setExportPin('')
+      return JSON.stringify(payload)
     } catch (e) {
       setExportErr(e instanceof Error ? e.message : 'Wrong PIN')
+      return null
     } finally { setExportBusy(false) }
+  }
+
+  const handleExport = async () => {
+    const json = await getPayloadJson()
+    if (!json) return
+    const blob = new Blob([json], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a'); a.href = url; a.download = `den-backup-${Date.now()}.json`
+    document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url)
+    setExportPin('')
+  }
+
+  const handleShowQR = async () => {
+    const json = await getPayloadJson()
+    if (!json) return
+    setQrText(json); setExportPin('')
   }
 
   const handleDelete = async () => {
@@ -3992,14 +4009,31 @@ function VaultSecuritySection({ pubkey, fingerprint }: { pubkey: string; fingerp
           <h4 className="text-sm font-semibold text-foreground">Export encrypted backup</h4>
         </div>
         <div className="p-4 space-y-3">
-          <p className="text-xs text-muted-foreground">Re-download your PIN-encrypted backup file. Enter your PIN to confirm.</p>
-          <Input type="password" inputMode="numeric" placeholder="PIN" value={exportPin} onChange={(e) => setExportPin(e.target.value)} />
+          <p className="text-xs text-muted-foreground">Re-download your PIN-encrypted backup file, or show it as a QR to transfer to another device. Enter your PIN to confirm.</p>
+          <PinInput value={exportPin} onChange={setExportPin} placeholder="PIN" onEnter={handleExport} />
           {exportErr && <p className="text-xs text-destructive">{exportErr}</p>}
-          <button onClick={handleExport} disabled={exportBusy} className="w-full h-9 px-3 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5">
-            {exportBusy ? <Loader2 size={15} className="animate-spin" /> : <><Download size={15} /> Download backup</>}
-          </button>
+          <div className="grid grid-cols-2 gap-2">
+            <button onClick={handleExport} disabled={exportBusy} className="h-9 px-3 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5">
+              {exportBusy ? <Loader2 size={15} className="animate-spin" /> : <><Download size={15} /> File</>}
+            </button>
+            <button onClick={handleShowQR} disabled={exportBusy} className="h-9 px-3 rounded-lg border border-border text-sm font-medium hover:bg-secondary transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5">
+              <QrCode size={15} /> QR
+            </button>
+          </div>
         </div>
       </section>
+
+      {/* PIN-gated QR of the encrypted backup */}
+      {qrText && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={() => setQrText(null)}>
+          <div className="w-full max-w-xs rounded-xl bg-card border border-border shadow-xl p-6 flex flex-col items-center gap-4 text-center" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-base font-bold text-foreground">Encrypted backup QR</h3>
+            <div className="bg-white p-3 rounded-lg"><QRCodeSVG value={qrText} size={232} level="M" /></div>
+            <p className="text-xs text-muted-foreground">Scan this from <span className="font-medium text-foreground">Import → Scan QR</span> on the other device. It's still encrypted — the PIN is required to open it.</p>
+            <button onClick={() => setQrText(null)} className="w-full h-9 px-3 rounded-lg border border-border text-sm font-medium hover:bg-secondary transition-colors cursor-pointer">Done</button>
+          </div>
+        </div>
+      )}
 
       {/* Delete from this device (PIN + fingerprint confirm) */}
       <section className="rounded-xl border border-destructive/30 bg-destructive/5 overflow-hidden">
@@ -4013,7 +4047,7 @@ function VaultSecuritySection({ pubkey, fingerprint }: { pubkey: string; fingerp
             <button onClick={() => setShowDelete(true)} className="w-full h-9 px-3 rounded-lg border border-destructive/40 text-destructive text-sm font-medium hover:bg-destructive hover:text-white transition-colors cursor-pointer flex items-center justify-center gap-1.5"><Trash2 size={15} /> Delete account</button>
           ) : (
             <>
-              <Input type="password" inputMode="numeric" placeholder="PIN" value={deletePin} onChange={(e) => setDeletePin(e.target.value)} />
+              <PinInput value={deletePin} onChange={setDeletePin} placeholder="PIN" />
               <Input placeholder={`Type "${fingerprint}" to confirm`} value={deleteConfirm} onChange={(e) => setDeleteConfirm(e.target.value)} />
               {deleteErr && <p className="text-xs text-destructive">{deleteErr}</p>}
               <div className="flex gap-2">

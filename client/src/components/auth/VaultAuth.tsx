@@ -11,7 +11,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
-import { Loader2, Plus, Import, KeyRound, Download, FileUp, Check, Copy, ShieldCheck, Eye, EyeOff, Lock, Shield, AlertCircle } from 'lucide-react'
+import { Loader2, Plus, Import, KeyRound, Download, FileUp, Check, Copy, ShieldCheck, Eye, EyeOff, Lock, Shield, AlertCircle, QrCode } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent } from '@/components/ui/card'
@@ -23,6 +23,7 @@ import { getVaultClient, vaultSigner, type VaultAccount } from '@/lib/auth/vault
 import { encryptBackup, parseBackupPayload, verifyBackupMatches } from '@/lib/auth/backupCrypto'
 import { WarningCarousel } from '@/components/auth/WarningCarousel'
 import { PinInput } from '@/components/auth/PinInput'
+import { QRScanner } from '@/components/auth/QRScanner'
 import { truncateNpub } from '@/lib/utils'
 
 type Screen = 'loading' | 'accounts' | 'unlock' | 'create' | 'import'
@@ -42,7 +43,7 @@ function downloadBackup(payload: object) {
   document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url)
 }
 
-export function VaultAuth() {
+export function VaultAuth({ onCreated }: { onCreated?: (pubkey: string) => void } = {}) {
   const [screen, setScreen] = useState<Screen>('loading')
   const [accounts, setAccounts] = useState<VaultAccount[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -57,12 +58,12 @@ export function VaultAuth() {
 
   if (screen === 'loading') return <VaultCard><Loader2 className="animate-spin text-muted-foreground my-6" /></VaultCard>
   if (screen === 'unlock' && selected) return <UnlockScreen account={selected} onBack={() => setScreen('accounts')} onDone={completeLogin} />
-  if (screen === 'create') return <CreateScreen onExit={() => setScreen('accounts')} onDone={completeLogin} />
+  if (screen === 'create') return <CreateScreen onExit={() => setScreen('accounts')} onDone={onCreated ?? completeLogin} />
   if (screen === 'import') return <ImportScreen onBack={() => setScreen('accounts')} onDone={completeLogin} />
 
   return (
     <VaultCard>
-      <Header icon={KeyRound} title="Welcome to DEN" subtitle={accounts.length ? 'Choose an account to unlock, or add one.' : 'Create a new account, or import a backup.'} />
+      <Header icon={KeyRound} title="DEN Chat" subtitle={accounts.length ? 'Choose an account to unlock, or add one.' : 'Create a new account, or import a backup.'} />
       {error && <p className="text-sm text-destructive text-center">{error}</p>}
       {accounts.length > 0 && (
         <div className="w-full space-y-2">
@@ -323,15 +324,15 @@ function ImportScreen({ onBack, onDone }: { onBack: () => void; onDone: (pubkey:
   const [password, setPassword] = useState('')
   const [name, setName] = useState('')
   const [busy, setBusy] = useState(false)
+  const [scanning, setScanning] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
-  const pick = (file: File) => {
-    file.text().then((t) => {
-      if (!parseBackupPayload(t)) { setError('Not a valid DEN backup file.'); return }
-      setFileText(t); setError(null)
-    })
+  const loadText = (t: string) => {
+    if (!parseBackupPayload(t)) { setError('Not a valid DEN backup (file or QR).'); return false }
+    setFileText(t); setError(null); return true
   }
+  const pick = (file: File) => { file.text().then(loadText) }
   const submit = async () => {
     if (!fileText || !password || busy) return
     setBusy(true); setError(null)
@@ -346,9 +347,13 @@ function ImportScreen({ onBack, onDone }: { onBack: () => void; onDone: (pubkey:
 
   return (
     <VaultCard onBack={onBack}>
-      <Header icon={Import} title="Import backup" subtitle="Restore an account from its encrypted backup file." />
+      <Header icon={Import} title="Import backup" subtitle="Restore an account from its encrypted backup file or QR code." />
       <input ref={fileRef} type="file" accept="application/json,.json" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) pick(f) }} />
-      <Button className="w-full" variant="outline" onClick={() => fileRef.current?.click()}><FileUp size={16} /> {fileText ? 'File selected · choose another' : 'Choose backup file'}</Button>
+      <div className="grid grid-cols-2 gap-2 w-full">
+        <Button variant="outline" onClick={() => fileRef.current?.click()}><FileUp size={16} /> {fileText ? 'Loaded ✓' : 'File'}</Button>
+        <Button variant="outline" onClick={() => { setError(null); setScanning(true) }}><QrCode size={16} /> Scan QR</Button>
+      </div>
+      {scanning && <QRScanner onResult={(t) => { loadText(t); setScanning(false) }} onClose={() => setScanning(false)} />}
       {fileText && (
         <>
           <PinInput value={password} onChange={setPassword} placeholder="Backup password / PIN" onEnter={submit} />

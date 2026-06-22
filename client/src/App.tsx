@@ -5,6 +5,7 @@ import { AppLayout } from './components/layout/AppLayout'
 import { SplashScreen } from './components/auth/SplashScreen'
 import { UpdateToast } from './components/ui/UpdateToast'
 import { SignerGuardBanner } from './components/ui/SignerGuardBanner'
+import { VaultLockGate } from './components/auth/VaultLockGate'
 import { DenChatLogo } from './components/ui/DenChatLogo'
 import { useStartup } from './hooks/useStartup'
 import { useDeepLink } from './hooks/useDeepLink'
@@ -88,6 +89,7 @@ export default function App() {
       <UpdateToast />
       <GlobalProfileModalListener />
       <SignerGuardBanner />
+      <VaultLockGate />
       {showOverlay && (
         <div
           style={{
