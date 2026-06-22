@@ -16,9 +16,10 @@ import type { BackupPayloadV1 } from '@/lib/auth/backupCrypto'
 /** The vault's deployed origin. Must match the vault's ALLOWED_PARENT_ORIGINS pairing. */
 export const VAULT_ORIGIN = 'https://vault.denchat.top'
 
-/** Plaintext metadata for a stored account (no secrets). */
-export interface VaultAccount { pubkey: string; npub: string; name: string | null; createdAt: number }
-export interface VaultStatus { accounts: VaultAccount[]; active: string | null; unlocked: boolean; pubkey: string | null }
+/** Plaintext metadata (no secrets). A "seed" holds one PIN; accounts are derived from it. */
+export interface VaultSeed { id: string; name: string | null; kind: 'seed' | 'key'; createdAt: number }
+export interface VaultAccount { pubkey: string; npub: string; seedId: string; index: number; name: string | null; createdAt: number }
+export interface VaultStatus { seeds: VaultSeed[]; accounts: VaultAccount[]; active: string | null; unlocked: boolean; pubkey: string | null }
 
 const REQUEST_TIMEOUT = 30_000
 
@@ -112,8 +113,9 @@ class VaultClient {
   status() { return this.call<VaultStatus>('status') }
   listAccounts() { return this.call<VaultAccount[]>('listAccounts') }
   generate() { return this.call<{ mnemonic: string; pubkey: string }>('generate') }
-  saveNew(mnemonic: string, pin: string, name?: string) { return this.call<{ pubkey: string }>('saveNew', { mnemonic, pin, name }) }
-  importBackup(payload: BackupPayloadV1, password: string, name?: string) { return this.call<{ pubkey: string }>('importBackup', { payload, password, name }) }
+  saveNew(mnemonic: string, pin: string, name?: string) { return this.call<{ pubkey: string; seedId: string }>('saveNew', { mnemonic, pin, name }) }
+  importBackup(payload: BackupPayloadV1, password: string, name?: string) { return this.call<{ pubkey: string; seedId: string }>('importBackup', { payload, password, name }) }
+  deriveAccount(seedId: string, pin: string, name?: string) { return this.call<{ pubkey: string }>('deriveAccount', { seedId, pin, name }) }
   async unlock(pubkey: string, pin: string) {
     const r = await this.call<{ pubkey: string }>('unlock', { pubkey, pin })
     this.activePubkey = pubkey

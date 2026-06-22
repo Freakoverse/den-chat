@@ -4118,16 +4118,9 @@ function SecurityTab() {
   // Copy
   const [copied, setCopied] = useState(false)
 
-  // Export modal
-  const [showExport, setShowExport] = useState(false)
-  const [exportPwd, setExportPwd] = useState('')
-  const [exportPwdConfirm, setExportPwdConfirm] = useState('')
+  // Export (PIN-gated; File + QR — matches the mobile/vault layout)
   const [exportErr, setExportErr] = useState('')
-  const [showPwd, setShowPwd] = useState(false)
-  const [showPwdConfirm, setShowPwdConfirm] = useState(false)
-  const [exportUsePin, setExportUsePin] = useState(true)
   const [exportPinConfirm, setExportPinConfirm] = useState('')
-  const [showExportPin, setShowExportPin] = useState(false)
   const [exportLoading, setExportLoading] = useState(false)
   const [seedQrText, setSeedQrText] = useState<string | null>(null)
 
@@ -4220,35 +4213,20 @@ function SecurityTab() {
   const produceEncryptedPayload = async (): Promise<string | null> => {
     setExportErr('')
     if (!pubkey) { setExportErr('No active account.'); return null }
+    if (!exportPinConfirm) { setExportErr('Enter your PIN to confirm.'); return null }
+    setExportLoading(true)
 
-    let encryptionPassword: string
+    // exportSeed/exportNsec verify the PIN AND return the secret — no reveal-first needed.
     let secret: string
-
-    if (exportUsePin) {
-      // PIN-based: exportSeed/exportNsec verify the PIN AND return the secret,
-      // so this works straight from the PIN — no need to reveal first.
-      if (!exportPinConfirm) { setExportErr('Enter your PIN to confirm.'); return null }
-      setExportLoading(true)
-      try {
-        secret = revealedSeed || revealedNsec || (isNsec ? await exportNsec(pubkey, exportPinConfirm) : await exportSeed(pubkey, exportPinConfirm))
-        encryptionPassword = exportPinConfirm
-      } catch {
-        setExportErr('Incorrect PIN.'); setExportLoading(false); return null
-      }
-    } else {
-      // Custom password mode — encrypts the already-revealed secret.
-      const s = revealedSeed || revealedNsec
-      if (!s) { setExportErr('Reveal your key first to use a custom password.'); return null }
-      if (!exportPwd) { setExportErr('Password is required.'); return null }
-      if (exportPwd !== exportPwdConfirm) { setExportErr('Passwords do not match.'); return null }
-      secret = s
-      encryptionPassword = exportPwd
-      setExportLoading(true)
+    try {
+      secret = revealedSeed || revealedNsec || (isNsec ? await exportNsec(pubkey, exportPinConfirm) : await exportSeed(pubkey, exportPinConfirm))
+    } catch {
+      setExportErr('Incorrect PIN.'); setExportLoading(false); return null
     }
 
     try {
       const enc = new TextEncoder()
-      const keyMaterial = await crypto.subtle.importKey('raw', enc.encode(encryptionPassword), 'PBKDF2', false, ['deriveKey'])
+      const keyMaterial = await crypto.subtle.importKey('raw', enc.encode(exportPinConfirm), 'PBKDF2', false, ['deriveKey'])
       const salt = crypto.getRandomValues(new Uint8Array(16))
       const key = await crypto.subtle.deriveKey(
         { name: 'PBKDF2', salt, iterations: 600000, hash: 'SHA-256' },
@@ -4516,11 +4494,17 @@ function SecurityTab() {
             <h4 className="text-sm font-semibold text-foreground">Export encrypted backup</h4>
           </div>
           <div className="p-4 space-y-3">
-            <p className="text-xs text-muted-foreground">A PIN-encrypted backup of your {isNsec ? 'private key' : 'seed phrase'} — save it as a file or show it as a QR to import on another device.</p>
-            <button onClick={() => { setShowExport(true); setExportErr('') }}
-              className="w-full h-9 px-3 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors cursor-pointer flex items-center justify-center gap-1.5">
-              <FileDown size={15} /> Export Encrypted Backup
-            </button>
+            <p className="text-xs text-muted-foreground">Re-download your PIN-encrypted backup file, or show it as a QR to transfer to another device. Enter your PIN to confirm.</p>
+            <PinInput value={exportPinConfirm} onChange={(v) => { setExportPinConfirm(v); setExportErr('') }} placeholder="PIN" onEnter={handleExportEncrypted} />
+            {exportErr && <p className="text-xs text-destructive">{exportErr}</p>}
+            <div className="grid grid-cols-2 gap-2">
+              <button onClick={handleExportEncrypted} disabled={exportLoading || !exportPinConfirm} className="h-9 px-3 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5">
+                {exportLoading ? <Loader2 size={15} className="animate-spin" /> : <><Download size={15} /> File</>}
+              </button>
+              <button onClick={handleExportQR} disabled={exportLoading || !exportPinConfirm} className="h-9 px-3 rounded-lg border border-border text-sm font-medium hover:bg-secondary transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5">
+                <QrCode size={15} /> QR
+              </button>
+            </div>
           </div>
         </section>
       )}
@@ -4802,84 +4786,6 @@ function SecurityTab() {
                 className="flex items-center justify-center gap-2 flex-1 h-9 rounded-lg bg-destructive text-destructive-foreground text-sm font-medium hover:bg-destructive/90 transition-colors cursor-pointer"
               >
                 <Copy size={14} /> Yes, copy
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Export encrypted backup modal */}
-      {showExport && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center px-2 bg-black/60 backdrop-blur-sm">
-          <div className="w-[380px] bg-card border border-border rounded-xl shadow-2xl p-5 space-y-4">
-            <div className="flex items-center justify-between">
-              <h4 className="text-sm font-semibold flex items-center gap-2"><Lock size={16} /> Encrypt Backup</h4>
-              <button onClick={() => setShowExport(false)} className="text-muted-foreground hover:text-foreground cursor-pointer"><X size={16} /></button>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Choose a password to encrypt your backup. You'll need this password to import it into DEN Chat or the DENOS signer.
-            </p>
-
-            {/* Use current PIN toggle */}
-            <div className="flex items-center justify-between px-3 py-2 rounded-lg border border-border bg-secondary/30">
-              <p className="text-xs font-medium text-foreground">Use current PIN</p>
-              <ToggleSwitch checked={exportUsePin} onChange={(v) => { setExportUsePin(v); setExportErr(''); setExportPinConfirm(''); setExportPwd(''); setExportPwdConfirm('') }} />
-            </div>
-
-            {exportErr && (
-              <div className="px-3 py-2 rounded-lg bg-destructive/10 border border-destructive/30">
-                <p className="text-xs text-destructive">{exportErr}</p>
-              </div>
-            )}
-
-            {exportUsePin ? (
-              /* PIN confirmation mode — single field */
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-muted-foreground">Confirm your PIN</label>
-                <div className="relative">
-                  <input type={showExportPin ? 'text' : 'password'} value={exportPinConfirm} onChange={(e) => { setExportPinConfirm(e.target.value); setExportErr('') }} placeholder="Enter PIN"
-                    onKeyDown={(e) => e.key === 'Enter' && handleExportEncrypted()}
-                    className="w-full h-9 rounded-lg border border-input bg-background px-3 pr-9 text-sm focus:outline-none [&::-ms-reveal]:hidden [&::-webkit-credentials-auto-fill-button]:hidden" />
-                  <button type="button" onClick={() => setShowExportPin(!showExportPin)} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
-                    {showExportPin ? <EyeOff size={15} /> : <Eye size={15} />}
-                  </button>
-                </div>
-              </div>
-            ) : (
-              /* Custom password mode — two fields */
-              <>
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-muted-foreground">Other PIN</label>
-                  <div className="relative">
-                    <input type={showPwd ? 'text' : 'password'} value={exportPwd} onChange={(e) => setExportPwd(e.target.value)} placeholder="Enter password"
-                      className="w-full h-9 rounded-lg border border-input bg-background px-3 pr-9 text-sm focus:outline-none [&::-ms-reveal]:hidden [&::-webkit-credentials-auto-fill-button]:hidden" />
-                    <button type="button" onClick={() => setShowPwd(!showPwd)} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
-                      {showPwd ? <EyeOff size={15} /> : <Eye size={15} />}
-                    </button>
-                  </div>
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-muted-foreground">Confirm other PIN</label>
-                  <div className="relative">
-                    <input type={showPwdConfirm ? 'text' : 'password'} value={exportPwdConfirm} onChange={(e) => setExportPwdConfirm(e.target.value)} placeholder="Confirm password"
-                      onKeyDown={(e) => e.key === 'Enter' && handleExportEncrypted()}
-                      className="w-full h-9 rounded-lg border border-input bg-background px-3 pr-9 text-sm focus:outline-none [&::-ms-reveal]:hidden [&::-webkit-credentials-auto-fill-button]:hidden" />
-                    <button type="button" onClick={() => setShowPwdConfirm(!showPwdConfirm)} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
-                      {showPwdConfirm ? <EyeOff size={15} /> : <Eye size={15} />}
-                    </button>
-                  </div>
-                </div>
-              </>
-            )}
-            <div className="flex gap-2 pt-1">
-              <button onClick={() => setShowExport(false)} className="flex-1 h-9 rounded-lg border border-border bg-secondary/50 text-sm hover:bg-secondary transition-colors cursor-pointer">
-                Cancel
-              </button>
-              <button onClick={handleExportQR} disabled={exportLoading || (exportUsePin ? !exportPinConfirm : !exportPwd)} className="flex-1 h-9 rounded-lg border border-border bg-secondary/50 text-sm font-medium hover:bg-secondary transition-colors cursor-pointer disabled:opacity-50 flex items-center justify-center gap-1.5">
-                <QrCode size={14} /> QR
-              </button>
-              <button onClick={handleExportEncrypted} disabled={exportLoading || (exportUsePin ? !exportPinConfirm : !exportPwd)} className="flex-1 h-9 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors cursor-pointer disabled:opacity-50 flex items-center justify-center gap-1.5">
-                {exportLoading ? <Loader2 size={14} className="animate-spin" /> : <FileDown size={14} />} File
               </button>
             </div>
           </div>

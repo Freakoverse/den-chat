@@ -11,7 +11,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
-import { Loader2, Plus, Import, KeyRound, Download, FileUp, Check, Copy, ShieldCheck, Eye, EyeOff, Lock, Shield, AlertCircle, QrCode } from 'lucide-react'
+import { Loader2, Plus, Import, KeyRound, Download, FileUp, Check, Copy, ShieldCheck, Eye, EyeOff, Lock, Shield, AlertCircle, QrCode, Sprout, ChevronRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent } from '@/components/ui/card'
@@ -19,14 +19,14 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { DenChatLogo } from '@/components/ui/DenChatLogo'
 import { useUserStore } from '@/stores/userStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
-import { getVaultClient, vaultSigner, type VaultAccount } from '@/lib/auth/vaultClient'
+import { getVaultClient, vaultSigner, type VaultAccount, type VaultSeed } from '@/lib/auth/vaultClient'
 import { encryptBackup, parseBackupPayload, verifyBackupMatches } from '@/lib/auth/backupCrypto'
 import { WarningCarousel } from '@/components/auth/WarningCarousel'
 import { PinInput } from '@/components/auth/PinInput'
 import { QRScanner } from '@/components/auth/QRScanner'
 import { truncateNpub } from '@/lib/utils'
 
-type Screen = 'loading' | 'accounts' | 'unlock' | 'create' | 'import'
+type Screen = 'loading' | 'accounts' | 'seed' | 'unlock' | 'derive' | 'create' | 'import'
 
 const vault = getVaultClient()
 
@@ -45,30 +45,45 @@ function downloadBackup(payload: object) {
 
 export function VaultAuth({ onCreated }: { onCreated?: (pubkey: string) => void } = {}) {
   const [screen, setScreen] = useState<Screen>('loading')
+  const [seeds, setSeeds] = useState<VaultSeed[]>([])
   const [accounts, setAccounts] = useState<VaultAccount[]>([])
   const [error, setError] = useState<string | null>(null)
-  const [selected, setSelected] = useState<VaultAccount | null>(null)
+  const [selectedSeed, setSelectedSeed] = useState<VaultSeed | null>(null)
+  const [selectedAccount, setSelectedAccount] = useState<VaultAccount | null>(null)
 
   const refresh = () => vault.status().then((s) => {
-    setAccounts(s.accounts)
-    setScreen('accounts')
+    setSeeds(s.seeds); setAccounts(s.accounts); setScreen('accounts')
   }).catch((e) => setError(e instanceof Error ? e.message : 'Vault unavailable'))
 
   useEffect(() => { refresh() }, [])
 
+  const accountsOf = (seedId: string) => accounts.filter((a) => a.seedId === seedId).sort((a, b) => a.index - b.index)
+
+  const openSeed = (seed: VaultSeed) => {
+    const accts = accountsOf(seed.id)
+    // A single key can't derive → straight to unlock. A seed always opens its detail
+    // screen (even with one account) so you can pick OR derive a new account.
+    if (seed.kind === 'key' && accts[0]) {
+      setSelectedSeed(seed); setSelectedAccount(accts[0]); setScreen('unlock'); return
+    }
+    setSelectedSeed(seed); setScreen('seed')
+  }
+
   if (screen === 'loading') return <VaultCard><Loader2 className="animate-spin text-muted-foreground my-6" /></VaultCard>
-  if (screen === 'unlock' && selected) return <UnlockScreen account={selected} onBack={() => setScreen('accounts')} onDone={completeLogin} />
+  if (screen === 'seed' && selectedSeed) return <SeedScreen seed={selectedSeed} accounts={accountsOf(selectedSeed.id)} onBack={() => setScreen('accounts')} onPick={(a) => { setSelectedAccount(a); setScreen('unlock') }} onDerive={() => setScreen('derive')} />
+  if (screen === 'unlock' && selectedAccount) return <UnlockScreen account={selectedAccount} onBack={() => setScreen(selectedSeed?.kind === 'seed' ? 'seed' : 'accounts')} onDone={completeLogin} />
+  if (screen === 'derive' && selectedSeed) return <DeriveScreen seed={selectedSeed} onBack={() => setScreen('seed')} onDone={completeLogin} />
   if (screen === 'create') return <CreateScreen onExit={() => setScreen('accounts')} onDone={onCreated ?? completeLogin} />
   if (screen === 'import') return <ImportScreen onBack={() => setScreen('accounts')} onDone={completeLogin} />
 
   return (
     <VaultCard>
-      <Header title="DEN Chat" subtitle={accounts.length ? 'Choose an account to unlock, or add one.' : 'Create a new account, or import a backup.'} />
+      <Header title="DEN Chat" subtitle={seeds.length ? 'Choose an identity to unlock, or add one.' : 'Create a new account, or import a backup.'} />
       {error && <p className="text-sm text-destructive text-center">{error}</p>}
-      {accounts.length > 0 && (
+      {seeds.length > 0 && (
         <div className="w-full space-y-2">
-          {accounts.map((a) => (
-            <AccountRow key={a.pubkey} account={a} onClick={() => { setSelected(a); setScreen('unlock') }} />
+          {seeds.map((s) => (
+            <SeedRow key={s.id} seed={s} count={accountsOf(s.id).length} firstAccount={accountsOf(s.id)[0]} onClick={() => openSeed(s)} />
           ))}
         </div>
       )}
@@ -80,11 +95,31 @@ export function VaultAuth({ onCreated }: { onCreated?: (pubkey: string) => void 
   )
 }
 
-/* ─── Account list row ─── */
+/* ─── Seed row (top-level identity: a seed or a single key) ─── */
+function SeedRow({ seed, count, firstAccount, onClick }: { seed: VaultSeed; count: number; firstAccount?: VaultAccount; onClick: () => void }) {
+  const { getProfile } = useProfileCache()
+  const p = firstAccount ? getProfile(firstAccount.pubkey) : undefined
+  const label = seed.name || p?.display_name || p?.name || (firstAccount ? truncateNpub(firstAccount.npub, 10) : 'Identity')
+  const isKey = seed.kind === 'key'
+  return (
+    <button onClick={onClick} className="w-full flex items-center gap-3 p-3 rounded-xl border border-border bg-card hover:border-border/80 transition-colors cursor-pointer text-left">
+      <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+        {isKey ? <KeyRound size={16} className="text-primary" /> : <Sprout size={16} className="text-primary" />}
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-medium text-foreground truncate">{label}</p>
+        <p className="text-xs text-muted-foreground truncate">{isKey ? 'Single key' : `${count} account${count === 1 ? '' : 's'}`}</p>
+      </div>
+      <ChevronRight size={16} className="text-muted-foreground shrink-0" />
+    </button>
+  )
+}
+
+/* ─── Account row (an account under a seed) ─── */
 function AccountRow({ account, onClick }: { account: VaultAccount; onClick: () => void }) {
   const { getProfile } = useProfileCache()
   const p = getProfile(account.pubkey)
-  const name = account.name || p?.display_name || p?.name || truncateNpub(account.npub, 10)
+  const name = account.name || p?.display_name || p?.name || `Account #${account.index + 1}`
   return (
     <button onClick={onClick} className="w-full flex items-center gap-3 p-3 rounded-xl border border-border bg-card hover:border-border/80 transition-colors cursor-pointer text-left">
       <Avatar className="h-9 w-9"><AvatarImage src={p?.picture as string | undefined} /><AvatarFallback>{name.slice(0, 2).toUpperCase()}</AvatarFallback></Avatar>
@@ -94,6 +129,45 @@ function AccountRow({ account, onClick }: { account: VaultAccount; onClick: () =
       </div>
       <KeyRound size={16} className="text-muted-foreground shrink-0" />
     </button>
+  )
+}
+
+/* ─── Seed detail (accounts under a seed + derive) ─── */
+function SeedScreen({ seed, accounts, onBack, onPick, onDerive }: { seed: VaultSeed; accounts: VaultAccount[]; onBack: () => void; onPick: (a: VaultAccount) => void; onDerive: () => void }) {
+  return (
+    <VaultCard onBack={onBack}>
+      <Header icon={Sprout} title={seed.name || 'Seed'} subtitle="Select an account to unlock, or derive a new one." />
+      <div className="w-full space-y-2">
+        {accounts.map((a) => <AccountRow key={a.pubkey} account={a} onClick={() => onPick(a)} />)}
+      </div>
+      {seed.kind === 'seed' && (
+        <Button variant="outline" className="w-full" onClick={onDerive}><Plus size={16} /> Derive New Account</Button>
+      )}
+    </VaultCard>
+  )
+}
+
+/* ─── Derive a new account from a seed (same PIN) ─── */
+function DeriveScreen({ seed, onBack, onDone }: { seed: VaultSeed; onBack: () => void; onDone: (pubkey: string) => void }) {
+  const [pin, setPin] = useState('')
+  const [name, setName] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const submit = async () => {
+    if (!pin || busy) return
+    setBusy(true); setError(null)
+    try { const r = await vault.deriveAccount(seed.id, pin, name.trim() || undefined); onDone(r.pubkey) }
+    catch (e) { setError(e instanceof Error ? e.message : 'Could not derive account') }
+    finally { setBusy(false) }
+  }
+  return (
+    <VaultCard onBack={onBack}>
+      <Header icon={Plus} title="Derive New Account" subtitle={`A new account from ${seed.name || 'this seed'} — enter the seed's PIN.`} />
+      <Input placeholder="Account name (optional)" value={name} onChange={(e) => setName(e.target.value)} className="h-10" />
+      <PinInput value={pin} onChange={setPin} placeholder="Seed PIN" autoFocus onEnter={submit} />
+      {error && <p className="flex items-center gap-1.5 text-sm text-destructive w-full"><AlertCircle size={14} className="shrink-0" /> {error}</p>}
+      <Button className="w-full" disabled={!pin || busy} onClick={submit}>{busy ? <Loader2 size={16} className="animate-spin" /> : 'Derive & sign in'}</Button>
+    </VaultCard>
   )
 }
 

@@ -239,7 +239,7 @@ function MobileTabBar({ activePage, onNavigate, dmUnread }: {
   const setMobileView = useNavigationStore((s) => s.setMobileView)
 
   const tabs: { id: 'hubs' | 'dms' | 'social' | 'discover' | 'wallet' | 'settings'; label: string; icon: typeof Home; badge?: number }[] = [
-    { id: 'hubs', label: 'Home', icon: Home },
+    { id: 'hubs', label: 'Hubs', icon: Home },
     { id: 'dms', label: 'DMs', icon: MessageSquare, badge: dmUnread },
     { id: 'social', label: 'Social', icon: AtSign },
     { id: 'discover', label: 'Discover', icon: Compass },
