@@ -51,9 +51,8 @@ export function VaultAuth({ onCreated }: { onCreated?: (pubkey: string) => void 
   const [selectedSeed, setSelectedSeed] = useState<VaultSeed | null>(null)
   const [selectedAccount, setSelectedAccount] = useState<VaultAccount | null>(null)
 
-  const refresh = () => vault.status().then((s) => {
-    setSeeds(s.seeds); setAccounts(s.accounts); setScreen('accounts')
-  }).catch((e) => setError(e instanceof Error ? e.message : 'Vault unavailable'))
+  const loadStatus = () => vault.status().then((s) => { setSeeds(s.seeds); setAccounts(s.accounts) })
+  const refresh = () => loadStatus().then(() => setScreen('accounts')).catch((e) => setError(e instanceof Error ? e.message : 'Vault unavailable'))
 
   useEffect(() => { refresh() }, [])
 
@@ -72,7 +71,7 @@ export function VaultAuth({ onCreated }: { onCreated?: (pubkey: string) => void 
   if (screen === 'loading') return <VaultCard><Loader2 className="animate-spin text-muted-foreground my-6" /></VaultCard>
   if (screen === 'seed' && selectedSeed) return <SeedScreen seed={selectedSeed} accounts={accountsOf(selectedSeed.id)} onBack={() => setScreen('accounts')} onPick={(a) => { setSelectedAccount(a); setScreen('unlock') }} onDerive={() => setScreen('derive')} />
   if (screen === 'unlock' && selectedAccount) return <UnlockScreen account={selectedAccount} onBack={() => setScreen(selectedSeed?.kind === 'seed' ? 'seed' : 'accounts')} onDone={completeLogin} />
-  if (screen === 'derive' && selectedSeed) return <DeriveScreen seed={selectedSeed} onBack={() => setScreen('seed')} onDone={completeLogin} />
+  if (screen === 'derive' && selectedSeed) return <DeriveScreen seed={selectedSeed} onBack={() => setScreen('seed')} onDone={() => { loadStatus().finally(() => setScreen('seed')) }} />
   if (screen === 'create') return <CreateScreen onExit={() => setScreen('accounts')} onDone={onCreated ?? completeLogin} />
   if (screen === 'import') return <ImportScreen onBack={() => setScreen('accounts')} onDone={completeLogin} />
 
@@ -148,7 +147,7 @@ function SeedScreen({ seed, accounts, onBack, onPick, onDerive }: { seed: VaultS
 }
 
 /* ─── Derive a new account from a seed (same PIN) ─── */
-function DeriveScreen({ seed, onBack, onDone }: { seed: VaultSeed; onBack: () => void; onDone: (pubkey: string) => void }) {
+function DeriveScreen({ seed, onBack, onDone }: { seed: VaultSeed; onBack: () => void; onDone: () => void }) {
   const [pin, setPin] = useState('')
   const [name, setName] = useState('')
   const [busy, setBusy] = useState(false)
@@ -156,7 +155,7 @@ function DeriveScreen({ seed, onBack, onDone }: { seed: VaultSeed; onBack: () =>
   const submit = async () => {
     if (!pin || busy) return
     setBusy(true); setError(null)
-    try { const r = await vault.deriveAccount(seed.id, pin, name.trim() || undefined); onDone(r.pubkey) }
+    try { await vault.deriveAccount(seed.id, pin, name.trim() || undefined); onDone() }
     catch (e) { setError(e instanceof Error ? e.message : 'Could not derive account') }
     finally { setBusy(false) }
   }
@@ -166,7 +165,7 @@ function DeriveScreen({ seed, onBack, onDone }: { seed: VaultSeed; onBack: () =>
       <Input placeholder="Account name (optional)" value={name} onChange={(e) => setName(e.target.value)} className="h-10" />
       <PinInput value={pin} onChange={setPin} placeholder="Seed PIN" autoFocus onEnter={submit} />
       {error && <p className="flex items-center gap-1.5 text-sm text-destructive w-full"><AlertCircle size={14} className="shrink-0" /> {error}</p>}
-      <Button className="w-full" disabled={!pin || busy} onClick={submit}>{busy ? <Loader2 size={16} className="animate-spin" /> : 'Derive & sign in'}</Button>
+      <Button className="w-full" disabled={!pin || busy} onClick={submit}>{busy ? <Loader2 size={16} className="animate-spin" /> : 'Derive account'}</Button>
     </VaultCard>
   )
 }
