@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { useUserStore } from '@/stores/userStore'
+import { useUserStore, type ISigner } from '@/stores/userStore'
 import { isTauri, isMobileOS } from '@/lib/utils'
 import { ADMIN_PUBKEY, StorageKey } from '@/lib/constants'
 import { fetchReplaceable, fetchEvents, publishToSpecificRelays, getRelayList } from '@/lib/nostr/relay-pool'
-import { MonitorSmartphone, Import, Plus, Loader2, AlertCircle, Link2, KeyRound, Copy, Check, AppWindow, ChevronDown, ChevronLeft, ChevronRight, X, Shield, ExternalLink, User, Lock, Eye, EyeOff, GitBranch, Sprout, KeySquare, Download, FileUp, BookOpen, Camera, Settings2, XCircle, FileText, Package, LockOpen, Globe, RefreshCw, Rocket } from 'lucide-react'
+import { MonitorSmartphone, Import, Plus, Loader2, AlertCircle, Link2, KeyRound, Copy, Check, AppWindow, ChevronDown, ChevronLeft, ChevronRight, X, Shield, ExternalLink, User, Lock, Eye, EyeOff, GitBranch, Sprout, KeySquare, Download, FileUp, BookOpen, Camera, Settings2, XCircle, FileText, Package, LockOpen, Globe, RefreshCw, Rocket, QrCode } from 'lucide-react'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { BlossomImage } from '@/components/ui/BlossomImage'
 import { Button } from '@/components/ui/button'
@@ -11,8 +11,6 @@ import { Input } from '@/components/ui/input'
 import { Card, CardContent } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
 import { DenChatLogo } from '@/components/ui/DenChatLogo'
-import { VaultAuth } from '@/components/auth/VaultAuth'
-import { vaultSigner } from '@/lib/auth/vaultClient'
 import { WarningCarousel } from '@/components/auth/WarningCarousel'
 import { PinInput } from '@/components/auth/PinInput'
 import { QRCodeSVG } from 'qrcode.react'
@@ -21,10 +19,11 @@ import { uploadToBlossomServers, blossomServers as blossomServerManager } from '
 import type { UploadProgress } from '@/lib/blossom'
 import { createUnsignedEvent, signWithSigner } from '@/lib/nostr/events'
 import {
-  listAccounts, listSeeds, generateAccount, generateNewSeed,
-  deriveNextAccount, importSeed, importNsec, loginAccount, deleteAccount,
   type StoredAccount, type StoredSeed,
 } from '@/lib/auth/secure-storage'
+import { rustBackend, vaultBackend, applyLogin } from '@/lib/auth/authBackend'
+import { verifyBackupMatches } from '@/lib/auth/backupCrypto'
+import { QRScanner } from '@/components/auth/QRScanner'
 import { PC55Signer, discover } from '@/lib/auth/pc55'
 import { BunkerSigner } from '@/lib/auth/bunker'
 import { NostrConnectSigner, generateNostrConnectDetails } from '@/lib/auth/nostr-connect'
@@ -83,10 +82,9 @@ export function LoginScreen() {
   const [pin, setPin] = useState('')
   const [pinHint, setPinHint] = useState('')
   const [accountName, setAccountName] = useState('')
-  // On mobile web (PWA), the vault flow is the primary login. `vaultMode` lets the
-  // user fall back to the other sign-in options (remote signer, etc.) and back.
+  // Mobile-web (PWA) uses the vault for key storage; desktop uses the OS keyring. One UI, one backend.
   const useVault = !isDesktop && isMobile
-  const [vaultMode, setVaultMode] = useState(useVault)
+  const backend = useVault ? vaultBackend : rustBackend
   const [backupMnemonic, setBackupMnemonic] = useState<string | null>(null)
   const [showBackupWords, setShowBackupWords] = useState(false)
   const [backupCopied, setBackupCopied] = useState(false)
@@ -96,6 +94,12 @@ export function LoginScreen() {
   const [backupPinError, setBackupPinError] = useState<string | null>(null)
   const [backupDownloading, setBackupDownloading] = useState(false)
   const [backupDownloaded, setBackupDownloaded] = useState(false)
+  // Re-upload-to-verify: confirm the saved backup file decrypts to this exact seed before continuing.
+  const [backupVerified, setBackupVerified] = useState(false)
+  const [backupVerifyPin, setBackupVerifyPin] = useState('')
+  const [backupVerifying, setBackupVerifying] = useState(false)
+  const [backupVerifyError, setBackupVerifyError] = useState<string | null>(null)
+  const verifyFileRef = useRef<HTMLInputElement>(null)
 
   // Reveal-seed confirmation + 5s countdown (guards against shoulder-surfing)
   const [showRevealConfirm, setShowRevealConfirm] = useState(false)
@@ -134,6 +138,7 @@ export function LoginScreen() {
   const [fileImportError, setFileImportError] = useState<string | null>(null)
   const [fileImportLoading, setFileImportLoading] = useState(false)
   const [showFilePasswordPrompt, setShowFilePasswordPrompt] = useState(false)
+  const [showQrScanner, setShowQrScanner] = useState(false)
   const [pendingFileData, setPendingFileData] = useState<string | null>(null)
   const [showFilePassword, setShowFilePassword] = useState(false)
 
@@ -145,8 +150,8 @@ export function LoginScreen() {
   // ── Onboarding state (post-generate profile setup) ──
   const [onboardingPubkey, setOnboardingPubkey] = useState<string | null>(null)
   const [onboardingPrivateKey, setOnboardingPrivateKey] = useState<string | null>(null)
-  // When true, onboarding signs via the vault (no raw key) and finishes by logging in with 'vault'.
-  const [vaultOnboarding, setVaultOnboarding] = useState(false)
+  // Signer to sign onboarding events with (vault path); null on desktop (uses the raw key above).
+  const [onboardingSigner, setOnboardingSigner] = useState<ISigner | null>(null)
   const [profileName, setProfileName] = useState('')
   const [profilePicUrl, setProfilePicUrl] = useState('')
   const [picUploadStatus, setPicUploadStatus] = useState<'idle' | 'uploading' | 'success' | 'error'>('idle')
@@ -182,13 +187,13 @@ export function LoginScreen() {
   const currentAccounts = currentGroup?.accounts || []
   const currentAccount = currentAccounts[accountIdx] || null
 
-  // Load saved accounts (desktop only)
+  // Load saved accounts from the active backend (desktop keyring, or mobile vault).
   const loadAccounts = useCallback(async () => {
-    if (!isDesktop) return
-    const [accounts, seeds] = await Promise.all([listAccounts(), listSeeds()])
+    if (!isDesktop && !useVault) return
+    const [accounts, seeds] = await Promise.all([backend.listAccounts(), backend.listSeeds()])
     setSavedAccounts(accounts)
     setSavedSeeds(seeds)
-  }, [isDesktop])
+  }, [isDesktop, useVault, backend])
 
   useEffect(() => {
     loadAccounts()
@@ -231,7 +236,7 @@ export function LoginScreen() {
     // Short delay so the UI transition fully settles
     const invokeTimer = setTimeout(() => {
       if (cancelled) return
-      deleteAccount(pendingDelete.pubkey, pendingDelete.pin)
+      backend.deleteAccount(pendingDelete.pubkey, pendingDelete.pin)
         .then(() => {
           if (cancelled) return
           cancelled = true
@@ -547,30 +552,31 @@ export function LoginScreen() {
     setScreen('import-pin')
   }
 
-  // ─── Import from encrypted backup file ───
+  // ─── Import from encrypted backup (file or QR) ───
+  // Validate a backup JSON string and open the password prompt. Shared by file + QR.
+  const loadBackupText = (text: string): boolean => {
+    try {
+      const data = JSON.parse(text)
+      if (data.version !== 1 || data.alg !== 'AES-256-GCM') { setError('Unrecognized backup format'); return false }
+      setPendingFileData(text)
+      setFileImportPassword('')
+      setFileImportError(null)
+      setShowFilePassword(false)
+      setShowFilePasswordPrompt(true)
+      return true
+    } catch {
+      setError("Could not read backup — make sure it's a valid backup")
+      return false
+    }
+  }
+
   const handleFileImportPick = () => {
     const input = document.createElement('input')
     input.type = 'file'
     input.accept = '.json'
     input.onchange = async (e) => {
       const file = (e.target as HTMLInputElement).files?.[0]
-      if (!file) return
-      try {
-        const text = await file.text()
-        const data = JSON.parse(text)
-        if (data.version !== 1 || data.alg !== 'AES-256-GCM') {
-          setError('Unrecognized backup file format')
-          return
-        }
-        // Store the raw file data and prompt for password
-        setPendingFileData(text)
-        setFileImportPassword('')
-        setFileImportError(null)
-        setShowFilePassword(false)
-        setShowFilePasswordPrompt(true)
-      } catch {
-        setError('Could not read file — make sure it\'s a valid backup .json')
-      }
+      if (file) loadBackupText(await file.text())
     }
     input.click()
   }
@@ -608,9 +614,9 @@ export function LoginScreen() {
       // Import directly — skip the PIN screen
       try {
         if (isValidMnemonic(mnemonic)) {
-          await importSeed(mnemonic, usedPin)
+          await backend.importSeed(mnemonic, usedPin)
         } else {
-          await importNsec(mnemonic, usedPin)
+          await backend.importNsec(mnemonic, usedPin)
         }
         await loadAccounts()
         setScreen('main')
@@ -631,9 +637,9 @@ export function LoginScreen() {
     setLoading('import')
     try {
       if (isValidMnemonic(words)) {
-        await importSeed(words, pin, accountName || undefined, pinHint || undefined)
+        await backend.importSeed(words, pin, accountName || undefined, pinHint || undefined)
       } else {
-        await importNsec(words, pin, accountName || undefined, pinHint || undefined)
+        await backend.importNsec(words, pin, accountName || undefined, pinHint || undefined)
       }
       await loadAccounts()
       setImportWords('')
@@ -662,20 +668,21 @@ export function LoginScreen() {
       let result: { pubkey: string; mnemonic: string; seed_id: string }
       // If no seeds exist, generate brand-new seed
       if (savedSeeds.length === 0) {
-        result = await generateAccount(pin, accountName || undefined, pinHint || undefined)
+        result = await backend.generateAccount(pin, accountName || undefined, pinHint || undefined)
       } else {
         // Generate a new independent seed (user chose "New Seed" or first-time generate)
-        result = await generateNewSeed(pin, accountName || undefined, pinHint || undefined)
+        result = await backend.generateNewSeed(pin, accountName || undefined, pinHint || undefined)
       }
       // Show the backup screen with the mnemonic (no auto-login)
       setBackupMnemonic(result.mnemonic)
       setShowBackupWords(false)
       await loadAccounts()
 
-      // Store pubkey + get private key for onboarding signing
+      // Store pubkey + prepare onboarding signing (priv key on desktop, vault signer on mobile)
       setOnboardingPubkey(result.pubkey)
-      const privKey = await loginAccount(result.pubkey, pin)
-      setOnboardingPrivateKey(privKey)
+      const loginResult = await backend.loginAccount(result.pubkey, pin)
+      setOnboardingPrivateKey(loginResult.privKey)
+      setOnboardingSigner(loginResult.signer)
 
       // Pre-populate relay/blossom lists with 3 random enabled entries
       const clientRelays = getRelayList()
@@ -699,7 +706,7 @@ export function LoginScreen() {
     if (!pin) { setError('PIN is required'); return }
     setLoading('derive')
     try {
-      await deriveNextAccount(seedId, pin, pinHint || undefined)
+      await backend.deriveNextAccount(seedId, pin, pinHint || undefined)
       await loadAccounts()
       setScreen('main')
     } catch (err: unknown) {
@@ -728,7 +735,7 @@ export function LoginScreen() {
       const enabledBlossoms = onboardBlossoms.filter(b => b.enabled).map(b => b.url)
       const servers = enabledBlossoms.length > 0 ? enabledBlossoms : undefined
       const { hash, serverUrls } = await uploadToBlossomServers(
-        data, vaultOnboarding ? vaultSigner() : null, vaultOnboarding ? null : onboardingPrivateKey, servers, file.type,
+        data, onboardingSigner, onboardingPrivateKey, servers, file.type,
         (p) => setPicUploadProgress({ ...p }),
         () => { const c = new AbortController(); picAbortRef.current = c; return c.signal },
       )
@@ -747,9 +754,9 @@ export function LoginScreen() {
   // ─── Onboarding: Publish profile + relay list + blossom list ───
   const handleOnboardingPublish = async () => {
     if (!onboardingPubkey) return
-    if (!vaultOnboarding && !onboardingPrivateKey) return
-    const oSigner = vaultOnboarding ? vaultSigner() : null
-    const oPk = vaultOnboarding ? null : onboardingPrivateKey
+    if (!onboardingSigner && !onboardingPrivateKey) return
+    const oSigner = onboardingSigner
+    const oPk = onboardingPrivateKey
     setPublishing(true)
     try {
       const enabledRelays = onboardRelays.filter(r => r.enabled)
@@ -788,55 +795,28 @@ export function LoginScreen() {
       console.error('Onboarding publish failed:', err)
     } finally {
       setPublishing(false)
+      // Navigate carousel to the just-created account
       const createdPubkey = onboardingPubkey
-      if (vaultOnboarding) {
-        // Vault path: authenticate with the vault signer instead of the desktop carousel.
-        if (createdPubkey) finishVaultOnboarding(createdPubkey)
-      } else {
-        // Navigate carousel to the just-created account
-        if (createdPubkey) {
-          for (let gi = 0; gi < accountGroups.length; gi++) {
-            const ai = accountGroups[gi].accounts.findIndex(a => a.pubkey === createdPubkey)
-            if (ai !== -1) { setSelectedSeedIdx(gi); setAccountIdx(ai); break }
-          }
+      if (createdPubkey) {
+        for (let gi = 0; gi < accountGroups.length; gi++) {
+          const ai = accountGroups[gi].accounts.findIndex(a => a.pubkey === createdPubkey)
+          if (ai !== -1) { setSelectedSeedIdx(gi); setAccountIdx(ai); break }
         }
-        // Clear sensitive state + navigate
-        setOnboardingPubkey(null)
-        setOnboardingPrivateKey(null)
-        setProfileName('')
-        setProfilePicUrl('')
-        setPicUploadStatus('idle')
-        setPicUploadProgress(null)
-        setPicUploadError(null)
-        setScreen('saved-accounts')
       }
+      // Clear sensitive state + navigate
+      setOnboardingPubkey(null)
+      setOnboardingPrivateKey(null); setOnboardingSigner(null)
+      setProfileName('')
+      setProfilePicUrl('')
+      setPicUploadStatus('idle')
+      setPicUploadProgress(null)
+      setPicUploadError(null)
+      setScreen('saved-accounts')
     }
-  }
-
-  // ─── Vault (route-b): hand a freshly-created vault account into the onboarding wizard ───
-  const handleVaultCreated = (pubkey: string) => {
-    setOnboardingPubkey(pubkey)
-    setOnboardingPrivateKey(null)
-    setVaultOnboarding(true)
-    setProfileName('')
-    setProfilePicUrl('')
-    setVaultMode(false)           // leave the vault gate so the onboarding screen renders
-    setScreen('onboarding-profile')
-  }
-  // Finish a vault onboarding: set the vault signer + authenticate (instead of the desktop carousel).
-  const finishVaultOnboarding = (pubkey: string) => {
-    setVaultOnboarding(false)
-    setOnboardingPubkey(null)
-    setProfileName('')
-    setProfilePicUrl('')
-    setPicUploadStatus('idle')
-    setSigner(vaultSigner())
-    login(pubkey, 'vault')
   }
 
   // ─── Onboarding: Skip ───
   const handleOnboardingSkip = () => {
-    if (vaultOnboarding) { if (onboardingPubkey) finishVaultOnboarding(onboardingPubkey); return }
     // Navigate carousel to the just-created account
     const createdPubkey = onboardingPubkey
     if (createdPubkey) {
@@ -846,7 +826,7 @@ export function LoginScreen() {
       }
     }
     setOnboardingPubkey(null)
-    setOnboardingPrivateKey(null)
+    setOnboardingPrivateKey(null); setOnboardingSigner(null)
     setProfileName('')
     setProfilePicUrl('')
     setPicUploadStatus('idle')
@@ -865,8 +845,7 @@ export function LoginScreen() {
       // Verify the PIN matches by attempting a verify call (uses the newest account)
       const newest = savedAccounts[savedAccounts.length - 1]
       if (newest) {
-        const { verifyPin } = await import('@/lib/auth/secure-storage')
-        const valid = await verifyPin(newest.pubkey, backupPin)
+        const valid = await backend.verifyPin(newest.pubkey, backupPin)
         if (!valid) { setBackupPinError('Incorrect PIN'); setBackupDownloading(false); return }
       }
       // Encrypt mnemonic with PBKDF2 + AES-256-GCM
@@ -903,13 +882,30 @@ export function LoginScreen() {
       document.body.removeChild(a)
       URL.revokeObjectURL(url)
       setShowBackupPinPrompt(false)
+      setBackupVerifyPin(backupPin)   // keep the PIN to verify the re-uploaded file
       setBackupPin('')
       setBackupDownloaded(true)
+      setBackupVerified(false)
+      setBackupVerifyError(null)
     } catch (err: unknown) {
       setBackupPinError(typeof err === 'string' ? err : err instanceof Error ? err.message : 'Encryption failed')
     } finally {
       setBackupDownloading(false)
     }
+  }
+
+  // ─── Re-upload the downloaded backup to verify it decrypts to this seed ───
+  const handleVerifyReupload = async (file: File) => {
+    if (!backupMnemonic) return
+    setBackupVerifying(true); setBackupVerifyError(null)
+    try {
+      const text = await file.text()
+      const result = await verifyBackupMatches(text, backupVerifyPin, backupMnemonic)
+      if (result === 'ok') setBackupVerified(true)
+      else setBackupVerifyError(result === 'mismatch' ? "That file is a different account's backup." : result === 'wrong-password' ? "That file doesn't match this PIN." : 'Not a valid backup file.')
+    } catch (e) {
+      setBackupVerifyError(e instanceof Error ? e.message : 'Verification failed')
+    } finally { setBackupVerifying(false) }
   }
 
   // ─── PIN Login for saved account ───
@@ -926,8 +922,8 @@ export function LoginScreen() {
     if (!pin) { setError('Enter your PIN'); return }
     setLoading('pin-login')
     try {
-      const privKeyHex = await loginAccount(selectedAccount.pubkey, pin)
-      login(selectedAccount.pubkey, selectedAccount.auth_method, privKeyHex)
+      const r = await backend.loginAccount(selectedAccount.pubkey, pin)
+      applyLogin(selectedAccount.pubkey, r)
     } catch (err: unknown) {
       setError(typeof err === 'string' ? err : err instanceof Error ? err.message : 'Wrong PIN or login failed')
     } finally {
@@ -1024,11 +1020,20 @@ export function LoginScreen() {
               <Separator className="flex-1" />
             </div>
 
-            <Button variant="outline" onClick={handleFileImportPick} className="w-full gap-2">
-              <FileUp size={15} /> Import from Backup File
-            </Button>
+            <div className="w-full grid grid-cols-2 gap-2">
+              <Button variant="outline" onClick={handleFileImportPick} className="gap-2">
+                <FileUp size={15} /> Backup File
+              </Button>
+              <Button variant="outline" onClick={() => { clearError(); setShowQrScanner(true) }} className="gap-2">
+                <QrCode size={15} /> Scan QR
+              </Button>
+            </div>
 
             <Button variant="ghost" onClick={goBack} className="w-full text-muted-foreground">Back</Button>
+
+            {showQrScanner && (
+              <QRScanner onResult={(text) => { setShowQrScanner(false); loadBackupText(text) }} onClose={() => setShowQrScanner(false)} />
+            )}
 
             {/* File decryption password prompt */}
             {showFilePasswordPrompt && (
@@ -1247,21 +1252,6 @@ export function LoginScreen() {
   }
 
   // ────────────────────────────────────────────
-  // ─── Render: Vault (mobile/PWA primary login) ───
-  // ────────────────────────────────────────────
-  if (vaultMode) {
-    return (
-      <div className="flex items-center justify-center h-full overflow-y-auto bg-surface-background relative p-4 max-[1080px]:items-start">
-        {bgImageUrl && <BlossomImage src={bgImageUrl} alt="" className="fixed inset-0 w-full h-full" imgClassName="object-right-bottom" />}
-        <div className="relative z-10 w-full max-w-md py-8 space-y-4">
-          <VaultAuth onCreated={handleVaultCreated} />
-          <button onClick={() => setVaultMode(false)} className="block mx-auto text-xs text-muted-foreground hover:text-foreground cursor-pointer">Other sign-in options</button>
-        </div>
-      </div>
-    )
-  }
-
-  // ────────────────────────────────────────────
   // ─── Render: Seed Backup Screen ───
   // ────────────────────────────────────────────
   if (screen === 'seed-backup' && backupMnemonic) {
@@ -1367,8 +1357,18 @@ export function LoginScreen() {
               </div>
             )}
 
-            <Button className="w-full mt-2" disabled={!backupDownloaded} onClick={() => { setBackupMnemonic(null); setBackupDownloaded(false); setScreen('onboarding-profile') }}>
-              {backupDownloaded ? "I've Saved My Seed · Continue" : 'Download backup to continue'}
+            {/* Re-upload the file you just saved, to confirm it's valid before continuing */}
+            <input ref={verifyFileRef} type="file" accept="application/json,.json" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleVerifyReupload(f) }} />
+            {backupDownloaded && !backupVerified && (
+              <Button className="w-full" variant="outline" disabled={backupVerifying} onClick={() => verifyFileRef.current?.click()}>
+                {backupVerifying ? <><Loader2 size={16} className="animate-spin" /> Verifying…</> : <><FileUp size={16} /> Re-upload backup to verify</>}
+              </Button>
+            )}
+            {backupVerifyError && <p className="text-xs text-destructive w-full text-center">{backupVerifyError}</p>}
+            {backupVerified && <p className="flex items-center justify-center gap-1.5 text-xs text-emerald-500 w-full"><Check size={13} /> Backup verified</p>}
+
+            <Button className="w-full mt-2" disabled={!backupDownloaded || !backupVerified} onClick={() => { setBackupMnemonic(null); setBackupDownloaded(false); setBackupVerified(false); setBackupVerifyPin(''); setScreen('onboarding-profile') }}>
+              {!backupDownloaded ? 'Download backup to continue' : !backupVerified ? 'Verify your backup to continue' : "I've Saved My Seed · Continue"}
             </Button>
           </CardContent>
         </Card>
@@ -2129,11 +2129,6 @@ export function LoginScreen() {
       {bgOverlay}
       <Card className="w-full max-w-sm shadow-lg relative z-10">
         <CardContent className="p-8 flex flex-col items-center gap-6">
-          {useVault && (
-            <button onClick={() => setVaultMode(true)} className="self-start -mb-3 flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground cursor-pointer">
-              <ChevronLeft size={14} /> DEN vault sign-in
-            </button>
-          )}
           {/* Logo */}
           <div className="flex flex-col items-center gap-3 mb-2">
             <DenChatLogo size={64} />
@@ -2219,8 +2214,8 @@ export function LoginScreen() {
               )}
             </div>
 
-            {/* Desktop-only: Saved Accounts or Import+Generate */}
-            {isDesktop && (
+            {/* Local-key accounts (desktop keyring or mobile vault): Saved Accounts or Import+Generate */}
+            {(isDesktop || useVault) && (
               savedAccounts.length > 0 ? (
                 <Button
                   variant="outline"

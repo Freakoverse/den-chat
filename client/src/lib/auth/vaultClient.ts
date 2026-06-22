@@ -17,7 +17,7 @@ import type { BackupPayloadV1 } from '@/lib/auth/backupCrypto'
 export const VAULT_ORIGIN = 'https://vault.denchat.top'
 
 /** Plaintext metadata (no secrets). A "seed" holds one PIN; accounts are derived from it. */
-export interface VaultSeed { id: string; name: string | null; kind: 'seed' | 'key'; createdAt: number }
+export interface VaultSeed { id: string; name: string | null; kind: 'seed' | 'key'; hint: string | null; createdAt: number }
 export interface VaultAccount { pubkey: string; npub: string; seedId: string; index: number; name: string | null; createdAt: number }
 export interface VaultStatus { seeds: VaultSeed[]; accounts: VaultAccount[]; active: string | null; unlocked: boolean; pubkey: string | null }
 
@@ -113,8 +113,8 @@ class VaultClient {
   status() { return this.call<VaultStatus>('status') }
   listAccounts() { return this.call<VaultAccount[]>('listAccounts') }
   generate() { return this.call<{ mnemonic: string; pubkey: string }>('generate') }
-  saveNew(mnemonic: string, pin: string, name?: string) { return this.call<{ pubkey: string; seedId: string }>('saveNew', { mnemonic, pin, name }) }
-  importBackup(payload: BackupPayloadV1, password: string, name?: string) { return this.call<{ pubkey: string; seedId: string }>('importBackup', { payload, password, name }) }
+  saveNew(mnemonic: string, pin: string, name?: string, hint?: string) { return this.call<{ pubkey: string; seedId: string }>('saveNew', { mnemonic, pin, name, hint }) }
+  importBackup(payload: BackupPayloadV1, password: string, name?: string, hint?: string) { return this.call<{ pubkey: string; seedId: string }>('importBackup', { payload, password, name, hint }) }
   deriveAccount(seedId: string, pin: string, name?: string) { return this.call<{ pubkey: string }>('deriveAccount', { seedId, pin, name }) }
   async unlock(pubkey: string, pin: string) {
     const r = await this.call<{ pubkey: string }>('unlock', { pubkey, pin })
