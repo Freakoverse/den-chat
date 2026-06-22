@@ -714,7 +714,6 @@ export function LoginScreen() {
     clearError()
     setDeriveSeedId(seedId)
     setPin('')
-    setShowPin(false)
     setScreen('derive-pin')
   }
 
@@ -918,7 +917,6 @@ export function LoginScreen() {
     clearError()
     setSelectedAccount(account)
     setPin('')
-    setShowPin(false)
     setScreen('pin-login')
   }
 

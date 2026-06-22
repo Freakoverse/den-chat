@@ -63,7 +63,7 @@ export function VaultAuth({ onCreated }: { onCreated?: (pubkey: string) => void 
 
   return (
     <VaultCard>
-      <Header icon={KeyRound} title="DEN Chat" subtitle={accounts.length ? 'Choose an account to unlock, or add one.' : 'Create a new account, or import a backup.'} />
+      <Header title="DEN Chat" subtitle={accounts.length ? 'Choose an account to unlock, or add one.' : 'Create a new account, or import a backup.'} />
       {error && <p className="text-sm text-destructive text-center">{error}</p>}
       {accounts.length > 0 && (
         <div className="w-full space-y-2">
@@ -379,11 +379,11 @@ function VaultCard({ onBack, wide, children }: { onBack?: () => void; wide?: boo
     </Card>
   )
 }
-function Header({ icon: Icon, title, subtitle }: { icon: React.ComponentType<{ size?: number; className?: string }>; title: string; subtitle?: string }) {
+function Header({ icon: Icon, title, subtitle }: { icon?: React.ComponentType<{ size?: number; className?: string }>; title: string; subtitle?: string }) {
   return (
     <div className="flex flex-col items-center gap-1.5 text-center">
       <div className="flex items-center gap-2">
-        <Icon size={20} className="text-primary" />
+        {Icon && <Icon size={20} className="text-primary" />}
         <h2 className="text-xl font-bold text-foreground">{title}</h2>
       </div>
       {subtitle && <p className="text-sm text-muted-foreground">{subtitle}</p>}

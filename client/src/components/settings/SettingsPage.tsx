@@ -4077,6 +4077,7 @@ function SecurityTab() {
   // Reveal seed
   const [revealedSeed, setRevealedSeed] = useState<string | null>(null)
   const [showSeedWords, setShowSeedWords] = useState(false)
+  const [showNsecValue, setShowNsecValue] = useState(false)
 
   // Uncensor confirmation + 5s countdown (guards against shoulder-surfing)
   const [showSeedRevealConfirm, setShowSeedRevealConfirm] = useState(false)
@@ -4095,6 +4096,7 @@ function SecurityTab() {
         setSeedRevealCountdown(null)
         setShowSeedRevealConfirm(false)
         setShowSeedWords(true)
+        setShowNsecValue(true)   // only the active section is rendered, so this is harmless for seed
       } else {
         setSeedRevealCountdown(remaining)
       }
@@ -4127,6 +4129,7 @@ function SecurityTab() {
   const [exportPinConfirm, setExportPinConfirm] = useState('')
   const [showExportPin, setShowExportPin] = useState(false)
   const [exportLoading, setExportLoading] = useState(false)
+  const [seedQrText, setSeedQrText] = useState<string | null>(null)
 
   // Change PIN
   const [showChangePin, setShowChangePin] = useState(false)
@@ -4213,28 +4216,32 @@ function SecurityTab() {
   }
 
   // ── Export encrypted backup ──
-  const handleExportEncrypted = async () => {
+  // Validate + encrypt the seed into the v1 backup payload (PIN or password). Shared by download + QR.
+  const produceEncryptedPayload = async (): Promise<string | null> => {
     setExportErr('')
-    if (!revealedSeed) { setExportErr('Reveal your seed first.'); return }
+    if (!pubkey) { setExportErr('No active account.'); return null }
 
     let encryptionPassword: string
+    let secret: string
 
     if (exportUsePin) {
-      // PIN-based: verify the entered PIN against the stored hash first
-      if (!exportPinConfirm) { setExportErr('Enter your PIN to confirm.'); return }
-      if (!pubkey) { setExportErr('No active account.'); return }
+      // PIN-based: exportSeed/exportNsec verify the PIN AND return the secret,
+      // so this works straight from the PIN — no need to reveal first.
+      if (!exportPinConfirm) { setExportErr('Enter your PIN to confirm.'); return null }
       setExportLoading(true)
       try {
-        const valid = await verifyPin(pubkey, exportPinConfirm)
-        if (!valid) { setExportErr('Incorrect PIN.'); setExportLoading(false); return }
+        secret = revealedSeed || revealedNsec || (isNsec ? await exportNsec(pubkey, exportPinConfirm) : await exportSeed(pubkey, exportPinConfirm))
         encryptionPassword = exportPinConfirm
       } catch {
-        setExportErr('PIN verification failed.'); setExportLoading(false); return
+        setExportErr('Incorrect PIN.'); setExportLoading(false); return null
       }
     } else {
-      // Custom password mode
-      if (!exportPwd) { setExportErr('Password is required.'); return }
-      if (exportPwd !== exportPwdConfirm) { setExportErr('Passwords do not match.'); return }
+      // Custom password mode — encrypts the already-revealed secret.
+      const s = revealedSeed || revealedNsec
+      if (!s) { setExportErr('Reveal your key first to use a custom password.'); return null }
+      if (!exportPwd) { setExportErr('Password is required.'); return null }
+      if (exportPwd !== exportPwdConfirm) { setExportErr('Passwords do not match.'); return null }
+      secret = s
       encryptionPassword = exportPwd
       setExportLoading(true)
     }
@@ -4248,22 +4255,36 @@ function SecurityTab() {
         keyMaterial, { name: 'AES-GCM', length: 256 }, false, ['encrypt'],
       )
       const iv = crypto.getRandomValues(new Uint8Array(12))
-      const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, enc.encode(revealedSeed))
-      const payload = JSON.stringify({
+      const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, enc.encode(secret))
+      return JSON.stringify({
         version: 1, alg: 'AES-256-GCM', kdf: 'PBKDF2-SHA256', iterations: 600000,
         salt: btoa(String.fromCharCode(...salt)),
         iv: btoa(String.fromCharCode(...iv)),
         ciphertext: btoa(String.fromCharCode(...new Uint8Array(ciphertext))),
       })
-      const blob = new Blob([payload], { type: 'application/json' })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url; a.download = 'den-chat-seed-backup.json'
-      document.body.appendChild(a); a.click(); document.body.removeChild(a)
-      URL.revokeObjectURL(url)
-      setShowExport(false); setExportPwd(''); setExportPwdConfirm(''); setExportPinConfirm('')
-    } catch (e) { setExportErr(String(e)) }
+    } catch (e) { setExportErr(String(e)); return null }
     finally { setExportLoading(false) }
+  }
+
+  const resetExport = () => { setShowExport(false); setExportPwd(''); setExportPwdConfirm(''); setExportPinConfirm('') }
+
+  const handleExportEncrypted = async () => {
+    const payload = await produceEncryptedPayload()
+    if (!payload) return
+    const blob = new Blob([payload], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url; a.download = 'den-chat-seed-backup.json'
+    document.body.appendChild(a); a.click(); document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+    resetExport()
+  }
+
+  const handleExportQR = async () => {
+    const payload = await produceEncryptedPayload()
+    if (!payload) return
+    setSeedQrText(payload)
+    resetExport()
   }
 
   // ── Change PIN ──
@@ -4409,10 +4430,6 @@ function SecurityTab() {
                   <button onClick={() => { setRevealedSeed(null); setShowSeedWords(false) }} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-secondary/50 border border-border text-xs hover:bg-secondary transition-colors cursor-pointer">
                     <EyeOff size={14} /> Hide
                   </button>
-                  <button onClick={() => { setShowExport(true); setExportErr('') }}
-                    className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-primary/10 border border-primary/30 text-xs text-primary hover:bg-primary/20 transition-colors cursor-pointer">
-                    <FileDown size={14} /> Export Encrypted Backup
-                  </button>
                 </div>
               </div>
             )}
@@ -4464,18 +4481,46 @@ function SecurityTab() {
             ) : (
               <div className="space-y-3">
                 <div className="p-3 bg-secondary/50 rounded-lg border border-border font-mono text-sm break-all">
-                  {revealedNsec}
+                  {showNsecValue ? revealedNsec : '•'.repeat(revealedNsec.length)}
                 </div>
-                <div className="flex gap-2">
-                  <button onClick={() => copyText(revealedNsec)} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-secondary/50 border border-border text-xs hover:bg-secondary transition-colors cursor-pointer">
+                <div className="flex gap-2 flex-wrap">
+                  <button onClick={() => {
+                    if (showNsecValue) {
+                      setShowNsecValue(false)
+                    } else {
+                      // Uncensoring is gated behind an "are you sure" + countdown
+                      setSeedRevealCountdown(null)
+                      setShowSeedRevealConfirm(true)
+                    }
+                  }} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-secondary/50 border border-border text-xs hover:bg-secondary transition-colors cursor-pointer">
+                    {showNsecValue ? <><EyeOff size={14} /> Censor</> : <><Eye size={14} /> Uncensor</>}
+                  </button>
+                  <button onClick={() => setShowSeedCopyConfirm(true)} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-secondary/50 border border-border text-xs hover:bg-secondary transition-colors cursor-pointer">
                     {copied ? <><Check size={14} /> Copied!</> : <><Copy size={14} /> Copy</>}
                   </button>
-                  <button onClick={() => setRevealedNsec(null)} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-secondary/50 border border-border text-xs hover:bg-secondary transition-colors cursor-pointer">
+                  <button onClick={() => { setRevealedNsec(null); setShowNsecValue(false) }} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-secondary/50 border border-border text-xs hover:bg-secondary transition-colors cursor-pointer">
                     <EyeOff size={14} /> Hide
                   </button>
                 </div>
               </div>
             )}
+          </div>
+        </section>
+      )}
+
+      {/* ── Export encrypted backup (its own box, PIN-gated; File + QR) ── */}
+      {hasLocal && (
+        <section className="rounded-xl border border-border bg-secondary/10 overflow-hidden">
+          <div className="flex items-center gap-2.5 px-4 py-3 border-b border-border/50 bg-secondary/20">
+            <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center shrink-0"><FileDown size={14} className="text-primary" /></div>
+            <h4 className="text-sm font-semibold text-foreground">Export encrypted backup</h4>
+          </div>
+          <div className="p-4 space-y-3">
+            <p className="text-xs text-muted-foreground">A PIN-encrypted backup of your {isNsec ? 'private key' : 'seed phrase'} — save it as a file or show it as a QR to import on another device.</p>
+            <button onClick={() => { setShowExport(true); setExportErr('') }}
+              className="w-full h-9 px-3 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors cursor-pointer flex items-center justify-center gap-1.5">
+              <FileDown size={15} /> Export Encrypted Backup
+            </button>
           </div>
         </section>
       )}
@@ -4685,7 +4730,7 @@ function SecurityTab() {
                 </div>
                 <h4 className="text-base font-bold text-foreground">Reveal your secret keys?</h4>
                 <p className="text-xs text-muted-foreground">
-                  These 24 words <strong>are</strong> your account. Anyone who sees them — over your shoulder, on a screen share, or in a screenshot — gains <strong className="text-destructive">full and permanent control</strong> of your identity and funds. There is no recovery and no undo.
+                  Your secret key <strong>is</strong> your account. Anyone who sees it — over your shoulder, on a screen share, or in a screenshot — gains <strong className="text-destructive">full and permanent control</strong> of your identity and funds. There is no recovery and no undo.
                 </p>
                 <p className="text-[11px] text-muted-foreground">Make sure no one is watching your screen and nothing is recording.</p>
                 <div className="flex gap-2 w-full pt-1">
@@ -4753,7 +4798,7 @@ function SecurityTab() {
                 Cancel
               </button>
               <button
-                onClick={() => { if (revealedSeed) copyText(revealedSeed); setShowSeedCopyConfirm(false) }}
+                onClick={() => { const s = revealedSeed || revealedNsec; if (s) copyText(s); setShowSeedCopyConfirm(false) }}
                 className="flex items-center justify-center gap-2 flex-1 h-9 rounded-lg bg-destructive text-destructive-foreground text-sm font-medium hover:bg-destructive/90 transition-colors cursor-pointer"
               >
                 <Copy size={14} /> Yes, copy
@@ -4772,7 +4817,7 @@ function SecurityTab() {
               <button onClick={() => setShowExport(false)} className="text-muted-foreground hover:text-foreground cursor-pointer"><X size={16} /></button>
             </div>
             <p className="text-xs text-muted-foreground">
-              Choose a password to encrypt your seed backup. You'll need this password to import it into DEN Chat or the DENOS signer.
+              Choose a password to encrypt your backup. You'll need this password to import it into DEN Chat or the DENOS signer.
             </p>
 
             {/* Use current PIN toggle */}
@@ -4830,10 +4875,25 @@ function SecurityTab() {
               <button onClick={() => setShowExport(false)} className="flex-1 h-9 rounded-lg border border-border bg-secondary/50 text-sm hover:bg-secondary transition-colors cursor-pointer">
                 Cancel
               </button>
+              <button onClick={handleExportQR} disabled={exportLoading || (exportUsePin ? !exportPinConfirm : !exportPwd)} className="flex-1 h-9 rounded-lg border border-border bg-secondary/50 text-sm font-medium hover:bg-secondary transition-colors cursor-pointer disabled:opacity-50 flex items-center justify-center gap-1.5">
+                <QrCode size={14} /> QR
+              </button>
               <button onClick={handleExportEncrypted} disabled={exportLoading || (exportUsePin ? !exportPinConfirm : !exportPwd)} className="flex-1 h-9 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors cursor-pointer disabled:opacity-50 flex items-center justify-center gap-1.5">
-                {exportLoading ? <Loader2 size={14} className="animate-spin" /> : <FileDown size={14} />} Export
+                {exportLoading ? <Loader2 size={14} className="animate-spin" /> : <FileDown size={14} />} File
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Encrypted-backup QR (seed/nsec accounts) */}
+      {seedQrText && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={() => setSeedQrText(null)}>
+          <div className="w-full max-w-xs rounded-xl bg-card border border-border shadow-xl p-6 flex flex-col items-center gap-4 text-center" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-base font-bold text-foreground">Encrypted backup QR</h3>
+            <div className="bg-white p-3 rounded-lg"><QRCodeSVG value={seedQrText} size={232} level="M" /></div>
+            <p className="text-xs text-muted-foreground">Scan this from <span className="font-medium text-foreground">Import → Scan QR</span> on the other device. It's still encrypted — your PIN/password is required to open it.</p>
+            <button onClick={() => setSeedQrText(null)} className="w-full h-9 px-3 rounded-lg border border-border text-sm font-medium hover:bg-secondary transition-colors cursor-pointer">Done</button>
           </div>
         </div>
       )}
