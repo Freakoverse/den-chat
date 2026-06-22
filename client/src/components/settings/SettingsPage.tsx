@@ -51,6 +51,7 @@ import { useProfileCache } from '@/hooks/useProfileCache'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { truncateNpub } from '@/lib/utils'
 import { Input } from '@/components/ui/input'
+import { getVaultClient } from '@/lib/auth/vaultClient'
 import { UserPanel } from '@/components/ui/UserPanel'
 import { ResizablePanel } from '@/components/ui/ResizablePanel'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
@@ -3932,6 +3933,101 @@ function SoundEffectsSection() {
 
 /* ─────────── Security ─────────── */
 
+/** Security controls for a vault-backed account (export backup + delete from device). */
+function VaultSecuritySection({ pubkey, fingerprint }: { pubkey: string; fingerprint: string }) {
+  const logout = useUserStore((s) => s.logout)
+  const [exportPin, setExportPin] = useState('')
+  const [exportErr, setExportErr] = useState('')
+  const [exportBusy, setExportBusy] = useState(false)
+  const [showDelete, setShowDelete] = useState(false)
+  const [deletePin, setDeletePin] = useState('')
+  const [deleteConfirm, setDeleteConfirm] = useState('')
+  const [deleteErr, setDeleteErr] = useState('')
+  const [deleteBusy, setDeleteBusy] = useState(false)
+
+  const handleExport = async () => {
+    if (!exportPin) { setExportErr('Enter your PIN'); return }
+    setExportBusy(true); setExportErr('')
+    try {
+      const { payload } = await getVaultClient().exportBackup(pubkey, exportPin)
+      const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a'); a.href = url; a.download = `den-backup-${Date.now()}.json`
+      document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url)
+      setExportPin('')
+    } catch (e) {
+      setExportErr(e instanceof Error ? e.message : 'Wrong PIN')
+    } finally { setExportBusy(false) }
+  }
+
+  const handleDelete = async () => {
+    if (!deletePin) { setDeleteErr('Enter your PIN'); return }
+    if (deleteConfirm.trim() !== fingerprint) { setDeleteErr(`Type "${fingerprint}" to confirm.`); return }
+    setDeleteBusy(true); setDeleteErr('')
+    try {
+      await getVaultClient().removeAccount(pubkey, deletePin)
+      logout()
+    } catch (e) {
+      setDeleteErr(e instanceof Error ? e.message : 'Wrong PIN')
+      setDeleteBusy(false)
+    }
+  }
+
+  return (
+    <>
+      <div className="rounded-xl border border-border bg-secondary/20 p-4 flex items-start gap-3">
+        <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+          <ShieldCheck size={18} className="text-primary" />
+        </div>
+        <div>
+          <p className="text-sm font-medium text-foreground">Vault account</p>
+          <p className="text-xs text-muted-foreground mt-0.5">Your key is stored in the isolated DEN vault. Export an encrypted backup, or remove it from this device below.</p>
+        </div>
+      </div>
+
+      {/* Export encrypted backup (PIN-gated) */}
+      <section className="rounded-xl border border-border bg-secondary/10 overflow-hidden">
+        <div className="flex items-center gap-2.5 px-4 py-3 border-b border-border/50 bg-secondary/20">
+          <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center shrink-0"><FileDown size={14} className="text-primary" /></div>
+          <h4 className="text-sm font-semibold text-foreground">Export encrypted backup</h4>
+        </div>
+        <div className="p-4 space-y-3">
+          <p className="text-xs text-muted-foreground">Re-download your PIN-encrypted backup file. Enter your PIN to confirm.</p>
+          <Input type="password" inputMode="numeric" placeholder="PIN" value={exportPin} onChange={(e) => setExportPin(e.target.value)} />
+          {exportErr && <p className="text-xs text-destructive">{exportErr}</p>}
+          <button onClick={handleExport} disabled={exportBusy} className="w-full h-9 px-3 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5">
+            {exportBusy ? <Loader2 size={15} className="animate-spin" /> : <><Download size={15} /> Download backup</>}
+          </button>
+        </div>
+      </section>
+
+      {/* Delete from this device (PIN + fingerprint confirm) */}
+      <section className="rounded-xl border border-destructive/30 bg-destructive/5 overflow-hidden">
+        <div className="flex items-center gap-2.5 px-4 py-3 border-b border-destructive/20 bg-destructive/10">
+          <div className="w-7 h-7 rounded-lg bg-destructive/10 flex items-center justify-center shrink-0"><Trash2 size={14} className="text-destructive" /></div>
+          <h4 className="text-sm font-semibold text-destructive">Delete from this device</h4>
+        </div>
+        <div className="p-4 space-y-3">
+          <p className="text-xs text-muted-foreground">Removes this account's key from the vault on this device. <span className="text-foreground font-medium">Make sure you have your backup file and PIN</span> — this can't be undone.</p>
+          {!showDelete ? (
+            <button onClick={() => setShowDelete(true)} className="w-full h-9 px-3 rounded-lg border border-destructive/40 text-destructive text-sm font-medium hover:bg-destructive hover:text-white transition-colors cursor-pointer flex items-center justify-center gap-1.5"><Trash2 size={15} /> Delete account</button>
+          ) : (
+            <>
+              <Input type="password" inputMode="numeric" placeholder="PIN" value={deletePin} onChange={(e) => setDeletePin(e.target.value)} />
+              <Input placeholder={`Type "${fingerprint}" to confirm`} value={deleteConfirm} onChange={(e) => setDeleteConfirm(e.target.value)} />
+              {deleteErr && <p className="text-xs text-destructive">{deleteErr}</p>}
+              <div className="flex gap-2">
+                <button onClick={() => { setShowDelete(false); setDeletePin(''); setDeleteConfirm(''); setDeleteErr('') }} className="flex-1 h-9 px-3 rounded-lg border border-border text-sm font-medium hover:bg-secondary transition-colors cursor-pointer">Cancel</button>
+                <button onClick={handleDelete} disabled={deleteBusy} className="flex-1 h-9 px-3 rounded-lg bg-destructive text-white text-sm font-medium hover:bg-destructive/90 transition-colors cursor-pointer disabled:opacity-50 flex items-center justify-center gap-1.5">{deleteBusy ? <Loader2 size={15} className="animate-spin" /> : 'Delete'}</button>
+              </div>
+            </>
+          )}
+        </div>
+      </section>
+    </>
+  )
+}
+
 function SecurityTab() {
   const authMethod = useUserStore((s) => s.authMethod)
   const pubkey = useUserStore((s) => s.pubkey)
@@ -4020,6 +4116,7 @@ function SecurityTab() {
 
   const isSeed = authMethod === 'seed'
   const isNsec = authMethod === 'nsec'
+  const isVault = authMethod === 'vault'
   const hasLocal = isDesktop && (isSeed || isNsec)
 
   const npubStr = pubkey ? nip19.npubEncode(pubkey) : ''
@@ -4195,7 +4292,7 @@ function SecurityTab() {
         <p className="text-xs text-muted-foreground mt-1">Manage your keys, PINs, backups, and account deletion.</p>
       </div>
 
-      {!hasLocal && (
+      {!hasLocal && !isVault && (
         <div className="rounded-xl border border-border bg-secondary/20 p-4 flex items-start gap-3">
           <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
             <Shield size={18} className="text-primary" />
@@ -4206,6 +4303,8 @@ function SecurityTab() {
           </div>
         </div>
       )}
+
+      {isVault && pubkey && <VaultSecuritySection pubkey={pubkey} fingerprint={npubFingerprint} />}
 
       {/* ── Seed phrase section (PIN-gated reveal) ── */}
       {hasLocal && isSeed && (

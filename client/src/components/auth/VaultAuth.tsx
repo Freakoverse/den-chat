@@ -9,7 +9,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
-import { Loader2, Plus, Import, ChevronLeft, KeyRound, Download, FileUp, Check, Copy, ShieldCheck } from 'lucide-react'
+import { Loader2, Plus, Import, ChevronLeft, KeyRound, Download, FileUp, Check, Copy, ShieldCheck, Eye, EyeOff } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent } from '@/components/ui/card'
@@ -18,10 +18,9 @@ import { useUserStore } from '@/stores/userStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { getVaultClient, vaultSigner, type VaultAccount } from '@/lib/auth/vaultClient'
 import { encryptBackup, parseBackupPayload, verifyBackupMatches } from '@/lib/auth/backupCrypto'
-import { truncateNpub } from '@/lib/utils'
+import { cn, truncateNpub } from '@/lib/utils'
 
 type Screen = 'loading' | 'accounts' | 'unlock' | 'create' | 'import'
-type CreateStep = 'seed' | 'pin' | 'backup' | 'verify'
 
 const vault = getVaultClient()
 
@@ -49,21 +48,23 @@ export function VaultAuth() {
   if (screen === 'import') return <ImportScreen onBack={() => setScreen('accounts')} onDone={completeLogin} />
 
   return (
-    <div className="w-full max-w-sm mx-auto space-y-4">
-      <Header title="Welcome to DEN" subtitle={accounts.length ? 'Choose an account to unlock, or add one.' : 'Create a new account, or import a backup.'} />
-      {error && <p className="text-sm text-destructive text-center">{error}</p>}
-      {accounts.length > 0 && (
-        <div className="space-y-2">
-          {accounts.map((a) => (
-            <AccountRow key={a.pubkey} account={a} onClick={() => { setSelected(a); setScreen('unlock') }} />
-          ))}
+    <Card className="w-full max-w-sm mx-auto">
+      <CardContent className="p-4 space-y-4">
+        <Header title="Welcome to DEN" subtitle={accounts.length ? 'Choose an account to unlock, or add one.' : 'Create a new account, or import a backup.'} />
+        {error && <p className="text-sm text-destructive text-center">{error}</p>}
+        {accounts.length > 0 && (
+          <div className="space-y-2">
+            {accounts.map((a) => (
+              <AccountRow key={a.pubkey} account={a} onClick={() => { setSelected(a); setScreen('unlock') }} />
+            ))}
+          </div>
+        )}
+        <div className="grid grid-cols-2 gap-2">
+          <Button variant="outline" onClick={() => setScreen('create')}><Plus size={16} /> Create</Button>
+          <Button variant="outline" onClick={() => setScreen('import')}><Import size={16} /> Import</Button>
         </div>
-      )}
-      <div className="grid grid-cols-2 gap-2">
-        <Button variant="outline" onClick={() => setScreen('create')}><Plus size={16} /> Create</Button>
-        <Button variant="outline" onClick={() => setScreen('import')}><Import size={16} /> Import</Button>
-      </div>
-    </div>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -109,11 +110,12 @@ function UnlockScreen({ account, onBack, onDone }: { account: VaultAccount; onBa
 
 /* ─── Create ─── */
 function CreateScreen({ onExit, onDone }: { onExit: () => void; onDone: (pubkey: string) => void }) {
-  const [step, setStep] = useState<CreateStep>('seed')
+  const [step, setStep] = useState<'pin' | 'backup'>('pin')
   const [mnemonic, setMnemonic] = useState('')
   const [name, setName] = useState('')
   const [pin, setPin] = useState('')
   const [pinConfirm, setPinConfirm] = useState('')
+  const [revealed, setRevealed] = useState(false)
   const [copied, setCopied] = useState(false)
   const [downloaded, setDownloaded] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -148,14 +150,28 @@ function CreateScreen({ onExit, onDone }: { onExit: () => void; onDone: (pubkey:
     } finally { setBusy(false) }
   }
 
-  if (!mnemonic && !error) return <Centered><Loader2 className="animate-spin text-muted-foreground" /></Centered>
-
-  if (step === 'seed') {
-    const words = mnemonic.split(' ')
+  // ── Step 1: PIN first (matches desktop) ──
+  if (step === 'pin') {
+    const ok = pin.length >= 4 && pin === pinConfirm
     return (
       <Pane onBack={onExit}>
-        <Header title="Your recovery phrase" subtitle="Write these 24 words down and keep them safe. They're the only way to recover your account on any client." />
-        <div className="grid grid-cols-3 gap-1.5">
+        <Header title="Set a PIN" subtitle="Unlocks this device and encrypts your backup file. It can't be reset — your recovery phrase is the fallback." />
+        <Input placeholder="Account name (optional)" value={name} onChange={(e) => setName(e.target.value)} />
+        <Input type="password" inputMode="numeric" placeholder="PIN" value={pin} onChange={(e) => setPin(e.target.value)} />
+        <Input type="password" inputMode="numeric" placeholder="Confirm PIN" value={pinConfirm} onChange={(e) => setPinConfirm(e.target.value)} />
+        {pin && pinConfirm && pin !== pinConfirm && <p className="text-xs text-destructive">PINs don't match.</p>}
+        <Button className="w-full" disabled={!ok || !mnemonic} onClick={() => setStep('backup')}>Continue</Button>
+      </Pane>
+    )
+  }
+
+  // ── Step 2: recovery phrase (blurred) + download + verify ──
+  const words = mnemonic.split(' ')
+  return (
+    <Pane onBack={() => setStep('pin')}>
+      <Header title="Your recovery phrase" subtitle="Write these 24 words down and keep them offline. They're the only way to recover your account on any client." />
+      <div className="relative">
+        <div className={cn('grid grid-cols-3 gap-1.5 transition', !revealed && 'blur-sm select-none pointer-events-none')}>
           {words.map((w, i) => (
             <div key={i} className="flex items-center gap-1 px-2 py-1.5 rounded-md bg-muted/40 text-xs">
               <span className="text-muted-foreground tabular-nums w-4 text-right">{i + 1}</span>
@@ -163,48 +179,22 @@ function CreateScreen({ onExit, onDone }: { onExit: () => void; onDone: (pubkey:
             </div>
           ))}
         </div>
-        <button onClick={() => { navigator.clipboard?.writeText(mnemonic); setCopied(true); setTimeout(() => setCopied(false), 1500) }} className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1 cursor-pointer">
-          {copied ? <Check size={12} className="text-emerald-500" /> : <Copy size={12} />} {copied ? 'Copied' : 'Copy phrase'}
-        </button>
-        {error && <p className="text-sm text-destructive">{error}</p>}
-        <Button className="w-full" onClick={() => setStep('pin')}>I've saved it · Continue</Button>
-      </Pane>
-    )
-  }
-
-  if (step === 'pin') {
-    const ok = pin.length >= 4 && pin === pinConfirm
-    return (
-      <Pane onBack={() => setStep('seed')}>
-        <Header title="Set a PIN" subtitle="Unlocks this device and encrypts your backup file. It can't be reset — your recovery phrase is the fallback." />
-        <Input placeholder="Account name (optional)" value={name} onChange={(e) => setName(e.target.value)} />
-        <Input type="password" inputMode="numeric" placeholder="PIN" value={pin} onChange={(e) => setPin(e.target.value)} />
-        <Input type="password" inputMode="numeric" placeholder="Confirm PIN" value={pinConfirm} onChange={(e) => setPinConfirm(e.target.value)} />
-        {pin && pinConfirm && pin !== pinConfirm && <p className="text-xs text-destructive">PINs don't match.</p>}
-        <Button className="w-full" disabled={!ok} onClick={() => setStep('backup')}>Continue</Button>
-      </Pane>
-    )
-  }
-
-  if (step === 'backup') {
-    return (
-      <Pane onBack={() => setStep('pin')}>
-        <Header title="Download your backup" subtitle="A PIN-encrypted file. Save it somewhere safe — if this device loses its data, this file (with your PIN) restores your account." />
-        <Button className="w-full" variant="outline" onClick={download}><Download size={16} /> {downloaded ? 'Downloaded · Download again' : 'Download encrypted backup'}</Button>
-        {error && <p className="text-sm text-destructive">{error}</p>}
-        <Button className="w-full" disabled={!downloaded} onClick={() => setStep('verify')}>Continue</Button>
-      </Pane>
-    )
-  }
-
-  // verify
-  return (
-    <Pane onBack={() => setStep('backup')}>
-      <Header title="Verify your backup" subtitle="Re-upload the file you just downloaded so we can confirm it's saved and works. Nothing leaves your device." />
+        {!revealed && (
+          <button onClick={() => setRevealed(true)} className="absolute inset-0 flex items-center justify-center gap-1.5 text-xs font-medium text-foreground cursor-pointer">
+            <Eye size={14} /> Tap to reveal
+          </button>
+        )}
+      </div>
+      <div className="flex items-center justify-between">
+        <button onClick={() => setRevealed((v) => !v)} className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1 cursor-pointer">{revealed ? <><EyeOff size={12} /> Hide</> : <><Eye size={12} /> Reveal</>}</button>
+        <button onClick={() => { navigator.clipboard?.writeText(mnemonic); setCopied(true); setTimeout(() => setCopied(false), 1500) }} className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1 cursor-pointer">{copied ? <Check size={12} className="text-emerald-500" /> : <Copy size={12} />} {copied ? 'Copied' : 'Copy'}</button>
+      </div>
+      <Button className="w-full" variant="outline" onClick={download}><Download size={16} /> {downloaded ? 'Downloaded · Download again' : 'Download encrypted backup'}</Button>
       <input ref={fileRef} type="file" accept="application/json,.json" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) onVerifyFile(f) }} />
-      <Button className="w-full" disabled={busy} onClick={() => fileRef.current?.click()}>
+      <Button className="w-full" disabled={!downloaded || busy} onClick={() => fileRef.current?.click()}>
         {busy ? <><Loader2 size={16} className="animate-spin" /> Verifying…</> : <><FileUp size={16} /> Re-upload to verify & finish</>}
       </Button>
+      {!downloaded && <p className="text-[11px] text-muted-foreground text-center">Download your backup, then re-upload it to finish.</p>}
       {error && <p className="text-sm text-destructive">{error}</p>}
     </Pane>
   )
