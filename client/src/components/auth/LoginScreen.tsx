@@ -3,7 +3,7 @@ import { useUserStore } from '@/stores/userStore'
 import { isTauri, isMobileOS } from '@/lib/utils'
 import { ADMIN_PUBKEY, StorageKey } from '@/lib/constants'
 import { fetchReplaceable, fetchEvents, publishToSpecificRelays, getRelayList } from '@/lib/nostr/relay-pool'
-import { MonitorSmartphone, Import, Plus, Loader2, AlertCircle, Link2, KeyRound, Copy, Check, AppWindow, ChevronDown, ChevronLeft, ChevronRight, X, Shield, ShieldAlert, ExternalLink, User, Lock, Eye, EyeOff, GitBranch, Sprout, KeySquare, Download, FileUp, BookOpen, Camera, Settings2, XCircle, FileText, Package, LockOpen, Globe, RefreshCw, Rocket } from 'lucide-react'
+import { MonitorSmartphone, Import, Plus, Loader2, AlertCircle, Link2, KeyRound, Copy, Check, AppWindow, ChevronDown, ChevronLeft, ChevronRight, X, Shield, ExternalLink, User, Lock, Eye, EyeOff, GitBranch, Sprout, KeySquare, Download, FileUp, BookOpen, Camera, Settings2, XCircle, FileText, Package, LockOpen, Globe, RefreshCw, Rocket } from 'lucide-react'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { BlossomImage } from '@/components/ui/BlossomImage'
 import { Button } from '@/components/ui/button'
@@ -12,6 +12,8 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
 import { DenChatLogo } from '@/components/ui/DenChatLogo'
 import { VaultAuth } from '@/components/auth/VaultAuth'
+import { WarningCarousel } from '@/components/auth/WarningCarousel'
+import { PinInput } from '@/components/auth/PinInput'
 import { QRCodeSVG } from 'qrcode.react'
 import { isValidMnemonic } from '@/lib/auth'
 import { uploadToBlossomServers, blossomServers as blossomServerManager } from '@/lib/blossom'
@@ -41,81 +43,6 @@ interface LoginBgEntry {
 }
 
 type Screen = 'main' | 'import' | 'nip46' | 'pin-login' | 'generate-pin' | 'import-pin' | 'derive-pin' | 'seed-backup' | 'saved-accounts' | 'onboarding-profile'
-
-// ── Rotating Warning Carousel ──────────────────────────────────────────────
-const WARNING_MESSAGES = [
-  {
-    icon: AlertCircle,
-    text: (
-      <>
-        <span className="font-semibold">There is no PIN recovery.</span> If you forget your PIN,
-        your only option is to re-import using your raw seed phrase (the 24 words).
-      </>
-    ),
-  },
-  {
-    icon: ShieldAlert,
-    text: (
-      <>
-        If your device is compromised, then so is your account, and you wouldn't know about it
-        unless the attacker takes action you notice. No solution.
-      </>
-    ),
-  },
-]
-
-function WarningCarousel() {
-  const [index, setIndex] = useState(0)
-  const [fading, setFading] = useState(false)
-  const [paused, setPaused] = useState(false)
-  const INTERVAL = 10_000
-
-  useEffect(() => {
-    if (paused) return
-    const timer = setInterval(() => {
-      setFading(true)
-      setTimeout(() => {
-        setIndex(i => (i + 1) % WARNING_MESSAGES.length)
-        setFading(false)
-      }, 200)
-    }, INTERVAL)
-    return () => clearInterval(timer)
-  }, [paused])
-
-  const { icon: Icon, text } = WARNING_MESSAGES[index]
-
-  return (
-    <div
-      className="w-full rounded-lg bg-amber-500/10 border border-amber-500/30 overflow-hidden cursor-pointer select-none"
-      onClick={() => setPaused(p => !p)}
-    >
-      <div
-        className="flex items-start gap-2 px-3 py-2 transition-opacity duration-200"
-        style={{ opacity: fading ? 0 : 1 }}
-      >
-        <Icon size={14} className="text-amber-500 shrink-0 mt-0.5" />
-        <p className="text-xs text-amber-600 dark:text-amber-400">{text}</p>
-      </div>
-      {/* Timer progress bar — pure CSS animation */}
-      <div className="h-[2px] w-full bg-amber-500/10">
-        <div
-          key={`${index}-${paused}`}
-          className="h-full bg-amber-500/50"
-          style={{
-            animation: `warningProgress ${INTERVAL}ms linear`,
-            animationPlayState: paused ? 'paused' : 'running',
-          }}
-        />
-      </div>
-      <style>{`
-        @keyframes warningProgress {
-          from { width: 0%; }
-          to   { width: 100%; }
-        }
-      `}</style>
-    </div>
-  )
-}
 
 export function LoginScreen() {
   const login = useUserStore((s) => s.login)
@@ -154,11 +81,11 @@ export function LoginScreen() {
   const [selectedAccount, setSelectedAccount] = useState<StoredAccount | null>(null)
   const [pin, setPin] = useState('')
   const [pinHint, setPinHint] = useState('')
-  const [showPin, setShowPin] = useState(false)
   const [accountName, setAccountName] = useState('')
   // On mobile web (PWA), the vault flow is the primary login. `vaultMode` lets the
-  // user fall back to the other sign-in options (remote signer, etc.) if needed.
-  const [vaultMode, setVaultMode] = useState(!isDesktop && isMobile)
+  // user fall back to the other sign-in options (remote signer, etc.) and back.
+  const useVault = !isDesktop && isMobile
+  const [vaultMode, setVaultMode] = useState(useVault)
   const [backupMnemonic, setBackupMnemonic] = useState<string | null>(null)
   const [showBackupWords, setShowBackupWords] = useState(false)
   const [backupCopied, setBackupCopied] = useState(false)
@@ -1152,23 +1079,12 @@ export function LoginScreen() {
               className="h-10"
             />
 
-            <div className="w-full relative">
-              <Input
-                type={showPin ? 'text' : 'password'}
-                placeholder="Enter PIN"
-                value={pin}
-                onChange={(e) => { setPin(e.target.value); clearError() }}
-                className="h-10 pr-10"
-                onKeyDown={(e) => e.key === 'Enter' && handleImportWithPin()}
-              />
-              <button
-                type="button"
-                onClick={() => setShowPin(!showPin)}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-              >
-                {showPin ? <EyeOff size={15} /> : <Eye size={15} />}
-              </button>
-            </div>
+            <PinInput
+              value={pin}
+              onChange={(v) => { setPin(v); clearError() }}
+              placeholder="Enter PIN"
+              onEnter={handleImportWithPin}
+            />
 
             <Input
               type="text"
@@ -1223,23 +1139,12 @@ export function LoginScreen() {
               className="h-10"
             />
 
-            <div className="w-full relative">
-              <Input
-                type={showPin ? 'text' : 'password'}
-                placeholder="Enter PIN"
-                value={pin}
-                onChange={(e) => { setPin(e.target.value); clearError() }}
-                className="h-10 pr-10"
-                onKeyDown={(e) => e.key === 'Enter' && handleGenerateWithPin()}
-              />
-              <button
-                type="button"
-                onClick={() => setShowPin(!showPin)}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-              >
-                {showPin ? <EyeOff size={15} /> : <Eye size={15} />}
-              </button>
-            </div>
+            <PinInput
+              value={pin}
+              onChange={(v) => { setPin(v); clearError() }}
+              placeholder="Enter PIN"
+              onEnter={handleGenerateWithPin}
+            />
 
             <Input
               type="text"
@@ -1286,24 +1191,13 @@ export function LoginScreen() {
               Enter the PIN for <strong>{deriveSeed?.name || 'this seed'}</strong> to derive a new account.
             </p>
 
-            <div className="w-full relative">
-              <Input
-                type={showPin ? 'text' : 'password'}
-                placeholder="Enter seed PIN"
-                value={pin}
-                onChange={(e) => { setPin(e.target.value); clearError() }}
-                className="h-10 pr-10"
-                onKeyDown={(e) => e.key === 'Enter' && handleDeriveFromSeed(deriveSeedId)}
-                autoFocus
-              />
-              <button
-                type="button"
-                onClick={() => setShowPin(!showPin)}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-              >
-                {showPin ? <EyeOff size={15} /> : <Eye size={15} />}
-              </button>
-            </div>
+            <PinInput
+              value={pin}
+              onChange={(v) => { setPin(v); clearError() }}
+              placeholder="Enter seed PIN"
+              autoFocus
+              onEnter={() => handleDeriveFromSeed(deriveSeedId)}
+            />
 
             {error && (
               <div className="flex items-center gap-2 text-sm text-destructive w-full">
@@ -1328,8 +1222,7 @@ export function LoginScreen() {
     return (
       <div className="flex items-center justify-center h-full overflow-y-auto bg-surface-background relative p-4 max-[1080px]:items-start">
         {bgImageUrl && <BlossomImage src={bgImageUrl} alt="" className="fixed inset-0 w-full h-full" imgClassName="object-right-bottom" />}
-        <div className="relative z-10 w-full max-w-sm py-8 space-y-4">
-          <div className="flex justify-center"><DenChatLogo className="h-9" /></div>
+        <div className="relative z-10 w-full max-w-md py-8 space-y-4">
           <VaultAuth />
           <button onClick={() => setVaultMode(false)} className="block mx-auto text-xs text-muted-foreground hover:text-foreground cursor-pointer">Other sign-in options</button>
         </div>
@@ -1869,24 +1762,13 @@ export function LoginScreen() {
               )
             })()}
 
-            <div className="w-full relative">
-              <Input
-                type={showPin ? 'text' : 'password'}
-                placeholder="Enter PIN"
-                value={pin}
-                onChange={(e) => { setPin(e.target.value); clearError() }}
-                className="h-11 pr-10"
-                onKeyDown={(e) => e.key === 'Enter' && handlePinLogin()}
-                autoFocus
-              />
-              <button
-                type="button"
-                onClick={() => setShowPin(!showPin)}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-              >
-                {showPin ? <EyeOff size={15} /> : <Eye size={15} />}
-              </button>
-            </div>
+            <PinInput
+              value={pin}
+              onChange={(v) => { setPin(v); clearError() }}
+              placeholder="Enter PIN"
+              autoFocus
+              onEnter={handlePinLogin}
+            />
 
             {selectedAccount.pin_hint && (
               <p className="text-xs text-muted-foreground w-full">
@@ -2216,6 +2098,11 @@ export function LoginScreen() {
       {bgOverlay}
       <Card className="w-full max-w-sm shadow-lg relative z-10">
         <CardContent className="p-8 flex flex-col items-center gap-6">
+          {useVault && (
+            <button onClick={() => setVaultMode(true)} className="self-start -mb-3 flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground cursor-pointer">
+              <ChevronLeft size={14} /> DEN vault sign-in
+            </button>
+          )}
           {/* Logo */}
           <div className="flex flex-col items-center gap-3 mb-2">
             <DenChatLogo size={64} />

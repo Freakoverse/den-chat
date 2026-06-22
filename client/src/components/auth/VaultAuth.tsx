@@ -2,23 +2,28 @@
  * VaultAuth — mobile/PWA login backed by the isolated vault origin.
  *
  * Rendered by LoginScreen only when `!isTauri() && isMobileOS()`. Mirrors the
- * desktop account flow (list → pick → PIN), plus Create (generate → save seed →
- * set PIN → download backup → re-upload to verify) and Import (file). The private
- * key lives entirely in the vault; on success the app authenticates with
- * `vaultSigner()` (authMethod 'vault') so all signing routes through the vault.
+ * desktop flow (account list → pick → PIN; Create Account → Backup Seed Phrase;
+ * Import) one-for-one — same wordings, hidden-by-default dotted words, reveal
+ * confirm + countdown — plus a local re-upload-to-verify step before the key is
+ * saved. The private key lives entirely in the vault; on success the app
+ * authenticates with `vaultSigner()` (authMethod 'vault') so signing routes
+ * through the vault.
  */
 
 import { useEffect, useRef, useState } from 'react'
-import { Loader2, Plus, Import, ChevronLeft, KeyRound, Download, FileUp, Check, Copy, ShieldCheck, Eye, EyeOff } from 'lucide-react'
+import { Loader2, Plus, Import, KeyRound, Download, FileUp, Check, Copy, ShieldCheck, Eye, EyeOff, Lock, Shield, AlertCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent } from '@/components/ui/card'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { DenChatLogo } from '@/components/ui/DenChatLogo'
 import { useUserStore } from '@/stores/userStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { getVaultClient, vaultSigner, type VaultAccount } from '@/lib/auth/vaultClient'
 import { encryptBackup, parseBackupPayload, verifyBackupMatches } from '@/lib/auth/backupCrypto'
-import { cn, truncateNpub } from '@/lib/utils'
+import { WarningCarousel } from '@/components/auth/WarningCarousel'
+import { PinInput } from '@/components/auth/PinInput'
+import { truncateNpub } from '@/lib/utils'
 
 type Screen = 'loading' | 'accounts' | 'unlock' | 'create' | 'import'
 
@@ -27,6 +32,14 @@ const vault = getVaultClient()
 function completeLogin(pubkey: string) {
   useUserStore.getState().setSigner(vaultSigner())
   useUserStore.getState().login(pubkey, 'vault')
+}
+
+function downloadBackup(payload: object) {
+  const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url; a.download = `den-backup-${Date.now()}.json`
+  document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url)
 }
 
 export function VaultAuth() {
@@ -42,33 +55,31 @@ export function VaultAuth() {
 
   useEffect(() => { refresh() }, [])
 
-  if (screen === 'loading') return <Centered><Loader2 className="animate-spin text-muted-foreground" /></Centered>
+  if (screen === 'loading') return <VaultCard><Loader2 className="animate-spin text-muted-foreground my-6" /></VaultCard>
   if (screen === 'unlock' && selected) return <UnlockScreen account={selected} onBack={() => setScreen('accounts')} onDone={completeLogin} />
   if (screen === 'create') return <CreateScreen onExit={() => setScreen('accounts')} onDone={completeLogin} />
   if (screen === 'import') return <ImportScreen onBack={() => setScreen('accounts')} onDone={completeLogin} />
 
   return (
-    <Card className="w-full max-w-sm mx-auto">
-      <CardContent className="p-4 space-y-4">
-        <Header title="Welcome to DEN" subtitle={accounts.length ? 'Choose an account to unlock, or add one.' : 'Create a new account, or import a backup.'} />
-        {error && <p className="text-sm text-destructive text-center">{error}</p>}
-        {accounts.length > 0 && (
-          <div className="space-y-2">
-            {accounts.map((a) => (
-              <AccountRow key={a.pubkey} account={a} onClick={() => { setSelected(a); setScreen('unlock') }} />
-            ))}
-          </div>
-        )}
-        <div className="grid grid-cols-2 gap-2">
-          <Button variant="outline" onClick={() => setScreen('create')}><Plus size={16} /> Create</Button>
-          <Button variant="outline" onClick={() => setScreen('import')}><Import size={16} /> Import</Button>
+    <VaultCard>
+      <Header icon={KeyRound} title="Welcome to DEN" subtitle={accounts.length ? 'Choose an account to unlock, or add one.' : 'Create a new account, or import a backup.'} />
+      {error && <p className="text-sm text-destructive text-center">{error}</p>}
+      {accounts.length > 0 && (
+        <div className="w-full space-y-2">
+          {accounts.map((a) => (
+            <AccountRow key={a.pubkey} account={a} onClick={() => { setSelected(a); setScreen('unlock') }} />
+          ))}
         </div>
-      </CardContent>
-    </Card>
+      )}
+      <div className="grid grid-cols-2 gap-2 w-full">
+        <Button variant="outline" onClick={() => setScreen('create')}><Plus size={16} /> Create</Button>
+        <Button variant="outline" onClick={() => setScreen('import')}><Import size={16} /> Import</Button>
+      </div>
+    </VaultCard>
   )
 }
 
-/* ─── Account list ─── */
+/* ─── Account list row ─── */
 function AccountRow({ account, onClick }: { account: VaultAccount; onClick: () => void }) {
   const { getProfile } = useProfileCache()
   const p = getProfile(account.pubkey)
@@ -99,43 +110,80 @@ function UnlockScreen({ account, onBack, onDone }: { account: VaultAccount; onBa
   }
   const display = account.name || truncateNpub(account.npub, 12)
   return (
-    <Pane onBack={onBack}>
-      <Header title={`Unlock ${display}`} subtitle="Enter your PIN to sign in." />
-      <Input type="password" inputMode="numeric" autoFocus value={pin} onChange={(e) => setPin(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} placeholder="PIN" />
-      {error && <p className="text-sm text-destructive">{error}</p>}
+    <VaultCard onBack={onBack}>
+      <Header icon={Lock} title={`Unlock ${display}`} subtitle="Enter your PIN to sign in." />
+      <PinInput value={pin} onChange={setPin} autoFocus onEnter={submit} />
+      {error && <p className="flex items-center gap-1.5 text-sm text-destructive w-full"><AlertCircle size={14} className="shrink-0" /> {error}</p>}
       <Button className="w-full" disabled={!pin || busy} onClick={submit}>{busy ? <Loader2 size={16} className="animate-spin" /> : 'Unlock'}</Button>
-    </Pane>
+    </VaultCard>
   )
 }
 
-/* ─── Create ─── */
+/* ─── Create (Create Account → Backup Seed Phrase) ─── */
 function CreateScreen({ onExit, onDone }: { onExit: () => void; onDone: (pubkey: string) => void }) {
   const [step, setStep] = useState<'pin' | 'backup'>('pin')
   const [mnemonic, setMnemonic] = useState('')
   const [name, setName] = useState('')
   const [pin, setPin] = useState('')
   const [pinConfirm, setPinConfirm] = useState('')
-  const [revealed, setRevealed] = useState(false)
-  const [copied, setCopied] = useState(false)
-  const [downloaded, setDownloaded] = useState(false)
-  const [busy, setBusy] = useState(false)
+  const [generating, setGenerating] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // Backup-step state (mirrors the desktop seed-backup screen)
+  const [showBackupWords, setShowBackupWords] = useState(false)
+  const [backupCopied, setBackupCopied] = useState(false)
+  const [showRevealConfirm, setShowRevealConfirm] = useState(false)
+  const [revealCountdown, setRevealCountdown] = useState<number | null>(null)
+  const [showCopyConfirm, setShowCopyConfirm] = useState(false)
+  const [downloaded, setDownloaded] = useState(false)
+  const [verifying, setVerifying] = useState(false)
+  const revealTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
-  useEffect(() => { vault.generate().then((r) => setMnemonic(r.mnemonic)).catch((e) => setError(e instanceof Error ? e.message : 'Generate failed')) }, [])
+  useEffect(() => () => { if (revealTimerRef.current) clearInterval(revealTimerRef.current) }, [])
 
-  const download = async () => {
-    const p = await encryptBackup(mnemonic, pin)
-    const blob = new Blob([JSON.stringify(p)], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url; a.download = `den-backup-${Date.now()}.json`
-    document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url)
+  const startRevealCountdown = () => {
+    let remaining = 5
+    setRevealCountdown(remaining)
+    if (revealTimerRef.current) clearInterval(revealTimerRef.current)
+    revealTimerRef.current = setInterval(() => {
+      remaining -= 1
+      if (remaining <= 0) {
+        if (revealTimerRef.current) { clearInterval(revealTimerRef.current); revealTimerRef.current = null }
+        setRevealCountdown(null)
+        setShowRevealConfirm(false)
+        setShowBackupWords(true)
+      } else {
+        setRevealCountdown(remaining)
+      }
+    }, 1000)
+  }
+  const cancelReveal = () => {
+    if (revealTimerRef.current) { clearInterval(revealTimerRef.current); revealTimerRef.current = null }
+    setRevealCountdown(null)
+    setShowRevealConfirm(false)
+  }
+
+  const handleGenerate = async () => {
+    if (pin.length < 4 || pin !== pinConfirm || generating) return
+    setGenerating(true); setError(null)
+    try {
+      const r = await vault.generate()
+      setMnemonic(r.mnemonic)
+      setStep('backup')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not generate a seed')
+    } finally { setGenerating(false) }
+  }
+
+  const handleDownload = async () => {
+    const payload = await encryptBackup(mnemonic, pin)
+    downloadBackup(payload)
     setDownloaded(true)
   }
 
-  const onVerifyFile = async (file: File) => {
-    setBusy(true); setError(null)
+  const handleVerifyFile = async (file: File) => {
+    setVerifying(true); setError(null)
     try {
       const text = await file.text()
       const result = await verifyBackupMatches(text, pin, mnemonic)
@@ -147,56 +195,125 @@ function CreateScreen({ onExit, onDone }: { onExit: () => void; onDone: (pubkey:
       onDone(r.pubkey)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Verification failed')
-    } finally { setBusy(false) }
+    } finally { setVerifying(false) }
   }
 
-  // ── Step 1: PIN first (matches desktop) ──
+  // ── Step 1: Create Account (PIN) ──
   if (step === 'pin') {
     const ok = pin.length >= 4 && pin === pinConfirm
     return (
-      <Pane onBack={onExit}>
-        <Header title="Set a PIN" subtitle="Unlocks this device and encrypts your backup file. It can't be reset — your recovery phrase is the fallback." />
-        <Input placeholder="Account name (optional)" value={name} onChange={(e) => setName(e.target.value)} />
-        <Input type="password" inputMode="numeric" placeholder="PIN" value={pin} onChange={(e) => setPin(e.target.value)} />
-        <Input type="password" inputMode="numeric" placeholder="Confirm PIN" value={pinConfirm} onChange={(e) => setPinConfirm(e.target.value)} />
-        {pin && pinConfirm && pin !== pinConfirm && <p className="text-xs text-destructive">PINs don't match.</p>}
-        <Button className="w-full" disabled={!ok || !mnemonic} onClick={() => setStep('backup')}>Continue</Button>
-      </Pane>
+      <VaultCard onBack={onExit}>
+        <Header icon={Lock} title="Create Account" subtitle="Choose a PIN to protect your new account. You'll need it every time you log in." />
+        <WarningCarousel />
+        <Input type="text" placeholder="Account name (optional)" value={name} onChange={(e) => setName(e.target.value)} className="h-10" />
+        <PinInput value={pin} onChange={(v) => { setPin(v); setError(null) }} placeholder="Enter PIN" />
+        <PinInput value={pinConfirm} onChange={setPinConfirm} placeholder="Confirm PIN" />
+        {pin && pinConfirm && pin !== pinConfirm && <p className="text-xs text-destructive w-full">PINs don't match.</p>}
+        {error && <p className="flex items-center gap-1.5 text-sm text-destructive w-full"><AlertCircle size={14} className="shrink-0" /> {error}</p>}
+        <Button className="w-full" disabled={!ok || generating} onClick={handleGenerate}>
+          {generating ? <Loader2 size={16} className="animate-spin" /> : 'Generate New Seed'}
+        </Button>
+      </VaultCard>
     )
   }
 
-  // ── Step 2: recovery phrase (blurred) + download + verify ──
+  // ── Step 2: Backup Seed Phrase ──
   const words = mnemonic.split(' ')
   return (
-    <Pane onBack={() => setStep('pin')}>
-      <Header title="Your recovery phrase" subtitle="Write these 24 words down and keep them offline. They're the only way to recover your account on any client." />
-      <div className="relative">
-        <div className={cn('grid grid-cols-3 gap-1.5 transition', !revealed && 'blur-sm select-none pointer-events-none')}>
-          {words.map((w, i) => (
-            <div key={i} className="flex items-center gap-1 px-2 py-1.5 rounded-md bg-muted/40 text-xs">
-              <span className="text-muted-foreground tabular-nums w-4 text-right">{i + 1}</span>
-              <span className="font-medium text-foreground truncate">{w}</span>
-            </div>
-          ))}
-        </div>
-        {!revealed && (
-          <button onClick={() => setRevealed(true)} className="absolute inset-0 flex items-center justify-center gap-1.5 text-xs font-medium text-foreground cursor-pointer">
-            <Eye size={14} /> Tap to reveal
-          </button>
-        )}
+    <VaultCard onBack={() => setStep('pin')} wide>
+      <Header icon={Shield} title="Backup Seed Phrase" />
+
+      <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-destructive/10 border border-destructive/30 w-full">
+        <AlertCircle size={14} className="text-destructive shrink-0 mt-0.5" />
+        <p className="text-xs text-destructive">Write down these words and store them securely. Anyone with these words can access your keys and funds.</p>
       </div>
-      <div className="flex items-center justify-between">
-        <button onClick={() => setRevealed((v) => !v)} className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1 cursor-pointer">{revealed ? <><EyeOff size={12} /> Hide</> : <><Eye size={12} /> Reveal</>}</button>
-        <button onClick={() => { navigator.clipboard?.writeText(mnemonic); setCopied(true); setTimeout(() => setCopied(false), 1500) }} className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1 cursor-pointer">{copied ? <Check size={12} className="text-emerald-500" /> : <Copy size={12} />} {copied ? 'Copied' : 'Copy'}</button>
+
+      <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 w-full">
+        {words.map((word, i) => (
+          <div key={i} className="flex items-center gap-2 p-2 bg-secondary/50 rounded-lg border border-border">
+            <span className="text-[10px] text-muted-foreground w-5 text-right">{i + 1}.</span>
+            <span className="font-mono text-sm">{showBackupWords ? word : '••••'}</span>
+          </div>
+        ))}
       </div>
-      <Button className="w-full" variant="outline" onClick={download}><Download size={16} /> {downloaded ? 'Downloaded · Download again' : 'Download encrypted backup'}</Button>
-      <input ref={fileRef} type="file" accept="application/json,.json" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) onVerifyFile(f) }} />
-      <Button className="w-full" disabled={!downloaded || busy} onClick={() => fileRef.current?.click()}>
-        {busy ? <><Loader2 size={16} className="animate-spin" /> Verifying…</> : <><FileUp size={16} /> Re-upload to verify & finish</>}
+
+      <div className="flex gap-2 w-full">
+        <button
+          onClick={() => { if (showBackupWords) { setShowBackupWords(false) } else { setRevealCountdown(null); setShowRevealConfirm(true) } }}
+          className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-secondary/50 border border-border text-xs hover:bg-secondary transition-colors cursor-pointer"
+        >
+          {showBackupWords ? <><EyeOff size={14} /> Censor</> : <><Eye size={14} /> Reveal</>}
+        </button>
+        <button
+          onClick={() => setShowCopyConfirm(true)}
+          className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-secondary/50 border border-border text-xs hover:bg-secondary transition-colors cursor-pointer"
+        >
+          {backupCopied ? <><Check size={14} /> Copied!</> : <><Copy size={14} /> Copy</>}
+        </button>
+      </div>
+
+      <button
+        onClick={handleDownload}
+        className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-secondary/30 border border-border text-xs hover:bg-secondary/60 transition-colors cursor-pointer text-muted-foreground hover:text-foreground"
+      >
+        <Download size={14} /> {downloaded ? 'Download Encrypted Backup again' : 'Download Encrypted Backup'}
+      </button>
+
+      <input ref={fileRef} type="file" accept="application/json,.json" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleVerifyFile(f) }} />
+      <Button className="w-full mt-1" disabled={!downloaded || verifying} onClick={() => fileRef.current?.click()}>
+        {verifying ? <><Loader2 size={16} className="animate-spin" /> Verifying…</> : downloaded ? <><FileUp size={16} /> Re-upload backup to verify & finish</> : 'Download backup to continue'}
       </Button>
-      {!downloaded && <p className="text-[11px] text-muted-foreground text-center">Download your backup, then re-upload it to finish.</p>}
-      {error && <p className="text-sm text-destructive">{error}</p>}
-    </Pane>
+      {downloaded && !verifying && <p className="text-[11px] text-muted-foreground text-center -mt-1">Re-upload the file you just saved to confirm it works.</p>}
+      {error && <p className="flex items-center gap-1.5 text-sm text-destructive w-full"><AlertCircle size={14} className="shrink-0" /> {error}</p>}
+
+      {/* Reveal-seed confirmation + countdown */}
+      {showRevealConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-150" onClick={revealCountdown === null ? () => setShowRevealConfirm(false) : undefined}>
+          <div className="w-full max-w-sm rounded-xl bg-card border border-border shadow-xl p-6 flex flex-col items-center gap-4 text-center" onClick={(e) => e.stopPropagation()}>
+            {revealCountdown === null ? (
+              <>
+                <div className="flex items-center justify-center w-12 h-12 rounded-full bg-destructive/10"><AlertCircle size={22} className="text-destructive" /></div>
+                <h3 className="text-lg font-bold text-foreground">Reveal your secret keys?</h3>
+                <p className="text-sm text-muted-foreground">These 24 words <strong>are</strong> your account. Anyone who sees them — over your shoulder, on a screen share, or in a screenshot — gains <strong className="text-destructive">full and permanent control</strong> of your identity and funds. There is no recovery and no undo.</p>
+                <p className="text-xs text-muted-foreground">Make sure no one is watching your screen and nothing is recording.</p>
+                <div className="flex gap-2 w-full mt-1">
+                  <Button variant="outline" className="flex-1" onClick={() => setShowRevealConfirm(false)}>Cancel</Button>
+                  <Button variant="destructive" className="flex-1 gap-1.5" onClick={startRevealCountdown}><Eye size={14} /> Yes, show</Button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="relative flex items-center justify-center w-16 h-16">
+                  <svg className="animate-spin h-16 w-16 text-destructive/30" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                  <span key={revealCountdown} className="absolute text-2xl font-bold text-foreground tabular-nums animate-in zoom-in-50 fade-in duration-300">{revealCountdown}</span>
+                </div>
+                <h3 className="text-lg font-bold text-foreground">Showing keys in {revealCountdown}…</h3>
+                <p className="text-sm text-muted-foreground">Last chance — make sure no one can see your screen.</p>
+                <Button variant="outline" className="w-full gap-1.5" onClick={cancelReveal}><EyeOff size={14} /> Wait, never mind</Button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Copy-seed confirmation */}
+      {showCopyConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-150" onClick={() => setShowCopyConfirm(false)}>
+          <div className="w-full max-w-sm rounded-xl bg-card border border-border shadow-xl p-6 flex flex-col items-center gap-4 text-center" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-center w-12 h-12 rounded-full bg-destructive/10"><AlertCircle size={22} className="text-destructive" /></div>
+            <h3 className="text-lg font-bold text-foreground">Copy seed to clipboard?</h3>
+            <p className="text-sm text-muted-foreground">Your clipboard can be read by other apps and clipboard-history tools, and may sync across your devices. Only copy if you're pasting it somewhere safe <strong>right now</strong> — and clear your clipboard afterward.</p>
+            <div className="flex gap-2 w-full mt-1">
+              <Button variant="outline" className="flex-1" onClick={() => setShowCopyConfirm(false)}>Cancel</Button>
+              <Button variant="destructive" className="flex-1 gap-1.5" onClick={() => { navigator.clipboard?.writeText(mnemonic); setBackupCopied(true); setShowCopyConfirm(false); setTimeout(() => setBackupCopied(false), 2000) }}><Copy size={14} /> Yes, copy</Button>
+            </div>
+          </div>
+        </div>
+      )}
+    </VaultCard>
   )
 }
 
@@ -228,42 +345,43 @@ function ImportScreen({ onBack, onDone }: { onBack: () => void; onDone: (pubkey:
   }
 
   return (
-    <Pane onBack={onBack}>
-      <Header title="Import backup" subtitle="Restore an account from its encrypted backup file." />
+    <VaultCard onBack={onBack}>
+      <Header icon={Import} title="Import backup" subtitle="Restore an account from its encrypted backup file." />
       <input ref={fileRef} type="file" accept="application/json,.json" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) pick(f) }} />
       <Button className="w-full" variant="outline" onClick={() => fileRef.current?.click()}><FileUp size={16} /> {fileText ? 'File selected · choose another' : 'Choose backup file'}</Button>
       {fileText && (
         <>
-          <Input type="password" placeholder="Backup password / PIN" value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} />
-          <Input placeholder="Account name (optional)" value={name} onChange={(e) => setName(e.target.value)} />
+          <PinInput value={password} onChange={setPassword} placeholder="Backup password / PIN" onEnter={submit} />
+          <Input placeholder="Account name (optional)" value={name} onChange={(e) => setName(e.target.value)} className="h-10" />
         </>
       )}
-      {error && <p className="text-sm text-destructive">{error}</p>}
+      {error && <p className="flex items-center gap-1.5 text-sm text-destructive w-full"><AlertCircle size={14} className="shrink-0" /> {error}</p>}
       <Button className="w-full" disabled={!fileText || !password || busy} onClick={submit}>{busy ? <Loader2 size={16} className="animate-spin" /> : 'Import & sign in'}</Button>
-    </Pane>
+    </VaultCard>
   )
 }
 
 /* ─── Layout helpers ─── */
-function Centered({ children }: { children: React.ReactNode }) {
-  return <div className="w-full max-w-sm mx-auto flex items-center justify-center py-16">{children}</div>
-}
-function Header({ title, subtitle }: { title: string; subtitle?: string }) {
+function VaultCard({ onBack, wide, children }: { onBack?: () => void; wide?: boolean; children: React.ReactNode }) {
   return (
-    <div className="text-center space-y-1">
-      <h2 className="text-lg font-bold text-foreground">{title}</h2>
-      {subtitle && <p className="text-xs text-muted-foreground leading-relaxed">{subtitle}</p>}
-    </div>
-  )
-}
-function Pane({ onBack, children }: { onBack: () => void; children: React.ReactNode }) {
-  return (
-    <Card className="w-full max-w-sm mx-auto">
-      <CardContent className="p-4 space-y-3">
-        <button onClick={onBack} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground cursor-pointer"><ChevronLeft size={14} /> Back</button>
+    <Card className={`w-full ${wide ? 'max-w-md' : 'max-w-sm'} mx-auto shadow-lg`}>
+      <CardContent className="p-6 sm:p-8 flex flex-col items-center gap-4">
+        <DenChatLogo size={40} />
         {children}
-        <p className="flex items-center justify-center gap-1 text-[10px] text-muted-foreground/70 pt-1"><ShieldCheck size={11} /> Your key is generated and stored in an isolated vault</p>
+        {onBack && <button onClick={onBack} className="text-sm text-muted-foreground hover:text-foreground cursor-pointer">Back</button>}
+        <p className="flex items-center justify-center gap-1 text-[10px] text-muted-foreground/70"><ShieldCheck size={11} /> Your key is generated and stored in an isolated vault</p>
       </CardContent>
     </Card>
+  )
+}
+function Header({ icon: Icon, title, subtitle }: { icon: React.ComponentType<{ size?: number; className?: string }>; title: string; subtitle?: string }) {
+  return (
+    <div className="flex flex-col items-center gap-1.5 text-center">
+      <div className="flex items-center gap-2">
+        <Icon size={20} className="text-primary" />
+        <h2 className="text-xl font-bold text-foreground">{title}</h2>
+      </div>
+      {subtitle && <p className="text-sm text-muted-foreground">{subtitle}</p>}
+    </div>
   )
 }
