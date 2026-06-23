@@ -22,6 +22,8 @@ export interface VaultAccount { pubkey: string; npub: string; seedId: string; in
 export interface VaultStatus { seeds: VaultSeed[]; accounts: VaultAccount[]; active: string | null; unlocked: boolean; pubkey: string | null }
 
 const REQUEST_TIMEOUT = 30_000
+const HIDDEN_IFRAME_CSS = 'position:fixed;width:0;height:0;border:0;visibility:hidden;'
+const OVERLAY_IFRAME_CSS = 'position:fixed;inset:0;width:100%;height:100%;border:0;visibility:visible;z-index:2147483647;'
 
 interface PendingRequest {
   resolve: (v: unknown) => void
@@ -54,7 +56,7 @@ class VaultClient {
     const iframe = document.createElement('iframe')
     iframe.src = VAULT_ORIGIN + '/'
     iframe.setAttribute('aria-hidden', 'true')
-    iframe.style.cssText = 'position:fixed;width:0;height:0;border:0;visibility:hidden;'
+    iframe.style.cssText = HIDDEN_IFRAME_CSS
     iframe.title = 'DEN Vault'
     document.body.appendChild(iframe)
     this.iframe = iframe
@@ -62,10 +64,16 @@ class VaultClient {
     return this.ready
   }
 
+  /** Resize the hidden iframe into a full-screen overlay (for the in-vault tx confirm) and back. */
+  private setOverlay(show: boolean) {
+    if (this.iframe) this.iframe.style.cssText = show ? OVERLAY_IFRAME_CSS : HIDDEN_IFRAME_CSS
+  }
+
   private onMessage = (e: MessageEvent) => {
     if (e.origin !== VAULT_ORIGIN) return // only trust the vault origin
     const msg = e.data
     if (msg?.type === 'vault-ready') { this.readyResolve?.(); return }
+    if (msg?.type === 'vault-overlay') { this.setOverlay(!!msg.show); return }
     if (typeof msg?.id !== 'string') return
     const p = this.pending.get(msg.id)
     if (!p) return
@@ -76,7 +84,7 @@ class VaultClient {
   }
 
   /** Send an op to the vault and await its result. */
-  async call<T = unknown>(type: string, params?: unknown): Promise<T> {
+  async call<T = unknown>(type: string, params?: unknown, timeoutMs = REQUEST_TIMEOUT): Promise<T> {
     await this.ensure()
     const id = `r${++this.seq}`
     const win = this.iframe?.contentWindow
@@ -85,7 +93,7 @@ class VaultClient {
       const timer = setTimeout(() => {
         this.pending.delete(id)
         reject(new Error('Vault request timed out'))
-      }, REQUEST_TIMEOUT)
+      }, timeoutMs)
       this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject, timer })
       win.postMessage({ id, type, params }, VAULT_ORIGIN)
     })
@@ -127,6 +135,8 @@ class VaultClient {
   renameSeed(seedId: string, name: string) { return this.call<{ ok: boolean }>('renameSeed', { seedId, name }) }
   renameAccount(pubkey: string, name: string) { return this.call<{ ok: boolean }>('renameAccount', { pubkey, name }) }
   changePin(pubkey: string, currentPin: string, newPin: string, newHint?: string) { return this.call<{ ok: boolean }>('changePin', { pubkey, currentPin, newPin, newHint }) }
+  /** Build + sign a blockchain transaction from structured params (the vault derives the sighash + confirms with PIN). */
+  signTransaction(chain: string, tx: unknown) { return this.call<{ signed: string }>('signTransaction', { chain, tx }, 5 * 60_000) }
 
   // ── ISigner-shaped operations (transparent re-unlock on idle-lock) ──
   getPublicKey() { return this.callWithRelock<string>('getPublicKey') }

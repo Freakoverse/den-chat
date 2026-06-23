@@ -108,23 +108,22 @@ export function WalletPage() {
   const isMobile = useMobile()
   const [mobileDetail, setMobileDetail] = useState(false)
 
-  const canSend = authMethod === 'nsec' || authMethod === 'seed'
+  const canSend = authMethod === 'nsec' || authMethod === 'seed' || authMethod === 'vault'
 
-  // Derive addresses on mount (pass private key for nsec/seed users to compute standard addresses)
+  // Derive addresses for the active account — re-derives when the account (pubkey)
+  // changes, so switching accounts in-app shows the right wallets, not the first one's.
   useEffect(() => {
-    if (pubkey && !derived) {
-      deriveAddresses(pubkey, privateKey)
-    }
-  }, [pubkey, derived])
+    if (pubkey) deriveAddresses(pubkey, privateKey)
+  }, [pubkey, privateKey])
 
-  // Fetch balances once derived (re-fetch when address mode changes)
+  // Fetch balances once derived (re-fetch when the account or address mode changes)
   const addressMode = useWalletStore((s) => s.addressMode)
   useEffect(() => {
     if (!derived) return
     for (const meta of CHAIN_META) {
       fetchBalance(meta.id)
     }
-  }, [derived, addressMode])
+  }, [derived, addressMode, pubkey])
 
   // Modals
   const [showReceive, setShowReceive] = useState(false)
@@ -384,7 +383,6 @@ function WalletDetailView({
   onReceive: () => void
   onHowToSend: () => void
 }) {
-  const privateKey = useUserStore((s) => s.privateKey)
   const [showSend, setShowSend] = useState(false)
   const [copied, setCopied] = useState(false)
   const setActivePage = useNavigationStore((s) => s.setActivePage)
@@ -823,13 +821,11 @@ function WalletDetailView({
       />
 
       {/* Send Modal */}
-      {showSend && privateKey && (
+      {showSend && (
         <SendModal
           chain={selectedChain}
           address={address}
-          privateKeyHex={privateKey}
           balance={displayBalance}
-          balanceRaw={balance?.nativeRaw}
           selectedToken={selectedToken}
           onClose={() => setShowSend(false)}
         />

@@ -26,6 +26,9 @@ import {
   renameSeed as rsRenameSeed, renameAccount as rsRenameAccount, changePin as rsChangePin,
   type StoredAccount, type StoredSeed,
 } from '@/lib/auth/secure-storage'
+import { createTaprootTransaction, createSegwitTransaction, type UTXO } from '@/lib/crypto/btc-tx'
+import { signEvmTransaction, getEvmSigningKey } from '@/lib/crypto/evm-tx'
+import type { EvmChain } from '@/stores/rpcStore'
 
 export type { StoredAccount, StoredSeed }
 
@@ -51,6 +54,32 @@ export interface AuthBackend {
   changePin(pubkey: string, currentPin: string, newPin: string, newHint?: string): Promise<void>
   /** PIN-gated: unlock the account and describe how to finish login (see applyLogin). */
   loginAccount(pubkey: string, pin: string): Promise<LoginResult>
+  /**
+   * Build + sign a blockchain transaction. Desktop verifies `pin` and signs locally;
+   * the vault ignores `pin` and confirms with its own in-iframe PIN prompt. The app
+   * gathers the structured inputs (UTXOs/nonce/gas) and broadcasts the returned hex.
+   */
+  signTransaction(pubkey: string, chain: string, tx: BtcSignTx | EvmSignTx, pin?: string): Promise<{ signed: string }>
+  /** true → the app must collect the PIN and show its own confirm (desktop); false → the vault does. */
+  confirmsInApp: boolean
+}
+
+export interface BtcSignTx { utxos: UTXO[]; recipientAddress: string; amountSats: string | number; feeRate: number; addressType: 'taproot' | 'segwit' }
+export interface EvmSignTx { to: string; value: string | number; data?: Uint8Array; gasLimit: string | number; gasPrice: string | number; nonce: string | number; addressMode?: 'nostr' | 'standard' }
+
+function signTxLocally(privKey: string, chain: string, tx: BtcSignTx | EvmSignTx): { signed: string } {
+  if (chain === 'bitcoin') {
+    const t = tx as BtcSignTx
+    const args = [privKey, t.utxos, t.recipientAddress, BigInt(t.amountSats), Number(t.feeRate)] as const
+    return { signed: t.addressType === 'segwit' ? createSegwitTransaction(...args) : createTaprootTransaction(...args) }
+  }
+  const t = tx as EvmSignTx
+  const signingKey = getEvmSigningKey(privKey, t.addressMode === 'standard' ? 'standard' : 'nostr')
+  const signed = signEvmTransaction(
+    { chain: chain as EvmChain, to: t.to, value: BigInt(t.value), data: t.data, gasLimit: BigInt(t.gasLimit), gasPrice: BigInt(t.gasPrice), nonce: BigInt(t.nonce) },
+    signingKey,
+  )
+  return { signed }
 }
 
 /** Finish login from a LoginResult: set the signer (if any) and authenticate. */
@@ -81,6 +110,12 @@ export const rustBackend: AuthBackend = {
     const acct = (await rsListAccounts()).find((a) => a.pubkey === pubkey)
     return { authMethod: acct?.auth_method ?? 'seed', privKey, signer: null }
   },
+  async signTransaction(pubkey, chain, tx, pin) {
+    if (!pin) throw new Error('PIN required')
+    const privKey = await rsLoginAccount(pubkey, pin) // PIN-gated; releases the key
+    return signTxLocally(privKey, chain, tx)
+  },
+  confirmsInApp: true,
 }
 
 /* ─── Mobile/PWA: vault ─── */
@@ -162,4 +197,9 @@ export const vaultBackend: AuthBackend = {
     await getVaultClient().unlock(pubkey, pin) // PIN-gated; throws on wrong PIN
     return { authMethod: 'vault', privKey: null, signer: vaultSigner() }
   },
+  async signTransaction(_pubkey, chain, tx) {
+    // The vault confirms + PINs in its own iframe and signs there — the key never leaves.
+    return getVaultClient().signTransaction(chain, tx)
+  },
+  confirmsInApp: false,
 }

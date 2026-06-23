@@ -17,7 +17,6 @@ import { sign as secp256k1Sign, schnorr, etc, getPublicKey, Point, hashes as sec
 import { sha256 as nobleSha256 } from '@noble/hashes/sha256'
 import { hmac } from '@noble/hashes/hmac'
 import { bytesToHex } from '@noble/hashes/utils'
-import { useRpcStore } from '@/stores/rpcStore'
 
 // Configure secp256k1 v3 sync hashes (required before sign/schnorr.sign work)
 if (!secp256k1Hashes.hmacSha256) {
@@ -70,15 +69,6 @@ function writeU64LE(n: bigint): Uint8Array {
     buf[i] = Number((n >> BigInt(i * 8)) & 0xffn)
   }
   return buf
-}
-
-/** Read uint64 LE from bytes at offset */
-function readU64LE(buf: Uint8Array, offset: number): bigint {
-  let val = 0n
-  for (let i = 0; i < 8; i++) {
-    val |= BigInt(buf[offset + i]) << BigInt(i * 8)
-  }
-  return val
 }
 
 /** Bitcoin variable-length integer (compactSize) encoding */
@@ -143,94 +133,9 @@ export interface BtcFeeEstimates {
   minimumFee: number
 }
 
-// ── API Helpers ──
-
-/** Get list of Bitcoin API base URLs from the RPC store */
-function getBtcNodes(): string[] {
-  const nodes = useRpcStore.getState().bitcoinNodes
-  if (nodes && nodes.length > 0) return nodes
-  return ['https://blockstream.info/api', 'https://mempool.space/api']
-}
-
-/** Fetch with fallback through configured Bitcoin nodes */
-async function btcFetch(path: string, init?: RequestInit): Promise<Response> {
-  const nodes = getBtcNodes()
-  let lastError: Error | undefined
-  for (const base of nodes) {
-    try {
-      const res = await fetch(`${base}${path}`, init)
-      if (res.ok) return res
-      throw new Error(`HTTP ${res.status}: ${res.statusText}`)
-    } catch (err) {
-      lastError = err instanceof Error ? err : new Error(String(err))
-    }
-  }
-  throw lastError ?? new Error('No Bitcoin nodes configured')
-}
-
-/** Fetch UTXOs for an address */
-export async function fetchUTXOs(address: string): Promise<UTXO[]> {
-  const res = await btcFetch(`/address/${address}/utxo`)
-  return res.json()
-}
-
-/** Fetch fee rate estimates (sat/vB) */
-export async function fetchFeeEstimates(): Promise<BtcFeeEstimates> {
-  const res = await btcFetch('/v1/fees/recommended')
-  const data = await res.json()
-  return {
-    fastestFee: Math.ceil(data.fastestFee || 1),
-    halfHourFee: Math.ceil(data.halfHourFee || 1),
-    hourFee: Math.ceil(data.hourFee || 1),
-    economyFee: Math.ceil(data.economyFee || 1),
-    minimumFee: Math.ceil(data.minimumFee || 1),
-  }
-}
-
-/** Broadcast a raw transaction hex */
-export async function broadcastTransaction(txHex: string): Promise<string> {
-  const res = await btcFetch('/tx', {
-    method: 'POST',
-    body: txHex,
-  })
-  const txid = await res.text()
-  if (txid.length !== 64) throw new Error(`Broadcast failed: ${txid}`)
-  return txid
-}
-
 // ── Bech32 / Address Utilities ──
 
 const BECH32_CHARSET = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l'
-
-function bech32Polymod(values: number[]): number {
-  const GEN = [0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3]
-  let chk = 1
-  for (const v of values) {
-    const b = chk >> 25
-    chk = ((chk & 0x1ffffff) << 5) ^ v
-    for (let i = 0; i < 5; i++) {
-      if ((b >> i) & 1) chk ^= GEN[i]
-    }
-  }
-  return chk
-}
-
-function bech32HrpExpand(hrp: string): number[] {
-  const ret: number[] = []
-  for (let i = 0; i < hrp.length; i++) ret.push(hrp.charCodeAt(i) >> 5)
-  ret.push(0)
-  for (let i = 0; i < hrp.length; i++) ret.push(hrp.charCodeAt(i) & 31)
-  return ret
-}
-
-function bech32Encode(hrp: string, data: number[], version: 'bech32' | 'bech32m'): string {
-  const checksumConst = version === 'bech32' ? 1 : 0x2bc830a3
-  const values = bech32HrpExpand(hrp).concat(data)
-  const polymod = bech32Polymod(values.concat([0, 0, 0, 0, 0, 0])) ^ checksumConst
-  const checksum: number[] = []
-  for (let i = 0; i < 6; i++) checksum.push((polymod >> (5 * (5 - i))) & 31)
-  return hrp + '1' + data.concat(checksum).map((d) => BECH32_CHARSET[d]).join('')
-}
 
 function convertBits(data: Uint8Array, fromBits: number, toBits: number, pad: boolean): number[] {
   let acc = 0
@@ -693,35 +598,3 @@ function decodeBech32Address(address: string): Uint8Array {
   return concat(new Uint8Array([versionOpcode, program.length]), program)
 }
 
-// ── High-Level Send ──
-
-/**
- * Build, sign, and broadcast a Bitcoin transaction.
- *
- * @returns The transaction ID (txid)
- */
-export async function sendBitcoinTransaction(params: {
-  privateKeyHex: string
-  recipientAddress: string
-  amountSats: bigint
-  feeRate: number
-  addressType: 'taproot' | 'segwit'
-  senderAddress: string
-}): Promise<string> {
-  const { privateKeyHex, recipientAddress, amountSats, feeRate, addressType, senderAddress } = params
-
-  // 1. Fetch UTXOs
-  const utxos = await fetchUTXOs(senderAddress)
-  if (utxos.length === 0) throw new Error('No UTXOs available')
-
-  // 2. Build and sign transaction
-  let txHex: string
-  if (addressType === 'taproot') {
-    txHex = createTaprootTransaction(privateKeyHex, utxos, recipientAddress, amountSats, feeRate)
-  } else {
-    txHex = createSegwitTransaction(privateKeyHex, utxos, recipientAddress, amountSats, feeRate)
-  }
-
-  // 3. Broadcast
-  return broadcastTransaction(txHex)
-}

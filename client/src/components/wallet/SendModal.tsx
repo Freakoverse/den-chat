@@ -19,6 +19,9 @@ import { CHAIN_TOKENS, type TokenInfo } from '@/lib/tokens'
 import { ContactPickerModal } from './ContactPickerModal'
 import { nip19 } from 'nostr-tools'
 import { deriveEvmAddress, deriveTaprootAddress, deriveSegwitAddress, deriveSegwitOddAddress } from '@/lib/crypto/derive'
+import { useUserStore } from '@/stores/userStore'
+import { rustBackend, vaultBackend, type BtcSignTx, type EvmSignTx } from '@/lib/auth/authBackend'
+import { PinInput } from '@/components/auth/PinInput'
 
 
 // ── Types ──
@@ -28,9 +31,7 @@ type SendStep = 'input' | 'confirm' | 'sending' | 'result'
 interface SendModalProps {
   chain: Chain
   address: string
-  privateKeyHex: string
   balance: string          // formatted native balance
-  balanceRaw?: bigint      // raw balance (wei for EVM, sats for BTC)
   selectedToken: string | null
   onClose: () => void
 }
@@ -103,7 +104,12 @@ function truncateAddr(addr: string): string {
 
 // ── Component ──
 
-export function SendModal({ chain, address, privateKeyHex, balance, balanceRaw, selectedToken, onClose }: SendModalProps) {
+export function SendModal({ chain, address, balance, selectedToken, onClose }: SendModalProps) {
+  const pubkey = useUserStore((s) => s.pubkey) || ''
+  const authMethod = useUserStore((s) => s.authMethod)
+  // Vault confirms + PINs inside its own iframe; desktop (seed/nsec) collects the PIN here.
+  const backend = authMethod === 'vault' ? vaultBackend : rustBackend
+  const [pin, setPin] = useState('')
   const [step, setStep] = useState<SendStep>('input')
   const [recipient, setRecipient] = useState('')
   const [amount, setAmount] = useState('')
@@ -114,7 +120,12 @@ export function SendModal({ chain, address, privateKeyHex, balance, balanceRaw, 
   // Bitcoin fee rate state
   const [btcFeeRates, setBtcFeeRates] = useState<{ fast: number; medium: number; economy: number } | null>(null)
   const [btcFeeSpeed, setBtcFeeSpeed] = useState<'fast' | 'medium' | 'economy'>('medium')
+  const [customFee, setCustomFee] = useState('') // custom sat/vB; overrides the speed presets when set
   const [loadingFees, setLoadingFees] = useState(false)
+  const [loadingMax, setLoadingMax] = useState(false)
+  // True when the amount was set via "Max" — the value is recomputed at send time
+  // from the exact fee so the whole balance fits (no "insufficient funds" overshoot).
+  const [isMaxSend, setIsMaxSend] = useState(false)
   const bitcoinAddressType = useWalletStore((s) => s.bitcoinAddressType)
   const addressMode = useWalletStore((s) => s.addressMode)
   // npub → address resolution
@@ -208,7 +219,8 @@ export function SendModal({ chain, address, privateKeyHex, balance, balanceRaw, 
     if (!isEvm || !recipientValid || !amountValid) return
     setLoadingGas(true)
     try {
-      const { getGasPrice, estimateGas: estimate, encodeErc20Transfer } = await import('@/lib/crypto/evm-tx')
+      const { getGasPrice, estimateGas: estimate } = await import('@/lib/crypto/evm-net')
+      const { encodeErc20Transfer } = await import('@/lib/crypto/evm-tx')
       const { bytesToHex } = await import('@noble/hashes/utils')
       const evmChain = chain as EvmChain
       const tx: { from: string; to: string; value?: string; data?: string } = {
@@ -246,7 +258,7 @@ export function SendModal({ chain, address, privateKeyHex, balance, balanceRaw, 
   useEffect(() => {
     if (chain !== 'bitcoin') return
     setLoadingFees(true)
-    import('@/lib/crypto/btc-tx').then(({ fetchFeeEstimates }) =>
+    import('@/lib/crypto/btc-net').then(({ fetchFeeEstimates }) =>
       fetchFeeEstimates().then((rates) => {
         setBtcFeeRates({ fast: rates.fastestFee, medium: rates.halfHourFee, economy: rates.economyFee })
       })
@@ -255,7 +267,11 @@ export function SendModal({ chain, address, privateKeyHex, balance, balanceRaw, 
     }).finally(() => setLoadingFees(false))
   }, [chain])
 
-  const btcFeeRate = btcFeeRates ? btcFeeRates[btcFeeSpeed] : 5
+  // A valid custom rate wins; otherwise use the selected speed preset.
+  const customFeeNum = customFee.trim() ? Number(customFee) : NaN
+  const btcFeeRate = !Number.isNaN(customFeeNum) && customFeeNum > 0
+    ? customFeeNum
+    : (btcFeeRates ? btcFeeRates[btcFeeSpeed] : 5)
 
   // Calculate total cost (amount + gas fee)
   const gasFee = gasEstimate ? gasEstimate.gasPrice * gasEstimate.gasLimit : 0n
@@ -264,53 +280,107 @@ export function SendModal({ chain, address, privateKeyHex, balance, balanceRaw, 
   // Can proceed to confirm (wait for gas/fee estimation to finish)
   const canConfirm = recipientValid && amountValid && !loadingGas && !loadingFees
 
+  /**
+   * Max = the largest amount that still leaves room for the network fee, so the
+   * send actually goes through (the recipient receives balance − fee).
+   *   - ERC-20 token: gas is paid in the native coin, so the whole token balance is sendable.
+   *   - EVM native:   balance − gasPrice·21000 (+10% buffer for a gas-price bump before confirm).
+   *   - Bitcoin:      UTXO total − fee, matching the signer's vbytes model exactly so change lands at 0.
+   */
+  // Bitcoin fee for a max send — matches the signer's vbytes model exactly (taproot vs segwit),
+  // with a single recipient + change output, so change lands at 0.
+  const btcFeeFor = (numInputs: number): bigint => {
+    const vbytes = bitcoinAddressType === 'segwit'
+      ? Math.ceil(numInputs * 68 + 2 * 31 + 10.5)
+      : Math.ceil(numInputs * 57.5 + 2 * 43 + 10.5)
+    return BigInt(Math.ceil(vbytes * btcFeeRate))
+  }
+
+  const handleMax = async () => {
+    // ERC-20: gas is paid in the native coin, so the whole token balance is sendable (not fee-adjusted).
+    if (tokenInfo) { setIsMaxSend(false); setAmount(maxBalance); return }
+    const rawBal = walletBalance?.nativeRaw ?? 0n
+    if (rawBal <= 0n) { setIsMaxSend(false); setAmount(maxBalance); return }
+    setLoadingMax(true)
+    setError(null)
+    try {
+      if (isEvm) {
+        const { getGasPrice } = await import('@/lib/crypto/evm-net')
+        const gasPrice = gasEstimate?.gasPrice ?? await getGasPrice(chain as EvmChain)
+        const gasLimit = gasEstimate?.gasLimit ?? (21000n * 13n) / 10n // mirror estimateGas's ×1.3 buffer
+        const fee = gasPrice * gasLimit
+        const max = rawBal > fee ? rawBal - fee : 0n
+        setAmount(formatAmount(max, decimals))
+      } else {
+        const { fetchUTXOs } = await import('@/lib/crypto/btc-net')
+        const utxos = await fetchUTXOs(address)
+        const total = utxos.reduce((s, u) => s + BigInt(u.value), 0n)
+        const fee = btcFeeFor(utxos.length)
+        const max = total > fee ? total - fee : 0n
+        setAmount(formatAmount(max, 8))
+      }
+      setIsMaxSend(true) // recompute the exact value at send time (gas/UTXOs can shift)
+    } catch {
+      setIsMaxSend(false)
+      setAmount(maxBalance) // fall back to the full balance on failure
+    } finally {
+      setLoadingMax(false)
+    }
+  }
+
   // ── Send Transaction ──
   const handleSend = async () => {
+    if (backend.confirmsInApp && !pin) { setError('Enter your PIN to confirm'); return }
     setStep('sending')
     setError(null)
     try {
       if (isEvm) {
-        const { sendEvmTransaction, encodeErc20Transfer } = await import('@/lib/crypto/evm-tx')
+        const { encodeErc20Transfer } = await import('@/lib/crypto/evm-tx')
+        const { getTransactionCount, getGasPrice, estimateGas, sendRawTransaction } = await import('@/lib/crypto/evm-net')
+        const { bytesToHex } = await import('@noble/hashes/utils')
         const evmChain = chain as EvmChain
 
         let data: Uint8Array | undefined
         let to = sendToAddress
         let amountWei = parsedAmount
-
         if (tokenInfo?.contractAddress) {
-          // ERC-20 transfer
           data = encodeErc20Transfer(sendToAddress, parsedAmount)
           to = tokenInfo.contractAddress
           amountWei = 0n
         }
 
-        const hash = await sendEvmTransaction({
-          chain: evmChain,
-          privateKeyHex,
-          to,
-          amountWei,
-          data,
-          gasLimitOverride: gasEstimate?.gasLimit,
-          gasPriceOverride: gasEstimate?.gasPrice,
-          addressMode,
-          senderAddress: address,
-        })
-        setTxHash(hash)
-        setStep('result')
+        // Gather structured inputs (the vault is offline — it only signs).
+        const nonce = await getTransactionCount(evmChain, address)
+        const gasPrice = gasEstimate?.gasPrice ?? await getGasPrice(evmChain)
+        const gasLimit = gasEstimate?.gasLimit ?? await estimateGas(evmChain, { from: address, to, value: '0x' + amountWei.toString(16), data: data ? '0x' + bytesToHex(data) : undefined })
+
+        // Native max send: spend exactly balance − gas (using the gas this tx will actually
+        // reserve), so value + gas can never exceed the balance.
+        if (isMaxSend && !tokenInfo) {
+          const rawBal = walletBalance?.nativeRaw ?? 0n
+          const fee = gasPrice * gasLimit
+          amountWei = rawBal > fee ? rawBal - fee : 0n
+        }
+
+        const tx: EvmSignTx = { to, value: amountWei.toString(), data, gasLimit: gasLimit.toString(), gasPrice: gasPrice.toString(), nonce: nonce.toString(), addressMode }
+        const { signed } = await backend.signTransaction(pubkey, evmChain, tx, pin || undefined)
+        setTxHash(await sendRawTransaction(evmChain, signed))
       } else {
-        // Bitcoin
-        const { sendBitcoinTransaction } = await import('@/lib/crypto/btc-tx')
-        const hash = await sendBitcoinTransaction({
-          privateKeyHex,
-          recipientAddress: sendToAddress,
-          amountSats: parsedAmount,
-          feeRate: btcFeeRate,
-          addressType: bitcoinAddressType,
-          senderAddress: address,
-        })
-        setTxHash(hash)
-        setStep('result')
+        const { fetchUTXOs, broadcastTransaction } = await import('@/lib/crypto/btc-net')
+        const utxos = await fetchUTXOs(address)
+        if (utxos.length === 0) throw new Error('No UTXOs available')
+        // Max send: recompute against the UTXOs fetched now so the fee matches and change is 0.
+        let amountSats = parsedAmount
+        if (isMaxSend) {
+          const total = utxos.reduce((s, u) => s + BigInt(u.value), 0n)
+          const fee = btcFeeFor(utxos.length)
+          amountSats = total > fee ? total - fee : 0n
+        }
+        const tx: BtcSignTx = { utxos, recipientAddress: sendToAddress, amountSats: amountSats.toString(), feeRate: btcFeeRate, addressType: bitcoinAddressType }
+        const { signed } = await backend.signTransaction(pubkey, 'bitcoin', tx, pin || undefined)
+        setTxHash(await broadcastTransaction(signed))
       }
+      setStep('result')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Transaction failed')
       setStep('result')
@@ -446,10 +516,11 @@ export function SendModal({ chain, address, privateKeyHex, balance, balanceRaw, 
                     Amount
                   </label>
                   <button
-                    onClick={() => setAmount(maxBalance)}
-                    className="text-[11px] text-primary hover:underline cursor-pointer"
+                    onClick={handleMax}
+                    disabled={loadingMax}
+                    className="text-[11px] text-primary hover:underline cursor-pointer disabled:opacity-50"
                   >
-                    Max {displayBalance} {sendSymbol}
+                    {loadingMax ? 'Calculating…' : `Max ${displayBalance} ${sendSymbol}`}
                   </button>
                 </div>
                 <div className="relative">
@@ -458,7 +529,7 @@ export function SendModal({ chain, address, privateKeyHex, balance, balanceRaw, 
                     value={amount}
                     onChange={(e) => {
                       const v = e.target.value.replace(/[^0-9.]/g, '')
-                      if (v.split('.').length <= 2) setAmount(v)
+                      if (v.split('.').length <= 2) { setAmount(v); setIsMaxSend(false) }
                     }}
                     placeholder="0.0"
                     className="w-full px-3 py-2.5 pr-16 rounded-xl bg-secondary/40 border border-border/50 text-sm font-mono text-foreground placeholder:text-muted-foreground/50 outline-none focus:border-primary/50 transition-colors"
@@ -508,10 +579,10 @@ export function SendModal({ chain, address, privateKeyHex, balance, balanceRaw, 
                         return (
                           <button
                             key={speed}
-                            onClick={() => setBtcFeeSpeed(speed)}
+                            onClick={() => { setBtcFeeSpeed(speed); setCustomFee('') }}
                             className={cn(
                               'flex-1 px-2 py-2 rounded-xl border text-center transition-all cursor-pointer',
-                              btcFeeSpeed === speed
+                              btcFeeSpeed === speed && !customFee.trim()
                                 ? 'border-primary/40 bg-primary/5 text-foreground'
                                 : 'border-border/40 bg-secondary/20 text-muted-foreground hover:border-border'
                             )}
@@ -523,6 +594,21 @@ export function SendModal({ chain, address, privateKeyHex, balance, balanceRaw, 
                       })}
                     </div>
                   )}
+                  {/* Custom fee rate — typing here deselects the presets above */}
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={customFee}
+                    onChange={(e) => {
+                      const v = e.target.value.replace(/[^0-9.]/g, '')
+                      if (v.split('.').length <= 2) setCustomFee(v)
+                    }}
+                    placeholder="Custom (sat/vB)"
+                    className={cn(
+                      'w-full mt-2 px-3 py-2 rounded-xl bg-secondary/40 border text-sm font-mono text-foreground placeholder:text-muted-foreground/50 outline-none transition-colors',
+                      customFee.trim() ? 'border-primary/40' : 'border-border/50 focus:border-primary/50'
+                    )}
+                  />
                 </div>
               )}
 
@@ -598,6 +684,16 @@ export function SendModal({ chain, address, privateKeyHex, balance, balanceRaw, 
                   Please verify all details carefully. Transactions cannot be reversed once confirmed.
                 </p>
               </div>
+
+              {backend.confirmsInApp ? (
+                <div className="space-y-1.5">
+                  <p className="text-xs text-muted-foreground">Enter your PIN to authorize this transaction.</p>
+                  <PinInput value={pin} onChange={(v) => { setPin(v); setError(null) }} placeholder="PIN" onEnter={handleSend} />
+                </div>
+              ) : (
+                <p className="text-[11px] text-muted-foreground text-center">You'll confirm and enter your PIN in the secure vault.</p>
+              )}
+              {error && <p className="text-xs text-destructive text-center">{error}</p>}
 
               <div className="flex gap-3">
                 <Button
