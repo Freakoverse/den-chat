@@ -140,7 +140,6 @@ export function LoginScreen() {
   const [showFilePasswordPrompt, setShowFilePasswordPrompt] = useState(false)
   const [showQrScanner, setShowQrScanner] = useState(false)
   const [pendingFileData, setPendingFileData] = useState<string | null>(null)
-  const [showFilePassword, setShowFilePassword] = useState(false)
 
   // Carousel state for account picker
   const [selectedSeedIdx, setSelectedSeedIdx] = useState(0)
@@ -561,7 +560,6 @@ export function LoginScreen() {
       setPendingFileData(text)
       setFileImportPassword('')
       setFileImportError(null)
-      setShowFilePassword(false)
       setShowFilePasswordPrompt(true)
       return true
     } catch {
@@ -1047,24 +1045,13 @@ export function LoginScreen() {
                     <p className="text-sm text-muted-foreground text-center">
                       Enter the password used when this backup was created.
                     </p>
-                    <div className="w-full relative">
-                      <Input
-                        type={showFilePassword ? 'text' : 'password'}
-                        placeholder="Backup password"
-                        value={fileImportPassword}
-                        onChange={(e) => { setFileImportPassword(e.target.value); setFileImportError(null) }}
-                        className="h-10 pr-10"
-                        onKeyDown={(e) => e.key === 'Enter' && handleFileDecrypt()}
-                        autoFocus
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowFilePassword(!showFilePassword)}
-                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-                      >
-                        {showFilePassword ? <EyeOff size={15} /> : <Eye size={15} />}
-                      </button>
-                    </div>
+                    <PinInput
+                      value={fileImportPassword}
+                      onChange={(v) => { setFileImportPassword(v); setFileImportError(null) }}
+                      placeholder="Backup password / PIN"
+                      autoFocus
+                      onEnter={handleFileDecrypt}
+                    />
                     {fileImportError && (
                       <div className="flex items-center gap-2 text-sm text-destructive w-full">
                         <AlertCircle size={14} className="shrink-0" /> <span>{fileImportError}</span>
@@ -1319,17 +1306,12 @@ export function LoginScreen() {
             ) : (
               <div className="w-full space-y-2 p-3 rounded-lg border border-border bg-secondary/20">
                 <p className="text-xs text-muted-foreground">Re-enter your PIN to encrypt and download:</p>
-                <div className="relative">
-                  <Input
-                    type="password"
-                    placeholder="Enter your PIN"
-                    value={backupPin}
-                    onChange={(e) => { setBackupPin(e.target.value); setBackupPinError(null) }}
-                    className="h-9 pr-10 text-sm"
-                    onKeyDown={(e) => e.key === 'Enter' && handleEncryptedBackup()}
-                    autoFocus
-                  />
-                </div>
+                <PinInput
+                  value={backupPin}
+                  onChange={(v) => { setBackupPin(v); setBackupPinError(null) }}
+                  autoFocus
+                  onEnter={handleEncryptedBackup}
+                />
                 {backupPinError && (
                   <div className="flex items-center gap-1.5 text-xs text-destructive">
                     <AlertCircle size={12} /> {backupPinError}
@@ -2802,9 +2784,9 @@ function GuideModal({ open, onClose, isDesktop, isMobile, onGenerate, onLocalSig
                       </Button>
                     </>
                   ) : isMobile ? (
-                    <Button onClick={onClose} className="w-full gap-2">
-                      <Check size={16} />
-                      Done
+                    <Button onClick={onGenerate} className="w-full gap-2">
+                      <Plus size={16} />
+                      Generate Account
                     </Button>
                   ) : (
                     <>
