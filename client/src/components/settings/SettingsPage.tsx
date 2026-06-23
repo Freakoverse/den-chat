@@ -51,7 +51,7 @@ import { useProfileCache } from '@/hooks/useProfileCache'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { truncateNpub } from '@/lib/utils'
 import { Input } from '@/components/ui/input'
-import { getVaultClient } from '@/lib/auth/vaultClient'
+import { rustBackend, vaultBackend } from '@/lib/auth/authBackend'
 import { PinInput } from '@/components/auth/PinInput'
 import { QRCodeSVG } from 'qrcode.react'
 import { UserPanel } from '@/components/ui/UserPanel'
@@ -63,11 +63,6 @@ import { DoodleBackground } from '@/components/ui/DoodleBackground'
 import { DonateModal } from '@/components/settings/DonateModal'
 import { DnnBadge } from '@/components/ui/DnnBadge'
 import { nip19 } from 'nostr-tools'
-import { isTauri } from '@/lib/utils'
-import {
-  exportSeed, exportNsec, changePin, verifyPin,
-  listSeeds, renameSeed,
-} from '@/lib/auth/secure-storage'
 import type { StoredSeed } from '@/lib/auth/secure-storage'
 import { useBlossomMedia } from '@/hooks/useBlossomMedia'
 import { MediaUploadStrip, useMediaUpload } from '@/components/social/MediaUploadStrip'
@@ -3961,137 +3956,10 @@ function ExpandableQR({ value }: { value: string }) {
 }
 
 /** Security controls for a vault-backed account (export backup + delete from device). */
-function VaultSecuritySection({ pubkey, fingerprint }: { pubkey: string; fingerprint: string }) {
-  const logout = useUserStore((s) => s.logout)
-  const [exportPin, setExportPin] = useState('')
-  const [exportErr, setExportErr] = useState('')
-  const [exportBusy, setExportBusy] = useState(false)
-  const [qrText, setQrText] = useState<string | null>(null)
-  const [showDelete, setShowDelete] = useState(false)
-  const [deletePin, setDeletePin] = useState('')
-  const [deleteConfirm, setDeleteConfirm] = useState('')
-  const [deleteErr, setDeleteErr] = useState('')
-  const [deleteBusy, setDeleteBusy] = useState(false)
-
-  // Decrypt + re-export the encrypted backup payload (PIN-gated). Shared by file + QR.
-  const getPayloadJson = async (): Promise<string | null> => {
-    if (!exportPin) { setExportErr('Enter your PIN'); return null }
-    setExportBusy(true); setExportErr('')
-    try {
-      const { payload } = await getVaultClient().exportBackup(pubkey, exportPin)
-      return JSON.stringify(payload)
-    } catch (e) {
-      setExportErr(e instanceof Error ? e.message : 'Wrong PIN')
-      return null
-    } finally { setExportBusy(false) }
-  }
-
-  const handleExport = async () => {
-    const json = await getPayloadJson()
-    if (!json) return
-    const blob = new Blob([json], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a'); a.href = url; a.download = `den-backup-${Date.now()}.json`
-    document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url)
-    setExportPin('')
-  }
-
-  const handleShowQR = async () => {
-    const json = await getPayloadJson()
-    if (!json) return
-    setQrText(json); setExportPin('')
-  }
-
-  const handleDelete = async () => {
-    if (!deletePin) { setDeleteErr('Enter your PIN'); return }
-    if (deleteConfirm.trim() !== fingerprint) { setDeleteErr(`Type "${fingerprint}" to confirm.`); return }
-    setDeleteBusy(true); setDeleteErr('')
-    try {
-      await getVaultClient().removeAccount(pubkey, deletePin)
-      logout()
-    } catch (e) {
-      setDeleteErr(e instanceof Error ? e.message : 'Wrong PIN')
-      setDeleteBusy(false)
-    }
-  }
-
-  return (
-    <>
-      <div className="rounded-xl border border-border bg-secondary/20 p-4 flex items-start gap-3">
-        <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
-          <ShieldCheck size={18} className="text-primary" />
-        </div>
-        <div>
-          <p className="text-sm font-medium text-foreground">Vault account</p>
-          <p className="text-xs text-muted-foreground mt-0.5">Your key is stored in the isolated DEN vault. Export an encrypted backup, or remove it from this device below.</p>
-        </div>
-      </div>
-
-      {/* Export encrypted backup (PIN-gated) */}
-      <section className="rounded-xl border border-border bg-secondary/10 overflow-hidden">
-        <div className="flex items-center gap-2.5 px-4 py-3 border-b border-border/50 bg-secondary/20">
-          <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center shrink-0"><FileDown size={14} className="text-primary" /></div>
-          <h4 className="text-sm font-semibold text-foreground">Export encrypted backup</h4>
-        </div>
-        <div className="p-4 space-y-3">
-          <p className="text-xs text-muted-foreground">Re-download your PIN-encrypted backup file, or show it as a QR to transfer to another device. Enter your PIN to confirm.</p>
-          <PinInput value={exportPin} onChange={setExportPin} placeholder="PIN" onEnter={handleExport} />
-          {exportErr && <p className="text-xs text-destructive">{exportErr}</p>}
-          <div className="grid grid-cols-2 gap-2">
-            <button onClick={handleExport} disabled={exportBusy} className="h-9 px-3 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5">
-              {exportBusy ? <Loader2 size={15} className="animate-spin" /> : <><Download size={15} /> File</>}
-            </button>
-            <button onClick={handleShowQR} disabled={exportBusy} className="h-9 px-3 rounded-lg border border-border text-sm font-medium hover:bg-secondary transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5">
-              <QrCode size={15} /> QR
-            </button>
-          </div>
-        </div>
-      </section>
-
-      {/* PIN-gated QR of the encrypted backup */}
-      {qrText && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={() => setQrText(null)}>
-          <div className="w-full max-w-xs rounded-xl bg-card border border-border shadow-xl p-6 flex flex-col items-center gap-4 text-center" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-base font-bold text-foreground">Encrypted backup QR</h3>
-            <ExpandableQR value={qrText} />
-            <p className="text-xs text-muted-foreground">Scan this from <span className="font-medium text-foreground">Import → Scan QR</span> on the other device. It's still encrypted — the PIN is required to open it.</p>
-            <button onClick={() => setQrText(null)} className="w-full h-9 px-3 rounded-lg border border-border text-sm font-medium hover:bg-secondary transition-colors cursor-pointer">Done</button>
-          </div>
-        </div>
-      )}
-
-      {/* Delete from this device (PIN + fingerprint confirm) */}
-      <section className="rounded-xl border border-destructive/30 bg-destructive/5 overflow-hidden">
-        <div className="flex items-center gap-2.5 px-4 py-3 border-b border-destructive/20 bg-destructive/10">
-          <div className="w-7 h-7 rounded-lg bg-destructive/10 flex items-center justify-center shrink-0"><Trash2 size={14} className="text-destructive" /></div>
-          <h4 className="text-sm font-semibold text-destructive">Delete from this device</h4>
-        </div>
-        <div className="p-4 space-y-3">
-          <p className="text-xs text-muted-foreground">Removes this account's key from the vault on this device. <span className="text-foreground font-medium">Make sure you have your backup file and PIN</span> — this can't be undone.</p>
-          {!showDelete ? (
-            <button onClick={() => setShowDelete(true)} className="w-full h-9 px-3 rounded-lg border border-destructive/40 text-destructive text-sm font-medium hover:bg-destructive hover:text-white transition-colors cursor-pointer flex items-center justify-center gap-1.5"><Trash2 size={15} /> Delete account</button>
-          ) : (
-            <>
-              <PinInput value={deletePin} onChange={setDeletePin} placeholder="PIN" />
-              <Input placeholder={`Type "${fingerprint}" to confirm`} value={deleteConfirm} onChange={(e) => setDeleteConfirm(e.target.value)} />
-              {deleteErr && <p className="text-xs text-destructive">{deleteErr}</p>}
-              <div className="flex gap-2">
-                <button onClick={() => { setShowDelete(false); setDeletePin(''); setDeleteConfirm(''); setDeleteErr('') }} className="flex-1 h-9 px-3 rounded-lg border border-border text-sm font-medium hover:bg-secondary transition-colors cursor-pointer">Cancel</button>
-                <button onClick={handleDelete} disabled={deleteBusy} className="flex-1 h-9 px-3 rounded-lg bg-destructive text-white text-sm font-medium hover:bg-destructive/90 transition-colors cursor-pointer disabled:opacity-50 flex items-center justify-center gap-1.5">{deleteBusy ? <Loader2 size={15} className="animate-spin" /> : 'Delete'}</button>
-              </div>
-            </>
-          )}
-        </div>
-      </section>
-    </>
-  )
-}
-
 function SecurityTab() {
   const authMethod = useUserStore((s) => s.authMethod)
   const pubkey = useUserStore((s) => s.pubkey)
   const logout = useUserStore((s) => s.logout)
-  const isDesktop = isTauri()
 
   // PIN entry
   const [pin, setPin] = useState('')
@@ -4169,29 +4037,37 @@ function SecurityTab() {
   const [seedNameDraft, setSeedNameDraft] = useState('')
   const [seedNameSaving, setSeedNameSaving] = useState(false)
 
-  const isSeed = authMethod === 'seed'
-  const isNsec = authMethod === 'nsec'
   const isVault = authMethod === 'vault'
-  const hasLocal = isDesktop && (isSeed || isNsec)
+  // One Security UI for both: desktop keyring (rust) and mobile vault.
+  const backend = isVault ? vaultBackend : rustBackend
+  // On vault the store's authMethod is 'vault', so fetch the account's real kind.
+  const [vaultKind, setVaultKind] = useState<'seed' | 'nsec' | null>(null)
+  useEffect(() => {
+    if (!isVault || !pubkey) { setVaultKind(null); return }
+    backend.listAccounts().then((accts) => setVaultKind(accts.find((a) => a.pubkey === pubkey)?.auth_method ?? null)).catch(() => setVaultKind(null))
+  }, [isVault, pubkey, backend])
+  const isSeed = authMethod === 'seed' || (isVault && vaultKind === 'seed')
+  const isNsec = authMethod === 'nsec' || (isVault && vaultKind === 'nsec')
+  const hasLocal = isSeed || isNsec || isVault
 
   const npubStr = pubkey ? nip19.npubEncode(pubkey) : ''
   const npubFingerprint = npubStr ? npubStr.slice(-6) : ''
 
   // Fetch the seed info for the current account so we can show/edit its label
   useEffect(() => {
-    if (!isDesktop || !isSeed) return
-    listSeeds().then((seeds) => {
+    if (!isSeed) return
+    backend.listSeeds().then((seeds) => {
       // Find the seed that contains the current pubkey
       const match = seeds.find((s) => s.account_pubkeys.includes(pubkey || ''))
       if (match) setSeedInfo(match)
     }).catch(() => { })
-  }, [isDesktop, isSeed, pubkey])
+  }, [isSeed, pubkey, backend])
 
   const handleSaveSeedName = async () => {
     if (!seedInfo || !seedNameDraft.trim()) return
     setSeedNameSaving(true)
     try {
-      await renameSeed(seedInfo.id, seedNameDraft.trim())
+      await backend.renameSeed(seedInfo.id, seedNameDraft.trim())
       setSeedInfo((prev) => prev ? { ...prev, name: seedNameDraft.trim() } : prev)
       setEditingSeedName(false)
     } catch (err) {
@@ -4212,7 +4088,7 @@ function SecurityTab() {
     if (!pubkey || !pin) { setPinErr('Enter your PIN'); return }
     setLoading(true); setPinErr('')
     try {
-      const mnemonic = await exportSeed(pubkey, pin)
+      const mnemonic = await backend.exportSeed(pubkey, pin)
       setRevealedSeed(mnemonic)
       setPin(''); setShowPin(false)
     } catch (err) {
@@ -4225,7 +4101,7 @@ function SecurityTab() {
     if (!pubkey || !pin) { setPinErr('Enter your PIN'); return }
     setLoading(true); setPinErr('')
     try {
-      const nsec = await exportNsec(pubkey, pin)
+      const nsec = await backend.exportNsec(pubkey, pin)
       setRevealedNsec(nsec)
       setPin(''); setShowPin(false)
     } catch (err) {
@@ -4244,7 +4120,7 @@ function SecurityTab() {
     // exportSeed/exportNsec verify the PIN AND return the secret — no reveal-first needed.
     let secret: string
     try {
-      secret = revealedSeed || revealedNsec || (isNsec ? await exportNsec(pubkey, exportPinConfirm) : await exportSeed(pubkey, exportPinConfirm))
+      secret = revealedSeed || revealedNsec || (isNsec ? await backend.exportNsec(pubkey, exportPinConfirm) : await backend.exportSeed(pubkey, exportPinConfirm))
     } catch {
       setExportErr('Incorrect PIN.'); setExportLoading(false); return null
     }
@@ -4297,7 +4173,7 @@ function SecurityTab() {
     if (!currentPin || !newPin) { setChangePinErr('Both fields are required.'); return }
     setLoading(true)
     try {
-      await changePin(pubkey, currentPin, newPin, newPinHint || undefined)
+      await backend.changePin(pubkey, currentPin, newPin, newPinHint || undefined)
       setShowChangePin(false); setCurrentPin(''); setNewPin(''); setNewPinHint('')
     } catch (err) {
       setChangePinErr(err instanceof Error ? err.message : 'PIN change failed')
@@ -4317,7 +4193,7 @@ function SecurityTab() {
     setLoading(true)
     try {
       // Verify PIN first — don't attempt deletion until we know it's correct
-      const valid = await verifyPin(pubkey, deletePin)
+      const valid = await backend.verifyPin(pubkey, deletePin)
       if (!valid) { setDeleteErr('Incorrect PIN'); setLoading(false); return }
       // If this is the last account under a seed, show a warning modal first
       if (isLastSeedAccount && !showSeedWarning) {
@@ -4350,7 +4226,7 @@ function SecurityTab() {
         <p className="text-xs text-muted-foreground mt-1">Manage your keys, PINs, backups, and account deletion.</p>
       </div>
 
-      {!hasLocal && !isVault && (
+      {!hasLocal && (
         <div className="rounded-xl border border-border bg-secondary/20 p-4 flex items-start gap-3">
           <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
             <Shield size={18} className="text-primary" />
@@ -4361,8 +4237,6 @@ function SecurityTab() {
           </div>
         </div>
       )}
-
-      {isVault && pubkey && <VaultSecuritySection pubkey={pubkey} fingerprint={npubFingerprint} />}
 
       {/* ── Seed phrase section (PIN-gated reveal) ── */}
       {hasLocal && isSeed && (

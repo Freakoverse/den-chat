@@ -15,13 +15,15 @@
  */
 import { nip19 } from 'nostr-tools'
 import { useUserStore, type AuthMethod, type ISigner } from '@/stores/userStore'
-import { encryptBackup } from '@/lib/auth/backupCrypto'
+import { encryptBackup, decryptBackup } from '@/lib/auth/backupCrypto'
 import { getVaultClient, vaultSigner } from '@/lib/auth/vaultClient'
 import {
   listAccounts as rsListAccounts, listSeeds as rsListSeeds, getActiveAccount as rsGetActive,
   generateAccount as rsGenerateAccount, generateNewSeed as rsGenerateNewSeed, deriveNextAccount as rsDerive,
   importSeed as rsImportSeed, importNsec as rsImportNsec, verifyPin as rsVerifyPin,
   loginAccount as rsLoginAccount, deleteAccount as rsDeleteAccount,
+  exportSeed as rsExportSeed, exportNsec as rsExportNsec,
+  renameSeed as rsRenameSeed, renameAccount as rsRenameAccount, changePin as rsChangePin,
   type StoredAccount, type StoredSeed,
 } from '@/lib/auth/secure-storage'
 
@@ -41,6 +43,12 @@ export interface AuthBackend {
   importNsec(nsecOrHex: string, pin: string, name?: string, pinHint?: string): Promise<{ pubkey: string; npub: string }>
   verifyPin(pubkey: string, pin: string): Promise<boolean>
   deleteAccount(pubkey: string, pin: string): Promise<void>
+  /** PIN-gated: returns the seed mnemonic / nsec for reveal + backup. */
+  exportSeed(pubkey: string, pin: string): Promise<string>
+  exportNsec(pubkey: string, pin: string): Promise<string>
+  renameSeed(seedId: string, name: string): Promise<void>
+  renameAccount(pubkey: string, name: string): Promise<void>
+  changePin(pubkey: string, currentPin: string, newPin: string, newHint?: string): Promise<void>
   /** PIN-gated: unlock the account and describe how to finish login (see applyLogin). */
   loginAccount(pubkey: string, pin: string): Promise<LoginResult>
 }
@@ -63,6 +71,11 @@ export const rustBackend: AuthBackend = {
   importNsec: rsImportNsec,
   verifyPin: rsVerifyPin,
   deleteAccount: rsDeleteAccount,
+  exportSeed: rsExportSeed,
+  exportNsec: rsExportNsec,
+  renameSeed: rsRenameSeed,
+  renameAccount: rsRenameAccount,
+  changePin: rsChangePin,
   async loginAccount(pubkey, pin) {
     const privKey = await rsLoginAccount(pubkey, pin)
     const acct = (await rsListAccounts()).find((a) => a.pubkey === pubkey)
@@ -134,6 +147,17 @@ export const vaultBackend: AuthBackend = {
   async deleteAccount(pubkey, pin) {
     await getVaultClient().removeAccount(pubkey, pin)
   },
+  async exportSeed(pubkey, pin) {
+    const { payload } = await getVaultClient().exportBackup(pubkey, pin) // PIN-gated
+    return decryptBackup(payload, pin) // the stored secret (mnemonic)
+  },
+  async exportNsec(pubkey, pin) {
+    const { payload } = await getVaultClient().exportBackup(pubkey, pin)
+    return decryptBackup(payload, pin) // the stored secret (nsec)
+  },
+  async renameSeed(seedId, name) { await getVaultClient().renameSeed(seedId, name) },
+  async renameAccount(pubkey, name) { await getVaultClient().renameAccount(pubkey, name) },
+  async changePin(pubkey, currentPin, newPin, newHint) { await getVaultClient().changePin(pubkey, currentPin, newPin, newHint) },
   async loginAccount(pubkey, pin) {
     await getVaultClient().unlock(pubkey, pin) // PIN-gated; throws on wrong PIN
     return { authMethod: 'vault', privKey: null, signer: vaultSigner() }

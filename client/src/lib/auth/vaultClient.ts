@@ -124,6 +124,9 @@ class VaultClient {
   lock() { return this.call('lock') }
   removeAccount(pubkey: string, pin: string) { return this.call<{ ok: boolean }>('removeAccount', { pubkey, pin }) }
   exportBackup(pubkey: string, pin: string) { return this.call<{ payload: BackupPayloadV1 }>('exportBackup', { pubkey, pin }) }
+  renameSeed(seedId: string, name: string) { return this.call<{ ok: boolean }>('renameSeed', { seedId, name }) }
+  renameAccount(pubkey: string, name: string) { return this.call<{ ok: boolean }>('renameAccount', { pubkey, name }) }
+  changePin(pubkey: string, currentPin: string, newPin: string, newHint?: string) { return this.call<{ ok: boolean }>('changePin', { pubkey, currentPin, newPin, newHint }) }
 
   // ── ISigner-shaped operations (transparent re-unlock on idle-lock) ──
   getPublicKey() { return this.callWithRelock<string>('getPublicKey') }
