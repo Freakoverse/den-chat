@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { setDraftUser } from '@/stores/draftStore'
+import { StorageKey } from '@/lib/constants'
 
 export type AuthMethod = 'upv2' | 'pc55' | 'nip46' | 'nsec' | 'seed' | 'vault' | null
 
@@ -72,6 +73,10 @@ export const useUserStore = create<UserState>((set) => ({
     if (currentState.signer?.close) {
       currentState.signer.close()
     }
+
+    // Clear persisted bunker credentials so auto-login doesn't re-authenticate
+    localStorage.removeItem(StorageKey.BUNKER_URL)
+    localStorage.removeItem(StorageKey.BUNKER_CLIENT_SECRET)
 
     set({
       isAuthenticated: false,
