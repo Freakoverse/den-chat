@@ -186,6 +186,16 @@ export function LoginScreen() {
   const currentAccounts = currentGroup?.accounts || []
   const currentAccount = currentAccounts[accountIdx] || null
 
+  // After generate/import, jump the carousel to the new account once the lists refresh.
+  const [pendingSelectPubkey, setPendingSelectPubkey] = useState<string | null>(null)
+  useEffect(() => {
+    if (!pendingSelectPubkey) return
+    for (let gi = 0; gi < accountGroups.length; gi++) {
+      const ai = accountGroups[gi].accounts.findIndex((a) => a.pubkey === pendingSelectPubkey)
+      if (ai !== -1) { setSelectedSeedIdx(gi); setAccountIdx(ai); setPendingSelectPubkey(null); break }
+    }
+  }, [accountGroups, pendingSelectPubkey])
+
   // Load saved accounts from the active backend (desktop keyring, or mobile vault).
   const loadAccounts = useCallback(async () => {
     if (!isDesktop && !useVault) return
@@ -611,13 +621,12 @@ export function LoginScreen() {
 
       // Import directly — skip the PIN screen
       try {
-        if (isValidMnemonic(mnemonic)) {
-          await backend.importSeed(mnemonic, usedPin)
-        } else {
-          await backend.importNsec(mnemonic, usedPin)
-        }
+        const imported = isValidMnemonic(mnemonic)
+          ? await backend.importSeed(mnemonic, usedPin)
+          : await backend.importNsec(mnemonic, usedPin)
         await loadAccounts()
-        setScreen('main')
+        setPendingSelectPubkey(imported.pubkey)
+        setScreen('saved-accounts')
       } catch (importErr: unknown) {
         setError(typeof importErr === 'string' ? importErr : importErr instanceof Error ? importErr.message : 'Import failed')
       }
@@ -634,14 +643,13 @@ export function LoginScreen() {
     const words = importWords.trim()
     setLoading('import')
     try {
-      if (isValidMnemonic(words)) {
-        await backend.importSeed(words, pin, accountName || undefined, pinHint || undefined)
-      } else {
-        await backend.importNsec(words, pin, accountName || undefined, pinHint || undefined)
-      }
+      const imported = isValidMnemonic(words)
+        ? await backend.importSeed(words, pin, accountName || undefined, pinHint || undefined)
+        : await backend.importNsec(words, pin, accountName || undefined, pinHint || undefined)
       await loadAccounts()
       setImportWords('')
-      setScreen('main')
+      setPendingSelectPubkey(imported.pubkey)
+      setScreen('saved-accounts')
     } catch (err: unknown) {
       setError(typeof err === 'string' ? err : err instanceof Error ? err.message : 'Import failed')
     } finally {
@@ -793,14 +801,8 @@ export function LoginScreen() {
       console.error('Onboarding publish failed:', err)
     } finally {
       setPublishing(false)
-      // Navigate carousel to the just-created account
-      const createdPubkey = onboardingPubkey
-      if (createdPubkey) {
-        for (let gi = 0; gi < accountGroups.length; gi++) {
-          const ai = accountGroups[gi].accounts.findIndex(a => a.pubkey === createdPubkey)
-          if (ai !== -1) { setSelectedSeedIdx(gi); setAccountIdx(ai); break }
-        }
-      }
+      // Select the just-created account once the carousel data refreshes.
+      if (onboardingPubkey) setPendingSelectPubkey(onboardingPubkey)
       // Clear sensitive state + navigate
       setOnboardingPubkey(null)
       setOnboardingPrivateKey(null); setOnboardingSigner(null)
@@ -815,14 +817,7 @@ export function LoginScreen() {
 
   // ─── Onboarding: Skip ───
   const handleOnboardingSkip = () => {
-    // Navigate carousel to the just-created account
-    const createdPubkey = onboardingPubkey
-    if (createdPubkey) {
-      for (let gi = 0; gi < accountGroups.length; gi++) {
-        const ai = accountGroups[gi].accounts.findIndex(a => a.pubkey === createdPubkey)
-        if (ai !== -1) { setSelectedSeedIdx(gi); setAccountIdx(ai); break }
-      }
-    }
+    if (onboardingPubkey) setPendingSelectPubkey(onboardingPubkey)
     setOnboardingPubkey(null)
     setOnboardingPrivateKey(null); setOnboardingSigner(null)
     setProfileName('')
