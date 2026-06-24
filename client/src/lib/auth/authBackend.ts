@@ -15,7 +15,6 @@
  */
 import { nip19 } from 'nostr-tools'
 import { useUserStore, type AuthMethod, type ISigner } from '@/stores/userStore'
-import { encryptBackup, decryptBackup } from '@/lib/auth/backupCrypto'
 import { getVaultClient, vaultSigner } from '@/lib/auth/vaultClient'
 import {
   listAccounts as rsListAccounts, listSeeds as rsListSeeds, getActiveAccount as rsGetActive,
@@ -46,9 +45,11 @@ export interface AuthBackend {
   importNsec(nsecOrHex: string, pin: string, name?: string, pinHint?: string): Promise<{ pubkey: string; npub: string }>
   verifyPin(pubkey: string, pin: string): Promise<boolean>
   deleteAccount(pubkey: string, pin: string): Promise<void>
-  /** PIN-gated: returns the seed mnemonic / nsec for reveal + backup. */
+  /** PIN-gated: returns the seed mnemonic / nsec for reveal + backup (desktop). */
   exportSeed(pubkey: string, pin: string): Promise<string>
   exportNsec(pubkey: string, pin: string): Promise<string>
+  /** Vault only: reveal the secret + offer a backup download inside the vault overlay (nothing returned to the app). */
+  revealSecret?(pubkey: string): Promise<void>
   renameSeed(seedId: string, name: string): Promise<void>
   renameAccount(pubkey: string, name: string): Promise<void>
   changePin(pubkey: string, currentPin: string, newPin: string, newHint?: string): Promise<void>
@@ -62,6 +63,12 @@ export interface AuthBackend {
   signTransaction(pubkey: string, chain: string, tx: BtcSignTx | EvmSignTx, pin?: string): Promise<{ signed: string }>
   /** true → the app must collect the PIN and show its own confirm (desktop); false → the vault does. */
   confirmsInApp: boolean
+  /**
+   * true → secrets + PINs are entered in the vault's own overlay, NOT the app (PWA);
+   * the UI must skip its in-app PIN screens and let the backend method drive the vault prompt.
+   * false → the app collects PINs in its own UI (desktop OS keyring).
+   */
+  promptsInVault: boolean
 }
 
 export interface BtcSignTx { utxos: UTXO[]; recipientAddress: string; amountSats: string | number; feeRate: number; addressType: 'taproot' | 'segwit' }
@@ -116,15 +123,17 @@ export const rustBackend: AuthBackend = {
     return signTxLocally(privKey, chain, tx)
   },
   confirmsInApp: true,
+  promptsInVault: false,
 }
 
 /* ─── Mobile/PWA: vault ─── */
 const npubOf = (pubkey: string) => nip19.npubEncode(pubkey)
 
-async function vaultGenerate(pin: string, name?: string, pinHint?: string): Promise<GenResult> {
-  const g = await getVaultClient().generate()
-  const r = await getVaultClient().saveNew(g.mnemonic, pin, name, pinHint)
-  return { pubkey: r.pubkey, npub: npubOf(r.pubkey), mnemonic: g.mnemonic, seed_id: r.seedId }
+// Generate + reveal + PIN entry all happen in the vault overlay; the app gets only the
+// new pubkey/seedId — never the mnemonic or PIN.
+async function vaultGenerate(): Promise<GenResult> {
+  const r = await getVaultClient().generateInteractive()
+  return { pubkey: r.pubkey, npub: npubOf(r.pubkey), mnemonic: '', seed_id: r.seedId }
 }
 
 export const vaultBackend: AuthBackend = {
@@ -160,41 +169,43 @@ export const vaultBackend: AuthBackend = {
   },
   generateAccount: vaultGenerate,
   generateNewSeed: vaultGenerate,
-  async deriveNextAccount(seedId, pin) {
-    const r = await getVaultClient().deriveAccount(seedId, pin)
+  async deriveNextAccount(seedId) {
+    const r = await getVaultClient().deriveInteractive(seedId) // PIN entered in the vault overlay
     const acct = (await getVaultClient().status()).accounts.find((a) => a.pubkey === r.pubkey)
     return { pubkey: r.pubkey, npub: npubOf(r.pubkey), account_index: acct?.index ?? 0 }
   },
-  async importSeed(mnemonic, pin, name, pinHint) {
-    const r = await getVaultClient().saveNew(mnemonic, pin, name, pinHint)
+  // Import (phrase / nsec / backup file) happens entirely in the vault overlay — the
+  // secret and PIN never reach the app. Both entry points open the same overlay.
+  async importSeed() {
+    const r = await getVaultClient().importInteractive()
     return { pubkey: r.pubkey, npub: npubOf(r.pubkey), seed_id: r.seedId }
   },
-  async importNsec(nsecOrHex, pin, name, pinHint) {
-    // The vault imports an encrypted backup; encrypt the key with its PIN first.
-    const payload = await encryptBackup(nsecOrHex.trim(), pin)
-    const r = await getVaultClient().importBackup(payload, pin, name, pinHint)
+  async importNsec() {
+    const r = await getVaultClient().importInteractive()
     return { pubkey: r.pubkey, npub: npubOf(r.pubkey) }
   },
   async verifyPin(pubkey, pin) {
     // exportBackup is PIN-gated and side-effect-free — succeeds iff the PIN is right.
     try { await getVaultClient().exportBackup(pubkey, pin); return true } catch { return false }
   },
-  async deleteAccount(pubkey, pin) {
-    await getVaultClient().removeAccount(pubkey, pin)
+  async deleteAccount(pubkey) {
+    await getVaultClient().removeInteractive(pubkey) // PIN confirmed in the vault overlay
   },
-  async exportSeed(pubkey, pin) {
-    const { payload } = await getVaultClient().exportBackup(pubkey, pin) // PIN-gated
-    return decryptBackup(payload, pin) // the stored secret (mnemonic)
-  },
-  async exportNsec(pubkey, pin) {
-    const { payload } = await getVaultClient().exportBackup(pubkey, pin)
-    return decryptBackup(payload, pin) // the stored secret (nsec)
-  },
+  // Reveal happens inside the vault overlay (see revealSecret) — the secret is never
+  // returned to the app, so these guard against accidental app-side exposure.
+  async exportSeed() { throw new Error('Secrets are revealed inside the vault') },
+  async exportNsec() { throw new Error('Secrets are revealed inside the vault') },
+  async revealSecret(pubkey) { await getVaultClient().exportRevealInteractive(pubkey) },
   async renameSeed(seedId, name) { await getVaultClient().renameSeed(seedId, name) },
   async renameAccount(pubkey, name) { await getVaultClient().renameAccount(pubkey, name) },
-  async changePin(pubkey, currentPin, newPin, newHint) { await getVaultClient().changePin(pubkey, currentPin, newPin, newHint) },
-  async loginAccount(pubkey, pin) {
-    await getVaultClient().unlock(pubkey, pin) // PIN-gated; throws on wrong PIN
+  async changePin(pubkey) { await getVaultClient().changePinInteractive(pubkey) },
+  async loginAccount(pubkey) {
+    // PIN is entered in the vault's overlay — the app never sees it. Skip the prompt if
+    // the vault is already unlocked for this account (e.g. right after generate/import).
+    const v = getVaultClient()
+    const s = await v.status()
+    if (s.unlocked && s.pubkey === pubkey) v.markActive(pubkey)
+    else await v.unlockInteractive(pubkey) // throws "Cancelled" if the user dismisses
     return { authMethod: 'vault', privKey: null, signer: vaultSigner() }
   },
   async signTransaction(_pubkey, chain, tx) {
@@ -202,4 +213,5 @@ export const vaultBackend: AuthBackend = {
     return getVaultClient().signTransaction(chain, tx)
   },
   confirmsInApp: false,
+  promptsInVault: true,
 }

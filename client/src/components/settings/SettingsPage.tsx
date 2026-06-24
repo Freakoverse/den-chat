@@ -4083,8 +4083,18 @@ function SecurityTab() {
     setTimeout(() => setCopied(false), 2000)
   }
 
+  // Vault: the secret is revealed (and downloadable) inside the vault overlay — the app
+  // never receives it. Shared by the seed + nsec reveal buttons.
+  const revealInVault = async () => {
+    if (!pubkey || !backend.revealSecret) return
+    setPinErr('')
+    try { await backend.revealSecret(pubkey) }
+    catch (err) { const m = err instanceof Error ? err.message : String(err); if (!/cancel/i.test(m)) setPinErr(m) }
+  }
+
   // ── Reveal Seed (PIN-gated) ──
   const handleRevealSeed = async () => {
+    if (backend.promptsInVault) { await revealInVault(); return }
     if (!pubkey || !pin) { setPinErr('Enter your PIN'); return }
     setLoading(true); setPinErr('')
     try {
@@ -4098,6 +4108,7 @@ function SecurityTab() {
 
   // ── Reveal nsec (PIN-gated) ──
   const handleRevealNsec = async () => {
+    if (backend.promptsInVault) { await revealInVault(); return }
     if (!pubkey || !pin) { setPinErr('Enter your PIN'); return }
     setLoading(true); setPinErr('')
     try {
@@ -4148,6 +4159,8 @@ function SecurityTab() {
   const resetExport = () => { setShowExport(false); setExportPwd(''); setExportPwdConfirm(''); setExportPinConfirm('') }
 
   const handleExportEncrypted = async () => {
+    // Vault: the encrypted backup is produced + downloaded inside the vault overlay.
+    if (backend.promptsInVault) { await revealInVault(); resetExport(); return }
     const payload = await produceEncryptedPayload()
     if (!payload) return
     const blob = new Blob([payload], { type: 'application/json' })
@@ -4160,6 +4173,8 @@ function SecurityTab() {
   }
 
   const handleExportQR = async () => {
+    // Vault: reveal/backup happens in the vault overlay (download, not QR, for now).
+    if (backend.promptsInVault) { await revealInVault(); resetExport(); return }
     const payload = await produceEncryptedPayload()
     if (!payload) return
     setSeedQrText(payload)
@@ -4170,6 +4185,18 @@ function SecurityTab() {
   const handleChangePin = async () => {
     if (!pubkey) return
     setChangePinErr('')
+    // Vault: current + new PIN are entered in the vault overlay.
+    if (backend.promptsInVault) {
+      setLoading(true)
+      try {
+        await backend.changePin(pubkey, '', '')
+        setShowChangePin(false); setCurrentPin(''); setNewPin(''); setNewPinHint('')
+      } catch (err) {
+        const m = err instanceof Error ? err.message : 'PIN change failed'
+        if (!/cancel/i.test(m)) setChangePinErr(m)
+      } finally { setLoading(false) }
+      return
+    }
     if (!currentPin || !newPin) { setChangePinErr('Both fields are required.'); return }
     setLoading(true)
     try {
@@ -4186,10 +4213,17 @@ function SecurityTab() {
   const handleDeleteAccount = async () => {
     if (!pubkey) return
     setDeleteErr('')
-    if (!deletePin) { setDeleteErr('PIN is required.'); return }
     if (deleteConfirm !== npubFingerprint) {
       setDeleteErr('Type "' + npubFingerprint + '" to confirm.'); return
     }
+    // Vault: the PIN is confirmed in the vault overlay when the delete actually runs (LoginScreen).
+    if (backend.promptsInVault) {
+      if (isLastSeedAccount && !showSeedWarning) { setShowSeedWarning(true); return }
+      sessionStorage.setItem('pending-delete', JSON.stringify({ pubkey, pin: '' }))
+      logout()
+      return
+    }
+    if (!deletePin) { setDeleteErr('PIN is required.'); return }
     setLoading(true)
     try {
       // Verify PIN first — don't attempt deletion until we know it's correct
@@ -4215,7 +4249,7 @@ function SecurityTab() {
   // Called from the seed warning modal — user has already confirmed PIN
   const handleConfirmSeedDeletion = () => {
     if (!pubkey) return
-    sessionStorage.setItem('pending-delete', JSON.stringify({ pubkey, pin: deletePin }))
+    sessionStorage.setItem('pending-delete', JSON.stringify({ pubkey, pin: backend.promptsInVault ? '' : deletePin }))
     logout()
   }
 

@@ -220,7 +220,8 @@ export function LoginScreen() {
     sessionStorage.removeItem('pending-delete')
     try {
       const data = JSON.parse(raw) as { pubkey: string; pin: string }
-      if (data.pubkey && data.pin) {
+      // Vault confirms the delete PIN in its own overlay, so an empty pin is expected there.
+      if (data.pubkey && (data.pin || backend.promptsInVault)) {
         setPendingDelete(data)
         setDeleteStatus('deleting')
       }
@@ -637,6 +638,24 @@ export function LoginScreen() {
     }
   }
 
+  // Vault: the secret (phrase/nsec/backup file) + PIN are entered in the vault overlay;
+  // the app never sees them. Then land on saved-accounts with the new account selected.
+  const runVaultImport = async () => {
+    clearError()
+    setLoading('import')
+    try {
+      const imported = await backend.importSeed('', '')
+      await loadAccounts()
+      setPendingSelectPubkey(imported.pubkey)
+      setScreen('saved-accounts')
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Import failed'
+      if (!/cancel/i.test(msg)) setError(typeof err === 'string' ? err : msg)
+    } finally {
+      setLoading(null)
+    }
+  }
+
   const handleImportWithPin = async () => {
     clearError()
     if (!pin) { setError('PIN is required'); return }
@@ -658,11 +677,38 @@ export function LoginScreen() {
   }
 
   // ─── Generate New Account (PIN-gated) ───
-  const openGenerateFlow = () => {
+  // Vault: the mnemonic reveal, label, PIN, hint, and backup download all happen in the
+  // vault's overlay — the app never sees the seed or PIN. Then continue to profile setup.
+  const runVaultGenerate = async () => {
+    setLoading('generate')
+    try {
+      const result = savedSeeds.length === 0
+        ? await backend.generateAccount('')
+        : await backend.generateNewSeed('')
+      await loadAccounts()
+      setOnboardingPubkey(result.pubkey)
+      const loginResult = await backend.loginAccount(result.pubkey, '')
+      setOnboardingPrivateKey(loginResult.privKey)
+      setOnboardingSigner(loginResult.signer)
+      const clientRelays = getRelayList()
+      setOnboardRelays([...clientRelays].sort(() => Math.random() - 0.5).slice(0, 3).map((r) => ({ url: r.url, enabled: true })))
+      const clientBlossoms = blossomServerManager.getList()
+      setOnboardBlossoms([...clientBlossoms].sort(() => Math.random() - 0.5).slice(0, 3).map((b) => ({ url: b.url, enabled: true })))
+      setScreen('onboarding-profile')
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Generation failed'
+      if (!/cancel/i.test(msg)) setError(typeof err === 'string' ? err : msg)
+    } finally {
+      setLoading(null)
+    }
+  }
+
+  const openGenerateFlow = async () => {
     clearError()
     setPin('')
     setPinHint('')
     setAccountName('')
+    if (backend.promptsInVault) { await runVaultGenerate(); return }
     setScreen('generate-pin')
   }
 
@@ -723,10 +769,28 @@ export function LoginScreen() {
   }
 
   // ─── Derive from carousel + button ───
+  // Vault: the seed's PIN is entered in the vault overlay; then show the new account.
+  const runVaultDerive = async (seedId: string) => {
+    clearError()
+    setLoading('derive')
+    try {
+      const r = await backend.deriveNextAccount(seedId, '')
+      await loadAccounts()
+      setPendingSelectPubkey(r.pubkey)
+      setScreen('saved-accounts')
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Derivation failed'
+      if (!/cancel/i.test(msg)) setError(typeof err === 'string' ? err : msg)
+    } finally {
+      setLoading(null)
+    }
+  }
+
   const openDeriveFlow = (seedId: string) => {
     clearError()
     setDeriveSeedId(seedId)
     setPin('')
+    if (backend.promptsInVault) { void runVaultDerive(seedId); return }
     setScreen('derive-pin')
   }
 
@@ -902,10 +966,24 @@ export function LoginScreen() {
   }
 
   // ─── PIN Login for saved account ───
-  const openPinLogin = (account: StoredAccount) => {
+  const openPinLogin = async (account: StoredAccount) => {
     clearError()
     setSelectedAccount(account)
     setPin('')
+    // Vault collects the PIN in its own overlay — don't show the app's PIN screen.
+    if (backend.promptsInVault) {
+      setLoading('pin-login')
+      try {
+        const r = await backend.loginAccount(account.pubkey, '')
+        applyLogin(account.pubkey, r)
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        if (!/cancel/i.test(msg)) setError(msg) // a dismissed prompt is not an error
+      } finally {
+        setLoading(null)
+      }
+      return
+    }
     setScreen('pin-login')
   }
 
@@ -2024,7 +2102,7 @@ export function LoginScreen() {
             <div className="w-full flex gap-2">
               <Button
                 variant="outline"
-                onClick={() => { setScreen('import'); clearError() }}
+                onClick={() => { clearError(); if (backend.promptsInVault) runVaultImport(); else setScreen('import') }}
                 className="gap-1.5"
               >
                 <Import size={14} />
@@ -2209,7 +2287,7 @@ export function LoginScreen() {
                 <div className="w-full flex gap-2">
                   <Button
                     variant="outline"
-                    onClick={() => { setScreen('import'); clearError() }}
+                    onClick={() => { clearError(); if (backend.promptsInVault) runVaultImport(); else setScreen('import') }}
                     className="gap-1.5 text-xs"
                   >
                     <Import size={14} />

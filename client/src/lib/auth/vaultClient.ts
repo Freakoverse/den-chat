@@ -22,8 +22,9 @@ export interface VaultAccount { pubkey: string; npub: string; seedId: string; in
 export interface VaultStatus { seeds: VaultSeed[]; accounts: VaultAccount[]; active: string | null; unlocked: boolean; pubkey: string | null }
 
 const REQUEST_TIMEOUT = 30_000
-const HIDDEN_IFRAME_CSS = 'position:fixed;width:0;height:0;border:0;visibility:hidden;'
-const OVERLAY_IFRAME_CSS = 'position:fixed;inset:0;width:100%;height:100%;border:0;visibility:visible;z-index:2147483647;'
+const HIDDEN_IFRAME_CSS = 'position:fixed;width:0;height:0;border:0;visibility:hidden;background:transparent;'
+// Transparent so the vault's confirm card floats over the app (the app stays visible behind the dimmed backdrop).
+const OVERLAY_IFRAME_CSS = 'position:fixed;inset:0;width:100%;height:100%;border:0;visibility:visible;z-index:2147483647;background:transparent;'
 
 interface PendingRequest {
   resolve: (v: unknown) => void
@@ -121,20 +122,37 @@ class VaultClient {
   status() { return this.call<VaultStatus>('status') }
   listAccounts() { return this.call<VaultAccount[]>('listAccounts') }
   generate() { return this.call<{ mnemonic: string; pubkey: string }>('generate') }
+  /** Generate + reveal a new seed in the vault overlay (PIN set there); returns only the pubkey. */
+  generateInteractive() { return this.call<{ pubkey: string; seedId: string }>('generateInteractive', undefined, 10 * 60_000) }
   saveNew(mnemonic: string, pin: string, name?: string, hint?: string) { return this.call<{ pubkey: string; seedId: string }>('saveNew', { mnemonic, pin, name, hint }) }
   importBackup(payload: BackupPayloadV1, password: string, name?: string, hint?: string) { return this.call<{ pubkey: string; seedId: string }>('importBackup', { payload, password, name, hint }) }
+  /** Import a phrase / nsec / backup file in the vault overlay (secret + PIN entered there); returns only the pubkey. */
+  importInteractive() { return this.call<{ pubkey: string; seedId: string }>('importInteractive', undefined, 10 * 60_000) }
   deriveAccount(seedId: string, pin: string, name?: string) { return this.call<{ pubkey: string }>('deriveAccount', { seedId, pin, name }) }
   async unlock(pubkey: string, pin: string) {
     const r = await this.call<{ pubkey: string }>('unlock', { pubkey, pin })
     this.activePubkey = pubkey
     return r
   }
+  /** Unlock with the PIN collected in the vault's own overlay (the app never sees it). */
+  async unlockInteractive(pubkey: string) {
+    const r = await this.call<{ pubkey: string }>('unlockInteractive', { pubkey }, 5 * 60_000)
+    this.activePubkey = pubkey
+    return r
+  }
+  /** Mark an already-unlocked account active (e.g. right after generate/import) for relock tracking. */
+  markActive(pubkey: string) { this.activePubkey = pubkey }
   lock() { return this.call('lock') }
   removeAccount(pubkey: string, pin: string) { return this.call<{ ok: boolean }>('removeAccount', { pubkey, pin }) }
   exportBackup(pubkey: string, pin: string) { return this.call<{ payload: BackupPayloadV1 }>('exportBackup', { pubkey, pin }) }
   renameSeed(seedId: string, name: string) { return this.call<{ ok: boolean }>('renameSeed', { seedId, name }) }
   renameAccount(pubkey: string, name: string) { return this.call<{ ok: boolean }>('renameAccount', { pubkey, name }) }
   changePin(pubkey: string, currentPin: string, newPin: string, newHint?: string) { return this.call<{ ok: boolean }>('changePin', { pubkey, currentPin, newPin, newHint }) }
+  // ── Interactive (PIN/secret entered in the vault overlay) ──
+  deriveInteractive(seedId: string) { return this.call<{ pubkey: string }>('deriveInteractive', { seedId }, 5 * 60_000) }
+  removeInteractive(pubkey: string) { return this.call<{ ok: boolean }>('removeInteractive', { pubkey }, 5 * 60_000) }
+  exportRevealInteractive(pubkey: string) { return this.call<{ ok: boolean }>('exportRevealInteractive', { pubkey }, 10 * 60_000) }
+  changePinInteractive(pubkey: string) { return this.call<{ ok: boolean }>('changePinInteractive', { pubkey }, 5 * 60_000) }
   /** Build + sign a blockchain transaction from structured params (the vault derives the sighash + confirms with PIN). */
   signTransaction(chain: string, tx: unknown) { return this.call<{ signed: string }>('signTransaction', { chain, tx }, 5 * 60_000) }
 
