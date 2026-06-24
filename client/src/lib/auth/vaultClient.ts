@@ -57,6 +57,7 @@ class VaultClient {
     const iframe = document.createElement('iframe')
     iframe.src = VAULT_ORIGIN + '/'
     iframe.setAttribute('aria-hidden', 'true')
+    iframe.allow = 'camera' // delegate camera to the vault origin for in-vault QR scanning
     iframe.style.cssText = HIDDEN_IFRAME_CSS
     iframe.title = 'DEN Vault'
     document.body.appendChild(iframe)
