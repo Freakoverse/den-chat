@@ -585,6 +585,19 @@ export function LoginScreen() {
     }
   }, [screen, connectDetails, handleNostrConnectLogin])
 
+  // Re-subscribe with the SAME key when the PWA returns to the foreground. Mobile
+  // suspends the relay WebSocket while you're in your signer app — the cause of
+  // "subscription closed before connection was established" — so on return we
+  // re-establish the subscription (same nostrconnect:// code) for the signer to land on.
+  useEffect(() => {
+    if (screen !== 'nip46') return
+    const onVisible = () => {
+      if (document.visibilityState === 'visible' && connectDetails) handleNostrConnectLogin()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [screen, connectDetails, handleNostrConnectLogin])
+
   const copyConnectionString = () => {
     if (!connectDetails?.connectionString) return
     navigator.clipboard.writeText(connectDetails.connectionString)
@@ -1988,17 +2001,24 @@ export function LoginScreen() {
                   <Button
                     variant="outline"
                     size="sm"
+                    onClick={() => { setConnectError(null); handleNostrConnectLogin() }}
+                    className="gap-1.5"
+                  >
+                    <RefreshCw size={13} /> Retry
+                  </Button>
+                  <button
                     onClick={() => {
-                      // Regenerate details with a fresh secret + keys, then retry
+                      // Only when the code is truly stale — this invalidates the QR/URI
+                      // your signer may already have scanned, so it isn't the default.
                       const details = generateNostrConnectDetails()
                       setConnectDetails(details)
                       setConnectError(null)
                       setConnectPending(true)
                     }}
-                    className="gap-1.5"
+                    className="text-xs text-muted-foreground hover:text-foreground cursor-pointer"
                   >
-                    <RefreshCw size={13} /> Retry
-                  </Button>
+                    Generate a new code
+                  </button>
                 </div>
               )}
             </div>
