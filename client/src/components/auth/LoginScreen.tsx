@@ -285,7 +285,43 @@ export function LoginScreen() {
     } catch { /* corrupt data, ignore */ }
   }, [login])
 
-  // Login backgrounds from NIP-78 — gated by user preferences
+  // ── Bunker auto-login from localStorage (NIP-46 remote signer) ──
+  useEffect(() => {
+    const bunkerStored = localStorage.getItem(StorageKey.BUNKER_URL)
+    const clientSecretStored = localStorage.getItem(StorageKey.BUNKER_CLIENT_SECRET)
+    if (!bunkerStored || !clientSecretStored) return
+
+    let cancelled = false
+    let retryCount = 0
+    const maxRetries = 3
+
+    const attempt = async (): Promise<void> => {
+      try {
+        const signer = new BunkerSigner(clientSecretStored)
+        const pubkey = await signer.login(bunkerStored, false)
+        if (cancelled) return
+        setSigner(signer)
+        login(pubkey, 'nip46')
+      } catch (err) {
+        if (cancelled) return
+        retryCount++
+        if (retryCount < maxRetries) {
+          setError(`Reconnecting to remote signer… (${retryCount + 1}/${maxRetries})`)
+          await new Promise((r) => setTimeout(r, 2000))
+          if (!cancelled) return attempt()
+        } else {
+          const msg = err instanceof Error ? err.message : 'Connection failed'
+          setError(`Remote signer unreachable: ${msg}. Try again from the Connect button below.`)
+        }
+      }
+    }
+
+    setError('Connecting to remote signer… (1/3)')
+    attempt()
+
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const [bgEntries, setBgEntries] = useState<LoginBgEntry[]>([])
   const [adEntries, setAdEntries] = useState<LoginBgEntry[]>([])
   const bgShowcaseEnabled = typeof window !== 'undefined' && localStorage.getItem(StorageKey.BG_SHOWCASE) !== 'false'
@@ -484,6 +520,9 @@ export function LoginScreen() {
     try {
       const signer = new BunkerSigner()
       const pubkey = await signer.login(bunkerUrl.trim())
+      // Persist bunker URL + client secret for auto-login on startup
+      localStorage.setItem(StorageKey.BUNKER_URL, bunkerUrl.trim())
+      localStorage.setItem(StorageKey.BUNKER_CLIENT_SECRET, signer.getClientSecretKey())
       setSigner(signer)
       login(pubkey, 'nip46')
     } catch (err) {

@@ -116,6 +116,9 @@ export const StorageKey = {
   BG_SHOWCASE: 'den-chat-bg-showcase',
   AD_SHOWCASE: 'den-chat-ad-showcase',
   SKIP_SPLASH: 'den-chat-skip-splash',
+  /** NIP-46 Bunker auto-login persistence */
+  BUNKER_URL: 'den-chat-bunker-url',
+  BUNKER_CLIENT_SECRET: 'den-chat-bunker-client-secret',
   /** Notification read-state event caches (NIP-78 event JSON) */
   NOTIF_SOCIAL_SEEN_AT: 'den-chat-notif-social',
   NOTIF_HUB_READ_STATE: 'den-chat-notif-hub',
