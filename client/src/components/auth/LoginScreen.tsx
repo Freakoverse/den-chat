@@ -298,7 +298,13 @@ export function LoginScreen() {
     const attempt = async (): Promise<void> => {
       try {
         const signer = new BunkerSigner(clientSecretStored)
-        const pubkey = await signer.login(bunkerStored, false)
+        // Bound each attempt: a flaky/suspended relay can leave login() hanging
+        // forever (common on mobile after the PWA was backgrounded), which would
+        // stall the whole retry loop. Time out so the next retry actually fires.
+        const pubkey = await Promise.race([
+          signer.login(bunkerStored, false),
+          new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Timed out reaching the remote signer')), 20_000)),
+        ])
         if (cancelled) return
         setSigner(signer)
         login(pubkey, 'nip46')
