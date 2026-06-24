@@ -1,5 +1,5 @@
 /**
- * vaultClient — talks to the isolated vault origin (vault.denchat.top) from the app.
+ * vaultClient — talks to the isolated vault origin (denchat.dekev.top) from the app.
  *
  * Embeds the vault as a hidden iframe and proxies key operations over postMessage.
  * The private key lives entirely in the vault origin; the app only ever sends
@@ -13,8 +13,12 @@
 import type { ISigner } from '@/stores/userStore'
 import type { BackupPayloadV1 } from '@/lib/auth/backupCrypto'
 
-/** The vault's deployed origin. Must match the vault's ALLOWED_PARENT_ORIGINS pairing. */
-export const VAULT_ORIGIN = 'https://vault.denchat.top'
+/**
+ * The vault's deployed origin. On a SEPARATE registrable domain from the app
+ * (dekev.top vs denchat.top) so Site Isolation puts the vault in its own process —
+ * closing the Spectre-class same-process gap a subdomain would leave open.
+ */
+export const VAULT_ORIGIN = 'https://denchat.dekev.top'
 
 /** Plaintext metadata (no secrets). A "seed" holds one PIN; accounts are derived from it. */
 export interface VaultSeed { id: string; name: string | null; kind: 'seed' | 'key'; hint: string | null; createdAt: number }
@@ -59,7 +63,7 @@ class VaultClient {
     iframe.setAttribute('aria-hidden', 'true')
     iframe.allow = 'camera' // delegate camera to the vault origin for in-vault QR scanning
     iframe.style.cssText = HIDDEN_IFRAME_CSS
-    iframe.title = 'DEN Vault'
+    iframe.title = 'DEN Chat Vault'
     document.body.appendChild(iframe)
     this.iframe = iframe
 
