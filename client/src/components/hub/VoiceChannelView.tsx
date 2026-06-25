@@ -54,6 +54,7 @@ import {
   Square,
   AlertTriangle,
   ArrowLeft,
+  Settings,
 } from 'lucide-react'
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { cn } from '@/lib/utils'
@@ -493,12 +494,18 @@ export function VoiceChannelView() {
                   <p className="text-[12px] text-muted-foreground mt-0.5">Click to start receiving stream data</p>
                 )}
               </div>
-              <button
-                onClick={(e) => { e.stopPropagation(); watchScreenShare(tile.pubkey) }}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 text-xs font-medium transition-colors cursor-pointer border border-emerald-500/20"
-              >
-                <Play size={12} /> Watch Stream
-              </button>
+              {isWatching ? (
+                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 text-xs font-medium border border-emerald-500/20">
+                  <Loader2 size={12} className="animate-spin" /> Connecting to stream…
+                </div>
+              ) : (
+                <button
+                  onClick={(e) => { e.stopPropagation(); watchScreenShare(tile.pubkey) }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 text-xs font-medium transition-colors cursor-pointer border border-emerald-500/20"
+                >
+                  <Play size={12} /> Watch Stream
+                </button>
+              )}
             </div>
           </div>
         )
@@ -522,37 +529,25 @@ export function VoiceChannelView() {
             <ScreenShare size={10} className="text-emerald-400" />
             <ScreenShareLabel pubkey={tile.pubkey} isSelf={isSelf} compact={!isPrimary} />
           </div>
-          <div className="absolute top-2 right-2 flex items-center gap-1.5">
-            {/* Stop watching button for remote screenshares */}
-            {!isSelf && (
-              <TooltipProvider delayDuration={200}>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); unwatchScreenShare(tile.pubkey) }}
-                      className="p-1.5 bg-black/60 backdrop-blur-sm rounded-md text-red-400/80 hover:text-red-400 transition-all cursor-pointer opacity-0 group-hover:opacity-100"
-                    >
-                      <Square size={14} />
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom" className="text-xs">Stop watching</TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-            )}
+          {/* Stream controls — label + icon, revealed on hover over the stream */}
+          <div className="absolute top-2 right-2 flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
             {isPrimary && (
-              <TooltipProvider delayDuration={200}>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); toggleFullscreen() }}
-                      className="p-1.5 bg-black/60 backdrop-blur-sm rounded-md text-white/80 hover:text-white transition-all cursor-pointer"
-                    >
-                      {isFullscreen ? <Minimize size={14} /> : <Maximize size={14} />}
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom" className="text-xs">{isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}</TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
+              <button
+                onClick={(e) => { e.stopPropagation(); toggleFullscreen() }}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 bg-black/70 backdrop-blur-sm rounded-md text-white/90 hover:text-white text-xs font-medium transition-colors cursor-pointer"
+              >
+                {isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+                {isFullscreen ? <Minimize size={15} /> : <Maximize size={15} />}
+              </button>
+            )}
+            {!isSelf && (
+              <button
+                onClick={(e) => { e.stopPropagation(); unwatchScreenShare(tile.pubkey) }}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 bg-black/70 backdrop-blur-sm rounded-md text-red-400/90 hover:text-red-400 text-xs font-medium transition-colors cursor-pointer"
+              >
+                Stop watching
+                <Square size={15} />
+              </button>
             )}
           </div>
         </div>
@@ -761,6 +756,24 @@ export function VoiceChannelView() {
             setShowPinModal(false)
           }}
         />
+      )}
+
+      {/* Connecting modal — appears while joining, with a cancel to abort the attempt */}
+      {isConnecting && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="w-full max-w-xs rounded-2xl bg-card border border-border shadow-2xl p-6 flex flex-col items-center gap-4 text-center">
+            <div className="w-12 h-12 rounded-full bg-emerald-500/10 flex items-center justify-center">
+              <Loader2 size={22} className="text-emerald-400 animate-spin" />
+            </div>
+            <div>
+              <h3 className="text-base font-semibold text-foreground">Connecting to voice…</h3>
+              <p className="text-xs text-muted-foreground mt-1">Joining {channel?.name || 'the channel'}</p>
+            </div>
+            <Button variant="outline" className="w-full" onClick={() => leaveChannel([], null, null)}>
+              Cancel
+            </Button>
+          </div>
+        </div>
       )}
 
       {/* Chat mode — reuse full ChannelView (toggled from sidebar icon) */}
@@ -1072,6 +1085,15 @@ export function VoiceChannelView() {
                   active={spatialEnabled}
                   disabled={!perms.use_spatial}
                   onClick={toggleSpatialPanel}
+                />
+                <VoiceActionButton
+                  icon={Settings}
+                  label="Voice & video settings"
+                  onClick={() => {
+                    const nav = useNavigationStore.getState()
+                    nav.setActivePage('settings')
+                    nav.setSettingsTab('voice-video')
+                  }}
                 />
                 <VoiceActionButton
                   icon={isDisconnecting ? Loader2 : PhoneOff}
