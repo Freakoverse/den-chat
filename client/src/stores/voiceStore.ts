@@ -629,7 +629,24 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
           console.log(`[VoiceStore] Suppressing '${state}' during join flow`)
           return
         }
-        set({ connectionState: state })
+        // Smooth transient fluctuations so a brief connection blip doesn't flap the
+        // UI "in and out" of the call. 'connected' applies immediately and cancels any
+        // pending downgrade; a downgrade (reconnecting/disconnected/failed) is held for
+        // a short grace and only applied if it persists — if 'connected' returns within
+        // the grace, the user never sees a flicker, and the audio (which usually keeps
+        // flowing through brief ICE blips) is uninterrupted.
+        const prevTimer = (get() as any)._connDowngradeTimer as ReturnType<typeof setTimeout> | null
+        if (prevTimer) clearTimeout(prevTimer)
+        if (state === 'connected') {
+          set({ connectionState: 'connected', _connDowngradeTimer: null } as any)
+          return
+        }
+        const timer = setTimeout(() => {
+          // Don't surface a stale downgrade after the call has been torn down.
+          if (!get().provider) { set({ _connDowngradeTimer: null } as any); return }
+          set({ connectionState: state, _connDowngradeTimer: null } as any)
+        }, 2000)
+        set({ _connDowngradeTimer: timer } as any)
       },
       onActiveSpeakerChanged: (ids) => {
         set({ activeSpeakers: ids })
@@ -1039,8 +1056,21 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
         // VAD tick interval — uses setTimeout chain instead of requestAnimationFrame
         // so it keeps running when the window/tab loses focus (RAF pauses on blur).
         const VAD_INTERVAL_MS = 20  // ~50Hz — fast enough for responsive gate
+        // Track real elapsed time between ticks so we can detect timer throttling.
+        // Browsers throttle setTimeout to ~1Hz when the window is unfocused/occluded,
+        // and a de-scheduled process (e.g. on Linux) shows the same symptom.
+        let lastVadTickAt = Date.now()
         const vadTick = () => {
           if (vadStopped) return
+
+          const tickNow = Date.now()
+          const tickGap = tickNow - lastVadTickAt
+          lastVadTickAt = tickNow
+          // If ticks arrive far slower than 20ms, responsive VAD is impossible, so we
+          // fail the gate OPEN (handled in the activity branch below) to keep the voice
+          // flowing cleanly instead of choppily gating it. This fixes "voice gets a lot
+          // worse when another window is focused."
+          const vadThrottled = tickGap > VAD_INTERVAL_MS * 6
 
           // Ensure AudioContext is running (browsers can suspend it in background)
           if (vadCtx.state === 'suspended') {
@@ -1062,7 +1092,7 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
             }
           } catch { }
 
-          if (currentMode === 'activity') {
+          if (currentMode === 'activity' && !vadThrottled) {
             // Voice Activity Detection logic
             analyser.getByteTimeDomainData(vadData)
             let sum = 0
@@ -1095,7 +1125,9 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
               consecutiveAbove = 0
               if (consecutiveBelow >= RELEASE_FRAMES && (now - lastAboveThreshold) >= holdMs) { gateOpen = false }
             }
-          } else if (currentMode === 'alwaysOn') {
+          } else if (currentMode === 'alwaysOn' || (currentMode === 'activity' && vadThrottled)) {
+            // alwaysOn, or activity mode while the VAD timer is throttled (window
+            // unfocused/occluded) — keep the gate open so voice isn't choppily cut.
             gateOpen = true
           }
           // For 'pushToTalk', gateOpen is managed by keydown/keyup handlers
