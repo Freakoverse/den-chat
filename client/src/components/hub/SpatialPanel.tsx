@@ -12,11 +12,15 @@
  * - Sphere radius slider
  */
 
-import { useRef, useEffect, useCallback, useState } from 'react'
+import { useRef, useEffect, useCallback, useState, type ReactNode } from 'react'
 import { useVoiceStore } from '@/stores/voiceStore'
 import { useUserStore } from '@/stores/userStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { cn, npubShort } from '@/lib/utils'
+import {
+  ArrowUp, ArrowDown, ArrowLeft, ArrowRight,
+  ArrowUpLeft, ArrowUpRight, ArrowDownLeft, ArrowDownRight,
+} from 'lucide-react'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
 
 // World space
@@ -856,13 +860,36 @@ export function SpatialPanel() {
     }
   }, [isFocused, updatePosition, updateHeading])
 
+  // On-screen movement pad for touch (mobile). Drives the SAME keysHeld set the
+  // keyboard uses, so the existing velocity/heading loop handles it (incl. diagonals).
+  // Uses div role=button (not <button>) so it never steals focus from the canvas —
+  // a focus change would fire the canvas onBlur and kill the movement loop mid-hold.
+  const dpadBtn = (keys: string[], icon: ReactNode, label: string) => {
+    const release = () => keys.forEach((k) => keysHeld.current.delete(k))
+    return (
+      <div
+        key={label}
+        role="button"
+        aria-label={`Move ${label}`}
+        onContextMenu={(e) => e.preventDefault()}
+        onPointerDown={(e) => { e.preventDefault(); keys.forEach((k) => keysHeld.current.add(k)); setIsFocused(true) }}
+        onPointerUp={release}
+        onPointerLeave={release}
+        onPointerCancel={release}
+        className="flex items-center justify-center w-11 h-11 rounded-lg bg-secondary/70 border border-border/50 text-foreground/70 active:bg-indigo-500/30 active:text-indigo-100 active:border-indigo-400/60 backdrop-blur-sm transition-colors cursor-pointer"
+      >
+        {icon}
+      </div>
+    )
+  }
+
   return (
     <div className="flex flex-col gap-2 flex-1 min-h-0 max-h-full p-2">
       {/* Canvas — fills all available space */}
       <div
         ref={containerRef}
         className={cn(
-          'flex-1 min-h-0 rounded-xl overflow-hidden border transition-colors',
+          'relative flex-1 min-h-0 rounded-xl overflow-hidden border transition-colors',
           isFocused
             ? 'border-indigo-500/50 ring-1 ring-indigo-500/30'
             : 'border-border/30',
@@ -885,6 +912,19 @@ export function SpatialPanel() {
           onTouchEnd={handleTouchEnd}
           className="w-full h-full cursor-crosshair outline-none block"
         />
+
+        {/* Mobile movement pad — simulates WASD on tap/hold (touch viewports ≤1080px) */}
+        <div className="absolute bottom-3 right-3 z-10 hidden max-[1080px]:grid grid-cols-3 gap-1.5 select-none touch-none">
+          {dpadBtn(['w', 'a'], <ArrowUpLeft size={16} />, 'up-left')}
+          {dpadBtn(['w'], <ArrowUp size={16} />, 'up')}
+          {dpadBtn(['w', 'd'], <ArrowUpRight size={16} />, 'up-right')}
+          {dpadBtn(['a'], <ArrowLeft size={16} />, 'left')}
+          <div className="w-11 h-11" aria-hidden />
+          {dpadBtn(['d'], <ArrowRight size={16} />, 'right')}
+          {dpadBtn(['s', 'a'], <ArrowDownLeft size={16} />, 'down-left')}
+          {dpadBtn(['s'], <ArrowDown size={16} />, 'down')}
+          {dpadBtn(['s', 'd'], <ArrowDownRight size={16} />, 'down-right')}
+        </div>
       </div>
 
     <TooltipProvider delayDuration={300}>
