@@ -249,14 +249,15 @@ export function VoiceChannelView() {
     const groups = new Map<string, { pubkey: string }[]>()
     for (const p of presenceList) {
       if (p.pubkey === pubkey) continue
+      // Only people confirmed (via presence) to be on a DIFFERENT host. Same-host
+      // and unknown-host people are excluded — they belong on the call tiles.
       if (!p.hostPubkey || p.hostPubkey === currentHostPubkey) continue
-      if (participants[p.pubkey]) continue
       const arr = groups.get(p.hostPubkey) || []
       arr.push({ pubkey: p.pubkey })
       groups.set(p.hostPubkey, arr)
     }
     return Array.from(groups.entries())
-  }, [presenceList, pubkey, currentHostPubkey, participants])
+  }, [presenceList, pubkey, currentHostPubkey])
 
   // Resolve voice permissions for this channel
   const perms = usePermissions(activeHubId ?? undefined, activeChannelId ?? undefined)
@@ -389,13 +390,21 @@ export function VoiceChannelView() {
 
   const isCreator = !!(pubkey && hub.creatorPubkey === pubkey)
 
+  // Map each present pubkey → its host, so the call tiles stay strictly to our own
+  // host. Anyone known (via presence) to be on a different host must never render as
+  // a call tile — they appear in the dimmed other-host group instead.
+  const presenceHostByPk = new Map<string, string>()
+  for (const pp of presenceList) if (pp.hostPubkey) presenceHostByPk.set(pp.pubkey, pp.hostPubkey)
+
   // Remote participants: never include our own pubkey (a stale/ghost session of
-  // ourselves must not render as a remote), and de-duplicate by pubkey so a
-  // duplicate roster entry can never multiply into many cards.
+  // ourselves must not render as a remote), drop anyone on a different host, and
+  // de-duplicate by pubkey so a duplicate roster entry can't multiply into cards.
   const _seenParticipantPk = new Set<string>()
   const participantList = Object.values(participants).filter((p) => {
     const pk = p.pubkey || p.id
     if (pk === pubkey) return false
+    const theirHost = presenceHostByPk.get(pk)
+    if (theirHost && currentHostPubkey && theirHost !== currentHostPubkey) return false
     if (_seenParticipantPk.has(pk)) return false
     _seenParticipantPk.add(pk)
     return true

@@ -1228,6 +1228,9 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
     const existingPresence = (get().presenceByHub[hubDTag] || []).filter(
       (p) =>
         p.channelId === channelId &&
+        // Only people on the host we just joined — a different host is a separate
+        // SFU we can't pull from (they're shown via the dimmed other-host group).
+        (!p.hostPubkey || p.hostPubkey === hostPubkey) &&
         p.status === 'joined' &&
         p.sessionId &&
         p.sessionId !== mySessionId &&
@@ -2208,8 +2211,12 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
       }
     }
 
-    // Publish immediately (with delay to let relay connect), then every 45s
-    setTimeout(() => publishKeepalive(), 2000)
+    // Publish a few times early, then every 45s. Cross-host participants discover
+    // each other ONLY via these Nostr presence events (no shared SFU DataChannel),
+    // so a single delayed publish that's slow or dropped means a long wait. Firing
+    // early + retrying makes that discovery fast and reliable.
+    setTimeout(() => publishKeepalive(), 700)
+    setTimeout(() => publishKeepalive(), 4_000)
     const interval = setInterval(publishKeepalive, PRESENCE_CONSTANTS.KEEPALIVE_INTERVAL_MS)
     set({ _keepaliveInterval: interval })
   },
