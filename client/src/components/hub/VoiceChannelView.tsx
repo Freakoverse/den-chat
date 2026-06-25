@@ -43,6 +43,7 @@ import {
   Maximize,
   Minimize,
   Radar,
+  Boxes,
   Pin,
   RefreshCw,
   Loader2,
@@ -56,8 +57,12 @@ import {
   ArrowLeft,
   Settings,
 } from 'lucide-react'
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
-import { cn } from '@/lib/utils'
+import { useState, useEffect, useMemo, useRef, useCallback, lazy, Suspense } from 'react'
+import { cn, isMobileOS } from '@/lib/utils'
+
+// 3D virtual space is heavy (three.js / R3F) and PC-only — lazy-load so it never
+// ships in the main bundle and only downloads when a user opens it.
+const VirtualSpace = lazy(() => import('./VirtualSpace'))
 import { getVoiceSensitivity } from '@/components/settings/SettingsPage'
 import { supportsE2EE } from '@/lib/voice/e2ee-crypto'
 import { SpatialPanel } from '@/components/hub/SpatialPanel'
@@ -215,6 +220,8 @@ export function VoiceChannelView() {
   const spatialEnabled = useVoiceStore((s) => s.spatialEnabled)
   const spatialPanelOpen = useVoiceStore((s) => s.spatialPanelOpen)
   const toggleSpatialPanel = useVoiceStore((s) => s.toggleSpatialPanel)
+  const virtualSpaceOpen = useVoiceStore((s) => s.virtualSpaceOpen)
+  const toggleVirtualSpace = useVoiceStore((s) => s.toggleVirtualSpace)
   const voiceChatMode = useVoiceStore((s) => s.voiceChatMode)
   const refreshHosts = useVoiceStore((s) => s.refreshHosts)
   const isE2EE = useVoiceStore((s) => s.isE2EE)
@@ -1077,6 +1084,14 @@ export function VoiceChannelView() {
                   </span>
                 </div>
               )}
+              {virtualSpaceOpen ? (
+                <div className="flex-1 min-h-0 p-2">
+                  <Suspense fallback={<div className="w-full h-full flex items-center justify-center text-sm text-muted-foreground">Loading virtual space…</div>}>
+                    <VirtualSpace />
+                  </Suspense>
+                </div>
+              ) : (
+              <>
               {/* Primary tile (expanded) */}
               {primaryTile && (
                 <div className="flex-1 min-h-0 flex flex-col">
@@ -1106,6 +1121,8 @@ export function VoiceChannelView() {
                     />
                   ))}
                 </div>
+              )}
+              </>
               )}
 
               {/* Voice controls */}
@@ -1146,6 +1163,16 @@ export function VoiceChannelView() {
                   disabled={!perms.use_spatial}
                   onClick={toggleSpatialPanel}
                 />
+                {/* 3D virtual space — PC only (pointer lock + mouse look) */}
+                {!isMobileOS() && (
+                  <VoiceActionButton
+                    icon={Boxes}
+                    label={!perms.use_spatial ? 'No permission for spatial audio' : virtualSpaceOpen ? 'Exit Virtual Space' : 'Virtual Space'}
+                    active={virtualSpaceOpen}
+                    disabled={!perms.use_spatial}
+                    onClick={toggleVirtualSpace}
+                  />
+                )}
                 <VoiceActionButton
                   icon={Settings}
                   label="Voice & video settings"

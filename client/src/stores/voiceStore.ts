@@ -78,6 +78,7 @@ interface VoiceStoreState {
   spatialEnabled: boolean
   spatial3DEnabled: boolean
   spatialPanelOpen: boolean
+  virtualSpaceOpen: boolean   // 3D "virtual space" (FPS) view open (PC only)
   myPosition: { x: number; y: number }
   myHeading: number  // radians, 0 = up/north
   myElevation: number  // height (world units) → audio Y. 0 in 2D mode.
@@ -162,6 +163,8 @@ interface VoiceStoreState {
 
   /** Toggle spatial panel */
   toggleSpatialPanel: () => void
+  /** Toggle the 3D virtual-space (FPS) view. Enables spatial audio while open. */
+  toggleVirtualSpace: () => void
 
   /** Toggle voice chat mode (show chat overlay in voice channel) */
   toggleVoiceChatMode: () => void
@@ -1221,6 +1224,7 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
       myHeading: 0,
       mySphereRadius: SPATIAL_DEFAULTS.DEFAULT_SPHERE_RADIUS,
       spatialPanelOpen: false,
+      virtualSpaceOpen: false,
       _joinInProgress: false,
     })
 
@@ -1423,6 +1427,7 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
       spatialEnabled: false,
       spatial3DEnabled: true,
       spatialPanelOpen: false,
+      virtualSpaceOpen: false,
       _spatialEngine: null,
       myHeading: 0,
       _micGainNode: null,
@@ -1643,6 +1648,20 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
 
       engine.start()
       set({ spatialEnabled: true, spatialPanelOpen: true, _spatialEngine: engine })
+    }
+  },
+
+  toggleVirtualSpace: () => {
+    const { virtualSpaceOpen, spatialEnabled, _spatialEngine } = get()
+    if (virtualSpaceOpen) {
+      // Close the 3D view — tear the spatial engine down (it existed for this view).
+      if (_spatialEngine) _spatialEngine.destroy()
+      set({ virtualSpaceOpen: false, spatialEnabled: false, spatialPanelOpen: false, _spatialEngine: null })
+    } else {
+      // Reuse the spatial-panel path to create + start the (3D) engine, then show the
+      // 3D view instead of the 2D radar.
+      if (!spatialEnabled) get().toggleSpatialPanel()
+      set({ virtualSpaceOpen: true, spatialPanelOpen: false })
     }
   },
 
