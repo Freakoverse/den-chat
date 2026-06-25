@@ -259,21 +259,45 @@ function RemoteAvatars() {
 }
 
 /** Faint ring on the ground marking your hearing radius; follows you as you move. */
+/**
+ * Faint ground overlay of what you can hear: a disc at your hearing radius that
+ * narrows into a forward-facing sector as the cone increases (matching the audio
+ * cone), and rotates to point where you're looking. Follows you as you move.
+ */
 function HearingRing() {
-  const ref = useRef<THREE.Mesh>(null)
+  const groupRef = useRef<THREE.Group>(null)
   const sphereRadius = useVoiceStore((s) => s.mySphereRadius)
+  const conePercent = useVoiceStore((s) => s.myConePercent)
   const { camera } = useThree()
+
+  const p = Math.max(0, Math.min(100, conePercent)) / 100
+  const halfAngle = Math.PI * (1 - p) + (Math.PI / 12) * p   // π (full circle) → π/12 (15°)
+  const start = -halfAngle
+  const length = 2 * halfAngle                                // 2π at cone 0 → full circle
+  const inner = Math.max(1, sphereRadius - 3)
+
   useFrame(() => {
-    if (ref.current) {
-      ref.current.position.x = camera.position.x
-      ref.current.position.z = camera.position.z
-    }
+    const g = groupRef.current
+    if (!g) return
+    g.position.x = camera.position.x
+    g.position.z = camera.position.z
+    const e = new THREE.Euler().setFromQuaternion(camera.quaternion, 'YXZ')
+    g.rotation.y = Math.PI / 2 + e.y   // aim the sector where we're looking (heading = -e.y)
   })
+
   return (
-    <mesh ref={ref} rotation={[-Math.PI / 2, 0, 0]} position={[CENTER, 0.3, CENTER]}>
-      <ringGeometry args={[Math.max(1, sphereRadius - 3), sphereRadius, 96]} />
-      <meshBasicMaterial color="#10b981" transparent opacity={0.18} side={THREE.DoubleSide} />
-    </mesh>
+    <group ref={groupRef} position={[CENTER, 0.3, CENTER]}>
+      {/* faint filled audible area */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[0, sphereRadius, 96, 1, start, length]} />
+        <meshBasicMaterial color="#10b981" transparent opacity={0.07} side={THREE.DoubleSide} depthWrite={false} />
+      </mesh>
+      {/* brighter outer edge */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.05, 0]}>
+        <ringGeometry args={[inner, sphereRadius, 96, 1, start, length]} />
+        <meshBasicMaterial color="#10b981" transparent opacity={0.3} side={THREE.DoubleSide} depthWrite={false} />
+      </mesh>
+    </group>
   )
 }
 
