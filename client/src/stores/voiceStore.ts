@@ -136,6 +136,9 @@ interface VoiceStoreState {
     hubSecret?: string,
   ) => Promise<void>
 
+  /** Switch to a different host in the current channel (disconnects current, rejoins) */
+  switchHost: (hostPubkey: string) => Promise<void>
+
   /** Leave the current voice channel */
   leaveChannel: (
     relays: string[],
@@ -1261,6 +1264,25 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
         },
       }))
     }
+  },
+
+  switchHost: async (hostPubkey) => {
+    const { currentHubDTag, currentChannelId, hostsByHub, currentHostPubkey } = get()
+    if (!currentHubDTag || !currentChannelId || hostPubkey === currentHostPubkey) return
+    const host = (hostsByHub[currentHubDTag] || []).find((h) => h.pubkey === hostPubkey)
+    if (!host || !host.config) {
+      console.warn('[VoiceStore] switchHost: no decrypted config for host', hostPubkey.slice(0, 8))
+      return
+    }
+    const myPubkey = useUserStore.getState().pubkey
+    if (!myPubkey) return
+    let hubSecret: string | undefined
+    try {
+      const hubStore = (await import('@/stores/hubStore')).useHubStore.getState()
+      hubSecret = hubStore.hubSecrets?.[currentHubDTag]
+    } catch { /* ignore */ }
+    // joinChannel disconnects the current provider before connecting to the new host.
+    await get().joinChannel(currentHubDTag, currentChannelId, host.config, hostPubkey, myPubkey, hubSecret)
   },
 
   leaveChannel: async (relays, signer, privateKey) => {

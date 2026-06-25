@@ -203,6 +203,8 @@ export function VoiceChannelView() {
   const getChannelPresence = useVoiceStore((s) => s.getChannelPresence)
   const joinChannel = useVoiceStore((s) => s.joinChannel)
   const leaveChannel = useVoiceStore((s) => s.leaveChannel)
+  const switchHost = useVoiceStore((s) => s.switchHost)
+  const currentHostPubkey = useVoiceStore((s) => s.currentHostPubkey)
   const toggleMute = useVoiceStore((s) => s.toggleMute)
   const toggleDeafen = useVoiceStore((s) => s.toggleDeafen)
   const toggleVideo = useVoiceStore((s) => s.toggleVideo)
@@ -239,6 +241,22 @@ export function VoiceChannelView() {
     () => (hub && activeChannelId ? getChannelPresence(hub.dTag, activeChannelId) : []),
     [hub, activeChannelId, presenceByHub],
   )
+
+  // People in this channel on a DIFFERENT host than us — we can't hear them (they're
+  // on a separate SFU). Grouped by host so the call window makes the split obvious,
+  // with a button to switch to their host. Only meaningful while we're connected.
+  const otherHostGroups = useMemo(() => {
+    const groups = new Map<string, { pubkey: string }[]>()
+    for (const p of presenceList) {
+      if (p.pubkey === pubkey) continue
+      if (!p.hostPubkey || p.hostPubkey === currentHostPubkey) continue
+      if (participants[p.pubkey]) continue
+      const arr = groups.get(p.hostPubkey) || []
+      arr.push({ pubkey: p.pubkey })
+      groups.set(p.hostPubkey, arr)
+    }
+    return Array.from(groups.entries())
+  }, [presenceList, pubkey, currentHostPubkey, participants])
 
   // Resolve voice permissions for this channel
   const perms = usePermissions(activeHubId ?? undefined, activeChannelId ?? undefined)
@@ -1067,6 +1085,20 @@ export function VoiceChannelView() {
                 {otherTiles.map((tile) => renderTile(tile, false))}
               </div>
 
+              {/* People in this channel on a different host — can't hear them here */}
+              {otherHostGroups.length > 0 && (
+                <div className="shrink-0 flex flex-col gap-2 px-4 pb-1">
+                  {otherHostGroups.map(([hostPk, members]) => (
+                    <OtherHostGroup
+                      key={hostPk}
+                      hostPubkey={hostPk}
+                      members={members}
+                      onJoin={() => switchHost(hostPk)}
+                    />
+                  ))}
+                </div>
+              )}
+
               {/* Voice controls */}
               <div className="flex justify-center gap-2 pb-4 pt-2">
                 <VoiceActionButton
@@ -1127,6 +1159,48 @@ export function VoiceChannelView() {
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+/* ─── OtherHostGroup — people in this channel on a different SFU host ─── */
+
+function OtherHostAvatar({ pubkey }: { pubkey: string }) {
+  const { getProfile } = useProfileCache()
+  const isHex = /^[0-9a-f]{64}$/i.test(pubkey)
+  const profile = isHex ? getProfile(pubkey) : null
+  const name = profile?.display_name || profile?.name || (isHex ? pubkey.slice(0, 8) + '…' : '?')
+  return (
+    <Avatar className="w-6 h-6 border border-border/40">
+      <AvatarImage src={profile?.picture} alt={name} />
+      <AvatarFallback className="text-[9px]">{name.slice(0, 2).toUpperCase()}</AvatarFallback>
+    </Avatar>
+  )
+}
+
+function OtherHostGroup({ hostPubkey, members, onJoin }: { hostPubkey: string; members: { pubkey: string }[]; onJoin: () => void }) {
+  const { getProfile } = useProfileCache()
+  const isHex = /^[0-9a-f]{64}$/i.test(hostPubkey)
+  const hostProfile = isHex ? getProfile(hostPubkey) : null
+  const hostName = hostProfile?.display_name || hostProfile?.name || (isHex ? hostPubkey.slice(0, 8) + '…' : 'another host')
+  return (
+    <div className="flex items-center gap-3 rounded-xl border border-border/40 bg-secondary/20 px-3 py-2 opacity-75">
+      <Globe size={14} className="text-muted-foreground shrink-0" />
+      <div className="flex items-center -space-x-1.5 shrink-0">
+        {members.slice(0, 6).map((m) => <OtherHostAvatar key={m.pubkey} pubkey={m.pubkey} />)}
+        {members.length > 6 && (
+          <span className="text-[10px] text-muted-foreground ml-2 shrink-0">+{members.length - 6}</span>
+        )}
+      </div>
+      <p className="text-xs text-muted-foreground leading-tight truncate min-w-0 flex-1">
+        On <span className="text-foreground/80 font-medium">{hostName}'s host</span> — join to hear them
+      </p>
+      <button
+        onClick={onJoin}
+        className="shrink-0 text-xs font-medium px-2.5 py-1.5 rounded-lg bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 transition-colors cursor-pointer"
+      >
+        Join this host
+      </button>
     </div>
   )
 }

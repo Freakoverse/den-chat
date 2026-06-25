@@ -635,6 +635,8 @@ function ChannelItem({ channel, position, isActive, onClick, isLocked = false, i
   const presenceByHub = useVoiceStore((s) => s.presenceByHub)
   const getChannelPresence = useVoiceStore((s) => s.getChannelPresence)
   const currentChannelId = useVoiceStore((s) => s.currentChannelId)
+  const currentHostPubkey = useVoiceStore((s) => s.currentHostPubkey)
+  const switchHost = useVoiceStore((s) => s.switchHost)
   const connectionState = useVoiceStore((s) => s.connectionState)
   const participants = useVoiceStore((s) => s.participants)
   const activeSpeakers = useVoiceStore((s) => s.activeSpeakers)
@@ -789,23 +791,90 @@ function ChannelItem({ channel, position, isActive, onClick, isLocked = false, i
               isConnecting={isConnecting}
             />
           )}
-          {voicePresence.map((p) => {
-            const part = participants[p.pubkey]
-            return (
-              <VoicePresenceUser
-                key={p.pubkey}
-                pubkey={p.pubkey}
-                isSelf={p.pubkey === myPubkey}
-                isSpeaking={p.pubkey === myPubkey ? selfSpeaking : (part?.isSpeaking ?? activeSpeakers.includes(p.pubkey))}
-                isMuted={p.pubkey === myPubkey ? myIsMuted : (part?.isMuted ?? false)}
-                isDeafened={p.pubkey === myPubkey ? myIsDeafened : (part?.isDeafened ?? false)}
-                hasVideo={p.pubkey === myPubkey ? myIsVideoEnabled : (part?.hasVideo ?? false)}
-                hasScreenShare={p.pubkey === myPubkey ? myIsScreenSharing : (part?.hasScreenShare ?? false)}
-                hasSpatial={p.pubkey === myPubkey ? myIsSpatial : (part?.hasSpatial ?? false)}
-              />
+          {(() => {
+            const renderRow = (p: typeof voicePresence[number]) => {
+              const part = participants[p.pubkey]
+              return (
+                <VoicePresenceUser
+                  key={p.pubkey}
+                  pubkey={p.pubkey}
+                  isSelf={p.pubkey === myPubkey}
+                  isSpeaking={p.pubkey === myPubkey ? selfSpeaking : (part?.isSpeaking ?? activeSpeakers.includes(p.pubkey))}
+                  isMuted={p.pubkey === myPubkey ? myIsMuted : (part?.isMuted ?? false)}
+                  isDeafened={p.pubkey === myPubkey ? myIsDeafened : (part?.isDeafened ?? false)}
+                  hasVideo={p.pubkey === myPubkey ? myIsVideoEnabled : (part?.hasVideo ?? false)}
+                  hasScreenShare={p.pubkey === myPubkey ? myIsScreenSharing : (part?.hasScreenShare ?? false)}
+                  hasSpatial={p.pubkey === myPubkey ? myIsSpatial : (part?.hasSpatial ?? false)}
+                />
+              )
+            }
+
+            // Group presence by host. When everyone is on one host, render flat
+            // (unchanged). When split across hosts, show a labeled group per host so
+            // people don't think they're all talking together — with a Join button to
+            // switch to another host (only while you're connected in this channel).
+            const groups = new Map<string, typeof voicePresence>()
+            for (const p of voicePresence) {
+              const h = p.hostPubkey || ''
+              if (!groups.has(h)) groups.set(h, [])
+              groups.get(h)!.push(p)
+            }
+            if (groups.size <= 1) return voicePresence.map(renderRow)
+
+            const entries = Array.from(groups.entries()).sort((a, b) =>
+              a[0] === currentHostPubkey ? -1 : b[0] === currentHostPubkey ? 1 : 0,
             )
-          })}
+            return entries.map(([hostPk, members]) => (
+              <div key={hostPk || 'unknown'} className="flex flex-col gap-0">
+                <VoiceHostGroupHeader
+                  hostPubkey={hostPk}
+                  count={members.length}
+                  isMine={hostPk === currentHostPubkey}
+                  canJoin={isInVoice && hostPk !== currentHostPubkey && !!hostPk}
+                  onJoin={() => switchHost(hostPk)}
+                />
+                {members.map(renderRow)}
+              </div>
+            ))
+          })()}
         </div>
+      )}
+    </div>
+  )
+}
+
+/* ─── VoiceHostGroupHeader — shown when a voice channel's people span >1 host ─── */
+
+function VoiceHostGroupHeader({
+  hostPubkey,
+  count,
+  isMine,
+  canJoin,
+  onJoin,
+}: {
+  hostPubkey: string
+  count: number
+  isMine: boolean
+  canJoin: boolean
+  onJoin: () => void
+}) {
+  const { getProfile } = useProfileCache()
+  const isHex = /^[0-9a-f]{64}$/i.test(hostPubkey)
+  const profile = isHex ? getProfile(hostPubkey) : null
+  const name = profile?.display_name || profile?.name || (isHex ? hostPubkey.slice(0, 8) + '…' : 'Unknown host')
+  return (
+    <div className="flex items-center gap-1.5 px-2 py-0.5 mt-0.5">
+      <span className={cn('w-1 h-1 rounded-full shrink-0', isMine ? 'bg-emerald-400' : 'bg-muted-foreground/40')} />
+      <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70 truncate">
+        {name}'s host · {count}
+      </span>
+      {canJoin && (
+        <button
+          onClick={onJoin}
+          className="ml-auto text-[10px] font-medium px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 transition-colors cursor-pointer shrink-0"
+        >
+          Join
+        </button>
       )}
     </div>
   )
