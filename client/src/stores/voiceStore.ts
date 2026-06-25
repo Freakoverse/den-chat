@@ -639,6 +639,10 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
         const dcMap = get()._dcSessionToPubkey
         const senderPubkey = dcMap[senderIdentity] || senderIdentity
 
+        // Never treat our own (possibly ghost/duplicate) session as a remote
+        // participant — that is what produced runaway self-cards on rejoin.
+        if (senderPubkey === useUserStore.getState().pubkey) return
+
         if (data.type === 'state') {
           // Update heartbeat timestamp for this participant
           set((s) => ({ _dcLastSeen: { ...s._dcLastSeen, [senderPubkey]: Date.now() } }))
@@ -1825,7 +1829,8 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
         presence.sessionId &&
         presence.sessionId !== state.currentSessionId &&
         presence.tracks.length > 0 &&
-        presence.pubkey !== (state.provider as any).identity
+        presence.pubkey !== (state.provider as any).identity &&
+        presence.pubkey !== useUserStore.getState().pubkey
       ) {
         // Check if we need to pull tracks — either new participant or new tracks from existing one
         const existingParticipant = state.participants[presence.pubkey]

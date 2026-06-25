@@ -371,7 +371,17 @@ export function VoiceChannelView() {
 
   const isCreator = !!(pubkey && hub.creatorPubkey === pubkey)
 
-  const participantList = Object.values(participants)
+  // Remote participants: never include our own pubkey (a stale/ghost session of
+  // ourselves must not render as a remote), and de-duplicate by pubkey so a
+  // duplicate roster entry can never multiply into many cards.
+  const _seenParticipantPk = new Set<string>()
+  const participantList = Object.values(participants).filter((p) => {
+    const pk = p.pubkey || p.id
+    if (pk === pubkey) return false
+    if (_seenParticipantPk.has(pk)) return false
+    _seenParticipantPk.add(pk)
+    return true
+  })
 
   // Helper: get a participant's video track from remote tracks (only live tracks)
   const getRemoteVideoTrack = (participantPubkey: string): MediaStreamTrack | null => {
@@ -434,9 +444,18 @@ export function VoiceChannelView() {
     tiles.push({ type: 'participant', pubkey: pk, key: `participant:${pk}` })
   }
 
+  // Dedup tiles by key — final backstop so a duplicate participant/track entry
+  // (e.g. a ghost session) can never render the same card more than once.
+  const _seenTileKeys = new Set<string>()
+  const dedupedTiles = tiles.filter((t) => {
+    if (_seenTileKeys.has(t.key)) return false
+    _seenTileKeys.add(t.key)
+    return true
+  })
+
   // Check if primary tile is still valid (e.g., screenshare stopped)
-  const primaryTile = primaryTileKey ? tiles.find((t) => t.key === primaryTileKey) : null
-  const otherTiles = primaryTile ? tiles.filter((t) => t.key !== primaryTileKey) : tiles
+  const primaryTile = primaryTileKey ? dedupedTiles.find((t) => t.key === primaryTileKey) : null
+  const otherTiles = primaryTile ? dedupedTiles.filter((t) => t.key !== primaryTileKey) : dedupedTiles
 
   // Render a single tile
   const renderTile = (tile: TileEntry, isPrimary: boolean) => {
