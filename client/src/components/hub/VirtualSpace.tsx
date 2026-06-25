@@ -205,11 +205,37 @@ function RemoteAvatar({ pubkey, x, z, elevation, heading, speaking, showRange, r
   showRange: boolean; radius: number; conePercent: number
 }) {
   const accent = speaking ? '#10b981' : '#6b7280'
+  const bodyGroup = useRef<THREE.Group>(null)   // position
+  const facing = useRef<THREE.Group>(null)      // heading rotation
+  const coneGroup = useRef<THREE.Group>(null)   // ground cone (position + heading)
+  const cur = useRef({ x, z, elevation, heading })
+
+  // Smoothly interpolate toward the latest networked pose. Updates arrive ~10Hz,
+  // so without this the avatar looks choppy. Purely visual — the audio engine still
+  // uses the exact positions, so spatialization stays accurate.
+  useFrame((_, dt) => {
+    const c = cur.current
+    const t = 1 - Math.exp(-Math.min(dt, 0.1) * 11)
+    c.x += (x - c.x) * t
+    c.z += (z - c.z) * t
+    c.elevation += (elevation - c.elevation) * t
+    let dh = heading - c.heading                 // shortest-angle turn
+    while (dh > Math.PI) dh -= 2 * Math.PI
+    while (dh < -Math.PI) dh += 2 * Math.PI
+    c.heading += dh * t
+    bodyGroup.current?.position.set(c.x, c.elevation, c.z)
+    if (facing.current) facing.current.rotation.y = -c.heading
+    if (coneGroup.current) {
+      coneGroup.current.position.set(c.x, 0.2, c.z)
+      coneGroup.current.rotation.y = Math.PI / 2 - c.heading
+    }
+  })
+
   return (
     <>
-      <group position={[x, elevation, z]}>
+      <group ref={bodyGroup} position={[x, elevation, z]}>
         {/* body + head, rotated to face the user's heading */}
-        <group rotation={[0, -heading, 0]}>
+        <group ref={facing} rotation={[0, -heading, 0]}>
           <mesh position={[0, BODY_H / 2, 0]} castShadow>
             <boxGeometry args={[HEAD * 0.7, BODY_H, HEAD * 0.5]} />
             <meshStandardMaterial color="#4b5563" />
@@ -222,7 +248,7 @@ function RemoteAvatar({ pubkey, x, z, elevation, heading, speaking, showRange, r
         <Nameplate pubkey={pubkey} y={BODY_H + HEAD + 8} speaking={speaking} />
       </group>
       {showRange && (
-        <group position={[x, 0.2, z]} rotation={[0, Math.PI / 2 - heading, 0]}>
+        <group ref={coneGroup} position={[x, 0.2, z]} rotation={[0, Math.PI / 2 - heading, 0]}>
           <ConeOverlay radius={radius} conePercent={conePercent} color="#60a5fa" fill={0.05} edge={0.22} />
         </group>
       )}
@@ -354,7 +380,7 @@ export default function VirtualSpace() {
   const updateConePercent = useVoiceStore((s) => s.updateConePercent)
   const controlsRef = useRef<any>(null)
   const [locked, setLocked] = useState(false)
-  const [showRanges, setShowRanges] = useState(false)
+  const [showRanges, setShowRanges] = useState(true)
 
   return (
     <div className="w-full h-full flex flex-col gap-2">
@@ -368,6 +394,7 @@ export default function VirtualSpace() {
             <Scene showRanges={showRanges} />
             <PointerLockControls
               ref={controlsRef}
+              selector="#vs-enter"
               onLock={() => setLocked(true)}
               onUnlock={() => { setLocked(false); keys.clear() }}
             />
@@ -381,18 +408,22 @@ export default function VirtualSpace() {
           </div>
         )}
 
-        {/* Enter prompt (shown when not pointer-locked) */}
-        {!locked && (
-          <div
-            className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/40 backdrop-blur-[1px] cursor-pointer"
-            onClick={() => controlsRef.current?.lock?.()}
-          >
-            <div className="px-4 py-3 rounded-xl bg-popover/90 border border-border text-center">
-              <p className="text-sm font-semibold text-foreground">Click to enter</p>
-              <p className="text-xs text-muted-foreground mt-1">WASD move · Space jump · Mouse look · Esc to release</p>
-            </div>
+        {/* Enter prompt — always mounted (a stable target for the pointer-lock
+            selector, so only clicking HERE locks; toggles/sliders never do). Hidden
+            and non-interactive while controlling. */}
+        <div
+          id="vs-enter"
+          onClick={() => controlsRef.current?.lock?.()}
+          className={cn(
+            'absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/40 backdrop-blur-[1px] transition-opacity',
+            locked ? 'opacity-0 pointer-events-none' : 'opacity-100 cursor-pointer',
+          )}
+        >
+          <div className="px-4 py-3 rounded-xl bg-popover/90 border border-border text-center">
+            <p className="text-sm font-semibold text-foreground">Click to enter</p>
+            <p className="text-xs text-muted-foreground mt-1">WASD move · Space jump · Mouse look · Esc to release</p>
           </div>
-        )}
+        </div>
 
         {/* Exit the virtual space entirely (available when not locked) */}
         {!locked && (
