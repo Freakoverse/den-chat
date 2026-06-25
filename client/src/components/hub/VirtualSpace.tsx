@@ -20,7 +20,7 @@ import { X } from 'lucide-react'
 import { useVoiceStore } from '@/stores/voiceStore'
 import { useUserStore } from '@/stores/userStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
-import { npubShort } from '@/lib/utils'
+import { npubShort, cn } from '@/lib/utils'
 
 // ── Scene constants (world units match the 2D spatial world: ~2000, hearing ~200) ──
 const BODY_H = 22
@@ -41,6 +41,9 @@ const CUBES: { x: number; z: number; s: number }[] = [
 
 const UP = new THREE.Vector3(0, 1, 0)
 
+const WORLD = 2000        // world bounds (matches the store clamp)
+const PLAYER_R = 4        // horizontal collision radius
+
 /** Highest ground surface under (x,z): a cube top if within its footprint, else 0. */
 function groundHeightAt(x: number, z: number): number {
   let g = 0
@@ -51,6 +54,23 @@ function groundHeightAt(x: number, z: number): number {
     }
   }
   return g
+}
+
+/**
+ * Resolve one horizontal axis against the cubes (axis-aligned box collision).
+ * Only collides when the player's feet are below the cube's top — so you walk into
+ * the sides but can stand on / walk across the top after jumping up.
+ */
+function collideAxis(x: number, z: number, feetY: number, axis: 'x' | 'z'): number {
+  for (const c of CUBES) {
+    if (feetY >= c.s - 0.5) continue   // on or above this cube's top → no side collision
+    const half = c.s / 2 + PLAYER_R
+    if (x > c.x - half && x < c.x + half && z > c.z - half && z < c.z + half) {
+      if (axis === 'x') x = x < c.x ? c.x - half : c.x + half
+      else z = z < c.z ? c.z - half : c.z + half
+    }
+  }
+  return axis === 'x' ? x : z
 }
 
 // ── Keyboard state (module-scoped so listeners are simple) ──
@@ -87,6 +107,21 @@ function Player() {
     const dt = Math.min(rawDt, 0.05)
 
     // Horizontal movement along the camera's yaw plane.
+    // Vertical first: gravity + jump + land on the floor or a cube top.
+    velY.current -= GRAVITY * dt
+    camera.position.y += velY.current * dt
+    const groundY = EYE + groundHeightAt(camera.position.x, camera.position.z)
+    if (camera.position.y <= groundY) {
+      camera.position.y = groundY
+      velY.current = 0
+      grounded.current = true
+    } else {
+      grounded.current = false
+    }
+    if (keys.has(' ') && grounded.current) { velY.current = JUMP; grounded.current = false }
+
+    // Horizontal: move along the yaw plane, then resolve cube collisions per axis
+    // (using the now-settled feet height, so landing on a cube doesn't get side-pushed).
     const forward = new THREE.Vector3()
     camera.getWorldDirection(forward)
     forward.y = 0
@@ -99,22 +134,14 @@ function Player() {
     if (keys.has('a')) move.sub(right)
     if (move.lengthSq() > 0) {
       move.normalize().multiplyScalar(SPEED * dt)
-      camera.position.x += move.x
-      camera.position.z += move.z
+      const feetY = camera.position.y - EYE
+      let nx = camera.position.x + move.x
+      let nz = camera.position.z + move.z
+      nx = collideAxis(nx, camera.position.z, feetY, 'x')  // resolve X against current Z
+      nz = collideAxis(nx, nz, feetY, 'z')                 // then Z against the resolved X
+      camera.position.x = Math.max(0, Math.min(WORLD, nx))
+      camera.position.z = Math.max(0, Math.min(WORLD, nz))
     }
-
-    // Gravity + jump + ground snap.
-    velY.current -= GRAVITY * dt
-    camera.position.y += velY.current * dt
-    const groundY = EYE + groundHeightAt(camera.position.x, camera.position.z)
-    if (camera.position.y <= groundY) {
-      camera.position.y = groundY
-      velY.current = 0
-      grounded.current = true
-    } else {
-      grounded.current = false
-    }
-    if (keys.has(' ') && grounded.current) { velY.current = JUMP; grounded.current = false }
 
     // Throttle store writes (~30Hz) — enough for audio + the 10Hz network broadcast.
     sinceWrite.current += dt
@@ -132,7 +159,7 @@ function Player() {
 }
 
 /** VRChat-style nameplate billboarded above a remote user: profile picture + name. */
-function Nameplate({ pubkey, y }: { pubkey: string; y: number }) {
+function Nameplate({ pubkey, y, speaking }: { pubkey: string; y: number; speaking: boolean }) {
   const { getProfile } = useProfileCache()
   const isHex = /^[0-9a-f]{64}$/i.test(pubkey)
   const profile = isHex ? getProfile(pubkey) : null
@@ -140,7 +167,12 @@ function Nameplate({ pubkey, y }: { pubkey: string; y: number }) {
   const pic = profile?.picture
   return (
     <Html position={[0, y, 0]} center distanceFactor={160}>
-      <div className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-black/75 border border-white/15 backdrop-blur-sm whitespace-nowrap select-none pointer-events-none">
+      <div className={cn(
+        'flex items-center gap-1.5 px-2 py-1 rounded-full backdrop-blur-sm whitespace-nowrap select-none pointer-events-none transition-all',
+        speaking
+          ? 'bg-emerald-600/85 border border-emerald-300/80 shadow-[0_0_12px_2px_rgba(16,185,129,0.65)]'
+          : 'bg-black/75 border border-white/15',
+      )}>
         {pic
           ? <img src={pic} alt="" className="w-5 h-5 rounded-full object-cover shrink-0" onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden' }} />
           : <div className="w-5 h-5 rounded-full bg-zinc-600 shrink-0" />}
@@ -167,7 +199,7 @@ function RemoteAvatar({ pubkey, x, z, elevation, heading, speaking }: {
           <meshStandardMaterial color={accent} />
         </mesh>
       </group>
-      <Nameplate pubkey={pubkey} y={BODY_H + HEAD + 8} />
+      <Nameplate pubkey={pubkey} y={BODY_H + HEAD + 8} speaking={speaking} />
     </group>
   )
 }
