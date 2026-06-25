@@ -21,6 +21,8 @@ export interface SpatialParticipant {
   id: string           // pubkey or participant ID
   position: { x: number; y: number }
   heading: number      // radians, 0 = up/north (visual only in 3D mode)
+  elevation?: number   // height in world units → audio Y. 0 = ground plane (2D default).
+  pitch?: number       // radians, vertical look. Listener-only for audio; 0 in 2D.
 }
 
 export interface SpatialEngineCallbacks {
@@ -43,6 +45,8 @@ interface Participant3DNodes {
 export class SpatialAudioEngine {
   private myPosition: { x: number; y: number } = { x: 0, y: 0 }
   private myHeading: number = 0  // radians, 0 = up/north (negative Y)
+  private myElevation: number = 0  // local height (world units) → audio Y. 0 in 2D.
+  private myPitch: number = 0      // local vertical look (radians); tilts the listener. 0 in 2D.
   private mySphereRadius: number = 50
   private myConePercent: number = 0  // 0 = full circle, 100 = tight cone (30°)
   private participants: Map<string, SpatialParticipant> = new Map()
@@ -103,6 +107,18 @@ export class SpatialAudioEngine {
     this.updateListener()
   }
 
+  /** Local height (world units). Panner Y is relative to this, so all positions recompute. */
+  updateMyElevation(elevation: number): void {
+    this.myElevation = elevation
+    this.updateAllPannerPositions()
+  }
+
+  /** Local vertical look (radians, 0 = level, >0 = up). Tilts the listener's forward vector. */
+  updateMyPitch(pitch: number): void {
+    this.myPitch = pitch
+    this.updateListener()
+  }
+
   updateMySphereRadius(radius: number): void {
     this.mySphereRadius = radius
     // Update maxDistance on all existing PannerNodes
@@ -139,7 +155,7 @@ export class SpatialAudioEngine {
     if (this.is3D) {
       const nodes = this.participantNodes.get(participant.id)
       if (nodes) {
-        this.setPannerPosition(nodes.panner, participant.position)
+        this.setPannerPosition(nodes.panner, participant.position, participant.elevation ?? 0)
       }
     }
   }
@@ -216,7 +232,7 @@ export class SpatialAudioEngine {
       panner.connect(this.ctx.destination)
 
       // Set initial position from participant data
-      this.setPannerPosition(panner, participant.position)
+      this.setPannerPosition(panner, participant.position, participant.elevation ?? 0)
 
       this.participantNodes.set(participantId, { source, gain, panner, element: el })
 
@@ -381,19 +397,22 @@ export class SpatialAudioEngine {
       (listener as any).setPosition(0, 0, 0)
     }
 
-    // Forward direction from heading (0 = up = negative Z in audio)
-    const fwdX = Math.sin(this.myHeading)
-    const fwdZ = -Math.cos(this.myHeading)
+    // Forward direction from heading (yaw) + pitch.
+    // heading 0 = up = -Z; pitch 0 = level, pitch > 0 = look up (+Y).
+    const cosP = Math.cos(this.myPitch)
+    const fwdX = Math.sin(this.myHeading) * cosP
+    const fwdY = Math.sin(this.myPitch)
+    const fwdZ = -Math.cos(this.myHeading) * cosP
 
     if (listener.forwardX !== undefined) {
       listener.forwardX.value = fwdX
-      listener.forwardY.value = 0
+      listener.forwardY.value = fwdY
       listener.forwardZ.value = fwdZ
       listener.upX.value = 0
       listener.upY.value = 1
       listener.upZ.value = 0
     } else {
-      (listener as any).setOrientation(fwdX, 0, fwdZ, 0, 1, 0)
+      (listener as any).setOrientation(fwdX, fwdY, fwdZ, 0, 1, 0)
     }
   }
 
@@ -402,15 +421,16 @@ export class SpatialAudioEngine {
    * Computes (remote - myPos) so listener stays at origin.
    * X → audio X (left/right), world Y → audio Z (front/back), audio Y = 0.
    */
-  private setPannerPosition(panner: PannerNode, pos: { x: number; y: number }): void {
+  private setPannerPosition(panner: PannerNode, pos: { x: number; y: number }, elevation = 0): void {
     const relX = pos.x - this.myPosition.x
     const relZ = pos.y - this.myPosition.y
+    const relY = elevation - this.myElevation   // world height → audio Y (0 in 2D)
     if (panner.positionX !== undefined) {
       panner.positionX.value = relX
-      panner.positionY.value = 0
+      panner.positionY.value = relY
       panner.positionZ.value = relZ
     } else {
-      (panner as any).setPosition(relX, 0, relZ)
+      (panner as any).setPosition(relX, relY, relZ)
     }
   }
 
@@ -422,7 +442,7 @@ export class SpatialAudioEngine {
     for (const [id, nodes] of this.participantNodes) {
       const participant = this.participants.get(id)
       if (participant) {
-        this.setPannerPosition(nodes.panner, participant.position)
+        this.setPannerPosition(nodes.panner, participant.position, participant.elevation ?? 0)
       }
     }
   }

@@ -52,6 +52,8 @@ export interface VoicePresence {
   sessionId: string
   position: { x: number; y: number }
   heading: number                      // radians, 0 = up/north
+  elevation?: number                   // height (world units) → audio Y. 0 = ground (2D).
+  pitch?: number                       // radians, vertical look (3D mode; visual). 0 in 2D.
   sphereRadius: number
   cone: number                         // hearing cone percent (0=full circle, 100=tight cone)
   tracks: string[]                     // track names published (e.g. ['pubkey:audio'])
@@ -326,6 +328,8 @@ export interface DCStateMessage {
   type: 'state'
   pos: { x: number; y: number }
   heading: number               // radians, 0 = up/north
+  elevation?: number            // height (world units) → audio Y. 0 = ground (2D).
+  pitch?: number                // radians, vertical look (3D mode; visual). 0 in 2D.
   sphere: number
   tracks: string[]  // e.g. ['audio', 'video', 'screenshare']
   muted?: boolean

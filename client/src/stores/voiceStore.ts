@@ -80,6 +80,8 @@ interface VoiceStoreState {
   spatialPanelOpen: boolean
   myPosition: { x: number; y: number }
   myHeading: number  // radians, 0 = up/north
+  myElevation: number  // height (world units) → audio Y. 0 in 2D mode.
+  myPitch: number      // radians, vertical look. 0 in 2D mode.
   mySphereRadius: number
   myConePercent: number  // 0 = full circle, 100 = tight cone
   _spatialEngine: SpatialAudioEngine | null
@@ -177,6 +179,10 @@ interface VoiceStoreState {
 
   /** Update heading (radians, 0 = up/north) */
   updateHeading: (heading: number) => void
+  /** Update local height (3D mode); feeds the spatial engine's Y axis */
+  updateElevation: (elevation: number) => void
+  /** Update local vertical look (3D mode); tilts the spatial listener */
+  updatePitch: (pitch: number) => void
 
   /** Toggle 3D spatial audio (HRTF) vs scalar fallback */
   toggle3DAudio: () => void
@@ -322,6 +328,8 @@ function parseVoicePresence(event: Event): VoicePresence | null {
     if (!dTag || !channelId) return null
 
     const headingTag = event.tags.find((t) => t[0] === 'heading')
+    const elevationTag = event.tags.find((t) => t[0] === 'elevation')
+    const pitchTag = event.tags.find((t) => t[0] === 'pitch')
 
     return {
       pubkey: event.pubkey,
@@ -335,6 +343,8 @@ function parseVoicePresence(event: Event): VoicePresence | null {
         y: posTag ? parseFloat(posTag[2]) || 0 : 0,
       },
       heading: headingTag ? parseFloat(headingTag[1]) || 0 : 0,
+      elevation: elevationTag ? parseFloat(elevationTag[1]) || 0 : 0,
+      pitch: pitchTag ? parseFloat(pitchTag[1]) || 0 : 0,
       sphereRadius: sphereTag ? parseFloat(sphereTag[1]) || SPATIAL_DEFAULTS.DEFAULT_SPHERE_RADIUS : SPATIAL_DEFAULTS.DEFAULT_SPHERE_RADIUS,
       cone: 0,  // Nostr presence doesn't broadcast cone — defaults to full circle
       tracks,
@@ -378,6 +388,8 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
   spatialPanelOpen: false,
   myPosition: { ...SPATIAL_DEFAULTS.SPAWN_POSITION },
   myHeading: 0,
+  myElevation: 0,
+  myPitch: 0,
   mySphereRadius: SPATIAL_DEFAULTS.DEFAULT_SPHERE_RADIUS,
   myConePercent: 0,
   _spatialEngine: null,
@@ -677,6 +689,8 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
               id: senderPubkey,
               position: data.pos,
               heading: data.heading ?? 0,
+              elevation: data.elevation ?? 0,
+              pitch: data.pitch ?? 0,
             })
           }
 
@@ -693,6 +707,8 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
               sessionId: senderIdentity,
               position: data.pos,
               heading: data.heading ?? 0,
+              elevation: data.elevation ?? 0,
+              pitch: data.pitch ?? 0,
               sphereRadius: data.sphere,
               tracks: data.tracks,
               createdAt: Math.floor(Date.now() / 1000),  // always fresh
@@ -1579,7 +1595,7 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
       set({ spatialEnabled: false, spatialPanelOpen: false, _spatialEngine: null })
     } else {
       // Enable spatial — create engine & start
-      const { spatial3DEnabled, myPosition, myHeading, mySphereRadius } = get()
+      const { spatial3DEnabled, myPosition, myHeading, myElevation, myPitch, mySphereRadius } = get()
       const engine = new SpatialAudioEngine()
       engine.setCallbacks({
         onVolumeUpdate: (participantId, volume) => {
@@ -1591,6 +1607,8 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
       if (provider) engine.setProvider(provider)
       engine.updateMyPosition(myPosition.x, myPosition.y)
       engine.updateMyHeading(myHeading)
+      engine.updateMyElevation(myElevation)
+      engine.updateMyPitch(myPitch)
       engine.updateMySphereRadius(mySphereRadius)
 
       // Seed with current participant positions from presence
@@ -1603,6 +1621,8 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
               id: p.pubkey,
               position: p.position,
               heading: p.heading ?? 0,
+              elevation: p.elevation ?? 0,
+              pitch: p.pitch ?? 0,
             })
           }
         }
@@ -1710,6 +1730,18 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
     set({ myHeading: heading })
     const engine = get()._spatialEngine
     if (engine) engine.updateMyHeading(heading)
+  },
+
+  updateElevation: (elevation) => {
+    set({ myElevation: elevation })
+    const engine = get()._spatialEngine
+    if (engine) engine.updateMyElevation(elevation)
+  },
+
+  updatePitch: (pitch) => {
+    set({ myPitch: pitch })
+    const engine = get()._spatialEngine
+    if (engine) engine.updateMyPitch(pitch)
   },
 
   toggle3DAudio: () => {
@@ -1978,6 +2010,8 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
             id: presence.pubkey,
             position: presence.position,
             heading: presence.heading ?? 0,
+            elevation: presence.elevation ?? 0,
+            pitch: presence.pitch ?? 0,
           })
         }
       }
@@ -2094,13 +2128,15 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
     if (existing) clearInterval(existing)
 
     const broadcastState = () => {
-      const { provider, connectionState, myPosition, myHeading, mySphereRadius, myConePercent, isMuted, isDeafened, spatialEnabled, _isSpeaking, isE2EE } = get()
+      const { provider, connectionState, myPosition, myHeading, myElevation, myPitch, mySphereRadius, myConePercent, isMuted, isDeafened, spatialEnabled, _isSpeaking, isE2EE } = get()
       if (!provider || connectionState !== 'connected') return
 
       provider.sendData({
         type: 'state',
         pos: myPosition,
         heading: myHeading,
+        elevation: myElevation,
+        pitch: myPitch,
         sphere: mySphereRadius,
         cone: myConePercent,
         tracks: provider.getPublishedTrackKinds(),
@@ -2188,7 +2224,7 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
           }
         }
 
-        const { myPosition, mySphereRadius } = get()
+        const { myPosition, myElevation, myPitch, mySphereRadius } = get()
         const tags: [string, ...string[]][] = [
           ['d', hubDTag],
           ['c', channelId],
@@ -2197,6 +2233,8 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
           ['session', sessionId],
           ['tracks', ...publishedTracks],
           ['pos', myPosition.x.toString(), myPosition.y.toString()],
+          ['elevation', myElevation.toString()],
+          ['pitch', myPitch.toString()],
           ['sphere', mySphereRadius.toString()],
         ]
         const unsigned = createUnsignedEvent(KINDS.VOICE_PRESENCE, '', tags)
