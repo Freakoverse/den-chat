@@ -44,6 +44,16 @@ export class LiveKitProvider implements VoiceProvider {
   // audio flows through its PannerNode graph). Mirrors the Cloudflare provider so
   // volume/deafen don't fight the engine during spatial 3D.
   private spatialSources = new Set<string>()
+  // Per-participant Web-Audio playback. Element playback of a WebRTC stream is
+  // quieter/duller than the direct Web-Audio path, so we route playback through a
+  // GainNode (matches the spatial path + other SFU clients) for loudness/clarity.
+  private gainNodes = new Map<string, { ctx: AudioContext; gain: GainNode; source: MediaStreamAudioSourceNode }>()
+  private userVolumes = new Map<string, number>()
+  private outputDeafened = false
+  private readonly REMOTE_PLAYBACK_GAIN = 1.0
+  // Single shared output AudioContext for ALL remote playback — Chrome caps the
+  // number of concurrent AudioContexts (~6), so never create one per participant.
+  private outputCtx: AudioContext | null = null
   private outputDeviceId: string = ''  // saved output device for new audio elements
   private lk: any = null
   private _connectedAt: number = 0   // timestamp when 'connected' was first reported
@@ -102,6 +112,18 @@ export class LiveKitProvider implements VoiceProvider {
       el.srcObject = null
     }
     this.audioElements.clear()
+
+    // Clean up playback GainNodes, then close the single shared output context
+    for (const [, entry] of this.gainNodes) {
+      try { entry.source.disconnect(); entry.gain.disconnect() } catch { /* ignore */ }
+    }
+    this.gainNodes.clear()
+    this.userVolumes.clear()
+    this.spatialSources.clear()
+    if (this.outputCtx && this.outputCtx.state !== 'closed') {
+      this.outputCtx.close().catch(() => {})
+    }
+    this.outputCtx = null
 
     // Disconnect room
     if (this.room) {
@@ -217,27 +239,50 @@ export class LiveKitProvider implements VoiceProvider {
 
   // ── Spatial Volume ────────────────────────────────────────
 
+  // Lazily create + resume the single shared output context.
+  private getOutputCtx(): AudioContext {
+    if (!this.outputCtx || this.outputCtx.state === 'closed') {
+      this.outputCtx = new AudioContext()
+    }
+    if (this.outputCtx.state === 'suspended') this.outputCtx.resume().catch(() => {})
+    return this.outputCtx
+  }
+
   setParticipantVolume(participantId: string, volume: number): void {
     // When spatially connected, the spatial engine's GainNode handles volume — skip.
     if (this.spatialSources.has(participantId)) return
 
     const el = this.audioElements.get(participantId)
-    if (el) {
-      el.volume = Math.max(0, Math.min(1, volume))
-    }
+    if (!el) return
 
-    // Also try via LiveKit API
-    if (this.room) {
-      const participants = Array.from(
-        this.room.remoteParticipants?.values() || [],
-      )
-      for (const p of participants) {
-        if ((p as any).identity === participantId || (p as any).sid === participantId) {
-          (p as any).setVolume?.(volume)
-          break
-        }
+    const clampedVolume = Math.max(0, Math.min(5, volume))
+    this.userVolumes.set(participantId, clampedVolume)
+
+    // Route playback through a Web Audio GainNode (never the bare element) for full
+    // loudness/clarity + clean deafen gating — see the field comment.
+    let entry = this.gainNodes.get(participantId)
+    if (!entry) {
+      const stream = el.srcObject as MediaStream
+      if (!stream) return
+      try {
+        const ctx = this.getOutputCtx()
+        const source = ctx.createMediaStreamSource(stream)
+        const gain = ctx.createGain()
+        source.connect(gain)
+        gain.connect(ctx.destination)
+        entry = { ctx, gain, source }
+        this.gainNodes.set(participantId, entry)
+        el.muted = true  // GainNode now handles output
+      } catch (err) {
+        console.warn('[LK Provider] Failed to create playback GainNode, falling back to element:', err)
+        el.muted = false
+        el.volume = Math.min(1, clampedVolume)
+        return
       }
+    } else if (this.outputCtx?.state === 'suspended') {
+      this.outputCtx.resume().catch(() => {})
     }
+    entry.gain.gain.value = this.outputDeafened ? 0 : clampedVolume * this.REMOTE_PLAYBACK_GAIN
   }
 
   getAudioElement(participantId: string): HTMLAudioElement | null {
@@ -250,13 +295,22 @@ export class LiveKitProvider implements VoiceProvider {
     // mark the participant as spatially managed so setParticipantVolume() skips it
     // and setDeafened() leaves the element muted (audio flows through the panner).
     if (!this.audioElements.get(participantId)) return
+    // Tear down our base playback GainNode (shared ctx stays open) — the spatial
+    // engine takes over routing.
+    const existing = this.gainNodes.get(participantId)
+    if (existing) {
+      try { existing.source.disconnect(); existing.gain.disconnect() } catch { /* ignore */ }
+      this.gainNodes.delete(participantId)
+    }
     this.spatialSources.add(participantId)
   }
 
   disconnectFromSpatialNode(participantId: string): void {
-    // The spatial engine unmutes the element directly on teardown; createMediaStreamSource
-    // (not createMediaElementSource) doesn't permanently capture it, so nothing else to do.
+    if (!this.spatialSources.has(participantId)) return
     this.spatialSources.delete(participantId)
+    // The spatial engine just unmuted the element; re-route playback through our
+    // GainNode so non-spatial playback keeps the same loudness/clarity as spatial.
+    this.setParticipantVolume(participantId, this.userVolumes.get(participantId) ?? 1)
   }
 
   // ── Media State ─────────────────────────────────────────────
@@ -275,9 +329,14 @@ export class LiveKitProvider implements VoiceProvider {
   }
 
   setDeafened(deafened: boolean): void {
-    // Mute all HTML audio playback elements
+    this.outputDeafened = deafened
     for (const [id, el] of this.audioElements) {
-      if (deafened) {
+      const entry = this.gainNodes.get(id)
+      if (entry) {
+        // Web-Audio playback path — gate through the GainNode (element stays muted).
+        const vol = this.userVolumes.get(id) ?? 1
+        entry.gain.gain.value = deafened ? 0 : vol * this.REMOTE_PLAYBACK_GAIN
+      } else if (deafened) {
         el.muted = true
       } else if (!this.spatialSources.has(id)) {
         // Don't unmute spatially-managed participants — their audio flows through
@@ -390,6 +449,9 @@ export class LiveKitProvider implements VoiceProvider {
           (audio as any).setSinkId(this.outputDeviceId).catch(() => {})
         }
         this.audioElements.set(participantId, audio)
+        // Route playback through Web Audio (mutes the element) for full loudness/clarity
+        // and clean deafen gating — see setParticipantVolume.
+        this.setParticipantVolume(participantId, this.userVolumes.get(participantId) ?? 1)
       }
 
       this.callbacks.onTrackSubscribed?.(remoteTrack)
@@ -406,6 +468,14 @@ export class LiveKitProvider implements VoiceProvider {
         el.pause()
         el.srcObject = null
         this.audioElements.delete(participantId)
+        // Tear down the Web-Audio playback graph for this participant (shared ctx stays open)
+        const entry = this.gainNodes.get(participantId)
+        if (entry) {
+          try { entry.source.disconnect(); entry.gain.disconnect() } catch { /* ignore */ }
+          this.gainNodes.delete(participantId)
+        }
+        this.userVolumes.delete(participantId)
+        this.spatialSources.delete(participantId)
       }
     })
 

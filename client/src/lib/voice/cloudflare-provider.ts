@@ -256,15 +256,18 @@ export class CloudflareProvider implements VoiceProvider {
     // Clean up spatial sources (if spatial engine didn't clean up first)
     this.spatialSources.clear()
 
-    // Clean up volume boost GainNodes
+    // Clean up playback GainNodes, then close the single shared output context
     for (const [, entry] of this.gainNodes) {
       try {
         entry.source.disconnect()
         entry.gain.disconnect()
-        entry.ctx.close()
       } catch { /* ignore */ }
     }
     this.gainNodes.clear()
+    if (this.outputCtx && this.outputCtx.state !== 'closed') {
+      this.outputCtx.close().catch(() => {})
+    }
+    this.outputCtx = null
 
     // Close peer connection
     if (this.pc) {
@@ -512,6 +515,27 @@ export class CloudflareProvider implements VoiceProvider {
   // Spatial 3D routing — tracks which audio elements are managed by the spatial engine.
   // When a participant is in this set, setParticipantVolume() skips (engine handles volume).
   private spatialSources = new Set<string>()
+  // Per-participant desired volume (0..5) so deafen can restore the right level.
+  private userVolumes = new Map<string, number>()
+  private outputDeafened = false
+  // Makeup gain for Web-Audio playback. <audio>-element playback of a WebRTC stream
+  // is quieter/duller than the direct Web-Audio path; we route playback through a
+  // GainNode (like the spatial path and other SFU clients) for full loudness/clarity.
+  // Unity matches the spatial path; bump slightly if you want it hotter.
+  private readonly REMOTE_PLAYBACK_GAIN = 1.0
+  // Single shared output AudioContext for ALL remote playback. Chrome caps the
+  // number of concurrent AudioContexts (~6), so we must never create one per
+  // participant — that would break multi-party calls.
+  private outputCtx: AudioContext | null = null
+
+  // Lazily create + resume the single shared output context.
+  private getOutputCtx(): AudioContext {
+    if (!this.outputCtx || this.outputCtx.state === 'closed') {
+      this.outputCtx = new AudioContext()
+    }
+    if (this.outputCtx.state === 'suspended') this.outputCtx.resume().catch(() => {})
+    return this.outputCtx
+  }
 
   setParticipantVolume(participantId: string, volume: number): void {
     // When spatially connected, the spatial engine's GainNode handles volume — skip here
@@ -521,52 +545,37 @@ export class CloudflareProvider implements VoiceProvider {
     if (!el) return
 
     const clampedVolume = Math.max(0, Math.min(5, volume))
+    this.userVolumes.set(participantId, clampedVolume)
 
-    if (clampedVolume <= 1) {
-      // Standard volume — use native HTMLAudioElement.volume
-      // Tear down GainNode if previously boosted
-      const existing = this.gainNodes.get(participantId)
-      if (existing) {
-        try {
-          existing.source.disconnect()
-          existing.gain.disconnect()
-          existing.ctx.close()
-        } catch { /* ignore */ }
-        this.gainNodes.delete(participantId)
-        // Unmute the native element — it was muted during boost
+    // Always route playback through a Web Audio GainNode (never the bare <audio>
+    // element). Element playback of a WebRTC stream is quieter/duller than the
+    // direct Web-Audio path; routing through a GainNode matches the spatial path
+    // (and other SFU clients) for loudness/clarity, gives >1 headroom, and lets
+    // deafen gate cleanly via the gain.
+    let entry = this.gainNodes.get(participantId)
+    if (!entry) {
+      const stream = el.srcObject as MediaStream
+      if (!stream) return
+      try {
+        const ctx = this.getOutputCtx()
+        const source = ctx.createMediaStreamSource(stream)
+        const gain = ctx.createGain()
+        source.connect(gain)
+        gain.connect(ctx.destination)
+        entry = { ctx, gain, source }
+        this.gainNodes.set(participantId, entry)
+        // Mute native element — GainNode now handles output (prevents double playback)
+        el.muted = true
+      } catch (err) {
+        console.warn('[CF Provider] Failed to create playback GainNode, falling back to element:', err)
         el.muted = false
+        el.volume = Math.min(1, clampedVolume)
+        return
       }
-      el.volume = clampedVolume
-    } else {
-      // Boosted volume (>100%) — route through Web Audio GainNode
-      // Mute the native element to prevent double playback;
-      // all audio flows through the GainNode → ctx.destination instead.
-      let entry = this.gainNodes.get(participantId)
-      if (!entry) {
-        const stream = el.srcObject as MediaStream
-        if (!stream) return
-        try {
-          const ctx = new AudioContext()
-          if (ctx.state === 'suspended') {
-            ctx.resume().catch(() => {})
-          }
-          const source = ctx.createMediaStreamSource(stream)
-          const gain = ctx.createGain()
-          source.connect(gain)
-          gain.connect(ctx.destination)
-          entry = { ctx, gain, source }
-          this.gainNodes.set(participantId, entry)
-          // Mute native element — GainNode now handles output
-          el.muted = true
-        } catch (err) {
-          console.warn('[CF Provider] Failed to create GainNode for volume boost:', err)
-          return
-        }
-      } else if (entry.ctx.state === 'suspended') {
-        entry.ctx.resume().catch(() => {})
-      }
-      entry.gain.gain.value = clampedVolume
+    } else if (this.outputCtx?.state === 'suspended') {
+      this.outputCtx.resume().catch(() => {})
     }
+    entry.gain.gain.value = this.outputDeafened ? 0 : clampedVolume * this.REMOTE_PLAYBACK_GAIN
   }
 
   getAudioElement(participantId: string): HTMLAudioElement | null {
@@ -587,10 +596,10 @@ export class CloudflareProvider implements VoiceProvider {
     // Disconnect any existing volume boost GainNode — spatial takes over
     const existing = this.gainNodes.get(participantId)
     if (existing) {
+      // Disconnect the nodes but DON'T close the shared output context.
       try {
         existing.source.disconnect()
         existing.gain.disconnect()
-        existing.ctx.close()
       } catch { /* ignore */ }
       this.gainNodes.delete(participantId)
     }
@@ -604,10 +613,9 @@ export class CloudflareProvider implements VoiceProvider {
   disconnectFromSpatialNode(participantId: string): void {
     if (!this.spatialSources.has(participantId)) return
     this.spatialSources.delete(participantId)
-    // The spatial engine unmutes the HTMLAudioElement directly.
-    // No need to create a new element — createMediaStreamSource (not createMediaElementSource)
-    // doesn't permanently capture the element.
-    console.log(`[CF Provider] Spatial routing cleared for ${participantId.slice(0, 8)}...`)
+    // The spatial engine just unmuted the element; re-route playback through our
+    // GainNode so non-spatial playback keeps the same loudness/clarity as spatial.
+    this.setParticipantVolume(participantId, this.userVolumes.get(participantId) ?? 1)
   }
 
   // ── Media State ───────────────────────────────────────────
@@ -617,15 +625,19 @@ export class CloudflareProvider implements VoiceProvider {
   }
 
   setDeafened(deafened: boolean): void {
+    this.outputDeafened = deafened
     for (const [id, el] of this.audioElements) {
-      if (deafened) {
+      const entry = this.gainNodes.get(id)
+      if (entry) {
+        // Web-Audio playback path — gate through the GainNode (element stays muted).
+        const vol = this.userVolumes.get(id) ?? 1
+        entry.gain.gain.value = deafened ? 0 : vol * this.REMOTE_PLAYBACK_GAIN
+      } else if (deafened) {
         el.muted = true
-      } else {
-        // Don't unmute spatially-managed participants — their audio
-        // flows through the PannerNode graph, element must stay muted
-        if (!this.spatialSources.has(id)) {
-          el.muted = false
-        }
+      } else if (!this.spatialSources.has(id)) {
+        // Don't unmute spatially-managed participants — their audio flows through
+        // the PannerNode graph, so the element must stay muted.
+        el.muted = false
       }
     }
   }
@@ -1411,6 +1423,9 @@ export class CloudflareProvider implements VoiceProvider {
         (audio as any).setSinkId(this.outputDeviceId).catch(() => {})
       }
       this.audioElements.set(participantId, audio)
+      // Route playback through Web Audio (mutes the element) for full loudness/clarity
+      // and clean deafen gating — see setParticipantVolume.
+      this.setParticipantVolume(participantId, this.userVolumes.get(participantId) ?? 1)
 
       // Set up AudioContext analyser for remote speaking detection
       try {
@@ -1463,6 +1478,14 @@ export class CloudflareProvider implements VoiceProvider {
         el.srcObject = null
         this.audioElements.delete(participantId)
       }
+      // Tear down the Web-Audio playback graph for this participant (shared ctx stays open)
+      const entry = this.gainNodes.get(participantId)
+      if (entry) {
+        try { entry.source.disconnect(); entry.gain.disconnect() } catch { /* ignore */ }
+        this.gainNodes.delete(participantId)
+      }
+      this.userVolumes.delete(participantId)
+      this.spatialSources.delete(participantId)
       // Clean up speaking detection analyser
       this.cleanupRemoteAnalyser(participantId)
     }
