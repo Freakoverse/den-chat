@@ -1281,8 +1281,16 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
       const hubStore = (await import('@/stores/hubStore')).useHubStore.getState()
       hubSecret = hubStore.hubSecrets?.[currentHubDTag]
     } catch { /* ignore */ }
-    // joinChannel disconnects the current provider before connecting to the new host.
-    await get().joinChannel(currentHubDTag, currentChannelId, host.config, hostPubkey, myPubkey, hubSecret)
+    // Surface the connecting modal immediately — joinChannel tears down the current
+    // provider before connecting to the new host, which can take a moment.
+    set({ connectionState: 'connecting' })
+    try {
+      // joinChannel disconnects the current provider before connecting to the new host.
+      await get().joinChannel(currentHubDTag, currentChannelId, host.config, hostPubkey, myPubkey, hubSecret)
+    } catch (err) {
+      console.error('[VoiceStore] switchHost failed:', err)
+      set({ connectionState: 'failed' })
+    }
   },
 
   leaveChannel: async (relays, signer, privateKey) => {
@@ -1888,6 +1896,10 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
         state.connectionState === 'connected' &&
         state.currentHubDTag === hubDTag &&
         state.currentChannelId === presence.channelId &&
+        // Only pull/add people on OUR host — a different host is a separate SFU we
+        // can't pull from. Other-host people are surfaced via the dimmed "other host"
+        // group in the UI instead (computed from presence). Empty host = treat as ours.
+        (!presence.hostPubkey || presence.hostPubkey === state.currentHostPubkey) &&
         presence.status === 'joined' &&
         presence.sessionId &&
         presence.sessionId !== state.currentSessionId &&
