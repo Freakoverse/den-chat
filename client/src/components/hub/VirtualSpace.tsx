@@ -200,29 +200,37 @@ function Nameplate({ pubkey, y, speaking }: { pubkey: string; y: number; speakin
   )
 }
 
-function RemoteAvatar({ pubkey, x, z, elevation, heading, speaking }: {
+function RemoteAvatar({ pubkey, x, z, elevation, heading, speaking, showRange, radius, conePercent }: {
   pubkey: string; x: number; z: number; elevation: number; heading: number; speaking: boolean
+  showRange: boolean; radius: number; conePercent: number
 }) {
   const accent = speaking ? '#10b981' : '#6b7280'
   return (
-    <group position={[x, elevation, z]}>
-      {/* body + head, rotated to face the user's heading */}
-      <group rotation={[0, -heading, 0]}>
-        <mesh position={[0, BODY_H / 2, 0]} castShadow>
-          <boxGeometry args={[HEAD * 0.7, BODY_H, HEAD * 0.5]} />
-          <meshStandardMaterial color="#4b5563" />
-        </mesh>
-        <mesh position={[0, BODY_H + HEAD / 2, 0]} castShadow>
-          <boxGeometry args={[HEAD, HEAD, HEAD]} />
-          <meshStandardMaterial color={accent} />
-        </mesh>
+    <>
+      <group position={[x, elevation, z]}>
+        {/* body + head, rotated to face the user's heading */}
+        <group rotation={[0, -heading, 0]}>
+          <mesh position={[0, BODY_H / 2, 0]} castShadow>
+            <boxGeometry args={[HEAD * 0.7, BODY_H, HEAD * 0.5]} />
+            <meshStandardMaterial color="#4b5563" />
+          </mesh>
+          <mesh position={[0, BODY_H + HEAD / 2, 0]} castShadow>
+            <boxGeometry args={[HEAD, HEAD, HEAD]} />
+            <meshStandardMaterial color={accent} />
+          </mesh>
+        </group>
+        <Nameplate pubkey={pubkey} y={BODY_H + HEAD + 8} speaking={speaking} />
       </group>
-      <Nameplate pubkey={pubkey} y={BODY_H + HEAD + 8} speaking={speaking} />
-    </group>
+      {showRange && (
+        <group position={[x, 0.2, z]} rotation={[0, Math.PI / 2 - heading, 0]}>
+          <ConeOverlay radius={radius} conePercent={conePercent} color="#60a5fa" fill={0.05} edge={0.22} />
+        </group>
+      )}
+    </>
   )
 }
 
-function RemoteAvatars() {
+function RemoteAvatars({ showRanges }: { showRanges: boolean }) {
   const presenceByHub = useVoiceStore((s) => s.presenceByHub)
   const participants = useVoiceStore((s) => s.participants)
   const activeSpeakers = useVoiceStore((s) => s.activeSpeakers)
@@ -252,30 +260,48 @@ function RemoteAvatars() {
           elevation={p.elevation ?? 0}
           heading={p.heading ?? 0}
           speaking={participants[p.pubkey]?.isSpeaking ?? activeSpeakers.includes(p.pubkey)}
+          showRange={showRanges}
+          radius={p.sphereRadius}
+          conePercent={p.cone ?? 0}
         />
       ))}
     </>
   )
 }
 
-/** Faint ring on the ground marking your hearing radius; follows you as you move. */
 /**
- * Faint ground overlay of what you can hear: a disc at your hearing radius that
- * narrows into a forward-facing sector as the cone increases (matching the audio
- * cone), and rotates to point where you're looking. Follows you as you move.
+ * A ground hearing overlay: a disc at the given radius that narrows into a
+ * forward-facing sector as the cone increases (matching the audio cone). The
+ * sector points along local +X — the parent group positions + orients it.
  */
+function ConeOverlay({ radius, conePercent, color, fill = 0.07, edge = 0.3 }: {
+  radius: number; conePercent: number; color: string; fill?: number; edge?: number
+}) {
+  const p = Math.max(0, Math.min(100, conePercent)) / 100
+  const halfAngle = Math.PI * (1 - p) + (Math.PI / 12) * p   // π (full circle) → π/12 (15°)
+  const start = -halfAngle
+  const length = 2 * halfAngle                                // 2π at cone 0 → full circle
+  const inner = Math.max(1, radius - 3)
+  return (
+    <>
+      <mesh rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[0, radius, 96, 1, start, length]} />
+        <meshBasicMaterial color={color} transparent opacity={fill} side={THREE.DoubleSide} depthWrite={false} />
+      </mesh>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.05, 0]}>
+        <ringGeometry args={[inner, radius, 96, 1, start, length]} />
+        <meshBasicMaterial color={color} transparent opacity={edge} side={THREE.DoubleSide} depthWrite={false} />
+      </mesh>
+    </>
+  )
+}
+
+/** My own hearing overlay — follows the camera and aims where I look. */
 function HearingRing() {
   const groupRef = useRef<THREE.Group>(null)
   const sphereRadius = useVoiceStore((s) => s.mySphereRadius)
   const conePercent = useVoiceStore((s) => s.myConePercent)
   const { camera } = useThree()
-
-  const p = Math.max(0, Math.min(100, conePercent)) / 100
-  const halfAngle = Math.PI * (1 - p) + (Math.PI / 12) * p   // π (full circle) → π/12 (15°)
-  const start = -halfAngle
-  const length = 2 * halfAngle                                // 2π at cone 0 → full circle
-  const inner = Math.max(1, sphereRadius - 3)
-
   useFrame(() => {
     const g = groupRef.current
     if (!g) return
@@ -284,24 +310,14 @@ function HearingRing() {
     const e = new THREE.Euler().setFromQuaternion(camera.quaternion, 'YXZ')
     g.rotation.y = Math.PI / 2 + e.y   // aim the sector where we're looking (heading = -e.y)
   })
-
   return (
     <group ref={groupRef} position={[CENTER, 0.3, CENTER]}>
-      {/* faint filled audible area */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]}>
-        <ringGeometry args={[0, sphereRadius, 96, 1, start, length]} />
-        <meshBasicMaterial color="#10b981" transparent opacity={0.07} side={THREE.DoubleSide} depthWrite={false} />
-      </mesh>
-      {/* brighter outer edge */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.05, 0]}>
-        <ringGeometry args={[inner, sphereRadius, 96, 1, start, length]} />
-        <meshBasicMaterial color="#10b981" transparent opacity={0.3} side={THREE.DoubleSide} depthWrite={false} />
-      </mesh>
+      <ConeOverlay radius={sphereRadius} conePercent={conePercent} color="#10b981" />
     </group>
   )
 }
 
-function Scene() {
+function Scene({ showRanges }: { showRanges: boolean }) {
   return (
     <>
       <ambientLight intensity={0.7} />
@@ -325,7 +341,7 @@ function Scene() {
 
       <HearingRing />
       <Player />
-      <RemoteAvatars />
+      <RemoteAvatars showRanges={showRanges} />
     </>
   )
 }
@@ -338,6 +354,7 @@ export default function VirtualSpace() {
   const updateConePercent = useVoiceStore((s) => s.updateConePercent)
   const controlsRef = useRef<any>(null)
   const [locked, setLocked] = useState(false)
+  const [showRanges, setShowRanges] = useState(false)
 
   return (
     <div className="w-full h-full flex flex-col gap-2">
@@ -348,7 +365,7 @@ export default function VirtualSpace() {
           gl={{ antialias: true }}
         >
           <Suspense fallback={null}>
-            <Scene />
+            <Scene showRanges={showRanges} />
             <PointerLockControls
               ref={controlsRef}
               onLock={() => setLocked(true)}
@@ -408,6 +425,18 @@ export default function VirtualSpace() {
           />
           <span className="text-[10px] font-mono text-muted-foreground/70 w-6 text-right tabular-nums">{myConePercent === 0 ? '○' : `${myConePercent}`}</span>
         </div>
+        <button
+          onClick={() => setShowRanges((v) => !v)}
+          title="Show other users' hearing ranges on the ground"
+          className={cn(
+            'text-[10px] px-2 py-1 rounded-md border transition-colors whitespace-nowrap font-medium shrink-0 cursor-pointer',
+            showRanges
+              ? 'bg-sky-500/15 border-sky-500/40 text-sky-300'
+              : 'bg-zinc-800/40 border-border/20 text-muted-foreground hover:text-foreground',
+          )}
+        >
+          Others' ranges
+        </button>
       </div>
 
       {/* Slider styling (same as the 2D spatial panel; included here since that panel
