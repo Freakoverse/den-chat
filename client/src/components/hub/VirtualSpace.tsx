@@ -84,6 +84,7 @@ function Player() {
   const updatePitch = useVoiceStore((s) => s.updatePitch)
   const velY = useRef(0)
   const grounded = useRef(true)
+  const jumpQueued = useRef(false)
   const sinceWrite = useRef(0)
 
   // Initialise camera from the current store position.
@@ -93,11 +94,23 @@ function Player() {
   }, [camera])
 
   useEffect(() => {
+    let spaceDown = false
     const down = (e: KeyboardEvent) => {
       const k = e.key.toLowerCase()
-      if (['w', 'a', 's', 'd', ' '].includes(k)) { keys.add(k); e.preventDefault() }
+      if (k === ' ') {
+        e.preventDefault()
+        // Edge-trigger: queue a jump only on a fresh press, so holding Space doesn't
+        // bunny-hop. Browser key-repeat fires keydown continuously while held.
+        if (!spaceDown) { spaceDown = true; jumpQueued.current = true }
+        return
+      }
+      if (['w', 'a', 's', 'd'].includes(k)) { keys.add(k); e.preventDefault() }
     }
-    const up = (e: KeyboardEvent) => keys.delete(e.key.toLowerCase())
+    const up = (e: KeyboardEvent) => {
+      const k = e.key.toLowerCase()
+      if (k === ' ') spaceDown = false
+      keys.delete(k)
+    }
     window.addEventListener('keydown', down)
     window.addEventListener('keyup', up)
     return () => { window.removeEventListener('keydown', down); window.removeEventListener('keyup', up); keys.clear() }
@@ -106,8 +119,7 @@ function Player() {
   useFrame((_, rawDt) => {
     const dt = Math.min(rawDt, 0.05)
 
-    // Horizontal movement along the camera's yaw plane.
-    // Vertical first: gravity + jump + land on the floor or a cube top.
+    // Vertical first: gravity + land on the floor or a cube top, then jump.
     velY.current -= GRAVITY * dt
     camera.position.y += velY.current * dt
     const groundY = EYE + groundHeightAt(camera.position.x, camera.position.z)
@@ -118,7 +130,12 @@ function Player() {
     } else {
       grounded.current = false
     }
-    if (keys.has(' ') && grounded.current) { velY.current = JUMP; grounded.current = false }
+    // One jump per press; a press just before landing still fires (small buffer).
+    if (jumpQueued.current && grounded.current) {
+      velY.current = JUMP
+      grounded.current = false
+      jumpQueued.current = false
+    }
 
     // Horizontal: move along the yaw plane, then resolve cube collisions per axis
     // (using the now-settled feet height, so landing on a cube doesn't get side-pushed).
