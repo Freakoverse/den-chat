@@ -14,20 +14,21 @@
  */
 import { useRef, useEffect, useState, Suspense } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
-import { PointerLockControls } from '@react-three/drei'
+import { PointerLockControls, Html } from '@react-three/drei'
 import * as THREE from 'three'
 import { X } from 'lucide-react'
 import { useVoiceStore } from '@/stores/voiceStore'
 import { useUserStore } from '@/stores/userStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
+import { npubShort } from '@/lib/utils'
 
 // ── Scene constants (world units match the 2D spatial world: ~2000, hearing ~200) ──
-const EYE = 20            // eye height above feet
 const BODY_H = 22
 const HEAD = 10
+const EYE = BODY_H + HEAD / 2   // camera at head/"face" height (27) → you meet others eye-to-eye
 const SPEED = 150         // units / second
 const GRAVITY = 600
-const JUMP = 180          // ~27u apex — clears the cubes
+const JUMP = 220          // ~40u apex — clears the tallest cube
 const CENTER = 1000       // world spawn center
 
 // A few cubes to jump on, near spawn. [x, z, size]
@@ -130,49 +131,43 @@ function Player() {
   return null
 }
 
-/** Load a participant's profile picture as a texture (CORS permitting); null otherwise. */
-function usePfpTexture(pubkey: string): THREE.Texture | null {
+/** VRChat-style nameplate billboarded above a remote user: profile picture + name. */
+function Nameplate({ pubkey, y }: { pubkey: string; y: number }) {
   const { getProfile } = useProfileCache()
-  const url = /^[0-9a-f]{64}$/i.test(pubkey) ? getProfile(pubkey)?.picture : undefined
-  const [tex, setTex] = useState<THREE.Texture | null>(null)
-  useEffect(() => {
-    if (!url) { setTex(null); return }
-    let cancelled = false
-    const loader = new THREE.TextureLoader()
-    loader.setCrossOrigin('anonymous')
-    loader.load(
-      url,
-      (t) => { if (!cancelled) { t.colorSpace = THREE.SRGBColorSpace; setTex(t) } },
-      undefined,
-      () => { if (!cancelled) setTex(null) },
-    )
-    return () => { cancelled = true }
-  }, [url])
-  return tex
+  const isHex = /^[0-9a-f]{64}$/i.test(pubkey)
+  const profile = isHex ? getProfile(pubkey) : null
+  const name = profile?.display_name || profile?.name || npubShort(pubkey)
+  const pic = profile?.picture
+  return (
+    <Html position={[0, y, 0]} center distanceFactor={160}>
+      <div className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-black/75 border border-white/15 backdrop-blur-sm whitespace-nowrap select-none pointer-events-none">
+        {pic
+          ? <img src={pic} alt="" className="w-5 h-5 rounded-full object-cover shrink-0" onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden' }} />
+          : <div className="w-5 h-5 rounded-full bg-zinc-600 shrink-0" />}
+        <span className="text-white text-xs font-medium max-w-[140px] truncate">{name}</span>
+      </div>
+    </Html>
+  )
 }
 
 function RemoteAvatar({ pubkey, x, z, elevation, heading, speaking }: {
   pubkey: string; x: number; z: number; elevation: number; heading: number; speaking: boolean
 }) {
-  const tex = usePfpTexture(pubkey)
   const accent = speaking ? '#10b981' : '#6b7280'
   return (
-    <group position={[x, elevation, z]} rotation={[0, -heading, 0]}>
-      {/* body */}
-      <mesh position={[0, BODY_H / 2, 0]} castShadow>
-        <boxGeometry args={[HEAD * 0.7, BODY_H, HEAD * 0.5]} />
-        <meshStandardMaterial color="#4b5563" />
-      </mesh>
-      {/* head */}
-      <mesh position={[0, BODY_H + HEAD / 2, 0]} castShadow>
-        <boxGeometry args={[HEAD, HEAD, HEAD]} />
-        <meshStandardMaterial color={accent} />
-      </mesh>
-      {/* profile picture on the front (-Z) face of the head */}
-      <mesh position={[0, BODY_H + HEAD / 2, -HEAD / 2 - 0.1]}>
-        <planeGeometry args={[HEAD * 0.9, HEAD * 0.9]} />
-        <meshBasicMaterial map={tex ?? undefined} color={tex ? '#ffffff' : '#9ca3af'} toneMapped={false} />
-      </mesh>
+    <group position={[x, elevation, z]}>
+      {/* body + head, rotated to face the user's heading */}
+      <group rotation={[0, -heading, 0]}>
+        <mesh position={[0, BODY_H / 2, 0]} castShadow>
+          <boxGeometry args={[HEAD * 0.7, BODY_H, HEAD * 0.5]} />
+          <meshStandardMaterial color="#4b5563" />
+        </mesh>
+        <mesh position={[0, BODY_H + HEAD / 2, 0]} castShadow>
+          <boxGeometry args={[HEAD, HEAD, HEAD]} />
+          <meshStandardMaterial color={accent} />
+        </mesh>
+      </group>
+      <Nameplate pubkey={pubkey} y={BODY_H + HEAD + 8} />
     </group>
   )
 }
@@ -213,6 +208,25 @@ function RemoteAvatars() {
   )
 }
 
+/** Faint ring on the ground marking your hearing radius; follows you as you move. */
+function HearingRing() {
+  const ref = useRef<THREE.Mesh>(null)
+  const sphereRadius = useVoiceStore((s) => s.mySphereRadius)
+  const { camera } = useThree()
+  useFrame(() => {
+    if (ref.current) {
+      ref.current.position.x = camera.position.x
+      ref.current.position.z = camera.position.z
+    }
+  })
+  return (
+    <mesh ref={ref} rotation={[-Math.PI / 2, 0, 0]} position={[CENTER, 0.3, CENTER]}>
+      <ringGeometry args={[Math.max(1, sphereRadius - 3), sphereRadius, 96]} />
+      <meshBasicMaterial color="#10b981" transparent opacity={0.18} side={THREE.DoubleSide} />
+    </mesh>
+  )
+}
+
 function Scene() {
   return (
     <>
@@ -235,6 +249,7 @@ function Scene() {
         </mesh>
       ))}
 
+      <HearingRing />
       <Player />
       <RemoteAvatars />
     </>
