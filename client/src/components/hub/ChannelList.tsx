@@ -4,7 +4,7 @@ import { useNotificationStore } from '@/stores/notificationStore'
 import { useNavigationStore } from '@/stores/navigationStore'
 import { getPermissionsForUser } from '@/lib/hub/permissions'
 import { Hash, Megaphone, MessagesSquare, MessageSquare, ChevronDown, ChevronRight, Settings, UserPlus, Inbox, Loader2, SlidersHorizontal, Volume2, MicOff, HeadphoneOff, Camera, ScreenShare, X, User, Radar, AlertTriangle, CalendarDays, Lock, Undo2 } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { cn, npubShort } from '@/lib/utils'
 import { BlossomImage } from '@/components/ui/BlossomImage'
 import { useState, useCallback, useEffect, useRef, useMemo, type ReactNode } from 'react'
 import { Separator } from '@/components/ui/separator'
@@ -861,7 +861,7 @@ function VoiceHostGroupHeader({
   const { getProfile } = useProfileCache()
   const isHex = /^[0-9a-f]{64}$/i.test(hostPubkey)
   const profile = isHex ? getProfile(hostPubkey) : null
-  const name = profile?.display_name || profile?.name || (isHex ? hostPubkey.slice(0, 8) + '…' : 'Unknown host')
+  const name = profile?.display_name || profile?.name || (hostPubkey ? npubShort(hostPubkey) : 'Unknown host')
   return (
     <div className="flex items-center gap-1.5 px-2 py-0.5 mt-0.5">
       <span className={cn('w-1 h-1 rounded-full shrink-0', isMine ? 'bg-emerald-400' : 'bg-muted-foreground/40')} />
@@ -928,7 +928,7 @@ function VoicePresenceUser({
   const { getProfile } = useProfileCache()
   const isHex = /^[0-9a-f]{64}$/i.test(pubkey)
   const profile = isHex ? getProfile(pubkey) : null
-  const name = profile?.display_name || profile?.name || (isHex ? pubkey.slice(0, 8) + '…' : 'Unknown')
+  const name = profile?.display_name || profile?.name || npubShort(pubkey)
   const cachedPicture = useCachedImageUrl(profile?.picture)
   const [showModal, setShowModal] = useState(false)
   const [showProfileModal, setShowProfileModal] = useState(false)

@@ -1,5 +1,6 @@
 import { type ClassValue, clsx } from 'clsx'
 import { twMerge } from 'tailwind-merge'
+import { nip19 } from 'nostr-tools'
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
@@ -22,6 +23,21 @@ export function isMobileOS(): boolean {
 export function truncateNpub(npub: string, chars = 8): string {
   if (npub.length <= chars * 2 + 3) return npub
   return `${npub.slice(0, chars)}...${npub.slice(-chars)}`
+}
+
+/**
+ * Hex pubkey → a short, display-safe npub (e.g. "npub1abc…wxyz"). Use anywhere a
+ * user identifier is shown as a fallback for a missing profile name — never show
+ * the raw hex pubkey to users. Falls back to a hex snippet only on invalid input.
+ */
+export function npubShort(pubkey: string, chars = 8): string {
+  if (!pubkey) return 'Unknown'
+  if (!/^[0-9a-f]{64}$/i.test(pubkey)) return pubkey.length > chars ? `${pubkey.slice(0, chars)}…` : pubkey
+  try {
+    return truncateNpub(nip19.npubEncode(pubkey), chars)
+  } catch {
+    return `${pubkey.slice(0, chars)}…`
+  }
 }
 
 import { getHour12 } from '@/stores/preferencesStore'

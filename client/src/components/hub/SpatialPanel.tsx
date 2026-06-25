@@ -16,7 +16,7 @@ import { useRef, useEffect, useCallback, useState } from 'react'
 import { useVoiceStore } from '@/stores/voiceStore'
 import { useUserStore } from '@/stores/userStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
-import { cn } from '@/lib/utils'
+import { cn, npubShort } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
 
 // World space
@@ -337,7 +337,7 @@ export function SpatialPanel() {
       ctx.stroke()
 
       // Name label
-      const displayName = profile?.display_name || profile?.name || dot.pubkey.slice(0, 8)
+      const displayName = profile?.display_name || profile?.name || npubShort(dot.pubkey)
       const fontSize = Math.max(9, Math.min(12, 10 * cam.zoom))
       ctx.fillStyle = 'rgba(255,255,255,0.8)'
       ctx.font = `500 ${fontSize}px Inter, sans-serif`

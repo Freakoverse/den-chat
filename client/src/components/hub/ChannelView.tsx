@@ -22,7 +22,7 @@ import { useState, useEffect, useRef, useCallback, memo, useMemo, Fragment } fro
 import { createPortal } from 'react-dom'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import { truncateNpub, formatTimestamp, cn } from '@/lib/utils'
+import { truncateNpub, formatTimestamp, cn, npubShort } from '@/lib/utils'
 import { getHour12 } from '@/stores/preferencesStore'
 import { nip19 } from 'nostr-tools'
 import EmojiPickerReact, { EmojiStyle, Theme } from 'emoji-picker-react'
@@ -5390,7 +5390,7 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
       {!threadRootRef && (
         <TypingIndicator
           convKey={hubTypingKey(hubDTag, channelId)}
-          resolveName={(pk) => { const p = getProfile(pk); return p?.display_name || p?.name || `${pk.slice(0, 8)}…` }}
+          resolveName={(pk) => { const p = getProfile(pk); return p?.display_name || p?.name || npubShort(pk) }}
           className="px-3 pb-1"
         />
       )}

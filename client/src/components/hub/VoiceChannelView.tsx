@@ -19,7 +19,7 @@ import { useProfileCache } from '@/hooks/useProfileCache'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
 import { Button } from '@/components/ui/button'
-import { truncateNpub } from '@/lib/utils'
+import { truncateNpub, npubShort } from '@/lib/utils'
 import { usePermissions } from '@/lib/hub/permissions'
 import { nip19 } from 'nostr-tools'
 import {
@@ -1178,7 +1178,7 @@ function OtherHostAvatar({ pubkey }: { pubkey: string }) {
   const { getProfile } = useProfileCache()
   const isHex = /^[0-9a-f]{64}$/i.test(pubkey)
   const profile = isHex ? getProfile(pubkey) : null
-  const name = profile?.display_name || profile?.name || (isHex ? pubkey.slice(0, 8) + '…' : '?')
+  const name = profile?.display_name || profile?.name || npubShort(pubkey)
   return (
     <Avatar className="w-6 h-6 border border-border/40">
       <AvatarImage src={profile?.picture} alt={name} />
@@ -1191,7 +1191,7 @@ function OtherHostGroup({ hostPubkey, members, onJoin }: { hostPubkey: string; m
   const { getProfile } = useProfileCache()
   const isHex = /^[0-9a-f]{64}$/i.test(hostPubkey)
   const hostProfile = isHex ? getProfile(hostPubkey) : null
-  const hostName = hostProfile?.display_name || hostProfile?.name || (isHex ? hostPubkey.slice(0, 8) + '…' : 'another host')
+  const hostName = hostProfile?.display_name || hostProfile?.name || (hostPubkey ? npubShort(hostPubkey) : 'another host')
   return (
     <div className="flex items-center gap-3 rounded-xl border border-border/40 bg-secondary/20 px-3 py-2 opacity-75">
       <Globe size={14} className="text-muted-foreground shrink-0" />
