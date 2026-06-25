@@ -40,6 +40,10 @@ export class LiveKitProvider implements VoiceProvider {
   private callbacks: Partial<VoiceProviderCallbacks> = {}
   private participants = new Map<string, VoiceParticipant>()
   private audioElements = new Map<string, HTMLAudioElement>()
+  // Participants whose audio the spatial engine has taken over (element muted,
+  // audio flows through its PannerNode graph). Mirrors the Cloudflare provider so
+  // volume/deafen don't fight the engine during spatial 3D.
+  private spatialSources = new Set<string>()
   private outputDeviceId: string = ''  // saved output device for new audio elements
   private lk: any = null
   private _connectedAt: number = 0   // timestamp when 'connected' was first reported
@@ -214,6 +218,9 @@ export class LiveKitProvider implements VoiceProvider {
   // ── Spatial Volume ────────────────────────────────────────
 
   setParticipantVolume(participantId: string, volume: number): void {
+    // When spatially connected, the spatial engine's GainNode handles volume — skip.
+    if (this.spatialSources.has(participantId)) return
+
     const el = this.audioElements.get(participantId)
     if (el) {
       el.volume = Math.max(0, Math.min(1, volume))
@@ -237,14 +244,19 @@ export class LiveKitProvider implements VoiceProvider {
     return this.audioElements.get(participantId) || null
   }
 
-  connectToSpatialNode(_participantId: string, _destination: AudioNode, _ctx: AudioContext): void {
-    // TODO: implement for LiveKit when spatial 3D is needed
-    console.warn('[LK Provider] connectToSpatialNode not yet implemented')
+  connectToSpatialNode(participantId: string, _destination: AudioNode, _ctx: AudioContext): void {
+    // The spatial engine builds the full graph (MediaStreamSource → GainNode →
+    // PannerNode) from the element's stream and mutes the element itself. We just
+    // mark the participant as spatially managed so setParticipantVolume() skips it
+    // and setDeafened() leaves the element muted (audio flows through the panner).
+    if (!this.audioElements.get(participantId)) return
+    this.spatialSources.add(participantId)
   }
 
-  disconnectFromSpatialNode(_participantId: string): void {
-    // TODO: implement for LiveKit when spatial 3D is needed
-    console.warn('[LK Provider] disconnectFromSpatialNode not yet implemented')
+  disconnectFromSpatialNode(participantId: string): void {
+    // The spatial engine unmutes the element directly on teardown; createMediaStreamSource
+    // (not createMediaElementSource) doesn't permanently capture it, so nothing else to do.
+    this.spatialSources.delete(participantId)
   }
 
   // ── Media State ─────────────────────────────────────────────
@@ -264,8 +276,14 @@ export class LiveKitProvider implements VoiceProvider {
 
   setDeafened(deafened: boolean): void {
     // Mute all HTML audio playback elements
-    for (const [, el] of this.audioElements) {
-      el.muted = deafened
+    for (const [id, el] of this.audioElements) {
+      if (deafened) {
+        el.muted = true
+      } else if (!this.spatialSources.has(id)) {
+        // Don't unmute spatially-managed participants — their audio flows through
+        // the PannerNode graph, so the element must stay muted.
+        el.muted = false
+      }
     }
     // Also set volume via LiveKit API for tracks not using audio elements
     if (this.room) {

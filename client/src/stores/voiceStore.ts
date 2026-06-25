@@ -972,6 +972,15 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
 
       // Create a new processed track from the gated output
       const destination = vadCtx.createMediaStreamDestination()
+      // Force a MONO capture track. The pipeline upstream is mono (RNNoise is
+      // maxChannels:1), and a mono signal into the default *stereo* destination
+      // yields a stereo track with a silent right channel on Chromium — which
+      // LiveKit's SFU preserves, so receivers hear left-ear-only (Cloudflare
+      // down-mixes it so it was masked there). Mono is the correct layout for
+      // voice, plays on both speakers everywhere, and is exactly what the spatial
+      // PannerNode wants (a mono point source).
+      destination.channelCount = 1
+      destination.channelCountMode = 'explicit'
       gateNode.connect(destination)
       const processedTrack = destination.stream.getAudioTracks()[0]
 
