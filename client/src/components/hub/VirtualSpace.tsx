@@ -96,6 +96,7 @@ function Player() {
   useEffect(() => {
     let spaceDown = false
     const down = (e: KeyboardEvent) => {
+      if (!document.pointerLockElement) return  // only drive movement while controlling
       const k = e.key.toLowerCase()
       if (k === ' ') {
         e.preventDefault()
@@ -307,55 +308,110 @@ function Scene() {
 
 export default function VirtualSpace() {
   const toggleVirtualSpace = useVoiceStore((s) => s.toggleVirtualSpace)
+  const mySphereRadius = useVoiceStore((s) => s.mySphereRadius)
+  const myConePercent = useVoiceStore((s) => s.myConePercent)
+  const updateSphereRadius = useVoiceStore((s) => s.updateSphereRadius)
+  const updateConePercent = useVoiceStore((s) => s.updateConePercent)
   const controlsRef = useRef<any>(null)
   const [locked, setLocked] = useState(false)
 
   return (
-    <div className="relative w-full h-full rounded-xl overflow-hidden border border-indigo-500/40 bg-black">
-      <Canvas
-        shadows
-        camera={{ fov: 75, near: 0.1, far: 6000, position: [CENTER, EYE, CENTER] }}
-        gl={{ antialias: true }}
-      >
-        <Suspense fallback={null}>
-          <Scene />
-          <PointerLockControls
-            ref={controlsRef}
-            onLock={() => setLocked(true)}
-            onUnlock={() => setLocked(false)}
-          />
-        </Suspense>
-      </Canvas>
-
-      {/* Crosshair while controlling */}
-      {locked && (
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-          <div className="w-1.5 h-1.5 rounded-full bg-white/70" />
-        </div>
-      )}
-
-      {/* Enter prompt (shown when not pointer-locked) */}
-      {!locked && (
-        <div
-          className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/40 backdrop-blur-[1px] cursor-pointer"
-          onClick={() => controlsRef.current?.lock?.()}
+    <div className="w-full h-full flex flex-col gap-2">
+      <div className="relative flex-1 min-h-0 rounded-xl overflow-hidden border border-indigo-500/40 bg-black">
+        <Canvas
+          shadows
+          camera={{ fov: 75, near: 0.1, far: 6000, position: [CENTER, EYE, CENTER] }}
+          gl={{ antialias: true }}
         >
-          <div className="px-4 py-3 rounded-xl bg-popover/90 border border-border text-center">
-            <p className="text-sm font-semibold text-foreground">Click to enter</p>
-            <p className="text-xs text-muted-foreground mt-1">WASD move · Space jump · Mouse look · Esc to release</p>
+          <Suspense fallback={null}>
+            <Scene />
+            <PointerLockControls
+              ref={controlsRef}
+              onLock={() => setLocked(true)}
+              onUnlock={() => { setLocked(false); keys.clear() }}
+            />
+          </Suspense>
+        </Canvas>
+
+        {/* Crosshair while controlling */}
+        {locked && (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+            <div className="w-1.5 h-1.5 rounded-full bg-white/70" />
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Exit the virtual space entirely (available when not locked) */}
-      {!locked && (
-        <button
-          onClick={() => toggleVirtualSpace()}
-          className="absolute top-3 right-3 z-10 flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-black/70 backdrop-blur-sm border border-border/50 text-foreground/80 hover:text-foreground text-xs font-medium transition-colors cursor-pointer"
-        >
-          Exit <X size={14} />
-        </button>
-      )}
+        {/* Enter prompt (shown when not pointer-locked) */}
+        {!locked && (
+          <div
+            className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/40 backdrop-blur-[1px] cursor-pointer"
+            onClick={() => controlsRef.current?.lock?.()}
+          >
+            <div className="px-4 py-3 rounded-xl bg-popover/90 border border-border text-center">
+              <p className="text-sm font-semibold text-foreground">Click to enter</p>
+              <p className="text-xs text-muted-foreground mt-1">WASD move · Space jump · Mouse look · Esc to release</p>
+            </div>
+          </div>
+        )}
+
+        {/* Exit the virtual space entirely (available when not locked) */}
+        {!locked && (
+          <button
+            onClick={() => toggleVirtualSpace()}
+            className="absolute top-3 right-3 z-10 flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-black/70 backdrop-blur-sm border border-border/50 text-foreground/80 hover:text-foreground text-xs font-medium transition-colors cursor-pointer"
+          >
+            Exit <X size={14} />
+          </button>
+        )}
+      </div>
+
+      {/* Hearing range + cone — same controls as the 2D spatial panel (adjust when released) */}
+      <div className="flex flex-col min-[1081px]:flex-row min-[1081px]:items-center gap-2 px-1 shrink-0">
+        <div className="flex items-center gap-1.5 flex-1 bg-zinc-800/40 rounded-md px-2 py-1 border border-border/10">
+          <span title="Hearing range radius" className="text-[10px] text-emerald-400/80 font-medium whitespace-nowrap cursor-default">⊕</span>
+          <input
+            type="range" min={10} max={500} step={10} value={mySphereRadius}
+            onChange={(e) => updateSphereRadius(Number(e.target.value))}
+            className="spatial-slider spatial-slider--emerald flex-1"
+          />
+          <span className="text-[10px] font-mono text-muted-foreground/70 w-6 text-right tabular-nums">{mySphereRadius}</span>
+        </div>
+        <div className="flex items-center gap-1.5 flex-1 bg-zinc-800/40 rounded-md px-2 py-1 border border-border/10">
+          <span title="Hearing cone directivity" className="text-[10px] text-amber-400/80 font-medium whitespace-nowrap cursor-default">◗</span>
+          <input
+            type="range" min={0} max={100} step={5} value={myConePercent}
+            onChange={(e) => updateConePercent(Number(e.target.value))}
+            className="spatial-slider spatial-slider--amber flex-1"
+          />
+          <span className="text-[10px] font-mono text-muted-foreground/70 w-6 text-right tabular-nums">{myConePercent === 0 ? '○' : `${myConePercent}`}</span>
+        </div>
+      </div>
+
+      {/* Slider styling (same as the 2D spatial panel; included here since that panel
+          isn't mounted while the virtual space is open). */}
+      <style>{`
+        .spatial-slider {
+          -webkit-appearance: none; appearance: none;
+          height: 4px; border-radius: 2px; outline: none; cursor: pointer;
+          background: rgba(255,255,255,0.06);
+        }
+        .spatial-slider::-webkit-slider-thumb {
+          -webkit-appearance: none; appearance: none;
+          width: 12px; height: 12px; border-radius: 50%; border: 2px solid; cursor: pointer;
+          transition: box-shadow 0.15s ease, transform 0.1s ease;
+        }
+        .spatial-slider::-moz-range-thumb {
+          width: 12px; height: 12px; border-radius: 50%; border: 2px solid; cursor: pointer;
+          transition: box-shadow 0.15s ease, transform 0.1s ease;
+        }
+        .spatial-slider::-webkit-slider-thumb:hover { transform: scale(1.2); }
+        .spatial-slider::-moz-range-thumb:hover { transform: scale(1.2); }
+        .spatial-slider--emerald::-webkit-slider-thumb { background: #10b981; border-color: #34d399; box-shadow: 0 0 6px rgba(16,185,129,0.4); }
+        .spatial-slider--emerald::-moz-range-thumb { background: #10b981; border-color: #34d399; box-shadow: 0 0 6px rgba(16,185,129,0.4); }
+        .spatial-slider--emerald::-webkit-slider-thumb:hover { box-shadow: 0 0 10px rgba(16,185,129,0.6); }
+        .spatial-slider--amber::-webkit-slider-thumb { background: #f59e0b; border-color: #fbbf24; box-shadow: 0 0 6px rgba(245,158,11,0.4); }
+        .spatial-slider--amber::-moz-range-thumb { background: #f59e0b; border-color: #fbbf24; box-shadow: 0 0 6px rgba(245,158,11,0.4); }
+        .spatial-slider--amber::-webkit-slider-thumb:hover { box-shadow: 0 0 10px rgba(245,158,11,0.6); }
+      `}</style>
     </div>
   )
 }
