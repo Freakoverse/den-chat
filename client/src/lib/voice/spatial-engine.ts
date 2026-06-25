@@ -161,8 +161,16 @@ export class SpatialAudioEngine {
     const el = this.provider.getAudioElement(participantId)
     if (!el) return
 
-    // Already connected?
-    if (this.participantNodes.has(participantId)) return
+    // Already connected to THIS element? If a node exists but points at a stale
+    // element/stream (the participant disconnected and rejoined with a fresh track),
+    // tear it down and rebuild below — otherwise the rejoiner plays flat (un-
+    // spatialized) until spatial is toggled off/on.
+    const existing = this.participantNodes.get(participantId)
+    if (existing) {
+      const stream0 = el.srcObject as MediaStream | null
+      if (existing.element === el && existing.source.mediaStream === stream0) return
+      this.disconnect3DParticipant(participantId)
+    }
 
     const stream = el.srcObject as MediaStream
     if (!stream) return

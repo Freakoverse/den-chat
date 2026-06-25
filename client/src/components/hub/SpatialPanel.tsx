@@ -122,7 +122,6 @@ export function SpatialPanel() {
   const updateHeading = useVoiceStore((s) => s.updateHeading)
   const updateSphereRadius = useVoiceStore((s) => s.updateSphereRadius)
   const spatial3DEnabled = useVoiceStore((s) => s.spatial3DEnabled)
-  const toggle3DAudio = useVoiceStore((s) => s.toggle3DAudio)
   const participants = useVoiceStore((s) => s.participants)
   const activeSpeakers = useVoiceStore((s) => s.activeSpeakers)
   const isSpeakingLocal = useVoiceStore((s) => s._isSpeaking)
@@ -891,23 +890,6 @@ export function SpatialPanel() {
     <TooltipProvider delayDuration={300}>
       {/* Controls bar */}
       <div className="flex flex-col max-[1080px]:gap-1.5 min-[1081px]:flex-row min-[1081px]:items-center gap-2 px-1 shrink-0">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              onClick={toggle3DAudio}
-              className={cn(
-                'text-[10px] px-2 py-1 rounded-md border transition-all whitespace-nowrap font-medium cursor-pointer w-full min-[1081px]:w-auto',
-                spatial3DEnabled
-                  ? 'bg-indigo-500/15 border-indigo-500/30 text-indigo-300 shadow-sm shadow-indigo-500/10'
-                  : 'bg-zinc-800/40 border-border/20 text-muted-foreground hover:text-foreground hover:border-border/40'
-              )}
-            >
-              {spatial3DEnabled ? '3D 🎧' : '2D'}
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="top" className="text-xs">{spatial3DEnabled ? '3D spatial audio (HRTF) active' : 'Spatial audio is distance-only'}</TooltipContent>
-        </Tooltip>
-
         {/* Range slider */}
         <div className="flex items-center gap-1.5 flex-1 bg-zinc-800/40 rounded-md px-2 py-1 border border-border/10">
           <Tooltip>
