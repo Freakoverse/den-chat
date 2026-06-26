@@ -14,7 +14,7 @@
  */
 import { useRef, useEffect, useState, useMemo, Suspense, memo } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
-import { Html } from '@react-three/drei'
+import { Html, Stars, Sparkles } from '@react-three/drei'
 import * as THREE from 'three'
 import { X } from 'lucide-react'
 import { useVoiceStore } from '@/stores/voiceStore'
@@ -36,13 +36,18 @@ const GRAVITY = 600
 const JUMP = 220          // ~40u apex — clears the tallest cube
 const CENTER = 1000       // world spawn center
 
-// A few cubes to jump on, near spawn. [x, z, size]
-const CUBES: { x: number; z: number; s: number }[] = [
-  { x: CENTER + 60, z: CENTER, s: 28 },
-  { x: CENTER - 70, z: CENTER + 40, s: 36 },
-  { x: CENTER + 20, z: CENTER - 90, s: 22 },
-  { x: CENTER - 30, z: CENTER - 50, s: 30 },
-]
+// ── Fireside layout: a campfire ringed by stump seats, a mountain behind it ──
+const FIRE = { x: CENTER, z: CENTER - 150 }    // in front of spawn (the camera looks down -Z)
+const STUMP_COUNT = 7
+const STUMP_RING_R = 62
+const STUMP_S = 16                             // seat height = collision footprint
+const MOON_OFFSET: [number, number, number] = [700, 760, -1000]  // from CENTER; also the moonlight direction
+
+// Stump seats double as the stand-on props (axis-aligned box collision, top at height s).
+const CUBES: { x: number; z: number; s: number }[] = Array.from({ length: STUMP_COUNT }, (_, i) => {
+  const a = (i / STUMP_COUNT) * Math.PI * 2 - Math.PI / 2
+  return { x: FIRE.x + Math.cos(a) * STUMP_RING_R, z: FIRE.z + Math.sin(a) * STUMP_RING_R, s: STUMP_S }
+})
 
 const UP = new THREE.Vector3(0, 1, 0)
 
@@ -517,27 +522,190 @@ function HearingRing() {
   )
 }
 
+/** Vertical night-sky gradient (zenith blue → horizon near-black), for the skydome. */
+function skyGradientTexture(): THREE.Texture {
+  const c = document.createElement('canvas')
+  c.width = 8; c.height = 256
+  const ctx = c.getContext('2d')!
+  const g = ctx.createLinearGradient(0, 0, 0, 256)
+  g.addColorStop(0, '#070a12')   // bottom of canvas → sphere bottom (horizon)
+  g.addColorStop(0.35, '#0a0f1e')
+  g.addColorStop(1, '#0c1430')   // top of canvas → zenith
+  ctx.fillStyle = g
+  ctx.fillRect(0, 0, 8, 256)
+  const t = new THREE.CanvasTexture(c)
+  t.colorSpace = THREE.SRGBColorSpace
+  return t
+}
+
+/** Soft radial glow disc (white center → transparent), for the moon halo / sparks. */
+function radialGlowTexture(core: string, edge: string): THREE.Texture {
+  const c = document.createElement('canvas')
+  c.width = 128; c.height = 128
+  const ctx = c.getContext('2d')!
+  const g = ctx.createRadialGradient(64, 64, 0, 64, 64, 64)
+  g.addColorStop(0, core)
+  g.addColorStop(0.35, core)
+  g.addColorStop(1, edge)
+  ctx.fillStyle = g
+  ctx.fillRect(0, 0, 128, 128)
+  return new THREE.CanvasTexture(c)
+}
+
+/** Star field + gradient dome + moon + cool moonlight. */
+function NightSky() {
+  const skyTex = useMemo(skyGradientTexture, [])
+  const haloTex = useMemo(() => radialGlowTexture('rgba(224,234,255,0.85)', 'rgba(224,234,255,0)'), [])
+  const moon: [number, number, number] = [CENTER + MOON_OFFSET[0], MOON_OFFSET[1], CENTER + MOON_OFFSET[2]]
+  return (
+    <group>
+      {/* gradient skydome (inside-out sphere, never fogged) */}
+      <mesh position={[CENTER, 0, CENTER]}>
+        <sphereGeometry args={[2900, 32, 16]} />
+        <meshBasicMaterial map={skyTex} side={THREE.BackSide} depthWrite={false} fog={false} />
+      </mesh>
+
+      <group position={[CENTER, 0, CENTER]}>
+        <Stars radius={1500} depth={140} count={1800} factor={5} saturation={0} fade speed={0.3} />
+      </group>
+
+      {/* moon disc + halo */}
+      <mesh position={moon}>
+        <sphereGeometry args={[68, 24, 24]} />
+        <meshBasicMaterial color="#eef3ff" fog={false} />
+      </mesh>
+      <sprite position={moon} scale={[440, 440, 1]}>
+        <spriteMaterial map={haloTex} transparent depthWrite={false} blending={THREE.AdditiveBlending} fog={false} />
+      </sprite>
+
+      {/* moonlight — direction matches the moon's offset from center */}
+      <directionalLight position={MOON_OFFSET} intensity={0.5} color="#aac4ff" />
+    </group>
+  )
+}
+
+/** Faceted low-poly mountain backdrop with a dark cave mouth facing the fire. */
+function Mountain() {
+  return (
+    <group position={[CENTER, 0, CENTER - 640]}>
+      <mesh position={[0, 175, 0]}>
+        <coneGeometry args={[310, 360, 7]} />
+        <meshStandardMaterial color="#23252e" roughness={1} flatShading />
+      </mesh>
+      <mesh position={[-165, 115, 95]}>
+        <coneGeometry args={[175, 250, 6]} />
+        <meshStandardMaterial color="#1d1f28" roughness={1} flatShading />
+      </mesh>
+      {/* cave: a dark open tube + a black backing so it reads as depth */}
+      <mesh position={[0, 24, 165]} rotation={[Math.PI / 2, 0, 0]}>
+        <cylinderGeometry args={[36, 36, 64, 18, 1, true]} />
+        <meshStandardMaterial color="#05060c" side={THREE.DoubleSide} roughness={1} />
+      </mesh>
+      <mesh position={[0, 24, 132]}>
+        <circleGeometry args={[36, 18]} />
+        <meshBasicMaterial color="#020306" />
+      </mesh>
+    </group>
+  )
+}
+
+/** The ring of stump seats (also the collision props — see CUBES). */
+function Stumps() {
+  return (
+    <>
+      {CUBES.map((c, i) => (
+        <group key={i} position={[c.x, 0, c.z]}>
+          <mesh position={[0, c.s / 2, 0]}>
+            <cylinderGeometry args={[c.s * 0.56, c.s * 0.64, c.s, 12]} />
+            <meshStandardMaterial color="#4f3d2b" roughness={1} />
+          </mesh>
+          {/* sawn top, slightly lighter */}
+          <mesh position={[0, c.s + 0.15, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+            <circleGeometry args={[c.s * 0.56, 12]} />
+            <meshStandardMaterial color="#735738" roughness={1} />
+          </mesh>
+        </group>
+      ))}
+    </>
+  )
+}
+
+/** Campfire: stone ring, crossed logs, additive flame cones, embers, flickering light. */
+function Campfire() {
+  const lightRef = useRef<THREE.PointLight>(null)
+  const flameRef = useRef<THREE.Group>(null)
+  useFrame(() => {
+    if (lightRef.current) lightRef.current.intensity = 5.2 + Math.random() * 2.2   // flicker
+    if (flameRef.current) {
+      const s = 0.9 + Math.sin(performance.now() * 0.013) * 0.1 + Math.random() * 0.08
+      flameRef.current.scale.set(1, s, 1)
+    }
+  })
+  return (
+    <group position={[FIRE.x, 0, FIRE.z]}>
+      {/* stone ring */}
+      {Array.from({ length: 9 }).map((_, i) => {
+        const a = (i / 9) * Math.PI * 2
+        return (
+          <mesh key={i} position={[Math.cos(a) * 15, 2.5, Math.sin(a) * 15]} rotation={[a, a * 1.3, 0]}>
+            <dodecahedronGeometry args={[4.2, 0]} />
+            <meshStandardMaterial color="#4a4e57" roughness={1} flatShading />
+          </mesh>
+        )
+      })}
+      {/* crossed logs */}
+      <mesh position={[0, 3, 0]} rotation={[0, 0.5, Math.PI / 2.1]}>
+        <cylinderGeometry args={[2, 2, 20, 8]} />
+        <meshStandardMaterial color="#3a2a1d" roughness={1} />
+      </mesh>
+      <mesh position={[0, 3, 0]} rotation={[0.5, -0.7, Math.PI / 2.1]}>
+        <cylinderGeometry args={[2, 2, 20, 8]} />
+        <meshStandardMaterial color="#2f241a" roughness={1} />
+      </mesh>
+      {/* flames (additive, unlit, never fogged) */}
+      <group ref={flameRef} position={[0, 6, 0]}>
+        <mesh>
+          <coneGeometry args={[7, 18, 10]} />
+          <meshBasicMaterial color="#ff5a1e" transparent opacity={0.5} blending={THREE.AdditiveBlending} depthWrite={false} fog={false} />
+        </mesh>
+        <mesh position={[0, 2, 0]}>
+          <coneGeometry args={[4.6, 14, 10]} />
+          <meshBasicMaterial color="#ff9d2e" transparent opacity={0.7} blending={THREE.AdditiveBlending} depthWrite={false} fog={false} />
+        </mesh>
+        <mesh position={[0, 4, 0]}>
+          <coneGeometry args={[2.4, 9, 8]} />
+          <meshBasicMaterial color="#ffd76b" transparent opacity={0.9} blending={THREE.AdditiveBlending} depthWrite={false} fog={false} />
+        </mesh>
+      </group>
+      {/* rising embers */}
+      <Sparkles count={28} scale={[24, 42, 24]} position={[0, 18, 0]} size={3} speed={0.5} color="#ffae53" opacity={0.7} />
+      {/* warm glow */}
+      <pointLight ref={lightRef} position={[0, 12, 0]} color="#ff7b2e" intensity={6} distance={320} decay={1.4} />
+    </group>
+  )
+}
+
 function Scene({ showRanges }: { showRanges: boolean }) {
   return (
     <>
-      <ambientLight intensity={0.7} />
-      <directionalLight position={[CENTER + 300, 600, CENTER + 200]} intensity={1.1} castShadow />
-      <hemisphereLight args={['#bcd4ff', '#202830', 0.5]} />
+      <color attach="background" args={['#05070d']} />
+      <fogExp2 attach="fog" args={['#070a12', 0.0013]} />
 
-      {/* floor */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[CENTER, 0, CENTER]} receiveShadow>
-        <planeGeometry args={[2400, 2400]} />
-        <meshStandardMaterial color="#1b2026" />
+      {/* night ambience */}
+      <ambientLight intensity={0.18} color="#5b6b8c" />
+      <hemisphereLight args={['#2a3554', '#05060a', 0.35]} />
+      <NightSky />
+
+      {/* ground */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[CENTER, 0, CENTER]}>
+        <planeGeometry args={[3000, 3000]} />
+        <meshStandardMaterial color="#0f141c" roughness={1} />
       </mesh>
-      <gridHelper args={[2400, 60, '#3a4452', '#2a313a']} position={[CENTER, 0.1, CENTER]} />
+      <gridHelper args={[3000, 75, '#1a2230', '#11161d']} position={[CENTER, 0.1, CENTER]} />
 
-      {/* cubes to jump on */}
-      {CUBES.map((c, i) => (
-        <mesh key={i} position={[c.x, c.s / 2, c.z]} castShadow receiveShadow>
-          <boxGeometry args={[c.s, c.s, c.s]} />
-          <meshStandardMaterial color="#374151" />
-        </mesh>
-      ))}
+      <Mountain />
+      <Stumps />
+      <Campfire />
 
       <HearingRing />
       <Player />
@@ -607,8 +775,7 @@ export default function VirtualSpace() {
     <div className="w-full h-full flex flex-col gap-2">
       <div className="relative flex-1 min-h-0 rounded-xl overflow-hidden border border-indigo-500/40 bg-black">
         <Canvas
-          shadows
-          camera={{ fov: 75, near: 0.1, far: 6000, position: [CENTER, EYE, CENTER] }}
+          camera={{ fov: 75, near: 0.1, far: 6500, position: [CENTER, EYE, CENTER] }}
           gl={{ antialias: true }}
         >
           <Suspense fallback={null}>
