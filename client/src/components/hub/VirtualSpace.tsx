@@ -30,9 +30,7 @@ import { getPublishRelays } from '@/stores/postingBehaviourStore'
 import VirtualAvatarModal from './VirtualAvatarModal'
 
 // ── Scene constants (world units match the 2D spatial world: ~2000, hearing ~200) ──
-const BODY_H = 22
-const HEAD = 10
-const EYE = BODY_H + HEAD / 2   // camera at head/"face" height (27) → you meet others eye-to-eye
+const EYE = 38   // camera eye height above feet
 const SPEED = 150         // units / second
 const GRAVITY = 600
 const JUMP = 220          // ~40u apex — clears the tallest cube
@@ -247,7 +245,7 @@ function standeeGeom(): THREE.ShapeGeometry {
 }
 function frameGeom(): THREE.ExtrudeGeometry {
   if (_frameGeom) return _frameGeom
-  const shape = chamferShape(STANDEE_W + FRAME_MARGIN * 2, STANDEE_H + FRAME_MARGIN * 2, STANDEE_C + FRAME_MARGIN)
+  const shape = chamferShape(STANDEE_W + FRAME_MARGIN * 2, STANDEE_H + FRAME_MARGIN * 2, STANDEE_C + FRAME_MARGIN * (2 - Math.SQRT2))
   const g = new THREE.ExtrudeGeometry(shape, { depth: FRAME_DEPTH, bevelEnabled: false })
   g.translate(0, 0, -FRAME_DEPTH / 2)   // center the slab on z
   _frameGeom = g
@@ -255,7 +253,7 @@ function frameGeom(): THREE.ExtrudeGeometry {
 }
 function frameOutline(): THREE.BufferGeometry {
   if (_frameOutline) return _frameOutline
-  const pts = chamferShape(STANDEE_W + FRAME_MARGIN * 2, STANDEE_H + FRAME_MARGIN * 2, STANDEE_C + FRAME_MARGIN).getPoints()
+  const pts = chamferShape(STANDEE_W + FRAME_MARGIN * 2, STANDEE_H + FRAME_MARGIN * 2, STANDEE_C + FRAME_MARGIN * (2 - Math.SQRT2)).getPoints()
   _frameOutline = new THREE.BufferGeometry().setFromPoints(pts.map((p) => new THREE.Vector3(p.x, p.y, 0)))
   return _frameOutline
 }
@@ -414,7 +412,7 @@ function RemoteAvatar({ pubkey, avatar, x, z, elevation, heading, speaking, show
         <group ref={facing} rotation={[0, Math.PI - heading, 0]}>
           <Standee avatar={avatar} pubkey={pubkey} speaking={speaking} />
         </group>
-        <Nameplate pubkey={pubkey} y={STANDEE_H + 6} speaking={speaking} />
+        <Nameplate pubkey={pubkey} y={STANDEE_H + 16} speaking={speaking} />
       </group>
       {showRange && (
         <group ref={coneGroup} position={[x, 0.2, z]} rotation={[0, Math.PI / 2 - heading, 0]}>
