@@ -585,40 +585,38 @@ function NightSky() {
 }
 
 /**
- * A cave at the mountain's foot: a recessed dark chamber (real interior depth,
- * rendered from the inside) framed by an irregular arch of low-poly boulders that
- * the moon catches — reads as an entrance carved into rock, not a tube.
+ * A cave at the mountain's foot: a faceted hollow (a low-poly icosphere rendered
+ * inside-out — the near wall is culled, so you walk straight in and are wrapped in
+ * dark rock with real depth) framed by an irregular arch of moonlit boulders.
  */
 function CaveMouth() {
   const rocks = useMemo(() => {
     const out: { p: [number, number, number]; s: number; r: [number, number, number] }[] = []
-    const N = 14, archW = 200, archH = 350
+    const N = 13, archW = 300, archH = 280
     for (let i = 0; i < N; i++) {
       const t = i / (N - 1)
       const a = Math.PI * t                          // left ground → over the top → right ground
       out.push({
-        p: [-Math.cos(a) * archW, Math.sin(a) * archH + 8, (Math.random() - 0.5) * 40],
-        s: 46 + Math.random() * 36,
+        p: [-Math.cos(a) * archW, Math.sin(a) * archH + 6, (Math.random() - 0.5) * 50],
+        s: 60 + Math.random() * 46,
         r: [Math.random() * 3, Math.random() * 3, Math.random() * 3],
       })
     }
-    // chunky jambs at the base
-    out.push({ p: [-archW - 12, 60, 14], s: 92, r: [0.4, 1, 0.2] })
-    out.push({ p: [archW + 8, 74, 14], s: 98, r: [1.1, 0.4, 0.7] })
+    // chunky jambs + a couple of foreground rocks breaking up the rim
+    out.push({ p: [-archW - 24, 80, 24], s: 124, r: [0.4, 1, 0.2] })
+    out.push({ p: [archW + 16, 96, 24], s: 132, r: [1.1, 0.4, 0.7] })
+    out.push({ p: [-archW * 0.55, 44, 110], s: 80, r: [0.6, 0.3, 1.2] })
+    out.push({ p: [archW * 0.6, 40, 116], s: 74, r: [1.4, 0.8, 0.2] })
     return out
   }, [])
   return (
     <group position={[0, 0, 3080]}>
-      {/* recessed dark chamber — real interior depth (seen from inside) + black far wall */}
-      <mesh position={[0, 175, -260]}>
-        <boxGeometry args={[360, 380, 540]} />
-        <meshStandardMaterial color="#080910" side={THREE.BackSide} roughness={1} />
+      {/* hollow cave volume — faceted dark interior; enterable (near faces are culled) */}
+      <mesh position={[0, 70, -300]} scale={[380, 400, 600]}>
+        <icosahedronGeometry args={[1, 2]} />
+        <meshStandardMaterial color="#0c0e16" side={THREE.BackSide} roughness={1} flatShading />
       </mesh>
-      <mesh position={[0, 175, -528]}>
-        <planeGeometry args={[360, 380]} />
-        <meshBasicMaterial color="#010103" />
-      </mesh>
-      {/* irregular boulder arch framing the mouth */}
+      {/* boulder arch framing the mouth */}
       {rocks.map((r, i) => (
         <mesh key={i} position={r.p} rotation={r.r} scale={r.s}>
           <dodecahedronGeometry args={[1, 0]} />
