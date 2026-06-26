@@ -439,7 +439,8 @@ function RemoteAvatars({ showRanges }: { showRanges: boolean }) {
           p.status === 'joined' &&
           p.pubkey !== myPubkey &&
           participants[p.pubkey] &&
-          participants[p.pubkey].hasVspace &&   // sealed room: only other virtual-space people
+          // virtual-space + plain (non-spatial) people; only 2D-spatial people are sealed off
+          (participants[p.pubkey].hasVspace || !participants[p.pubkey].hasSpatial) &&
           (!p.hostPubkey || p.hostPubkey === currentHostPubkey),
       )
     : []

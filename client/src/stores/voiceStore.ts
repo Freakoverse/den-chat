@@ -615,7 +615,8 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
               id: track.participantId,
               position: { x: 250, y: 250 },  // default until DC state arrives
               heading: 0,
-              room: get().participants[track.participantId]?.hasVspace ?? false,
+              vspace: get().participants[track.participantId]?.hasVspace ?? false,
+              spatial: get().participants[track.participantId]?.hasSpatial ?? false,
             })
             // In 3D mode, also connect audio to the Web Audio graph
             if (_spatialEngine.get3DEnabled()) {
@@ -695,7 +696,8 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
               heading: data.heading ?? 0,
               elevation: data.elevation ?? 0,
               pitch: data.pitch ?? 0,
-              room: data.vspace ?? false,
+              vspace: data.vspace ?? false,
+              spatial: data.spatial ?? false,
             })
           }
 
@@ -1633,7 +1635,8 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
               heading: p.heading ?? 0,
               elevation: p.elevation ?? 0,
               pitch: p.pitch ?? 0,
-              room: participants[p.pubkey]?.hasVspace ?? false,
+              vspace: participants[p.pubkey]?.hasVspace ?? false,
+              spatial: participants[p.pubkey]?.hasSpatial ?? false,
             })
           }
         }

@@ -23,7 +23,8 @@ export interface SpatialParticipant {
   heading: number      // radians, 0 = up/north (visual only in 3D mode)
   elevation?: number   // height in world units → audio Y. 0 = ground plane (2D default).
   pitch?: number       // radians, vertical look. Listener-only for audio; 0 in 2D.
-  room?: boolean       // in the 3D virtual-space room. Cross-room (≠ my room) is muted.
+  vspace?: boolean     // in the 3D virtual-space room
+  spatial?: boolean    // in any spatial mode (2D or 3D). Plain (false) people are never sealed.
 }
 
 export interface SpatialEngineCallbacks {
@@ -143,9 +144,14 @@ export class SpatialAudioEngine {
     this.myRoom = inVirtualSpace
   }
 
-  /** A participant in a different room than mine is muted (sealed rooms). */
+  /**
+   * Whether a participant is sealed off (muted) from me. The seal is only between the
+   * two active spatial modes — 2D radar vs 3D virtual space. Plain (non-spatial)
+   * people are "in the world" and stay audible to every spatial viewer.
+   */
   private isCrossRoom(participant: SpatialParticipant): boolean {
-    return (participant.room ?? false) !== this.myRoom
+    if (!(participant.spatial ?? false)) return false   // plain person — never sealed
+    return (participant.vspace ?? false) !== this.myRoom // the other spatial mode → mute
   }
 
   /** Set per-user volume (0-5 range). Applied on top of spatial attenuation. */
