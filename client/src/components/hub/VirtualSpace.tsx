@@ -13,9 +13,10 @@
  * texture if the host serves them with CORS, otherwise a flat colour is shown.
  */
 import { useRef, useEffect, useState, useMemo, Suspense, memo } from 'react'
-import { Canvas, useFrame, useThree } from '@react-three/fiber'
+import { Canvas, useFrame, useThree, useLoader } from '@react-three/fiber'
 import { Html, Stars, Sparkles } from '@react-three/drei'
 import * as THREE from 'three'
+import { OBJLoader } from 'three-stdlib'
 import { X } from 'lucide-react'
 import { useVoiceStore } from '@/stores/voiceStore'
 import { useUserStore } from '@/stores/userStore'
@@ -584,64 +585,38 @@ function NightSky() {
   )
 }
 
-/**
- * A cave at the mountain's foot: a faceted hollow (a low-poly icosphere rendered
- * inside-out — the near wall is culled, so you walk straight in and are wrapped in
- * dark rock with real depth) framed by an irregular arch of moonlit boulders.
- */
-function CaveMouth() {
-  const rocks = useMemo(() => {
-    const out: { p: [number, number, number]; s: number; r: [number, number, number] }[] = []
-    const N = 13, archW = 300, archH = 280
-    for (let i = 0; i < N; i++) {
-      const t = i / (N - 1)
-      const a = Math.PI * t                          // left ground → over the top → right ground
-      out.push({
-        p: [-Math.cos(a) * archW, Math.sin(a) * archH + 6, (Math.random() - 0.5) * 50],
-        s: 60 + Math.random() * 46,
-        r: [Math.random() * 3, Math.random() * 3, Math.random() * 3],
-      })
-    }
-    // chunky jambs + a couple of foreground rocks breaking up the rim
-    out.push({ p: [-archW - 24, 80, 24], s: 124, r: [0.4, 1, 0.2] })
-    out.push({ p: [archW + 16, 96, 24], s: 132, r: [1.1, 0.4, 0.7] })
-    out.push({ p: [-archW * 0.55, 44, 110], s: 80, r: [0.6, 0.3, 1.2] })
-    out.push({ p: [archW * 0.6, 40, 116], s: 74, r: [1.4, 0.8, 0.2] })
-    return out
-  }, [])
-  return (
-    <group position={[0, 0, 3080]}>
-      {/* hollow cave volume — faceted dark interior; enterable (near faces are culled) */}
-      <mesh position={[0, 70, -300]} scale={[380, 400, 600]}>
-        <icosahedronGeometry args={[1, 2]} />
-        <meshStandardMaterial color="#0c0e16" side={THREE.BackSide} roughness={1} flatShading />
-      </mesh>
-      {/* boulder arch framing the mouth */}
-      {rocks.map((r, i) => (
-        <mesh key={i} position={r.p} rotation={r.r} scale={r.s}>
-          <dodecahedronGeometry args={[1, 0]} />
-          <meshStandardMaterial color="#262932" roughness={1} flatShading />
-        </mesh>
-      ))}
-    </group>
-  )
+// ── Mountain model (low-poly OBJ with a modeled slit cave + crystals) ──
+const MOUNTAIN_SCALE = 26
+// cave entrance ends up at ~[CENTER, 0, CENTER-448], facing the camp (+Z).
+// Y offset drops the model so the cave floor (model Y≈1.5) sits at ground level.
+const MOUNTAIN_POS: [number, number, number] = [CENTER, -39, CENTER - 1150]
+
+/** Night-palette materials applied to the model's named groups (keeps glowing crystals). */
+function mountainMaterials(): Record<string, THREE.Material> {
+  return {
+    mat_rock: new THREE.MeshStandardMaterial({ color: '#2b2f3a', roughness: 1, flatShading: true }),
+    mat_snow: new THREE.MeshStandardMaterial({ color: '#c2d0ea', roughness: 0.85, flatShading: true }),
+    mat_cave_rock: new THREE.MeshStandardMaterial({ color: '#15171f', roughness: 1, flatShading: true, side: THREE.DoubleSide }),
+    mat_cave_floor: new THREE.MeshStandardMaterial({ color: '#0e1016', roughness: 1, flatShading: true, side: THREE.DoubleSide }),
+    mat_crystal: new THREE.MeshStandardMaterial({ color: '#1d6f8c', emissive: '#23d3ff', emissiveIntensity: 2.4, roughness: 0.3, flatShading: true }),
+  }
 }
 
-/** Faceted low-poly mountain backdrop (towering) with a cave at its foot. */
-function Mountain() {
-  return (
-    <group position={[CENTER, 0, CENTER - 3600]}>
-      <mesh position={[0, 1800, 0]}>
-        <coneGeometry args={[3100, 3600, 7]} />
-        <meshStandardMaterial color="#23252e" roughness={1} flatShading />
-      </mesh>
-      <mesh position={[-1650, 1200, 950]}>
-        <coneGeometry args={[1750, 2500, 6]} />
-        <meshStandardMaterial color="#1d1f28" roughness={1} flatShading />
-      </mesh>
-      <CaveMouth />
-    </group>
-  )
+function MountainModel() {
+  const obj = useLoader(OBJLoader, `${import.meta.env.BASE_URL}models/mountain.obj`)
+  const model = useMemo(() => {
+    const mats = mountainMaterials()
+    const remap = (m: THREE.Material) => mats[m.name] ?? m
+    const root = obj.clone()
+    root.traverse((c) => {
+      const m = c as THREE.Mesh
+      if (!m.isMesh) return
+      m.material = Array.isArray(m.material) ? m.material.map(remap) : remap(m.material as THREE.Material)
+      m.geometry.computeVertexNormals()
+    })
+    return root
+  }, [obj])
+  return <primitive object={model} position={MOUNTAIN_POS} rotation={[0, -Math.PI / 2, 0]} scale={MOUNTAIN_SCALE} />
 }
 
 /** The ring of stump seats (also the collision props — see CUBES). */
@@ -738,7 +713,7 @@ function Scene({ showRanges }: { showRanges: boolean }) {
       </mesh>
       <gridHelper args={[3000, 75, '#1a2230', '#11161d']} position={[CENTER, 0.1, CENTER]} />
 
-      <Mountain />
+      <Suspense fallback={null}><MountainModel /></Suspense>
       <Stumps />
       <Campfire />
 
