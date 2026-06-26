@@ -12,7 +12,7 @@
  * onto a cube top when over its footprint); remote profile pictures only render as a
  * texture if the host serves them with CORS, otherwise a flat colour is shown.
  */
-import { useRef, useEffect, useState, Suspense, memo } from 'react'
+import { useRef, useEffect, useState, useMemo, Suspense, memo } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { PointerLockControls, Html } from '@react-three/drei'
 import * as THREE from 'three'
@@ -21,6 +21,7 @@ import { useVoiceStore } from '@/stores/voiceStore'
 import { useUserStore } from '@/stores/userStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { npubShort, cn } from '@/lib/utils'
+import { fetchVirtualAvatarCached, loadAvatarBlobUrl } from '@/lib/voice/virtualAvatar'
 
 // ── Scene constants (world units match the 2D spatial world: ~2000, hearing ~200) ──
 const BODY_H = 22
@@ -200,11 +201,113 @@ const Nameplate = memo(function Nameplate({ pubkey, y, speaking }: { pubkey: str
   )
 })
 
+// ── Standee avatar (9:16 portrait frame with 45° chamfered corners) ──
+const STANDEE_H = 36
+const STANDEE_W = (STANDEE_H * 9) / 16
+const STANDEE_C = 4   // corner chamfer
+
+function chamferShape(w: number, h: number, c: number): THREE.Shape {
+  const hw = w / 2, hh = h / 2
+  const s = new THREE.Shape()
+  s.moveTo(-hw + c, hh)
+  s.lineTo(hw - c, hh)
+  s.lineTo(hw, hh - c)
+  s.lineTo(hw, -hh + c)
+  s.lineTo(hw - c, -hh)
+  s.lineTo(-hw + c, -hh)
+  s.lineTo(-hw, -hh + c)
+  s.lineTo(-hw, hh - c)
+  s.closePath()
+  return s
+}
+
+let _standeeGeom: THREE.ShapeGeometry | null = null
+let _standeeBorder: THREE.BufferGeometry | null = null
+function standeeGeom(): THREE.ShapeGeometry {
+  if (_standeeGeom) return _standeeGeom
+  const g = new THREE.ShapeGeometry(chamferShape(STANDEE_W, STANDEE_H, STANDEE_C))
+  // Normalize UVs to the bounding box so a texture fills the frame (corners clipped).
+  const pos = g.attributes.position
+  const uv: number[] = []
+  for (let i = 0; i < pos.count; i++) {
+    uv.push((pos.getX(i) + STANDEE_W / 2) / STANDEE_W, (pos.getY(i) + STANDEE_H / 2) / STANDEE_H)
+  }
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2))
+  _standeeGeom = g
+  return g
+}
+function standeeBorder(): THREE.BufferGeometry {
+  if (_standeeBorder) return _standeeBorder
+  const pts = chamferShape(STANDEE_W, STANDEE_H, STANDEE_C).getPoints()
+  _standeeBorder = new THREE.BufferGeometry().setFromPoints(pts.map((p) => new THREE.Vector3(p.x, p.y, 0)))
+  return _standeeBorder
+}
+
+/** Deterministic solid-fill colour from a pubkey (shown until a custom image is set). */
+function colorFromPubkey(pubkey: string): string {
+  let h = 0
+  for (let i = 0; i < pubkey.length; i++) h = (h * 31 + pubkey.charCodeAt(i)) >>> 0
+  return `hsl(${h % 360}, 45%, 42%)`
+}
+
+/** Load a user's front/back avatar images (NIP-78) as CORS-safe textures. */
+function useAvatarTextures(pubkey: string) {
+  const [tex, setTex] = useState<{ front: THREE.Texture | null; back: THREE.Texture | null }>({ front: null, back: null })
+  useEffect(() => {
+    let cancelled = false
+    const blobUrls: string[] = []
+    const made: THREE.Texture[] = []
+    const loadTex = async (url: string | undefined, flipX: boolean): Promise<THREE.Texture | null> => {
+      const blobUrl = await loadAvatarBlobUrl(url)
+      if (!blobUrl) return null
+      blobUrls.push(blobUrl)
+      return new Promise<THREE.Texture | null>((res) => {
+        new THREE.TextureLoader().load(blobUrl, (t) => {
+          t.colorSpace = THREE.SRGBColorSpace
+          if (flipX) { t.wrapS = THREE.RepeatWrapping; t.repeat.x = -1; t.offset.x = 1 }  // un-mirror the back face
+          res(t)
+        }, undefined, () => res(null))
+      })
+    }
+    ;(async () => {
+      const av = await fetchVirtualAvatarCached(pubkey)
+      if (cancelled || !av) return
+      const [front, back] = await Promise.all([loadTex(av.front, false), loadTex(av.back ?? av.front, true)])
+      if (cancelled) { front?.dispose(); back?.dispose(); blobUrls.forEach(URL.revokeObjectURL); return }
+      if (front) made.push(front)
+      if (back) made.push(back)
+      setTex({ front, back })
+    })()
+    return () => { cancelled = true; made.forEach((t) => t.dispose()); blobUrls.forEach(URL.revokeObjectURL) }
+  }, [pubkey])
+  return tex
+}
+
+/** Two-sided standee: front faces the user's heading, back behind it. */
+function Standee({ pubkey, speaking }: { pubkey: string; speaking: boolean }) {
+  const { front, back } = useAvatarTextures(pubkey)
+  const color = useMemo(() => colorFromPubkey(pubkey), [pubkey])
+  const geom = standeeGeom()
+  const border = standeeBorder()
+  return (
+    <group position={[0, 0.5, 0]}>
+      <mesh geometry={geom} position={[0, STANDEE_H / 2, 0.2]}>
+        <meshBasicMaterial map={front ?? undefined} color={front ? '#ffffff' : color} side={THREE.FrontSide} toneMapped={false} />
+      </mesh>
+      <mesh geometry={geom} position={[0, STANDEE_H / 2, -0.2]} rotation={[0, Math.PI, 0]}>
+        <meshBasicMaterial map={back ?? undefined} color={back ? '#ffffff' : color} side={THREE.FrontSide} toneMapped={false} />
+      </mesh>
+      <lineLoop geometry={border} position={[0, STANDEE_H / 2, 0.3]}>
+        <lineBasicMaterial color={speaking ? '#10b981' : '#cbd5e1'} transparent opacity={speaking ? 0.95 : 0.55} />
+      </lineLoop>
+    </group>
+  )
+}
+
 function RemoteAvatar({ pubkey, x, z, elevation, heading, speaking, showRange, radius, conePercent }: {
   pubkey: string; x: number; z: number; elevation: number; heading: number; speaking: boolean
   showRange: boolean; radius: number; conePercent: number
 }) {
-  const accent = speaking ? '#10b981' : '#6b7280'
   const bodyGroup = useRef<THREE.Group>(null)   // position
   const facing = useRef<THREE.Group>(null)      // heading rotation
   const coneGroup = useRef<THREE.Group>(null)   // ground cone (position + heading)
@@ -224,7 +327,8 @@ function RemoteAvatar({ pubkey, x, z, elevation, heading, speaking, showRange, r
     while (dh < -Math.PI) dh += 2 * Math.PI
     c.heading += dh * t
     bodyGroup.current?.position.set(c.x, c.elevation, c.z)
-    if (facing.current) facing.current.rotation.y = -c.heading
+    // Standee front face is local +Z, so π - heading aims it at the heading direction.
+    if (facing.current) facing.current.rotation.y = Math.PI - c.heading
     if (coneGroup.current) {
       coneGroup.current.position.set(c.x, 0.2, c.z)
       coneGroup.current.rotation.y = Math.PI / 2 - c.heading
@@ -234,18 +338,11 @@ function RemoteAvatar({ pubkey, x, z, elevation, heading, speaking, showRange, r
   return (
     <>
       <group ref={bodyGroup} position={[x, elevation, z]}>
-        {/* body + head, rotated to face the user's heading */}
-        <group ref={facing} rotation={[0, -heading, 0]}>
-          <mesh position={[0, BODY_H / 2, 0]} castShadow>
-            <boxGeometry args={[HEAD * 0.7, BODY_H, HEAD * 0.5]} />
-            <meshStandardMaterial color="#4b5563" />
-          </mesh>
-          <mesh position={[0, BODY_H + HEAD / 2, 0]} castShadow>
-            <boxGeometry args={[HEAD, HEAD, HEAD]} />
-            <meshStandardMaterial color={accent} />
-          </mesh>
+        {/* standee, rotated to face the user's heading */}
+        <group ref={facing} rotation={[0, Math.PI - heading, 0]}>
+          <Standee pubkey={pubkey} speaking={speaking} />
         </group>
-        <Nameplate pubkey={pubkey} y={BODY_H + HEAD + 8} speaking={speaking} />
+        <Nameplate pubkey={pubkey} y={STANDEE_H + 6} speaking={speaking} />
       </group>
       {showRange && (
         <group ref={coneGroup} position={[x, 0.2, z]} rotation={[0, Math.PI / 2 - heading, 0]}>
