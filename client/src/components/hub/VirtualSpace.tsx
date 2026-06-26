@@ -191,7 +191,7 @@ const Nameplate = memo(function Nameplate({ pubkey, y, speaking }: { pubkey: str
   const name = profile?.display_name || profile?.name || npubShort(pubkey)
   const pic = profile?.picture
   return (
-    <Html position={[0, y, 0]} center distanceFactor={160}>
+    <Html position={[0, y, 0]} center distanceFactor={160} zIndexRange={[30, 0]}>
       <div className={cn(
         'flex items-center gap-1.5 px-2 py-1 rounded-full backdrop-blur-sm whitespace-nowrap select-none pointer-events-none transition-all',
         speaking
@@ -337,7 +337,7 @@ function Standee({ avatar, pubkey, speaking }: { avatar: VirtualAvatar | null; p
   const color = useMemo(() => colorFromPubkey(pubkey), [pubkey])
   const img = standeeGeom()
   return (
-    <group position={[0, 0.5, 0]}>
+    <group position={[0, 4, 0]}>{/* lift so the frame's bottom clears the floor */}
       {/* 3D frame slab around the image */}
       <mesh geometry={frameGeom()} position={[0, STANDEE_H / 2, 0]} castShadow>
         <meshStandardMaterial color="#0f172a" metalness={0.25} roughness={0.65} />

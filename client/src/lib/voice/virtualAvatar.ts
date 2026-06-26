@@ -86,6 +86,16 @@ function parseBlossomUrl(url: string): { hash: string; origin: string } | null {
   }
 }
 
+/** Sniff an image MIME from magic bytes — a blob URL needs a type or the <img>/
+ *  texture loader can decode it to a blank (white) image. */
+function sniffImageMime(b: Uint8Array): string {
+  if (b.length > 3 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return 'image/png'
+  if (b.length > 2 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return 'image/jpeg'
+  if (b.length > 11 && b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 && b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50) return 'image/webp'
+  if (b.length > 5 && b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46) return 'image/gif'
+  return 'image/png'
+}
+
 /**
  * Resolve a blossom image URL to a same-origin blob URL (CORS-safe for WebGL
  * textures), via failover download + the profile render-size cap. Returns null on
@@ -99,7 +109,7 @@ export async function loadAvatarBlobUrl(url: string | undefined): Promise<string
     const bytes = await downloadFromBlossom(parsed.hash, [parsed.origin])
     const limitBytes = getRenderLimit('profile') * 1024 * 1024
     if (bytes.byteLength > limitBytes) return null
-    return URL.createObjectURL(new Blob([bytes]))
+    return URL.createObjectURL(new Blob([bytes], { type: sniffImageMime(bytes) }))
   } catch {
     return null
   }
