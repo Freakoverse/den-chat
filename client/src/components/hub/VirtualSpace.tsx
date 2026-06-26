@@ -215,7 +215,7 @@ function RemoteAvatar({ pubkey, x, z, elevation, heading, speaking, showRange, r
   // uses the exact positions, so spatialization stays accurate.
   useFrame((_, dt) => {
     const c = cur.current
-    const t = 1 - Math.exp(-Math.min(dt, 0.1) * 6)
+    const t = 1 - Math.exp(-Math.min(dt, 0.1) * 24)
     c.x += (x - c.x) * t
     c.z += (z - c.z) * t
     c.elevation += (elevation - c.elevation) * t
