@@ -101,7 +101,7 @@ function sniffImageMime(b: Uint8Array): string {
  * textures), via failover download + the profile render-size cap. Returns null on
  * failure or if it exceeds the limit. The caller owns the blob URL (revoke when done).
  */
-export async function loadAvatarBlobUrl(url: string | undefined): Promise<string | null> {
+export async function loadAvatarBlobUrl(url: string | undefined): Promise<{ url: string; mime: string } | null> {
   if (!url) return null
   const parsed = parseBlossomUrl(url)
   if (!parsed) return null
@@ -109,7 +109,8 @@ export async function loadAvatarBlobUrl(url: string | undefined): Promise<string
     const bytes = await downloadFromBlossom(parsed.hash, [parsed.origin])
     const limitBytes = getRenderLimit('profile') * 1024 * 1024
     if (bytes.byteLength > limitBytes) return null
-    return URL.createObjectURL(new Blob([bytes], { type: sniffImageMime(bytes) }))
+    const mime = sniffImageMime(bytes)
+    return { url: URL.createObjectURL(new Blob([bytes], { type: mime })), mime }
   } catch {
     return null
   }
