@@ -14,14 +14,19 @@
  */
 import { useRef, useEffect, useState, useMemo, Suspense, memo } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
-import { PointerLockControls, Html } from '@react-three/drei'
+import { Html } from '@react-three/drei'
 import * as THREE from 'three'
 import { X } from 'lucide-react'
 import { useVoiceStore } from '@/stores/voiceStore'
 import { useUserStore } from '@/stores/userStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { npubShort, cn } from '@/lib/utils'
-import { fetchVirtualAvatarCached, loadAvatarBlobUrl } from '@/lib/voice/virtualAvatar'
+import {
+  fetchVirtualAvatarCached, loadAvatarBlobUrl, parseVirtualAvatar, clearVirtualAvatarCache,
+  VIRTUAL_AVATAR_KIND, VIRTUAL_AVATAR_DTAG, type VirtualAvatar,
+} from '@/lib/voice/virtualAvatar'
+import { subscribeToRelays } from '@/lib/nostr/relay-pool'
+import { getPublishRelays } from '@/stores/postingBehaviourStore'
 import VirtualAvatarModal from './VirtualAvatarModal'
 
 // ── Scene constants (world units match the 2D spatial world: ~2000, hearing ~200) ──
@@ -222,8 +227,11 @@ function chamferShape(w: number, h: number, c: number): THREE.Shape {
   return s
 }
 
+const FRAME_MARGIN = 1.8   // border width around the image
+const FRAME_DEPTH = 2.4    // 3D thickness of the frame
 let _standeeGeom: THREE.ShapeGeometry | null = null
-let _standeeBorder: THREE.BufferGeometry | null = null
+let _frameGeom: THREE.ExtrudeGeometry | null = null
+let _frameOutline: THREE.BufferGeometry | null = null
 function standeeGeom(): THREE.ShapeGeometry {
   if (_standeeGeom) return _standeeGeom
   const g = new THREE.ShapeGeometry(chamferShape(STANDEE_W, STANDEE_H, STANDEE_C))
@@ -237,11 +245,19 @@ function standeeGeom(): THREE.ShapeGeometry {
   _standeeGeom = g
   return g
 }
-function standeeBorder(): THREE.BufferGeometry {
-  if (_standeeBorder) return _standeeBorder
-  const pts = chamferShape(STANDEE_W, STANDEE_H, STANDEE_C).getPoints()
-  _standeeBorder = new THREE.BufferGeometry().setFromPoints(pts.map((p) => new THREE.Vector3(p.x, p.y, 0)))
-  return _standeeBorder
+function frameGeom(): THREE.ExtrudeGeometry {
+  if (_frameGeom) return _frameGeom
+  const shape = chamferShape(STANDEE_W + FRAME_MARGIN * 2, STANDEE_H + FRAME_MARGIN * 2, STANDEE_C + FRAME_MARGIN)
+  const g = new THREE.ExtrudeGeometry(shape, { depth: FRAME_DEPTH, bevelEnabled: false })
+  g.translate(0, 0, -FRAME_DEPTH / 2)   // center the slab on z
+  _frameGeom = g
+  return g
+}
+function frameOutline(): THREE.BufferGeometry {
+  if (_frameOutline) return _frameOutline
+  const pts = chamferShape(STANDEE_W + FRAME_MARGIN * 2, STANDEE_H + FRAME_MARGIN * 2, STANDEE_C + FRAME_MARGIN).getPoints()
+  _frameOutline = new THREE.BufferGeometry().setFromPoints(pts.map((p) => new THREE.Vector3(p.x, p.y, 0)))
+  return _frameOutline
 }
 
 /** Deterministic solid-fill colour from a pubkey (shown until a custom image is set). */
@@ -251,13 +267,46 @@ function colorFromPubkey(pubkey: string): string {
   return `hsl(${h % 360}, 45%, 42%)`
 }
 
-/** Load a user's front/back avatar images (NIP-78) as CORS-safe textures. */
-function useAvatarTextures(pubkey: string) {
+/**
+ * Live map of participant pubkey → their NIP-78 virtual avatar. Seeds from cache,
+ * then subscribes to kind-30078 / d=virtual-space-avatar for those authors, so an
+ * edit (including the editor's own save) updates everyone's standee without a refetch.
+ */
+function useVirtualAvatars(pubkeys: string[]): Record<string, VirtualAvatar | null> {
+  const [avatars, setAvatars] = useState<Record<string, VirtualAvatar | null>>({})
+  const seenAt = useRef<Record<string, number>>({})
+  const key = pubkeys.slice().sort().join(',')
+  useEffect(() => {
+    if (!pubkeys.length) return
+    pubkeys.forEach((pk) => {
+      fetchVirtualAvatarCached(pk).then((av) => setAvatars((prev) => (pk in prev ? prev : { ...prev, [pk]: av })))
+    })
+    const sub = subscribeToRelays(
+      getPublishRelays(),
+      { kinds: [VIRTUAL_AVATAR_KIND], '#d': [VIRTUAL_AVATAR_DTAG], authors: pubkeys },
+      (ev) => {
+        if ((seenAt.current[ev.pubkey] ?? 0) >= ev.created_at) return
+        seenAt.current[ev.pubkey] = ev.created_at
+        clearVirtualAvatarCache(ev.pubkey)
+        setAvatars((prev) => ({ ...prev, [ev.pubkey]: parseVirtualAvatar(ev) }))
+      },
+    )
+    return () => sub.close()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key])
+  return avatars
+}
+
+/** Load a virtual avatar's front/back images as CORS-safe textures (reloads on change). */
+function useAvatarTextures(avatar: VirtualAvatar | null) {
   const [tex, setTex] = useState<{ front: THREE.Texture | null; back: THREE.Texture | null }>({ front: null, back: null })
+  const front = avatar?.front
+  const back = avatar?.back
   useEffect(() => {
     let cancelled = false
     const blobUrls: string[] = []
     const made: THREE.Texture[] = []
+    if (!front && !back) { setTex({ front: null, back: null }); return }
     const loadTex = async (url: string | undefined, flipX: boolean): Promise<THREE.Texture | null> => {
       const blobUrl = await loadAvatarBlobUrl(url)
       if (!blobUrl) return null
@@ -271,42 +320,46 @@ function useAvatarTextures(pubkey: string) {
       })
     }
     ;(async () => {
-      const av = await fetchVirtualAvatarCached(pubkey)
-      if (cancelled || !av) return
-      const [front, back] = await Promise.all([loadTex(av.front, false), loadTex(av.back ?? av.front, true)])
-      if (cancelled) { front?.dispose(); back?.dispose(); blobUrls.forEach(URL.revokeObjectURL); return }
-      if (front) made.push(front)
-      if (back) made.push(back)
-      setTex({ front, back })
+      const [f, b] = await Promise.all([loadTex(front, false), loadTex(back ?? front, true)])
+      if (cancelled) { f?.dispose(); b?.dispose(); blobUrls.forEach(URL.revokeObjectURL); return }
+      if (f) made.push(f)
+      if (b) made.push(b)
+      setTex({ front: f, back: b })
     })()
     return () => { cancelled = true; made.forEach((t) => t.dispose()); blobUrls.forEach(URL.revokeObjectURL) }
-  }, [pubkey])
+  }, [front, back])
   return tex
 }
 
-/** Two-sided standee: front faces the user's heading, back behind it. */
-function Standee({ pubkey, speaking }: { pubkey: string; speaking: boolean }) {
-  const { front, back } = useAvatarTextures(pubkey)
+/** Two-sided framed standee: front faces the user's heading, back behind it. */
+function Standee({ avatar, pubkey, speaking }: { avatar: VirtualAvatar | null; pubkey: string; speaking: boolean }) {
+  const { front, back } = useAvatarTextures(avatar)
   const color = useMemo(() => colorFromPubkey(pubkey), [pubkey])
-  const geom = standeeGeom()
-  const border = standeeBorder()
+  const img = standeeGeom()
   return (
     <group position={[0, 0.5, 0]}>
-      <mesh geometry={geom} position={[0, STANDEE_H / 2, 0.2]}>
+      {/* 3D frame slab around the image */}
+      <mesh geometry={frameGeom()} position={[0, STANDEE_H / 2, 0]} castShadow>
+        <meshStandardMaterial color="#0f172a" metalness={0.25} roughness={0.65} />
+      </mesh>
+      {/* front image (toward heading) */}
+      <mesh geometry={img} position={[0, STANDEE_H / 2, FRAME_DEPTH / 2 + 0.15]}>
         <meshBasicMaterial map={front ?? undefined} color={front ? '#ffffff' : color} side={THREE.FrontSide} toneMapped={false} />
       </mesh>
-      <mesh geometry={geom} position={[0, STANDEE_H / 2, -0.2]} rotation={[0, Math.PI, 0]}>
+      {/* back image */}
+      <mesh geometry={img} position={[0, STANDEE_H / 2, -(FRAME_DEPTH / 2 + 0.15)]} rotation={[0, Math.PI, 0]}>
         <meshBasicMaterial map={back ?? undefined} color={back ? '#ffffff' : color} side={THREE.FrontSide} toneMapped={false} />
       </mesh>
-      <lineLoop geometry={border} position={[0, STANDEE_H / 2, 0.3]}>
-        <lineBasicMaterial color={speaking ? '#10b981' : '#cbd5e1'} transparent opacity={speaking ? 0.95 : 0.55} />
+      {/* speaking glow on the frame edge */}
+      <lineLoop geometry={frameOutline()} position={[0, STANDEE_H / 2, FRAME_DEPTH / 2 + 0.05]}>
+        <lineBasicMaterial color={speaking ? '#10b981' : '#475569'} transparent opacity={speaking ? 0.95 : 0.6} />
       </lineLoop>
     </group>
   )
 }
 
-function RemoteAvatar({ pubkey, x, z, elevation, heading, speaking, showRange, radius, conePercent }: {
-  pubkey: string; x: number; z: number; elevation: number; heading: number; speaking: boolean
+function RemoteAvatar({ pubkey, avatar, x, z, elevation, heading, speaking, showRange, radius, conePercent }: {
+  pubkey: string; avatar: VirtualAvatar | null; x: number; z: number; elevation: number; heading: number; speaking: boolean
   showRange: boolean; radius: number; conePercent: number
 }) {
   const bodyGroup = useRef<THREE.Group>(null)   // position
@@ -341,7 +394,7 @@ function RemoteAvatar({ pubkey, x, z, elevation, heading, speaking, showRange, r
       <group ref={bodyGroup} position={[x, elevation, z]}>
         {/* standee, rotated to face the user's heading */}
         <group ref={facing} rotation={[0, Math.PI - heading, 0]}>
-          <Standee pubkey={pubkey} speaking={speaking} />
+          <Standee avatar={avatar} pubkey={pubkey} speaking={speaking} />
         </group>
         <Nameplate pubkey={pubkey} y={STANDEE_H + 6} speaking={speaking} />
       </group>
@@ -363,15 +416,19 @@ function RemoteAvatars({ showRanges }: { showRanges: boolean }) {
   const currentHostPubkey = useVoiceStore((s) => s.currentHostPubkey)
   const myPubkey = useUserStore((s) => s.pubkey)
 
-  if (!currentHubDTag) return null
-  const presences = (presenceByHub[currentHubDTag] || []).filter(
-    (p) =>
-      p.channelId === currentChannelId &&
-      p.status === 'joined' &&
-      p.pubkey !== myPubkey &&
-      participants[p.pubkey] &&
-      (!p.hostPubkey || p.hostPubkey === currentHostPubkey),
-  )
+  const presences = currentHubDTag
+    ? (presenceByHub[currentHubDTag] || []).filter(
+        (p) =>
+          p.channelId === currentChannelId &&
+          p.status === 'joined' &&
+          p.pubkey !== myPubkey &&
+          participants[p.pubkey] &&
+          (!p.hostPubkey || p.hostPubkey === currentHostPubkey),
+      )
+    : []
+
+  // Hook must run every render — live avatars for the current participants.
+  const avatars = useVirtualAvatars(presences.map((p) => p.pubkey))
 
   return (
     <>
@@ -379,6 +436,7 @@ function RemoteAvatars({ showRanges }: { showRanges: boolean }) {
         <RemoteAvatar
           key={p.pubkey}
           pubkey={p.pubkey}
+          avatar={avatars[p.pubkey] ?? null}
           x={p.position.x}
           z={p.position.y}
           elevation={p.elevation ?? 0}
@@ -470,13 +528,54 @@ function Scene({ showRanges }: { showRanges: boolean }) {
   )
 }
 
+/**
+ * First-person mouse-look + pointer lock. Custom (not drei's PointerLockControls)
+ * so we can CLAMP per-event mouse deltas — the browser occasionally reports a huge
+ * movementX/Y spike that otherwise slingshots the view somewhere you didn't aim.
+ */
+function FpsLook({ onLockChange }: { onLockChange: (locked: boolean) => void }) {
+  const { camera, gl } = useThree()
+  useEffect(() => {
+    const el = gl.domElement
+    const euler = new THREE.Euler(0, 0, 0, 'YXZ')
+    const SENS = 0.0022
+    const MAX_DELTA = 100   // px per event — caps spurious spikes
+    const onMove = (e: MouseEvent) => {
+      if (document.pointerLockElement !== el) return
+      const dx = Math.max(-MAX_DELTA, Math.min(MAX_DELTA, e.movementX || 0))
+      const dy = Math.max(-MAX_DELTA, Math.min(MAX_DELTA, e.movementY || 0))
+      euler.setFromQuaternion(camera.quaternion)
+      euler.y -= dx * SENS
+      euler.x -= dy * SENS
+      euler.x = Math.max(-Math.PI / 2 + 0.02, Math.min(Math.PI / 2 - 0.02, euler.x))   // clamp pitch
+      camera.quaternion.setFromEuler(euler)
+    }
+    const onPlc = () => {
+      const locked = document.pointerLockElement === el
+      if (!locked) keys.clear()
+      onLockChange(locked)
+    }
+    const enterEl = document.getElementById('vs-enter')
+    const onEnter = () => { el.requestPointerLock?.() }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('pointerlockchange', onPlc)
+    enterEl?.addEventListener('click', onEnter)
+    return () => {
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('pointerlockchange', onPlc)
+      enterEl?.removeEventListener('click', onEnter)
+      if (document.pointerLockElement === el) document.exitPointerLock?.()
+    }
+  }, [camera, gl, onLockChange])
+  return null
+}
+
 export default function VirtualSpace() {
   const toggleVirtualSpace = useVoiceStore((s) => s.toggleVirtualSpace)
   const mySphereRadius = useVoiceStore((s) => s.mySphereRadius)
   const myConePercent = useVoiceStore((s) => s.myConePercent)
   const updateSphereRadius = useVoiceStore((s) => s.updateSphereRadius)
   const updateConePercent = useVoiceStore((s) => s.updateConePercent)
-  const controlsRef = useRef<any>(null)
   const [locked, setLocked] = useState(false)
   const [showRanges, setShowRanges] = useState(true)
   const [editAvatar, setEditAvatar] = useState(false)
@@ -491,12 +590,7 @@ export default function VirtualSpace() {
         >
           <Suspense fallback={null}>
             <Scene showRanges={showRanges} />
-            <PointerLockControls
-              ref={controlsRef}
-              selector="#vs-enter"
-              onLock={() => setLocked(true)}
-              onUnlock={() => { setLocked(false); keys.clear() }}
-            />
+            <FpsLook onLockChange={setLocked} />
           </Suspense>
         </Canvas>
 
@@ -512,7 +606,6 @@ export default function VirtualSpace() {
             and non-interactive while controlling. */}
         <div
           id="vs-enter"
-          onClick={() => controlsRef.current?.lock?.()}
           className={cn(
             'absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/40 backdrop-blur-[1px] transition-opacity',
             locked ? 'opacity-0 pointer-events-none' : 'opacity-100 cursor-pointer',
