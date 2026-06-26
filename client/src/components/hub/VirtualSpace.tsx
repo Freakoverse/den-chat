@@ -43,6 +43,7 @@ const STUMP_COUNT = 7
 const STUMP_RING_R = 62
 const STUMP_S = 16                             // seat height = collision footprint
 const MOON_OFFSET: [number, number, number] = [-1000, 1500, 1500]  // from CENTER (high + south — lights the cave); also the moonlight direction
+const SPAWN = { x: CENTER, z: CENTER }   // virtual-space spawn: south of the fire, facing the mountain/cave (-Z)
 
 // Stump seats double as the stand-on props (axis-aligned box collision, top at height s).
 const CUBES: { x: number; z: number; s: number }[] = Array.from({ length: STUMP_COUNT }, (_, i) => {
@@ -84,6 +85,26 @@ function collideAxis(x: number, z: number, feetY: number, axis: 'x' | 'z'): numb
   return axis === 'x' ? x : z
 }
 
+// ── Mountain mesh collision: raycast against the loaded model so rock is solid but
+//    the cave opening (no geometry) stays walkable. The model registers itself here. ──
+const mountainRef: { current: THREE.Object3D | null } = { current: null }
+const _ray = new THREE.Raycaster()
+const _rayO = new THREE.Vector3()
+const _rayD = new THREE.Vector3()
+
+/** True if moving from (fromX,fromZ) to (toX,toZ) at feet height would cross mountain rock. */
+function mountainBlocks(fromX: number, fromZ: number, toX: number, toZ: number, feetY: number): boolean {
+  if (!mountainRef.current) return false
+  const dx = toX - fromX, dz = toZ - fromZ
+  const dist = Math.hypot(dx, dz)
+  if (dist < 1e-4) return false
+  _rayO.set(fromX, feetY + 18, fromZ)   // knee height
+  _rayD.set(dx / dist, 0, dz / dist)
+  _ray.set(_rayO, _rayD)
+  _ray.far = dist + PLAYER_R
+  return _ray.intersectObject(mountainRef.current, true).length > 0
+}
+
 // ── Keyboard state (module-scoped so listeners are simple) ──
 const keys = new Set<string>()
 
@@ -98,10 +119,14 @@ function Player() {
   const jumpQueued = useRef(false)
   const sinceWrite = useRef(0)
 
-  // Initialise camera from the current store position.
+  // Spawn at a fixed vantage facing the mountain/cave (looking down -Z = north),
+  // and sync the store so audio + remote views start me there too.
   useEffect(() => {
-    const { myPosition, myElevation } = useVoiceStore.getState()
-    camera.position.set(myPosition.x, EYE + (myElevation || 0), myPosition.y)
+    camera.position.set(SPAWN.x, EYE, SPAWN.z)
+    camera.rotation.set(0, 0, 0)
+    const st = useVoiceStore.getState()
+    st.updatePosition(SPAWN.x, SPAWN.z)
+    st.updateElevation(0)
   }, [camera])
 
   useEffect(() => {
@@ -164,10 +189,14 @@ function Player() {
     if (move.lengthSq() > 0) {
       move.normalize().multiplyScalar(SPEED * dt)
       const feetY = camera.position.y - EYE
-      let nx = camera.position.x + move.x
-      let nz = camera.position.z + move.z
-      nx = collideAxis(nx, camera.position.z, feetY, 'x')  // resolve X against current Z
-      nz = collideAxis(nx, nz, feetY, 'z')                 // then Z against the resolved X
+      const ox = camera.position.x, oz = camera.position.z
+      let nx = ox + move.x
+      let nz = oz + move.z
+      nx = collideAxis(nx, oz, feetY, 'x')  // resolve X against current Z
+      nz = collideAxis(nx, nz, feetY, 'z')  // then Z against the resolved X
+      // Mountain rock collision (raycast per axis → slide along walls, enter the cave).
+      if (mountainBlocks(ox, oz, nx, oz, feetY)) nx = ox
+      if (mountainBlocks(nx, oz, nx, nz, feetY)) nz = oz
       camera.position.x = Math.max(0, Math.min(WORLD, nx))
       camera.position.z = Math.max(0, Math.min(WORLD, nz))
     }
@@ -618,6 +647,11 @@ function MountainModel() {
     })
     return root
   }, [obj])
+  // Register for raycast collision (world matrices are kept current by R3F each frame).
+  useEffect(() => {
+    mountainRef.current = model
+    return () => { if (mountainRef.current === model) mountainRef.current = null }
+  }, [model])
   return <primitive object={model} position={MOUNTAIN_POS} rotation={[0, -Math.PI / 2, 0]} scale={MOUNTAIN_SCALE} />
 }
 
