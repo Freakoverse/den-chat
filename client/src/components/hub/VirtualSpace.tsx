@@ -297,6 +297,23 @@ function useVirtualAvatars(pubkeys: string[]): Record<string, VirtualAvatar | nu
   return avatars
 }
 
+/** object-fit: cover for a texture on the 9:16 frame — fills the frame, crops the
+ *  overflowing axis (never squishes). flipX mirrors X for the back face. */
+function applyCoverFit(tex: THREE.Texture, frameAspect: number, flipX: boolean): void {
+  const img = tex.image as { width?: number; height?: number } | undefined
+  if (!img?.width || !img?.height) return
+  const a = img.width / img.height
+  let rx = 1, ry = 1, ox = 0, oy = 0
+  if (a > frameAspect) { rx = frameAspect / a; ox = (1 - rx) / 2 }   // image wider → crop sides (height 100%)
+  else { ry = a / frameAspect; oy = (1 - ry) / 2 }                    // image taller → crop top/bottom (width 100%)
+  if (flipX) { ox = ox + rx; rx = -rx }                              // mirror X for the back-facing copy
+  tex.wrapS = THREE.ClampToEdgeWrapping
+  tex.wrapT = THREE.ClampToEdgeWrapping
+  tex.repeat.set(rx, ry)
+  tex.offset.set(ox, oy)
+  tex.needsUpdate = true
+}
+
 /** Load a virtual avatar's front/back images as CORS-safe textures (reloads on change). */
 function useAvatarTextures(avatar: VirtualAvatar | null) {
   const [tex, setTex] = useState<{ front: THREE.Texture | null; back: THREE.Texture | null }>({ front: null, back: null })
@@ -314,13 +331,13 @@ function useAvatarTextures(avatar: VirtualAvatar | null) {
       return new Promise<THREE.Texture | null>((res) => {
         new THREE.TextureLoader().load(blobUrl, (t) => {
           t.colorSpace = THREE.SRGBColorSpace
-          if (flipX) { t.wrapS = THREE.RepeatWrapping; t.repeat.x = -1; t.offset.x = 1 }  // un-mirror the back face
+          applyCoverFit(t, STANDEE_W / STANDEE_H, flipX)
           res(t)
         }, undefined, () => res(null))
       })
     }
     ;(async () => {
-      const [f, b] = await Promise.all([loadTex(front, false), loadTex(back ?? front, true)])
+      const [f, b] = await Promise.all([loadTex(front, false), loadTex(back, true)])
       if (cancelled) { f?.dispose(); b?.dispose(); blobUrls.forEach(URL.revokeObjectURL); return }
       if (f) made.push(f)
       if (b) made.push(b)
@@ -557,7 +574,12 @@ function FpsLook({ onLockChange }: { onLockChange: (locked: boolean) => void }) 
       onLockChange(locked)
     }
     const enterEl = document.getElementById('vs-enter')
-    const onEnter = () => { el.requestPointerLock?.() }
+    const onEnter = () => {
+      // unadjustedMovement disables OS pointer acceleration, which otherwise amplifies
+      // fast flicks into overshoot in the browser (Tauri's webview doesn't accelerate).
+      const p = (el as any).requestPointerLock?.({ unadjustedMovement: true })
+      if (p && typeof p.catch === 'function') p.catch(() => el.requestPointerLock?.())
+    }
     document.addEventListener('mousemove', onMove)
     document.addEventListener('pointerlockchange', onPlc)
     enterEl?.addEventListener('click', onEnter)
