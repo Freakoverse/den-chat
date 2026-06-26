@@ -92,6 +92,7 @@ export interface VoiceParticipant {
   hasVideo: boolean
   hasScreenShare: boolean
   hasSpatial?: boolean
+  hasVspace?: boolean   // in the 3D virtual-space room
 }
 
 // ─── Provider Event Callbacks ──────────────────────────────────
@@ -335,6 +336,7 @@ export interface DCStateMessage {
   muted?: boolean
   deafened?: boolean
   spatial?: boolean
+  vspace?: boolean   // sender is in the 3D virtual-space room
   speaking?: boolean  // local VAD speaking state — used for remote speaking indicators
   e2ee?: boolean      // whether this participant has E2EE enabled
   cone?: number       // hearing cone percent (0=full circle, 100=tight cone)

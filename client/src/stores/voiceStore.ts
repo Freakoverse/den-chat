@@ -764,6 +764,7 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
                       hasVideo: incomingTrackKinds.includes('video'),
                       hasScreenShare: incomingTrackKinds.includes('screenshare'),
                       hasSpatial: data.spatial ?? false,
+                      hasVspace: data.vspace ?? false,
                     },
                   },
                 }))
@@ -804,7 +805,7 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
 
                 // Update participant state if track availability changed
                 const nowSpeaking = data.speaking ?? false
-                if (hadVideo !== nowHasVideo || hadScreen !== nowHasScreen || existingParticipant.isMuted !== (data.muted ?? false) || existingParticipant.isDeafened !== (data.deafened ?? false) || existingParticipant.hasSpatial !== (data.spatial ?? false) || existingParticipant.isSpeaking !== nowSpeaking) {
+                if (hadVideo !== nowHasVideo || hadScreen !== nowHasScreen || existingParticipant.isMuted !== (data.muted ?? false) || existingParticipant.isDeafened !== (data.deafened ?? false) || existingParticipant.hasSpatial !== (data.spatial ?? false) || existingParticipant.hasVspace !== (data.vspace ?? false) || existingParticipant.isSpeaking !== nowSpeaking) {
                   set((s) => ({
                     participants: {
                       ...s.participants,
@@ -815,6 +816,7 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
                         isMuted: data.muted ?? false,
                         isDeafened: data.deafened ?? false,
                         hasSpatial: data.spatial ?? false,
+                        hasVspace: data.vspace ?? false,
                         isSpeaking: nowSpeaking,
                       },
                     },
@@ -2147,7 +2149,7 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
     if (existing) clearInterval(existing)
 
     const broadcastState = () => {
-      const { provider, connectionState, myPosition, myHeading, myElevation, myPitch, mySphereRadius, myConePercent, isMuted, isDeafened, spatialEnabled, _isSpeaking, isE2EE } = get()
+      const { provider, connectionState, myPosition, myHeading, myElevation, myPitch, mySphereRadius, myConePercent, isMuted, isDeafened, spatialEnabled, virtualSpaceOpen, _isSpeaking, isE2EE } = get()
       if (!provider || connectionState !== 'connected') return
 
       provider.sendData({
@@ -2162,6 +2164,7 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
         muted: isMuted,
         deafened: isDeafened,
         spatial: spatialEnabled,
+        vspace: virtualSpaceOpen,
         speaking: _isSpeaking,
         e2ee: isE2EE,
       })
@@ -2289,7 +2292,7 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
   },
 
   _broadcastStateNow: () => {
-    const { provider, connectionState, myPosition, myHeading, mySphereRadius, myConePercent, isMuted, spatialEnabled, _isSpeaking } = get()
+    const { provider, connectionState, myPosition, myHeading, mySphereRadius, myConePercent, isMuted, spatialEnabled, virtualSpaceOpen, _isSpeaking } = get()
     if (!provider || connectionState !== 'connected') return
 
     provider.sendData({
@@ -2301,6 +2304,7 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
       tracks: provider.getPublishedTrackKinds(),
       muted: isMuted,
       spatial: spatialEnabled,
+      vspace: virtualSpaceOpen,
       speaking: _isSpeaking,
     })
   },

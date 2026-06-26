@@ -3,7 +3,7 @@ import { useUserStore } from '@/stores/userStore'
 import { useNotificationStore } from '@/stores/notificationStore'
 import { useNavigationStore } from '@/stores/navigationStore'
 import { getPermissionsForUser } from '@/lib/hub/permissions'
-import { Hash, Megaphone, MessagesSquare, MessageSquare, ChevronDown, ChevronRight, Settings, UserPlus, Inbox, Loader2, SlidersHorizontal, Volume2, MicOff, HeadphoneOff, Camera, ScreenShare, X, User, Radar, AlertTriangle, CalendarDays, Lock, Undo2 } from 'lucide-react'
+import { Hash, Megaphone, MessagesSquare, MessageSquare, ChevronDown, ChevronRight, Settings, UserPlus, Inbox, Loader2, SlidersHorizontal, Volume2, MicOff, HeadphoneOff, Camera, ScreenShare, X, User, Radar, Boxes, AlertTriangle, CalendarDays, Lock, Undo2 } from 'lucide-react'
 import { cn, npubShort } from '@/lib/utils'
 import { BlossomImage } from '@/components/ui/BlossomImage'
 import { useState, useCallback, useEffect, useRef, useMemo, type ReactNode } from 'react'
@@ -646,6 +646,7 @@ function ChannelItem({ channel, position, isActive, onClick, isLocked = false, i
   const myIsVideoEnabled = useVoiceStore((s) => s.isVideoEnabled)
   const myIsScreenSharing = useVoiceStore((s) => s.isScreenSharing)
   const myIsSpatial = useVoiceStore((s) => s.spatialEnabled)
+  const myIsVspace = useVoiceStore((s) => s.virtualSpaceOpen)
   const activeHubId = useHubStore((s) => s.activeHubId)
   const hub = useHubStore((s) => (activeHubId ? s.hubs[activeHubId] : null))
   const myPubkey = useUserStore((s) => s.pubkey)
@@ -788,6 +789,7 @@ function ChannelItem({ channel, position, isActive, onClick, isLocked = false, i
               hasVideo={false}
               hasScreenShare={false}
               hasSpatial={myIsSpatial}
+              hasVspace={myIsVspace}
               isConnecting={isConnecting}
             />
           )}
@@ -805,6 +807,7 @@ function ChannelItem({ channel, position, isActive, onClick, isLocked = false, i
                   hasVideo={p.pubkey === myPubkey ? myIsVideoEnabled : (part?.hasVideo ?? false)}
                   hasScreenShare={p.pubkey === myPubkey ? myIsScreenSharing : (part?.hasScreenShare ?? false)}
                   hasSpatial={p.pubkey === myPubkey ? myIsSpatial : (part?.hasSpatial ?? false)}
+                  hasVspace={p.pubkey === myPubkey ? myIsVspace : (part?.hasVspace ?? false)}
                 />
               )
             }
@@ -913,6 +916,7 @@ function VoicePresenceUser({
   hasVideo,
   hasScreenShare,
   hasSpatial,
+  hasVspace = false,
   isConnecting = false,
 }: {
   pubkey: string
@@ -923,6 +927,7 @@ function VoicePresenceUser({
   hasVideo: boolean
   hasScreenShare: boolean
   hasSpatial: boolean
+  hasVspace?: boolean
   isConnecting?: boolean
 }) {
   const { getProfile } = useProfileCache()
@@ -980,7 +985,7 @@ function VoicePresenceUser({
               {isDeafened && <HeadphoneOff size={10} className="text-red-400/70" />}
               {hasVideo && <Camera size={10} className="text-blue-400/70" />}
               {hasScreenShare && <ScreenShare size={10} className="text-purple-400/70" />}
-              {hasSpatial && <Radar size={10} className="text-indigo-400/70" />}
+              {hasVspace ? <Boxes size={10} className="text-indigo-400/70" /> : hasSpatial && <Radar size={10} className="text-indigo-400/70" />}
             </>
           )}
           {/* Gear button — appears on hover (not for self) */}
