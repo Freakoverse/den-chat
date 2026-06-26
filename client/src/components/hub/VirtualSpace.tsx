@@ -30,7 +30,7 @@ import { getPublishRelays } from '@/stores/postingBehaviourStore'
 import VirtualAvatarModal from './VirtualAvatarModal'
 
 // ── Scene constants (world units match the 2D spatial world: ~2000, hearing ~200) ──
-const EYE = 32   // camera eye height above feet
+const EYE = 34   // camera eye height above feet
 const SPEED = 150         // units / second
 const GRAVITY = 600
 const JUMP = 220          // ~40u apex — clears the tallest cube
