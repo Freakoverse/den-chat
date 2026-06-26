@@ -41,7 +41,7 @@ const FIRE = { x: CENTER, z: CENTER - 150 }    // in front of spawn (the camera 
 const STUMP_COUNT = 7
 const STUMP_RING_R = 62
 const STUMP_S = 16                             // seat height = collision footprint
-const MOON_OFFSET: [number, number, number] = [700, 760, -1000]  // from CENTER; also the moonlight direction
+const MOON_OFFSET: [number, number, number] = [-1000, 850, 1500]  // from CENTER (south — lights the cave); also the moonlight direction
 
 // Stump seats double as the stand-on props (axis-aligned box collision, top at height s).
 const CUBES: { x: number; z: number; s: number }[] = Array.from({ length: STUMP_COUNT }, (_, i) => {
@@ -561,7 +561,7 @@ function NightSky() {
     <group>
       {/* gradient skydome (inside-out sphere, never fogged) */}
       <mesh position={[CENTER, 0, CENTER]}>
-        <sphereGeometry args={[2900, 32, 16]} />
+        <sphereGeometry args={[5500, 32, 16]} />
         <meshBasicMaterial map={skyTex} side={THREE.BackSide} depthWrite={false} fog={false} />
       </mesh>
 
@@ -579,30 +579,30 @@ function NightSky() {
       </sprite>
 
       {/* moonlight — direction matches the moon's offset from center */}
-      <directionalLight position={MOON_OFFSET} intensity={0.5} color="#aac4ff" />
+      <directionalLight position={MOON_OFFSET} intensity={0.85} color="#aac4ff" />
     </group>
   )
 }
 
-/** Faceted low-poly mountain backdrop with a dark cave mouth facing the fire. */
+/** Faceted low-poly mountain backdrop (towering) with a dark cave mouth at its foot. */
 function Mountain() {
   return (
-    <group position={[CENTER, 0, CENTER - 640]}>
-      <mesh position={[0, 175, 0]}>
-        <coneGeometry args={[310, 360, 7]} />
+    <group position={[CENTER, 0, CENTER - 3600]}>
+      <mesh position={[0, 1800, 0]}>
+        <coneGeometry args={[3100, 3600, 7]} />
         <meshStandardMaterial color="#23252e" roughness={1} flatShading />
       </mesh>
-      <mesh position={[-165, 115, 95]}>
-        <coneGeometry args={[175, 250, 6]} />
+      <mesh position={[-1650, 1200, 950]}>
+        <coneGeometry args={[1750, 2500, 6]} />
         <meshStandardMaterial color="#1d1f28" roughness={1} flatShading />
       </mesh>
-      {/* cave: a dark open tube + a black backing so it reads as depth */}
-      <mesh position={[0, 24, 165]} rotation={[Math.PI / 2, 0, 0]}>
-        <cylinderGeometry args={[36, 36, 64, 18, 1, true]} />
-        <meshStandardMaterial color="#05060c" side={THREE.DoubleSide} roughness={1} />
+      {/* cave at the foot, mouth facing the camp (+z) — a dark tube + black backing for depth */}
+      <mesh position={[0, 160, 2950]} rotation={[Math.PI / 2, 0, 0]}>
+        <cylinderGeometry args={[170, 170, 460, 22, 1, true]} />
+        <meshStandardMaterial color="#0a0c14" side={THREE.DoubleSide} roughness={1} />
       </mesh>
-      <mesh position={[0, 24, 132]}>
-        <circleGeometry args={[36, 18]} />
+      <mesh position={[0, 160, 2715]}>
+        <circleGeometry args={[170, 22]} />
         <meshBasicMaterial color="#020306" />
       </mesh>
     </group>
@@ -775,7 +775,7 @@ export default function VirtualSpace() {
     <div className="w-full h-full flex flex-col gap-2">
       <div className="relative flex-1 min-h-0 rounded-xl overflow-hidden border border-indigo-500/40 bg-black">
         <Canvas
-          camera={{ fov: 75, near: 0.1, far: 6500, position: [CENTER, EYE, CENTER] }}
+          camera={{ fov: 75, near: 0.1, far: 12000, position: [CENTER, EYE, CENTER] }}
           gl={{ antialias: true }}
         >
           <Suspense fallback={null}>
