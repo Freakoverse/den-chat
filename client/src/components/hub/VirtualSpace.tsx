@@ -12,7 +12,7 @@
  * onto a cube top when over its footprint); remote profile pictures only render as a
  * texture if the host serves them with CORS, otherwise a flat colour is shown.
  */
-import { useRef, useEffect, useState, useMemo, useCallback, Suspense, memo } from 'react'
+import { useRef, useEffect, useState, useMemo, Suspense, memo } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { Html } from '@react-three/drei'
 import * as THREE from 'three'
@@ -312,98 +312,43 @@ function applyCoverFit(tex: THREE.Texture, frameAspect: number, flipX: boolean):
   tex.needsUpdate = true
 }
 
-type GifSource = { img: HTMLImageElement; canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D; tex: THREE.CanvasTexture }
-
-/**
- * Load a virtual avatar's front/back images as CORS-safe textures (reloads on change).
- * Animated GIFs become a CanvasTexture driven by a (hidden, in-DOM) <img>; call the
- * returned tick() each frame to redraw them. Static images use a plain texture.
- */
+/** Load a virtual avatar's front/back images as CORS-safe textures (reloads on change). */
 function useAvatarTextures(avatar: VirtualAvatar | null) {
   const [tex, setTex] = useState<{ front: THREE.Texture | null; back: THREE.Texture | null }>({ front: null, back: null })
-  const gifs = useRef<GifSource[]>([])
-  const acc = useRef(0)
   const front = avatar?.front
   const back = avatar?.back
   useEffect(() => {
     let cancelled = false
     const blobUrls: string[] = []
     const made: THREE.Texture[] = []
-    const anims: GifSource[] = []
-    if (!front && !back) { setTex({ front: null, back: null }); gifs.current = []; return }
-
+    if (!front && !back) { setTex({ front: null, back: null }); return }
     const loadTex = async (url: string | undefined, flipX: boolean): Promise<THREE.Texture | null> => {
-      const r = await loadAvatarBlobUrl(url)
-      if (!r) return null
-      blobUrls.push(r.url)
-      if (r.mime === 'image/gif') {
-        // Animated GIF → CanvasTexture redrawn from a playing <img> (must be in the
-        // DOM to animate; kept invisible).
-        const img = new Image()
-        img.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;pointer-events:none;z-index:-1'
-        document.body.appendChild(img)
-        const ok = await new Promise<boolean>((res) => { img.onload = () => res(true); img.onerror = () => res(false); img.src = r.url })
-        if (!ok) { img.remove(); return null }
-        const canvas = document.createElement('canvas')
-        canvas.width = img.naturalWidth || 256
-        canvas.height = img.naturalHeight || 256
-        const ctx = canvas.getContext('2d')!
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
-        const t = new THREE.CanvasTexture(canvas)
-        t.colorSpace = THREE.SRGBColorSpace
-        applyCoverFit(t, STANDEE_W / STANDEE_H, flipX)
-        anims.push({ img, canvas, ctx, tex: t })
-        return t
-      }
+      const blobUrl = await loadAvatarBlobUrl(url)
+      if (!blobUrl) return null
+      blobUrls.push(blobUrl)
       return new Promise<THREE.Texture | null>((res) => {
-        new THREE.TextureLoader().load(r.url, (t) => {
+        new THREE.TextureLoader().load(blobUrl, (t) => {
           t.colorSpace = THREE.SRGBColorSpace
           applyCoverFit(t, STANDEE_W / STANDEE_H, flipX)
           res(t)
         }, undefined, () => res(null))
       })
     }
-
     ;(async () => {
       const [f, b] = await Promise.all([loadTex(front, false), loadTex(back, true)])
-      if (cancelled) {
-        f?.dispose(); b?.dispose(); blobUrls.forEach(URL.revokeObjectURL); anims.forEach((a) => a.img.remove())
-        return
-      }
+      if (cancelled) { f?.dispose(); b?.dispose(); blobUrls.forEach(URL.revokeObjectURL); return }
       if (f) made.push(f)
       if (b) made.push(b)
-      gifs.current = anims
       setTex({ front: f, back: b })
     })()
-
-    return () => {
-      cancelled = true
-      made.forEach((t) => t.dispose())
-      blobUrls.forEach(URL.revokeObjectURL)
-      gifs.current.forEach((a) => a.img.remove())
-      gifs.current = []
-    }
+    return () => { cancelled = true; made.forEach((t) => t.dispose()); blobUrls.forEach(URL.revokeObjectURL) }
   }, [front, back])
-
-  // Redraw any GIF canvases (~20Hz) so their textures animate.
-  const tick = useCallback((dt: number) => {
-    if (!gifs.current.length) return
-    acc.current += dt
-    if (acc.current < 0.05) return
-    acc.current = 0
-    for (const a of gifs.current) {
-      a.ctx.drawImage(a.img, 0, 0, a.canvas.width, a.canvas.height)
-      a.tex.needsUpdate = true
-    }
-  }, [])
-
-  return { front: tex.front, back: tex.back, tick }
+  return tex
 }
 
 /** Two-sided framed standee: front faces the user's heading, back behind it. */
 function Standee({ avatar, pubkey, speaking }: { avatar: VirtualAvatar | null; pubkey: string; speaking: boolean }) {
-  const { front, back, tick } = useAvatarTextures(avatar)
-  useFrame((_, dt) => tick(dt))
+  const { front, back } = useAvatarTextures(avatar)
   const color = useMemo(() => colorFromPubkey(pubkey), [pubkey])
   const img = standeeGeom()
   return (
