@@ -593,12 +593,14 @@ const MOUNTAIN_POS: [number, number, number] = [CENTER, -39, CENTER - 1150]
 
 /** Night-palette materials applied to the model's named groups (keeps glowing crystals). */
 function mountainMaterials(): Record<string, THREE.Material> {
+  // DoubleSide throughout: the model's winding is inconsistent, so front-side culling
+  // makes outer faces vanish (you see through to the interior). Cheap at ~1080 faces.
   return {
-    mat_rock: new THREE.MeshStandardMaterial({ color: '#2b2f3a', roughness: 1, flatShading: true }),
-    mat_snow: new THREE.MeshStandardMaterial({ color: '#c2d0ea', roughness: 0.85, flatShading: true }),
+    mat_rock: new THREE.MeshStandardMaterial({ color: '#2b2f3a', roughness: 1, flatShading: true, side: THREE.DoubleSide }),
+    mat_snow: new THREE.MeshStandardMaterial({ color: '#c2d0ea', roughness: 0.85, flatShading: true, side: THREE.DoubleSide }),
     mat_cave_rock: new THREE.MeshStandardMaterial({ color: '#15171f', roughness: 1, flatShading: true, side: THREE.DoubleSide }),
     mat_cave_floor: new THREE.MeshStandardMaterial({ color: '#0e1016', roughness: 1, flatShading: true, side: THREE.DoubleSide }),
-    mat_crystal: new THREE.MeshStandardMaterial({ color: '#1d6f8c', emissive: '#23d3ff', emissiveIntensity: 2.4, roughness: 0.3, flatShading: true }),
+    mat_crystal: new THREE.MeshStandardMaterial({ color: '#1d6f8c', emissive: '#23d3ff', emissiveIntensity: 2.4, roughness: 0.3, flatShading: true, side: THREE.DoubleSide }),
   }
 }
 
