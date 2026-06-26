@@ -22,6 +22,7 @@ import { useUserStore } from '@/stores/userStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { npubShort, cn } from '@/lib/utils'
 import { fetchVirtualAvatarCached, loadAvatarBlobUrl } from '@/lib/voice/virtualAvatar'
+import VirtualAvatarModal from './VirtualAvatarModal'
 
 // ── Scene constants (world units match the 2D spatial world: ~2000, hearing ~200) ──
 const BODY_H = 22
@@ -478,6 +479,7 @@ export default function VirtualSpace() {
   const controlsRef = useRef<any>(null)
   const [locked, setLocked] = useState(false)
   const [showRanges, setShowRanges] = useState(true)
+  const [editAvatar, setEditAvatar] = useState(false)
 
   return (
     <div className="w-full h-full flex flex-col gap-2">
@@ -565,6 +567,13 @@ export default function VirtualSpace() {
         >
           Others' ranges
         </button>
+        <button
+          onClick={() => setEditAvatar(true)}
+          title="Customize your virtual-space avatar"
+          className="text-[10px] px-2 py-1 rounded-md border border-border/20 bg-zinc-800/40 text-muted-foreground hover:text-foreground transition-colors whitespace-nowrap font-medium shrink-0 cursor-pointer"
+        >
+          Customize
+        </button>
       </div>
 
       {/* Slider styling (same as the 2D spatial panel; included here since that panel
@@ -593,6 +602,8 @@ export default function VirtualSpace() {
         .spatial-slider--amber::-moz-range-thumb { background: #f59e0b; border-color: #fbbf24; box-shadow: 0 0 6px rgba(245,158,11,0.4); }
         .spatial-slider--amber::-webkit-slider-thumb:hover { box-shadow: 0 0 10px rgba(245,158,11,0.6); }
       `}</style>
+
+      {editAvatar && <VirtualAvatarModal onClose={() => setEditAvatar(false)} />}
     </div>
   )
 }
