@@ -41,7 +41,7 @@ const FIRE = { x: CENTER, z: CENTER - 150 }    // in front of spawn (the camera 
 const STUMP_COUNT = 7
 const STUMP_RING_R = 62
 const STUMP_S = 16                             // seat height = collision footprint
-const MOON_OFFSET: [number, number, number] = [-1000, 850, 1500]  // from CENTER (south — lights the cave); also the moonlight direction
+const MOON_OFFSET: [number, number, number] = [-1000, 1500, 1500]  // from CENTER (high + south — lights the cave); also the moonlight direction
 
 // Stump seats double as the stand-on props (axis-aligned box collision, top at height s).
 const CUBES: { x: number; z: number; s: number }[] = Array.from({ length: STUMP_COUNT }, (_, i) => {
@@ -584,7 +584,52 @@ function NightSky() {
   )
 }
 
-/** Faceted low-poly mountain backdrop (towering) with a dark cave mouth at its foot. */
+/**
+ * A cave at the mountain's foot: a recessed dark chamber (real interior depth,
+ * rendered from the inside) framed by an irregular arch of low-poly boulders that
+ * the moon catches — reads as an entrance carved into rock, not a tube.
+ */
+function CaveMouth() {
+  const rocks = useMemo(() => {
+    const out: { p: [number, number, number]; s: number; r: [number, number, number] }[] = []
+    const N = 14, archW = 200, archH = 350
+    for (let i = 0; i < N; i++) {
+      const t = i / (N - 1)
+      const a = Math.PI * t                          // left ground → over the top → right ground
+      out.push({
+        p: [-Math.cos(a) * archW, Math.sin(a) * archH + 8, (Math.random() - 0.5) * 40],
+        s: 46 + Math.random() * 36,
+        r: [Math.random() * 3, Math.random() * 3, Math.random() * 3],
+      })
+    }
+    // chunky jambs at the base
+    out.push({ p: [-archW - 12, 60, 14], s: 92, r: [0.4, 1, 0.2] })
+    out.push({ p: [archW + 8, 74, 14], s: 98, r: [1.1, 0.4, 0.7] })
+    return out
+  }, [])
+  return (
+    <group position={[0, 0, 3080]}>
+      {/* recessed dark chamber — real interior depth (seen from inside) + black far wall */}
+      <mesh position={[0, 175, -260]}>
+        <boxGeometry args={[360, 380, 540]} />
+        <meshStandardMaterial color="#080910" side={THREE.BackSide} roughness={1} />
+      </mesh>
+      <mesh position={[0, 175, -528]}>
+        <planeGeometry args={[360, 380]} />
+        <meshBasicMaterial color="#010103" />
+      </mesh>
+      {/* irregular boulder arch framing the mouth */}
+      {rocks.map((r, i) => (
+        <mesh key={i} position={r.p} rotation={r.r} scale={r.s}>
+          <dodecahedronGeometry args={[1, 0]} />
+          <meshStandardMaterial color="#262932" roughness={1} flatShading />
+        </mesh>
+      ))}
+    </group>
+  )
+}
+
+/** Faceted low-poly mountain backdrop (towering) with a cave at its foot. */
 function Mountain() {
   return (
     <group position={[CENTER, 0, CENTER - 3600]}>
@@ -596,15 +641,7 @@ function Mountain() {
         <coneGeometry args={[1750, 2500, 6]} />
         <meshStandardMaterial color="#1d1f28" roughness={1} flatShading />
       </mesh>
-      {/* cave at the foot, mouth facing the camp (+z) — a dark tube + black backing for depth */}
-      <mesh position={[0, 160, 2950]} rotation={[Math.PI / 2, 0, 0]}>
-        <cylinderGeometry args={[170, 170, 460, 22, 1, true]} />
-        <meshStandardMaterial color="#0a0c14" side={THREE.DoubleSide} roughness={1} />
-      </mesh>
-      <mesh position={[0, 160, 2715]}>
-        <circleGeometry args={[170, 22]} />
-        <meshBasicMaterial color="#020306" />
-      </mesh>
+      <CaveMouth />
     </group>
   )
 }
