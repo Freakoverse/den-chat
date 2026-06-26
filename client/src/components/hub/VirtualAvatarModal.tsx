@@ -55,9 +55,11 @@ export default function VirtualAvatarModal({ onClose }: { onClose: () => void })
     set((s) => ({ ...s, uploading: true, preview: localPreview }))
     try {
       const bytes = new Uint8Array(await file.arrayBuffer())
-      const { serverUrls } = await uploadToBlossomServers(bytes, signer, privateKey, undefined, file.type)
+      const { hash, serverUrls } = await uploadToBlossomServers(bytes, signer, privateKey, undefined, file.type)
       if (!serverUrls.length) throw new Error('no servers')
-      set((s) => ({ ...s, uploading: false, url: serverUrls[0], preview: localPreview }))
+      // serverUrls are server BASE urls — the blob lives at <server>/<hash>.
+      const url = `${serverUrls[0].replace(/\/+$/, '')}/${hash}`
+      set((s) => ({ ...s, uploading: false, url, preview: localPreview }))
     } catch {
       setError('Upload failed — check your Blossom servers in settings.')
       set((s) => ({ ...s, uploading: false }))
