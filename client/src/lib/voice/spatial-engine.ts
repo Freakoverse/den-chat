@@ -23,6 +23,7 @@ export interface SpatialParticipant {
   heading: number      // radians, 0 = up/north (visual only in 3D mode)
   elevation?: number   // height in world units → audio Y. 0 = ground plane (2D default).
   pitch?: number       // radians, vertical look. Listener-only for audio; 0 in 2D.
+  room?: boolean       // in the 3D virtual-space room. Cross-room (≠ my room) is muted.
 }
 
 export interface SpatialEngineCallbacks {
@@ -49,6 +50,7 @@ export class SpatialAudioEngine {
   private myPitch: number = 0      // local vertical look (radians); tilts the listener. 0 in 2D.
   private mySphereRadius: number = 50
   private myConePercent: number = 0  // 0 = full circle, 100 = tight cone (30°)
+  private myRoom: boolean = false    // am I in the 3D virtual-space room? Cross-room is muted.
   private participants: Map<string, SpatialParticipant> = new Map()
   private callbacks: SpatialEngineCallbacks | null = null
   private timerId: ReturnType<typeof setTimeout> | null = null
@@ -133,6 +135,19 @@ export class SpatialAudioEngine {
     this.myConePercent = Math.max(0, Math.min(100, percent))
   }
 
+  /**
+   * Set my room membership (virtual-space vs not). People in a different room are
+   * muted (sealed rooms) — the next tick re-applies all gains.
+   */
+  updateMyRoom(inVirtualSpace: boolean): void {
+    this.myRoom = inVirtualSpace
+  }
+
+  /** A participant in a different room than mine is muted (sealed rooms). */
+  private isCrossRoom(participant: SpatialParticipant): boolean {
+    return (participant.room ?? false) !== this.myRoom
+  }
+
   /** Set per-user volume (0-5 range). Applied on top of spatial attenuation. */
   setUserVolume(participantId: string, volume: number): void {
     this.userVolumes.set(participantId, volume)
@@ -143,7 +158,8 @@ export class SpatialAudioEngine {
         const participant = this.participants.get(participantId)
         const coneAtten = (this.myConePercent > 0 && participant)
           ? this.computeConeAttenuation(participant.position) : 1.0
-        nodes.gain.gain.value = coneAtten * volume
+        const roomMul = (participant && this.isCrossRoom(participant)) ? 0 : 1
+        nodes.gain.gain.value = coneAtten * volume * roomMul
       }
     }
   }
@@ -214,7 +230,8 @@ export class SpatialAudioEngine {
       const coneAtten = this.myConePercent > 0
         ? this.computeConeAttenuation(participant.position) : 1.0
       const userVol = this.userVolumes.get(participantId) ?? 1.0
-      gain.gain.value = coneAtten * userVol
+      const roomMul = this.isCrossRoom(participant) ? 0 : 1
+      gain.gain.value = coneAtten * userVol * roomMul
 
       const panner = this.ctx.createPanner()
       panner.panningModel = 'HRTF'
@@ -302,7 +319,8 @@ export class SpatialAudioEngine {
         const coneAtten = this.myConePercent > 0
           ? this.computeConeAttenuation(participant.position) : 1.0
         const userVol = this.userVolumes.get(id) ?? 1.0
-        nodes.gain.gain.value = coneAtten * userVol
+        const roomMul = this.isCrossRoom(participant) ? 0 : 1
+        nodes.gain.gain.value = coneAtten * userVol * roomMul
       }
     } else {
       // Scalar mode — compute distance-based volume * cone attenuation
@@ -320,6 +338,9 @@ export class SpatialAudioEngine {
         // Apply per-user volume boost
         const userVol = this.userVolumes.get(id) ?? 1.0
         volume *= userVol
+
+        // Sealed rooms: a participant in a different room than mine is muted.
+        if (this.isCrossRoom(participant)) volume = 0
 
         const lastVol = this.lastVolumes.get(id) ?? -1
         if (Math.abs(volume - lastVol) > 0.01) {

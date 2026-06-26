@@ -160,7 +160,8 @@ export function SpatialPanel() {
       if (
         p.channelId === currentChannelId &&
         p.status === 'joined' &&
-        participants[p.pubkey]
+        participants[p.pubkey] &&
+        !participants[p.pubkey].hasVspace   // sealed room: hide virtual-space people from the 2D radar
       ) {
         activeKeys.add(p.pubkey)
         const smooth = smoothedPositions.current.get(p.pubkey)

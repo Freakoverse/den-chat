@@ -615,6 +615,7 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
               id: track.participantId,
               position: { x: 250, y: 250 },  // default until DC state arrives
               heading: 0,
+              room: get().participants[track.participantId]?.hasVspace ?? false,
             })
             // In 3D mode, also connect audio to the Web Audio graph
             if (_spatialEngine.get3DEnabled()) {
@@ -694,6 +695,7 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
               heading: data.heading ?? 0,
               elevation: data.elevation ?? 0,
               pitch: data.pitch ?? 0,
+              room: data.vspace ?? false,
             })
           }
 
@@ -1617,6 +1619,7 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
       engine.updateMyElevation(myElevation)
       engine.updateMyPitch(myPitch)
       engine.updateMySphereRadius(mySphereRadius)
+      engine.updateMyRoom(get().virtualSpaceOpen)   // sealed rooms: mute the other room
 
       // Seed with current participant positions from presence
       const { presenceByHub, currentHubDTag, currentChannelId, participants } = get()
@@ -1630,6 +1633,7 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
               heading: p.heading ?? 0,
               elevation: p.elevation ?? 0,
               pitch: p.pitch ?? 0,
+              room: participants[p.pubkey]?.hasVspace ?? false,
             })
           }
         }
@@ -1659,11 +1663,16 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
       // Close the 3D view — tear the spatial engine down (it existed for this view).
       if (_spatialEngine) _spatialEngine.destroy()
       set({ virtualSpaceOpen: false, spatialEnabled: false, spatialPanelOpen: false, _spatialEngine: null })
+      get()._broadcastStateNow()   // tell others I left the virtual-space room
     } else {
       // Reuse the spatial-panel path to create + start the (3D) engine, then show the
       // 3D view instead of the 2D radar.
       if (!spatialEnabled) get().toggleSpatialPanel()
       set({ virtualSpaceOpen: true, spatialPanelOpen: false })
+      // Sealed rooms: switch the engine to the virtual-space room (mute 2D/plain people)
+      // and broadcast my new room so others seal me off from theirs.
+      get()._spatialEngine?.updateMyRoom(true)
+      get()._broadcastStateNow()
     }
   },
 
