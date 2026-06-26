@@ -12,7 +12,7 @@
  * onto a cube top when over its footprint); remote profile pictures only render as a
  * texture if the host serves them with CORS, otherwise a flat colour is shown.
  */
-import { useRef, useEffect, useState, Suspense } from 'react'
+import { useRef, useEffect, useState, Suspense, memo } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { PointerLockControls, Html } from '@react-three/drei'
 import * as THREE from 'three'
@@ -177,7 +177,7 @@ function Player() {
 }
 
 /** VRChat-style nameplate billboarded above a remote user: profile picture + name. */
-function Nameplate({ pubkey, y, speaking }: { pubkey: string; y: number; speaking: boolean }) {
+const Nameplate = memo(function Nameplate({ pubkey, y, speaking }: { pubkey: string; y: number; speaking: boolean }) {
   const { getProfile } = useProfileCache()
   const isHex = /^[0-9a-f]{64}$/i.test(pubkey)
   const profile = isHex ? getProfile(pubkey) : null
@@ -198,7 +198,7 @@ function Nameplate({ pubkey, y, speaking }: { pubkey: string; y: number; speakin
       </div>
     </Html>
   )
-}
+})
 
 function RemoteAvatar({ pubkey, x, z, elevation, heading, speaking, showRange, radius, conePercent }: {
   pubkey: string; x: number; z: number; elevation: number; heading: number; speaking: boolean
@@ -215,7 +215,7 @@ function RemoteAvatar({ pubkey, x, z, elevation, heading, speaking, showRange, r
   // uses the exact positions, so spatialization stays accurate.
   useFrame((_, dt) => {
     const c = cur.current
-    const t = 1 - Math.exp(-Math.min(dt, 0.1) * 11)
+    const t = 1 - Math.exp(-Math.min(dt, 0.1) * 6)
     c.x += (x - c.x) * t
     c.z += (z - c.z) * t
     c.elevation += (elevation - c.elevation) * t
