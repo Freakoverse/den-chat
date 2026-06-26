@@ -337,18 +337,19 @@ function Standee({ avatar, pubkey, speaking }: { avatar: VirtualAvatar | null; p
   const color = useMemo(() => colorFromPubkey(pubkey), [pubkey])
   const img = standeeGeom()
   return (
-    <group position={[0, 4, 0]}>{/* lift so the frame's bottom clears the floor */}
+    <group position={[0, 3, 0]}>{/* lift so the frame's bottom clears the floor */}
       {/* 3D frame slab around the image */}
       <mesh geometry={frameGeom()} position={[0, STANDEE_H / 2, 0]} castShadow>
         <meshStandardMaterial color="#0f172a" metalness={0.25} roughness={0.65} />
       </mesh>
-      {/* front image (toward heading) */}
+      {/* front image (toward heading). key on the texture so the material recompiles
+          with the map once it loads (R3F won't add USE_MAP to an existing material). */}
       <mesh geometry={img} position={[0, STANDEE_H / 2, FRAME_DEPTH / 2 + 0.15]}>
-        <meshBasicMaterial map={front ?? undefined} color={front ? '#ffffff' : color} side={THREE.FrontSide} toneMapped={false} />
+        <meshBasicMaterial key={front?.uuid ?? 'solid'} map={front ?? undefined} color={front ? '#ffffff' : color} side={THREE.FrontSide} toneMapped={false} />
       </mesh>
       {/* back image */}
       <mesh geometry={img} position={[0, STANDEE_H / 2, -(FRAME_DEPTH / 2 + 0.15)]} rotation={[0, Math.PI, 0]}>
-        <meshBasicMaterial map={back ?? undefined} color={back ? '#ffffff' : color} side={THREE.FrontSide} toneMapped={false} />
+        <meshBasicMaterial key={back?.uuid ?? 'solid'} map={back ?? undefined} color={back ? '#ffffff' : color} side={THREE.FrontSide} toneMapped={false} />
       </mesh>
       {/* speaking glow on the frame edge */}
       <lineLoop geometry={frameOutline()} position={[0, STANDEE_H / 2, FRAME_DEPTH / 2 + 0.05]}>
