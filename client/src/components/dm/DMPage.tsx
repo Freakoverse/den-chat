@@ -416,7 +416,7 @@ function ConversationList({
 
       {/* DM self (NIP-04 only) — open an encrypted conversation with your own key */}
       {dmProtocol === 'nip04' && myPubkey && (
-        <div className="px-3 pb-0.5 shrink-0">
+        <div className="px-3 pb-0.5 shrink-0 mt-1.5">
           <button
             onClick={() => onSelect(myPubkey)}
             className="w-full flex items-center justify-center gap-1.5 py-1.5 text-[11px] font-medium rounded-md bg-secondary/40 border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors cursor-pointer"
