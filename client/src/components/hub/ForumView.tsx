@@ -695,6 +695,7 @@ function ForumPostDetail({
   const forumHubMembers = useHubStore((s) => s.hubMembers[hubDTag])
   const { storeReactions, reactions } = useDecryptedReactions(hubDTag, getChannelKey, forumHub, forumHubMembers, channelId)
   const hubRoleNames = useMemo(() => forumHub?.roles?.map((r: any) => r.name).filter(Boolean) || [], [forumHub])
+  const hubChannels = useMemo(() => forumHub?.channels?.map((c: any) => ({ channelId: c.channelId, name: c.name })) || [], [forumHub])
   const allForumMessages = useMemo(() => [post as ChatMessage, ...replies], [post, replies])
 
   const addReaction = useCallback((messageId: string, emoji: string, customUrl?: string) => {
@@ -1032,7 +1033,7 @@ function ForumPostDetail({
             {/* Body — hidden for mods until revealed */}
             {(!isPostHidden || !canHide || hiddenPostRevealed) && (
             <div className="prose prose-sm dark:prose-invert max-w-none mb-4">
-              <MessageContent content={post.content} mutedWords={mutedWords} hubRoleNames={hubRoleNames} />
+              <MessageContent content={post.content} mutedWords={mutedWords} hubRoleNames={hubRoleNames} hubChannels={hubChannels} />
             </div>
             )}
 
@@ -1173,7 +1174,7 @@ function ForumPostDetail({
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-semibold text-foreground">{myNpubName}</span>
-                      <div className="text-sm text-foreground/90 break-words"><MessageContent content={optMsg.content} hubRoleNames={hubRoleNames} /></div>
+                      <div className="text-sm text-foreground/90 break-words"><MessageContent content={optMsg.content} hubRoleNames={hubRoleNames} hubChannels={hubChannels} /></div>
                       {optMsg.status === 'mining' && <span className="text-[10px] text-muted-foreground italic">processing...</span>}
                       {optMsg.status === 'publishing' && !optMsg.relayProgress?.confirmed && <span className="text-[10px] text-muted-foreground italic">publishing...</span>}
                       {optMsg.status === 'published' && <Check size={13} className="text-green-500 shrink-0" />}

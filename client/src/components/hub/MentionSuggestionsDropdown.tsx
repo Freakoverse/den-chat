@@ -11,7 +11,7 @@ import { createPortal } from 'react-dom'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { truncateNpub } from '@/lib/utils'
 import { formatDnnId } from '@/lib/dnn/formatDnnId'
-import { Globe, Radio, Shield, BadgeCheck } from 'lucide-react'
+import { Globe, Radio, Shield, BadgeCheck, Hash } from 'lucide-react'
 import type { MentionSuggestion } from './useMentionAutocomplete'
 
 export function MentionSuggestionsDropdown({ suggestions, activeIndex, onSelect, onHover, anchorRef }: {
@@ -63,7 +63,7 @@ export function MentionSuggestionsDropdown({ suggestions, activeIndex, onSelect,
       className="bg-popover/95 backdrop-blur-md border border-border rounded-lg shadow-xl overflow-hidden overflow-y-auto"
     >
       {suggestions.map((s, i) => {
-        const key = s.type === 'user' ? s.pubkey : s.type === 'group' ? s.keyword : s.roleId
+        const key = s.type === 'user' ? s.pubkey : s.type === 'group' ? s.keyword : s.type === 'channel' ? s.channelId : s.roleId
         return (
           <button
             key={key}
@@ -105,6 +105,16 @@ export function MentionSuggestionsDropdown({ suggestions, activeIndex, onSelect,
                 <div className="min-w-0 flex-1">
                   <span className="text-sm font-semibold text-amber-400 truncate block">{s.label}</span>
                   <span className="text-[10px] text-muted-foreground truncate block">{s.description}</span>
+                </div>
+              </>
+            ) : s.type === 'channel' ? (
+              <>
+                <div className="h-6 w-6 shrink-0 rounded-full bg-primary/15 flex items-center justify-center">
+                  <Hash size={13} className="text-primary" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <span className="text-sm font-semibold text-primary truncate block">#{s.channelName}</span>
+                  <span className="text-[10px] text-muted-foreground truncate block">Open this channel</span>
                 </div>
               </>
             ) : (

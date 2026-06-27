@@ -4573,6 +4573,7 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
   const hubMembers = useHubStore((s) => hubDTag ? s.hubMembers[hubDTag] : undefined)
   const { getProfile } = useProfileCache()
   const [mentionQuery, setMentionQuery] = useState<string | null>(null)
+  const [mentionTrigger, setMentionTrigger] = useState<'@' | '#'>('@')   // '#' = channel autocomplete
   const [mentionIndex, setMentionIndex] = useState(0)
   const mentionStartRef = useRef<number | null>(null)
   const mentionListRef = useRef<HTMLDivElement>(null)
@@ -4588,11 +4589,20 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
     | { type: 'user'; pubkey: string; name: string; npub: string; picture?: string; dnnId?: string }
     | { type: 'group'; keyword: 'everyone' | 'here'; label: string; description: string }
     | { type: 'role'; roleId: string; roleName: string; color?: string }
+    | { type: 'channel'; channelId: string; channelName: string }
 
-  // Compute filtered suggestions from hub members + group mentions + roles
+  // Compute filtered suggestions from hub members + group mentions + roles (or #channels)
   const mentionSuggestions: MentionSuggestion[] = useMemo(() => {
-    if (mentionQuery === null || !hubMembers) return []
+    if (mentionQuery === null) return []
     const q = mentionQuery.toLowerCase()
+    // #channel suggestions (trigger '#')
+    if (mentionTrigger === '#') {
+      return (hub?.channels || [])
+        .filter((c) => c.name && (!q || c.name.toLowerCase().includes(q)))
+        .slice(0, 10)
+        .map((c) => ({ type: 'channel' as const, channelId: c.channelId, channelName: c.name }))
+    }
+    if (!hubMembers) return []
     const results: MentionSuggestion[] = []
 
     // 1. Group mentions (@everyone, @here) — permission-gated
@@ -4632,21 +4642,30 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
 
     results.push(...userResults)
     return results.slice(0, 10) // limit total suggestions
-  }, [mentionQuery, hubMembers, getProfile, inputPerms.mention_everyone, inputPerms.mention_here, inputPerms.mention_roles, hub?.roles])
+  }, [mentionQuery, mentionTrigger, hub?.channels, hubMembers, getProfile, inputPerms.mention_everyone, inputPerms.mention_here, inputPerms.mention_roles, hub?.roles])
 
-  // Detect @mention query from cursor position
+  // Detect @mention or #channel query from cursor position
   const updateMentionQuery = useCallback((text: string, cursorPos: number) => {
-    // Look backwards from cursor for '@'
     const beforeCursor = text.slice(0, cursorPos)
     const atMatch = beforeCursor.match(/@([^\s@]*)$/)
     if (atMatch) {
+      setMentionTrigger('@')
       setMentionQuery(atMatch[1])
       mentionStartRef.current = cursorPos - atMatch[0].length
       setMentionIndex(0)
-    } else {
-      setMentionQuery(null)
-      mentionStartRef.current = null
+      return
     }
+    // #channel — require start-of-line or whitespace before '#' (so colors/anchors don't trigger)
+    const hashMatch = beforeCursor.match(/(?:^|\s)#([^\s#]*)$/)
+    if (hashMatch) {
+      setMentionTrigger('#')
+      setMentionQuery(hashMatch[1])
+      mentionStartRef.current = cursorPos - hashMatch[1].length - 1   // position of '#'
+      setMentionIndex(0)
+      return
+    }
+    setMentionQuery(null)
+    mentionStartRef.current = null
   }, [])
 
   // Compute filtered emoji suggestions from the merged emoji map
@@ -4717,6 +4736,8 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
       mention = `@${suggestion.npub}`
     } else if (suggestion.type === 'group') {
       mention = `@${suggestion.keyword}`
+    } else if (suggestion.type === 'channel') {
+      mention = `#${suggestion.channelName}`
     } else {
       mention = `@${suggestion.roleName}`
     }
@@ -5719,7 +5740,7 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
               className="absolute bottom-full left-0 right-0 mb-1 mx-2 bg-popover/95 backdrop-blur-md border border-border rounded-lg shadow-xl overflow-hidden z-50 max-h-[240px] overflow-y-auto"
             >
               {mentionSuggestions.map((s, i) => {
-                const key = s.type === 'user' ? s.pubkey : s.type === 'group' ? s.keyword : s.roleId
+                const key = s.type === 'user' ? s.pubkey : s.type === 'group' ? s.keyword : s.type === 'channel' ? s.channelId : s.roleId
                 return (
                   <button
                     key={key}
@@ -5771,6 +5792,17 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
                           <span className="text-[10px] text-muted-foreground truncate block">
                             {s.description}
                           </span>
+                        </div>
+                      </>
+                    ) : s.type === 'channel' ? (
+                      /* ── Channel mention row (#channel) ── */
+                      <>
+                        <div className="h-6 w-6 shrink-0 rounded-full bg-primary/15 flex items-center justify-center">
+                          <Hash size={13} className="text-primary" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <span className="text-sm font-semibold text-primary truncate block">#{s.channelName}</span>
+                          <span className="text-[10px] text-muted-foreground truncate block">Open this channel</span>
                         </div>
                       </>
                     ) : (
