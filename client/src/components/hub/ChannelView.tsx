@@ -3239,6 +3239,8 @@ export function ChatMessageRow({
 
   // Derive hub role names for mention rendering in MessageContent
   const hubRoleNames = useMemo(() => rowHub?.roles?.map((r: any) => r.name).filter(Boolean) || [], [rowHub])
+  // Derive hub channels for #channel mention rendering in MessageContent
+  const hubChannels = useMemo(() => rowHub?.channels?.map((c: any) => ({ channelId: c.channelId, name: c.name })) || [], [rowHub])
 
   // ── Mention highlight detection ──
   // Check if the current user is mentioned in this message (by @npub, @everyone, @here, or @roleName)
@@ -3399,7 +3401,7 @@ export function ChatMessageRow({
           ) : (
             <>
               <div className={`text-sm text-foreground/90 break-words transition-opacity ${relayPending ? 'opacity-50' : ''}`}>
-                <MessageContent content={contentForRender} onProfileClick={onOpenProfile} emojiTags={msg.emojiTags} mutedWords={mutedWords} disableLinkPreviews={!authorCanEmbed} disableHubInviteCards={!authorCanInvite} hubRoleNames={hubRoleNames} suffix={
+                <MessageContent content={contentForRender} onProfileClick={onOpenProfile} emojiTags={msg.emojiTags} mutedWords={mutedWords} disableLinkPreviews={!authorCanEmbed} disableHubInviteCards={!authorCanInvite} hubRoleNames={hubRoleNames} hubChannels={hubChannels} suffix={
                   <>
                     {msg.edited && <span className="text-[10px] text-muted-foreground ml-1"> (edited)</span>}
                     <RelayProgressIndicator eventId={msg.id} />
@@ -3692,7 +3694,7 @@ export function ChatMessageRow({
           ) : (
             <>
               <div className={`text-sm text-foreground/90 break-words transition-opacity ${relayPending ? 'opacity-50' : ''}`}>
-                <MessageContent content={contentForRender} onProfileClick={onOpenProfile} emojiTags={msg.emojiTags} mutedWords={mutedWords} disableLinkPreviews={!authorCanEmbed} disableHubInviteCards={!authorCanInvite} hubRoleNames={hubRoleNames} suffix={
+                <MessageContent content={contentForRender} onProfileClick={onOpenProfile} emojiTags={msg.emojiTags} mutedWords={mutedWords} disableLinkPreviews={!authorCanEmbed} disableHubInviteCards={!authorCanInvite} hubRoleNames={hubRoleNames} hubChannels={hubChannels} suffix={
                   <>
                     {msg.edited && <span className="text-[10px] text-muted-foreground ml-1"> (edited)</span>}
                     <RelayProgressIndicator eventId={msg.id} />

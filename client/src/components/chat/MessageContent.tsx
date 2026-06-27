@@ -26,7 +26,36 @@ import { ProfileCard, NoteCard, LongFormCard, CommentCard, LiveActivityCard } fr
 import { detectEmbed } from '@/lib/embeds'
 import { Embed } from '@/components/ui/Embed'
 import { usePreferencesStore } from '@/stores/preferencesStore'
+import { useHubStore } from '@/stores/hubStore'
 import { CustomAudioPlayer } from '@/components/ui/CustomAudioPlayer'
+
+/* ─── Channel mention pill (#channel → click to open that channel) ─── */
+
+export function ChannelPill({ channelId, name }: { channelId: string; name: string }) {
+  return (
+    <button
+      onClick={(e) => { e.stopPropagation(); useHubStore.getState().setActiveChannel(channelId) }}
+      className="inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-xs font-medium bg-primary/15 text-primary hover:bg-primary/25 transition-colors cursor-pointer align-baseline"
+      title={`#${name}`}
+    >
+      <Hash size={11} className="opacity-80" />{name}
+    </button>
+  )
+}
+
+type HubChannel = { channelId: string; name: string }
+
+/** Build a regex + name→channel lookup for the hub's channels (longest names first). */
+function channelMatcher(channels?: HubChannel[]): { re: RegExp; byName: Map<string, HubChannel> } | null {
+  if (!channels || channels.length === 0) return null
+  const byName = new Map<string, HubChannel>()
+  for (const c of channels) if (c.name) byName.set(c.name.toLowerCase(), c)
+  const names = channels.map((c) => c.name).filter(Boolean).sort((a, b) => b.length - a.length)
+  if (names.length === 0) return null
+  const escaped = names.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+  const re = new RegExp(`(^|\\s)#(${escaped.join('|')})(?![a-zA-Z0-9_-])`, 'gi')
+  return { re, byName }
+}
 
 /* ─── Spoiler text (Discord-style ||text||) ─── */
 
@@ -675,7 +704,7 @@ export function CodeBlock({ code, language }: { code: string; language?: string 
 
 /* ─── Main MessageContent renderer ─── */
 
-export const MessageContent = memo(function MessageContent({ content, suffix, onProfileClick, emojiTags, disableLinkPreviews, disableCustomEmojis, disableMedia, disableHubInviteCards, mutedWords, hubRoleNames }: { content: string; suffix?: React.ReactNode; onProfileClick?: (pubkey: string) => void; emojiTags?: [string, string, string?][]; disableLinkPreviews?: boolean; disableCustomEmojis?: boolean; disableMedia?: boolean; disableHubInviteCards?: boolean; mutedWords?: Set<string>; hubRoleNames?: string[] }) {
+export const MessageContent = memo(function MessageContent({ content, suffix, onProfileClick, emojiTags, disableLinkPreviews, disableCustomEmojis, disableMedia, disableHubInviteCards, mutedWords, hubRoleNames, hubChannels }: { content: string; suffix?: React.ReactNode; onProfileClick?: (pubkey: string) => void; emojiTags?: [string, string, string?][]; disableLinkPreviews?: boolean; disableCustomEmojis?: boolean; disableMedia?: boolean; disableHubInviteCards?: boolean; mutedWords?: Set<string>; hubRoleNames?: string[]; hubChannels?: HubChannel[] }) {
   const globalEmbedsOff = !usePreferencesStore((s) => s.showEmbeds)
   const globalMutedWordsOff = !usePreferencesStore((s) => s.hideMutedWords)
   const globalMediaOff = !usePreferencesStore((s) => s.showMedia)
@@ -925,6 +954,14 @@ export const MessageContent = memo(function MessageContent({ content, suffix, on
           </TooltipProvider>
         )
       }
+      // Channel mention pills (inserted by preChannelMarkdown) — alt "channel:id|name"
+      if (alt && alt.startsWith('channel:')) {
+        const rest = alt.slice(8)
+        const pipeIdx = rest.indexOf('|')
+        const channelId = pipeIdx >= 0 ? rest.slice(0, pipeIdx) : rest
+        const name = pipeIdx >= 0 ? rest.slice(pipeIdx + 1) : rest
+        return <ChannelPill channelId={channelId} name={name} />
+      }
       // Normal images
       return <BlossomImage src={src || ''} alt={alt || ''} />
     },
@@ -943,7 +980,9 @@ export const MessageContent = memo(function MessageContent({ content, suffix, on
     const timestamped = preTimestampMarkdown(mentioned)
     // Pre-process: replace :shortcode: with markdown image syntax for NIP-30 emojis
     const emojified = effectiveDisableEmojis ? timestamped : preEmojifyMarkdown(timestamped, emojiTags)
-    const proc = emojified.replace(/\n{3,}/g, (m) => {
+    // Pre-process: replace #channel-name (matching a real hub channel) with a clickable pill
+    const channeled = preChannelMarkdown(emojified, hubChannels)
+    const proc = channeled.replace(/\n{3,}/g, (m) => {
       const spacers = Array(m.length - 2).fill('\u00a0').join('\n\n')
       return '\n\n' + spacers + '\n\n'
     })
@@ -992,7 +1031,7 @@ export const MessageContent = memo(function MessageContent({ content, suffix, on
           const hasBlockSyntax = /^(\s*(#{1,6}\s|[-*]\s|\d+\.\s|>|```|---|\|))|\n\n/m.test(seg.value)
           const hasUrl = /(https?:\/\/|www\.)\S/i.test(seg.value)
           if (!hasBlockSyntax && !hasUrl) {
-            return <span key={i}>{emojifyTimestampAndMention(seg.value, emojiTags, hubRoleNames)}</span>
+            return <span key={i}>{emojifyTimestampAndMention(seg.value, emojiTags, hubRoleNames, hubChannels)}</span>
           }
           return <span key={i}>{renderMarkdown(seg.value)}</span>
         })}
@@ -1294,10 +1333,62 @@ function mentionifyInline(node: React.ReactNode, hubRoleNames?: string[]): React
   return node
 }
 
-/** Process emojis, timestamps, AND mentions in one pass (for non-markdown inline paths) */
-function emojifyTimestampAndMention(text: string, eventEmojiTags?: [string, string, string?][], hubRoleNames?: string[]): React.ReactNode {
+/* ─── Channel mention (#channel) pre-processing ──────────── */
+
+/**
+ * Pre-process text for markdown: replace #channel-name (matching a real hub channel)
+ * with markdown image syntax. alt="channel:channelId|name" → clickable ChannelPill.
+ */
+function preChannelMarkdown(text: string, channels?: HubChannel[]): string {
+  const m = channelMatcher(channels)
+  if (!m) return text
+  m.re.lastIndex = 0
+  return text.replace(m.re, (full, pre: string, name: string) => {
+    const c = m.byName.get(name.toLowerCase())
+    return c ? `${pre}![channel:${c.channelId}|${c.name}](c)` : full
+  })
+}
+
+/** Split text on #channel patterns and return nodes with ChannelPills (inline paths). */
+function channelifyInline(node: React.ReactNode, channels?: HubChannel[]): React.ReactNode {
+  const m = channelMatcher(channels)
+  if (!m) return node
+
+  const processString = (text: string): React.ReactNode[] => {
+    const parts: React.ReactNode[] = []
+    let lastIndex = 0
+    let match: RegExpExecArray | null
+    m.re.lastIndex = 0
+    while ((match = m.re.exec(text)) !== null) {
+      const c = m.byName.get(match[2].toLowerCase())
+      if (!c) continue
+      const contentStart = match.index + match[1].length  // after the leading boundary char
+      if (contentStart > lastIndex) parts.push(text.slice(lastIndex, contentStart))
+      parts.push(<ChannelPill key={`ch-${match.index}`} channelId={c.channelId} name={c.name} />)
+      lastIndex = m.re.lastIndex
+    }
+    if (lastIndex < text.length) parts.push(text.slice(lastIndex))
+    return parts.length > 0 ? parts : [text]
+  }
+
+  if (typeof node === 'string') {
+    const parts = processString(node)
+    return parts.length === 1 && typeof parts[0] === 'string' ? parts[0] : <>{parts}</>
+  }
+  if (node && typeof node === 'object' && 'props' in node) {
+    const children = (node as any).props.children
+    if (Array.isArray(children)) {
+      const processed = children.flatMap((child: React.ReactNode) => typeof child === 'string' ? processString(child) : [child])
+      return <>{processed}</>
+    }
+  }
+  return node
+}
+
+/** Process emojis, timestamps, mentions, AND channels in one pass (for non-markdown inline paths) */
+function emojifyTimestampAndMention(text: string, eventEmojiTags?: [string, string, string?][], hubRoleNames?: string[], hubChannels?: HubChannel[]): React.ReactNode {
   const result = emojifyAndTimestamp(text, eventEmojiTags)
-  return mentionifyInline(result, hubRoleNames)
+  return channelifyInline(mentionifyInline(result, hubRoleNames), hubChannels)
 }
 
 /* ─── Nostr reference detection + rendering ────────────────── */
