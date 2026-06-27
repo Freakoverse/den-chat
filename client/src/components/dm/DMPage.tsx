@@ -34,7 +34,7 @@ import { getUploadBlossoms, getPublishRelays } from '@/stores/postingBehaviourSt
 import {
   Search, Plus, MessageSquare, Loader2,
   Lock, Users, UserPlus, AlertCircle, X, ShieldBan, Eye, EyeOff, Shield, ShieldCheck, Info,
-  AlertTriangle, Download, Star, ChevronLeft, Check,
+  AlertTriangle, Download, Star, ChevronLeft, Check, NotebookPen,
 } from 'lucide-react'
 import { MessageContent } from '@/components/chat/MessageContent'
 import { ScrollableContent } from '../chat/ScrollableContent'
@@ -318,6 +318,7 @@ function ConversationList({
 
   // Block list — needed so the memo re-runs when users are blocked/unblocked
   const blockedPubkeys = useBlockStore((s) => s.blockedPubkeys)
+  const myPubkey = useUserStore((s) => s.pubkey)
 
   const { getProfile } = useProfileCache()
 
@@ -412,6 +413,18 @@ function ConversationList({
           </TooltipProvider>
         </div>
       </div>
+
+      {/* DM self (NIP-04 only) — open an encrypted conversation with your own key */}
+      {dmProtocol === 'nip04' && myPubkey && (
+        <div className="px-3 pb-0.5 shrink-0">
+          <button
+            onClick={() => onSelect(myPubkey)}
+            className="w-full flex items-center justify-center gap-1.5 py-1.5 text-[11px] font-medium rounded-md bg-secondary/40 border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors cursor-pointer"
+          >
+            <NotebookPen size={12} /> DM self
+          </button>
+        </div>
+      )}
 
       {/* Search */}
       <div className="px-3 py-2 shrink-0">
