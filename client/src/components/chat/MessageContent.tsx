@@ -36,18 +36,16 @@ import { CustomAudioPlayer } from '@/components/ui/CustomAudioPlayer'
 /** Open a channel the way the sidebar does: select it (AppLayout routes voice/forum/
  *  text by the channel's type). For a voice channel, open its text-chat (like the
  *  sidebar's chat toggle) rather than the join screen. Navigate on the mobile layout. */
-function openChannel(channelId: string) {
-  const hub = useHubStore.getState()
-  hub.setActiveChannel(channelId)
-  const ch = hub.activeHubId ? hub.hubs[hub.activeHubId]?.channels.find((c) => c.channelId === channelId) : undefined
-  useVoiceStore.getState().setVoiceChatMode(ch?.type === 'voice')
+function openChannel(channelId: string, voice: boolean) {
+  useHubStore.getState().setActiveChannel(channelId)
+  useVoiceStore.getState().setVoiceChatMode(voice)   // voice channel → show its text-chat
   if (window.innerWidth <= 1080) useNavigationStore.getState().setMobileView('chat')
 }
 
-export function ChannelPill({ channelId, name }: { channelId: string; name: string }) {
+export function ChannelPill({ channelId, name, voice }: { channelId: string; name: string; voice?: boolean }) {
   return (
     <button
-      onClick={(e) => { e.stopPropagation(); openChannel(channelId) }}
+      onClick={(e) => { e.stopPropagation(); openChannel(channelId, !!voice) }}
       className="inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-xs font-medium bg-primary/15 text-primary hover:bg-primary/25 transition-colors cursor-pointer align-baseline"
       title={`#${name}`}
     >
@@ -56,7 +54,7 @@ export function ChannelPill({ channelId, name }: { channelId: string; name: stri
   )
 }
 
-type HubChannel = { channelId: string; name: string }
+type HubChannel = { channelId: string; name: string; type?: string }
 
 /** Build a regex + name→channel lookup for the hub's channels (longest names first). */
 function channelMatcher(channels?: HubChannel[]): { re: RegExp; byName: Map<string, HubChannel> } | null {
@@ -967,13 +965,15 @@ export const MessageContent = memo(function MessageContent({ content, suffix, on
           </TooltipProvider>
         )
       }
-      // Channel mention pills (inserted by preChannelMarkdown) — alt "channel:id|name"
+      // Channel mention pills (inserted by preChannelMarkdown) — alt "channel:id|type|name"
       if (alt && alt.startsWith('channel:')) {
         const rest = alt.slice(8)
-        const pipeIdx = rest.indexOf('|')
-        const channelId = pipeIdx >= 0 ? rest.slice(0, pipeIdx) : rest
-        const name = pipeIdx >= 0 ? rest.slice(pipeIdx + 1) : rest
-        return <ChannelPill channelId={channelId} name={name} />
+        const p1 = rest.indexOf('|')
+        const p2 = rest.indexOf('|', p1 + 1)
+        const channelId = p1 >= 0 ? rest.slice(0, p1) : rest
+        const type = p1 >= 0 && p2 >= 0 ? rest.slice(p1 + 1, p2) : ''
+        const name = p2 >= 0 ? rest.slice(p2 + 1) : (p1 >= 0 ? rest.slice(p1 + 1) : rest)
+        return <ChannelPill channelId={channelId} name={name} voice={type === 'voice'} />
       }
       // Normal images
       return <BlossomImage src={src || ''} alt={alt || ''} />
@@ -1358,7 +1358,7 @@ function preChannelMarkdown(text: string, channels?: HubChannel[]): string {
   m.re.lastIndex = 0
   return text.replace(m.re, (full, pre: string, name: string) => {
     const c = m.byName.get(name.toLowerCase())
-    return c ? `${pre}![channel:${c.channelId}|${c.name}](c)` : full
+    return c ? `${pre}![channel:${c.channelId}|${c.type || ''}|${c.name}](c)` : full
   })
 }
 
@@ -1377,7 +1377,7 @@ function channelifyInline(node: React.ReactNode, channels?: HubChannel[]): React
       if (!c) continue
       const contentStart = match.index + match[1].length  // after the leading boundary char
       if (contentStart > lastIndex) parts.push(text.slice(lastIndex, contentStart))
-      parts.push(<ChannelPill key={`ch-${match.index}`} channelId={c.channelId} name={c.name} />)
+      parts.push(<ChannelPill key={`ch-${match.index}`} channelId={c.channelId} name={c.name} voice={c.type === 'voice'} />)
       lastIndex = m.re.lastIndex
     }
     if (lastIndex < text.length) parts.push(text.slice(lastIndex))

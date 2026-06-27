@@ -3240,7 +3240,7 @@ export function ChatMessageRow({
   // Derive hub role names for mention rendering in MessageContent
   const hubRoleNames = useMemo(() => rowHub?.roles?.map((r: any) => r.name).filter(Boolean) || [], [rowHub])
   // Derive hub channels for #channel mention rendering in MessageContent
-  const hubChannels = useMemo(() => rowHub?.channels?.map((c: any) => ({ channelId: c.channelId, name: c.name })) || [], [rowHub])
+  const hubChannels = useMemo(() => rowHub?.channels?.map((c: any) => ({ channelId: c.channelId, name: c.name, type: c.type })) || [], [rowHub])
 
   // ── Mention highlight detection ──
   // Check if the current user is mentioned in this message (by @npub, @everyone, @here, or @roleName)

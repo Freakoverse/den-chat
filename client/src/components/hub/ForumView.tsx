@@ -695,7 +695,7 @@ function ForumPostDetail({
   const forumHubMembers = useHubStore((s) => s.hubMembers[hubDTag])
   const { storeReactions, reactions } = useDecryptedReactions(hubDTag, getChannelKey, forumHub, forumHubMembers, channelId)
   const hubRoleNames = useMemo(() => forumHub?.roles?.map((r: any) => r.name).filter(Boolean) || [], [forumHub])
-  const hubChannels = useMemo(() => forumHub?.channels?.map((c: any) => ({ channelId: c.channelId, name: c.name })) || [], [forumHub])
+  const hubChannels = useMemo(() => forumHub?.channels?.map((c: any) => ({ channelId: c.channelId, name: c.name, type: c.type })) || [], [forumHub])
   const allForumMessages = useMemo(() => [post as ChatMessage, ...replies], [post, replies])
 
   const addReaction = useCallback((messageId: string, emoji: string, customUrl?: string) => {
