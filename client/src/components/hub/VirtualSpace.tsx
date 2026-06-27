@@ -105,6 +105,17 @@ function mountainBlocks(fromX: number, fromZ: number, toX: number, toZ: number, 
   return _ray.intersectObject(mountainRef.current, true).length > 0
 }
 
+const _downDir = new THREE.Vector3(0, -1, 0)
+/** Height of the mountain surface directly below a point (cave floor / slope), or null. */
+function mountainSurfaceBelow(x: number, z: number, fromY: number): number | null {
+  if (!mountainRef.current) return null
+  _rayO.set(x, fromY, z)
+  _ray.set(_rayO, _downDir)
+  _ray.far = fromY + 60
+  const hits = _ray.intersectObject(mountainRef.current, true)
+  return hits.length > 0 ? hits[0].point.y : null
+}
+
 // ── Keyboard state (module-scoped so listeners are simple) ──
 const keys = new Set<string>()
 
@@ -156,10 +167,14 @@ function Player() {
   useFrame((_, rawDt) => {
     const dt = Math.min(rawDt, 0.05)
 
-    // Vertical first: gravity + land on the floor or a cube top, then jump.
+    // Vertical first: gravity + land on the floor, a cube top, or the mountain
+    // surface below us (so you can't drop through the slope mid-jump), then jump.
     velY.current -= GRAVITY * dt
     camera.position.y += velY.current * dt
-    const groundY = EYE + groundHeightAt(camera.position.x, camera.position.z)
+    let surfaceH = groundHeightAt(camera.position.x, camera.position.z)
+    const mY = mountainSurfaceBelow(camera.position.x, camera.position.z, camera.position.y + 4)
+    if (mY !== null && mY > surfaceH) surfaceH = mY
+    const groundY = EYE + surfaceH
     if (camera.position.y <= groundY) {
       camera.position.y = groundY
       velY.current = 0
