@@ -27,14 +27,22 @@ import { detectEmbed } from '@/lib/embeds'
 import { Embed } from '@/components/ui/Embed'
 import { usePreferencesStore } from '@/stores/preferencesStore'
 import { useHubStore } from '@/stores/hubStore'
+import { useNavigationStore } from '@/stores/navigationStore'
 import { CustomAudioPlayer } from '@/components/ui/CustomAudioPlayer'
 
 /* ─── Channel mention pill (#channel → click to open that channel) ─── */
 
+/** Open a channel the way the sidebar does: select it (AppLayout routes voice/forum/
+ *  text by the channel's type) and, on the narrow/mobile layout, navigate to it. */
+function openChannel(channelId: string) {
+  useHubStore.getState().setActiveChannel(channelId)
+  if (window.innerWidth <= 1080) useNavigationStore.getState().setMobileView('chat')
+}
+
 export function ChannelPill({ channelId, name }: { channelId: string; name: string }) {
   return (
     <button
-      onClick={(e) => { e.stopPropagation(); useHubStore.getState().setActiveChannel(channelId) }}
+      onClick={(e) => { e.stopPropagation(); openChannel(channelId) }}
       className="inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-xs font-medium bg-primary/15 text-primary hover:bg-primary/25 transition-colors cursor-pointer align-baseline"
       title={`#${name}`}
     >
