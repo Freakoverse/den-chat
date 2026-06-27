@@ -4467,6 +4467,10 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
   const inputPerms = usePermissions(hubDTag || undefined, channelId || undefined)
 
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  // Focus the composer when a reply is started, so you can type immediately.
+  useEffect(() => {
+    if (replyContext) textareaRef.current?.focus()
+  }, [replyContext])
   const emojiButtonRef = useRef<HTMLButtonElement>(null)
   const stickerButtonRef = useRef<HTMLButtonElement>(null)
   const gifButtonRef = useRef<HTMLButtonElement>(null)
