@@ -28,14 +28,19 @@ import { Embed } from '@/components/ui/Embed'
 import { usePreferencesStore } from '@/stores/preferencesStore'
 import { useHubStore } from '@/stores/hubStore'
 import { useNavigationStore } from '@/stores/navigationStore'
+import { useVoiceStore } from '@/stores/voiceStore'
 import { CustomAudioPlayer } from '@/components/ui/CustomAudioPlayer'
 
 /* ─── Channel mention pill (#channel → click to open that channel) ─── */
 
 /** Open a channel the way the sidebar does: select it (AppLayout routes voice/forum/
- *  text by the channel's type) and, on the narrow/mobile layout, navigate to it. */
+ *  text by the channel's type). For a voice channel, open its text-chat (like the
+ *  sidebar's chat toggle) rather than the join screen. Navigate on the mobile layout. */
 function openChannel(channelId: string) {
-  useHubStore.getState().setActiveChannel(channelId)
+  const hub = useHubStore.getState()
+  hub.setActiveChannel(channelId)
+  const ch = hub.activeHubId ? hub.hubs[hub.activeHubId]?.channels.find((c) => c.channelId === channelId) : undefined
+  useVoiceStore.getState().setVoiceChatMode(ch?.type === 'voice')
   if (window.innerWidth <= 1080) useNavigationStore.getState().setMobileView('chat')
 }
 
