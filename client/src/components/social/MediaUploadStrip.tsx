@@ -8,7 +8,7 @@
 
 import { useState, useRef, useCallback } from 'react'
 import { Upload, Loader2, FileIcon, X, ImagePlus } from 'lucide-react'
-import { uploadToBlossomServers, computeHash } from '@/lib/blossom'
+import { uploadToBlossomServers, computeHash, blossomServers } from '@/lib/blossom'
 import type { UploadProgress } from '@/lib/blossom'
 import type { ISigner } from '@/stores/userStore'
 
@@ -19,6 +19,7 @@ export type PendingFile = {
   file: File
   status: 'pending' | 'uploading' | 'success' | 'failed'
   hash?: string
+  serveBase?: string   // configured Blossom server that holds the blob (for the link)
   progress?: UploadProgress
   previewUrl?: string
 }
@@ -42,6 +43,20 @@ function fileExt(file: File): string {
   const nameExt = file.name.includes('.') ? file.name.split('.').pop()!.toLowerCase() : ''
   if (/^[a-z0-9]{2,4}$/.test(nameExt)) return nameExt
   return MIME_EXT[file.type.toLowerCase()] || ''
+}
+
+const normServer = (u: string) => u.replace(/\/+$/, '').toLowerCase()
+
+/**
+ * Pick the base URL to serve an uploaded blob from. Prefers the user's #1
+ * configured Blossom server (Settings → Network, toggle-respecting order) among
+ * the servers that actually accepted the upload, so links point at a server the
+ * user chose (and that holds the blob) — not a hardcoded host.
+ */
+function serveBase(serverUrls: string[]): string {
+  const accepted = serverUrls.map(normServer).filter(Boolean)
+  const configured = blossomServers.getServers().map(normServer)
+  return configured.find((s) => accepted.includes(s)) || accepted[0] || configured[0] || 'https://blossom.primal.net'
 }
 
 function formatFileSize(bytes: number) {
@@ -125,14 +140,15 @@ export function useMediaUpload(signer: ISigner | null | undefined, privateKey: s
       try {
         const buffer = await pf.file.arrayBuffer()
         const data = new Uint8Array(buffer)
-        const { hash } = await uploadToBlossomServers(
+        const { hash, serverUrls } = await uploadToBlossomServers(
           data, signer || null, privateKey || null, undefined, pf.file.type,
           (progress) => {
             setPendingFiles((prev) => prev.map((f) => f.id === pf.id ? { ...f, progress: { ...progress } } : f))
           },
           () => { const c = new AbortController(); uploadAbortRef.current = c; return c.signal },
         )
-        setPendingFiles((prev) => prev.map((f) => f.id === pf.id ? { ...f, status: 'success' as const, hash, progress: undefined } : f))
+        const base = serveBase(serverUrls)
+        setPendingFiles((prev) => prev.map((f) => f.id === pf.id ? { ...f, status: 'success' as const, hash, serveBase: base, progress: undefined } : f))
         hashes.push(hash)
       } catch {
         setPendingFiles((prev) => prev.map((f) => f.id === pf.id ? { ...f, status: 'failed' as const, progress: undefined } : f))
@@ -158,7 +174,8 @@ export function useMediaUpload(signer: ISigner | null | undefined, privateKey: s
       .filter((f) => f.status === 'success' && f.hash)
       .map((f) => {
         const ext = fileExt(f.file)
-        return `https://blossom.primal.net/${f.hash}${ext ? `.${ext}` : ''}`
+        const base = (f.serveBase || 'https://blossom.primal.net').replace(/\/+$/, '')
+        return `${base}/${f.hash}${ext ? `.${ext}` : ''}`
       })
   }, [pendingFiles])
 
