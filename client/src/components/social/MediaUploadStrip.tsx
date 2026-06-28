@@ -25,6 +25,25 @@ export type PendingFile = {
 
 /* ─── Helpers ─── */
 
+// Blossom serves a blob at <hash> AND <hash>.<ext> (the server keys on the sha256
+// and ignores the extension). Appending the extension lets OTHER clients — which
+// detect media by the URL's file extension, not by attachment metadata — render
+// the image/video/audio inline instead of showing a bare link.
+const MIME_EXT: Record<string, string> = {
+  'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/png': 'png', 'image/gif': 'gif',
+  'image/webp': 'webp', 'image/avif': 'avif', 'image/svg+xml': 'svg', 'image/bmp': 'bmp',
+  'video/mp4': 'mp4', 'video/webm': 'webm', 'video/quicktime': 'mov', 'video/x-matroska': 'mkv',
+  'audio/mpeg': 'mp3', 'audio/ogg': 'ogg', 'audio/wav': 'wav', 'audio/x-wav': 'wav',
+  'audio/flac': 'flac', 'audio/mp4': 'm4a', 'audio/aac': 'aac',
+}
+
+/** Best-effort file extension for a uploaded file (from its name, else its MIME). */
+function fileExt(file: File): string {
+  const nameExt = file.name.includes('.') ? file.name.split('.').pop()!.toLowerCase() : ''
+  if (/^[a-z0-9]{2,4}$/.test(nameExt)) return nameExt
+  return MIME_EXT[file.type.toLowerCase()] || ''
+}
+
 function formatFileSize(bytes: number) {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
@@ -137,7 +156,10 @@ export function useMediaUpload(signer: ISigner | null | undefined, privateKey: s
   const getUploadedUrls = useCallback(() => {
     return pendingFiles
       .filter((f) => f.status === 'success' && f.hash)
-      .map((f) => `https://blossom.primal.net/${f.hash}`)
+      .map((f) => {
+        const ext = fileExt(f.file)
+        return `https://blossom.primal.net/${f.hash}${ext ? `.${ext}` : ''}`
+      })
   }, [pendingFiles])
 
   const hasPendingOrFailed = pendingFiles.some((f) => f.status === 'pending' || f.status === 'failed')
