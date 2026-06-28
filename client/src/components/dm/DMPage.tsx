@@ -895,7 +895,7 @@ function DMChatView({ recipientPubkey, onSwitchProtocol, onBack }: { recipientPu
       {/* Messages */}
       <div
         ref={messagesContainerRef}
-        className="flex-1 min-h-0 overflow-y-auto flex flex-col-reverse px-4 py-3"
+        className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden flex flex-col-reverse px-4 py-3"
         onScroll={() => {
           handleScroll()
           const el = messagesContainerRef.current
@@ -1382,7 +1382,7 @@ function DMMessageRow({ msg, showDateSep, isGrouped, senderProfile, displayName,
         </div>
         <div className="flex-1 min-w-0">
           {!isGrouped && (
-            <div className="flex items-center gap-2 mb-0.5">
+            <div className="flex items-center flex-wrap gap-x-2 gap-y-0.5 mb-0.5">
               <span className="text-sm font-semibold text-foreground cursor-pointer hover:underline" onClick={onShowProfile}>
                 {displayName}
               </span>
@@ -1553,7 +1553,7 @@ function DMMessageContent({ msg, showDateSep, isGrouped, senderProfile, displayN
         </div>
         <div className="flex-1 min-w-0">
           {!isGrouped && (
-            <div className="flex items-baseline gap-2 mb-0.5">
+            <div className="flex items-baseline flex-wrap gap-x-2 gap-y-0.5 mb-0.5">
               <span className="text-sm font-semibold text-foreground cursor-pointer hover:underline" onClick={onShowProfile}>
                 {displayName}
               </span>
