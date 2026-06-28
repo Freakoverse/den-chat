@@ -1184,18 +1184,16 @@ function MessageList({ hubDTag, channelId, channelName, optimisticMessages, setO
   const saveEdit = useCallback(async (originalMsg: ChatMessage, newText: string, removedHashes?: Set<string>) => {
     const attachmentsChanged = removedHashes && removedHashes.size > 0
     if (!newText.trim() || (newText === originalMsg.content && !attachmentsChanged)) return
-    try {
-      // Filter out removed attachments
-      const remainingAttachments = attachmentsChanged && originalMsg.attachments
-        ? originalMsg.attachments.filter(a => !removedHashes.has(a.hash))
-        : originalMsg.attachments
-      // Pass replyTo, rootRef, attachments, and nsfw to preserve them on edit
-      await editMessage(originalMsg.dTag, newText, originalMsg.replyTo, originalMsg.rootRef, undefined, remainingAttachments, originalMsg.nsfw || undefined, originalMsg.isThread || undefined)
-      setEditingId(null)
-      setEditText('')
-    } catch (err) {
-      console.error('Edit failed:', err)
-    }
+    // Filter out removed attachments
+    const remainingAttachments = attachmentsChanged && originalMsg.attachments
+      ? originalMsg.attachments.filter(a => !removedHashes.has(a.hash))
+      : originalMsg.attachments
+    // Pass replyTo, rootRef, attachments, and nsfw to preserve them on edit.
+    // Let errors (e.g. signer unavailable / wrong account) propagate so the edit
+    // field can show them instead of closing as if the edit succeeded.
+    await editMessage(originalMsg.dTag, newText, originalMsg.replyTo, originalMsg.rootRef, undefined, remainingAttachments, originalMsg.nsfw || undefined, originalMsg.isThread || undefined)
+    setEditingId(null)
+    setEditText('')
   }, [editMessage])
 
   const handleReply = useCallback((msg: ChatMessage) => {
@@ -3373,7 +3371,7 @@ export function ChatMessageRow({
         <div className="min-w-0 flex-1">
           <ScrollableContent>
           {isEditing ? (
-            <EditField text={editText} onChange={setEditText} onCancel={() => { cancelEdit(); setRemovedAttachmentHashes(new Set()) }} unchanged={editUnchanged} onSave={() => { onSaveEdit(msg, editText, removedAttachmentHashes); setRemovedAttachmentHashes(new Set()) }} hubDTag={hubDTag} channelId={channelId} />
+            <EditField text={editText} onChange={setEditText} onCancel={() => { cancelEdit(); setRemovedAttachmentHashes(new Set()) }} unchanged={editUnchanged} onSave={async () => { await onSaveEdit(msg, editText, removedAttachmentHashes); setRemovedAttachmentHashes(new Set()) }} hubDTag={hubDTag} channelId={channelId} />
           ) : !msg.decrypted && !msg.deleted ? (
             <EncryptedMessageCard hubDTag={hubDTag} />
           ) : shouldBlurBlocked ? (
@@ -3677,7 +3675,7 @@ export function ChatMessageRow({
           </div>
           <ScrollableContent>
           {isEditing ? (
-            <EditField text={editText} onChange={setEditText} onCancel={() => { cancelEdit(); setRemovedAttachmentHashes(new Set()) }} unchanged={editUnchanged} onSave={() => { onSaveEdit(msg, editText, removedAttachmentHashes); setRemovedAttachmentHashes(new Set()) }} hubDTag={hubDTag} channelId={channelId} />
+            <EditField text={editText} onChange={setEditText} onCancel={() => { cancelEdit(); setRemovedAttachmentHashes(new Set()) }} unchanged={editUnchanged} onSave={async () => { await onSaveEdit(msg, editText, removedAttachmentHashes); setRemovedAttachmentHashes(new Set()) }} hubDTag={hubDTag} channelId={channelId} />
           ) : !msg.decrypted && !msg.deleted ? (
             <EncryptedMessageCard hubDTag={hubDTag} />
           ) : shouldBlurMsg ? (
@@ -4258,6 +4256,7 @@ function EditField({ text, onChange, onCancel, unchanged, onSave, hubDTag, chann
 }) {
   const ref = useRef<HTMLTextAreaElement>(null)
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
   const autoResize = useCallback((el: HTMLTextAreaElement) => {
     el.style.height = 'auto'
     el.style.height = `${Math.min(el.scrollHeight, 300)}px`
@@ -4284,8 +4283,11 @@ function EditField({ text, onChange, onCancel, unchanged, onSave, hubDTag, chann
   const handleSave = async () => {
     if (saving || unchanged || !text.trim() || isEditOverLimit) return
     setSaving(true)
+    setSaveError(null)
     try {
       await onSave()
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'Failed to save your edit. Please try again.')
     } finally {
       setSaving(false)
     }
@@ -4369,6 +4371,7 @@ function EditField({ text, onChange, onCancel, unchanged, onSave, hubDTag, chann
           ) : 'Save'}
         </button>
       </div>
+      {saveError && <p className="text-[11px] text-red-400">{saveError}</p>}
     </div>
   )
 }

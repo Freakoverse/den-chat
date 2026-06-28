@@ -4,7 +4,7 @@
 
 import { finalizeEvent, type UnsignedEvent, type Event } from 'nostr-tools'
 import { KINDS, STANDARD_KINDS } from '@/lib/crypto/constants'
-import type { ISigner } from '@/stores/userStore'
+import { useUserStore, type ISigner } from '@/stores/userStore'
 
 type Tag = [string, ...string[]]
 
@@ -45,10 +45,26 @@ export async function signWithSigner(
   privateKey: string | null
 ): Promise<Event> {
   if (signer) {
-    // Signer needs pubkey on the event for signing
-    const pubkey = await signer.getPublicKey()
+    const expected = useUserStore.getState().pubkey
+    // Signer needs pubkey on the event for signing. If the extension/remote signer is
+    // gone or its active account was switched away from the one we're logged in as,
+    // fail loudly instead of silently signing/publishing as the wrong identity.
+    let pubkey: string
+    try {
+      pubkey = await signer.getPublicKey()
+    } catch {
+      throw new Error('Your signer is unavailable — reconnect your extension or remote signer and try again.')
+    }
+    if (!pubkey) throw new Error('Your signer is unavailable — reconnect it and try again.')
+    if (expected && pubkey !== expected) {
+      throw new Error('Your signer is set to a different account than the one you’re logged in to. Switch it back to this account (or log out and back in) before publishing.')
+    }
     const eventWithPubkey = { ...unsignedEvent, pubkey }
     const signed = await signer.signEvent(eventWithPubkey)
+    if (!signed?.sig) throw new Error('Signing was cancelled or failed.')
+    if (expected && signed.pubkey !== expected) {
+      throw new Error('The event was signed by a different account. Aborting to avoid publishing as the wrong identity.')
+    }
     return signed as unknown as Event
   }
   if (privateKey) {
