@@ -151,8 +151,8 @@ export function ImageCropModal({ file, aspect = 1, round, maxOutput = 1024, titl
   }
 
   return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-      <div className="w-full max-w-md rounded-2xl bg-card border border-border shadow-2xl flex flex-col max-h-[92vh]">
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+      <div className="w-full max-w-md rounded-2xl bg-secondary border border-border/80 shadow-2xl flex flex-col max-h-[92vh]">
         <div className="flex items-center justify-between px-5 py-3 border-b border-border shrink-0">
           <h3 className="text-sm font-semibold text-foreground">{title}</h3>
           <button onClick={onCancel} disabled={busy} className="text-muted-foreground hover:text-foreground disabled:opacity-50 cursor-pointer"><X size={18} /></button>
