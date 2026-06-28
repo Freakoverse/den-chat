@@ -268,6 +268,7 @@ export function HubSidebar({ activePage, onNavigate, compact = false }: { active
                         <TooltipTrigger asChild>
                           <button
                             onClick={() => toggleFolder(folder.id)}
+                            data-folder-id={folder.id}
                             className={cn(
                               'relative w-11 h-11 flex items-center justify-center rounded-[24px] hover:rounded-2xl transition-all duration-200 cursor-pointer overflow-hidden',
                               isCollapsed

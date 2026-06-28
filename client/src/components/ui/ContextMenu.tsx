@@ -353,6 +353,26 @@ export function ContextMenuProvider({ children }: { children: ReactNode }) {
         })
       }
 
+      // --- Folder actions (right-click on a folder icon) ---
+      const folderEl = target.closest('[data-folder-id]') as HTMLElement | null
+      const folderId = folderEl?.dataset.folderId
+      if (folderId) {
+        if (items.length > 0) items.push({ separator: true })
+        items.push({
+          label: 'Mark Folder as Read',
+          icon: <CheckCheck size={14} />,
+          action: async () => {
+            const { useHubStore } = await import('@/stores/hubStore')
+            const { useNotificationStore } = await import('@/stores/notificationStore')
+            const notif = useNotificationStore.getState()
+            for (const entry of useHubStore.getState().hubEntries) {
+              if (entry.folderId === folderId) notif.markHubRead(entry.dTag)
+            }
+            close()
+          },
+        })
+      }
+
       // --- Channel actions (right-click on a channel in the channel list) ---
       const channelEl = target.closest('[data-channel-id]') as HTMLElement | null
       const channelId = channelEl?.dataset.channelId
