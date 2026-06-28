@@ -470,8 +470,8 @@ export function SocialFeedPage() {
   // Mobile tab bar — shown only on mobile, with section switcher + contextual sub-tabs
   const MobileTabBar = (
     <div className="hidden max-[1080px]:flex flex-col shrink-0 border-b border-border bg-secondary/30">
-      {/* Section switcher row */}
-      <div className="flex items-center border-b border-border/40">
+      {/* Section switcher row — horizontally scrollable when the tabs overflow */}
+      <div className="flex items-center border-b border-border/40 overflow-x-auto">
         {([
           { id: 'short' as const, label: 'Short Form', icon: <Newspaper size={14} /> },
           { id: 'long' as const, label: 'Long Form', icon: <FileText size={14} /> },
@@ -492,7 +492,7 @@ export function SocialFeedPage() {
               // forum/video/livestream/nmail: do nothing (coming soon)
             }}
             className={cn(
-              'flex-1 flex items-center justify-center gap-1.5 px-2 py-2 text-[11px] font-semibold uppercase tracking-wide whitespace-nowrap transition-colors cursor-pointer',
+              'shrink-0 flex items-center justify-center gap-1.5 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide whitespace-nowrap transition-colors cursor-pointer',
               activeSection === section.id
                 ? 'text-primary border-b-2 border-primary'
                 : (section.id === 'forum' || section.id === 'video' || section.id === 'livestream' || section.id === 'nmail')

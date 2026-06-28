@@ -200,7 +200,7 @@ export function SettingsPage() {
         <DoodleBackground className="[mask-image:linear-gradient(to_top_left,black,transparent_70%)] max-[1300px]:opacity-0 transition-opacity duration-300" />
         <div className="absolute inset-0 overflow-y-auto p-6 max-[1080px]:p-3 max-[1080px]:pb-12">
           {/* Mobile tab selector — shown only on mobile, sticky at top */}
-          <div className="hidden max-[1080px]:block max-[1080px]:-top-3 mb-4 sticky top-0 z-30 -mx-3 px-3 -mt-3 pt-3 pb-2 bg-background">
+          <div className="hidden max-[1080px]:block max-[1080px]:-top-3 mb-1 sticky top-0 z-30 -mx-3 px-3 -mt-3 pt-3 pb-2 bg-background">
             <button
               onClick={() => setMobileNavOpen(!mobileNavOpen)}
               className="flex items-center justify-between w-full px-3 py-2.5 rounded-lg bg-secondary/60 border border-border text-sm font-medium text-foreground cursor-pointer"
