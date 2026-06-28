@@ -488,18 +488,20 @@ export function SocialFeedPage() {
                 useSocialStore.getState().setActivePage('feed')
               } else if (section.id === 'long') {
                 useSocialStore.getState().setActivePage('longform-feed')
+              } else if (section.id === 'forum') {
+                useSocialStore.getState().openForumFeed()
               }
-              // forum/video/livestream/nmail: do nothing (coming soon)
+              // video/livestream/nmail: do nothing (coming soon)
             }}
             className={cn(
               'shrink-0 flex items-center justify-center gap-1.5 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide whitespace-nowrap transition-colors cursor-pointer',
               activeSection === section.id
                 ? 'text-primary border-b-2 border-primary'
-                : (section.id === 'forum' || section.id === 'video' || section.id === 'livestream' || section.id === 'nmail')
+                : (section.id === 'video' || section.id === 'livestream' || section.id === 'nmail')
                   ? 'text-muted-foreground/40 cursor-default'
                   : 'text-muted-foreground hover:text-foreground'
             )}
-            disabled={section.id === 'forum' || section.id === 'video' || section.id === 'livestream' || section.id === 'nmail'}
+            disabled={section.id === 'video' || section.id === 'livestream' || section.id === 'nmail'}
           >
             {section.icon}
             {section.label}
@@ -552,6 +554,27 @@ export function SocialFeedPage() {
               { id: 'longform-mine' as SocialPage, label: 'My Articles', icon: <FolderOpen size={15} /> },
               { id: 'longform-drafts' as SocialPage, label: 'Drafts', icon: <FileArchive size={15} /> },
               { id: 'longform-bookmarks' as SocialPage, label: 'Bookmarks', icon: <Bookmark size={15} /> },
+            ]).map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => useSocialStore.getState().setActivePage(tab.id)}
+                className={cn(
+                  'flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 text-xs font-medium whitespace-nowrap transition-colors cursor-pointer',
+                  activePage === tab.id
+                    ? 'text-primary'
+                    : 'text-muted-foreground hover:text-foreground'
+                )}
+              >
+                {tab.icon}
+                {tab.label}
+              </button>
+            ))}
+          </>
+        ) : activeSection === 'forum' ? (
+          <>
+            {([
+              { id: 'forum-feed' as SocialPage, label: 'Feed', icon: <MessageCircle size={15} /> },
+              { id: 'forum-notifications' as SocialPage, label: 'Notifications', icon: <Bell size={15} /> },
             ]).map((tab) => (
               <button
                 key={tab.id}
