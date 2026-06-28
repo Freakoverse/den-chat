@@ -172,7 +172,7 @@ export function UserPanel() {
 
   return (
     <>
-      <div className="flex gap-2 px-1 py-1 min-h-14">
+      <div className="flex gap-2 min-h-14">
         <div className="w-full flex flex-col gap-0 bg-secondary/50 rounded-md overflow-hidden shadow-md p-1">
           {/* Voice connection indicator — show above user card when in voice */}
           {(isInVoice || isDisconnecting) && (
