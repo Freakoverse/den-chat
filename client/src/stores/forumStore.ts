@@ -9,7 +9,7 @@
 
 import { create } from 'zustand'
 import type { Event } from 'nostr-tools'
-import { fetchEvents, fetchReplaceable, fetchEventById, publishEvent } from '@/lib/nostr/relay-pool'
+import { fetchEvents, fetchReplaceable, fetchEventById, publishEvent, assertPublished } from '@/lib/nostr/relay-pool'
 import { signWithSigner, mineAndSign } from '@/lib/nostr'
 import { createDeletionEvent } from '@/lib/nostr/events'
 import { useUserStore } from '@/stores/userStore'
@@ -534,7 +534,7 @@ export const useForumStore = create<ForumState>((set, get) => ({
     if ((!signer && !privateKey) || !title.trim()) return null
     const unsigned = createCommunityPost({ address: community.address, pubkey: community.pubkey }, title, body, opts)
     const signed = await mineAndSign(unsigned, get().publishPow, pubkey, signer, privateKey)
-    await publishEvent(signed)
+    assertPublished(await publishEvent(signed))
     const post = parseCommunityPost(signed)
     if (post) {
       const addr = community.address
@@ -687,7 +687,7 @@ export const useForumStore = create<ForumState>((set, get) => ({
     if ((!signer && !privateKey) || !title.trim() || !word.trim()) return null
     const unsigned = createForumWordPost(word, title, body, opts)
     const signed = await mineAndSign(unsigned, get().publishPow, pubkey, signer, privateKey)
-    await publishEvent(signed)
+    assertPublished(await publishEvent(signed))
     const post = parseForumWordPost(signed)
     if (post) {
       const norm = post.word
@@ -701,7 +701,7 @@ export const useForumStore = create<ForumState>((set, get) => ({
     if ((!signer && !privateKey) || !body.trim()) return null
     const unsigned = createForumComment({ root, parent, body })
     const signed = await mineAndSign(unsigned, get().publishPow, pubkey, signer, privateKey)
-    await publishEvent(signed)
+    assertPublished(await publishEvent(signed))
     const comment = parseForumComment(signed)
     if (comment) {
       set({ commentsByPost: { ...get().commentsByPost, [root.id]: [...(get().commentsByPost[root.id] || []), comment] } })

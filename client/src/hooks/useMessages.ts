@@ -15,7 +15,7 @@ import { useUserStore } from '@/stores/userStore'
 import { useMessageStore, type ChatMessage as RawChatMessage } from '@/stores/messageStore'
 import type { Attachment } from '@/stores/messageStore'
 export type { Attachment }
-import { publishEventProgressive, publishToSpecificRelays } from '@/lib/nostr/relay-pool'
+import { publishEventProgressive, publishToSpecificRelays, assertPublished } from '@/lib/nostr/relay-pool'
 import { getPublishRelays } from '@/stores/postingBehaviourStore'
 import { signWithSigner, mineAndSign, createMessageEvent, createDeletionEvent, createDeletedMessageEvent, createReactionEvent, createEditHintEvent } from '@/lib/nostr/events'
 import { nip19 } from 'nostr-tools'
@@ -781,9 +781,10 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
 
     // Progressive publishing — fires callback on each relay confirmation
     // The RelayProgressIndicator next to the message picks this up via eventId
-    await publishEventProgressive(signed, (confirmed, total, acceptedRelays) => {
+    const editAccepted = await publishEventProgressive(signed, (confirmed, total, acceptedRelays) => {
       setRelayProgress(eventId, confirmed, total, acceptedRelays)
     }, publishRelays)
+    assertPublished(editAccepted)   // dead-relay → throw so the edit field shows an error
 
     // Publish ephemeral edit hint (kind 26943) to notify other connected clients.
     // Fire-and-forget — hint failure should not affect the edit itself.

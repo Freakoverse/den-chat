@@ -24,6 +24,7 @@ interface ComposeBoxProps {
 export function ComposeBox({ replyTo, placeholder, onPosted }: ComposeBoxProps) {
   const [text, setText] = useState('')
   const [posting, setPosting] = useState(false)
+  const [postError, setPostError] = useState<string | null>(null)
   const [nsfw, setNsfw] = useState(false)
   const [showEmoji, setShowEmoji] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
@@ -57,6 +58,7 @@ export function ComposeBox({ replyTo, placeholder, onPosted }: ComposeBoxProps) 
     if (!fullContent) return
 
     setPosting(true)
+    setPostError(null)
 
     try {
       const tags: string[][] = []
@@ -91,6 +93,7 @@ export function ComposeBox({ replyTo, placeholder, onPosted }: ComposeBoxProps) 
       onPosted?.()
     } catch (err) {
       console.error('Failed to post:', err)
+      setPostError(err instanceof Error ? err.message : 'Failed to post. Please try again.')
     } finally {
       setPosting(false)
     }
@@ -229,6 +232,7 @@ export function ComposeBox({ replyTo, placeholder, onPosted }: ComposeBoxProps) 
             {media.hasPendingOrFailed ? 'Upload & Post' : posting ? 'Posting...' : 'Post'}
           </Button>
         </div>
+        {postError && <p className="text-xs text-red-400 mt-1.5">{postError}</p>}
 
         {/* Settings panel (collapsible) — below the toolbar */}
         {showSettings && (

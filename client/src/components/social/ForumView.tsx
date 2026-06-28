@@ -241,13 +241,17 @@ function PostComposer({ onSubmit, onCancel }: {
   const [body, setBody] = useState('')
   const [nsfw, setNsfw] = useState(false)
   const [posting, setPosting] = useState(false)
+  const [postError, setPostError] = useState<string | null>(null)
 
   const submit = async () => {
     if (!title.trim() || posting) return
     setPosting(true)
+    setPostError(null)
     try {
       const ok = await onSubmit(title, body, { nsfw })
       if (ok) onCancel()
+    } catch (err) {
+      setPostError(err instanceof Error ? err.message : 'Failed to post. Please try again.')
     } finally {
       setPosting(false)
     }
@@ -289,6 +293,7 @@ function PostComposer({ onSubmit, onCancel }: {
           </button>
         </div>
       </div>
+      {postError && <p className="text-xs text-red-400">{postError}</p>}
     </div>
   )
 }

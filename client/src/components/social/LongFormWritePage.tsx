@@ -60,6 +60,7 @@ export function LongFormWritePage() {
   const [videoUrl, setVideoUrl] = useState('')
   const [isNsfw, setIsNsfw] = useState(false)
   const [publishing, setPublishing] = useState(false)
+  const [publishError, setPublishError] = useState<string | null>(null)
   const [showEmoji, setShowEmoji] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [editDTag, setEditDTag] = useState<string | null>(null)
@@ -252,6 +253,7 @@ export function LongFormWritePage() {
   const handlePublish = useCallback(async (asDraft = false) => {
     if (!title.trim() || !pubkey) return
     setPublishing(true)
+    setPublishError(null)
     try {
       const identifier = editDTag || crypto.randomUUID()
       // When promoting a draft to article, published_at = now (first real publication)
@@ -289,7 +291,10 @@ export function LongFormWritePage() {
       pendingFiles.forEach(f => { if (f.previewUrl) URL.revokeObjectURL(f.previewUrl) })
       if (featuredPreview) URL.revokeObjectURL(featuredPreview)
       handleGoBack()
-    } catch (err) { console.error('[LongForm] Publish failed:', err) }
+    } catch (err) {
+      console.error('[LongForm] Publish failed:', err)
+      setPublishError(err instanceof Error ? err.message : 'Failed to publish. Please try again.')
+    }
     finally { setPublishing(false) }
   }, [title, summary, body, featuredImage, tags, pubkey, editDTag, editPublishedAt, editCreatedAt, editingDraft, settings, handleGoBack, pendingFiles, featuredPreview, videoUrl, isNsfw])
 
@@ -603,6 +608,7 @@ export function LongFormWritePage() {
 
       {/* Footer */}
       <div className="flex items-center justify-end gap-2 px-6 py-3 border-t border-border shrink-0">
+        {publishError && <span className="text-xs text-red-400 mr-auto">{publishError}</span>}
         <button onClick={handleGoBack} className="px-4 py-2 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors cursor-pointer">Cancel</button>
         <button onClick={() => handlePublish(true)} disabled={!title.trim() || publishing || hasPending}
           className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-medium border border-border text-foreground hover:bg-accent/50 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">

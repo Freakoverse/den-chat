@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { useUserStore } from '@/stores/userStore'
 import { StorageKey } from '@/lib/constants'
 import { STANDARD_KINDS } from '@/lib/crypto/constants'
-import { getRelays, fetchReplaceable, publishToSpecificRelays } from '@/lib/nostr/relay-pool'
+import { getRelays, fetchReplaceable, publishToSpecificRelays, assertPublished } from '@/lib/nostr/relay-pool'
 import { getPublishRelays } from '@/stores/postingBehaviourStore'
 import { benchmarkHashRate, estimateSolveTime } from '@/lib/pow/pow'
 import { mineAndSign } from '@/lib/nostr/events'
@@ -39,7 +39,8 @@ export function useComposeSettings(initialPow = 15): ComposeSettings {
 
     // Publish to relays from posting behaviour store
     const relays = getPublishRelays()
-    await publishToSpecificRelays(relays, signed)
+    const accepted = await publishToSpecificRelays(relays, signed)
+    assertPublished(accepted)   // dead-relay → throw so the composer can show an error
 
     return signed as Event
   }, [powDifficulty, pubkey, signer, privateKey])

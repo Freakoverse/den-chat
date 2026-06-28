@@ -149,6 +149,18 @@ export function publishEventProgressive(
 }
 
 /**
+ * Throw a user-facing error if no relay accepted the event. Pass the `accepted`
+ * array returned by publishEvent / publishToSpecificRelays / publishEventProgressive.
+ * Used by user-facing writes so a dead-relay publish fails loudly instead of
+ * silently looking published. (Background/best-effort publishes don't use this.)
+ */
+export function assertPublished(accepted: string[] | undefined): void {
+  if (!accepted || accepted.length === 0) {
+    throw new Error("Couldn't reach any relay — your message wasn't published. Check your connection or relay settings and try again.")
+  }
+}
+
+/**
  * Publish an event to a SPECIFIC set of relays (not the global activeRelays).
  * Each relay has a 15-second timeout.
  */
