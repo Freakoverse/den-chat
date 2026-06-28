@@ -271,8 +271,10 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
 
   return (
     <Wrapper>
-      {/* Banner area — card */}
-      <div className="relative overflow-hidden rounded-lg bg-secondary/50 shadow-md shrink-0" style={{ minHeight: hub.banner ? '110px' : '48px' }}>
+      {/* Header card — banner + (live event) + nav merged into one card */}
+      <div className="rounded-lg overflow-hidden shadow-md shrink-0">
+      {/* Banner area */}
+      <div className="relative bg-secondary/50" style={{ minHeight: hub.banner ? '110px' : '48px' }}>
         {hub.banner ? (
           <>
             <BlossomImage
@@ -311,7 +313,7 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
       {liveEventCount > 0 && (
         <button
           onClick={() => setShowEvents(true)}
-          className="flex items-center gap-2 px-3 py-1.5 bg-blue-500/10 rounded-lg shadow-md shrink-0 cursor-pointer hover:bg-blue-500/15 transition-colors w-full"
+          className="flex items-center gap-2 px-3 py-1.5 bg-blue-500/10 cursor-pointer hover:bg-blue-500/15 transition-colors w-full"
         >
           <span className="relative flex h-2 w-2">
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
@@ -325,7 +327,7 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
 
       {/* Action items */}
       {!isModBanned && (
-        <div className="flex flex-wrap gap-1 p-1.5 rounded-lg bg-secondary/50 shadow-md shrink-0">
+        <div className="flex flex-wrap gap-1 p-1.5 bg-secondary/50">
           {(() => {
             const canInvite = isCreator || (pubkey && hub ? getPermissionsForUser(hub, pubkey, hubMembers).create_invite : false)
             return canInvite ? (
@@ -396,6 +398,7 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
           )}
         </div>
       )}
+      </div>
 
       {/* Channel list — de-rendered when mod-banned */}
       {isModBanned ? (
