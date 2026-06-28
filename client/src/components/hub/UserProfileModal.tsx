@@ -28,6 +28,7 @@ import {
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
 import { uploadToBlossomServers, blossomServers as blossomServerManager } from '@/lib/blossom'
+import { ImageCropModal } from '@/components/ui/ImageCropModal'
 import type { UploadProgress } from '@/lib/blossom'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -125,6 +126,7 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
   const picAbortRef = useRef<AbortController | null>(null)
   const picInputRef = useRef<HTMLInputElement>(null)
   const [picDragOver, setPicDragOver] = useState(false)
+  const [picEditFile, setPicEditFile] = useState<File | null>(null)   // crop editor target
 
   // Upload state for banner
   const [bannerUpStatus, setBannerUpStatus] = useState<UploadStatus>('idle')
@@ -203,6 +205,16 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
 
   const imgDragOver = (e: React.DragEvent, set: (v: boolean) => void) => { e.preventDefault(); e.stopPropagation(); set(true) }
   const imgDragLeave = (e: React.DragEvent, set: (v: boolean) => void) => { e.preventDefault(); e.stopPropagation(); set(false) }
+
+  // Profile picture: open the crop editor (size-checked up front so the user doesn't
+  // edit then get rejected). The editor returns a file we then upload as the picture.
+  const uploadPicture = (f: File) => handleImageUpload(f, (url) => setEditProfile((p) => ({ ...p, picture: url })), setPicStatus, setPicProgress, picAbortRef)
+  const startPicEdit = (f: File) => {
+    if (!isValidImageFile(f)) return
+    const limitMb = Number(localStorage.getItem('den-chat-upload-limit-mb')) || 10
+    if (f.size > limitMb * 1024 * 1024) { setFileSizeWarning({ name: f.name, limitMb }); return }
+    setPicEditFile(f)
+  }
 
   const npub = displayPubkey ? nip19.npubEncode(displayPubkey) : ''
   const blocked = displayPubkey ? isBlocked(displayPubkey) : false
@@ -1350,7 +1362,7 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
                       onClick={() => { if (picStatus !== 'uploading') picInputRef.current?.click() }}
                       onDragOver={(e) => imgDragOver(e, setPicDragOver)}
                       onDragLeave={(e) => imgDragLeave(e, setPicDragOver)}
-                      onDrop={(e) => handleDrop(e, (url) => setEditProfile({ ...editProfile, picture: url }), setPicStatus, setPicProgress, picAbortRef, setPicDragOver)}
+                      onDrop={(e) => { e.preventDefault(); e.stopPropagation(); setPicDragOver(false); const f = e.dataTransfer.files?.[0]; if (f) startPicEdit(f) }}
                       className={cn(
                         'relative w-18 h-18 rounded-2xl border-2 border-dashed flex items-center justify-center overflow-hidden cursor-pointer group transition-colors',
                         picDragOver ? 'border-primary bg-primary/10' : editProfile.picture ? 'border-transparent' : 'border-border hover:border-primary/50'
@@ -1380,7 +1392,7 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
                     )}
                   </div>
                   <input ref={picInputRef} type="file" accept={ACCEPTED_IMAGE_EXTENSIONS} className="hidden"
-                    onChange={(e) => { const f = e.target.files?.[0]; if (f) handleImageUpload(f, (url) => setEditProfile({ ...editProfile, picture: url }), setPicStatus, setPicProgress, picAbortRef); e.target.value = '' }} />
+                    onChange={(e) => { const f = e.target.files?.[0]; if (f) startPicEdit(f); e.target.value = '' }} />
 
                   <div className="flex-1 flex flex-col gap-2">
                     <Field label="Display Name" value={editProfile.display_name} onChange={(v) => setEditProfile({ ...editProfile, display_name: v })} />
@@ -1419,6 +1431,19 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
               </div>
 
               {/* File size warning modal */}
+              {picEditFile && (
+                <ImageCropModal
+                  file={picEditFile}
+                  aspect={1}
+                  round
+                  maxOutput={1024}
+                  title="Edit profile picture"
+                  onCancel={() => setPicEditFile(null)}
+                  onUploadOriginal={() => { const f = picEditFile; setPicEditFile(null); uploadPicture(f) }}
+                  onSave={(f) => { setPicEditFile(null); uploadPicture(f) }}
+                />
+              )}
+
               {fileSizeWarning && (
                 <div className="fixed inset-0 z-[60] flex items-center justify-center px-2 bg-black/60 backdrop-blur-sm" onClick={() => setFileSizeWarning(null)}>
                   <div className="w-[360px] bg-card border border-border rounded-xl shadow-2xl p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
