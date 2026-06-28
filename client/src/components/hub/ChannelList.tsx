@@ -271,8 +271,8 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
 
   return (
     <Wrapper>
-      {/* Banner area */}
-      <div className="relative overflow-hidden group" style={{ minHeight: hub.banner ? '110px' : '48px' }}>
+      {/* Banner area — card */}
+      <div className="relative overflow-hidden rounded-lg bg-secondary/50 shadow-md shrink-0" style={{ minHeight: hub.banner ? '110px' : '48px' }}>
         {hub.banner ? (
           <>
             <BlossomImage
@@ -280,8 +280,8 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
               alt={`${hub.name} banner`}
               className="w-full h-28 object-cover"
             />
-            {/* Overlay — full-height gradient, visible on hover */}
-            <div className="absolute inset-0 bg-gradient-to-t from-black to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 ease-in-out" />
+            {/* Bottom gradient so the hub name stays readable over the banner */}
+            <div className="absolute bottom-0 left-0 right-0 h-full max-h-[50%] bg-gradient-to-t from-black/75 to-transparent pointer-events-none" />
             {/* Hub name — positioned over the gradient */}
             <div className="absolute bottom-0 left-0 right-0 flex items-center px-3 py-2 gap-2">
 
@@ -295,7 +295,7 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
           </>
         ) : (
           /* No banner — simple header with hub name */
-          <div className="flex items-center gap-2 px-4 h-12 min-h-12 border-b border-border bg-secondary/30">
+          <div className="flex items-center gap-2 px-4 h-12 min-h-12">
 
             <button
               onClick={() => setShowInfo(true)}
@@ -311,7 +311,7 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
       {liveEventCount > 0 && (
         <button
           onClick={() => setShowEvents(true)}
-          className="flex items-center gap-2 px-3 py-1.5 bg-blue-500/10 border-b border-blue-500/20 cursor-pointer hover:bg-blue-500/15 transition-colors w-full"
+          className="flex items-center gap-2 px-3 py-1.5 bg-blue-500/10 rounded-lg shadow-md shrink-0 cursor-pointer hover:bg-blue-500/15 transition-colors w-full"
         >
           <span className="relative flex h-2 w-2">
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
@@ -325,7 +325,7 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
 
       {/* Action items */}
       {!isModBanned && (
-        <div className="flex flex-wrap gap-1 px-2 py-1.5 border-b border-border bg-secondary/30">
+        <div className="flex flex-wrap gap-1 p-1.5 rounded-lg bg-secondary/50 shadow-md shrink-0">
           {(() => {
             const canInvite = isCreator || (pubkey && hub ? getPermissionsForUser(hub, pubkey, hubMembers).create_invite : false)
             return canInvite ? (
@@ -399,11 +399,11 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
 
       {/* Channel list — de-rendered when mod-banned */}
       {isModBanned ? (
-        <div className="flex-1 flex items-center justify-center py-8">
+        <div className="flex-1 flex items-center justify-center py-8 rounded-lg bg-secondary/50 shadow-md">
           <p className="text-xs text-muted-foreground/50 italic">Channels unavailable</p>
         </div>
       ) : (
-        <div className="flex-1 overflow-y-auto py-2 scrollbar-hide">
+        <div className="flex-1 overflow-y-auto py-2 scrollbar-hide rounded-lg bg-secondary/50 shadow-md">
           {uncategorized.map((channel) => {
             const gid = getChannelGroupId(channel)
             const locked = !hasGroupAccess(gid)
@@ -536,11 +536,11 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
 
 // Wrappers for mobile vs desktop rendering
 function MobileWrapper({ children }: { children: ReactNode }) {
-  return <div className="flex flex-col flex-1 overflow-hidden bg-secondary/50">{children}</div>
+  return <div className="flex flex-col flex-1 overflow-hidden bg-background border-l border-r border-border p-2 gap-2">{children}</div>
 }
 function DesktopWrapper({ children }: { children: ReactNode }) {
   return (
-    <ResizablePanel id="hub" defaultWidth={280} minWidth={200} maxWidth={420} className="flex flex-col overflow-hidden bg-secondary/50">
+    <ResizablePanel id="hub" defaultWidth={280} minWidth={200} maxWidth={420} className="flex flex-col overflow-hidden bg-background border-l border-r border-border p-2 gap-2">
       {children}
     </ResizablePanel>
   )
