@@ -26,6 +26,23 @@ interface ImageCropModalProps {
 
 const FRAME_W = 320
 
+/** Gradient track + round thumb slider, matching the "Release Delay" control in settings. */
+function GradientSlider({ min, max, step, value, onChange }: { min: number; max: number; step: number; value: number; onChange: (v: number) => void }) {
+  const pct = ((value - min) / (max - min)) * 100
+  return (
+    <div className="flex-1 relative h-6 flex items-center">
+      <div className="absolute left-0 right-0 h-2 rounded-full overflow-hidden">
+        <div className="absolute inset-0 bg-muted-foreground/20" />
+        <div className="absolute inset-y-0 left-0 bg-gradient-to-r from-sky-500 to-violet-400" style={{ width: `${pct}%` }} />
+      </div>
+      <div className="absolute w-5 h-5 rounded-full bg-primary border-2 border-background shadow-lg pointer-events-none transition-all" style={{ left: `calc(${pct}% - 10px)` }} />
+      <input type="range" min={min} max={max} step={step} value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
+    </div>
+  )
+}
+
 export function ImageCropModal({ file, aspect = 1, round, maxOutput = 1024, title = 'Edit image', onCancel, onUploadOriginal, onSave }: ImageCropModalProps) {
   const frameH = Math.round(FRAME_W / aspect)
   const [img, setImg] = useState<HTMLImageElement | null>(null)
@@ -185,22 +202,18 @@ export function ImageCropModal({ file, aspect = 1, round, maxOutput = 1024, titl
           <p className="text-[11px] text-muted-foreground -mt-1">Drag to reposition · the frame is always filled</p>
 
           {/* Zoom slider */}
-          <div className="w-full flex items-center gap-2">
+          <div className="w-full flex items-center gap-3 px-3 py-1.5 rounded-lg bg-card">
             <ZoomIn size={15} className="text-muted-foreground shrink-0" />
-            <input type="range" min={1} max={4} step={0.01} value={zoomFactor}
-              onChange={(e) => setZoomFactor(Number(e.target.value))}
-              className="flex-1 h-1.5 accent-primary cursor-pointer" />
-            <span className="text-[10px] font-mono text-muted-foreground w-9 text-right tabular-nums">{zoomFactor.toFixed(2)}×</span>
+            <GradientSlider min={1} max={4} step={0.01} value={zoomFactor} onChange={setZoomFactor} />
+            <span className="text-sm font-medium tabular-nums text-foreground min-w-[42px] text-right">{zoomFactor.toFixed(2)}×</span>
           </div>
 
           {/* Rotation slider + 90° buttons */}
-          <div className="w-full flex items-center gap-2">
+          <div className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg bg-card">
             <button onClick={() => setRotationDeg((r) => r - 90)} title="Rotate left 90°" className="shrink-0 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/50 cursor-pointer"><RotateCcw size={15} /></button>
-            <input type="range" min={-180} max={180} step={1} value={rotationDeg}
-              onChange={(e) => setRotationDeg(Number(e.target.value))}
-              className="flex-1 h-1.5 accent-primary cursor-pointer" />
+            <GradientSlider min={-180} max={180} step={1} value={rotationDeg} onChange={(v) => setRotationDeg(Math.round(v))} />
             <button onClick={() => setRotationDeg((r) => r + 90)} title="Rotate right 90°" className="shrink-0 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/50 cursor-pointer"><RotateCw size={15} /></button>
-            <span className="text-[10px] font-mono text-muted-foreground w-9 text-right tabular-nums">{rotationDeg}°</span>
+            <span className="text-sm font-medium tabular-nums text-foreground min-w-[42px] text-right">{rotationDeg}°</span>
           </div>
 
           <button onClick={reset} className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer">

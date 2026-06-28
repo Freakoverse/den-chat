@@ -126,7 +126,8 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
   const picAbortRef = useRef<AbortController | null>(null)
   const picInputRef = useRef<HTMLInputElement>(null)
   const [picDragOver, setPicDragOver] = useState(false)
-  const [picEditFile, setPicEditFile] = useState<File | null>(null)   // crop editor target
+  const [picEditFile, setPicEditFile] = useState<File | null>(null)     // pic crop editor target
+  const [bannerEditFile, setBannerEditFile] = useState<File | null>(null) // banner crop editor target
 
   // Upload state for banner
   const [bannerUpStatus, setBannerUpStatus] = useState<UploadStatus>('idle')
@@ -214,6 +215,14 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
     const limitMb = Number(localStorage.getItem('den-chat-upload-limit-mb')) || 10
     if (f.size > limitMb * 1024 * 1024) { setFileSizeWarning({ name: f.name, limitMb }); return }
     setPicEditFile(f)
+  }
+
+  const uploadBanner = (f: File) => handleImageUpload(f, (url) => setEditProfile((p) => ({ ...p, banner: url })), setBannerUpStatus, setBannerUpProgress, bannerAbortRef)
+  const startBannerEdit = (f: File) => {
+    if (!isValidImageFile(f)) return
+    const limitMb = Number(localStorage.getItem('den-chat-upload-limit-mb')) || 10
+    if (f.size > limitMb * 1024 * 1024) { setFileSizeWarning({ name: f.name, limitMb }); return }
+    setBannerEditFile(f)
   }
 
   const npub = displayPubkey ? nip19.npubEncode(displayPubkey) : ''
@@ -1308,7 +1317,7 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
                       onClick={() => { if (bannerUpStatus !== 'uploading') bannerInputRef.current?.click() }}
                       onDragOver={(e) => imgDragOver(e, setBannerDragOver)}
                       onDragLeave={(e) => imgDragLeave(e, setBannerDragOver)}
-                      onDrop={(e) => handleDrop(e, (url) => setEditProfile({ ...editProfile, banner: url }), setBannerUpStatus, setBannerUpProgress, bannerAbortRef, setBannerDragOver)}
+                      onDrop={(e) => { e.preventDefault(); e.stopPropagation(); setBannerDragOver(false); const f = e.dataTransfer.files?.[0]; if (f) startBannerEdit(f) }}
                       className={cn(
                         'w-full h-28 rounded-lg overflow-hidden border-2 border-dashed flex items-center justify-center cursor-pointer group transition-colors',
                         bannerDragOver ? 'border-primary bg-primary/10' : editProfile.banner ? 'border-transparent' : 'border-border hover:border-primary/50'
@@ -1352,7 +1361,7 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
                   </div>
                 </div>
                 <input ref={bannerInputRef} type="file" accept={ACCEPTED_IMAGE_EXTENSIONS} className="hidden"
-                  onChange={(e) => { const f = e.target.files?.[0]; if (f) handleImageUpload(f, (url) => setEditProfile({ ...editProfile, banner: url }), setBannerUpStatus, setBannerUpProgress, bannerAbortRef); e.target.value = '' }} />
+                  onChange={(e) => { const f = e.target.files?.[0]; if (f) startBannerEdit(f); e.target.value = '' }} />
 
                 {/* Profile picture upload + name fields */}
                 <div className="flex items-start gap-4">
@@ -1441,6 +1450,18 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
                   onCancel={() => setPicEditFile(null)}
                   onUploadOriginal={() => { const f = picEditFile; setPicEditFile(null); uploadPicture(f) }}
                   onSave={(f) => { setPicEditFile(null); uploadPicture(f) }}
+                />
+              )}
+
+              {bannerEditFile && (
+                <ImageCropModal
+                  file={bannerEditFile}
+                  aspect={3}
+                  maxOutput={1500}
+                  title="Edit banner"
+                  onCancel={() => setBannerEditFile(null)}
+                  onUploadOriginal={() => { const f = bannerEditFile; setBannerEditFile(null); uploadBanner(f) }}
+                  onSave={(f) => { setBannerEditFile(null); uploadBanner(f) }}
                 />
               )}
 
