@@ -20,6 +20,7 @@ import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { Input } from '@/components/ui/input'
 import { Separator } from '@/components/ui/separator'
+import { ImageCropModal } from '@/components/ui/ImageCropModal'
 import { useHubStore, type HubData, type Channel, type Category, type Role, type HubMember, type HideEntry } from '@/stores/hubStore'
 import { useMessageStore } from '@/stores/messageStore'
 import { UserProfileModal } from '@/components/hub/UserProfileModal'
@@ -1360,6 +1361,8 @@ function GeneralPage({
   const bannerInputRef = useRef<HTMLInputElement>(null)
   const [bannerDragOver, setBannerDragOver] = useState(false)
   const [fileSizeWarning, setFileSizeWarning] = useState<{ name: string; limitMb: number } | null>(null)
+  const [iconEditFile, setIconEditFile] = useState<File | null>(null)     // icon crop editor target
+  const [bannerEditFile, setBannerEditFile] = useState<File | null>(null) // banner crop editor target
 
 
   const [newTag, setNewTag] = useState('')
@@ -1413,6 +1416,16 @@ function GeneralPage({
     handleImageUpload(file, setUrl, setStatus, setProgress, abortRef)
   }
 
+  // Open the crop editor first (size-checked) instead of uploading immediately.
+  const startEdit = (f: File, set: (f: File | null) => void) => {
+    if (!isValidImageFile(f)) return
+    const limitMb = Number(localStorage.getItem('den-chat-upload-limit-mb')) || 10
+    if (f.size > limitMb * 1024 * 1024) { setFileSizeWarning({ name: f.name, limitMb }); return }
+    set(f)
+  }
+  const uploadIcon = (f: File) => handleImageUpload(f, setEditIcon, setIconStatus, setIconProgress, iconAbortRef)
+  const uploadBanner = (f: File) => handleImageUpload(f, setEditBanner, setBannerStatus, setBannerProgress, bannerAbortRef)
+
   const dragOver = (e: React.DragEvent, set: (v: boolean) => void) => { e.preventDefault(); e.stopPropagation(); set(true) }
   const dragLeave = (e: React.DragEvent, set: (v: boolean) => void) => { e.preventDefault(); e.stopPropagation(); set(false) }
 
@@ -1427,7 +1440,7 @@ function GeneralPage({
               onClick={() => { if (bannerStatus !== 'uploading') bannerInputRef.current?.click() }}
               onDragOver={(e) => dragOver(e, setBannerDragOver)}
               onDragLeave={(e) => dragLeave(e, setBannerDragOver)}
-              onDrop={(e) => handleDrop(e, setEditBanner, setBannerStatus, setBannerProgress, bannerAbortRef, setBannerDragOver)}
+              onDrop={(e) => { e.preventDefault(); e.stopPropagation(); setBannerDragOver(false); const f = e.dataTransfer.files?.[0]; if (f) startEdit(f, setBannerEditFile) }}
               className={cn(
                 'w-full h-32 rounded-lg overflow-hidden border-2 border-dashed flex items-center justify-center cursor-pointer group transition-colors',
                 bannerDragOver ? 'border-primary bg-primary/10' : editBanner ? 'border-transparent' : 'border-border hover:border-primary/50'
@@ -1479,7 +1492,7 @@ function GeneralPage({
         </div>
 
         <input ref={bannerInputRef} type="file" accept={ACCEPTED_IMAGE_EXTENSIONS} className="hidden"
-          onChange={(e) => { const f = e.target.files?.[0]; if (f) handleImageUpload(f, setEditBanner, setBannerStatus, setBannerProgress, bannerAbortRef); e.target.value = '' }} />
+          onChange={(e) => { const f = e.target.files?.[0]; if (f) startEdit(f, setBannerEditFile); e.target.value = '' }} />
 
         {/* Icon + Name */}
         <div className="flex items-start gap-4 max-[1080px]:flex-col max-[1080px]:items-center">
@@ -1489,7 +1502,7 @@ function GeneralPage({
               onClick={() => { if (iconStatus !== 'uploading') iconInputRef.current?.click() }}
               onDragOver={(e) => dragOver(e, setIconDragOver)}
               onDragLeave={(e) => dragLeave(e, setIconDragOver)}
-              onDrop={(e) => handleDrop(e, setEditIcon, setIconStatus, setIconProgress, iconAbortRef, setIconDragOver)}
+              onDrop={(e) => { e.preventDefault(); e.stopPropagation(); setIconDragOver(false); const f = e.dataTransfer.files?.[0]; if (f) startEdit(f, setIconEditFile) }}
               className={cn(
                 'relative w-20 h-20 rounded-2xl border-2 border-dashed flex items-center justify-center overflow-hidden cursor-pointer group transition-colors',
                 iconDragOver ? 'border-primary bg-primary/10' : editIcon ? 'border-transparent' : 'border-border hover:border-primary/50'
@@ -1520,7 +1533,20 @@ function GeneralPage({
           </div>
 
           <input ref={iconInputRef} type="file" accept={ACCEPTED_IMAGE_EXTENSIONS} className="hidden"
-            onChange={(e) => { const f = e.target.files?.[0]; if (f) handleImageUpload(f, setEditIcon, setIconStatus, setIconProgress, iconAbortRef); e.target.value = '' }} />
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) startEdit(f, setIconEditFile); e.target.value = '' }} />
+
+          {iconEditFile && (
+            <ImageCropModal file={iconEditFile} aspect={1} maxOutput={512} title="Edit hub icon"
+              onCancel={() => setIconEditFile(null)}
+              onUploadOriginal={() => { const f = iconEditFile; setIconEditFile(null); uploadIcon(f) }}
+              onSave={(f) => { setIconEditFile(null); uploadIcon(f) }} />
+          )}
+          {bannerEditFile && (
+            <ImageCropModal file={bannerEditFile} aspect={3} maxOutput={1500} title="Edit hub banner"
+              onCancel={() => setBannerEditFile(null)}
+              onUploadOriginal={() => { const f = bannerEditFile; setBannerEditFile(null); uploadBanner(f) }}
+              onSave={(f) => { setBannerEditFile(null); uploadBanner(f) }} />
+          )}
 
           <div className="flex-1 flex flex-col gap-3 max-[1080px]:w-full">
             <div>
