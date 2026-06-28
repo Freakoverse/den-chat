@@ -208,16 +208,20 @@ export function useStartup() {
     useNotificationStore.getState().init(pubkey, signer, privateKey)
       .then(() => {
         // Background check: are there new social notifications since last seen?
+        // Match the notifications page's filter so the badge doesn't go ghost:
+        //  - kind-1 mentions/replies that tag us (the page keeps all of these), plus
+        //  - reactions/reposts/zaps that explicitly target a kind-1 post (#k=1).
+        // The old query counted ANY kind 7/6/9735 #p-tagging us (e.g. reactions to our
+        // long-form posts, or events that merely copied our p-tag), which lit the
+        // short-form badge while the page showed nothing.
         const { socialSeenAt, setHasSocialNotification } = useNotificationStore.getState()
         if (socialSeenAt > 0) {
-          fetchEvents({
-            kinds: [1, 7, 6, 9735],
-            '#p': [pubkey],
-            since: socialSeenAt + 1,
-            limit: 1,
-          }).then((events) => {
-            // Filter out our own events (self-replies, etc.)
-            const hasNew = events.some(e => e.pubkey !== pubkey)
+          Promise.all([
+            fetchEvents({ kinds: [1], '#p': [pubkey], since: socialSeenAt + 1, limit: 1 }),
+            fetchEvents({ kinds: [7, 6, 9735], '#p': [pubkey], '#k': ['1'], since: socialSeenAt + 1, limit: 1 }),
+          ]).then((groups) => {
+            // Filter out our own events (self-replies, self-zaps, etc.)
+            const hasNew = groups.flat().some(e => e.pubkey !== pubkey)
             if (hasNew) setHasSocialNotification(true)
           }).catch(() => { /* non-critical */ })
         }
