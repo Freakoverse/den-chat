@@ -390,12 +390,19 @@ export function SocialPost({ event, onOpenProfile, onOpenThread, compact, isBook
   // NIP-09 delete request for a kind-1 note: publish only the kind-5 deletion
   // (no replacement "deleted" marker — kind 1 isn't replaceable), then hide locally.
   const handleDeleteConfirm = useCallback(async () => {
-    const { signer, privateKey } = useUserStore.getState()
-    const deletion = createDeletionEvent([event.id], [], 'User requested deletion')
-    const signed = await signWithSigner(deletion, signer, privateKey)
-    assertPublished(await publishEventProgressive(signed, () => {}, getPublishRelays()))
-    setShowDeleteModal(false)
-    setDeleted(true)
+    // The shared dialog can't render an error, so catch here: on failure just close
+    // (and leave the post) instead of hanging on the spinner.
+    try {
+      const { signer, privateKey } = useUserStore.getState()
+      const deletion = createDeletionEvent([event.id], [], 'User requested deletion')
+      const signed = await signWithSigner(deletion, signer, privateKey)
+      assertPublished(await publishEventProgressive(signed, () => {}, getPublishRelays()))
+      setDeleted(true)
+    } catch (err) {
+      console.error('[Social] Delete request failed:', err)
+    } finally {
+      setShowDeleteModal(false)
+    }
   }, [event.id])
 
   const copyNpub = useCallback(() => {
