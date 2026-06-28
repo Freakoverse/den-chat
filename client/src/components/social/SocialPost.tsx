@@ -8,9 +8,9 @@ import { useUserStore } from '@/stores/userStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { useBlockStore } from '@/stores/blockStore'
 import { useWotStore } from '@/stores/wotStore'
-import { publishToSpecificRelays, fetchEvents } from '@/lib/nostr/relay-pool'
+import { publishToSpecificRelays, fetchEvents, publishEventProgressive, assertPublished } from '@/lib/nostr/relay-pool'
 import { getPublishRelays } from '@/stores/postingBehaviourStore'
-import { signWithSigner } from '@/lib/nostr/events'
+import { signWithSigner, createDeletionEvent } from '@/lib/nostr/events'
 import { RichContent } from '@/components/social/RichContent'
 import { DnnBadge } from '@/components/ui/DnnBadge'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -24,12 +24,13 @@ import { getEmojiMap } from '@/stores/emojiStore'
 import { cn } from '@/lib/utils'
 import {
   MessageCircle, Repeat2, Heart, Bookmark, ChevronDown, ChevronUp,
-  Eye, EyeOff, Quote, Send, X, Loader2, Smile, MoreVertical, Copy, Code, Check, ShieldBan, Zap,
+  Eye, EyeOff, Quote, Send, X, Loader2, Smile, MoreVertical, Copy, Code, Check, ShieldBan, Zap, Trash2,
 } from 'lucide-react'
 import { nip19 } from 'nostr-tools'
 import { decryptNip04, encryptNip04 } from '@/lib/nostr/nip04dm'
 import type { Event } from 'nostr-tools'
 import { ZapModal } from '@/components/hub/ZapModal'
+import { DeleteConfirmDialog } from '@/components/hub/ChannelView'
 import { useZapStore } from '@/stores/zapStore'
 import { parseZapReceipt, formatSats, type ZapInfo } from '@/lib/nostr/zap'
 import { ZapListModal } from '@/components/hub/ZapListModal'
@@ -246,6 +247,9 @@ export function SocialPost({ event, onOpenProfile, onOpenThread, compact, isBook
   const [showDotMenu, setShowDotMenu] = useState(false)
   const [rawEventJson, setRawEventJson] = useState<string | null>(null)
   const [copyFeedback, setCopyFeedback] = useState(false)
+  const [showDeleteModal, setShowDeleteModal] = useState(false)
+  const [deleted, setDeleted] = useState(false)
+  const isOwnPost = !!myPubkey && event.pubkey === myPubkey
   const reactionBtnRef = useRef<HTMLButtonElement>(null)
   const dotMenuRef = useRef<HTMLDivElement>(null)
 
@@ -383,9 +387,28 @@ export function SocialPost({ event, onOpenProfile, onOpenThread, compact, isBook
     setShowDotMenu(false)
   }, [event.id])
 
+  // NIP-09 delete request for a kind-1 note: publish only the kind-5 deletion
+  // (no replacement "deleted" marker — kind 1 isn't replaceable), then hide locally.
+  const handleDeleteConfirm = useCallback(async () => {
+    const { signer, privateKey } = useUserStore.getState()
+    const deletion = createDeletionEvent([event.id], [], 'User requested deletion')
+    const signed = await signWithSigner(deletion, signer, privateKey)
+    assertPublished(await publishEventProgressive(signed, () => {}, getPublishRelays()))
+    setShowDeleteModal(false)
+    setDeleted(true)
+  }, [event.id])
+
   const copyNpub = useCallback(() => {
     navigator.clipboard.writeText(npubStr)
   }, [npubStr])
+
+  if (deleted) {
+    return (
+      <div className="py-3 px-4 text-xs text-muted-foreground/60 italic border-b border-border/30">
+        Post deleted — deletion request sent to your relays.
+      </div>
+    )
+  }
 
   return (
     <TooltipProvider delayDuration={300}>
@@ -454,6 +477,14 @@ export function SocialPost({ event, onOpenProfile, onOpenThread, compact, isBook
                 >
                   <Code size={13} /> View Raw Event
                 </button>
+                {isOwnPost && (
+                  <button
+                    onClick={() => { setShowDeleteModal(true); setShowDotMenu(false) }}
+                    className="flex items-center gap-2 w-full px-3 py-1.5 text-sm text-red-400 hover:bg-red-500/10 cursor-pointer transition-colors rounded-md"
+                  >
+                    <Trash2 size={13} /> Request Delete
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -674,6 +705,18 @@ export function SocialPost({ event, onOpenProfile, onOpenThread, compact, isBook
         {/* Raw Event Modal */}
         {rawEventJson && (
           <RawEventModal rawJson={rawEventJson} onClose={() => setRawEventJson(null)} />
+        )}
+
+        {/* Delete request — NIP-09 only (no replacement marker for kind 1) */}
+        {showDeleteModal && (
+          <DeleteConfirmDialog
+            onCancel={() => setShowDeleteModal(false)}
+            onConfirm={handleDeleteConfirm}
+            title="Request Delete"
+            description="This sends a NIP-09 deletion request to your relays. Deletion is not guaranteed — some relays may not honor it, and other clients may have already cached the post."
+            progressSteps={['Publishing deletion request...', 'Notifying relays...']}
+            confirmLabel="Yes, Request Delete"
+          />
         )}
 
         {/* Zap Modal */}
