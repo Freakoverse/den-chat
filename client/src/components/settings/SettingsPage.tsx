@@ -40,7 +40,7 @@ import {
 } from '@/lib/voice/soundEffects'
 import { DenChatLogo } from '@/components/ui/DenChatLogo'
 import {
-  Settings, Palette, Globe, Shield, ShieldCheck, Info, Keyboard, MessageSquare, Users,
+  Settings, Palette, Globe, Shield, ShieldCheck, Info, Keyboard, MessageSquare, Users, ChevronsUpDown,
   Sun, Moon, Monitor, Plus, Minus, Trash2, Eye, EyeOff, Search,
   Copy, Check, Lock, FileDown, AlertTriangle, X, RotateCcw, RefreshCw,
   Loader2, Send, HelpCircle, XCircle, UserMinus, ShieldOff, Tag, Download, QrCode,
@@ -59,6 +59,7 @@ import { ResizablePanel } from '@/components/ui/ResizablePanel'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
 import { BlossomImage } from '@/components/ui/BlossomImage'
 import { UserProfileModal } from '@/components/hub/UserProfileModal'
+import { AccountSwitcher } from '@/components/ui/AccountSwitcher'
 import { DoodleBackground } from '@/components/ui/DoodleBackground'
 import { DonateModal } from '@/components/settings/DonateModal'
 import { DnnBadge } from '@/components/ui/DnnBadge'
@@ -313,6 +314,21 @@ function GeneralTab() {
             Edit User Profile
           </span>
         </button>
+
+        {/* Switch account — desktop keyring (seed/nsec) + PWA vault; hidden for other login methods */}
+        <AccountSwitcher
+          trigger={(open) => (
+            <button
+              onClick={open}
+              className="flex items-center justify-between gap-2 w-full px-3 py-3 rounded-lg border border-border bg-secondary/30 hover:bg-secondary/50 transition-colors cursor-pointer text-left group"
+            >
+              <span className="flex items-center gap-2 text-sm font-medium text-foreground">
+                <ChevronsUpDown size={14} /> Switch Account
+              </span>
+              <span className="text-xs text-muted-foreground opacity-70 group-hover:opacity-100 transition-opacity shrink-0">Manage accounts</span>
+            </button>
+          )}
+        />
 
         {/* Client tag */}
         <div className="flex items-center justify-between gap-2 px-3 py-3 rounded-lg border border-border bg-secondary/30">

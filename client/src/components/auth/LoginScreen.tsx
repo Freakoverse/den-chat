@@ -278,9 +278,13 @@ export function LoginScreen() {
     if (!raw) return
     sessionStorage.removeItem('pending-switch')
     try {
-      const data = JSON.parse(raw) as { pubkey: string; authMethod: string; privKeyHex: string }
+      const data = JSON.parse(raw) as { pubkey: string; authMethod: string; privKeyHex?: string }
       if (data.pubkey && data.privKeyHex) {
+        // Desktop: the released private key was stashed before the reload.
         login(data.pubkey, data.authMethod as 'seed' | 'nsec', data.privKeyHex)
+      } else if (data.pubkey && data.authMethod === 'vault') {
+        // PWA: re-unlock the target account in the vault's own overlay (the app never sees the PIN).
+        vaultBackend.loginAccount(data.pubkey).then((r) => applyLogin(data.pubkey, r)).catch(() => {})
       }
     } catch { /* corrupt data, ignore */ }
   }, [login])

@@ -7,16 +7,17 @@
  * Mic and deafen buttons work globally (even before joining a call).
  */
 
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { useUserStore } from '@/stores/userStore'
 import { useVoiceStore } from '@/stores/voiceStore'
 import { useHubStore } from '@/stores/hubStore'
 import { UserProfileModal } from '@/components/hub/UserProfileModal'
+import { AccountSwitcher } from '@/components/ui/AccountSwitcher'
 import { DnnBadge } from '@/components/ui/DnnBadge'
 import { useDnnStore } from '@/stores/dnnStore'
 import { formatDnnId } from '@/lib/dnn/formatDnnId'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
-import { truncateNpub, isTauri } from '@/lib/utils'
+import { truncateNpub } from '@/lib/utils'
 import { nip19 } from 'nostr-tools'
 import {
   Camera,
@@ -32,19 +33,8 @@ import {
   Clock,
   Loader2,
   ChevronsUpDown,
-  Sprout,
-  Key,
-  Lock,
-  Eye,
-  EyeOff,
-  Check,
-  X,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import {
-  listAccounts, listSeeds, loginAccount,
-  type StoredAccount, type StoredSeed,
-} from '@/lib/auth/secure-storage'
 
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { useCachedImageUrl } from '@/lib/imageCache'
@@ -56,73 +46,6 @@ export function UserPanel() {
   const authMethod = useUserStore((s) => s.authMethod)
   const cachedAvatar = useCachedImageUrl(avatar ?? undefined)
   const [profileOpen, setProfileOpen] = useState(false)
-  const isDesktop = isTauri()
-  const showSwitcher = isDesktop && (authMethod === 'seed' || authMethod === 'nsec')
-
-  // ── Account switcher state ──
-  const [switcherOpen, setSwitcherOpen] = useState(false)
-  const [savedAccounts, setSavedAccounts] = useState<StoredAccount[]>([])
-  const [savedSeeds, setSavedSeeds] = useState<StoredSeed[]>([])
-  const [switchTarget, setSwitchTarget] = useState<StoredAccount | null>(null)
-  const [switchPin, setSwitchPin] = useState('')
-  const [switchShowPin, setSwitchShowPin] = useState(false)
-  const [switchError, setSwitchError] = useState<string | null>(null)
-  const [switchLoading, setSwitchLoading] = useState(false)
-
-  const loadAccounts = useCallback(async () => {
-    if (!isDesktop) return
-    const [accounts, seeds] = await Promise.all([listAccounts(), listSeeds()])
-    setSavedAccounts(accounts)
-    setSavedSeeds(seeds)
-  }, [isDesktop])
-
-  // Load accounts when switcher opens
-  useEffect(() => {
-    if (switcherOpen) loadAccounts()
-  }, [switcherOpen, loadAccounts])
-
-  // Build account groups (same logic as LoginScreen)
-  const accountGroups = useMemo(() => {
-    const groups: { type: 'seed' | 'standalone'; seed?: StoredSeed; accounts: StoredAccount[] }[] = []
-    for (const seed of savedSeeds) {
-      const accts = savedAccounts.filter((a) => a.seed_id === seed.id)
-      if (accts.length > 0) groups.push({ type: 'seed', seed, accounts: accts })
-    }
-    const standalone = savedAccounts.filter((a) => !a.seed_id)
-    if (standalone.length > 0) groups.push({ type: 'standalone', accounts: standalone })
-    return groups
-  }, [savedAccounts, savedSeeds])
-
-  // Handle account switch — stash credentials and reload for clean slate
-  const handleSwitch = async () => {
-    if (!switchTarget || !switchPin) return
-    setSwitchLoading(true)
-    setSwitchError(null)
-    try {
-      const privKeyHex = await loginAccount(switchTarget.pubkey, switchPin)
-      // Stash credentials for LoginScreen to pick up after reload
-      sessionStorage.setItem('pending-switch', JSON.stringify({
-        pubkey: switchTarget.pubkey,
-        authMethod: switchTarget.auth_method,
-        privKeyHex,
-      }))
-      // Full reload — guarantees every store, subscription, and WebSocket
-      // is torn down and re-initialized with the new identity
-      window.location.reload()
-    } catch {
-      setSwitchError('Incorrect PIN')
-    } finally {
-      setSwitchLoading(false)
-    }
-  }
-
-  const closeSwitcher = () => {
-    setSwitcherOpen(false)
-    setSwitchTarget(null)
-    setSwitchPin('')
-    setSwitchError(null)
-    setSwitchShowPin(false)
-  }
 
   // Trigger profile fetch + DNN verification for own pubkey on mount
   const { getProfile } = useProfileCache()
@@ -239,22 +162,24 @@ export function UserPanel() {
                 <DnnSubline pubkey={pubkey} npub={npub} />
               </div>
             </button>
-            {/* Account switcher button — desktop + in-app accounts only */}
-            {showSwitcher && (
-              <TooltipProvider delayDuration={300}>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      onClick={() => setSwitcherOpen(true)}
-                      className="h-full shrink-0 p-1.5 rounded hover:bg-white/10 text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-                    >
-                      <ChevronsUpDown size={16} />
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent side="top" className="text-xs">Switch Account</TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-            )}
+            {/* Account switcher — desktop keyring (seed/nsec) + PWA vault */}
+            <AccountSwitcher
+              trigger={(open) => (
+                <TooltipProvider delayDuration={300}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        onClick={open}
+                        className="h-full shrink-0 p-1.5 rounded hover:bg-white/10 text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                      >
+                        <ChevronsUpDown size={16} />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" className="text-xs">Switch Account</TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              )}
+            />
           </div>
 
           {/* Action buttons row */}
@@ -349,133 +274,6 @@ export function UserPanel() {
       </div>
 
       <UserProfileModal open={profileOpen} onClose={() => setProfileOpen(false)} />
-
-      {/* ── Account Switcher Modal ── */}
-      {switcherOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center px-2 bg-black/60 backdrop-blur-sm" onClick={closeSwitcher}>
-          <div
-            className="w-[380px] max-h-[70vh] bg-card border border-border rounded-xl shadow-2xl flex flex-col overflow-hidden"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Header */}
-            <div className="flex items-center justify-between px-5 py-4 border-b border-border">
-              <h4 className="text-sm font-semibold flex items-center gap-2"><ChevronsUpDown size={16} /> Switch Account</h4>
-              <button onClick={closeSwitcher} className="text-muted-foreground hover:text-foreground cursor-pointer"><X size={16} /></button>
-            </div>
-
-            {/* Account list */}
-            <div className="flex-1 overflow-y-auto p-3 space-y-3">
-              {accountGroups.length === 0 && (
-                <p className="text-xs text-muted-foreground text-center py-6">No accounts found</p>
-              )}
-              {accountGroups.map((group, gi) => (
-                <div key={gi}>
-                  {/* Group header */}
-                  <div className="flex items-center gap-1.5 px-2 mb-1.5">
-                    {group.type === 'seed' ? (
-                      <Sprout size={12} className="text-emerald-400 shrink-0" />
-                    ) : (
-                      <Key size={12} className="text-amber-400 shrink-0" />
-                    )}
-                    <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground truncate">
-                      {group.type === 'seed' ? (group.seed?.name || 'Seed') : 'Imported Keys'}
-                    </span>
-                  </div>
-
-                  {/* Accounts in group */}
-                  <div className="space-y-1">
-                    {group.accounts.map((acct) => {
-                      const isActive = acct.pubkey === pubkey
-                      const acctNpub = acct.npub || nip19.npubEncode(acct.pubkey)
-                      const acctName = acct.name || truncateNpub(acctNpub)
-
-                      return (
-                        <button
-                          key={acct.pubkey}
-                          onClick={() => {
-                            if (isActive) return
-                            setSwitchTarget(acct)
-                            setSwitchPin('')
-                            setSwitchError(null)
-                            setSwitchShowPin(false)
-                          }}
-                          className={cn(
-                            'w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left transition-colors',
-                            isActive
-                              ? 'bg-primary/10 cursor-default'
-                              : switchTarget?.pubkey === acct.pubkey
-                                ? 'bg-secondary ring-1 ring-primary/40'
-                                : 'hover:bg-secondary/60 cursor-pointer',
-                          )}
-                        >
-                          <AccountAvatar pubkey={acct.pubkey} size={32} />
-                          <div className="flex-1 min-w-0">
-                            <div className="text-sm font-medium truncate text-foreground">{acctName}</div>
-                            <div className="text-[10px] text-muted-foreground truncate">{truncateNpub(acctNpub)}</div>
-                          </div>
-                          {/* Auth method badge */}
-                          <span className={cn(
-                            'shrink-0 text-[9px] px-1.5 py-0.5 rounded-full font-medium uppercase tracking-wider',
-                            acct.auth_method === 'seed'
-                              ? 'bg-emerald-500/15 text-emerald-400'
-                              : 'bg-amber-500/15 text-amber-400',
-                          )}>
-                            {acct.auth_method === 'seed' ? `#${(acct.account_index ?? 0)}` : 'nsec'}
-                          </span>
-                          {isActive && <Check size={14} className="shrink-0 text-primary" />}
-                        </button>
-                      )
-                    })}
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {/* PIN prompt — shown when a target account is selected */}
-            {switchTarget && (
-              <div className="border-t border-border px-4 py-3 space-y-2">
-                <p className="text-xs text-muted-foreground">
-                  Enter PIN for <span className="font-medium text-foreground">{switchTarget.name || truncateNpub(switchTarget.npub || '')}</span>
-                  {switchTarget.pin_hint && (
-                    <span className="text-muted-foreground/70"> — hint: {switchTarget.pin_hint}</span>
-                  )}
-                </p>
-                {switchError && (
-                  <p className="text-xs text-destructive">{switchError}</p>
-                )}
-                <div className="flex gap-2">
-                  <div className="relative flex-1">
-                    <input
-                      type={switchShowPin ? 'text' : 'password'}
-                      value={switchPin}
-                      onChange={(e) => { setSwitchPin(e.target.value); setSwitchError(null) }}
-                      onKeyDown={(e) => e.key === 'Enter' && handleSwitch()}
-                      placeholder="PIN"
-                      autoFocus
-                      className="w-full h-9 rounded-lg border border-input bg-background px-3 pr-9 text-sm focus:outline-none [&::-ms-reveal]:hidden"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setSwitchShowPin(!switchShowPin)}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-                    >
-                      {switchShowPin ? <EyeOff size={14} /> : <Eye size={14} />}
-                    </button>
-                  </div>
-                  <button
-                    onClick={handleSwitch}
-                    disabled={!switchPin || switchLoading}
-                    className="h-9 px-4 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
-                  >
-                    {switchLoading ? <Loader2 size={14} className="animate-spin" /> : <Lock size={14} />}
-                    Switch
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
     </>
   )
 }
@@ -497,29 +295,5 @@ function DnnSubline({ pubkey, npub }: { pubkey: string | null; npub: string }) {
     <div className="text-sm truncate text-muted-foreground text-left">
       {npub ? truncateNpub(npub) : ''}
     </div>
-  )
-}
-
-/** Small avatar for the account switcher — fetches profile from cache */
-function AccountAvatar({ pubkey, size = 32 }: { pubkey: string; size?: number }) {
-  const { getProfile } = useProfileCache()
-  const profile = getProfile(pubkey) // synchronous — triggers bg fetch + re-render via hook
-  const cachedUrl = useCachedImageUrl(profile?.picture ?? undefined)
-  const npub = nip19.npubEncode(pubkey)
-  const fallback = truncateNpub(npub).slice(0, 2).toUpperCase()
-
-  return (
-    <span
-      className="relative flex shrink-0 overflow-hidden rounded-full"
-      style={{ width: size, height: size }}
-    >
-      {cachedUrl ? (
-        <img src={cachedUrl} alt="" className="w-full h-full object-cover" />
-      ) : (
-        <span className="flex h-full w-full items-center justify-center rounded-full text-[10px] bg-primary text-primary-foreground">
-          {fallback}
-        </span>
-      )}
-    </span>
   )
 }
