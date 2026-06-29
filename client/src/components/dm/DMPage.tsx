@@ -373,7 +373,7 @@ function ConversationList({
       </div>
 
       {/* Protocol tabs — Private (NIP-04) / Extra Private (NIP-17) */}
-      <div className="pt-2 pb-1 shrink-0">
+      <div className="shrink-0">
         <div className="flex items-center gap-1 p-0.5 rounded-lg bg-secondary/60 border border-border">
           <button
             onClick={() => onProtocolChange('nip04')}
@@ -416,7 +416,7 @@ function ConversationList({
 
       {/* DM self (NIP-04 only) — open an encrypted conversation with your own key */}
       {dmProtocol === 'nip04' && myPubkey && (
-        <div className="pb-0.5 shrink-0 mt-1.5">
+        <div className="shrink-0">
           <button
             onClick={() => onSelect(myPubkey)}
             className="w-full flex items-center justify-center gap-1.5 py-1.5 text-[11px] font-medium rounded-md bg-secondary/40 border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors cursor-pointer"
