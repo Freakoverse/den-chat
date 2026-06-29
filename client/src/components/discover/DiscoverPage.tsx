@@ -1204,10 +1204,9 @@ export function DiscoverPage() {
 
   const LeftPanel = (
     <ResizablePanel id="discover" defaultWidth={280} minWidth={200} maxWidth={420} className="flex flex-col bg-background pr-2 py-2 gap-2 max-[1080px]:hidden">
-      <div className="bg-secondary/50 rounded-md shadow-md shrink-0 pb-2">
+      <div className="bg-secondary/50 rounded-md shadow-md flex-1 overflow-y-auto pb-2">
         <DiscoverNav activeTab={discoverTab} onTabChange={setDiscoverTab} />
       </div>
-      <div className="flex-1" />
       <UserPanel />
     </ResizablePanel>
   )

@@ -1034,6 +1034,7 @@ function PublicChatView({ topic, pendingHighlightId, onHighlightConsumed }: { to
 
       {/* Input bar */}
       <ChatInputBar
+        bare
         draftKey={_pcKey}
         message={message}
         onMessageChange={setMessage}

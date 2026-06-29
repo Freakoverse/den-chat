@@ -141,6 +141,8 @@ interface ChatInputBarProps {
    * restored on mount so they survive switching conversations.
    */
   draftKey?: string
+  /** Drop the px-2 pb-2 root padding so the bar sits flush (e.g. below a bordered chat card) */
+  bare?: boolean
 }
 
 /* ─── Helpers ─── */
@@ -186,6 +188,7 @@ export function ChatInputBar({
   encryptBeforeUpload = false,
   forceEncrypt = false,
   draftKey,
+  bare = false,
 }: ChatInputBarProps) {
   const [showEmoji, setShowEmoji] = useState(false)
   const [showSticker, setShowSticker] = useState(false)
@@ -837,7 +840,7 @@ export function ChatInputBar({
       )}
 
       <div
-        className="px-2 pb-2"
+        className={bare ? '' : 'px-2 pb-2'}
       >
         {/* Content above bar (reply indicator, etc.) */}
         {topContent}
