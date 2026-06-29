@@ -81,7 +81,7 @@ function SocialNav({ activeTab, activePage, onTabChange, onOpenProfile, onPageCh
       <div className="p-2 rounded-md shadow-md bg-secondary">
       <button
         onClick={() => setShortFormOpen(!shortFormOpen)}
-        className="flex items-center justify-between px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+        className="flex items-center justify-between w-full px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
       >
         <span>Short Form</span>
         <ChevronDown size={14} className={`transition-transform duration-200 ${shortFormOpen ? '' : '-rotate-90'}`} />
@@ -126,7 +126,7 @@ function SocialNav({ activeTab, activePage, onTabChange, onOpenProfile, onPageCh
       <div className="p-2 rounded-md shadow-md bg-secondary">
       <button
         onClick={() => setLongFormOpen(!longFormOpen)}
-        className="flex items-center justify-between px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+        className="flex items-center justify-between w-full px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
       >
         <span>Long Form</span>
         <ChevronDown size={14} className={`transition-transform duration-200 ${longFormOpen ? '' : '-rotate-90'}`} />
@@ -155,7 +155,7 @@ function SocialNav({ activeTab, activePage, onTabChange, onOpenProfile, onPageCh
       <div className="p-2 rounded-md shadow-md bg-secondary">
       <button
         onClick={() => setForumOpen(!forumOpen)}
-        className="flex items-center justify-between px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+        className="flex items-center justify-between w-full px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
       >
         <span>Forum</span>
         <ChevronDown size={14} className={`transition-transform duration-200 ${forumOpen ? '' : '-rotate-90'}`} />
@@ -167,7 +167,7 @@ function SocialNav({ activeTab, activePage, onTabChange, onOpenProfile, onPageCh
       <div className="p-2 rounded-md shadow-md bg-secondary">
       <button
         onClick={() => setVideoOpen(!videoOpen)}
-        className="flex items-center justify-between px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+        className="flex items-center justify-between w-full px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
       >
         <span>Videos</span>
         <ChevronDown size={14} className={`transition-transform duration-200 ${videoOpen ? '' : '-rotate-90'}`} />
@@ -181,7 +181,7 @@ function SocialNav({ activeTab, activePage, onTabChange, onOpenProfile, onPageCh
       <div className="p-2 rounded-md shadow-md bg-secondary">
       <button
         onClick={() => setLivestreamOpen(!livestreamOpen)}
-        className="flex items-center justify-between px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+        className="flex items-center justify-between w-full px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
       >
         <span>Livestreams</span>
         <ChevronDown size={14} className={`transition-transform duration-200 ${livestreamOpen ? '' : '-rotate-90'}`} />
@@ -195,7 +195,7 @@ function SocialNav({ activeTab, activePage, onTabChange, onOpenProfile, onPageCh
       <div className="p-2 rounded-md shadow-md bg-secondary">
       <button
         onClick={() => setNmailOpen(!nmailOpen)}
-        className="flex items-center justify-between px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+        className="flex items-center justify-between w-full px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
       >
         <span>N-Mail</span>
         <ChevronDown size={14} className={`transition-transform duration-200 ${nmailOpen ? '' : '-rotate-90'}`} />
@@ -470,7 +470,7 @@ export function SocialFeedPage() {
   // Left sidebar (shared across all sub-pages) — hidden on mobile
   const LeftPanel = (
     <ResizablePanel id="social" defaultWidth={280} minWidth={200} maxWidth={420} className="flex flex-col bg-background pr-2 py-2 gap-2 overflow-hidden max-[1080px]:hidden max-[1080px]:p-2">
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto bg-secondary/50 rounded-md shadow-md">
         <SocialNav activeTab={feedTab} activePage={activePage} onTabChange={(tab) => { setFeedTab(tab); useSocialStore.getState().setActivePage('feed') }} onOpenProfile={() => pubkey && setActiveProfile(pubkey)} onPageChange={(page) => useSocialStore.getState().setActivePage(page)} />
       </div>
       <UserPanel />
