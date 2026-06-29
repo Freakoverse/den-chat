@@ -1241,7 +1241,7 @@ export function DiscoverPage() {
           {/* Hero Banner */}
           {discoverTab === 'hubs' ? (
             <>
-              <div className="relative overflow-hidden bg-secondary/50 rounded-md shadow-md mx-6 max-[1080px]:mx-2 mt-2">
+              <div className="relative overflow-hidden bg-secondary/50 rounded-md shadow-md mt-2">
                 <div className="absolute inset-0 bg-gradient-to-br from-primary/15 via-primary/5 to-transparent" />
                 <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-primary/10 via-transparent to-transparent" />
 
@@ -1261,7 +1261,7 @@ export function DiscoverPage() {
               </div>
 
               {/* Search + Filters bar */}
-              <div className="sticky top-0 z-20 bg-secondary/50 backdrop-blur-md rounded-md shadow-md mx-6 max-[1080px]:mx-2 mt-2 px-3 py-3">
+              <div className="sticky top-0 z-20 bg-secondary/50 backdrop-blur-md rounded-md shadow-md mt-2 px-3 py-3">
                 <div className="flex items-center gap-2 max-w-4xl mx-auto">
                   <div className="flex items-center gap-2 flex-1 px-3.5 py-2 rounded-xl bg-secondary/60 border border-border focus-within:border-primary/40 transition-colors">
                     <Search size={15} className="text-muted-foreground shrink-0" />
@@ -1308,7 +1308,7 @@ export function DiscoverPage() {
               </div>
 
               {/* Results */}
-              <div className="px-6 max-[1080px]:px-3 py-5 max-w-5xl mx-auto max-[1080px]:pb-12">
+              <div className="py-5 max-[1080px]:pb-12">
                 {/* Results header */}
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center gap-2">

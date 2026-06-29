@@ -698,7 +698,7 @@ export function SocialFeedPage() {
 
             {/* Filter bar */}
             <div className="shrink-0 overflow-y-scroll scrollbar-invisible">
-              <div className="w-full flex pb-2 px-2 border-b border-border/30" style={{ maxWidth: 640, width: '100%', margin: '0 auto' }}>
+              <div className="w-full flex pb-2 border-b border-border/30" style={{ maxWidth: 640, width: '100%', margin: '0 auto' }}>
                 <div className="flex items-center justify-end px-4 py-1 bg-secondary rounded-sm" style={{ maxWidth: 640, width: '100%', margin: '0 auto' }}>
                   <button
                     onClick={() => setShowFilterModal(true)}
@@ -711,7 +711,7 @@ export function SocialFeedPage() {
               </div>
             </div>
 
-            <div className="flex-1 overflow-y-scroll border border-border rounded-md" ref={scrollRef}>
+            <div className="flex-1 overflow-y-scroll" ref={scrollRef}>
               <div className="w-full mx-auto space-y-3 py-2 max-[1080px]:px-2 max-[1080px]:pb-12" style={{ maxWidth: 640 }}>
                 {loading ? (
                   <div className="flex items-center justify-center py-12">
