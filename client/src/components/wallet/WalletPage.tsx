@@ -231,9 +231,9 @@ export function WalletPage() {
         defaultWidth={280}
         minWidth={220}
         maxWidth={400}
-        className="flex flex-col border-r border-border bg-secondary/30"
+        className="flex flex-col bg-background pr-2 py-2 gap-2 max-[1080px]:p-2"
       >
-        <div className="px-4 pt-4 pb-2">
+        <div className="px-4 pt-4 pb-2 bg-secondary/50 rounded-md shadow-md shrink-0">
           <h2 className="text-sm font-semibold text-foreground">Wallet</h2>
           <p className="text-[10px] text-muted-foreground mt-0.5 flex items-center gap-1">
             Deterministic multi-chain wallets
@@ -247,7 +247,7 @@ export function WalletPage() {
         </div>
 
         {/* Chain wallet cards */}
-        <div className="flex-1 overflow-y-auto px-3 pb-3 space-y-2">
+        <div className="flex-1 overflow-y-auto px-3 py-3 space-y-2 bg-secondary/50 rounded-md shadow-md">
           {CHAIN_META.map((meta) => (
             <WalletCard
               key={meta.id}
@@ -267,7 +267,7 @@ export function WalletPage() {
       </ResizablePanel>
 
       {/* ── Main Detail View ── */}
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex-1 flex flex-col overflow-hidden pr-2 py-2 gap-2 max-[1080px]:px-2">
         <WalletDetailView
           meta={currentMeta}
           address={currentAddress}
@@ -739,7 +739,7 @@ function WalletDetailView({
       </div>
 
       {/* Transaction history */}
-      <div className="flex-1 overflow-y-auto px-8 pb-6 border-t border-border">
+      <div className="flex-1 overflow-y-auto px-8 pb-6 border border-border rounded-md">
         <div className="flex items-center justify-between py-4">
           <h3 className="text-sm font-semibold text-foreground">Transaction History</h3>
           {meta.id !== 'bitcoin' && (

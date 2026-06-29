@@ -457,8 +457,8 @@ export function SocialFeedPage() {
 
   // Left sidebar (shared across all sub-pages) — hidden on mobile
   const LeftPanel = (
-    <ResizablePanel id="social" defaultWidth={280} minWidth={200} maxWidth={420} className="flex flex-col bg-secondary/50 max-[1080px]:hidden">
-      <div className="flex-1 overflow-y-auto">
+    <ResizablePanel id="social" defaultWidth={280} minWidth={200} maxWidth={420} className="flex flex-col bg-background pr-2 py-2 gap-2 overflow-hidden max-[1080px]:hidden max-[1080px]:p-2">
+      <div className="flex-1 overflow-y-auto bg-secondary/50 rounded-md shadow-md">
         <SocialNav activeTab={feedTab} activePage={activePage} onTabChange={(tab) => { setFeedTab(tab); useSocialStore.getState().setActivePage('feed') }} onOpenProfile={() => pubkey && setActiveProfile(pubkey)} onPageChange={(page) => useSocialStore.getState().setActivePage(page)} />
       </div>
       <UserPanel />
@@ -664,12 +664,12 @@ export function SocialFeedPage() {
   return (
     <>
       {LeftPanel}
-      <div id="social-content" className="flex-1 flex flex-col min-w-0 bg-background relative">
+      <div id="social-content" className="flex-1 flex flex-col min-w-0 bg-background relative pr-2 py-2 gap-2 max-[1080px]:px-2">
         {/* Mobile tab bar — above header to match Long Form structure */}
         {MobileTabBar}
 
         {/* Header */}
-        <div className="flex items-center justify-between px-4 h-12 min-h-12 border-b border-border shrink-0">
+        <div className="flex items-center justify-between px-4 h-12 min-h-12 bg-secondary/50 rounded-md shadow-md shrink-0">
           <span className="font-semibold text-sm text-foreground">{tabTitles[feedTab]}</span>
           {feedTab === 'home' && (
             <Button variant="ghost" size="icon" onClick={handleRefresh} className="text-muted-foreground">
@@ -711,7 +711,7 @@ export function SocialFeedPage() {
               </div>
             </div>
 
-            <div className="flex-1 overflow-y-scroll" ref={scrollRef}>
+            <div className="flex-1 overflow-y-scroll border border-border rounded-md" ref={scrollRef}>
               <div className="w-full mx-auto space-y-3 py-2 max-[1080px]:px-2 max-[1080px]:pb-12" style={{ maxWidth: 640 }}>
                 {loading ? (
                   <div className="flex items-center justify-center py-12">

@@ -265,7 +265,7 @@ export function DMPage() {
       />
 
       {/* Right — Chat */}
-      <div className={`flex-1 flex flex-col min-w-0 h-full overflow-hidden bg-background ${mobileShowList ? 'max-[1080px]:hidden' : ''}`}>
+      <div className={`flex-1 flex flex-col min-w-0 h-full overflow-hidden bg-background pr-2 py-2 gap-2 max-[1080px]:px-2 ${mobileShowList ? 'max-[1080px]:hidden' : ''}`}>
         {activeConversation ? (
           dmProtocol === 'nip04'
             ? <DM04ChatView recipientPubkey={activeConversation} onSwitchProtocol={() => { setDmProtocol('nip17'); setNip17Active(activeConversation) }} onBack={handleMobileBack} />
@@ -350,9 +350,9 @@ function ConversationList({
   }, [search, activeList, getProfile])
 
   return (
-    <ResizablePanel id="dm" defaultWidth={280} minWidth={200} maxWidth={420} className={`flex flex-col border-r border-border bg-secondary/20 h-full max-[1080px]:!w-full max-[1080px]:!min-w-0 max-[1080px]:!max-w-none ${mobileShowList ? '' : 'max-[1080px]:!hidden'}`}>
+    <ResizablePanel id="dm" defaultWidth={280} minWidth={200} maxWidth={420} className={`flex flex-col bg-background pr-2 py-2 gap-2 h-full overflow-hidden max-[1080px]:p-2 max-[1080px]:!w-full max-[1080px]:!min-w-0 max-[1080px]:!max-w-none ${mobileShowList ? '' : 'max-[1080px]:!hidden'}`}>
       {/* Header */}
-      <div className="px-3 py-3 border-b border-border flex items-center justify-between shrink-0">
+      <div className="px-3 py-3 bg-secondary/50 rounded-md shadow-md flex items-center justify-between shrink-0">
         <div className="flex items-center gap-2">
           <Lock size={14} className="text-primary" />
           <h2 className="text-sm font-semibold text-foreground">Direct Messages</h2>
@@ -459,7 +459,7 @@ function ConversationList({
       </div>
 
       {/* Conversation list */}
-      <div className="flex-1 overflow-y-auto px-2 py-1">
+      <div className="flex-1 overflow-y-auto px-2 py-1 bg-secondary/50 rounded-md shadow-md">
         {loading ? (
           <div className="flex items-center justify-center py-8 text-muted-foreground">
             <Loader2 size={16} className="animate-spin mr-2" />
@@ -847,9 +847,9 @@ function DMChatView({ recipientPubkey, onSwitchProtocol, onBack }: { recipientPu
   }, [message, myPubkey, recipientPubkey, signer, privateKey, sendMessage, sending, pendingStickers, pendingGifs])
 
   return (
-    <div ref={chatContainerRef} className="flex flex-col flex-1 min-w-0 h-full overflow-hidden relative">
+    <div ref={chatContainerRef} className="flex flex-col flex-1 min-w-0 h-full overflow-hidden relative gap-2">
       {/* Chat header — clickable to open profile */}
-      <div className="flex items-center gap-3 px-4 py-3 border-b border-border shrink-0 bg-background">
+      <div className="flex items-center gap-3 px-4 py-3 bg-secondary/50 rounded-md shadow-md shrink-0">
         {onBack && (
           <button onClick={onBack} className="hidden max-[1080px]:flex p-1.5 -ml-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors cursor-pointer shrink-0">
             <ChevronLeft size={18} />
@@ -895,7 +895,7 @@ function DMChatView({ recipientPubkey, onSwitchProtocol, onBack }: { recipientPu
       {/* Messages */}
       <div
         ref={messagesContainerRef}
-        className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden flex flex-col-reverse px-4 py-3"
+        className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden flex flex-col-reverse px-4 py-3 border border-border rounded-md"
         onScroll={() => {
           handleScroll()
           const el = messagesContainerRef.current

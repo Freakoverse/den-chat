@@ -501,9 +501,9 @@ export function DM04ChatView({ recipientPubkey, onSwitchProtocol, onBack }: { re
   ) : null
 
   return (
-    <div ref={chatContainerRef} className="flex flex-col flex-1 min-w-0 h-full overflow-hidden relative">
-      {/* Chat header */}
-      <div className="flex items-center gap-3 px-4 py-3 border-b border-border shrink-0 bg-background">
+    <div ref={chatContainerRef} className="flex flex-col flex-1 min-w-0 h-full overflow-hidden relative gap-2">
+      {/* Chat header card */}
+      <div className="flex items-center gap-3 px-4 py-3 bg-secondary/50 rounded-md shadow-md shrink-0">
         {onBack && (
           <button onClick={onBack} className="hidden max-[1080px]:flex p-1.5 -ml-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors cursor-pointer shrink-0">
             <ChevronLeft size={18} />
@@ -551,7 +551,7 @@ export function DM04ChatView({ recipientPubkey, onSwitchProtocol, onBack }: { re
       {/* Messages */}
       <div
         ref={messagesContainerRef}
-        className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden flex flex-col-reverse px-4 py-3"
+        className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden flex flex-col-reverse px-4 py-3 border border-border rounded-md"
         onScroll={() => {
           handleScroll()
           const el = messagesContainerRef.current

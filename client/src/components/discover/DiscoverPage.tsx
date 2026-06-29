@@ -1203,8 +1203,10 @@ export function DiscoverPage() {
   const activeFilterCount = (showNsfw ? 1 : 0) + ((powMin !== 15 || powMax !== 25) ? 1 : 0) + (filterTags.length > 0 ? 1 : 0) + (filterClientTags.length > 0 ? 1 : 0)
 
   const LeftPanel = (
-    <ResizablePanel id="discover" defaultWidth={280} minWidth={200} maxWidth={420} className="flex flex-col bg-secondary/50 max-[1080px]:hidden">
-      <DiscoverNav activeTab={discoverTab} onTabChange={setDiscoverTab} />
+    <ResizablePanel id="discover" defaultWidth={280} minWidth={200} maxWidth={420} className="flex flex-col bg-background pr-2 py-2 gap-2 max-[1080px]:hidden">
+      <div className="bg-secondary/50 rounded-md shadow-md shrink-0 pb-2">
+        <DiscoverNav activeTab={discoverTab} onTabChange={setDiscoverTab} />
+      </div>
       <div className="flex-1" />
       <UserPanel />
     </ResizablePanel>
@@ -1240,7 +1242,8 @@ export function DiscoverPage() {
           {/* Hero Banner */}
           {discoverTab === 'hubs' ? (
             <>
-              <div className="relative overflow-hidden bg-gradient-to-br from-primary/20 via-primary/5 to-background border-b border-border">
+              <div className="relative overflow-hidden bg-secondary/50 rounded-md shadow-md mx-6 max-[1080px]:mx-2 mt-2">
+                <div className="absolute inset-0 bg-gradient-to-br from-primary/15 via-primary/5 to-transparent" />
                 <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-primary/10 via-transparent to-transparent" />
 
                 <div className="relative z-10 px-8 max-[1080px]:px-4 pt-10 max-[1080px]:pt-6 pb-8 max-[1080px]:pb-5 max-w-4xl mx-auto">
@@ -1259,7 +1262,7 @@ export function DiscoverPage() {
               </div>
 
               {/* Search + Filters bar */}
-              <div className="sticky top-0 z-20 bg-background/95 backdrop-blur-md border-b border-border px-6 max-[1080px]:px-3 py-3">
+              <div className="sticky top-0 z-20 bg-secondary/50 backdrop-blur-md rounded-md shadow-md mx-6 max-[1080px]:mx-2 mt-2 px-3 py-3">
                 <div className="flex items-center gap-2 max-w-4xl mx-auto">
                   <div className="flex items-center gap-2 flex-1 px-3.5 py-2 rounded-xl bg-secondary/60 border border-border focus-within:border-primary/40 transition-colors">
                     <Search size={15} className="text-muted-foreground shrink-0" />
