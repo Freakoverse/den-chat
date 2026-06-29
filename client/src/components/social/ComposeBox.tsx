@@ -137,8 +137,8 @@ export function ComposeBox({ replyTo, placeholder, onPosted }: ComposeBoxProps) 
   const canPost = (text.trim() || media.allSuccess) && !media.isUploading && !posting
 
   return (
-    <div className="flex gap-3 p-4 bg-secondary/50 rounded-lg">
-      <Avatar className="h-10 w-10 shrink-0">
+    <div className="flex gap-3 p-4 bg-secondary/50 rounded-lg max-[1080px]:p-0 max-[1080px]:bg-transparent">
+      <Avatar className="h-10 w-10 shrink-0 max-[1080px]:hidden">
         {avatar && <AvatarImage src={avatar} />}
         <AvatarFallback className="text-sm bg-primary text-primary-foreground">
           {(displayName || 'U').slice(0, 2).toUpperCase()}
