@@ -482,9 +482,9 @@ export function SocialFeedPage() {
 
   // Mobile tab bar — shown only on mobile, with section switcher + contextual sub-tabs
   const MobileTabBar = (
-    <div className="hidden max-[1080px]:flex flex-col shrink-0 border-b border-border bg-secondary/30">
+    <div className="hidden max-[1080px]:flex flex-col shrink-0 rounded-md shadow-md overflow-hidden bg-secondary/30">
       {/* Section switcher row — wraps to multiple rows when the tabs don't fit */}
-      <div className="flex flex-wrap items-center border-b border-border/40">
+      <div className="flex flex-wrap items-center gap-1 p-1 border-b border-border/40">
         {([
           { id: 'short' as const, label: 'Short Form', icon: <Newspaper size={14} /> },
           { id: 'long' as const, label: 'Long Form', icon: <FileText size={14} /> },
@@ -509,7 +509,7 @@ export function SocialFeedPage() {
             className={cn(
               'shrink-0 flex items-center justify-center gap-1.5 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide whitespace-nowrap transition-colors cursor-pointer',
               activeSection === section.id
-                ? 'text-primary border-b-2 border-primary'
+                ? 'bg-primary/15 text-primary rounded-md'
                 : (section.id === 'video' || section.id === 'livestream' || section.id === 'nmail')
                   ? 'text-muted-foreground/40 cursor-default'
                   : 'text-muted-foreground hover:text-foreground'
@@ -699,7 +699,7 @@ export function SocialFeedPage() {
                 <ComposeBox />
               </div>
             </div>
-            <div className="hidden max-[1080px]:block shrink-0 px-2 pt-3 pb-1">
+            <div className="hidden max-[1080px]:block shrink-0">
               <button
                 onClick={() => setShowComposeModal(true)}
                 className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors cursor-pointer"
@@ -710,7 +710,7 @@ export function SocialFeedPage() {
 
             {/* Filter bar */}
             <div className="shrink-0 overflow-y-scroll scrollbar-invisible">
-              <div className="w-full flex pb-2 border-b border-border/30" style={{ maxWidth: 640, width: '100%', margin: '0 auto' }}>
+              <div className="w-full flex" style={{ maxWidth: 640, width: '100%', margin: '0 auto' }}>
                 <div className="flex items-center justify-end px-4 py-1 bg-secondary rounded-sm" style={{ maxWidth: 640, width: '100%', margin: '0 auto' }}>
                   <button
                     onClick={() => setShowFilterModal(true)}
