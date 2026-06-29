@@ -522,6 +522,7 @@ export function SocialFeedPage() {
             ]).map((tab) => (
               <button
                 key={tab.id}
+                title={tab.label}
                 onClick={() => { setFeedTab(tab.id); useSocialStore.getState().setActivePage('feed') }}
                 className={cn(
                   'flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 text-xs font-medium whitespace-nowrap transition-colors cursor-pointer',
@@ -531,11 +532,11 @@ export function SocialFeedPage() {
                 )}
               >
                 {tab.icon}
-                {tab.label}
               </button>
             ))}
             <button
               onClick={() => pubkey && setActiveProfile(pubkey)}
+              title="Profile"
               className={cn(
                 'flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 text-xs font-medium whitespace-nowrap transition-colors cursor-pointer',
                 activePage === 'profile'
@@ -544,7 +545,6 @@ export function SocialFeedPage() {
               )}
             >
               <User size={15} />
-              Profile
             </button>
           </>
         ) : activeSection === 'long' ? (
@@ -558,6 +558,7 @@ export function SocialFeedPage() {
             ]).map((tab) => (
               <button
                 key={tab.id}
+                title={tab.label}
                 onClick={() => useSocialStore.getState().setActivePage(tab.id)}
                 className={cn(
                   'flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 text-xs font-medium whitespace-nowrap transition-colors cursor-pointer',
@@ -567,7 +568,6 @@ export function SocialFeedPage() {
                 )}
               >
                 {tab.icon}
-                {tab.label}
               </button>
             ))}
           </>
@@ -579,6 +579,7 @@ export function SocialFeedPage() {
             ]).map((tab) => (
               <button
                 key={tab.id}
+                title={tab.label}
                 onClick={() => useSocialStore.getState().setActivePage(tab.id)}
                 className={cn(
                   'flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 text-xs font-medium whitespace-nowrap transition-colors cursor-pointer',
@@ -588,7 +589,6 @@ export function SocialFeedPage() {
                 )}
               >
                 {tab.icon}
-                {tab.label}
               </button>
             ))}
           </>
