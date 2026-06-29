@@ -1241,6 +1241,7 @@ export function DiscoverPage() {
           {/* Hero Banner */}
           {discoverTab === 'hubs' ? (
             <>
+              <div className="max-w-6xl mx-auto w-full">
               <div className="relative overflow-hidden bg-secondary/50 rounded-md shadow-md mt-2">
                 <div className="absolute inset-0 bg-gradient-to-br from-primary/15 via-primary/5 to-transparent" />
                 <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-primary/10 via-transparent to-transparent" />
@@ -1401,6 +1402,7 @@ export function DiscoverPage() {
                     <span className="text-[11px]">Fetching more hubs from relays...</span>
                   </div>
                 )}
+              </div>
               </div>
             </>
           ) : (

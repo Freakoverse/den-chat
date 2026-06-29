@@ -373,7 +373,7 @@ function ConversationList({
       </div>
 
       {/* Protocol tabs — Private (NIP-04) / Extra Private (NIP-17) */}
-      <div className="px-3 pt-2 pb-1 shrink-0">
+      <div className="pt-2 pb-1 shrink-0">
         <div className="flex items-center gap-1 p-0.5 rounded-lg bg-secondary/60 border border-border">
           <button
             onClick={() => onProtocolChange('nip04')}
@@ -416,7 +416,7 @@ function ConversationList({
 
       {/* DM self (NIP-04 only) — open an encrypted conversation with your own key */}
       {dmProtocol === 'nip04' && myPubkey && (
-        <div className="px-3 pb-0.5 shrink-0 mt-1.5">
+        <div className="pb-0.5 shrink-0 mt-1.5">
           <button
             onClick={() => onSelect(myPubkey)}
             className="w-full flex items-center justify-center gap-1.5 py-1.5 text-[11px] font-medium rounded-md bg-secondary/40 border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors cursor-pointer"
@@ -426,22 +426,10 @@ function ConversationList({
         </div>
       )}
 
-      {/* Search */}
-      <div className="px-3 py-2 shrink-0">
-        <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-secondary/50 border border-border">
-          <Search size={13} className="text-muted-foreground shrink-0" />
-          <input
-            type="text"
-            placeholder="Search..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="flex-1 bg-transparent text-xs text-foreground placeholder:text-muted-foreground outline-none"
-          />
-        </div>
-      </div>
-
+      {/* Following/Other tabs + Search + conversation list — one card */}
+      <div className="flex-1 min-h-0 flex flex-col gap-2 p-2 rounded-md bg-secondary/50 shadow-md">
       {/* Following / Other tabs */}
-      <div className="flex px-3 gap-1 shrink-0">
+      <div className="flex gap-1 shrink-0">
         <button
           onClick={() => setTab('following')}
           className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-medium rounded-lg transition-colors cursor-pointer
@@ -458,8 +446,22 @@ function ConversationList({
         </button>
       </div>
 
+      {/* Search */}
+      <div className="shrink-0">
+        <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-secondary/50 border border-border">
+          <Search size={13} className="text-muted-foreground shrink-0" />
+          <input
+            type="text"
+            placeholder="Search..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="flex-1 bg-transparent text-xs text-foreground placeholder:text-muted-foreground outline-none"
+          />
+        </div>
+      </div>
+
       {/* Conversation list */}
-      <div className="flex-1 overflow-y-auto px-2 py-1 bg-secondary/50 rounded-md shadow-md">
+      <div className="flex-1 overflow-y-auto min-h-0">
         {loading ? (
           <div className="flex items-center justify-center py-8 text-muted-foreground">
             <Loader2 size={16} className="animate-spin mr-2" />
@@ -521,6 +523,7 @@ function ConversationList({
             })}
           </div>
         )}
+      </div>
       </div>
 
       <div className="max-[1080px]:hidden">
