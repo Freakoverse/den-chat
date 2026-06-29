@@ -470,8 +470,8 @@ export function SocialFeedPage() {
   // Mobile tab bar — shown only on mobile, with section switcher + contextual sub-tabs
   const MobileTabBar = (
     <div className="hidden max-[1080px]:flex flex-col shrink-0 border-b border-border bg-secondary/30">
-      {/* Section switcher row — horizontally scrollable when the tabs overflow */}
-      <div className="flex items-center border-b border-border/40 overflow-x-auto">
+      {/* Section switcher row — wraps to multiple rows when the tabs don't fit */}
+      <div className="flex flex-wrap items-center border-b border-border/40">
         {([
           { id: 'short' as const, label: 'Short Form', icon: <Newspaper size={14} /> },
           { id: 'long' as const, label: 'Long Form', icon: <FileText size={14} /> },

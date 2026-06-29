@@ -435,7 +435,7 @@ export function ForumNotificationsPage() {
 
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="mx-auto w-full max-w-[680px] px-4 py-4 space-y-3">
+      <div className="mx-auto w-full max-w-[680px] px-4 py-3 space-y-3">
         <div className="flex justify-center">
           <div className="inline-flex gap-1 p-1 rounded-xl bg-card border border-border">
             {(['open', 'moderated'] as const).map((t) => (
