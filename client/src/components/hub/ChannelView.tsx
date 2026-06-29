@@ -275,7 +275,7 @@ export function ChannelView({ hideHeader = false }: { hideHeader?: boolean } = {
   const isAnnouncement = channel.type === 'announcement'
 
   return (
-    <div ref={channelContainerRef} className="flex flex-col h-full bg-background relative">
+    <div ref={channelContainerRef} className="flex flex-col h-full bg-background relative p-2 gap-2">
       {!hideHeader && <ChannelHeader channel={channel} channelId={activeChannelId!} isCreator={!!(hub && pubkey && hub.creatorPubkey === pubkey)} />}
       {/* Loading overlay while blossom membership is being resolved.
           Starts below the 48px header (unless hidden) so the back button stays usable. */}
@@ -285,6 +285,8 @@ export function ChannelView({ hideHeader = false }: { hideHeader?: boolean } = {
           <span className="text-sm text-muted-foreground">Loading hub data...</span>
         </div>
       )}
+      {/* Chat area — messages + composer in one bordered, rounded card */}
+      <div className="flex-1 flex flex-col min-h-0 border border-border rounded-md overflow-hidden">
       <MessageList
         hubDTag={activeHubId!}
         channelId={activeChannelId!}
@@ -307,6 +309,7 @@ export function ChannelView({ hideHeader = false }: { hideHeader?: boolean } = {
         dragContainerRef={channelContainerRef}
         canPublish={canPublish}
       />
+      </div>
     </div>
   )
 }
@@ -350,7 +353,7 @@ function ChannelHeader({ channel, channelId, isCreator }: { channel: { name: str
 
   return (
     <>
-      <div className="flex items-center justify-between px-4 h-12 min-h-12 border-b border-border">
+      <div className="flex items-center justify-between px-4 h-12 min-h-12 bg-secondary/50 rounded-md shadow-md shrink-0">
         <div className="flex items-center gap-2 min-w-0 flex-1">
           {isMobile && (
             <button

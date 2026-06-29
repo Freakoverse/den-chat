@@ -168,7 +168,7 @@ export function AppLayout() {
         {showMobileMembers && activeHubId && activeChannelId && !isBanned && (
           <div className="fixed inset-0 z-50 flex">
             <div className="flex-1 bg-black/40" onClick={() => setShowMobileMembers(false)} />
-            <div className="w-[280px] max-w-[80vw] h-full animate-in slide-in-from-right duration-200">
+            <div className="w-[280px] max-w-[80vw] h-full p-2 bg-background animate-in slide-in-from-right duration-200">
               <MemberList />
             </div>
           </div>
@@ -218,7 +218,7 @@ export function AppLayout() {
             )}
           </div>
           {activeHubId && activeChannelId && !isBanned && (
-            <ResizablePanel id="members" defaultWidth={240} minWidth={180} maxWidth={380} side="right" className="flex">
+            <ResizablePanel id="members" defaultWidth={240} minWidth={180} maxWidth={380} side="right" className="flex p-2 bg-background">
               <MemberList />
             </ResizablePanel>
           )}

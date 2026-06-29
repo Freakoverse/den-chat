@@ -130,7 +130,7 @@ export function MemberList() {
   }
 
   return (
-    <div className="flex flex-col w-full h-full overflow-hidden bg-background border-l border-border">
+    <div className="flex flex-col w-full h-full overflow-hidden bg-secondary/50 rounded-md shadow-md">
       {/* Header */}
       <div className="px-4 pt-3 pb-2 border-b border-border/50">
         <div className="flex items-center gap-1.5">
