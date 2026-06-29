@@ -212,7 +212,7 @@ export function SettingsPage() {
               <ChevronDown size={14} className={`text-muted-foreground transition-transform ${mobileNavOpen ? 'rotate-180' : ''}`} />
             </button>
             {mobileNavOpen && (
-              <div className="absolute top-full left-2 right-2 mt-1 rounded-xl border border-border bg-popover/95 backdrop-blur-md shadow-xl z-50 p-1 max-h-[60vh] overflow-y-auto animate-in fade-in-0 zoom-in-95">
+              <div className="absolute top-full left-2 right-2 mt-1 rounded-xl border border-border bg-popover/95 backdrop-blur-md shadow-xl z-50 p-1 flex flex-col gap-1 max-h-[60vh] overflow-y-auto animate-in fade-in-0 zoom-in-95">
                 {allTabs.map((t) => (
                   <Fragment key={t.id}>
                     {t.separatorBefore && <div className="mx-3 my-1 border-t border-border" />}
@@ -315,7 +315,7 @@ function GeneralTab() {
         </button>
 
         {/* Client tag */}
-        <div className="flex items-center justify-between px-3 py-3 rounded-lg border border-border bg-secondary/30">
+        <div className="flex items-center justify-between gap-2 px-3 py-3 rounded-lg border border-border bg-secondary/30">
           <div>
             <label className="text-sm font-medium text-foreground flex items-center gap-1.5">
               <Tag size={14} /> Client Tag
@@ -432,7 +432,7 @@ function PreferencesTab() {
           <p className="text-xs text-muted-foreground">Select your preferred display language</p>
           <button
             onClick={() => setShowLangModal(true)}
-            className="flex items-center justify-between w-full max-w-xs px-3 py-2 rounded-lg border border-border bg-secondary/30 hover:bg-secondary/60 transition-colors cursor-pointer text-sm"
+            className="flex items-center justify-between gap-2 w-full max-w-xs px-3 py-2 rounded-lg border border-border bg-secondary/30 hover:bg-secondary/60 transition-colors cursor-pointer text-sm"
           >
             <span className="flex items-center gap-2">
               <span className="text-base">{currentLang.flag}</span>
@@ -2789,14 +2789,14 @@ function PostingBehaviourSection() {
         Control which relay and blossom server lists are used when publishing events or uploading media. These settings apply across hub messages, social posts, DMs, and profile updates.
       </p>
       <div className="space-y-2">
-        <div className="flex items-center justify-between px-3 py-2 rounded-lg border border-border bg-secondary/30">
+        <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-border bg-secondary/30">
           <div>
             <p className="text-sm font-medium text-foreground">Post to client relays</p>
             <p className="text-xs text-muted-foreground">Publish events to your configured client relays</p>
           </div>
           <ToggleSwitch checked={postToClientRelays} onChange={setPostToClientRelays} />
         </div>
-        <div className="flex items-center justify-between px-3 py-2 rounded-lg border border-border bg-secondary/30">
+        <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-border bg-secondary/30">
           <div>
             <p className="text-sm font-medium text-foreground">Post to user relays</p>
             <p className="text-xs text-muted-foreground">Publish events to your NIP-65 relay list</p>
@@ -2820,14 +2820,14 @@ function PostingBehaviourSection() {
             </div>
           )}
         </div>
-        <div className="flex items-center justify-between px-3 py-2 rounded-lg border border-border bg-secondary/30">
+        <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-border bg-secondary/30">
           <div>
             <p className="text-sm font-medium text-foreground">Limit to max 3 relays per list</p>
             <p className="text-xs text-muted-foreground">Randomly pick up to 3 relays from each enabled list to reduce publish load</p>
           </div>
           <ToggleSwitch checked={limitRelaysPerList} onChange={setLimitRelaysPerList} />
         </div>
-        <div className="flex items-center justify-between px-3 py-2 rounded-lg border border-border bg-secondary/30">
+        <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-border bg-secondary/30">
           <div>
             <p className="text-sm font-medium text-foreground">Limit to max 3 blossoms per list</p>
             <p className="text-xs text-muted-foreground">Upload media to at most 3 blossom servers from each list</p>
@@ -3497,7 +3497,7 @@ function ModerationTab() {
         </div>
 
         {/* DNN Bonus Toggle */}
-        <div className="flex items-center justify-between px-3 py-2.5 rounded-lg border border-border bg-secondary/30">
+        <div className="flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg border border-border bg-secondary/30">
           <div>
             <p className="text-sm font-medium text-foreground flex items-center gap-1.5">
               <BadgeCheck size={14} className="text-primary" /> DNN ID Bonus
@@ -3512,7 +3512,7 @@ function ModerationTab() {
           <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Apply WoT Filtering To</h4>
 
           <div className="space-y-2">
-            <div className="flex items-center justify-between px-3 py-2.5 rounded-lg border border-border bg-secondary/30">
+            <div className="flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg border border-border bg-secondary/30">
               <div>
                 <p className="text-sm font-medium text-foreground">Social Feed</p>
                 <p className="text-xs text-muted-foreground">Hide low-trust posts in the social page</p>
@@ -3520,7 +3520,7 @@ function ModerationTab() {
               <ToggleSwitch checked={wotSettings.applySocial} onChange={(v) => updateWot({ applySocial: v })} />
             </div>
 
-            <div className="flex items-center justify-between px-3 py-2.5 rounded-lg border border-border bg-secondary/30">
+            <div className="flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg border border-border bg-secondary/30">
               <div>
                 <p className="text-sm font-medium text-foreground">Public Chat</p>
                 <p className="text-xs text-muted-foreground">Hide low-trust messages in public chat</p>
@@ -3528,7 +3528,7 @@ function ModerationTab() {
               <ToggleSwitch checked={wotSettings.applyPublicChat} onChange={(v) => updateWot({ applyPublicChat: v })} />
             </div>
 
-            <div className="flex items-center justify-between px-3 py-2.5 rounded-lg border border-border bg-secondary/30">
+            <div className="flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg border border-border bg-secondary/30">
               <div>
                 <p className="text-sm font-medium text-foreground">Hub Chat</p>
                 <p className="text-xs text-muted-foreground">Hide low-trust messages in hub channels</p>
@@ -3536,7 +3536,7 @@ function ModerationTab() {
               <ToggleSwitch checked={wotSettings.applyHubChat} onChange={(v) => updateWot({ applyHubChat: v })} />
             </div>
 
-            <div className="flex items-center justify-between px-3 py-2.5 rounded-lg border border-border bg-secondary/30">
+            <div className="flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg border border-border bg-secondary/30">
               <div>
                 <p className="text-sm font-medium text-foreground">Direct Messages</p>
                 <p className="text-xs text-muted-foreground">Hide DM conversations from low-trust users</p>
@@ -3612,7 +3612,7 @@ function EmbedPreferenceToggle() {
   const setShowEmbeds = usePreferencesStore((s) => s.setShowEmbeds)
 
   return (
-    <div className="flex items-center justify-between px-3 py-2.5 rounded-lg border border-border bg-secondary/30">
+    <div className="flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg border border-border bg-secondary/30">
       <div>
         <p className="text-sm font-medium text-foreground">Show Link Previews & Embeds</p>
         <p className="text-xs text-muted-foreground">URLs display as clickable links only — no iframes or preview cards are loaded.</p>
@@ -3627,7 +3627,7 @@ function LinkPreviewPreferenceToggle() {
   const setShowLinkPreviews = usePreferencesStore((s) => s.setShowLinkPreviews)
 
   return (
-    <div className="flex items-center justify-between px-3 py-2.5 rounded-lg border border-border bg-secondary/30">
+    <div className="flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg border border-border bg-secondary/30">
       <div>
         <p className="text-sm font-medium text-foreground">Show Link Previews</p>
         <p className="text-xs text-muted-foreground">Display OpenGraph preview cards for URLs. Only works on the desktop app.</p>
@@ -3662,7 +3662,7 @@ function MediaPreferenceToggle() {
   const setShowMedia = usePreferencesStore((s) => s.setShowMedia)
 
   return (
-    <div className="flex items-center justify-between px-3 py-2.5 rounded-lg border border-border bg-secondary/30">
+    <div className="flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg border border-border bg-secondary/30">
       <div>
         <p className="text-sm font-medium text-foreground">Show Media</p>
         <p className="text-xs text-muted-foreground">Render images, videos, stickers, and GIFs inline in messages.</p>
@@ -3677,7 +3677,7 @@ function CustomEmojiPreferenceToggle() {
   const setShowCustomEmojis = usePreferencesStore((s) => s.setShowCustomEmojis)
 
   return (
-    <div className="flex items-center justify-between px-3 py-2.5 rounded-lg border border-border bg-secondary/30">
+    <div className="flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg border border-border bg-secondary/30">
       <div>
         <p className="text-sm font-medium text-foreground">Show Custom Emojis</p>
         <p className="text-xs text-muted-foreground">Render custom emoji images in text and reactions.</p>
@@ -3792,7 +3792,7 @@ function MutedWordsGlobalToggle() {
   const wordCount = useBlockStore((s) => s.mutedWords).size
 
   return (
-    <div className="flex items-center justify-between px-3 py-2.5 rounded-lg border border-border bg-secondary/30">
+    <div className="flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg border border-border bg-secondary/30">
       <div>
         <p className="text-sm font-medium text-foreground">Hide Muted Words</p>
         <p className="text-xs text-muted-foreground">Redact your {wordCount} muted word{wordCount !== 1 ? 's' : ''} in messages across the app.</p>
@@ -8865,7 +8865,7 @@ function SocialNetworkTab() {
         )}
 
         {/* Hide blocked toggle */}
-        <div className="flex items-center justify-between mt-4 px-3 py-2.5 rounded-lg border border-border bg-secondary/30">
+        <div className="flex items-center justify-between gap-2 mt-4 px-3 py-2.5 rounded-lg border border-border bg-secondary/30">
           <div>
             <p className="text-sm font-medium text-foreground">Completely hide blocked users' messages</p>
             <p className="text-xs text-muted-foreground">When enabled, messages from blocked users won't appear at all in chat</p>
