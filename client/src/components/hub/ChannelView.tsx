@@ -3621,7 +3621,7 @@ export function ChatMessageRow({
           </Avatar>
         </button>
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-x-2 gap-y-0.5 mb-1 flex-wrap">
             <button
               onClick={() => onOpenProfile(msg.pubkey)}
               className="text-sm font-semibold cursor-pointer hover:underline text-foreground"
