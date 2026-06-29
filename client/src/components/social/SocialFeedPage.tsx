@@ -224,6 +224,7 @@ export function SocialFeedPage() {
   const [bookmarkPosts, setBookmarkPosts] = useState<Event[]>([])
   const [subLoading, setSubLoading] = useState(false)
   const [showFilterModal, setShowFilterModal] = useState(false)
+  const [showComposeModal, setShowComposeModal] = useState(false)   // mobile: compose in a modal
 
   // ── Batch data for SocialPost (avoids per-post relay queries) ──
   const SOCIAL_ZAP_NS = '__social__'
@@ -680,10 +681,19 @@ export function SocialFeedPage() {
         {/* ─── Home tab ─── */}
         {feedTab === 'home' && (
           <>
-            <div className="shrink-0 overflow-y-scroll scrollbar-invisible">
-              <div className="w-full mx-auto pt-4 pb-2 max-[1080px]:px-2" style={{ maxWidth: 640 }}>
+            {/* Composer: inline on desktop; a full-width button that opens a modal on mobile */}
+            <div className="shrink-0 overflow-y-scroll scrollbar-invisible max-[1080px]:hidden">
+              <div className="w-full mx-auto pt-4 pb-2" style={{ maxWidth: 640 }}>
                 <ComposeBox />
               </div>
+            </div>
+            <div className="hidden max-[1080px]:block shrink-0 px-2 pt-3 pb-1">
+              <button
+                onClick={() => setShowComposeModal(true)}
+                className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors cursor-pointer"
+              >
+                <PenLine size={15} /> Post
+              </button>
             </div>
 
             {/* Filter bar */}
@@ -744,6 +754,21 @@ export function SocialFeedPage() {
               filters={feedFilters}
               setFilter={setFeedFilter}
             />
+
+            {/* Compose modal (mobile) */}
+            {showComposeModal && (
+              <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={() => setShowComposeModal(false)}>
+                <div className="w-full max-w-lg bg-card border border-border rounded-2xl shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+                  <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+                    <h3 className="text-sm font-semibold text-foreground">New post</h3>
+                    <button onClick={() => setShowComposeModal(false)} className="text-muted-foreground hover:text-foreground cursor-pointer"><X size={18} /></button>
+                  </div>
+                  <div className="p-3">
+                    <ComposeBox onPosted={() => setShowComposeModal(false)} />
+                  </div>
+                </div>
+              </div>
+            )}
           </>
         )}
 
