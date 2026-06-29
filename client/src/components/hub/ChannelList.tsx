@@ -543,7 +543,7 @@ function MobileWrapper({ children }: { children: ReactNode }) {
 }
 function DesktopWrapper({ children }: { children: ReactNode }) {
   return (
-    <ResizablePanel id="hub" defaultWidth={280} minWidth={200} maxWidth={420} className="flex flex-col overflow-hidden bg-background p-2 gap-2">
+    <ResizablePanel id="hub" defaultWidth={280} minWidth={200} maxWidth={420} className="flex flex-col overflow-hidden bg-background pr-2 py-2 gap-2">
       {children}
     </ResizablePanel>
   )

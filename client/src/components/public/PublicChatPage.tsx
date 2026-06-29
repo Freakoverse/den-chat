@@ -156,9 +156,9 @@ function TopicListPanel({ topics, activeTopic, onSelect, onAdd, onInfo, onSettin
   }, [topics, allMessages, pcReadTimes])
 
   return (
-    <ResizablePanel id="public-chat" defaultWidth={240} minWidth={180} maxWidth={360} className="flex flex-col border-r border-border bg-secondary/20 h-full">
-      {/* Header */}
-      <div className="px-3 pt-3 pb-2 border-b border-border shrink-0">
+    <ResizablePanel id="public-chat" defaultWidth={240} minWidth={180} maxWidth={360} className="flex flex-col bg-background pr-2 py-2 gap-2 h-full overflow-hidden max-[1080px]:p-2">
+      {/* Header card */}
+      <div className="px-3 pt-3 pb-2 bg-secondary/50 rounded-md shadow-md shrink-0">
         <div className="flex items-center gap-2 mb-2">
           <MessagesSquare size={14} className="text-primary" />
           <h2 className="text-sm font-semibold text-foreground">Public Chat</h2>
@@ -210,8 +210,8 @@ function TopicListPanel({ topics, activeTopic, onSelect, onAdd, onInfo, onSettin
         </div>
       </div>
 
-      {/* Topic list */}
-      <div className="flex-1 overflow-y-auto px-2 py-2">
+      {/* Topic list card */}
+      <div className="flex-1 overflow-y-auto px-2 py-2 bg-secondary/50 rounded-md shadow-md">
         {loading ? (
           <div className="flex items-center justify-center py-8 text-muted-foreground">
             <Loader2 size={16} className="animate-spin mr-2" />
@@ -377,33 +377,33 @@ function PublicChatNotificationView({ onNavigate }: { onNavigate: (topic: string
   }, [onNavigate])
 
   return (
-    <div className="flex flex-col flex-1 min-w-0 h-full overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center gap-3 px-4 py-3 border-b border-border shrink-0 bg-background">
-        <Bell size={16} className="text-muted-foreground" />
-        <h3 className="text-sm font-semibold text-foreground flex-1">Notifications</h3>
+    <div className="flex flex-col flex-1 min-w-0 h-full overflow-hidden pr-2 py-2 gap-2 max-[1080px]:px-2">
+      {/* Header + tabs card */}
+      <div className="bg-secondary/50 rounded-md shadow-md shrink-0 overflow-hidden">
+        <div className="flex items-center gap-3 px-4 py-3 border-b border-border/50">
+          <Bell size={16} className="text-muted-foreground" />
+          <h3 className="text-sm font-semibold text-foreground flex-1">Notifications</h3>
+        </div>
+        <div className="flex items-center gap-1 px-4 py-2">
+          {tabs.map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={cn(
+                'px-3 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer',
+                activeTab === tab.id
+                  ? 'bg-primary/15 text-primary'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'
+              )}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
       </div>
 
-      {/* Tabs */}
-      <div className="flex items-center gap-1 px-4 py-2 border-b border-border/50 shrink-0 bg-background">
-        {tabs.map(tab => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            className={cn(
-              'px-3 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer',
-              activeTab === tab.id
-                ? 'bg-primary/15 text-primary'
-                : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'
-            )}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
-
-      {/* Notification list */}
-      <div className="flex-1 overflow-y-auto px-4 py-3">
+      {/* Notification list — bordered, rounded card */}
+      <div className="flex-1 overflow-y-auto px-4 py-3 border border-border rounded-md">
         {loading ? (
           <div className="flex items-center justify-center py-12 text-muted-foreground">
             <Loader2 size={16} className="animate-spin mr-2" />
@@ -919,17 +919,17 @@ function PublicChatView({ topic, pendingHighlightId, onHighlightConsumed }: { to
   const replyTargetProfile = replyTo ? getProfile(replyTo.pubkey) : null
 
   return (
-    <div ref={chatContainerRef} className="flex flex-col flex-1 min-w-0 h-full overflow-hidden relative">
-      {/* Header */}
-      <div className="flex items-center gap-3 px-4 py-3 border-b border-border shrink-0 bg-background">
+    <div ref={chatContainerRef} className="flex flex-col flex-1 min-w-0 h-full overflow-hidden relative pr-2 py-2 gap-2 max-[1080px]:px-2">
+      {/* Header card */}
+      <div className="flex items-center gap-3 px-4 py-3 bg-secondary/50 rounded-md shadow-md shrink-0">
         <Hash size={16} className="text-muted-foreground" />
         <h3 className="text-sm font-semibold text-foreground flex-1">{topic}</h3>
       </div>
 
-      {/* Messages */}
+      {/* Messages — bordered, rounded card */}
       <div
         ref={messagesContainerRef}
-        className="flex-1 min-h-0 overflow-y-auto flex flex-col-reverse px-4 py-3"
+        className="flex-1 min-h-0 overflow-y-auto flex flex-col-reverse px-4 py-3 border border-border rounded-md"
         onScroll={handleScroll}
       >
         <div className="relative">
