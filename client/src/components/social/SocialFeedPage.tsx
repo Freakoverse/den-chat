@@ -616,7 +616,7 @@ export function SocialFeedPage() {
     return (
       <>
         {LeftPanel}
-        <div id="social-content" className="flex-1 flex flex-col min-w-0 bg-background relative">
+        <div id="social-content" className="flex-1 flex flex-col min-w-0 bg-background relative max-[1080px]:px-2 max-[1080px]:py-2 max-[1080px]:gap-2">
           {MobileTabBar}
           <PostThread />
         </div>
@@ -628,7 +628,7 @@ export function SocialFeedPage() {
     return (
       <>
         {LeftPanel}
-        <div id="social-content" className="flex-1 flex flex-col min-w-0 bg-background relative">
+        <div id="social-content" className="flex-1 flex flex-col min-w-0 bg-background relative max-[1080px]:px-2 max-[1080px]:py-2 max-[1080px]:gap-2">
           {MobileTabBar}
           <UserProfilePage />
         </div>
@@ -638,37 +638,37 @@ export function SocialFeedPage() {
 
   // Long-form sub-pages — now with MobileTabBar
   if (activePage === 'longform-feed') {
-    return (<>{LeftPanel}<div className="flex-1 flex flex-col min-w-0 bg-background overflow-hidden">{MobileTabBar}<LongFormFeedPage /></div></>)
+    return (<>{LeftPanel}<div className="flex-1 flex flex-col min-w-0 bg-background overflow-hidden max-[1080px]:px-2 max-[1080px]:py-2 max-[1080px]:gap-2">{MobileTabBar}<LongFormFeedPage /></div></>)
   }
   if (activePage === 'longform-read') {
-    return (<>{LeftPanel}<div className="flex-1 flex flex-col min-w-0 bg-background overflow-hidden">{MobileTabBar}<LongFormArticleReader /></div></>)
+    return (<>{LeftPanel}<div className="flex-1 flex flex-col min-w-0 bg-background overflow-hidden max-[1080px]:px-2 max-[1080px]:py-2 max-[1080px]:gap-2">{MobileTabBar}<LongFormArticleReader /></div></>)
   }
   if (activePage === 'longform-write') {
-    return (<>{LeftPanel}<div className="flex-1 flex flex-col min-w-0 bg-background overflow-hidden">{MobileTabBar}<LongFormWritePage /></div></>)
+    return (<>{LeftPanel}<div className="flex-1 flex flex-col min-w-0 bg-background overflow-hidden max-[1080px]:px-2 max-[1080px]:py-2 max-[1080px]:gap-2">{MobileTabBar}<LongFormWritePage /></div></>)
   }
   if (activePage === 'longform-mine') {
-    return (<>{LeftPanel}<div className="flex-1 flex flex-col min-w-0 bg-background overflow-hidden">{MobileTabBar}<LongFormMinePage /></div></>)
+    return (<>{LeftPanel}<div className="flex-1 flex flex-col min-w-0 bg-background overflow-hidden max-[1080px]:px-2 max-[1080px]:py-2 max-[1080px]:gap-2">{MobileTabBar}<LongFormMinePage /></div></>)
   }
   if (activePage === 'longform-drafts') {
-    return (<>{LeftPanel}<div className="flex-1 flex flex-col min-w-0 bg-background overflow-hidden">{MobileTabBar}<LongFormDraftsPage /></div></>)
+    return (<>{LeftPanel}<div className="flex-1 flex flex-col min-w-0 bg-background overflow-hidden max-[1080px]:px-2 max-[1080px]:py-2 max-[1080px]:gap-2">{MobileTabBar}<LongFormDraftsPage /></div></>)
   }
   if (activePage === 'longform-bookmarks') {
-    return (<>{LeftPanel}<div className="flex-1 flex flex-col min-w-0 bg-background overflow-hidden">{MobileTabBar}<LongFormBookmarksPage /></div></>)
+    return (<>{LeftPanel}<div className="flex-1 flex flex-col min-w-0 bg-background overflow-hidden max-[1080px]:px-2 max-[1080px]:py-2 max-[1080px]:gap-2">{MobileTabBar}<LongFormBookmarksPage /></div></>)
   }
   if (activePage === 'longform-notifications') {
-    return (<>{LeftPanel}<div className="flex-1 flex flex-col min-w-0 bg-background overflow-hidden">{MobileTabBar}<LongFormNotificationsPage /></div></>)
+    return (<>{LeftPanel}<div className="flex-1 flex flex-col min-w-0 bg-background overflow-hidden max-[1080px]:px-2 max-[1080px]:py-2 max-[1080px]:gap-2">{MobileTabBar}<LongFormNotificationsPage /></div></>)
   }
   if (activePage === 'longform-draft-preview') {
-    return (<>{LeftPanel}<div className="flex-1 flex flex-col min-w-0 bg-background overflow-hidden">{MobileTabBar}<DraftPreviewPage /></div></>)
+    return (<>{LeftPanel}<div className="flex-1 flex flex-col min-w-0 bg-background overflow-hidden max-[1080px]:px-2 max-[1080px]:py-2 max-[1080px]:gap-2">{MobileTabBar}<DraftPreviewPage /></div></>)
   }
   if (activePage === 'forum-feed') {
-    return (<>{LeftPanel}<div className="flex-1 flex flex-col min-w-0 bg-background overflow-hidden">{MobileTabBar}<ForumFeedPage /></div></>)
+    return (<>{LeftPanel}<div className="flex-1 flex flex-col min-w-0 bg-background overflow-hidden max-[1080px]:px-2 max-[1080px]:py-2 max-[1080px]:gap-2">{MobileTabBar}<ForumFeedPage /></div></>)
   }
   if (activePage === 'forum-thread') {
-    return (<>{LeftPanel}<div className="flex-1 flex flex-col min-w-0 bg-background overflow-hidden">{MobileTabBar}<ForumThreadPage /></div></>)
+    return (<>{LeftPanel}<div className="flex-1 flex flex-col min-w-0 bg-background overflow-hidden max-[1080px]:px-2 max-[1080px]:py-2 max-[1080px]:gap-2">{MobileTabBar}<ForumThreadPage /></div></>)
   }
   if (activePage === 'forum-notifications') {
-    return (<>{LeftPanel}<div className="flex-1 flex flex-col min-w-0 bg-background overflow-hidden">{MobileTabBar}<ForumNotificationsPage /></div></>)
+    return (<>{LeftPanel}<div className="flex-1 flex flex-col min-w-0 bg-background overflow-hidden max-[1080px]:px-2 max-[1080px]:py-2 max-[1080px]:gap-2">{MobileTabBar}<ForumNotificationsPage /></div></>)
   }
 
   const tabTitles: Record<FeedTab, string> = { home: 'Social Feed', reactions: 'Reactions', bookmarks: 'Bookmarks', notifications: 'Notifications' }
@@ -709,7 +709,7 @@ export function SocialFeedPage() {
             </div>
 
             {/* Filter bar */}
-            <div className="shrink-0 overflow-y-scroll scrollbar-invisible">
+            <div className="shrink-0">
               <div className="w-full flex" style={{ maxWidth: 640, width: '100%', margin: '0 auto' }}>
                 <div className="flex items-center justify-end px-4 py-1 bg-secondary rounded-sm" style={{ maxWidth: 640, width: '100%', margin: '0 auto' }}>
                   <button
