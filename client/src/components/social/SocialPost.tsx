@@ -10,7 +10,7 @@ import { useBlockStore } from '@/stores/blockStore'
 import { useWotStore } from '@/stores/wotStore'
 import { publishToSpecificRelays, fetchEvents, publishEventProgressive, assertPublished } from '@/lib/nostr/relay-pool'
 import { getPublishRelays } from '@/stores/postingBehaviourStore'
-import { signWithSigner, createDeletionEvent } from '@/lib/nostr/events'
+import { signWithSigner, createDeletionEvent, withClientTag } from '@/lib/nostr/events'
 import { RichContent } from '@/components/social/RichContent'
 import { DnnBadge } from '@/components/ui/DnnBadge'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -282,7 +282,7 @@ export function SocialPost({ event, onOpenProfile, onOpenThread, compact, isBook
         kind: 7,
         pubkey: myPubkey,
         created_at: Math.floor(Date.now() / 1000),
-        tags,
+        tags: withClientTag(tags),
         content: emoji,
       }
       const signed = await signWithSigner(unsigned, signer, privateKey)
@@ -317,7 +317,7 @@ export function SocialPost({ event, onOpenProfile, onOpenThread, compact, isBook
         kind: 6,
         pubkey: myPubkey,
         created_at: Math.floor(Date.now() / 1000),
-        tags: [['e', event.id, ''], ['p', event.pubkey]],
+        tags: withClientTag([['e', event.id, ''], ['p', event.pubkey]]),
         content: JSON.stringify(event),
       }
       const signed = await signWithSigner(unsigned, signer, privateKey)

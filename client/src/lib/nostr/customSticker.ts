@@ -11,7 +11,7 @@
  */
 
 import { fetchEvents, fetchReplaceable, publishToSpecificRelays, fetchEventsFromRelays, getRelays } from '@/lib/nostr/relay-pool'
-import { createUnsignedEvent, signWithSigner } from '@/lib/nostr/events'
+import { createUnsignedEvent, signWithSigner, withClientTag } from '@/lib/nostr/events'
 import type { ISigner } from '@/stores/userStore'
 import type { StickerSet, CustomSticker } from '@/stores/stickerStore'
 import type { Event } from 'nostr-tools'
@@ -234,7 +234,7 @@ export async function publishStickerSet(
     ...stickers.map((s): [string, ...string[]] => ['sticker', s.shortcode, s.url, s.nsfw ? 'nsfw' : 'sfw']),
   ]
 
-  const unsigned = createUnsignedEvent(KIND_STICKER_SET, '', tags)
+  const unsigned = createUnsignedEvent(KIND_STICKER_SET, '', withClientTag(tags))
   const signed = await signWithSigner(unsigned, signer, privateKey)
   await publishToSpecificRelays(getPublishRelays(), signed)
 }
@@ -264,7 +264,7 @@ export async function deleteStickerSet(
     ['deleted', 'true'],
   ]
 
-  const unsigned = createUnsignedEvent(KIND_STICKER_SET, '', tags)
+  const unsigned = createUnsignedEvent(KIND_STICKER_SET, '', withClientTag(tags))
   const signed = await signWithSigner(unsigned, signer, privateKey)
   await publishToSpecificRelays(getPublishRelays(), signed)
 }

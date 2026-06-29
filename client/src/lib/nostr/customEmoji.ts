@@ -13,7 +13,7 @@
  */
 
 import { fetchEvents, fetchReplaceable, publishToSpecificRelays, fetchEventsFromRelays, getRelays } from '@/lib/nostr/relay-pool'
-import { createUnsignedEvent, signWithSigner } from '@/lib/nostr/events'
+import { createUnsignedEvent, signWithSigner, withClientTag } from '@/lib/nostr/events'
 import type { ISigner } from '@/stores/userStore'
 import type { EmojiSet, CustomEmoji } from '@/stores/emojiStore'
 import type { Event } from 'nostr-tools'
@@ -219,7 +219,7 @@ export async function publishEmojiSet(
     ...emojis.map((e): [string, ...string[]] => ['emoji', e.shortcode, e.url, e.nsfw ? 'nsfw' : 'sfw']),
   ]
 
-  const unsigned = createUnsignedEvent(KIND_EMOJI_SET, '', tags)
+  const unsigned = createUnsignedEvent(KIND_EMOJI_SET, '', withClientTag(tags))
   const signed = await signWithSigner(unsigned, signer, privateKey)
   await publishToSpecificRelays(getPublishRelays(), signed)
 }
@@ -251,7 +251,7 @@ export async function deleteEmojiSet(
     ['deleted', 'true'],
   ]
 
-  const unsigned = createUnsignedEvent(KIND_EMOJI_SET, '', tags)
+  const unsigned = createUnsignedEvent(KIND_EMOJI_SET, '', withClientTag(tags))
   const signed = await signWithSigner(unsigned, signer, privateKey)
   await publishToSpecificRelays(getPublishRelays(), signed)
 }

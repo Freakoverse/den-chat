@@ -15,7 +15,7 @@
  */
 
 import { fetchEvents, fetchReplaceable, publishToSpecificRelays } from '@/lib/nostr/relay-pool'
-import { createUnsignedEvent, signWithSigner } from '@/lib/nostr/events'
+import { createUnsignedEvent, signWithSigner, withClientTag } from '@/lib/nostr/events'
 import type { ISigner } from '@/stores/userStore'
 import type { GifCollection, GifEntry } from '@/stores/gifStore'
 import type { Event } from 'nostr-tools'
@@ -249,7 +249,7 @@ export async function publishGifCollection(
     ...gifs.map((g): [string, ...string[]] => ['j', g.name, g.url, g.nsfw ? 'nsfw' : 'sfw']),
   ]
 
-  const unsigned = createUnsignedEvent(KIND_GIF_SET, '', tags)
+  const unsigned = createUnsignedEvent(KIND_GIF_SET, '', withClientTag(tags))
   const signed = await signWithSigner(unsigned, signer, privateKey)
   await publishToSpecificRelays(getPublishRelays(), signed)
 }
@@ -297,7 +297,7 @@ export async function deleteGifCollection(
     ['deleted', 'true'],
   ]
 
-  const unsigned = createUnsignedEvent(KIND_GIF_SET, '', tags)
+  const unsigned = createUnsignedEvent(KIND_GIF_SET, '', withClientTag(tags))
   const signed = await signWithSigner(unsigned, signer, privateKey)
   await publishToSpecificRelays(getPublishRelays(), signed)
 }

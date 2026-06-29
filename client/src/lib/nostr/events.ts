@@ -9,6 +9,27 @@ import { useUserStore, type ISigner } from '@/stores/userStore'
 type Tag = [string, ...string[]]
 
 /**
+ * Whether the NIP-89 client tag (`['client', 'DEN Chat']`) should be attached.
+ * Respects the global Settings toggle (localStorage `den-chat-client-tag`),
+ * enabled unless explicitly set to 'false'.
+ */
+export function isClientTagEnabled(): boolean {
+  return typeof window !== 'undefined' ? localStorage.getItem('den-chat-client-tag') !== 'false' : true
+}
+
+/**
+ * Append the NIP-89 `['client', 'DEN Chat']` tag when enabled and not already
+ * present. Use this on content-bearing events (notes, reactions, reposts,
+ * votes, deletions, forum posts, emoji/sticker/gif sets) — NOT on replaceable
+ * metadata lists, ephemeral events, or NIP-17 gift wraps/seals.
+ */
+export function withClientTag(tags: Tag[]): Tag[] {
+  return isClientTagEnabled() && !tags.some((t) => t[0] === 'client')
+    ? [...tags, ['client', 'DEN Chat']]
+    : tags
+}
+
+/**
  * Create an unsigned Nostr event.
  */
 export function createUnsignedEvent(
@@ -244,7 +265,7 @@ export function createReactionEvent(
   if (targetARef) {
     tags.push(['a', targetARef])
   }
-  return createUnsignedEvent(STANDARD_KINDS.REACTION, encryptedEmoji, tags)
+  return createUnsignedEvent(STANDARD_KINDS.REACTION, encryptedEmoji, withClientTag(tags))
 }
 
 /**
@@ -272,7 +293,7 @@ export function createDeletedReactionEvent(
     ['p', targetPubkey],
     ['deleted', 'true'],
   ]
-  return createUnsignedEvent(STANDARD_KINDS.REACTION, '', tags, originalCreatedAt + 1)
+  return createUnsignedEvent(STANDARD_KINDS.REACTION, '', withClientTag(tags), originalCreatedAt + 1)
 }
 
 /**
@@ -289,7 +310,7 @@ export function createDeletionEvent(
     ...eventIds.map((id): Tag => ['e', id]),
     ...(aRefs || []).map((ref): Tag => ['a', ref]),
   ]
-  return createUnsignedEvent(STANDARD_KINDS.DELETION, reason || '', tags)
+  return createUnsignedEvent(STANDARD_KINDS.DELETION, reason || '', withClientTag(tags))
 }
 
 /**
@@ -314,7 +335,7 @@ export function createDeletedMessageEvent(
     ['deleted', 'true'],
   ]
 
-  return createUnsignedEvent(KINDS.MESSAGE, '', tags, originalCreatedAt != null ? originalCreatedAt + 1 : undefined)
+  return createUnsignedEvent(KINDS.MESSAGE, '', withClientTag(tags), originalCreatedAt != null ? originalCreatedAt + 1 : undefined)
 }
 
 /**
@@ -439,7 +460,7 @@ export function createVoteEvent(
     ['epoch', epoch.toString()],
   ]
 
-  return createUnsignedEvent(KINDS.POLL_VOTE, content, tags)
+  return createUnsignedEvent(KINDS.POLL_VOTE, content, withClientTag(tags))
 }
 
 /**

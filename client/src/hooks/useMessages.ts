@@ -912,10 +912,7 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
       }
     }
 
-    // Add client tag if enabled
-    if (isClientTagEnabled()) {
-      unsigned = { ...unsigned, tags: [...unsigned.tags, ['client', 'DEN Chat']] }
-    }
+    // Client tag is added by createReactionEvent (respects the settings toggle)
 
     const signed = await signWithSigner(unsigned, signer, privateKey)
     const hubRelays = hub?.generalRelays || []

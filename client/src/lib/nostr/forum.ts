@@ -16,7 +16,7 @@
 
 import type { Event, UnsignedEvent } from 'nostr-tools'
 import { nip19 } from 'nostr-tools'
-import { createUnsignedEvent } from '@/lib/nostr/events'
+import { createUnsignedEvent, withClientTag } from '@/lib/nostr/events'
 import { countLeadingZeroBits } from '@/lib/pow/pow'
 import { KINDS } from '@/lib/crypto/constants'
 
@@ -77,7 +77,7 @@ export function createForumWordPost(
     ['subject', title.trim()],
   ]
   if (opts?.nsfw) tags.push(['content-warning', 'nsfw'])
-  return createUnsignedEvent(KINDS.FORUM_POST, body, tags)
+  return createUnsignedEvent(KINDS.FORUM_POST, body, withClientTag(tags))
 }
 
 /**
@@ -95,7 +95,7 @@ export function createForumComment(opts: {
     ['E', root.id], ['K', String(root.kind ?? KINDS.FORUM_POST)], ['P', root.pubkey],
     ['e', parent.id], ['k', String(parent.kind ?? KINDS.FORUM_POST)], ['p', parent.pubkey],
   ]
-  return createUnsignedEvent(KINDS.FORUM_POST, body, tags)
+  return createUnsignedEvent(KINDS.FORUM_POST, body, withClientTag(tags))
 }
 
 /** Create a reaction (kind 7, NIP-25) on a forum post or comment. */
@@ -104,11 +104,11 @@ export function createForumReaction(
   targetAuthor: string,
   content: string,
 ): UnsignedEvent {
-  return createUnsignedEvent(7, content, [
+  return createUnsignedEvent(7, content, withClientTag([
     ['e', targetId],
     ['p', targetAuthor],
     ['k', String(KINDS.FORUM_POST)],
-  ])
+  ]))
 }
 
 /** Replaceable list (kind 10044) of the user's followed word communities. */
@@ -394,7 +394,7 @@ export function createCommunityPost(
     ['subject', title.trim()],
   ]
   if (opts?.nsfw) tags.push(['content-warning', 'nsfw'])
-  return createUnsignedEvent(KINDS.FORUM_POST, body, tags)
+  return createUnsignedEvent(KINDS.FORUM_POST, body, withClientTag(tags))
 }
 
 /** Parse a kind-1111 event as a top-level created-community post. */

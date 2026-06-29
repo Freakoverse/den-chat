@@ -18,6 +18,7 @@ import { useUserStore } from '@/stores/userStore'
 import { useHubStore } from '@/stores/hubStore'
 import { useUserListsStore } from '@/stores/userListsStore'
 import { createUnsignedEvent, signWithSigner, createHubListEvent } from '@/lib/nostr'
+import { isClientTagEnabled } from '@/lib/nostr/events'
 import { publishToSpecificRelays, getRelayList } from '@/lib/nostr/relay-pool'
 import { getPublishRelays } from '@/stores/postingBehaviourStore'
 import { getRelays } from '@/lib/nostr/relay-pool'
@@ -99,7 +100,7 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
   const [description, setDescription] = useState('')
   const [nsfw, setNsfw] = useState(false)
   const [discoverable, setDiscoverable] = useState(true)
-  const [addClientTag, setAddClientTag] = useState(true)
+  const [addClientTag, setAddClientTag] = useState(isClientTagEnabled)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [creationStep, setCreationStep] = useState<CreationStep | null>(null)
