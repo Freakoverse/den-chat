@@ -539,11 +539,11 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
 
 // Wrappers for mobile vs desktop rendering
 function MobileWrapper({ children }: { children: ReactNode }) {
-  return <div className="flex flex-col flex-1 overflow-hidden bg-background border-l border-r border-border p-2 gap-2">{children}</div>
+  return <div className="flex flex-col flex-1 overflow-hidden bg-background p-2 gap-2">{children}</div>
 }
 function DesktopWrapper({ children }: { children: ReactNode }) {
   return (
-    <ResizablePanel id="hub" defaultWidth={280} minWidth={200} maxWidth={420} className="flex flex-col overflow-hidden bg-background border-l border-r border-border p-2 gap-2">
+    <ResizablePanel id="hub" defaultWidth={280} minWidth={200} maxWidth={420} className="flex flex-col overflow-hidden bg-background p-2 gap-2">
       {children}
     </ResizablePanel>
   )

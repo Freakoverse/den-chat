@@ -275,7 +275,7 @@ export function ChannelView({ hideHeader = false }: { hideHeader?: boolean } = {
   const isAnnouncement = channel.type === 'announcement'
 
   return (
-    <div ref={channelContainerRef} className="flex flex-col h-full bg-background relative p-2 gap-2">
+    <div ref={channelContainerRef} className="flex flex-col h-full bg-background relative py-2 gap-2">
       {!hideHeader && <ChannelHeader channel={channel} channelId={activeChannelId!} isCreator={!!(hub && pubkey && hub.creatorPubkey === pubkey)} />}
       {/* Loading overlay while blossom membership is being resolved.
           Starts below the 48px header (unless hidden) so the back button stays usable. */}
@@ -285,7 +285,7 @@ export function ChannelView({ hideHeader = false }: { hideHeader?: boolean } = {
           <span className="text-sm text-muted-foreground">Loading hub data...</span>
         </div>
       )}
-      {/* Chat area — messages + composer in one bordered, rounded card */}
+      {/* Messages — bordered, rounded card */}
       <div className="flex-1 flex flex-col min-h-0 border border-border rounded-md overflow-hidden">
       <MessageList
         hubDTag={activeHubId!}
@@ -298,6 +298,8 @@ export function ChannelView({ hideHeader = false }: { hideHeader?: boolean } = {
         canPublish={canPublish}
         isAnnouncement={isAnnouncement}
       />
+      </div>
+      {/* Composer — outside the messages card, flush */}
       <MessageInput
         hubDTag={activeHubId!}
         channelId={activeChannelId!}
@@ -308,8 +310,8 @@ export function ChannelView({ hideHeader = false }: { hideHeader?: boolean } = {
         onCancelReply={() => setReplyContext(null)}
         dragContainerRef={channelContainerRef}
         canPublish={canPublish}
+        bare
       />
-      </div>
     </div>
   )
 }
@@ -4417,9 +4419,10 @@ export interface MessageInputProps {
   hideReplyBanner?: boolean
   canPublish?: boolean
   threadRootRef?: string
+  bare?: boolean   // drop the px-2 pb-2 root padding (composer sits outside a card)
 }
 
-export function MessageInput({ hubDTag, channelId, channelName, optimisticMessages, setOptimisticMessages, replyContext, onCancelReply, dragContainerRef, hideReplyBanner, canPublish = true, threadRootRef }: MessageInputProps) {
+export function MessageInput({ hubDTag, channelId, channelName, optimisticMessages, setOptimisticMessages, replyContext, onCancelReply, dragContainerRef, hideReplyBanner, canPublish = true, threadRootRef, bare = false }: MessageInputProps) {
   const draftKey = threadRootRef ? hubThreadDraftKey(hubDTag, channelId, threadRootRef) : hubDraftKey(hubDTag, channelId)
   const [message, setMessage] = useState(() => getDraft(draftKey))
   // Load correct draft when switching channels
@@ -5398,7 +5401,7 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
       ? 'You do not have permission to send messages in this channel.'
       : 'You must be a member to send messages in this hub.'
     return (
-      <div className="px-2 pb-2">
+      <div className={bare ? '' : 'px-2 pb-2'}>
         <div className="flex items-center gap-2 px-4 py-3 rounded-xl border border-border bg-secondary/30">
           <Lock size={14} className="text-muted-foreground shrink-0" />
           <span className="text-sm text-muted-foreground">{reason}</span>
@@ -5429,7 +5432,7 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
       )}
 
       <div
-        className="px-2 pb-2"
+        className={bare ? '' : 'px-2 pb-2'}
       >
         {/* Reply indicator — hidden when hideReplyBanner is set (e.g. default thread context) */}
         {replyContext && !hideReplyBanner && (
