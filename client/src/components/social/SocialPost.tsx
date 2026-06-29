@@ -791,7 +791,7 @@ function InteractionButton({ icon, label, onClick, active, activeColor, activeFi
 
 /* ─── Raw Event Modal (reused from hub pattern) ─── */
 
-function RawEventModal({ rawJson, onClose }: { rawJson: string; onClose: () => void }) {
+export function RawEventModal({ rawJson, onClose }: { rawJson: string; onClose: () => void }) {
   const [copied, setCopied] = useState(false)
 
   let pretty: string

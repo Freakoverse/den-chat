@@ -27,12 +27,13 @@ import { subscribeEvents, fetchEvents } from '@/lib/nostr/relay-pool'
 import { KINDS } from '@/lib/crypto/constants'
 import { uploadToBlossomServers, type UploadProgress } from '@/lib/blossom'
 import { RichContent } from '@/components/social/RichContent'
+import { RawEventModal } from '@/components/social/SocialPost'
 import { NotificationList, type NotifItem } from '@/components/social/NotificationList'
 import { BlossomImage } from '@/components/ui/BlossomImage'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
 import {
-  ArrowBigUp, ArrowBigDown, MessageSquare, Loader2, ChevronLeft, Plus,
+  ArrowBigUp, ArrowBigDown, MessageSquare, Loader2, ChevronLeft, Plus, MoreVertical, Code,
   Copy, Check, Shield, Star, Clock, Flame, TrendingUp, AlertTriangle,
   Newspaper, Bell, Users, ShieldCheck, Minus, X, Pencil, UserPlus, Trash2, Crown,
   Eye, EyeOff, RotateCcw, Upload,
@@ -51,6 +52,53 @@ function ForumBody({ body, className }: { body: string; className?: string }) {
   return (
     <div className={cn('text-sm text-foreground/90 break-words', className)}>
       <RichContent content={body} mutedWords={mutedWords} onOpenProfile={(pk) => setActiveProfile(pk)} />
+    </div>
+  )
+}
+
+/** 3-dot menu for a forum post / comment — copy the event address (nevent) or view the raw event. */
+function ForumEventMenu({ event, className }: { event: Event; className?: string }) {
+  const [open, setOpen] = useState(false)
+  const [showRaw, setShowRaw] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onDocClick = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }
+    document.addEventListener('mousedown', onDocClick)
+    return () => document.removeEventListener('mousedown', onDocClick)
+  }, [open])
+
+  const copyAddress = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    navigator.clipboard.writeText(nip19.neventEncode({ id: event.id, author: event.pubkey, kind: event.kind }))
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
+  }
+
+  return (
+    <div className={cn('relative shrink-0', className)} ref={ref}>
+      <button
+        onClick={(e) => { e.stopPropagation(); setOpen(!open) }}
+        className="p-1 rounded cursor-pointer text-muted-foreground/50 hover:text-muted-foreground hover:bg-accent/50 transition-colors"
+      >
+        <MoreVertical size={14} />
+      </button>
+      {open && (
+        <div
+          className="absolute right-0 top-full mt-1 w-48 bg-popover/95 backdrop-blur-md border border-border rounded-xl shadow-xl p-1 flex flex-col gap-1 z-50 animate-in fade-in-0 zoom-in-95"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button onClick={copyAddress} className="flex items-center gap-2 w-full px-3 py-1.5 text-sm text-foreground/80 hover:bg-accent/50 cursor-pointer transition-colors rounded-md">
+            <Copy size={13} /> {copied ? 'Copied!' : 'Copy Event Address'}
+          </button>
+          <button onClick={(e) => { e.stopPropagation(); setShowRaw(true); setOpen(false) }} className="flex items-center gap-2 w-full px-3 py-1.5 text-sm text-foreground/80 hover:bg-accent/50 cursor-pointer transition-colors rounded-md">
+            <Code size={13} /> View Raw Event
+          </button>
+        </div>
+      )}
+      {showRaw && <RawEventModal rawJson={JSON.stringify(event)} onClose={() => setShowRaw(false)} />}
     </div>
   )
 }
@@ -324,6 +372,7 @@ function PostRow({ post, onOpen, showSource }: { post: ForumPost; onOpen: () => 
           <MessageSquare size={12} /> {comments?.length ?? commentCount ?? 0} comments
         </div>
       </button>
+      <ForumEventMenu event={post.raw} className="py-2 pr-2" />
     </div>
   )
 }
@@ -1437,6 +1486,7 @@ function CommentNode({ node, root, depth }: { node: CommentTreeNode; root: { id:
           <Avatar className="h-4 w-4"><AvatarImage src={picture} /><AvatarFallback className="text-[8px]">{name.slice(0, 2).toUpperCase()}</AvatarFallback></Avatar>
           <span className="truncate">{name}</span>
           <span>· {formatTimestamp(comment.createdAt)}</span>
+          <ForumEventMenu event={comment.raw} className="ml-auto" />
         </div>
         <ForumBody body={comment.body} className="mt-0.5" />
         <div className="flex items-center gap-2 mt-1">
@@ -1538,6 +1588,7 @@ export function ForumThreadPage() {
                 <Avatar className="h-4 w-4"><AvatarImage src={picture} /><AvatarFallback className="text-[8px]">{name.slice(0, 2).toUpperCase()}</AvatarFallback></Avatar>
                 <span>{name}</span><span>· {formatTimestamp(post.createdAt)}</span>
                 {post.nsfw && <span className="px-1 rounded bg-red-500/20 text-red-400 text-[9px] font-semibold">NSFW</span>}
+                <ForumEventMenu event={post.raw} className="ml-auto" />
               </div>
               <h1 className="text-lg font-bold text-foreground leading-tight">{post.title}</h1>
               <ForumBody body={post.body} className="mt-2" />

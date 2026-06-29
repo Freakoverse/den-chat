@@ -231,6 +231,8 @@ export interface ForumPost {
   createdAt: number
   pow: number
   nsfw?: boolean
+  /** The raw signed event — for the post menu (copy address / view raw). */
+  raw: Event
 }
 
 export interface ForumComment {
@@ -241,6 +243,8 @@ export interface ForumComment {
   rootId: string        // uppercase E (top-level post)
   parentId: string      // lowercase e (immediate parent)
   pow: number
+  /** The raw signed event — for the comment menu (copy address / view raw). */
+  raw: Event
 }
 
 const hasParent = (event: Event) => event.tags.some((t) => t[0] === 'e')
@@ -264,6 +268,7 @@ export function parseForumWordPost(event: Event): ForumPost | null {
     createdAt: event.created_at,
     pow: countLeadingZeroBits(event.id),
     nsfw: event.tags.some((t) => t[0] === 'content-warning'),
+    raw: event,
   }
 }
 
@@ -281,6 +286,7 @@ export function parseForumComment(event: Event): ForumComment | null {
     rootId,
     parentId,
     pow: countLeadingZeroBits(event.id),
+    raw: event,
   }
 }
 
@@ -413,6 +419,7 @@ export function parseCommunityPost(event: Event): ForumPost | null {
     createdAt: event.created_at,
     pow: countLeadingZeroBits(event.id),
     nsfw: event.tags.some((t) => t[0] === 'content-warning'),
+    raw: event,
   }
 }
 

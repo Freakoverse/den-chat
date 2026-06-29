@@ -426,6 +426,9 @@ function MediaImage({ src, className, style, onClick }: {
           className={`${className} transition-opacity duration-300 ${loaded ? 'opacity-100' : 'opacity-0 absolute'}`}
           style={loaded ? style : { ...style, position: 'absolute', top: 0, left: 0, width: '100%' }}
           loading="lazy"
+          // Strip the Referer so hotlink-protected hosts (which 403 cross-origin
+          // requests coming from another domain) still serve the image.
+          referrerPolicy="no-referrer"
           onLoad={() => { setLoaded(true); setError(false) }}
           onError={() => { blossom.onImgError(); setError(true) }}
           onClick={onClick}
