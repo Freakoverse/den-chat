@@ -699,7 +699,7 @@ export function SocialFeedPage() {
             {/* Filter bar */}
             <div className="shrink-0 overflow-y-scroll scrollbar-invisible">
               <div className="w-full flex pb-2 px-2 border-b border-border/30" style={{ maxWidth: 640, width: '100%', margin: '0 auto' }}>
-                <div className="flex items-center justify-end px-4 py-1 bg-secondary rounded-sm max-[1080px]:mx-2" style={{ maxWidth: 640, width: '100%', margin: '0 auto' }}>
+                <div className="flex items-center justify-end px-4 py-1 bg-secondary rounded-sm" style={{ maxWidth: 640, width: '100%', margin: '0 auto' }}>
                   <button
                     onClick={() => setShowFilterModal(true)}
                     className="flex items-center gap-1.5 px-2 py-1 rounded-md text-xs text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors cursor-pointer"
