@@ -840,6 +840,7 @@ export function DM04ChatView({ recipientPubkey, onSwitchProtocol, onBack }: { re
 
       {/* Input */}
       <ChatInputBar
+        bare
         draftKey={_dm04Key}
         message={message}
         onMessageChange={(v) => { setMessage(v); signalTyping(v) }}

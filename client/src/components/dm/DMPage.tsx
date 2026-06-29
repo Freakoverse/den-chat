@@ -1101,6 +1101,7 @@ function DMChatView({ recipientPubkey, onSwitchProtocol, onBack }: { recipientPu
 
       {/* Input — shared ChatInputBar with emoji, markdown toolbar, file upload */}
       <ChatInputBar
+        bare
         draftKey={_dm17Key}
         message={message}
         onMessageChange={setMessage}
