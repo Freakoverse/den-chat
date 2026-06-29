@@ -1237,7 +1237,7 @@ export function DiscoverPage() {
           ))}
         </div>
 
-        <div className="flex-1 overflow-y-auto scrollbar-hide">
+        <div className="flex-1 overflow-y-auto scrollbar-hide pr-2 max-[1080px]:px-2">
           {/* Hero Banner */}
           {discoverTab === 'hubs' ? (
             <>

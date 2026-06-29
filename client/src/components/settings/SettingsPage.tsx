@@ -127,7 +127,7 @@ export function SettingsPage() {
     <div className="flex flex-1 h-full overflow-hidden bg-background">
       {/* Left nav — hidden on mobile */}
       <ResizablePanel id="settings" defaultWidth={280} minWidth={200} maxWidth={420} className="flex flex-col bg-background pr-2 py-2 gap-2 overflow-hidden max-[1080px]:hidden">
-        <h2 className="px-4 text-sm font-semibold text-foreground mb-3">Settings</h2>
+        <h2 className="px-4 py-3 text-sm font-semibold text-foreground bg-secondary/50 rounded-md shadow-md shrink-0">Settings</h2>
         <TooltipProvider delayDuration={400}>
           <div className="flex-1 overflow-y-auto p-1.5 flex flex-col gap-1.5 bg-secondary/50 rounded-md shadow-md">
             {TABS.map((t) => {
@@ -198,7 +198,7 @@ export function SettingsPage() {
       {/* Right content */}
       <div className="flex-1 relative overflow-hidden pr-2 py-2 max-[1080px]:px-2">
         <DoodleBackground className="[mask-image:linear-gradient(to_top_left,black,transparent_70%)] max-[1300px]:opacity-0 transition-opacity duration-300" />
-        <div className="absolute inset-0 overflow-y-auto p-6 max-[1080px]:p-3 max-[1080px]:pb-12 border border-border rounded-md">
+        <div className="absolute inset-y-2 right-2 left-0 max-[1080px]:inset-2 overflow-y-auto p-6 max-[1080px]:p-3 max-[1080px]:pb-12 border border-border rounded-md">
           {/* Mobile tab selector — shown only on mobile, sticky at top */}
           <div className="hidden max-[1080px]:block max-[1080px]:-top-3 mb-1 sticky top-0 z-30 -mx-3 px-3 -mt-3 pt-3 pb-2 bg-background">
             <button
