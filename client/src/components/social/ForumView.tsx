@@ -12,11 +12,14 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { useSocialStore } from '@/stores/socialStore'
+import { useNavigationStore } from '@/stores/navigationStore'
 import { useForumStore, FORUM_DEFAULT_POW, MAX_FORUM_LIST } from '@/stores/forumStore'
 import { useUserStore } from '@/stores/userStore'
 import { useFollowStore } from '@/stores/followStore'
 import { useBlockStore } from '@/stores/blockStore'
+import { usePreferencesStore } from '@/stores/preferencesStore'
 import { useWotStore } from '@/stores/wotStore'
+import { useDnnStore } from '@/stores/dnnStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import {
   sortPosts, encodeCommunityNaddr, decodeCommunityNaddr, parseCommunityAddress, communityAddress,
@@ -36,7 +39,7 @@ import {
   ArrowBigUp, ArrowBigDown, MessageSquare, Loader2, ChevronLeft, Plus, MoreVertical, Code,
   Copy, Check, Shield, Star, Clock, Flame, TrendingUp, AlertTriangle,
   Newspaper, Bell, Users, ShieldCheck, Minus, X, Pencil, UserPlus, Trash2, Crown,
-  Eye, EyeOff, RotateCcw, Upload,
+  Eye, EyeOff, RotateCcw, Upload, Filter, ImageOff, Link as LinkIcon, Sticker,
 } from 'lucide-react'
 import { cn, truncateNpub, formatTimestamp } from '@/lib/utils'
 import { nip19 } from 'nostr-tools'
@@ -48,10 +51,21 @@ import type { SocialPage } from '@/stores/socialStore'
 function ForumBody({ body, className }: { body: string; className?: string }) {
   const mutedWords = useBlockStore((s) => s.mutedWords)
   const setActiveProfile = useSocialStore((s) => s.setActiveProfile)
+  // Content filters: per-forum toggle AND the global render preference.
+  const showMedia = useForumStore((s) => s.showMedia) && usePreferencesStore((s) => s.showMedia)
+  const showEmbeds = useForumStore((s) => s.showEmbeds) && usePreferencesStore((s) => s.showEmbeds)
+  const showEmojis = useForumStore((s) => s.showCustomEmojis) && usePreferencesStore((s) => s.showCustomEmojis)
   if (!body.trim()) return null
   return (
     <div className={cn('text-sm text-foreground/90 break-words', className)}>
-      <RichContent content={body} mutedWords={mutedWords} onOpenProfile={(pk) => setActiveProfile(pk)} />
+      <RichContent
+        content={body}
+        mutedWords={mutedWords}
+        onOpenProfile={(pk) => setActiveProfile(pk)}
+        disableMedia={!showMedia}
+        disableEmbeds={!showEmbeds}
+        disableCustomEmojis={!showEmojis}
+      />
     </div>
   )
 }
@@ -204,22 +218,119 @@ function Hint({ label, side = 'top', children }: { label: string; side?: 'top' |
 function useForumFilter() {
   const viewPow = useForumStore((s) => s.viewPow)
   const showNsfw = useForumStore((s) => s.showNsfw)
+  const dnnOnly = useForumStore((s) => s.dnnOnly)
   const blockedPubkeys = useBlockStore((s) => s.blockedPubkeys)
   const mutedWords = useBlockStore((s) => s.mutedWords)
   const wotShouldHide = useWotStore((s) => s.shouldHide)
+  const dnnVerified = useDnnStore((s) => s.verified)
   return useCallback(
     (item: { pubkey: string; pow: number; title?: string; body: string; nsfw?: boolean }) => {
       if (item.pow < viewPow) return false
       if (item.nsfw && !showNsfw) return false
       if (blockedPubkeys.has(item.pubkey)) return false
       if (wotShouldHide(item.pubkey, 'forum')) return false
+      if (dnnOnly && !dnnVerified[item.pubkey]) return false
       if (mutedWords.size > 0) {
         const text = `${item.title || ''} ${item.body}`.toLowerCase()
         for (const w of mutedWords) if (w && text.includes(w.toLowerCase())) return false
       }
       return true
     },
-    [viewPow, showNsfw, blockedPubkeys, mutedWords, wotShouldHide],
+    [viewPow, showNsfw, dnnOnly, blockedPubkeys, mutedWords, wotShouldHide, dnnVerified],
+  )
+}
+
+/** Renders nothing — triggers DNN verification for a post author so the dnn-only filter resolves. */
+function DnnVerify({ pubkey }: { pubkey: string }) {
+  const { getProfile } = useProfileCache()
+  const profile = getProfile(pubkey)
+  const verifyPubkey = useDnnStore((s) => s.verifyPubkey)
+  useEffect(() => { verifyPubkey(pubkey, profile?.nip05 as string | undefined) }, [pubkey, profile?.nip05, verifyPubkey])
+  return null
+}
+
+// ─── Filter panel ───
+
+function ForumToggle({ enabled, onToggle, icon, label, description, disabled }: {
+  enabled: boolean; onToggle: (v: boolean) => void; icon: React.ReactNode; label: string; description: React.ReactNode; disabled?: boolean
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 py-2.5">
+      <div className="flex items-start gap-2 min-w-0">
+        <span className="text-muted-foreground mt-0.5 shrink-0">{icon}</span>
+        <div className="min-w-0">
+          <div className="text-sm font-medium text-foreground">{label}</div>
+          <div className="text-[11px] text-muted-foreground mt-0.5">{description}</div>
+        </div>
+      </div>
+      <button
+        onClick={() => !disabled && onToggle(!enabled)}
+        disabled={disabled}
+        className={cn('relative w-10 h-[22px] rounded-full transition-colors shrink-0',
+          disabled ? 'bg-muted-foreground/20 cursor-not-allowed' : enabled ? 'bg-primary cursor-pointer' : 'bg-muted-foreground/30 cursor-pointer')}
+      >
+        <div className={cn('absolute top-[3px] w-4 h-4 rounded-full bg-white shadow transition-transform', enabled ? 'translate-x-[22px]' : 'translate-x-[3px]')} />
+      </button>
+    </div>
+  )
+}
+
+function ForumSettingsModal({ onClose }: { onClose: () => void }) {
+  const showMedia = useForumStore((s) => s.showMedia)
+  const setShowMedia = useForumStore((s) => s.setShowMedia)
+  const showEmbeds = useForumStore((s) => s.showEmbeds)
+  const setShowEmbeds = useForumStore((s) => s.setShowEmbeds)
+  const showCustomEmojis = useForumStore((s) => s.showCustomEmojis)
+  const setShowCustomEmojis = useForumStore((s) => s.setShowCustomEmojis)
+  const dnnOnly = useForumStore((s) => s.dnnOnly)
+  const setDnnOnly = useForumStore((s) => s.setDnnOnly)
+  const showNsfw = useForumStore((s) => s.showNsfw)
+  const setShowNsfw = useForumStore((s) => s.setShowNsfw)
+  const gMedia = usePreferencesStore((s) => s.showMedia)
+  const gEmbeds = usePreferencesStore((s) => s.showEmbeds)
+  const gEmojis = usePreferencesStore((s) => s.showCustomEmojis)
+
+  const gotoModeration = () => {
+    onClose()
+    useNavigationStore.getState().setSettingsTab('moderation')
+    useNavigationStore.getState().setActivePage('settings')
+  }
+  const globalLink = (
+    <span>Disabled globally. <button onClick={gotoModeration} className="text-primary hover:underline cursor-pointer">Enable in Settings → Moderation</button></span>
+  )
+
+  return (
+    <ModalShell title="Forum Filters" onClose={onClose} maxW="max-w-md">
+      <div className="space-y-3">
+        {/* Content filters */}
+        <div>
+          <label className="text-sm font-medium text-foreground mb-1 flex items-center gap-1.5"><Eye size={14} className="text-blue-400" /> Content Filters</label>
+          <p className="text-xs text-muted-foreground mb-1">Control what's rendered in forum posts. Disabled content shows a placeholder.</p>
+          <div className="flex flex-col divide-y divide-border/50">
+            <ForumToggle enabled={gMedia && showMedia} onToggle={setShowMedia} disabled={!gMedia} icon={<ImageOff size={14} />} label="Show Media" description={gMedia ? 'Render images, video, and audio inline' : globalLink} />
+            <ForumToggle enabled={gEmbeds && showEmbeds} onToggle={setShowEmbeds} disabled={!gEmbeds} icon={<LinkIcon size={14} />} label="Show Link Previews & Embeds" description={gEmbeds ? 'Render link preview cards and media embeds for URLs' : globalLink} />
+            <ForumToggle enabled={gEmojis && showCustomEmojis} onToggle={setShowCustomEmojis} disabled={!gEmojis} icon={<Sticker size={14} />} label="Show Custom Emojis" description={gEmojis ? 'Render custom emoji images in text' : globalLink} />
+          </div>
+        </div>
+
+        {/* Audience */}
+        <div className="flex flex-col divide-y divide-border/50 border-t border-border/50 pt-1">
+          <ForumToggle enabled={dnnOnly} onToggle={setDnnOnly} icon={<ShieldCheck size={14} />} label="DNN ID holders only" description="Only show posts from authors with a verified DNN ID" />
+          <ForumToggle enabled={showNsfw} onToggle={setShowNsfw} icon={<EyeOff size={14} />} label="Show NSFW" description="Show posts marked with a content warning" />
+        </div>
+
+        {/* Proof of Work */}
+        <div className="border-t border-border/50 pt-3">
+          <label className="text-sm font-medium text-foreground mb-1 flex items-center gap-1.5"><Shield size={14} className="text-amber-400" /> Proof of Work</label>
+          <p className="text-xs text-muted-foreground mb-2">Hide posts whose ID proof-of-work is below this threshold.</p>
+          <PowControl kind="view" />
+        </div>
+
+        <p className="text-[11px] text-muted-foreground/70 border-t border-border/50 pt-3">
+          Web of Trust and muted-word filtering follow your <button onClick={gotoModeration} className="text-primary hover:underline cursor-pointer">Settings → Moderation</button> preferences.
+        </p>
+      </div>
+    </ModalShell>
   )
 }
 
@@ -1067,6 +1178,7 @@ export function ForumFeedPage() {
   const openForumFeed = useSocialStore((s) => s.openForumFeed)
   const filterFn = useForumFilter()
   const [composing, setComposing] = useState(false)
+  const [showFilters, setShowFilters] = useState(false)
   // An active community/word forces its tab; otherwise the manual choice wins.
   const [manualTab, setManualTab] = useState<'open' | 'moderated'>('open')
   const tab: 'open' | 'moderated' = community ? 'moderated' : word ? 'open' : manualTab
@@ -1101,13 +1213,22 @@ export function ForumFeedPage() {
 
   const loading = word ? loadingWord === word : followedWords.some((w) => loadingWord === w)
 
+  const dnnOnly = useForumStore((s) => s.dnnOnly)
+  // Authors of the raw (pre-filter) feed — verify their DNN so the dnn-only filter resolves.
+  const rawAuthors = useMemo(() => {
+    const source = word ? (postsByWord[word] || []) : followedWords.flatMap((w) => postsByWord[w] || [])
+    return [...new Set(source.map((p) => p.pubkey))]
+  }, [word, postsByWord, followedWords])
+
   return (
     <div className="flex-1 flex min-h-0">
+      {dnnOnly && rawAuthors.map((pk) => <DnnVerify key={pk} pubkey={pk} />)}
+      {showFilters && <ForumSettingsModal onClose={() => setShowFilters(false)} />}
       {/* Main column — centered, contained */}
       <div className="flex-1 min-w-0 overflow-y-auto">
         {/* Pill tabs */}
         <div className="sticky top-0 z-10 bg-background/95 backdrop-blur">
-          <div className="mx-auto w-full max-w-[680px] px-4 py-3 flex justify-center">
+          <div className="mx-auto w-full max-w-[680px] px-4 py-3 flex items-center justify-center gap-2 relative">
             <div className="inline-flex gap-1 p-1 rounded-xl bg-card border border-border">
               {(['open', 'moderated'] as const).map((t) => (
                 <button
@@ -1120,6 +1241,7 @@ export function ForumFeedPage() {
                 </button>
               ))}
             </div>
+            <button onClick={() => setShowFilters(true)} title="Filters" className="absolute right-4 h-8 w-8 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors cursor-pointer"><Filter size={15} /></button>
           </div>
         </div>
 

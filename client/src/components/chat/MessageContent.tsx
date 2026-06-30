@@ -8,7 +8,7 @@
  */
 
 import { useState, useEffect, useMemo, memo, useCallback, useRef, Children, isValidElement, cloneElement } from 'react'
-import { Download, Loader2, Check, Copy, Hash } from 'lucide-react'
+import { Download, Loader2, Check, Copy, Hash, Link as LinkIcon } from 'lucide-react'
 import { useBlossomMedia } from '@/hooks/useBlossomMedia'
 import { VerificationBadge } from '@/components/ui/VerificationBadge'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
@@ -764,7 +764,7 @@ export const MessageContent = memo(function MessageContent({ content, suffix, on
 
   // Collect embeds/previews during render, then render them all after the text content
   // This prevents embeds from splitting inline text (e.g. "testing out [link] [EMBED] , seems decent")
-  type DeferredEmbed = { type: 'embed'; href: string; embed: ReturnType<typeof detectEmbed> } | { type: 'preview'; href: string }
+  type DeferredEmbed = { type: 'embed'; href: string; embed: ReturnType<typeof detectEmbed> } | { type: 'preview'; href: string } | { type: 'hidden'; href: string }
   const collectedEmbedsRef = useRef<DeferredEmbed[]>([])
 
   /** Renders all embeds/previews collected during the last markdown pass */
@@ -782,19 +782,21 @@ export const MessageContent = memo(function MessageContent({ content, suffix, on
     return (
       <>
         {unique.map((item, i) =>
-          item.type === 'embed'
-            ? (
-              <div key={`embed-${i}`} className="mt-1">
-                <LazyInView skeleton minHeight={item.embed!.layout === 'video' ? 225 : (item.embed!.height ?? 200)}>
-                  <Embed embed={item.embed!} maxWidth={400} />
-                </LazyInView>
-              </div>
-            )
-            : (
-              <LazyInView key={`preview-${i}`}>
-                <LinkPreview href={item.href} />
+          item.type === 'embed' ? (
+            <div key={`embed-${i}`} className="mt-1">
+              <LazyInView skeleton minHeight={item.embed!.layout === 'video' ? 225 : (item.embed!.height ?? 200)}>
+                <Embed embed={item.embed!} maxWidth={400} />
               </LazyInView>
-            )
+            </div>
+          ) : item.type === 'hidden' ? (
+            <div key={`hidden-${i}`} className="mt-1 rounded-lg bg-secondary/40 border border-border/50 px-3 py-2 text-xs text-muted-foreground/70 flex items-center gap-1.5 flex-wrap">
+              <LinkIcon size={13} className="shrink-0" /> Link preview hidden — <a href={item.href} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline break-all">open link</a>
+            </div>
+          ) : (
+            <LazyInView key={`preview-${i}`}>
+              <LinkPreview href={item.href} />
+            </LazyInView>
+          )
         )}
       </>
     )
@@ -841,10 +843,10 @@ export const MessageContent = memo(function MessageContent({ content, suffix, on
         return <AudioEmbed src={href} />
       }
       // Embeddable URLs (YouTube, Twitch, Kick, Twitter/X, Spotify, Steam, TikTok)
-      const embedInfo = !effectiveDisablePreviews ? detectEmbed(href) : null
+      const embedInfo = detectEmbed(href)
       if (embedInfo) {
-        // Defer embed to render after all text content
-        collectedEmbedsRef.current.push({ type: 'embed', href, embed: embedInfo })
+        // Defer the embed — or a "hidden" placeholder when previews are disabled — to render after text.
+        collectedEmbedsRef.current.push(effectiveDisablePreviews ? { type: 'hidden', href } : { type: 'embed', href, embed: embedInfo })
         return (
           <a href={href} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">{children}</a>
         )

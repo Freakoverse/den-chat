@@ -17,7 +17,7 @@ import { useBlossomMedia } from '@/hooks/useBlossomMedia'
 import { fetchEvents } from '@/lib/nostr/relay-pool'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { truncateNpub, formatTimestamp } from '@/lib/utils'
-import { Copy, Check, X, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Copy, Check, X, ChevronLeft, ChevronRight, ImageOff, Link as LinkIcon } from 'lucide-react'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
 import { HubEventCard } from '@/components/hub/HubEventCard'
 import { HubMessageCard } from '@/components/hub/HubMessageCard'
@@ -46,6 +46,31 @@ interface RichContentProps {
   onOpenProfile?: (pubkey: string) => void
   onOpenThread?: (eventId: string) => void
   mutedWords?: Set<string>
+  /** Replace inline images/videos/audio with a "media hidden" placeholder. */
+  disableMedia?: boolean
+  /** Replace link-preview/media embeds with a "link preview hidden" placeholder. */
+  disableEmbeds?: boolean
+  /** Render custom-emoji shortcodes as text instead of images (no-op for plain bodies). */
+  disableCustomEmojis?: boolean
+}
+
+/** Placeholder shown in place of media when media rendering is disabled. */
+function MediaHidden({ label }: { label: string }) {
+  return (
+    <div className="rounded-lg mt-2 bg-secondary/40 border border-border/50 flex items-center justify-center gap-2 text-xs text-muted-foreground/70 py-4">
+      <ImageOff size={13} /> {label} hidden
+    </div>
+  )
+}
+
+/** Placeholder shown in place of a link preview/embed when embeds are disabled. */
+function EmbedHidden({ url }: { url: string }) {
+  return (
+    <div className="mt-2 rounded-lg bg-secondary/40 border border-border/50 px-3 py-2 text-xs text-muted-foreground/70 flex items-center gap-1.5 flex-wrap">
+      <LinkIcon size={13} className="shrink-0" /> Link preview hidden —{' '}
+      <a href={url} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline break-all" onClick={(e) => e.stopPropagation()}>open link</a>
+    </div>
+  )
 }
 
 interface ContentSegment {
@@ -192,7 +217,7 @@ function emojifySocial(text: string): React.ReactNode {
   return <>{parts}</>
 }
 
-export function RichContent({ content, onOpenProfile, onOpenThread, mutedWords }: RichContentProps) {
+export function RichContent({ content, onOpenProfile, onOpenThread, mutedWords, disableMedia = false, disableEmbeds = false }: RichContentProps) {
   const globalEmbedsOff = !usePreferencesStore((s) => s.showEmbeds)
   const globalMutedWordsOff = !usePreferencesStore((s) => s.hideMutedWords)
   const effectiveMutedWords = globalMutedWordsOff ? undefined : mutedWords
@@ -278,6 +303,7 @@ export function RichContent({ content, onOpenProfile, onOpenThread, mutedWords }
         }
 
         if (block.kind === 'image-group') {
+          if (disableMedia) return <MediaHidden key={i} label="Media" />
           const urls = block.urls
           if (urls.length === 1) {
             return (
@@ -307,6 +333,7 @@ export function RichContent({ content, onOpenProfile, onOpenThread, mutedWords }
         }
 
         if (block.kind === 'video') {
+          if (disableMedia) return <MediaHidden key={i} label="Video" />
           return (
             <MediaVideo
               key={i}
@@ -319,6 +346,7 @@ export function RichContent({ content, onOpenProfile, onOpenThread, mutedWords }
         }
 
         if (block.kind === 'audio') {
+          if (disableMedia) return <MediaHidden key={i} label="Audio" />
           return (
             <CustomAudioPlayer
               key={i}
@@ -329,15 +357,8 @@ export function RichContent({ content, onOpenProfile, onOpenThread, mutedWords }
         }
 
         if (block.kind === 'embed') {
-          if (globalEmbedsOff) {
-            // Render as plain link when embeds are disabled
-            return (
-              <p key={i} className="text-sm text-foreground/90 whitespace-pre-wrap break-words">
-                <a href={block.url} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline" onClick={(e) => e.stopPropagation()}>
-                  {block.url}
-                </a>
-              </p>
-            )
+          if (globalEmbedsOff || disableEmbeds) {
+            return <EmbedHidden key={i} url={block.url} />
           }
           return (
             <div key={i} className="mt-2">
