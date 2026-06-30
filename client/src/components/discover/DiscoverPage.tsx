@@ -575,6 +575,10 @@ function DiscoverHubCard({ hub }: { hub: DiscoveredHub }) {
   const setHubData = useHubStore((s) => s.setHubData)
   const setHubEntries = useHubStore((s) => s.setHubEntries)
   const folders = useHubStore((s) => s.folders)
+  // Membership signals already resolved on load (useHubEventSubscription): holding the
+  // hub secret means we decrypted it from the LKH tree → we're an actual member.
+  const hubSecret = useHubStore((s) => s.hubSecrets[hub.dTag])
+  const hubMembers = useHubStore((s) => s.hubMembers[hub.dTag])
   const { getProfile } = useProfileCache()
 
   const [joining, setJoining] = useState(false)
@@ -587,6 +591,9 @@ function DiscoverHubCard({ hub }: { hub: DiscoveredHub }) {
   const [showHubLimitModal, setShowHubLimitModal] = useState(false)
 
   const isAlreadyInList = hubEntries.some(e => e.dTag === hub.dTag)
+  // "Actually in the hub" — not merely listed: we hold the secret (decrypted from the
+  // LKH tree) or our pubkey is a member leaf on our page of the tree.
+  const isMember = !!hubSecret || (!!myPubkey && (hubMembers?.some(m => m.pubkey === myPubkey) ?? false))
   const creatorProfile = getProfile(hub.creatorPubkey)
   const creatorName = creatorProfile?.display_name || creatorProfile?.name || truncateNpub(nip19.npubEncode(hub.creatorPubkey), 10)
 
@@ -736,7 +743,11 @@ function DiscoverHubCard({ hub }: { hub: DiscoveredHub }) {
           >
             <Info size={12} /> Info
           </button>
-          {isAlreadyInList || joined ? (
+          {isMember ? (
+            <span className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-medium bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+              <Check size={12} /> Joined
+            </span>
+          ) : isAlreadyInList || joined ? (
             <span className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
               <Check size={12} /> Request Sent
             </span>

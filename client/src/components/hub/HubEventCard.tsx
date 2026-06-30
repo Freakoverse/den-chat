@@ -56,6 +56,12 @@ export function HubEventCard({ identifier, pubkey, relays }: HubEventCardProps) 
 
   // Check if already a member/entry
   const isAlreadyInList = hubEntries.some(e => e.dTag === identifier)
+  // "Actually in the hub" (resolved on load): holding the hub secret means we decrypted
+  // it from the LKH tree → real member; or our pubkey is a member leaf on our page.
+  const dTag = hubData?.dTag || identifier
+  const hubSecret = useHubStore((s) => s.hubSecrets[dTag])
+  const hubMembers = useHubStore((s) => s.hubMembers[dTag])
+  const isMember = !!hubSecret || (!!myPubkey && (hubMembers?.some(m => m.pubkey === myPubkey) ?? false))
 
   // Fetch hub event data
   useEffect(() => {
@@ -329,7 +335,11 @@ export function HubEventCard({ identifier, pubkey, relays }: HubEventCardProps) 
           >
             <Info size={12} /> Info
           </button>
-          {isAlreadyInList || joined ? (
+          {isMember ? (
+            <span className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs font-medium bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+              <Check size={12} /> Joined
+            </span>
+          ) : isAlreadyInList || joined ? (
             <span className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
               <Check size={12} /> Request Sent
             </span>
