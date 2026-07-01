@@ -715,6 +715,29 @@ export function CodeBlock({ code, language }: { code: string; language?: string 
 
 /* ─── Main MessageContent renderer ─── */
 
+/** "Link preview hidden" placeholder that reveals the embed on click (public chat). */
+function RevealEmbed({ embed }: { embed: ReturnType<typeof detectEmbed> }) {
+  const [revealed, setRevealed] = useState(false)
+  if (!embed) return null
+  if (revealed) {
+    return (
+      <div className="mt-1">
+        <LazyInView skeleton minHeight={embed.layout === 'video' ? 225 : (embed.height ?? 200)}>
+          <Embed embed={embed} maxWidth={400} />
+        </LazyInView>
+      </div>
+    )
+  }
+  return (
+    <button
+      onClick={() => setRevealed(true)}
+      className="mt-1 w-full rounded-lg bg-secondary/40 border border-border/50 px-3 py-2 text-xs text-muted-foreground/70 flex items-center justify-center gap-1.5 hover:bg-secondary/60 hover:text-foreground transition-colors cursor-pointer"
+    >
+      <LinkIcon size={13} /> Link preview hidden — click to view
+    </button>
+  )
+}
+
 export const MessageContent = memo(function MessageContent({ content, suffix, onProfileClick, emojiTags, disableLinkPreviews, disableCustomEmojis, disableMedia, disableHubInviteCards, mutedWords, hubRoleNames, hubChannels }: { content: string; suffix?: React.ReactNode; onProfileClick?: (pubkey: string) => void; emojiTags?: [string, string, string?][]; disableLinkPreviews?: boolean; disableCustomEmojis?: boolean; disableMedia?: boolean; disableHubInviteCards?: boolean; mutedWords?: Set<string>; hubRoleNames?: string[]; hubChannels?: HubChannel[] }) {
   const globalEmbedsOff = !usePreferencesStore((s) => s.showEmbeds)
   const globalMutedWordsOff = !usePreferencesStore((s) => s.hideMutedWords)
@@ -764,7 +787,7 @@ export const MessageContent = memo(function MessageContent({ content, suffix, on
 
   // Collect embeds/previews during render, then render them all after the text content
   // This prevents embeds from splitting inline text (e.g. "testing out [link] [EMBED] , seems decent")
-  type DeferredEmbed = { type: 'embed'; href: string; embed: ReturnType<typeof detectEmbed> } | { type: 'preview'; href: string } | { type: 'hidden'; href: string }
+  type DeferredEmbed = { type: 'embed'; href: string; embed: ReturnType<typeof detectEmbed> } | { type: 'preview'; href: string } | { type: 'hidden'; href: string; embed: ReturnType<typeof detectEmbed> }
   const collectedEmbedsRef = useRef<DeferredEmbed[]>([])
 
   /** Renders all embeds/previews collected during the last markdown pass */
@@ -789,9 +812,7 @@ export const MessageContent = memo(function MessageContent({ content, suffix, on
               </LazyInView>
             </div>
           ) : item.type === 'hidden' ? (
-            <div key={`hidden-${i}`} className="mt-1 rounded-lg bg-secondary/40 border border-border/50 px-3 py-2 text-xs text-muted-foreground/70 flex items-center gap-1.5 flex-wrap">
-              <LinkIcon size={13} className="shrink-0" /> Link preview hidden — <a href={item.href} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline break-all">open link</a>
-            </div>
+            <RevealEmbed key={`hidden-${i}`} embed={item.embed} />
           ) : (
             <LazyInView key={`preview-${i}`}>
               <LinkPreview href={item.href} />
@@ -846,7 +867,7 @@ export const MessageContent = memo(function MessageContent({ content, suffix, on
       const embedInfo = detectEmbed(href)
       if (embedInfo) {
         // Defer the embed — or a "hidden" placeholder when previews are disabled — to render after text.
-        collectedEmbedsRef.current.push(effectiveDisablePreviews ? { type: 'hidden', href } : { type: 'embed', href, embed: embedInfo })
+        collectedEmbedsRef.current.push(effectiveDisablePreviews ? { type: 'hidden', href, embed: embedInfo } : { type: 'embed', href, embed: embedInfo })
         return (
           <a href={href} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">{children}</a>
         )

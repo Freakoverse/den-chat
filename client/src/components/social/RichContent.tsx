@@ -10,7 +10,7 @@
  * - Plain URLs → clickable links
  */
 
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useEffect, useMemo, useCallback, Fragment } from 'react'
 import { nip19 } from 'nostr-tools'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { useBlossomMedia } from '@/hooks/useBlossomMedia'
@@ -54,22 +54,18 @@ interface RichContentProps {
   disableCustomEmojis?: boolean
 }
 
-/** Placeholder shown in place of media when media rendering is disabled. */
-function MediaHidden({ label }: { label: string }) {
+/** Click-to-view placeholder — shows a "hidden" chip that reveals its children on click. */
+function RevealPlaceholder({ kind, children }: { kind: 'media' | 'embed'; children: React.ReactNode }) {
+  const [revealed, setRevealed] = useState(false)
+  if (revealed) return <>{children}</>
   return (
-    <div className="rounded-lg mt-2 bg-secondary/40 border border-border/50 flex items-center justify-center gap-2 text-xs text-muted-foreground/70 py-4">
-      <ImageOff size={13} /> {label} hidden
-    </div>
-  )
-}
-
-/** Placeholder shown in place of a link preview/embed when embeds are disabled. */
-function EmbedHidden({ url }: { url: string }) {
-  return (
-    <div className="mt-2 rounded-lg bg-secondary/40 border border-border/50 px-3 py-2 text-xs text-muted-foreground/70 flex items-center gap-1.5 flex-wrap">
-      <LinkIcon size={13} className="shrink-0" /> Link preview hidden —{' '}
-      <a href={url} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline break-all" onClick={(e) => e.stopPropagation()}>open link</a>
-    </div>
+    <button
+      onClick={(e) => { e.stopPropagation(); setRevealed(true) }}
+      className="w-full mt-2 rounded-lg bg-secondary/40 border border-border/50 flex items-center justify-center gap-2 text-xs text-muted-foreground/70 py-4 hover:bg-secondary/60 hover:text-foreground transition-colors cursor-pointer"
+    >
+      {kind === 'media' ? <ImageOff size={13} /> : <LinkIcon size={13} />}
+      {kind === 'media' ? 'Media hidden' : 'Link preview hidden'} — click to view
+    </button>
   )
 }
 
@@ -303,22 +299,17 @@ export function RichContent({ content, onOpenProfile, onOpenThread, mutedWords, 
         }
 
         if (block.kind === 'image-group') {
-          if (disableMedia) return <MediaHidden key={i} label="Media" />
           const urls = block.urls
-          if (urls.length === 1) {
-            return (
-              <MediaImage
-                key={i}
-                src={urls[0]}
-                className="rounded-lg mt-2 max-w-full object-contain cursor-pointer"
-                style={{ maxHeight: 400 }}
-                onClick={(e) => { e.stopPropagation(); openGallery(urls[0]) }}
-              />
-            )
-          }
-          // 2-column grid for multiple adjacent images
-          return (
-            <div key={i} className="grid grid-cols-2 gap-1 mt-2 rounded-lg overflow-hidden">
+          const media = urls.length === 1 ? (
+            <MediaImage
+              src={urls[0]}
+              className="rounded-lg mt-2 max-w-full object-contain cursor-pointer"
+              style={{ maxHeight: 400 }}
+              onClick={(e) => { e.stopPropagation(); openGallery(urls[0]) }}
+            />
+          ) : (
+            // 2-column grid for multiple adjacent images
+            <div className="grid grid-cols-2 gap-1 mt-2 rounded-lg overflow-hidden">
               {urls.map((url, j) => (
                 <MediaImage
                   key={j}
@@ -330,41 +321,37 @@ export function RichContent({ content, onOpenProfile, onOpenThread, mutedWords, 
               ))}
             </div>
           )
+          return disableMedia
+            ? <RevealPlaceholder key={i} kind="media">{media}</RevealPlaceholder>
+            : <Fragment key={i}>{media}</Fragment>
         }
 
         if (block.kind === 'video') {
-          if (disableMedia) return <MediaHidden key={i} label="Video" />
-          return (
+          const media = (
             <MediaVideo
-              key={i}
               src={block.url}
               className="rounded-lg mt-2 w-full"
               style={{ maxHeight: 400 }}
               onClick={(e) => e.stopPropagation()}
             />
           )
+          return disableMedia
+            ? <RevealPlaceholder key={i} kind="media">{media}</RevealPlaceholder>
+            : <Fragment key={i}>{media}</Fragment>
         }
 
         if (block.kind === 'audio') {
-          if (disableMedia) return <MediaHidden key={i} label="Audio" />
-          return (
-            <CustomAudioPlayer
-              key={i}
-              src={block.url}
-              className="w-full mt-2"
-            />
-          )
+          const media = <CustomAudioPlayer src={block.url} className="w-full mt-2" />
+          return disableMedia
+            ? <RevealPlaceholder key={i} kind="media">{media}</RevealPlaceholder>
+            : <Fragment key={i}>{media}</Fragment>
         }
 
         if (block.kind === 'embed') {
-          if (globalEmbedsOff || disableEmbeds) {
-            return <EmbedHidden key={i} url={block.url} />
-          }
-          return (
-            <div key={i} className="mt-2">
-              <Embed embed={block.embed} />
-            </div>
-          )
+          const embedEl = <div className="mt-2"><Embed embed={block.embed} /></div>
+          return (globalEmbedsOff || disableEmbeds)
+            ? <RevealPlaceholder key={i} kind="embed">{embedEl}</RevealPlaceholder>
+            : <Fragment key={i}>{embedEl}</Fragment>
         }
 
         return null

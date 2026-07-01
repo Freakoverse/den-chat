@@ -208,11 +208,11 @@ export const useForumStore = create<ForumState>((set, get) => ({
     try { localStorage.setItem(SHOW_NSFW_KEY, v ? '1' : '0') } catch { /* ignore */ }
     set({ showNsfw: v })
   },
-  showMedia: loadBool(SHOW_MEDIA_KEY, true),
+  showMedia: loadBool(SHOW_MEDIA_KEY, false),
   setShowMedia: (v) => { try { localStorage.setItem(SHOW_MEDIA_KEY, v ? '1' : '0') } catch { /* ignore */ } set({ showMedia: v }) },
-  showEmbeds: loadBool(SHOW_EMBEDS_KEY, true),
+  showEmbeds: loadBool(SHOW_EMBEDS_KEY, false),
   setShowEmbeds: (v) => { try { localStorage.setItem(SHOW_EMBEDS_KEY, v ? '1' : '0') } catch { /* ignore */ } set({ showEmbeds: v }) },
-  showCustomEmojis: loadBool(SHOW_EMOJIS_KEY, true),
+  showCustomEmojis: loadBool(SHOW_EMOJIS_KEY, false),
   setShowCustomEmojis: (v) => { try { localStorage.setItem(SHOW_EMOJIS_KEY, v ? '1' : '0') } catch { /* ignore */ } set({ showCustomEmojis: v }) },
   dnnOnly: loadBool(DNN_ONLY_KEY, false),
   setDnnOnly: (v) => { try { localStorage.setItem(DNN_ONLY_KEY, v ? '1' : '0') } catch { /* ignore */ } set({ dnnOnly: v }) },
