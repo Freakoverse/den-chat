@@ -17,7 +17,7 @@ import { useBlossomMedia } from '@/hooks/useBlossomMedia'
 import { fetchEvents } from '@/lib/nostr/relay-pool'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { truncateNpub, formatTimestamp } from '@/lib/utils'
-import { Copy, Check, X, ChevronLeft, ChevronRight, ImageOff, Link as LinkIcon } from 'lucide-react'
+import { Copy, Check, X, ChevronLeft, ChevronRight, ImageOff, Link as LinkIcon, Eye } from 'lucide-react'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
 import { HubEventCard } from '@/components/hub/HubEventCard'
 import { HubMessageCard } from '@/components/hub/HubMessageCard'
@@ -59,13 +59,16 @@ function RevealPlaceholder({ kind, children }: { kind: 'media' | 'embed'; childr
   const [revealed, setRevealed] = useState(false)
   if (revealed) return <>{children}</>
   return (
-    <button
-      onClick={(e) => { e.stopPropagation(); setRevealed(true) }}
-      className="w-full mt-2 rounded-lg bg-secondary/40 border border-border/50 flex items-center justify-center gap-2 text-xs text-muted-foreground/70 py-4 hover:bg-secondary/60 hover:text-foreground transition-colors cursor-pointer"
-    >
-      {kind === 'media' ? <ImageOff size={13} /> : <LinkIcon size={13} />}
-      {kind === 'media' ? 'Media hidden' : 'Link preview hidden'} — click to view
-    </button>
+    <div className="flex items-center gap-2.5 py-1.5 px-3 mt-2 rounded-lg bg-muted/40 border border-border/40">
+      {kind === 'media' ? <ImageOff size={14} className="text-muted-foreground shrink-0" /> : <LinkIcon size={14} className="text-muted-foreground shrink-0" />}
+      <span className="text-xs text-muted-foreground">{kind === 'media' ? 'Media hidden' : 'Link preview hidden'}</span>
+      <button
+        onClick={(e) => { e.stopPropagation(); setRevealed(true) }}
+        className="ml-auto flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full text-muted-foreground hover:text-foreground bg-muted/60 hover:bg-muted transition-colors cursor-pointer"
+      >
+        <Eye size={11} /> Preview
+      </button>
+    </div>
   )
 }
 

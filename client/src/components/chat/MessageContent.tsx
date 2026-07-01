@@ -8,7 +8,7 @@
  */
 
 import { useState, useEffect, useMemo, memo, useCallback, useRef, Children, isValidElement, cloneElement } from 'react'
-import { Download, Loader2, Check, Copy, Hash, Link as LinkIcon } from 'lucide-react'
+import { Download, Loader2, Check, Copy, Hash, Link as LinkIcon, Eye } from 'lucide-react'
 import { useBlossomMedia } from '@/hooks/useBlossomMedia'
 import { VerificationBadge } from '@/components/ui/VerificationBadge'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
@@ -729,12 +729,16 @@ function RevealEmbed({ embed }: { embed: ReturnType<typeof detectEmbed> }) {
     )
   }
   return (
-    <button
-      onClick={() => setRevealed(true)}
-      className="mt-1 w-full rounded-lg bg-secondary/40 border border-border/50 px-3 py-2 text-xs text-muted-foreground/70 flex items-center justify-center gap-1.5 hover:bg-secondary/60 hover:text-foreground transition-colors cursor-pointer"
-    >
-      <LinkIcon size={13} /> Link preview hidden — click to view
-    </button>
+    <div className="mt-1 flex items-center gap-2.5 py-1.5 px-3 rounded-lg bg-muted/40 border border-border/40">
+      <LinkIcon size={14} className="text-muted-foreground shrink-0" />
+      <span className="text-xs text-muted-foreground">Link preview hidden</span>
+      <button
+        onClick={() => setRevealed(true)}
+        className="ml-auto flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full text-muted-foreground hover:text-foreground bg-muted/60 hover:bg-muted transition-colors cursor-pointer"
+      >
+        <Eye size={11} /> Preview
+      </button>
+    </div>
   )
 }
 
