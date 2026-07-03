@@ -65,16 +65,30 @@ export function normalizeWord(word: string): string {
 
 // ─── Event creators (word communities) ───
 
-/** Create a top-level word-community post (kind 1111 + `t` + `subject`). */
+/** Build the category (`c`, single) + user-tag (`t`, ≤10) tags from composer input. */
+function classifierTags(opts?: { category?: string; tags?: string[] }): Tag[] {
+  const out: Tag[] = []
+  const cat = opts?.category?.trim().toLowerCase()
+  if (cat) out.push(['c', cat])
+  const seen = new Set<string>()
+  for (const raw of opts?.tags || []) {
+    const t = raw.trim().toLowerCase()
+    if (t && !seen.has(t) && seen.size < 10) { seen.add(t); out.push(['t', t]) }
+  }
+  return out
+}
+
+/** Create a top-level word-community post (kind 1111 + `w` word + `subject` + optional `c`/`t`). */
 export function createForumWordPost(
   word: string,
   title: string,
   body: string,
-  opts?: { nsfw?: boolean },
+  opts?: { nsfw?: boolean; category?: string; tags?: string[] },
 ): UnsignedEvent {
   const tags: Tag[] = [
-    ['t', normalizeWord(word)],
+    ['w', normalizeWord(word)],
     ['subject', title.trim()],
+    ...classifierTags(opts),
   ]
   if (opts?.nsfw) tags.push(['content-warning', 'nsfw'])
   return createUnsignedEvent(KINDS.FORUM_POST, body, withClientTag(tags))
@@ -204,7 +218,7 @@ export function wordProfileByAuthorsFilter(word: string, authors: string[]) {
 
 /** Filter for the top-level posts of a word community. */
 export function wordPostsFilter(word: string, limit = 50) {
-  return { kinds: [KINDS.FORUM_POST], '#t': [normalizeWord(word)], limit }
+  return { kinds: [KINDS.FORUM_POST], '#w': [normalizeWord(word)], limit }
 }
 
 /** Filter for the full comment tree of a post (rooted on it via uppercase E). */
@@ -224,10 +238,14 @@ export interface ForumPost {
   pubkey: string
   title: string
   body: string
-  /** Word community handle (the lowercase `t` tag) — set for word posts. */
+  /** Word community handle (the lowercase `w` tag) — set for word posts. */
   word?: string
   /** Created-community address `34550:pubkey:dtag` — set for NIP-72 posts. */
   community?: string
+  /** Single category (first `c` tag). */
+  category?: string
+  /** User tags (`t` tags, ≤10). */
+  tags: string[]
   createdAt: number
   pow: number
   nsfw?: boolean
@@ -249,6 +267,14 @@ export interface ForumComment {
 
 const hasParent = (event: Event) => event.tags.some((t) => t[0] === 'e')
 
+/** Extract the category (`c`, first) + user tags (`t`, ≤10) from a post event. */
+function parseClassifiers(event: Event): { category?: string; tags: string[] } {
+  return {
+    category: event.tags.find((t) => t[0] === 'c' && t[1])?.[1],
+    tags: event.tags.filter((t) => t[0] === 't' && t[1]).map((t) => t[1]).slice(0, 10),
+  }
+}
+
 /**
  * Parse a kind-1111 event as a top-level word-community post. Returns null if it
  * isn't one (missing `t`/`subject`, or it has a parent `e` tag → it's a comment).
@@ -256,7 +282,7 @@ const hasParent = (event: Event) => event.tags.some((t) => t[0] === 'e')
 export function parseForumWordPost(event: Event): ForumPost | null {
   if (event.kind !== KINDS.FORUM_POST) return null
   if (hasParent(event)) return null // it's a comment, not a top-level post
-  const word = event.tags.find((t) => t[0] === 't')?.[1]
+  const word = event.tags.find((t) => t[0] === 'w')?.[1]
   const title = event.tags.find((t) => t[0] === 'subject')?.[1]
   if (!word || !title) return null
   return {
@@ -265,6 +291,7 @@ export function parseForumWordPost(event: Event): ForumPost | null {
     title,
     body: event.content,
     word: word.toLowerCase(),
+    ...parseClassifiers(event),
     createdAt: event.created_at,
     pow: countLeadingZeroBits(event.id),
     nsfw: event.tags.some((t) => t[0] === 'content-warning'),
@@ -392,12 +419,13 @@ export function createCommunityPost(
   community: { address: string; pubkey: string },
   title: string,
   body: string,
-  opts?: { nsfw?: boolean },
+  opts?: { nsfw?: boolean; category?: string; tags?: string[] },
 ): UnsignedEvent {
   const tags: Tag[] = [
     ['A', community.address], ['K', String(COMMUNITY_KIND)], ['P', community.pubkey],
     ['a', community.address], ['k', String(COMMUNITY_KIND)], ['p', community.pubkey],
     ['subject', title.trim()],
+    ...classifierTags(opts),
   ]
   if (opts?.nsfw) tags.push(['content-warning', 'nsfw'])
   return createUnsignedEvent(KINDS.FORUM_POST, body, withClientTag(tags))
@@ -416,6 +444,7 @@ export function parseCommunityPost(event: Event): ForumPost | null {
     title,
     body: event.content,
     community: address,
+    ...parseClassifiers(event),
     createdAt: event.created_at,
     pow: countLeadingZeroBits(event.id),
     nsfw: event.tags.some((t) => t[0] === 'content-warning'),

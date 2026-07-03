@@ -92,6 +92,12 @@ interface ForumState {
   /** Only show posts/comments from authors with a verified DNN ID. */
   dnnOnly: boolean
   setDnnOnly: (v: boolean) => void
+  /** Classifier filters (transient; feed-only). `filterCategory` is a single category; `filterTags` is a set of required tags. */
+  filterCategory: string | null
+  setFilterCategory: (c: string | null) => void
+  filterTags: string[]
+  addFilterTag: (t: string) => void
+  removeFilterTag: (t: string) => void
 
   // ── Followed word communities (kind 10044) ──
   followedWords: string[]
@@ -147,7 +153,7 @@ interface ForumState {
   createCommunity: (opts: { name: string; description?: string; image?: string; banner?: string; nsfw?: boolean; moderators?: string[] }) => Promise<CommunityDef | null>
   /** Republish a community definition (creator only). `moderators` excludes the creator. */
   updateCommunity: (def: CommunityDef, changes: { name?: string; description?: string; image?: string; banner?: string; nsfw?: boolean; moderators?: string[] }) => Promise<CommunityDef | null>
-  publishCommunityPost: (community: CommunityDef, title: string, body: string, opts?: { nsfw?: boolean }) => Promise<ForumPost | null>
+  publishCommunityPost: (community: CommunityDef, title: string, body: string, opts?: { nsfw?: boolean; category?: string; tags?: string[] }) => Promise<ForumPost | null>
   approvePost: (community: CommunityDef, post: ForumPost) => Promise<void>
 
   // ── Active view ──
@@ -173,7 +179,7 @@ interface ForumState {
   fetchPostById: (id: string) => Promise<ForumPost | null>
 
   // ── Publish ──
-  publishWordPost: (word: string, title: string, body: string, opts?: { nsfw?: boolean }) => Promise<ForumPost | null>
+  publishWordPost: (word: string, title: string, body: string, opts?: { nsfw?: boolean; category?: string; tags?: string[] }) => Promise<ForumPost | null>
   publishComment: (root: { id: string; pubkey: string }, parent: { id: string; pubkey: string }, body: string) => Promise<ForumComment | null>
   react: (target: { id: string; pubkey: string }, content: string) => Promise<void>
 
@@ -216,6 +222,17 @@ export const useForumStore = create<ForumState>((set, get) => ({
   setShowCustomEmojis: (v) => { try { localStorage.setItem(SHOW_EMOJIS_KEY, v ? '1' : '0') } catch { /* ignore */ } set({ showCustomEmojis: v }) },
   dnnOnly: loadBool(DNN_ONLY_KEY, false),
   setDnnOnly: (v) => { try { localStorage.setItem(DNN_ONLY_KEY, v ? '1' : '0') } catch { /* ignore */ } set({ dnnOnly: v }) },
+  filterCategory: null,
+  setFilterCategory: (c) => { const v = c?.trim().toLowerCase() || ''; set({ filterCategory: v || null }) },
+  filterTags: [],
+  addFilterTag: (t) => {
+    const v = t.trim().toLowerCase()
+    if (!v) return
+    const cur = get().filterTags
+    if (cur.includes(v)) return
+    set({ filterTags: [...cur, v] })
+  },
+  removeFilterTag: (t) => set({ filterTags: get().filterTags.filter((x) => x !== t) }),
 
   followedWords: [],
   followedLoaded: false,

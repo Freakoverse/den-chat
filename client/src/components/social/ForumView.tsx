@@ -40,6 +40,7 @@ import {
   Copy, Check, Shield, Star, Clock, Flame, TrendingUp, AlertTriangle,
   Newspaper, Bell, Users, ShieldCheck, Minus, X, Pencil, UserPlus, Trash2, Crown,
   Eye, EyeOff, RotateCcw, Upload, Filter, ImageOff, Link as LinkIcon, Sticker,
+  Tag as TagIcon, Folder,
 } from 'lucide-react'
 import { cn, truncateNpub, formatTimestamp } from '@/lib/utils'
 import { nip19 } from 'nostr-tools'
@@ -219,24 +220,31 @@ function useForumFilter() {
   const viewPow = useForumStore((s) => s.viewPow)
   const showNsfw = useForumStore((s) => s.showNsfw)
   const dnnOnly = useForumStore((s) => s.dnnOnly)
+  const filterCategory = useForumStore((s) => s.filterCategory)
+  const filterTags = useForumStore((s) => s.filterTags)
   const blockedPubkeys = useBlockStore((s) => s.blockedPubkeys)
   const mutedWords = useBlockStore((s) => s.mutedWords)
   const wotShouldHide = useWotStore((s) => s.shouldHide)
   const dnnVerified = useDnnStore((s) => s.verified)
   return useCallback(
-    (item: { pubkey: string; pow: number; title?: string; body: string; nsfw?: boolean }) => {
+    (item: { pubkey: string; pow: number; title?: string; body: string; nsfw?: boolean; category?: string; tags?: string[] }) => {
       if (item.pow < viewPow) return false
       if (item.nsfw && !showNsfw) return false
       if (blockedPubkeys.has(item.pubkey)) return false
       if (wotShouldHide(item.pubkey, 'forum')) return false
       if (dnnOnly && !dnnVerified[item.pubkey]) return false
+      if (filterCategory && item.category !== filterCategory) return false
+      if (filterTags.length > 0) {
+        const itemTags = item.tags || []
+        for (const t of filterTags) if (!itemTags.includes(t)) return false
+      }
       if (mutedWords.size > 0) {
         const text = `${item.title || ''} ${item.body}`.toLowerCase()
         for (const w of mutedWords) if (w && text.includes(w.toLowerCase())) return false
       }
       return true
     },
-    [viewPow, showNsfw, dnnOnly, blockedPubkeys, mutedWords, wotShouldHide, dnnVerified],
+    [viewPow, showNsfw, dnnOnly, filterCategory, filterTags, blockedPubkeys, mutedWords, wotShouldHide, dnnVerified],
   )
 }
 
@@ -392,22 +400,38 @@ function CopyHandle({ handle }: { handle: string }) {
 
 // ─── Post composer ───
 
+const MAX_POST_TAGS = 10
+
 function PostComposer({ onSubmit, onCancel }: {
-  onSubmit: (title: string, body: string, opts: { nsfw: boolean }) => Promise<boolean>
+  onSubmit: (title: string, body: string, opts: { nsfw: boolean; category?: string; tags?: string[] }) => Promise<boolean>
   onCancel: () => void
 }) {
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
   const [nsfw, setNsfw] = useState(false)
+  const [category, setCategory] = useState('')
+  const [tags, setTags] = useState<string[]>([])
+  const [tagDraft, setTagDraft] = useState('')
   const [posting, setPosting] = useState(false)
   const [postError, setPostError] = useState<string | null>(null)
+
+  const addTag = (raw: string) => {
+    const v = raw.trim().toLowerCase()
+    if (!v) return
+    setTags((cur) => (cur.includes(v) || cur.length >= MAX_POST_TAGS ? cur : [...cur, v]))
+    setTagDraft('')
+  }
+  const onTagKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addTag(tagDraft) }
+    else if (e.key === 'Backspace' && !tagDraft && tags.length) setTags((cur) => cur.slice(0, -1))
+  }
 
   const submit = async () => {
     if (!title.trim() || posting) return
     setPosting(true)
     setPostError(null)
     try {
-      const ok = await onSubmit(title, body, { nsfw })
+      const ok = await onSubmit(title, body, { nsfw, category: category.trim() || undefined, tags: tags.length ? tags : undefined })
       if (ok) onCancel()
     } catch (err) {
       setPostError(err instanceof Error ? err.message : 'Failed to post. Please try again.')
@@ -432,6 +456,31 @@ function PostComposer({ onSubmit, onCancel }: {
         rows={4}
         className="w-full px-3 py-2 rounded-md text-sm bg-muted/30 border border-border text-foreground placeholder:text-muted-foreground focus:outline-none resize-y"
       />
+      <div className="flex flex-col sm:flex-row gap-2">
+        <input
+          value={category}
+          onChange={(e) => setCategory(e.target.value)}
+          placeholder="Category (optional)"
+          className="sm:w-44 h-9 px-3 rounded-md text-sm bg-muted/30 border border-border text-foreground placeholder:text-muted-foreground focus:outline-none"
+        />
+        <div className="flex-1 min-w-0 rounded-md bg-muted/30 border border-border px-2 py-1.5 flex flex-wrap items-center gap-1.5">
+          {tags.map((t) => (
+            <span key={t} className="inline-flex items-center gap-1 h-6 pl-2 pr-1 rounded text-xs bg-accent/60 text-foreground">
+              {t}
+              <button onClick={() => setTags((cur) => cur.filter((x) => x !== t))} className="hover:text-red-400 cursor-pointer"><X size={12} /></button>
+            </span>
+          ))}
+          <input
+            value={tagDraft}
+            onChange={(e) => setTagDraft(e.target.value)}
+            onKeyDown={onTagKey}
+            onBlur={() => addTag(tagDraft)}
+            disabled={tags.length >= MAX_POST_TAGS}
+            placeholder={tags.length >= MAX_POST_TAGS ? `Max ${MAX_POST_TAGS} tags` : tags.length ? 'Add tag…' : 'Tags (optional, Enter to add)'}
+            className="flex-1 min-w-[8rem] h-6 bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none disabled:cursor-not-allowed"
+          />
+        </div>
+      </div>
       <div className="flex items-center justify-between">
         <button
           onClick={() => setNsfw((v) => !v)}
@@ -481,6 +530,11 @@ function PostRow({ post, onOpen, showSource }: { post: ForumPost; onOpen: () => 
         {post.body && <p className="text-xs text-muted-foreground line-clamp-2 mt-0.5 whitespace-pre-wrap">{post.body}</p>}
         <div className="flex items-center gap-1 text-[11px] text-muted-foreground mt-1.5">
           <MessageSquare size={12} /> {comments?.length ?? commentCount ?? 0} comments
+          {post.category && (
+            <span className="ml-auto inline-flex items-center gap-1 max-w-[45%] pl-1.5 pr-2 h-5 rounded-full bg-amber-500/15 text-amber-500 font-medium">
+              <Folder size={11} className="shrink-0" /> <span className="truncate">{post.category}</span>
+            </span>
+          )}
         </div>
       </button>
       <ForumEventMenu event={post.raw} className="py-2 pr-2" />
@@ -987,6 +1041,10 @@ const SORTS: { id: ForumSort; label: string; icon: React.ReactNode }[] = [
 /** Shared sort pills + view-PoW + NSFW filter row (its own card). */
 function FeedControls() {
   const { sort, setSort, showNsfw, setShowNsfw } = useForumStore()
+  const filterCategory = useForumStore((s) => s.filterCategory)
+  const filterTags = useForumStore((s) => s.filterTags)
+  const [classifierOpen, setClassifierOpen] = useState(false)
+  const tagCount = filterTags.length
   return (
     <div className="flex items-center gap-1.5 rounded-xl border border-border bg-card px-3 py-2">
       {SORTS.map((sOpt) => (
@@ -1000,6 +1058,24 @@ function FeedControls() {
         </button>
       ))}
       <div className="ml-auto flex items-center gap-1">
+        <Hint label="Filter by tags">
+          <button
+            onClick={() => setClassifierOpen(true)}
+            className={cn('flex items-center gap-1 h-7 px-2 rounded-full text-[11px] font-medium transition-colors cursor-pointer',
+              tagCount ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-secondary/60')}
+          >
+            <TagIcon size={12} /> Tags{tagCount ? ` (${tagCount})` : ''}
+          </button>
+        </Hint>
+        <Hint label="Filter by category">
+          <button
+            onClick={() => setClassifierOpen(true)}
+            className={cn('flex items-center gap-1 h-7 px-2 rounded-full text-[11px] font-medium transition-colors cursor-pointer max-w-[10rem]',
+              filterCategory ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-secondary/60')}
+          >
+            <Folder size={12} /> <span className="truncate">{filterCategory ? `Category: ${filterCategory}` : 'Category'}</span>
+          </button>
+        </Hint>
         <Hint label={showNsfw ? 'NSFW shown' : 'NSFW hidden'}>
           <button
             onClick={() => setShowNsfw(!showNsfw)}
@@ -1010,6 +1086,82 @@ function FeedControls() {
           </button>
         </Hint>
         <PowControl kind="view" />
+      </div>
+      {classifierOpen && <ClassifierFilterModal onClose={() => setClassifierOpen(false)} />}
+    </div>
+  )
+}
+
+function ClassifierFilterModal({ onClose }: { onClose: () => void }) {
+  const filterCategory = useForumStore((s) => s.filterCategory)
+  const setFilterCategory = useForumStore((s) => s.setFilterCategory)
+  const filterTags = useForumStore((s) => s.filterTags)
+  const addFilterTag = useForumStore((s) => s.addFilterTag)
+  const removeFilterTag = useForumStore((s) => s.removeFilterTag)
+  const [catDraft, setCatDraft] = useState(filterCategory || '')
+  const [tagDraft, setTagDraft] = useState('')
+
+  const commitCategory = () => setFilterCategory(catDraft)
+  const addTag = () => {
+    const v = tagDraft.trim()
+    if (!v) return
+    addFilterTag(v)
+    setTagDraft('')
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+      <div className="w-full max-w-md rounded-xl border border-border bg-card p-4 space-y-4" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-foreground">Filter feed</h3>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground cursor-pointer"><X size={16} /></button>
+        </div>
+
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5"><Folder size={12} /> Category</label>
+          <div className="flex gap-2">
+            <input
+              value={catDraft}
+              onChange={(e) => setCatDraft(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') { commitCategory(); onClose() } }}
+              placeholder="Show only this category…"
+              className="flex-1 h-9 px-3 rounded-md text-sm bg-muted/30 border border-border text-foreground placeholder:text-muted-foreground focus:outline-none"
+              autoFocus
+            />
+            {filterCategory && (
+              <button onClick={() => { setFilterCategory(null); setCatDraft('') }} className="h-9 px-3 rounded-md text-xs text-muted-foreground border border-border hover:text-foreground cursor-pointer">Clear</button>
+            )}
+          </div>
+        </div>
+
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5"><TagIcon size={12} /> Tags <span className="text-muted-foreground/70">(posts must include all)</span></label>
+          <div className="flex gap-2">
+            <input
+              value={tagDraft}
+              onChange={(e) => setTagDraft(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addTag() } }}
+              placeholder="Add a tag…"
+              className="flex-1 h-9 px-3 rounded-md text-sm bg-muted/30 border border-border text-foreground placeholder:text-muted-foreground focus:outline-none"
+            />
+            <button onClick={addTag} className="h-9 px-3 rounded-md text-xs font-medium bg-secondary/60 text-foreground hover:bg-secondary cursor-pointer">Add</button>
+          </div>
+          {filterTags.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 pt-1">
+              {filterTags.map((t) => (
+                <span key={t} className="inline-flex items-center gap-1 h-6 pl-2 pr-1 rounded text-xs bg-accent/60 text-foreground">
+                  {t}
+                  <button onClick={() => removeFilterTag(t)} className="hover:text-red-400 cursor-pointer"><X size={12} /></button>
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="flex justify-end gap-2 pt-1">
+          <button onClick={() => { setFilterCategory(null); filterTags.forEach(removeFilterTag); setCatDraft('') }} className="h-9 px-3 rounded-md text-sm text-muted-foreground hover:text-foreground cursor-pointer">Reset all</button>
+          <button onClick={() => { commitCategory(); onClose() }} className="h-9 px-4 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer">Apply</button>
+        </div>
       </div>
     </div>
   )
@@ -1200,7 +1352,7 @@ export function ForumFeedPage() {
     if (tab !== 'open') return
     const words = word ? [word] : followedWords
     if (words.length === 0) return
-    const sub = subscribeEvents({ kinds: [KINDS.FORUM_POST], '#t': words }, (ev) => ingestPost(ev))
+    const sub = subscribeEvents({ kinds: [KINDS.FORUM_POST], '#w': words }, (ev) => ingestPost(ev))
     return () => sub.close()
   }, [tab, word, followedWords, ingestPost])
 
@@ -1714,6 +1866,27 @@ export function ForumThreadPage() {
               </div>
               <h1 className="text-lg font-bold text-foreground leading-tight">{post.title}</h1>
               <ForumBody body={post.body} className="mt-2" />
+              {(post.category || post.tags.length > 0) && (
+                <div className="mt-3 pt-3 border-t border-border flex flex-wrap items-center gap-1.5">
+                  {post.category && (
+                    <button
+                      onClick={() => useForumStore.getState().setFilterCategory(post.category!)}
+                      className="inline-flex items-center gap-1 h-6 pl-2 pr-2.5 rounded-full text-[11px] font-medium bg-amber-500/15 text-amber-500 hover:bg-amber-500/25 transition-colors cursor-pointer"
+                    >
+                      <Folder size={11} /> {post.category}
+                    </button>
+                  )}
+                  {post.tags.map((t) => (
+                    <button
+                      key={t}
+                      onClick={() => useForumStore.getState().addFilterTag(t)}
+                      className="inline-flex items-center gap-1 h-6 pl-2 pr-2.5 rounded-full text-[11px] font-medium bg-sky-500/15 text-sky-400 hover:bg-sky-500/25 transition-colors cursor-pointer"
+                    >
+                      <TagIcon size={11} /> {t}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 
