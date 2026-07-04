@@ -42,7 +42,7 @@ interface LoginBgEntry {
   buttons: LoginBgButton[]
 }
 
-type Screen = 'main' | 'import' | 'nip46' | 'pin-login' | 'generate-pin' | 'import-pin' | 'derive-pin' | 'seed-backup' | 'saved-accounts' | 'onboarding-profile'
+type Screen = 'main' | 'advanced' | 'upv2' | 'import' | 'nip46' | 'pin-login' | 'generate-pin' | 'import-pin' | 'derive-pin' | 'seed-backup' | 'saved-accounts' | 'onboarding-profile'
 
 export function LoginScreen() {
   const login = useUserStore((s) => s.login)
@@ -2244,6 +2244,122 @@ export function LoginScreen() {
   }
 
   // ────────────────────────────────────────────
+  // ─── Render: Advanced (ID/Address & Pass + Connect) ───
+  // ────────────────────────────────────────────
+  if (screen === 'advanced') {
+    return (
+      <div className="flex items-center justify-center h-full overflow-y-auto bg-surface-background relative p-4 max-[1080px]:items-start">
+        {bgImageUrl && <BlossomImage src={bgImageUrl} alt="" className="fixed inset-0 w-full h-full" imgClassName="object-right-bottom" />}
+        {bgSkeletonOverlay}
+        {bgOverlay}
+        <Card className="w-full max-w-sm shadow-lg relative z-10">
+          <CardContent className="p-8 flex flex-col items-center gap-5">
+            <div className="w-full flex items-center gap-2">
+              <button onClick={() => { setScreen('main'); clearError() }} className="p-1.5 -ml-1.5 rounded-lg hover:bg-secondary/60 text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
+                <ChevronLeft size={18} />
+              </button>
+              <h2 className="text-lg font-bold text-foreground">Advanced sign-in</h2>
+            </div>
+            <p className="text-sm text-muted-foreground text-center -mt-2">
+              Extra ways to sign in for existing Nostr users.
+            </p>
+
+            <div className="w-full flex flex-col gap-2.5">
+              {/* UPV2: DNN ID / Address + Password */}
+              <Button
+                variant="outline"
+                onClick={() => { setScreen('upv2'); clearError() }}
+                className="w-full h-12 gap-2 justify-start px-4"
+              >
+                <KeyRound size={16} className="shrink-0 text-primary" />
+                <span className="flex flex-col items-start leading-tight">
+                  <span className="text-sm font-medium">ID/Address &amp; Pass</span>
+                  <span className="text-[10px] text-muted-foreground">Log in with a DNN ID or npub + password</span>
+                </span>
+              </Button>
+
+              {/* NIP-46: Connect / Bunker */}
+              <Button
+                variant="outline"
+                onClick={openNip46Dialog}
+                className="w-full h-12 gap-2 justify-start px-4"
+              >
+                <Link2 size={16} className="shrink-0 text-primary" />
+                <span className="flex flex-col items-start leading-tight">
+                  <span className="text-sm font-medium">Connect</span>
+                  <span className="text-[10px] text-muted-foreground">Remote signer via Nostr Connect or bunker://</span>
+                </span>
+              </Button>
+            </div>
+
+            {error && (
+              <div className="flex items-center gap-2 text-sm text-destructive w-full">
+                <AlertCircle size={14} className="shrink-0" />
+                <span>{error}</span>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  // ────────────────────────────────────────────
+  // ─── Render: UPV2 (DNN ID/Address + Password) ───
+  // ────────────────────────────────────────────
+  if (screen === 'upv2') {
+    return (
+      <div className="flex items-center justify-center h-full overflow-y-auto bg-surface-background relative p-4 max-[1080px]:items-start">
+        {bgImageUrl && <BlossomImage src={bgImageUrl} alt="" className="fixed inset-0 w-full h-full" imgClassName="object-right-bottom" />}
+        {bgSkeletonOverlay}
+        {bgOverlay}
+        <Card className="w-full max-w-sm shadow-lg relative z-10">
+          <CardContent className="p-8 flex flex-col items-center gap-5">
+            <div className="w-full flex items-center gap-2">
+              <button onClick={() => { setScreen('advanced'); clearError() }} className="p-1.5 -ml-1.5 rounded-lg hover:bg-secondary/60 text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
+                <ChevronLeft size={18} />
+              </button>
+              <h2 className="text-lg font-bold text-foreground">ID/Address &amp; Pass</h2>
+            </div>
+            <p className="text-sm text-muted-foreground text-center -mt-2">
+              Log in with your DNN ID or npub and password. Requires a running remote signer that supports this flow (e.g. DENOS).
+            </p>
+
+            <div className="w-full flex flex-col gap-3">
+              <Input
+                type="text"
+                placeholder="DNN ID or npub"
+                value={username}
+                onChange={(e) => { setUsername(e.target.value); clearError() }}
+                className="h-11"
+                autoFocus
+              />
+              <Input
+                type="password"
+                placeholder="Password"
+                value={password}
+                onChange={(e) => { setPassword(e.target.value); clearError() }}
+                className="h-11"
+                onKeyDown={(e) => e.key === 'Enter' && handleUPV2Login()}
+              />
+              <Button variant="secondary" onClick={handleUPV2Login} size="lg" className="w-full hover:!bg-primary hover:!text-primary-foreground" disabled={loading === 'upv2'}>
+                {loading === 'upv2' ? <Loader2 size={16} className="animate-spin" /> : 'Login'}
+              </Button>
+            </div>
+
+            {error && (
+              <div className="flex items-center gap-2 text-sm text-destructive w-full">
+                <AlertCircle size={14} className="shrink-0" />
+                <span>{error}</span>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  // ────────────────────────────────────────────
   // ─── Render: Main Login ───
   // ────────────────────────────────────────────
   return (
@@ -2259,28 +2375,6 @@ export function LoginScreen() {
             <h1 className="text-2xl font-bold text-foreground">DEN Chat</h1>
           </div>
 
-          {/* UPV2: DNN ID/npub + Password */}
-          <div className="w-full flex flex-col gap-3">
-            <Input
-              type="text"
-              placeholder="DNN ID or npub"
-              value={username}
-              onChange={(e) => { setUsername(e.target.value); clearError() }}
-              className="h-11"
-            />
-            <Input
-              type="password"
-              placeholder="Password"
-              value={password}
-              onChange={(e) => { setPassword(e.target.value); clearError() }}
-              className="h-11"
-              onKeyDown={(e) => e.key === 'Enter' && handleUPV2Login()}
-            />
-            <Button variant="secondary" onClick={handleUPV2Login} size="lg" className="w-full hover:!bg-primary hover:!text-primary-foreground" disabled={loading === 'upv2'}>
-              {loading === 'upv2' ? <Loader2 size={16} className="animate-spin" /> : 'Login'}
-            </Button>
-          </div>
-
           {error && (
             <div className="flex items-center gap-2 text-sm text-destructive w-full">
               <AlertCircle size={14} className="shrink-0" />
@@ -2288,55 +2382,45 @@ export function LoginScreen() {
             </div>
           )}
 
-          <Separator />
-
           <div className="w-full flex flex-col gap-2">
-            {/* External signer row — Local | Connect | Extension */}
-            <div className="w-full flex flex-wrap gap-2">
-              {/* NIP-PC55: Local Signer — hidden on mobile OS */}
-              {!isMobile && (
-                <Button
-                  variant="outline"
-                  onClick={handleLocalLogin}
-                  className="grow gap-1.5 text-xs"
-                  disabled={loading === 'pc55'}
-                >
-                  {loading === 'pc55' ? (
-                    <Loader2 size={14} className="animate-spin" />
-                  ) : (
-                    <MonitorSmartphone size={14} />
-                  )}
-                  Local
-                </Button>
-              )}
+            {/* External signer row — Local | Extension (both hidden on mobile OS) */}
+            {!isMobile && (
+              <div className="w-full flex flex-wrap gap-2">
+                {/* NIP-PC55: Local Signer — hidden on mobile OS */}
+                {!isMobile && (
+                  <Button
+                    variant="outline"
+                    onClick={handleLocalLogin}
+                    className="grow gap-1.5 text-xs"
+                    disabled={loading === 'pc55'}
+                  >
+                    {loading === 'pc55' ? (
+                      <Loader2 size={14} className="animate-spin" />
+                    ) : (
+                      <MonitorSmartphone size={14} />
+                    )}
+                    Local
+                  </Button>
+                )}
 
-              {/* NIP-46: Connect / Bunker */}
-              <Button
-                variant="outline"
-                onClick={openNip46Dialog}
-                className="grow gap-1.5 text-xs"
-              >
-                <Link2 size={14} />
-                Connect
-              </Button>
-
-              {/* NIP-07: Browser Extension — browser only, hidden on mobile OS */}
-              {!isDesktop && !isMobile && (
-                <Button
-                  variant="outline"
-                  onClick={handleNip07Login}
-                  className="grow gap-1.5 text-xs"
-                  disabled={loading === 'nip07'}
-                >
-                  {loading === 'nip07' ? (
-                    <Loader2 size={14} className="animate-spin" />
-                  ) : (
-                    <AppWindow size={14} />
-                  )}
-                  Extension
-                </Button>
-              )}
-            </div>
+                {/* NIP-07: Browser Extension — browser only, hidden on mobile OS */}
+                {!isDesktop && !isMobile && (
+                  <Button
+                    variant="outline"
+                    onClick={handleNip07Login}
+                    className="grow gap-1.5 text-xs"
+                    disabled={loading === 'nip07'}
+                  >
+                    {loading === 'nip07' ? (
+                      <Loader2 size={14} className="animate-spin" />
+                    ) : (
+                      <AppWindow size={14} />
+                    )}
+                    Extension
+                  </Button>
+                )}
+              </div>
+            )}
 
             {/* Local-key accounts (desktop keyring or mobile vault): Saved Accounts or Import+Generate */}
             {(isDesktop || useVault) && (
@@ -2381,6 +2465,16 @@ export function LoginScreen() {
             >
               <BookOpen size={15} />
               New user?
+            </Button>
+
+            {/* Advanced — collapses ID/Address & Pass + Connect onto their own page */}
+            <Button
+              variant="ghost"
+              onClick={() => { clearError(); setScreen('advanced') }}
+              className="w-full gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+            >
+              <Settings2 size={14} />
+              Advanced
             </Button>
           </div>
 
