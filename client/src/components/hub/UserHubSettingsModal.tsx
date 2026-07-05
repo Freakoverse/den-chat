@@ -297,6 +297,9 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
       setMeshError(null)
       setAddNpub('')
       setActiveTab(initialTab ?? 'messages')
+      // On mobile: if opened straight to a tab (e.g. from the voice channel view),
+      // drill into that page; otherwise show the nav list first.
+      setMobileShowNav(!initialTab)
       // Snapshot the current mute settings so we can detect changes
       const currentMute = useNotificationStore.getState().hubMuteSettings[hub.dTag] ?? EMPTY_MUTE_SETTINGS
       initialMuteRef.current = { ...currentMute }
