@@ -1046,7 +1046,7 @@ function FeedControls() {
   const [classifierOpen, setClassifierOpen] = useState(false)
   const tagCount = filterTags.length
   return (
-    <div className="flex items-center gap-1.5 rounded-xl border border-border bg-card px-3 py-2">
+    <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-border bg-card px-3 py-2">
       {SORTS.map((sOpt) => (
         <button
           key={sOpt.id}
@@ -1380,20 +1380,20 @@ export function ForumFeedPage() {
       <div className="flex-1 min-w-0 overflow-y-auto">
         {/* Pill tabs */}
         <div className="sticky top-0 z-10 bg-background/95 backdrop-blur">
-          <div className="mx-auto w-full max-w-[680px] px-4 py-3 flex items-center justify-center gap-2 relative">
-            <div className="inline-flex gap-1 p-1 rounded-xl bg-card border border-border">
+          <div className="mx-auto w-full max-w-[680px] px-4 py-3 flex items-center gap-2">
+            <div className="flex flex-1 gap-1 p-1 rounded-xl bg-card border border-border">
               {(['open', 'moderated'] as const).map((t) => (
                 <button
                   key={t}
                   onClick={() => onTabClick(t)}
-                  className={cn('px-6 py-1.5 rounded-lg text-sm font-medium transition-colors cursor-pointer',
+                  className={cn('flex-1 px-6 py-1.5 rounded-lg text-sm font-medium transition-colors cursor-pointer',
                     tab === t ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground')}
                 >
                   {t === 'open' ? 'Open' : 'Moderated'}
                 </button>
               ))}
             </div>
-            <button onClick={() => setShowFilters(true)} title="Filters" className="absolute right-4 h-8 w-8 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors cursor-pointer"><Filter size={15} /></button>
+            <button onClick={() => setShowFilters(true)} title="Filters" className="shrink-0 h-8 w-8 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors cursor-pointer"><Filter size={15} /></button>
           </div>
         </div>
 
