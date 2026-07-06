@@ -18,7 +18,7 @@ import { sha256 } from '@noble/hashes/sha256'
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils'
 import { schnorr } from '@noble/curves/secp256k1'
 import { dnnService } from '@/lib/dnn/dnnService'
-import { getRelays } from '@/lib/nostr/relay-pool'
+import { getRandomRelays } from '@/lib/nostr/relay-pool'
 
 const UPV2_KIND = 24134
 
@@ -113,9 +113,9 @@ class UPV2Service {
     npub: string
     relays: string[]
   } | null> {
-    // Fall back to the user's active relay pool (Settings → Network) rather than
-    // a separate hardcoded list.
-    const DEFAULT_RELAYS = getRelays()
+    // Fall back to 3 random relays from the user's active pool (Settings → Network)
+    // rather than a separate hardcoded list.
+    const DEFAULT_RELAYS = getRandomRelays(3)
 
     // Handle npub
     if (identifier.startsWith('npub')) {

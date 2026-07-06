@@ -88,6 +88,21 @@ export function getDefaultRelays(): string[] {
 }
 
 /**
+ * Pick up to `n` random relays from the active pool. Used by lightweight
+ * bootstrap flows (auth) that don't need to fan out across the whole pool.
+ */
+export function getRandomRelays(n: number): string[] {
+  const all = getRelays()
+  if (all.length <= n) return all
+  const shuffled = [...all]
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
+  }
+  return shuffled.slice(0, n)
+}
+
+/**
  * Publish an event to all active relays.
  * Each relay has a 15-second timeout — if it doesn't respond, it counts as failed.
  * @returns Array of relay URLs that accepted the event
