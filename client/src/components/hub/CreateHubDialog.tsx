@@ -93,6 +93,7 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
   const setHubEntries = useHubStore((s) => s.setHubEntries)
   const setHubData = useHubStore((s) => s.setHubData)
   const setHubSecret = useHubStore((s) => s.setHubSecret)
+  const setHubSecretsResolved = useHubStore((s) => s.setHubSecretsResolved)
   const setActiveHub = useHubStore((s) => s.setActiveHub)
   const setHubStatus = useHubStore((s) => s.setHubStatus)
 
@@ -591,6 +592,10 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
       })
       setHubSecret(dTag, secretHexStr)
       setHubStatus(dTag, 'loaded')
+      // Creator already holds the secret, so blossom-secret resolution is trivially
+      // done. Mark it resolved now, otherwise the channel view's "Loading hub data…"
+      // overlay waits forever (the loader only sets this flag on a fresh page load).
+      setHubSecretsResolved(dTag, true)
 
       // Update user's hub list — safe now because hub data/secret are already in store,
       // so the hub loader will find it "loaded" and skip the NIP-04 decrypt
