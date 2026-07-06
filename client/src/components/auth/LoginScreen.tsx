@@ -14,7 +14,7 @@ import { DenChatLogo } from '@/components/ui/DenChatLogo'
 import { WarningCarousel } from '@/components/auth/WarningCarousel'
 import { PinInput } from '@/components/auth/PinInput'
 import { QRCodeSVG } from 'qrcode.react'
-import { isValidMnemonic } from '@/lib/auth'
+import { isValidMnemonic, generateSeedPhrase } from '@/lib/auth'
 import { uploadToBlossomServers, blossomServers as blossomServerManager } from '@/lib/blossom'
 import type { UploadProgress } from '@/lib/blossom'
 import { createUnsignedEvent, signWithSigner } from '@/lib/nostr/events'
@@ -85,6 +85,10 @@ export function LoginScreen() {
   // Mobile-web (PWA) uses the vault for key storage; desktop uses the OS keyring. One UI, one backend.
   const useVault = !isDesktop && isMobile
   const backend = useVault ? vaultBackend : rustBackend
+  // Desktop generate flow: the seed is held here IN MEMORY and only written to the
+  // keyring once the user has verified their backup (handleFinishGenerate). Until then
+  // no account exists, so abandoning the flow (navigate/refresh/close) leaves nothing.
+  const [pendingGen, setPendingGen] = useState<{ mnemonic: string; pin: string; name?: string; hint?: string } | null>(null)
   const [backupMnemonic, setBackupMnemonic] = useState<string | null>(null)
   const [showBackupWords, setShowBackupWords] = useState(false)
   const [backupCopied, setBackupCopied] = useState(false)
@@ -779,24 +783,16 @@ export function LoginScreen() {
     if (!pin) { setError('PIN is required'); return }
     setLoading('generate')
     try {
-      let result: { pubkey: string; mnemonic: string; seed_id: string }
-      // If no seeds exist, generate brand-new seed
-      if (savedSeeds.length === 0) {
-        result = await backend.generateAccount(pin, accountName || undefined, pinHint || undefined)
-      } else {
-        // Generate a new independent seed (user chose "New Seed" or first-time generate)
-        result = await backend.generateNewSeed(pin, accountName || undefined, pinHint || undefined)
-      }
-      // Show the backup screen with the mnemonic (no auto-login)
-      setBackupMnemonic(result.mnemonic)
+      // Generate the seed IN MEMORY only — nothing is written to the keyring here.
+      // The account is persisted later, in handleFinishGenerate, once the user has
+      // downloaded AND re-verified their backup. Abandoning before that leaves nothing.
+      const mnemonic = generateSeedPhrase()
+      setPendingGen({ mnemonic, pin, name: accountName || undefined, hint: pinHint || undefined })
+      setBackupMnemonic(mnemonic)
       setShowBackupWords(false)
-      await loadAccounts()
-
-      // Store pubkey + prepare onboarding signing (priv key on desktop, vault signer on mobile)
-      setOnboardingPubkey(result.pubkey)
-      const loginResult = await backend.loginAccount(result.pubkey, pin)
-      setOnboardingPrivateKey(loginResult.privKey)
-      setOnboardingSigner(loginResult.signer)
+      setBackupDownloaded(false)
+      setBackupVerified(false)
+      setBackupVerifyPin('')
 
       // Pre-populate relay/blossom lists with 3 random enabled entries
       const clientRelays = getRelayList()
@@ -810,6 +806,33 @@ export function LoginScreen() {
       setScreen('seed-backup')
     } catch (err: unknown) {
       setError(typeof err === 'string' ? err : err instanceof Error ? err.message : 'Generation failed')
+    } finally {
+      setLoading(null)
+    }
+  }
+
+  // Persist the just-generated account NOW (deferred until the backup was verified),
+  // then continue to profile onboarding. Nothing was stored before this ran.
+  const handleFinishGenerate = async () => {
+    if (!pendingGen) { setScreen('onboarding-profile'); return }
+    clearError()
+    setLoading('generate')
+    try {
+      const result = await backend.importSeed(pendingGen.mnemonic, pendingGen.pin, pendingGen.name, pendingGen.hint)
+      await loadAccounts()
+      setOnboardingPubkey(result.pubkey)
+      const loginResult = await backend.loginAccount(result.pubkey, pendingGen.pin)
+      setOnboardingPrivateKey(loginResult.privKey)
+      setOnboardingSigner(loginResult.signer)
+      setPendingGen(null)
+      setBackupMnemonic(null)
+      setShowBackupWords(false)
+      setBackupDownloaded(false)
+      setBackupVerified(false)
+      setBackupVerifyPin('')
+      setScreen('onboarding-profile')
+    } catch (err: unknown) {
+      setError(typeof err === 'string' ? err : err instanceof Error ? err.message : 'Failed to save account')
     } finally {
       setLoading(null)
     }
@@ -961,11 +984,17 @@ export function LoginScreen() {
     setBackupDownloading(true)
     setBackupPinError(null)
     try {
-      // Verify the PIN matches by attempting a verify call (uses the newest account)
-      const newest = savedAccounts[savedAccounts.length - 1]
-      if (newest) {
-        const valid = await backend.verifyPin(newest.pubkey, backupPin)
-        if (!valid) { setBackupPinError('Incorrect PIN'); setBackupDownloading(false); return }
+      // In the deferred-generate flow the account isn't stored yet, so the backup
+      // password is simply the PIN the user set at generation. Otherwise fall back to
+      // verifying against the stored account.
+      if (pendingGen) {
+        if (backupPin !== pendingGen.pin) { setBackupPinError('Incorrect PIN'); setBackupDownloading(false); return }
+      } else {
+        const newest = savedAccounts[savedAccounts.length - 1]
+        if (newest) {
+          const valid = await backend.verifyPin(newest.pubkey, backupPin)
+          if (!valid) { setBackupPinError('Incorrect PIN'); setBackupDownloading(false); return }
+        }
       }
       // Encrypt mnemonic with PBKDF2 + AES-256-GCM
       const enc = new TextEncoder()
@@ -1484,8 +1513,8 @@ export function LoginScreen() {
             {backupVerifyError && <p className="text-xs text-destructive w-full text-center">{backupVerifyError}</p>}
             {backupVerified && <p className="flex items-center justify-center gap-1.5 text-xs text-emerald-500 w-full"><Check size={13} /> Backup verified</p>}
 
-            <Button className="w-full mt-2" disabled={!backupDownloaded || !backupVerified} onClick={() => { setBackupMnemonic(null); setBackupDownloaded(false); setBackupVerified(false); setBackupVerifyPin(''); setScreen('onboarding-profile') }}>
-              {!backupDownloaded ? 'Download backup to continue' : !backupVerified ? 'Verify your backup to continue' : "I've Saved My Seed · Continue"}
+            <Button className="w-full mt-2" disabled={!backupDownloaded || !backupVerified || loading === 'generate'} onClick={handleFinishGenerate}>
+              {loading === 'generate' ? <><Loader2 size={16} className="animate-spin" /> Saving…</> : !backupDownloaded ? 'Download backup to continue' : !backupVerified ? 'Verify your backup to continue' : "I've Saved My Seed · Continue"}
             </Button>
           </CardContent>
         </Card>
