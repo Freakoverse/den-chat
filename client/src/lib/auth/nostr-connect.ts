@@ -12,8 +12,7 @@
 import { generateSecretKey, getPublicKey } from 'nostr-tools'
 import { BunkerSigner as NBunkerSigner, createNostrConnectURI, toBunkerURL, parseBunkerInput } from 'nostr-tools/nip46'
 import { bytesToHex } from '@noble/hashes/utils'
-
-const DEFAULT_RELAYS = ['wss://relay.primal.net', 'wss://relay.nostr.band', 'wss://nos.lol']
+import { getRelays } from '@/lib/nostr/relay-pool'
 
 export interface NostrConnectLoginDetails {
   privKey: Uint8Array
@@ -24,7 +23,7 @@ export interface NostrConnectLoginDetails {
  * Generate login details (keys + connection URI) upfront.
  * This should be called once when the UI mounts.
  */
-export function generateNostrConnectDetails(relays: string[] = DEFAULT_RELAYS): NostrConnectLoginDetails {
+export function generateNostrConnectDetails(relays: string[] = getRelays()): NostrConnectLoginDetails {
   const privKey = generateSecretKey()
   const connectionString = createNostrConnectURI({
     clientPubkey: getPublicKey(privKey),

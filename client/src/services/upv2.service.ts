@@ -18,6 +18,7 @@ import { sha256 } from '@noble/hashes/sha256'
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils'
 import { schnorr } from '@noble/curves/secp256k1'
 import { dnnService } from '@/lib/dnn/dnnService'
+import { getRelays } from '@/lib/nostr/relay-pool'
 
 const UPV2_KIND = 24134
 
@@ -112,7 +113,9 @@ class UPV2Service {
     npub: string
     relays: string[]
   } | null> {
-    const DEFAULT_RELAYS = ['wss://relay.primal.net', 'wss://relay.nostr.band', 'wss://nos.lol']
+    // Fall back to the user's active relay pool (Settings → Network) rather than
+    // a separate hardcoded list.
+    const DEFAULT_RELAYS = getRelays()
 
     // Handle npub
     if (identifier.startsWith('npub')) {
