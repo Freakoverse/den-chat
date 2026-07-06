@@ -251,8 +251,12 @@ export function ChannelView({ hideHeader = false }: { hideHeader?: boolean } = {
 
   const channelContainerRef = useRef<HTMLDivElement>(null)
 
-  // Membership / facilitation gate (hooks must be called unconditionally)
-  const isMember = !!(pubkey && hubMembers?.some((m) => m.pubkey === pubkey))
+  // Membership / facilitation gate (hooks must be called unconditionally).
+  // The creator is always an owner/member — hubMembers isn't populated at creation
+  // time (only after the member tree is loaded from Blossom), so gate on it directly
+  // to avoid a spurious "you must be a member" on a freshly created hub.
+  const isCreator = !!(pubkey && hub && hub.creatorPubkey === pubkey)
+  const isMember = isCreator || !!(pubkey && hubMembers?.some((m) => m.pubkey === pubkey))
   const hubFacilitatorMembers = useHubStore((s) => activeHubId ? s.hubFacilitatorMembers[activeHubId] : undefined)
 
   // Whether blossom secret resolution has completed for this hub.
@@ -276,7 +280,7 @@ export function ChannelView({ hideHeader = false }: { hideHeader?: boolean } = {
 
   return (
     <div ref={channelContainerRef} className="flex flex-col h-full bg-background relative py-2 gap-2">
-      {!hideHeader && <ChannelHeader channel={channel} channelId={activeChannelId!} isCreator={!!(hub && pubkey && hub.creatorPubkey === pubkey)} />}
+      {!hideHeader && <ChannelHeader channel={channel} channelId={activeChannelId!} isCreator={isCreator} />}
       {/* Loading overlay while blossom membership is being resolved.
           Starts below the 48px header (unless hidden) so the back button stays usable. */}
       {!secretsResolved && (
