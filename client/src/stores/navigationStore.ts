@@ -4,7 +4,7 @@
  */
 import { create } from 'zustand'
 
-type ActivePage = 'hubs' | 'dms' | 'social' | 'discover' | 'settings' | 'wallet' | 'public-chat'
+type ActivePage = 'hubs' | 'dms' | 'social' | 'discover' | 'settings' | 'wallet' | 'public-chat' | 'sites'
 type MobileView = 'home' | 'chat'
 
 interface NavigationStore {
