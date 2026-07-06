@@ -13,7 +13,7 @@ import { generateSecretKey, getPublicKey } from 'nostr-tools'
 import { BunkerSigner as NBunkerSigner, createNostrConnectURI, toBunkerURL, parseBunkerInput } from 'nostr-tools/nip46'
 import { bytesToHex } from '@noble/hashes/utils'
 
-const DEFAULT_RELAYS = ['wss://relay.primal.net', 'wss://relay.damus.io', 'wss://nos.lol']
+const DEFAULT_RELAYS = ['wss://relay.primal.net', 'wss://relay.nostr.band', 'wss://nos.lol']
 
 export interface NostrConnectLoginDetails {
   privKey: Uint8Array

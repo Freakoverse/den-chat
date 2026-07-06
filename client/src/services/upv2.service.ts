@@ -112,7 +112,7 @@ class UPV2Service {
     npub: string
     relays: string[]
   } | null> {
-    const DEFAULT_RELAYS = ['wss://relay.primal.net', 'wss://relay.damus.io', 'wss://nos.lol']
+    const DEFAULT_RELAYS = ['wss://relay.primal.net', 'wss://relay.nostr.band', 'wss://nos.lol']
 
     // Handle npub
     if (identifier.startsWith('npub')) {

@@ -9,9 +9,12 @@ const pool = new SimplePool()
 
 /** Default relays — user can customize these later */
 const DEFAULT_RELAYS = [
-  'wss://relay.damus.io',
   'wss://relay.primal.net',
   'wss://nos.lol',
+  'wss://relay.nostr.band',
+  'wss://relay.snort.social',
+  'wss://relay.wellorder.net',
+  'wss://relay.nostr.info',
 ]
 
 /** In-memory cache — null means "not loaded yet" */
