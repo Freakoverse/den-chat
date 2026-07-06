@@ -3522,6 +3522,9 @@ function DangerousPage({ hub, onClose, setHubStatus }: DangerousPageProps) {
 
       // Update local state
       setHubStatus(hub.dTag, 'deleted')
+      // Leave the (now-deleted) hub's view — otherwise activeHubId still points at it
+      // and its ChannelList keeps rendering even though it's hidden from the sidebar.
+      useHubStore.getState().setActiveHub(null)
 
       onClose()
     } catch (err: any) {
