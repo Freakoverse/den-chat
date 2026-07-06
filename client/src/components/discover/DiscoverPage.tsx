@@ -1274,7 +1274,7 @@ export function DiscoverPage() {
 
               {/* Search + Filters bar */}
               <div className="sticky top-0 z-20 bg-secondary/50 backdrop-blur-md rounded-md shadow-md mt-2 px-3 py-3">
-                <div className="flex items-center gap-2 max-w-4xl mx-auto">
+                <div className="flex items-center gap-2">
                   <div className="flex items-center gap-2 flex-1 min-w-0 px-3.5 py-2 rounded-xl bg-secondary/60 border border-border focus-within:border-primary/40 transition-colors">
                     <Search size={15} className="text-muted-foreground shrink-0" />
                     <input
