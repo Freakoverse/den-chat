@@ -110,14 +110,16 @@ export function SettingsPage() {
   const logout = useUserStore((s) => s.logout)
   const isAdmin = currentPubkey === ADMIN_PUBKEY
 
-  // Allow other components to deep-link to a specific settings tab
+  // Allow other components to deep-link to a specific settings tab. React to
+  // changes (not just mount) so it also switches when Settings is already open.
+  const settingsTab = useNavigationStore((s) => s.settingsTab)
+  const setSettingsTab = useNavigationStore((s) => s.setSettingsTab)
   useEffect(() => {
-    const { settingsTab, setSettingsTab } = useNavigationStore.getState()
     if (settingsTab && TABS.some(t => t.id === settingsTab)) {
       setTab(settingsTab as Tab)
       setSettingsTab(null) // consume it so it doesn't persist
     }
-  }, [])
+  }, [settingsTab, setSettingsTab])
 
   // Find current tab config for mobile selector
   const allTabs = isAdmin ? [...TABS, { id: 'admin' as Tab, label: 'Admin', icon: <ShieldCheck size={18} />, separatorBefore: true, tooltip: 'Administration tools' }] : TABS
