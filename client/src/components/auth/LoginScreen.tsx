@@ -91,6 +91,8 @@ export function LoginScreen() {
   const [pendingGen, setPendingGen] = useState<{ mnemonic: string; pin: string; name?: string; hint?: string } | null>(null)
   const [backupMnemonic, setBackupMnemonic] = useState<string | null>(null)
   const [showBackupWords, setShowBackupWords] = useState(false)
+  // Recovery-phrase grid is collapsed by default so focus lands on the backup download.
+  const [showSeedAccordion, setShowSeedAccordion] = useState(false)
   const [backupCopied, setBackupCopied] = useState(false)
   const [deriveSeedId, setDeriveSeedId] = useState<string | null>(null)
   const [showBackupPinPrompt, setShowBackupPinPrompt] = useState(false)
@@ -790,6 +792,7 @@ export function LoginScreen() {
       setPendingGen({ mnemonic, pin, name: accountName || undefined, hint: pinHint || undefined })
       setBackupMnemonic(mnemonic)
       setShowBackupWords(false)
+      setShowSeedAccordion(false)
       setBackupDownloaded(false)
       setBackupVerified(false)
       setBackupVerifyPin('')
@@ -1426,36 +1429,52 @@ export function LoginScreen() {
               </p>
             </div>
 
-            <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 w-full">
-              {words.map((word, i) => (
-                <div key={i} className="flex items-center gap-2 p-2 bg-secondary/50 rounded-lg border border-border">
-                  <span className="text-[10px] text-muted-foreground w-5 text-right">{i + 1}.</span>
-                  <span className="font-mono text-sm">{showBackupWords ? word : '••••'}</span>
-                </div>
-              ))}
-            </div>
+            {/* Recovery phrase — collapsed by default; download the backup first */}
+            <div className="w-full rounded-lg border border-border overflow-hidden">
+              <button
+                onClick={() => { setShowSeedAccordion((v) => { if (v) setShowBackupWords(false); return !v }) }}
+                className="w-full flex items-center justify-between px-3 py-2.5 bg-secondary/30 hover:bg-secondary/50 transition-colors cursor-pointer"
+              >
+                <span className="flex items-center gap-2 text-sm font-medium text-foreground">
+                  <KeyRound size={14} /> View recovery phrase
+                </span>
+                <ChevronDown size={16} className={`text-muted-foreground transition-transform ${showSeedAccordion ? 'rotate-180' : ''}`} />
+              </button>
+              {showSeedAccordion && (
+                <div className="p-3 space-y-3 border-t border-border">
+                  <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 w-full">
+                    {words.map((word, i) => (
+                      <div key={i} className="flex items-center gap-2 p-2 bg-secondary/50 rounded-lg border border-border">
+                        <span className="text-[10px] text-muted-foreground w-5 text-right">{i + 1}.</span>
+                        <span className="font-mono text-sm">{showBackupWords ? word : '••••'}</span>
+                      </div>
+                    ))}
+                  </div>
 
-            <div className="flex gap-2 w-full">
-              <button
-                onClick={() => {
-                  if (showBackupWords) {
-                    setShowBackupWords(false)
-                  } else {
-                    // Revealing is gated behind an "are you sure" + countdown
-                    setRevealCountdown(null)
-                    setShowRevealConfirm(true)
-                  }
-                }}
-                className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-secondary/50 border border-border text-xs hover:bg-secondary transition-colors cursor-pointer"
-              >
-                {showBackupWords ? <><EyeOff size={14} /> Censor</> : <><Eye size={14} /> Reveal</>}
-              </button>
-              <button
-                onClick={() => setShowCopyConfirm(true)}
-                className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-secondary/50 border border-border text-xs hover:bg-secondary transition-colors cursor-pointer"
-              >
-                {backupCopied ? <><Check size={14} /> Copied!</> : <><Copy size={14} /> Copy</>}
-              </button>
+                  <div className="flex gap-2 w-full">
+                    <button
+                      onClick={() => {
+                        if (showBackupWords) {
+                          setShowBackupWords(false)
+                        } else {
+                          // Revealing is gated behind an "are you sure" + countdown
+                          setRevealCountdown(null)
+                          setShowRevealConfirm(true)
+                        }
+                      }}
+                      className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-secondary/50 border border-border text-xs hover:bg-secondary transition-colors cursor-pointer"
+                    >
+                      {showBackupWords ? <><EyeOff size={14} /> Censor</> : <><Eye size={14} /> Reveal</>}
+                    </button>
+                    <button
+                      onClick={() => setShowCopyConfirm(true)}
+                      className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-secondary/50 border border-border text-xs hover:bg-secondary transition-colors cursor-pointer"
+                    >
+                      {backupCopied ? <><Check size={14} /> Copied!</> : <><Copy size={14} /> Copy</>}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Encrypted backup download */}
