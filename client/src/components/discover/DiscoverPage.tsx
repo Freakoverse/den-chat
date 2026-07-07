@@ -575,6 +575,7 @@ function DiscoverHubCard({ hub }: { hub: DiscoveredHub }) {
   const privateKey = useUserStore((s) => s.privateKey)
   const hubEntries = useHubStore((s) => s.hubEntries)
   const setHubData = useHubStore((s) => s.setHubData)
+  const setHubStatus = useHubStore((s) => s.setHubStatus)
   const setHubEntries = useHubStore((s) => s.setHubEntries)
   const folders = useHubStore((s) => s.folders)
   // Membership signals already resolved on load (useHubEventSubscription): holding the
@@ -645,6 +646,10 @@ function DiscoverHubCard({ hub }: { hub: DiscoveredHub }) {
           categories: [], roles: [], minPow: hub.minPow, nsfw: hub.nsfw, discoverable: hub.discoverable,
         }
         setHubData(hub.dTag, hubData)
+        // Mark it loaded now — we already have the full hub definition from discovery.
+        // Otherwise it has no status and renders as an endless pulsing skeleton in the
+        // sidebar until a reload runs the hub loader.
+        setHubStatus(hub.dTag, 'loaded')
 
         const relayHint = hub.generalRelays[0] || ''
         const newEntry = { dTag: hub.dTag, relayHint, position: hubEntries.length, folderId: undefined }
