@@ -1158,8 +1158,8 @@ export function VoiceChannelView() {
                 />
                 <VoiceActionButton
                   icon={Radar}
-                  label={!perms.use_spatial ? 'No permission for spatial audio' : spatialEnabled ? 'Disable Spatial' : 'Spatial Audio'}
-                  active={spatialEnabled}
+                  label={!perms.use_spatial ? 'No permission for spatial audio' : spatialPanelOpen ? 'Close Spatial Panel' : 'Spatial Audio'}
+                  active={spatialPanelOpen}
                   disabled={!perms.use_spatial}
                   onClick={toggleSpatialPanel}
                 />

@@ -740,6 +740,17 @@ function ForumPostDetail({
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
   }, [replies.length, optimisticMessages.length])
 
+  // Reconcile: drop an optimistic reply once its real event arrives — mirrors the
+  // text-channel MessageList behavior. Without this the local "sent ✓" copy lingers.
+  useEffect(() => {
+    if (optimisticMessages.length === 0 || replies.length === 0) return
+    const toRemove: string[] = []
+    for (const opt of optimisticMessages) {
+      if (replies.some((r) => r.pubkey === myPubkey && r.content === opt.content)) toRemove.push(opt.tempId)
+    }
+    if (toRemove.length > 0) setOptimisticMessages((prev) => prev.filter((m) => !toRemove.includes(m.tempId)))
+  }, [replies, optimisticMessages, myPubkey])
+
   const startEdit = useCallback((msg: ChatMessage) => {
     setEditingId(msg.id)
     setEditText(msg.content)
@@ -926,7 +937,7 @@ function ForumPostDetail({
                     {post.clientTag && (
                       <Tooltip>
                         <TooltipTrigger asChild>
-                          <span className="text-muted-foreground/60 cursor-default">Ãƒâ€šÃ‚Â· via {post.clientTag}</span>
+                          <span className="text-muted-foreground/60 cursor-default">{'·'} via {post.clientTag}</span>
                         </TooltipTrigger>
                         <TooltipContent side="top" className="text-xs">
                           This post was published through the {post.clientTag} client
