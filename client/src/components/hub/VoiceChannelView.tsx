@@ -679,7 +679,7 @@ export function VoiceChannelView() {
   return (
     <div className="flex-1 flex flex-col bg-background min-h-0 overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 h-12 min-h-12 border-b border-border bg-secondary/30">
+      <div className="flex items-center justify-between px-4 h-12 min-h-12 shrink-0 m-2 bg-secondary/50 rounded-md shadow-md">
         <div className="flex items-center gap-2 min-w-0 flex-1">
           {isMobilVCV && (
             <button

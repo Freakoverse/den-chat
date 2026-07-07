@@ -23,6 +23,7 @@ import { getUploadBlossoms } from '@/stores/postingBehaviourStore'
 import { ChatInputBar, type FileAttachment } from '@/components/chat/ChatInputBar'
 import { MessageContent } from '@/components/chat/MessageContent'
 import { BlossomImage } from '@/components/ui/BlossomImage'
+import { preCacheImage } from '@/lib/imageCache'
 import { DnnBadge } from '@/components/ui/DnnBadge'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { UserProfileModal } from '@/components/hub/UserProfileModal'
@@ -163,6 +164,13 @@ export function ForumView() {
     posts.sort((a, b) => b.timestamp - a.timestamp)
     return { forumPosts: posts, forumReplies: replies }
   }, [messages, hiddenMessages, canHide])
+
+  // Pre-warm the image cache for featured images. This is lifecycle-independent, so
+  // toggling grid/list view (which remounts the cards) serves from cache instead of
+  // re-probing/re-downloading — the card BlossomImages check the same persistent/blob cache.
+  useEffect(() => {
+    for (const p of forumPosts) if (p.featuredImage) preCacheImage(p.featuredImage)
+  }, [forumPosts])
 
   // Filter + search
   const filteredPosts = useMemo(() => {
