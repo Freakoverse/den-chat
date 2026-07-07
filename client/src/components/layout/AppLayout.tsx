@@ -10,7 +10,6 @@ import { DMPage } from '@/components/dm/DMPage'
 import { DiscoverPage } from '@/components/discover/DiscoverPage'
 import { PublicChatPage } from '@/components/public/PublicChatPage'
 import { WalletPage } from '@/components/wallet/WalletPage'
-import { SitesPage } from '@/components/sites/SitesPage'
 import { useHubStore } from '@/stores/hubStore'
 import { useNavigationStore } from '@/stores/navigationStore'
 import { useNotificationStore } from '@/stores/notificationStore'
@@ -139,8 +138,6 @@ export function AppLayout() {
             <SocialFeedPage />
           ) : activePage === 'discover' ? (
             <DiscoverPage />
-          ) : activePage === 'sites' ? (
-            <SitesPage />
           ) : activePage === 'dms' ? (
             <DMPage />
           ) : activePage === 'public-chat' ? (
@@ -204,8 +201,6 @@ export function AppLayout() {
         <SocialFeedPage />
       ) : activePage === 'discover' ? (
         <DiscoverPage />
-      ) : activePage === 'sites' ? (
-        <SitesPage />
       ) : activePage === 'public-chat' ? (
         <PublicChatPage />
       ) : activePage === 'dms' ? (
@@ -238,7 +233,7 @@ export function AppLayout() {
 
 function MobileTabBar({ activePage, onNavigate, dmUnread }: {
   activePage: string
-  onNavigate: (page: 'hubs' | 'dms' | 'social' | 'discover' | 'settings' | 'wallet' | 'public-chat' | 'sites') => void
+  onNavigate: (page: 'hubs' | 'dms' | 'social' | 'discover' | 'settings' | 'wallet' | 'public-chat') => void
   dmUnread: number
 }) {
   const setMobileView = useNavigationStore((s) => s.setMobileView)

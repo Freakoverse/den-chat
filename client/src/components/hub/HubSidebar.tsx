@@ -8,7 +8,7 @@ import { useDM04Store } from '@/stores/dm04Store'
 import { useBlockStore } from '@/stores/blockStore'
 import { useWotStore } from '@/stores/wotStore'
 import { usePublicChatStore } from '@/stores/publicChatStore'
-import { Plus, Pencil, MessageSquare, MessagesSquare, Settings, AtSign, Compass, HelpCircle, XCircle, FolderClosed, Search, Sparkles, X, Volume2, RefreshCw, Loader2, Wallet, Globe } from 'lucide-react'
+import { Plus, Pencil, MessageSquare, MessagesSquare, Settings, AtSign, Compass, HelpCircle, XCircle, FolderClosed, Search, Sparkles, X, Volume2, RefreshCw, Loader2, Wallet } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { BlossomImage } from '@/components/ui/BlossomImage'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
@@ -32,7 +32,7 @@ function saveCollapsed(set: Set<string>) {
   } catch { /* ignore */ }
 }
 
-export function HubSidebar({ activePage, onNavigate, compact = false }: { activePage: 'hubs' | 'dms' | 'social' | 'discover' | 'settings' | 'wallet' | 'public-chat' | 'sites'; onNavigate?: (page: 'hubs' | 'dms' | 'social' | 'discover' | 'settings' | 'wallet' | 'public-chat' | 'sites') => void; compact?: boolean }) {
+export function HubSidebar({ activePage, onNavigate, compact = false }: { activePage: 'hubs' | 'dms' | 'social' | 'discover' | 'settings' | 'wallet' | 'public-chat'; onNavigate?: (page: 'hubs' | 'dms' | 'social' | 'discover' | 'settings' | 'wallet' | 'public-chat') => void; compact?: boolean }) {
   const hubEntries = useHubStore((s) => s.hubEntries)
   const folders = useHubStore((s) => s.folders)
   const hubs = useHubStore((s) => s.hubs)
@@ -190,9 +190,6 @@ export function HubSidebar({ activePage, onNavigate, compact = false }: { active
             </HubIcon>
             <HubIcon label="Discover" isActive={activePage === 'discover'} onClick={() => onNavigate?.('discover')}>
               <Compass size={20} />
-            </HubIcon>
-            <HubIcon label="Sites" isActive={activePage === 'sites'} onClick={() => onNavigate?.('sites')}>
-              <Globe size={20} />
             </HubIcon>
             <HubIcon label="Public Chat" isActive={activePage === 'public-chat'} onClick={() => onNavigate?.('public-chat')} dmUnreadCount={pcTotalUnread}>
               <MessagesSquare size={20} />

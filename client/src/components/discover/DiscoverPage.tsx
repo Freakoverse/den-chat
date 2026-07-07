@@ -31,9 +31,10 @@ import { useWotStore } from '@/stores/wotStore'
 import {
   Compass, Search, Loader2, Hash, Info, UserPlus, Check, AlertTriangle,
   X, ShieldAlert, SlidersHorizontal, ChevronLeft, ChevronRight, Plus,
-  Gamepad2, Package,
+  Gamepad2, Package, Globe, Monitor,
 } from 'lucide-react'
 import type { Event } from 'nostr-tools'
+import { isTauri } from '@/lib/utils'
 
 const PAGE_SIZE = 15
 
@@ -111,7 +112,7 @@ function parseHubEventForDiscover(event: Event): DiscoveredHub | null {
 }
 
 // ── Discover tab type ──
-type DiscoverTab = 'hubs' | 'games' | 'mods'
+type DiscoverTab = 'hubs' | 'games' | 'mods' | 'sites'
 
 // ── Left Sidebar Nav ──
 function DiscoverNav({ activeTab, onTabChange }: { activeTab: DiscoverTab; onTabChange: (tab: DiscoverTab) => void }) {
@@ -119,6 +120,7 @@ function DiscoverNav({ activeTab, onTabChange }: { activeTab: DiscoverTab; onTab
     { id: 'hubs', label: 'Hubs', icon: <Compass size={18} /> },
     { id: 'games', label: 'Games', icon: <Gamepad2 size={18} /> },
     { id: 'mods', label: 'Mods', icon: <Package size={18} /> },
+    { id: 'sites', label: 'Sites', icon: <Globe size={18} /> },
   ]
   return (
     <nav className="flex flex-col gap-1 px-2 pt-4">
@@ -1229,7 +1231,7 @@ export function DiscoverPage() {
         {/* Scrollable area */}
         {/* Mobile tab bar */}
         <div className="hidden max-[1080px]:flex items-center gap-1 px-2 py-2 border-b border-border bg-secondary/30 shrink-0">
-          {(['hubs', 'games', 'mods'] as DiscoverTab[]).map(tab => (
+          {(['hubs', 'games', 'mods', 'sites'] as DiscoverTab[]).map(tab => (
             <button
               key={tab}
               onClick={() => setDiscoverTab(tab)}
@@ -1243,6 +1245,7 @@ export function DiscoverPage() {
               {tab === 'hubs' && <Compass size={14} />}
               {tab === 'games' && <Gamepad2 size={14} />}
               {tab === 'mods' && <Package size={14} />}
+              {tab === 'sites' && <Globe size={14} />}
               {tab.charAt(0).toUpperCase() + tab.slice(1)}
             </button>
           ))}
@@ -1416,6 +1419,25 @@ export function DiscoverPage() {
               </div>
               </div>
             </>
+          ) : discoverTab === 'sites' ? (
+            /* Coming Soon placeholder for Sites (in-client DNN browser) */
+            <div className="flex-1 flex flex-col items-center justify-center py-32 text-center px-4">
+              <div className="w-16 h-16 rounded-2xl bg-secondary flex items-center justify-center mb-5">
+                <Globe size={28} className="text-muted-foreground" />
+              </div>
+              <h2 className="text-lg font-semibold text-foreground mb-2">Sites</h2>
+              <p className="text-sm text-muted-foreground max-w-xs">
+                A built-in browser for DNN sites — decentralized domains with their own self-verified certificates. Coming soon.
+              </p>
+              {!isTauri() && (
+                <div className="mt-5 max-w-xs flex items-start gap-2.5 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-left">
+                  <Monitor size={16} className="text-amber-500 shrink-0 mt-0.5" />
+                  <p className="text-xs text-amber-500/90 leading-relaxed">
+                    This view will only be available in the installed desktop app.
+                  </p>
+                </div>
+              )}
+            </div>
           ) : (
             /* Coming Soon placeholder for Games / Mods */
             <div className="flex-1 flex flex-col items-center justify-center py-32 text-center px-4">
