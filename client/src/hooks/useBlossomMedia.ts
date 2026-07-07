@@ -331,7 +331,10 @@ export function useBlossomMedia(originalUrl: string | undefined, maxSizeMB?: num
           if (!res.ok) continue
 
           const blob = await res.blob()
-          if (cancelRef.current) { verifyingRef.current = false; return }
+          // NOTE: intentionally do NOT bail on unmount here. The blob is already
+          // downloaded, so finish hashing and populate the caches even if the
+          // component unmounted (e.g. a grid/list view toggle) — otherwise the
+          // verified/persistent cache never fills and every remount re-probes.
 
           const actualHash = await hashBlob(blob)
           if (actualHash === parsed.hash) {
