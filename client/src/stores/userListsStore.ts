@@ -8,6 +8,21 @@
 import { create } from 'zustand'
 import { fetchReplaceable } from '@/lib/nostr/relay-pool'
 import { STANDARD_KINDS } from '@/lib/crypto/constants'
+import type { Event } from 'nostr-tools'
+
+/**
+ * Fetch a replaceable event, retrying up to `attempts` times. Guards against a cold
+ * launch where relays haven't connected yet and the first fetch returns nothing —
+ * otherwise the user's relay list stays empty until a later manual refresh.
+ */
+async function fetchReplaceableWithRetry(pubkey: string, kind: number, attempts = 3): Promise<Event | null> {
+  for (let i = 0; i < attempts; i++) {
+    const ev = await fetchReplaceable(pubkey, kind).catch(() => null)
+    if (ev) return ev
+    if (i < attempts - 1) await new Promise((r) => setTimeout(r, 1500))
+  }
+  return null
+}
 
 interface UserListsState {
   userRelays: string[]
@@ -32,9 +47,10 @@ export const useUserListsStore = create<UserListsState>((set) => ({
   refreshingBlossoms: false,
 
   loadUserLists: async (pubkey: string) => {
+    // Retry on launch — a single cold-start fetch often misses before relays connect.
     const [relayEv, blossomEv] = await Promise.all([
-      fetchReplaceable(pubkey, STANDARD_KINDS.RELAY_LIST).catch(() => null),
-      fetchReplaceable(pubkey, STANDARD_KINDS.BLOSSOM_SERVER_LIST).catch(() => null),
+      fetchReplaceableWithRetry(pubkey, STANDARD_KINDS.RELAY_LIST),
+      fetchReplaceableWithRetry(pubkey, STANDARD_KINDS.BLOSSOM_SERVER_LIST),
     ])
 
     const userRelays = relayEv
