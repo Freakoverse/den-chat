@@ -244,6 +244,53 @@ export function subscribeEvents(
 }
 
 /**
+ * Progressive one-shot fetch: streams events via subscribeMany and calls `onEvents`
+ * with the accumulated, deduplicated, newest-first list as results arrive — so the UI
+ * can paint the first events immediately (from the fastest relay) instead of blocking
+ * on the whole batch. Closes on EOSE-from-all or `maxWait`, whichever comes first.
+ *
+ * Returns `{ close, done }`. `done` resolves with the final list; call `close()` to
+ * abort early (e.g. on unmount / refetch) — that also resolves `done` with what we have.
+ */
+export function fetchEventsProgressive(
+  filter: Filter,
+  onEvents: (events: Event[]) => void,
+  opts?: { maxWait?: number; relays?: string[] },
+): { close: () => void; done: Promise<Event[]> } {
+  const relays = opts?.relays ?? getRelays()
+  const maxWait = opts?.maxWait ?? FETCH_MAX_WAIT_MS
+  const byId = new Map<string, Event>()
+  let closed = false
+  let flushTimer: ReturnType<typeof setTimeout> | null = null
+  let deadline: ReturnType<typeof setTimeout> | null = null
+
+  const snapshot = () => [...byId.values()].sort((a, b) => b.created_at - a.created_at)
+  const flush = () => { flushTimer = null; if (!closed) onEvents(snapshot()) }
+  const scheduleFlush = () => { if (flushTimer == null) flushTimer = setTimeout(flush, 120) }
+
+  let resolveDone!: (e: Event[]) => void
+  const done = new Promise<Event[]>((r) => { resolveDone = r })
+
+  const teardown = (emitFinal: boolean) => {
+    if (closed) return
+    closed = true
+    if (flushTimer) { clearTimeout(flushTimer); flushTimer = null }
+    if (deadline) { clearTimeout(deadline); deadline = null }
+    sub.close()
+    if (emitFinal) onEvents(snapshot())
+    resolveDone(snapshot())
+  }
+
+  const sub = pool.subscribeMany(relays, filter, {
+    onevent(ev) { if (!byId.has(ev.id)) { byId.set(ev.id, ev); scheduleFlush() } },
+    oneose() { teardown(true) },
+  })
+  deadline = setTimeout(() => teardown(true), maxWait)
+
+  return { close: () => teardown(false), done }
+}
+
+/**
  * Subscribe to events on SPECIFIC relays (not the global activeRelays).
  * Used for hub-specific relay subscriptions where each hub defines its own relay set.
  */

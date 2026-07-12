@@ -10,7 +10,7 @@ import { useSocialStore } from '@/stores/socialStore'
 import { useFollowStore } from '@/stores/followStore'
 import { useUserStore } from '@/stores/userStore'
 import { useNotificationStore } from '@/stores/notificationStore'
-import { fetchEvents } from '@/lib/nostr/relay-pool'
+import { fetchEvents, fetchEventsProgressive } from '@/lib/nostr/relay-pool'
 import { nip19 } from 'nostr-tools'
 import { decryptNip04 } from '@/lib/nostr/nip04dm'
 import { ComposeBox } from '@/components/social/ComposeBox'
@@ -228,6 +228,7 @@ export function SocialFeedPage() {
   const [loading, setLoading] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
   const loadingMoreRef = useRef(false)
+  const feedFetchRef = useRef<{ close: () => void } | null>(null)
   const sentinelRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
 
@@ -355,13 +356,19 @@ export function SocialFeedPage() {
       if (authors.length === 0) { setLoading(false); return }
       const since = Math.floor(Date.now() / 1000) - 86400
 
-      const events = await fetchEvents({
-        kinds: [1, 6],
-        authors,
-        since,
-        limit: 40,
-      })
-      setPosts(events)
+      // Progressive: paint posts as they stream from the fastest relays instead of
+      // waiting for the whole batch. Abort any previous in-flight feed fetch first.
+      feedFetchRef.current?.close()
+      let painted = false
+      const handle = fetchEventsProgressive(
+        { kinds: [1, 6], authors, since, limit: 40 },
+        (events) => {
+          setPosts(events)
+          if (!painted) { painted = true; setLoading(false) }
+        },
+      )
+      feedFetchRef.current = handle
+      await handle.done
     } catch (err) {
       console.error('Failed to load feed:', err)
     } finally {
@@ -394,6 +401,9 @@ export function SocialFeedPage() {
       loadingMoreRef.current = false
     }
   }, [follows, pubkey, posts, prependPosts])
+
+  // Abort any in-flight progressive feed fetch on unmount
+  useEffect(() => () => feedFetchRef.current?.close(), [])
 
   // IntersectionObserver for infinite scroll
   useEffect(() => {
