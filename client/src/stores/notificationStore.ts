@@ -112,6 +112,9 @@ export interface NotificationState {
 
   // Hub Chat
   markChannelRead: (hubDTag: string, channelId: string) => void
+  /** Advance the read watermark for a channel the user is actively viewing, so
+   *  messages seen live aren't re-counted as unread by a later refresh scan. */
+  advanceChannelRead: (hubDTag: string, channelId: string, messageTimestamp: number) => void
   markHubRead: (hubDTag: string) => void
   incrementChannelUnread: (hubDTag: string, channelId: string, messageTimestamp: number, mentionType?: 'personal' | 'everyone' | 'here' | 'role') => void
   setHubMuteSettings: (hubDTag: string, settings: HubMuteSettings) => void
@@ -501,6 +504,21 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
       return { hubUnreads, ...recomputeTotals({ ...state, hubUnreads }) }
     })
     // Save to localStorage immediately
+    _saveHubToLocalStorage(get)
+  },
+
+  advanceChannelRead: (hubDTag, channelId, messageTimestamp) => {
+    set((state) => {
+      const hubChannels = { ...(state.hubUnreads[hubDTag] || {}) }
+      const existing = hubChannels[channelId] || { lastRead: 0, count: 0, hasMention: false }
+      // Advance to the newest of: current watermark, this message's time, or now
+      // (max() keeps it clock-skew-safe against future-dated events).
+      const ts = Math.max(existing.lastRead, messageTimestamp, Math.floor(Date.now() / 1000))
+      if (ts === existing.lastRead && existing.count === 0 && !existing.hasMention) return {}
+      hubChannels[channelId] = { lastRead: ts, count: 0, hasMention: false }
+      const hubUnreads = { ...state.hubUnreads, [hubDTag]: hubChannels }
+      return { hubUnreads, ...recomputeTotals({ ...state, hubUnreads }) }
+    })
     _saveHubToLocalStorage(get)
   },
 

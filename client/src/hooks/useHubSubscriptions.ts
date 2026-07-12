@@ -948,6 +948,11 @@ export function useHubSubscriptions() {
         if (msg.hubDTag !== activeHubIdRef.current) {
           incrementUnreadRef.current(msg.hubDTag)
         }
+      } else {
+        // Message landed in the channel the user is actively viewing. Advance the
+        // read watermark so it isn't re-counted as unread by a later refresh scan
+        // (fixes "0 unread while in the hub, then N after leaving").
+        useNotificationStore.getState().advanceChannelRead(msg.hubDTag, msg.channelId, msg.createdAt)
       }
     }
 
