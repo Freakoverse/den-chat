@@ -7,6 +7,10 @@ import { StorageKey } from '@/lib/constants'
 
 const pool = new SimplePool()
 
+/** Max time a one-shot query waits before returning what responsive relays have.
+ *  Prevents a slow/dead relay from stalling the whole fetch. */
+const FETCH_MAX_WAIT_MS = 4000
+
 /** Default relays — user can customize these later */
 const DEFAULT_RELAYS = [
   'wss://relay.primal.net',
@@ -213,7 +217,9 @@ export async function fetchEvents(filter: Filter | Filter[]): Promise<Event[]> {
   const merged = Array.isArray(filter)
     ? filter.reduce<Filter>((acc, f) => ({ ...acc, ...f }), {})
     : filter
-  return pool.querySync(getRelays(), merged)
+  // Cap the wait so a single slow/dead relay can't stall the whole query — we
+  // return everything the responsive relays gave us instead of hanging for the slowest.
+  return pool.querySync(getRelays(), merged, { maxWait: FETCH_MAX_WAIT_MS })
 }
 
 /**
@@ -281,7 +287,10 @@ export async function fetchReplaceable(
   }
 
   const events = await fetchEvents(filter)
-  return events[0] ?? null
+  // Replaceable events: different relays may return different versions — pick the
+  // newest by created_at rather than whichever relay answered first.
+  if (events.length === 0) return null
+  return events.reduce((newest, e) => (e.created_at > newest.created_at ? e : newest))
 }
 
 /**
@@ -293,7 +302,7 @@ export async function fetchEventsFromRelays(relays: string[], filter: Filter | F
   const merged = Array.isArray(filter)
     ? filter.reduce<Filter>((acc, f) => ({ ...acc, ...f }), {})
     : filter
-  return pool.querySync(relays, merged)
+  return pool.querySync(relays, merged, { maxWait: FETCH_MAX_WAIT_MS })
 }
 
 /**
