@@ -37,6 +37,7 @@ export function HubSidebar({ activePage, onNavigate, compact = false }: { active
   const folders = useHubStore((s) => s.folders)
   const hubs = useHubStore((s) => s.hubs)
   const hubStatus = useHubStore((s) => s.hubStatus)
+  const hubSecretsResolved = useHubStore((s) => s.hubSecretsResolved)
   const activeHubId = useHubStore((s) => s.activeHubId)
   const setActiveHub = useHubStore((s) => s.setActiveHub)
   const hubListLoaded = useHubStore((s) => s.hubListLoaded)
@@ -221,6 +222,7 @@ export function HubSidebar({ activePage, onNavigate, compact = false }: { active
                     status={status}
                     isInVoice={voiceHubDTag === entry.dTag}
                     hubDTag={entry.dTag}
+                    loadingSecrets={status === 'loaded' && !hubSecretsResolved[entry.dTag]}
                   >
                     {hub?.icon ? (
                       <BlossomImage src={hub.icon} alt={hub.name} className="absolute inset-0 w-full h-full object-cover" fallback={
@@ -304,6 +306,7 @@ export function HubSidebar({ activePage, onNavigate, compact = false }: { active
                             folderColor={folder.color}
                             isInVoice={voiceHubDTag === entry.dTag}
                             hubDTag={entry.dTag}
+                            loadingSecrets={status === 'loaded' && !hubSecretsResolved[entry.dTag]}
                           >
                             {hub?.icon ? (
                               <BlossomImage src={hub.icon} alt={hub.name} className="absolute inset-0 w-full h-full object-cover" fallback={
@@ -469,9 +472,11 @@ interface HubIconProps {
   hubDTag?: string
   dmUnreadCount?: number
   hasNotificationDot?: boolean
+  /** Show a spinner overlay while the hub's blossom secret/data is still being fetched+decrypted. */
+  loadingSecrets?: boolean
 }
 
-function HubIcon({ label, isActive, onClick, children, isAction, isPreview, status, compact, folderColor, isInVoice, hubDTag, dmUnreadCount, hasNotificationDot }: HubIconProps) {
+function HubIcon({ label, isActive, onClick, children, isAction, isPreview, status, compact, folderColor, isInVoice, hubDTag, dmUnreadCount, hasNotificationDot, loadingSecrets }: HubIconProps) {
   const size = compact ? 'w-10 h-10' : 'w-12 h-12'
   const rounding = isActive ? 'rounded-2xl' : 'rounded-[24px] hover:rounded-2xl'
 
@@ -513,9 +518,15 @@ function HubIcon({ label, isActive, onClick, children, isAction, isPreview, stat
             )}
           >
             {children}
+            {/* Loading overlay while blossom secret/data is being fetched + decrypted */}
+            {loadingSecrets && (
+              <div className="absolute inset-0 z-[5] flex items-center justify-center bg-background/45 backdrop-blur-[1px]">
+                <Loader2 size={16} className="animate-spin text-white" />
+              </div>
+            )}
           </button>
         </TooltipTrigger>
-        <TooltipContent side="right">{label}</TooltipContent>
+        <TooltipContent side="right">{loadingSecrets ? `${label} — loading…` : label}</TooltipContent>
       </Tooltip>
 
       {/* Status badge */}
