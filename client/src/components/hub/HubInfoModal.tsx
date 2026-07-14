@@ -5,15 +5,18 @@
  * Opened by clicking the hub name in the channel list banner.
  */
 
-import { useState, useEffect } from 'react'
-import { X, Copy, Check, Tag } from 'lucide-react'
+import { useState, useEffect, useRef } from 'react'
+import { X, Copy, Check, Tag, MoreVertical, Code, Link2, Radio, Loader2 } from 'lucide-react'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Separator } from '@/components/ui/separator'
 import { BlossomImage } from '@/components/ui/BlossomImage'
+import { RawEventModal } from '@/components/social/SocialPost'
 import type { HubData } from '@/stores/hubStore'
 import { truncateNpub } from '@/lib/utils'
-import { fetchEvents } from '@/lib/nostr/relay-pool'
+import { fetchEvents, fetchReplaceable } from '@/lib/nostr/relay-pool'
+import { checkEventAvailability } from '@/lib/nostr/eventRedundancy'
+import { KINDS } from '@/lib/crypto/constants'
 import { nip19 } from 'nostr-tools'
 
 interface HubInfoModalProps {
@@ -36,6 +39,48 @@ interface CreatorProfile {
 export function HubInfoModal({ open, onClose, hub, blurMedia, onCreatorClick }: HubInfoModalProps) {
   const [creator, setCreator] = useState<CreatorProfile | null>(null)
   const [copied, setCopied] = useState(false)
+
+  // ── 3-dot menu / actions ──
+  const [menuOpen, setMenuOpen] = useState(false)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const [addressCopied, setAddressCopied] = useState(false)
+  const [rawJson, setRawJson] = useState<string | null>(null)
+  const [rawLoading, setRawLoading] = useState(false)
+  const [showAvailability, setShowAvailability] = useState(false)
+
+  const hubAddress = nip19.naddrEncode({
+    identifier: hub.dTag,
+    pubkey: hub.creatorPubkey,
+    kind: KINDS.HUB_EVENT,
+    relays: hub.generalRelays.slice(0, 3),
+  })
+
+  useEffect(() => {
+    if (!menuOpen) return
+    const onDoc = (e: MouseEvent) => { if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false) }
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [menuOpen])
+
+  const copyHubAddress = () => {
+    navigator.clipboard.writeText(hubAddress)
+    setAddressCopied(true)
+    setMenuOpen(false)
+    setTimeout(() => setAddressCopied(false), 2000)
+  }
+
+  const viewRawEvent = async () => {
+    setMenuOpen(false)
+    setRawLoading(true)
+    try {
+      const ev = await fetchReplaceable(hub.creatorPubkey, KINDS.HUB_EVENT, hub.dTag)
+      setRawJson(ev ? JSON.stringify(ev, null, 2) : '// Hub event not found on any relay')
+    } catch {
+      setRawJson('// Failed to fetch the hub event')
+    } finally {
+      setRawLoading(false)
+    }
+  }
 
   useEffect(() => {
     if (!open || !hub.creatorPubkey) return
@@ -95,13 +140,37 @@ export function HubInfoModal({ open, onClose, hub, blurMedia, onCreatorClick }: 
           <div className="h-20 w-full bg-gradient-to-br from-primary/30 to-primary/10" />
         )}
 
-        {/* Close button */}
-        <button
-          onClick={onClose}
-          className="absolute top-2 right-2 bg-black/50 text-white p-1 rounded-full hover:bg-black/70 cursor-pointer z-10"
-        >
-          <X size={14} />
-        </button>
+        {/* Top-right actions: 3-dot menu + close */}
+        <div className="absolute top-2 right-2 flex items-center gap-1.5 z-20">
+          <div className="relative" ref={menuRef}>
+            <button
+              onClick={() => setMenuOpen((v) => !v)}
+              className="bg-black/50 text-white p-1 rounded-full hover:bg-black/70 cursor-pointer"
+            >
+              {rawLoading ? <Loader2 size={14} className="animate-spin" /> : <MoreVertical size={14} />}
+            </button>
+            {menuOpen && (
+              <div className="absolute right-0 mt-1 w-56 rounded-lg border border-border bg-popover shadow-lg py-1 text-sm">
+                <button onClick={viewRawEvent} className="flex items-center gap-2.5 w-full px-3 py-2 text-foreground/90 hover:bg-accent/50 transition-colors cursor-pointer">
+                  <Code size={14} className="text-muted-foreground" /> View raw event
+                </button>
+                <button onClick={copyHubAddress} className="flex items-center gap-2.5 w-full px-3 py-2 text-foreground/90 hover:bg-accent/50 transition-colors cursor-pointer">
+                  {addressCopied ? <Check size={14} className="text-emerald-400" /> : <Link2 size={14} className="text-muted-foreground" />}
+                  {addressCopied ? 'Copied!' : 'Copy hub address'}
+                </button>
+                <button onClick={() => { setMenuOpen(false); setShowAvailability(true) }} className="flex items-center gap-2.5 w-full px-3 py-2 text-foreground/90 hover:bg-accent/50 transition-colors cursor-pointer">
+                  <Radio size={14} className="text-muted-foreground" /> Check hub availability
+                </button>
+              </div>
+            )}
+          </div>
+          <button
+            onClick={onClose}
+            className="bg-black/50 text-white p-1 rounded-full hover:bg-black/70 cursor-pointer"
+          >
+            <X size={14} />
+          </button>
+        </div>
 
         {/* Icon overlapping banner/content boundary */}
         <div className="px-5 -mt-10 relative">
@@ -201,6 +270,79 @@ export function HubInfoModal({ open, onClose, hub, blurMedia, onCreatorClick }: 
               <div className="h-16 rounded-lg bg-secondary animate-pulse" />
             )}
           </div>
+        </div>
+      </div>
+
+      {rawJson !== null && <RawEventModal rawJson={rawJson} onClose={() => setRawJson(null)} />}
+      {showAvailability && <HubAvailabilityModal hub={hub} onClose={() => setShowAvailability(false)} />}
+    </div>
+  )
+}
+
+/** Queries each of the user's relays for the hub event and reports coverage. */
+function HubAvailabilityModal({ hub, onClose }: { hub: HubData; onClose: () => void }) {
+  const [loading, setLoading] = useState(true)
+  const [results, setResults] = useState<{ relay: string; present: boolean }[]>([])
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    checkEventAvailability({ kinds: [KINDS.HUB_EVENT], authors: [hub.creatorPubkey], '#d': [hub.dTag], limit: 1 })
+      .then((r) => { if (!cancelled) setResults(r) })
+      .catch(() => { if (!cancelled) setResults([]) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [hub.creatorPubkey, hub.dTag])
+
+  const presentCount = results.filter((r) => r.present).length
+  const total = results.length
+  const healthy = presentCount >= 3
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center px-2">
+      <div className="absolute inset-0 bg-black/70" onClick={onClose} />
+      <div className="relative z-10 w-full max-w-md rounded-lg border border-border bg-background shadow-lg animate-in fade-in-0 zoom-in-95">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+          <div className="flex items-center gap-2">
+            <Radio size={16} className="text-primary" />
+            <h3 className="text-sm font-semibold text-foreground">Hub availability</h3>
+          </div>
+          <button onClick={onClose} className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/50 cursor-pointer"><X size={15} /></button>
+        </div>
+
+        <div className="p-4">
+          {loading ? (
+            <div className="flex flex-col items-center gap-2 py-8 text-muted-foreground">
+              <Loader2 size={22} className="animate-spin" />
+              <span className="text-xs">Checking your relays…</span>
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center gap-2 mb-3">
+                <span className={`text-2xl font-bold ${healthy ? 'text-emerald-400' : presentCount > 0 ? 'text-amber-400' : 'text-destructive'}`}>
+                  {presentCount}
+                </span>
+                <span className="text-sm text-muted-foreground">of {total} relays have this hub</span>
+              </div>
+              <p className={`text-xs mb-3 ${healthy ? 'text-emerald-400/80' : 'text-amber-400/80'}`}>
+                {healthy
+                  ? 'Well-replicated — the hub event is safely redundant.'
+                  : presentCount > 0
+                    ? 'Under-replicated. The background rebroadcast will try to fill gaps as you use the hub.'
+                    : 'Not found on any of your relays.'}
+              </p>
+              <div className="flex flex-col gap-1 max-h-64 overflow-y-auto">
+                {results.map((r) => (
+                  <div key={r.relay} className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-md bg-secondary/40 text-xs">
+                    <span className="truncate text-foreground/80 font-mono">{r.relay.replace(/^wss:\/\//, '')}</span>
+                    {r.present
+                      ? <span className="flex items-center gap-1 text-emerald-400 shrink-0"><Check size={12} /> present</span>
+                      : <span className="flex items-center gap-1 text-muted-foreground shrink-0"><X size={12} /> absent</span>}
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
         </div>
       </div>
     </div>

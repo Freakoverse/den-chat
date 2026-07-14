@@ -142,6 +142,25 @@ async function checkAndRebroadcast(filter: Filter, key: string): Promise<void> {
   }
 }
 
+/**
+ * Check which of the user's relays (client + NIP-65) currently hold an event
+ * matching `filter`. Read-only — does NOT rebroadcast. Used by the hub
+ * availability UI. Each relay is queried individually with an 8s timeout.
+ */
+export async function checkEventAvailability(filter: Filter): Promise<{ relay: string; present: boolean }[]> {
+  const relays = getAllRelays()
+  const results = await Promise.allSettled(
+    relays.map(async (relay) => {
+      const events = await Promise.race([
+        fetchEventsFromRelays([relay], filter),
+        new Promise<Event[]>((_, reject) => setTimeout(() => reject(new Error('timeout')), RELAY_TIMEOUT_MS)),
+      ])
+      return { relay, present: events.length > 0 }
+    }),
+  )
+  return results.map((r, i) => (r.status === 'fulfilled' ? r.value : { relay: relays[i], present: false }))
+}
+
 // ── Public API ──
 
 /**
