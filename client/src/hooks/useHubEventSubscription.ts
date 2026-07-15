@@ -16,6 +16,7 @@ import { useHubStore } from '@/stores/hubStore'
 import { useUserStore } from '@/stores/userStore'
 import { subscribeToRelays } from '@/lib/nostr/relay-pool'
 import { KINDS } from '@/lib/crypto/constants'
+import { putHubEvent } from '@/lib/cache/hubEventCache'
 import { parseHubEvent } from './useHubLoader'
 import { buildRelayIndex } from '@/lib/nostr/buildRelayIndex'
 import type { Event } from 'nostr-tools'
@@ -71,6 +72,10 @@ export function useHubEventSubscription() {
     const processHubEvent = async (event: Event) => {
       const hubData = parseHubEvent(event)
       if (!hubData) return
+
+      // Keep a local (IndexedDB) copy of the hub definition — newest-wins, tombstones
+      // included — so it can still be exported if it's later wiped from all relays.
+      putHubEvent(event).catch(() => {})
 
       const dTag = hubData.dTag
 

@@ -16,6 +16,7 @@ import type { HubData } from '@/stores/hubStore'
 import { truncateNpub } from '@/lib/utils'
 import { fetchEvents, fetchReplaceable } from '@/lib/nostr/relay-pool'
 import { checkEventAvailability } from '@/lib/nostr/eventRedundancy'
+import { getHubEvent } from '@/lib/cache/hubEventCache'
 import { KINDS } from '@/lib/crypto/constants'
 import { nip19 } from 'nostr-tools'
 
@@ -73,8 +74,11 @@ export function HubInfoModal({ open, onClose, hub, blurMedia, onCreatorClick }: 
     setMenuOpen(false)
     setRawLoading(true)
     try {
-      const ev = await fetchReplaceable(hub.creatorPubkey, KINDS.HUB_EVENT, hub.dTag)
-      setRawJson(ev ? JSON.stringify(ev, null, 2) : '// Hub event not found on any relay')
+      let ev = await fetchReplaceable(hub.creatorPubkey, KINDS.HUB_EVENT, hub.dTag)
+      if (ev) putHubEvent(ev).catch(() => {})
+      // Wiped from all relays? Fall back to the local IndexedDB copy.
+      if (!ev) ev = await getHubEvent(KINDS.HUB_EVENT, hub.creatorPubkey, hub.dTag)
+      setRawJson(ev ? JSON.stringify(ev, null, 2) : '// Hub event not found on any relay or in local cache')
     } catch {
       setRawJson('// Failed to fetch the hub event')
     } finally {

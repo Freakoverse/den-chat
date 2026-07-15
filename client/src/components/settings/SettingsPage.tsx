@@ -23,6 +23,7 @@ import { STANDARD_KINDS, KINDS } from '@/lib/crypto/constants'
 import { blossomServers, uploadToBlossomServers, downloadFromBlossomWithProgress } from '@/lib/blossom'
 import type { DownloadProgress } from '@/lib/blossom'
 import { getRelayList, getDefaultRelays, setRelays, publishToSpecificRelays, fetchReplaceable, fetchEvents } from '@/lib/nostr/relay-pool'
+import { checkEventAvailability } from '@/lib/nostr/eventRedundancy'
 import { getPublishRelays } from '@/stores/postingBehaviourStore'
 import { createUnsignedEvent, signWithSigner, createHubListEvent, createDeletionEvent } from '@/lib/nostr/events'
 import { DeleteConfirmDialog } from '@/components/hub/ChannelView'
@@ -42,7 +43,7 @@ import { DenChatLogo } from '@/components/ui/DenChatLogo'
 import {
   Settings, Palette, Globe, Shield, ShieldCheck, Info, Keyboard, MessageSquare, Users, ChevronsUpDown,
   Sun, Moon, Monitor, Plus, Minus, Trash2, Eye, EyeOff, Search,
-  Copy, Check, Lock, FileDown, AlertTriangle, X, RotateCcw, RefreshCw,
+  Copy, Check, Lock, FileDown, AlertTriangle, X, RotateCcw, RefreshCw, Rocket, FileUp,
   Loader2, Send, HelpCircle, XCircle, UserMinus, ShieldOff, Tag, Download, QrCode,
   GripVertical, FolderPlus, ChevronDown, ChevronRight, Pencil, ListPlus, Upload, Undo2,
   BookOpen, Mic, Volume2, Camera, MonitorPlay, Megaphone, Crown, Sparkles, Zap, Palette as PaletteIcon, BadgeCheck, MessageCircleOff, ArrowUp, ArrowDown, Heart, LogOut, Gamepad2, Activity, Save,
@@ -63,7 +64,7 @@ import { AccountSwitcher } from '@/components/ui/AccountSwitcher'
 import { DoodleBackground } from '@/components/ui/DoodleBackground'
 import { DonateModal } from '@/components/settings/DonateModal'
 import { DnnBadge } from '@/components/ui/DnnBadge'
-import { nip19 } from 'nostr-tools'
+import { nip19, verifyEvent, type Event as NostrEvent } from 'nostr-tools'
 import type { StoredSeed } from '@/lib/auth/secure-storage'
 import { useBlossomMedia } from '@/hooks/useBlossomMedia'
 import { MediaUploadStrip, useMediaUpload } from '@/components/social/MediaUploadStrip'
@@ -5519,6 +5520,120 @@ function MyHubsTab() {
               })
             )
           })()}
+        </div>
+      )}
+
+      {/* Manual hub rebroadcast tool */}
+      <div className="mt-6 pt-6 border-t border-border">
+        <RebroadcastHubTool />
+      </div>
+    </div>
+  )
+}
+
+/* ─────────── Rebroadcast a hub (manual, file-based) ─────────── */
+
+function RebroadcastHubTool() {
+  const fileRef = useRef<HTMLInputElement>(null)
+  const [event, setEvent] = useState<NostrEvent | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [checking, setChecking] = useState(false)
+  const [coverage, setCoverage] = useState<{ present: number; total: number } | null>(null)
+  const [confirming, setConfirming] = useState(false)
+  const [publishing, setPublishing] = useState(false)
+  const [result, setResult] = useState<string | null>(null)
+
+  const reset = () => { setEvent(null); setError(null); setCoverage(null); setConfirming(false); setResult(null) }
+
+  const hubName = event?.tags.find((t) => t[0] === 'n')?.[1] || event?.tags.find((t) => t[0] === 'name')?.[1] || '(unnamed hub)'
+  const isDeleted = !!event?.tags.some((t) => t[0] === 'deleted' && t[1] === 'true')
+
+  const onFile = async (file: File) => {
+    reset()
+    try {
+      const parsed = JSON.parse(await file.text())
+      if (!parsed || typeof parsed !== 'object' || parsed.kind !== KINDS.HUB_EVENT) {
+        setError('That file is not a hub event (kind 36942).'); return
+      }
+      if (!verifyEvent(parsed)) { setError('The event signature is invalid — refusing to rebroadcast a tampered event.'); return }
+      setEvent(parsed as NostrEvent)
+      // Check current coverage so the user knows if this looks deleted/gone.
+      setChecking(true)
+      try {
+        const results = await checkEventAvailability({ kinds: [KINDS.HUB_EVENT], authors: [parsed.pubkey], '#d': [parsed.tags.find((t: string[]) => t[0] === 'd')?.[1] ?? ''], limit: 1 })
+        setCoverage({ present: results.filter((r) => r.present).length, total: results.length })
+      } catch { setCoverage(null) } finally { setChecking(false) }
+    } catch {
+      setError('Could not read that file as JSON.')
+    }
+  }
+
+  const doRebroadcast = async () => {
+    if (!event) return
+    setPublishing(true)
+    setResult(null)
+    try {
+      const accepted = await publishToSpecificRelays(getPublishRelays(), event)
+      setResult(accepted.length > 0 ? `Rebroadcast to ${accepted.length} relay(s).` : 'No relays accepted the event.')
+      setConfirming(false)
+    } catch (err) {
+      setResult(err instanceof Error ? err.message : 'Rebroadcast failed.')
+    } finally {
+      setPublishing(false)
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div>
+        <h3 className="text-sm font-semibold text-foreground flex items-center gap-2"><Rocket size={15} /> Rebroadcast a hub</h3>
+        <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+          Re-publish a hub's event to your relays from a <span className="font-mono">.json</span> file you exported earlier (via a hub's ⋮ → View raw event → Export). Use this only to restore a hub that's been wiped from relays.
+        </p>
+      </div>
+
+      <input ref={fileRef} type="file" accept="application/json,.json" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) onFile(f); e.target.value = '' }} />
+      <Button variant="outline" size="sm" className="w-fit gap-2" onClick={() => fileRef.current?.click()}>
+        <FileUp size={14} /> Select file…
+      </Button>
+
+      {error && <p className="text-xs text-destructive flex items-center gap-1.5"><AlertTriangle size={12} /> {error}</p>}
+
+      {event && (
+        <div className="rounded-lg border border-border bg-secondary/30 p-3 flex flex-col gap-2">
+          <div className="text-sm font-medium text-foreground">{hubName}</div>
+          <div className="text-[11px] text-muted-foreground font-mono break-all">by {nip19.npubEncode(event.pubkey)}</div>
+          <div className="text-[11px] text-muted-foreground">
+            {checking ? 'Checking current relay coverage…' : coverage ? `Currently on ${coverage.present} of ${coverage.total} of your relays.` : ''}
+          </div>
+
+          {isDeleted && (
+            <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+              <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+              This is a <b>deletion</b> event — rebroadcasting it propagates the deletion (it will not revive the hub).
+            </div>
+          )}
+          {!isDeleted && coverage?.present === 0 && (
+            <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-500">
+              <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+              This hub is on <b>none</b> of your relays. It may have been deleted by its owner. Rebroadcasting could revive it against their wishes — only continue if you're sure it was wiped, not deleted.
+            </div>
+          )}
+
+          {result ? (
+            <p className="text-xs text-emerald-400">{result}</p>
+          ) : confirming ? (
+            <div className="flex items-center gap-2">
+              <Button size="sm" variant="destructive" className="gap-1.5" disabled={publishing} onClick={doRebroadcast}>
+                {publishing ? <Loader2 size={13} className="animate-spin" /> : <Rocket size={13} />} Yes, rebroadcast
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setConfirming(false)}>Cancel</Button>
+            </div>
+          ) : (
+            <Button size="sm" className="w-fit gap-1.5" onClick={() => setConfirming(true)}>
+              <Rocket size={13} /> Rebroadcast to my relays
+            </Button>
+          )}
         </div>
       )}
     </div>

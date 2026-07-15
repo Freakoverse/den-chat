@@ -24,7 +24,7 @@ import { getEmojiMap } from '@/stores/emojiStore'
 import { cn } from '@/lib/utils'
 import {
   MessageCircle, Repeat2, Heart, Bookmark, ChevronDown, ChevronUp,
-  Eye, EyeOff, Quote, Send, X, Loader2, Smile, MoreVertical, Copy, Code, Check, ShieldBan, Zap, Trash2,
+  Eye, EyeOff, Quote, Send, X, Loader2, Smile, MoreVertical, Copy, Code, Check, ShieldBan, Zap, Trash2, Download,
 } from 'lucide-react'
 import { nip19 } from 'nostr-tools'
 import { decryptNip04, encryptNip04 } from '@/lib/nostr/nip04dm'
@@ -795,16 +795,33 @@ export function RawEventModal({ rawJson, onClose }: { rawJson: string; onClose: 
   const [copied, setCopied] = useState(false)
 
   let pretty: string
+  let parsed: { id?: string; kind?: number } | null = null
   try {
-    pretty = JSON.stringify(JSON.parse(rawJson), null, 2)
+    parsed = JSON.parse(rawJson)
+    pretty = JSON.stringify(parsed, null, 2)
   } catch {
     pretty = rawJson
   }
+  // Only offer export when it's an actual signed event (not a "// not found" note).
+  const isEvent = !!(parsed && typeof parsed === 'object' && parsed.id && typeof parsed.kind === 'number')
 
   const handleCopy = () => {
     navigator.clipboard.writeText(pretty)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
+  }
+
+  const handleExport = () => {
+    const name = parsed?.id ? `${parsed.kind}-${parsed.id.slice(0, 12)}` : `event-${parsed?.kind ?? 'raw'}`
+    const blob = new Blob([pretty], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `nostr-${name}.json`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
   }
 
   return (
@@ -816,6 +833,14 @@ export function RawEventModal({ rawJson, onClose }: { rawJson: string; onClose: 
         <div className="flex items-center justify-between px-4 py-3 border-b border-border">
           <h3 className="text-sm font-semibold text-foreground">Raw Nostr Event</h3>
           <div className="flex items-center gap-2">
+            {isEvent && (
+              <button
+                onClick={handleExport}
+                className="flex items-center gap-1 px-2 py-1 rounded text-xs text-muted-foreground hover:text-foreground hover:bg-accent/50 cursor-pointer transition-colors"
+              >
+                <Download size={12} /> Export .json
+              </button>
+            )}
             <button
               onClick={handleCopy}
               className="flex items-center gap-1 px-2 py-1 rounded text-xs text-muted-foreground hover:text-foreground hover:bg-accent/50 cursor-pointer transition-colors"
