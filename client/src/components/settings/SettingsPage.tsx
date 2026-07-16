@@ -24,6 +24,7 @@ import { blossomServers, uploadToBlossomServers, downloadFromBlossomWithProgress
 import type { DownloadProgress } from '@/lib/blossom'
 import { getRelayList, getDefaultRelays, setRelays, publishToSpecificRelays, fetchReplaceable, fetchEvents } from '@/lib/nostr/relay-pool'
 import { checkEventAvailability } from '@/lib/nostr/eventRedundancy'
+import { parseHubBackup } from '@/lib/hub/hubBackup'
 import { getPublishRelays } from '@/stores/postingBehaviourStore'
 import { createUnsignedEvent, signWithSigner, createHubListEvent, createDeletionEvent } from '@/lib/nostr/events'
 import { DeleteConfirmDialog } from '@/components/hub/ChannelView'
@@ -5535,36 +5536,52 @@ function MyHubsTab() {
 
 function RebroadcastHubTool() {
   const fileRef = useRef<HTMLInputElement>(null)
+  const signer = useUserStore((s) => s.signer)
+  const privateKey = useUserStore((s) => s.privateKey)
   const [event, setEvent] = useState<NostrEvent | null>(null)
+  const [blobs, setBlobs] = useState<Map<string, Uint8Array> | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [checking, setChecking] = useState(false)
   const [coverage, setCoverage] = useState<{ present: number; total: number } | null>(null)
   const [confirming, setConfirming] = useState(false)
   const [publishing, setPublishing] = useState(false)
+  const [progress, setProgress] = useState<string | null>(null)
   const [result, setResult] = useState<string | null>(null)
 
-  const reset = () => { setEvent(null); setError(null); setCoverage(null); setConfirming(false); setResult(null) }
+  const reset = () => { setEvent(null); setBlobs(null); setError(null); setCoverage(null); setConfirming(false); setResult(null); setProgress(null) }
 
   const hubName = event?.tags.find((t) => t[0] === 'n')?.[1] || event?.tags.find((t) => t[0] === 'name')?.[1] || '(unnamed hub)'
   const isDeleted = !!event?.tags.some((t) => t[0] === 'deleted' && t[1] === 'true')
 
+  const runCoverage = async (ev: NostrEvent) => {
+    setChecking(true)
+    try {
+      const results = await checkEventAvailability({ kinds: [KINDS.HUB_EVENT], authors: [ev.pubkey], '#d': [ev.tags.find((t) => t[0] === 'd')?.[1] ?? ''], limit: 1 })
+      setCoverage({ present: results.filter((r) => r.present).length, total: results.length })
+    } catch { setCoverage(null) } finally { setChecking(false) }
+  }
+
   const onFile = async (file: File) => {
     reset()
     try {
+      // A full backup bundle is gzipped; an event-only export is plain JSON.
+      const isBundle = file.name.endsWith('.gz') || file.type === 'application/gzip'
+      if (isBundle) {
+        const { event: ev, blobs: b } = await parseHubBackup(file)
+        setEvent(ev)
+        setBlobs(b)
+        await runCoverage(ev)
+        return
+      }
       const parsed = JSON.parse(await file.text())
       if (!parsed || typeof parsed !== 'object' || parsed.kind !== KINDS.HUB_EVENT) {
-        setError('That file is not a hub event (kind 36942).'); return
+        setError('That file is not a hub event (kind 36942) or a hub backup (.json.gz).'); return
       }
       if (!verifyEvent(parsed)) { setError('The event signature is invalid — refusing to rebroadcast a tampered event.'); return }
       setEvent(parsed as NostrEvent)
-      // Check current coverage so the user knows if this looks deleted/gone.
-      setChecking(true)
-      try {
-        const results = await checkEventAvailability({ kinds: [KINDS.HUB_EVENT], authors: [parsed.pubkey], '#d': [parsed.tags.find((t: string[]) => t[0] === 'd')?.[1] ?? ''], limit: 1 })
-        setCoverage({ present: results.filter((r) => r.present).length, total: results.length })
-      } catch { setCoverage(null) } finally { setChecking(false) }
-    } catch {
-      setError('Could not read that file as JSON.')
+      await runCoverage(parsed as NostrEvent)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not read that file.')
     }
   }
 
@@ -5573,13 +5590,33 @@ function RebroadcastHubTool() {
     setPublishing(true)
     setResult(null)
     try {
+      // 1. Re-upload the member/Blossom blobs (individually — Blossom has no bundles).
+      //    Byte-identical bytes ⇒ identical SHA-256 ⇒ the index's references resolve again.
+      let uploaded = 0
+      if (blobs && blobs.size > 0) {
+        let i = 0
+        for (const [, bytes] of blobs) {
+          i++
+          setProgress(`Uploading hub data… ${i}/${blobs.size}`)
+          try {
+            await uploadToBlossomServers(bytes, signer, privateKey, undefined, 'application/octet-stream')
+            uploaded++
+          } catch { /* try the rest; report the shortfall below */ }
+        }
+      }
+      // 2. Rebroadcast the hub event itself.
+      setProgress('Rebroadcasting the hub event…')
       const accepted = await publishToSpecificRelays(getPublishRelays(), event)
-      setResult(accepted.length > 0 ? `Rebroadcast to ${accepted.length} relay(s).` : 'No relays accepted the event.')
+
+      const parts = [accepted.length > 0 ? `Rebroadcast to ${accepted.length} relay(s).` : 'No relays accepted the event.']
+      if (blobs && blobs.size > 0) parts.push(`Re-uploaded ${uploaded}/${blobs.size} data file(s).`)
+      setResult(parts.join(' '))
       setConfirming(false)
     } catch (err) {
       setResult(err instanceof Error ? err.message : 'Rebroadcast failed.')
     } finally {
       setPublishing(false)
+      setProgress(null)
     }
   }
 
@@ -5588,11 +5625,11 @@ function RebroadcastHubTool() {
       <div>
         <h3 className="text-sm font-semibold text-foreground flex items-center gap-2"><Rocket size={15} /> Rebroadcast a hub</h3>
         <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
-          Re-publish a hub's event to your relays from a <span className="font-mono">.json</span> file you exported earlier (via a hub's ⋮ → View raw event → Export). Use this only to restore a hub that's been wiped from relays.
+          Restore a hub from a file you exported earlier — either a full backup (<span className="font-mono">.json.gz</span>, via a hub's ⋮ → Export hub backup) which also re-uploads its member data, or an event-only <span className="font-mono">.json</span> (⋮ → View raw event → Export). Use this only to restore a hub that's been wiped.
         </p>
       </div>
 
-      <input ref={fileRef} type="file" accept="application/json,.json" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) onFile(f); e.target.value = '' }} />
+      <input ref={fileRef} type="file" accept="application/json,.json,.gz,application/gzip" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) onFile(f); e.target.value = '' }} />
       <Button variant="outline" size="sm" className="w-fit gap-2" onClick={() => fileRef.current?.click()}>
         <FileUp size={14} /> Select file…
       </Button>
@@ -5605,6 +5642,9 @@ function RebroadcastHubTool() {
           <div className="text-[11px] text-muted-foreground font-mono break-all">by {nip19.npubEncode(event.pubkey)}</div>
           <div className="text-[11px] text-muted-foreground">
             {checking ? 'Checking current relay coverage…' : coverage ? `Currently on ${coverage.present} of ${coverage.total} of your relays.` : ''}
+          </div>
+          <div className="text-[11px] text-muted-foreground">
+            {blobs ? `Full backup — includes ${blobs.size} member-data file(s) to re-upload.` : 'Event only — no member data included.'}
           </div>
 
           {isDeleted && (
@@ -5620,6 +5660,8 @@ function RebroadcastHubTool() {
             </div>
           )}
 
+          {progress && <p className="text-xs text-muted-foreground flex items-center gap-1.5"><Loader2 size={12} className="animate-spin" /> {progress}</p>}
+
           {result ? (
             <p className="text-xs text-emerald-400">{result}</p>
           ) : confirming ? (
@@ -5627,7 +5669,7 @@ function RebroadcastHubTool() {
               <Button size="sm" variant="destructive" className="gap-1.5" disabled={publishing} onClick={doRebroadcast}>
                 {publishing ? <Loader2 size={13} className="animate-spin" /> : <Rocket size={13} />} Yes, rebroadcast
               </Button>
-              <Button size="sm" variant="ghost" onClick={() => setConfirming(false)}>Cancel</Button>
+              <Button size="sm" variant="ghost" disabled={publishing} onClick={() => setConfirming(false)}>Cancel</Button>
             </div>
           ) : (
             <Button size="sm" className="w-fit gap-1.5" onClick={() => setConfirming(true)}>

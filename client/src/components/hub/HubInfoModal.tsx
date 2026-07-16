@@ -6,7 +6,7 @@
  */
 
 import { useState, useEffect, useRef } from 'react'
-import { X, Copy, Check, Tag, MoreVertical, Code, Link2, Radio, Loader2 } from 'lucide-react'
+import { X, Copy, Check, Tag, MoreVertical, Code, Link2, Radio, Loader2, Archive, AlertTriangle } from 'lucide-react'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Separator } from '@/components/ui/separator'
@@ -16,7 +16,8 @@ import type { HubData } from '@/stores/hubStore'
 import { truncateNpub } from '@/lib/utils'
 import { fetchEvents, fetchReplaceable } from '@/lib/nostr/relay-pool'
 import { checkEventAvailability } from '@/lib/nostr/eventRedundancy'
-import { getHubEvent } from '@/lib/cache/hubEventCache'
+import { getHubEvent, putHubEvent } from '@/lib/cache/hubEventCache'
+import { buildHubBackup, fmtBytes } from '@/lib/hub/hubBackup'
 import { KINDS } from '@/lib/crypto/constants'
 import { nip19 } from 'nostr-tools'
 
@@ -48,6 +49,42 @@ export function HubInfoModal({ open, onClose, hub, blurMedia, onCreatorClick }: 
   const [rawJson, setRawJson] = useState<string | null>(null)
   const [rawLoading, setRawLoading] = useState(false)
   const [showAvailability, setShowAvailability] = useState(false)
+  const [backupBusy, setBackupBusy] = useState(false)
+  const [backupProgress, setBackupProgress] = useState<{ done: number; total: number; bytes: number } | null>(null)
+  const [backupError, setBackupError] = useState<string | null>(null)
+
+  /** Resolve the signed hub event: relays first, local cache if it's been wiped. */
+  const resolveHubEvent = async () => {
+    const ev = await fetchReplaceable(hub.creatorPubkey, KINDS.HUB_EVENT, hub.dTag)
+    if (ev) { putHubEvent(ev).catch(() => {}); return ev }
+    return getHubEvent(KINDS.HUB_EVENT, hub.creatorPubkey, hub.dTag)
+  }
+
+  const exportBackup = async () => {
+    setMenuOpen(false)
+    setBackupError(null)
+    setBackupBusy(true)
+    setBackupProgress(null)
+    try {
+      const ev = await resolveHubEvent()
+      if (!ev) throw new Error('Hub event not found on any relay or in the local cache.')
+      const blob = await buildHubBackup(hub, ev, (done, total, bytes) => setBackupProgress({ done, total, bytes }))
+      const safe = hub.name.replace(/[^a-z0-9._-]+/gi, '-').toLowerCase().slice(0, 40) || hub.dTag.slice(0, 8)
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `den-hub-${safe}-backup.json.gz`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      setBackupError(e instanceof Error ? e.message : 'Backup failed')
+    } finally {
+      setBackupBusy(false)
+      setBackupProgress(null)
+    }
+  }
 
   const hubAddress = nip19.naddrEncode({
     identifier: hub.dTag,
@@ -74,10 +111,8 @@ export function HubInfoModal({ open, onClose, hub, blurMedia, onCreatorClick }: 
     setMenuOpen(false)
     setRawLoading(true)
     try {
-      let ev = await fetchReplaceable(hub.creatorPubkey, KINDS.HUB_EVENT, hub.dTag)
-      if (ev) putHubEvent(ev).catch(() => {})
-      // Wiped from all relays? Fall back to the local IndexedDB copy.
-      if (!ev) ev = await getHubEvent(KINDS.HUB_EVENT, hub.creatorPubkey, hub.dTag)
+      // Relays first; falls back to the local IndexedDB copy if it's been wiped.
+      const ev = await resolveHubEvent()
       setRawJson(ev ? JSON.stringify(ev, null, 2) : '// Hub event not found on any relay or in local cache')
     } catch {
       setRawJson('// Failed to fetch the hub event')
@@ -165,6 +200,9 @@ export function HubInfoModal({ open, onClose, hub, blurMedia, onCreatorClick }: 
                 <button onClick={() => { setMenuOpen(false); setShowAvailability(true) }} className="flex items-center gap-2.5 w-full px-3 py-2 text-foreground/90 hover:bg-accent/50 transition-colors cursor-pointer">
                   <Radio size={14} className="text-muted-foreground" /> Check hub availability
                 </button>
+                <button onClick={exportBackup} disabled={backupBusy} className="flex items-center gap-2.5 w-full px-3 py-2 text-foreground/90 hover:bg-accent/50 transition-colors cursor-pointer disabled:opacity-50">
+                  <Archive size={14} className="text-muted-foreground" /> Export hub backup (.json.gz)
+                </button>
               </div>
             )}
           </div>
@@ -195,6 +233,21 @@ export function HubInfoModal({ open, onClose, hub, blurMedia, onCreatorClick }: 
 
         {/* Content */}
         <div className="px-5 pb-5 pt-3 flex flex-col gap-4">
+          {/* Backup progress / error */}
+          {backupBusy && (
+            <div className="flex items-center gap-2 rounded-md bg-secondary/50 border border-border px-3 py-2 text-xs text-muted-foreground">
+              <Loader2 size={13} className="animate-spin shrink-0" />
+              {backupProgress
+                ? `Downloading hub data… ${backupProgress.done}/${backupProgress.total} files (${fmtBytes(backupProgress.bytes)})`
+                : 'Preparing backup…'}
+            </div>
+          )}
+          {backupError && (
+            <div className="flex items-start gap-2 rounded-md bg-destructive/10 border border-destructive/30 px-3 py-2 text-xs text-destructive">
+              <AlertTriangle size={13} className="shrink-0 mt-0.5" /> <span>{backupError}</span>
+            </div>
+          )}
+
           <div>
             <h2 className="text-xl font-bold text-foreground">{hub.name}</h2>
             {hub.description && (
