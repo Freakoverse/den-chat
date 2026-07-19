@@ -366,6 +366,11 @@ export function SendModal({ chain, address, balance, selectedToken, onClose }: S
         const { signed } = await backend.signTransaction(pubkey, evmChain, tx, pin || undefined)
         setTxHash(await sendRawTransaction(evmChain, signed))
       } else {
+        // Signing a SegWit Odd address needs opposite-parity key derivation, which the
+        // signer doesn't implement — fail before taking a PIN rather than at signing time.
+        if (bitcoinAddressType === 'segwit-odd') {
+          throw new Error('Sending from a SegWit Odd address is not supported yet. Switch to Taproot or SegWit Even in the wallet to send.')
+        }
         const { fetchUTXOs, broadcastTransaction } = await import('@/lib/crypto/btc-net')
         const utxos = await fetchUTXOs(address)
         if (utxos.length === 0) throw new Error('No UTXOs available')

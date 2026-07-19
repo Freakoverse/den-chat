@@ -75,7 +75,7 @@ function processDeepLink(url: string) {
         const decoded = nip19.decode(naddr)
         if (decoded.type === 'naddr') {
           const addr = decoded.data as { kind: number; pubkey: string; identifier: string }
-          const hubData = useHubStore.getState().hubData[addr.identifier]
+          const hubData = useHubStore.getState().hubs[addr.identifier]
 
           if (hubData) {
             // Hub already joined — navigate directly to it

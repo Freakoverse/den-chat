@@ -39,6 +39,9 @@ export interface ChatMessage {
   rootRef?: string
   edited?: boolean
   deleted?: boolean
+  /** Underlying event created_at — carried through so edit/replace comparisons
+   *  in messageStore keep working after a local self-edit. */
+  eventCreatedAt?: number
   decrypted: boolean
   isThread?: boolean
   rawEvent?: string

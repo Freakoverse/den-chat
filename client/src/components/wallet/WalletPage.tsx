@@ -24,7 +24,7 @@ import { ResizablePanel } from '@/components/ui/ResizablePanel'
 import { UserPanel } from '@/components/ui/UserPanel'
 import { useUserStore } from '@/stores/userStore'
 import { useNavigationStore } from '@/stores/navigationStore'
-import { useWalletStore, CHAIN_META, type ChainMeta } from '@/stores/walletStore'
+import { useWalletStore, CHAIN_META, type ChainMeta, type BalanceInfo } from '@/stores/walletStore'
 import { type EvmChain } from '@/stores/rpcStore'
 import { CHAIN_TOKENS, type TokenInfo } from '@/lib/tokens'
 import type { Chain } from '@/lib/crypto/derive'
@@ -377,7 +377,7 @@ function WalletDetailView({
 }: {
   meta: ChainMeta
   address: string
-  balance?: { native: string; nativeRaw?: bigint; pending?: string; loading: boolean; error?: string }
+  balance?: BalanceInfo
   canSend: boolean
   onRefresh: () => void
   onReceive: () => void

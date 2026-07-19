@@ -290,7 +290,8 @@ export function LoginScreen() {
         login(data.pubkey, data.authMethod as 'seed' | 'nsec', data.privKeyHex)
       } else if (data.pubkey && data.authMethod === 'vault') {
         // PWA: re-unlock the target account in the vault's own overlay (the app never sees the PIN).
-        vaultBackend.loginAccount(data.pubkey).then((r) => applyLogin(data.pubkey, r)).catch(() => {})
+        // The vault collects the PIN in its own overlay, so the pin arg is unused here.
+        vaultBackend.loginAccount(data.pubkey, '').then((r) => applyLogin(data.pubkey, r)).catch(() => {})
       }
     } catch { /* corrupt data, ignore */ }
   }, [login])

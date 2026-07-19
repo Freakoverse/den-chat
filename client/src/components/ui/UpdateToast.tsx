@@ -65,7 +65,9 @@ export function UpdateToast() {
 
       let latestVersion: string | null = null
       let latestBody = ''
-      let latestPlatforms: { platform: string; url: string; ext: string }[] = []
+      // Shape must match UpdatePlatform (incl. `hash`) — it's populated below and
+      // consumed by setAvailable for download verification.
+      let latestPlatforms: { platform: string; url: string; ext: string; hash: string }[] = []
 
       // Try the den-chat-latest pointer first (single event, fast)
       const latestEvent = await fetchReplaceable(ADMIN_PUBKEY, 30078, 'den-chat-latest')

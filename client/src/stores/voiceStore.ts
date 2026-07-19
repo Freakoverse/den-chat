@@ -103,6 +103,7 @@ interface VoiceStoreState {
   _stateBroadcastInterval: ReturnType<typeof setInterval> | null  // DC state broadcast (100ms)
   _vadCleanup: (() => void) | null   // Voice activity detection gate cleanup
   _isSpeaking: boolean  // local VAD speaking state — broadcast via DataChannel
+  _joinInProgress: boolean  // guards against races while a join is mid-flight
   // Maps remote sessionId → pubkey (resolved when subscribing DC)
   _dcSessionToPubkey: Record<string, string>
   // Heartbeat: last time we received a DC state message from each participant
@@ -389,6 +390,7 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
   spatialEnabled: false,
   spatial3DEnabled: true,
   spatialPanelOpen: false,
+  virtualSpaceOpen: false,
   myPosition: { ...SPATIAL_DEFAULTS.SPAWN_POSITION },
   myHeading: 0,
   myElevation: 0,
@@ -645,7 +647,7 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
         // The SDK may fire rapid connected→disconnected→connected events during
         // initial negotiation, which causes the UI to flash. Only allow 'connected'
         // through; the final state is set explicitly after mic setup completes.
-        if ((get() as any)._joinInProgress && state !== 'connected') {
+        if (get()._joinInProgress && state !== 'connected') {
           console.log(`[VoiceStore] Suppressing '${state}' during join flow`)
           return
         }

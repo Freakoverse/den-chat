@@ -244,7 +244,7 @@ async function loadHubSecret(
   memberPubkey: string,
   memberPrivateKey: string | null,
   signer: any,
-): Promise<{ secretHex: string; members: HubMember[]; bannedPubkeys: string[]; historyHash: string; pageCount: number } | null> {
+): Promise<{ secretHex: string; members: HubMember[]; bannedPubkeys: string[]; historyHash: string; pageCount: number; failReason?: 'signer-issue' | 'not-a-member' } | null> {
   if (!hubData.indexFileHash || hubData.blossomServers.length === 0) {
     return null
   }

@@ -735,7 +735,9 @@ export const useForumStore = create<ForumState>((set, get) => ({
     assertPublished(await publishEvent(signed))
     const post = parseForumWordPost(signed)
     if (post) {
-      const norm = post.word
+      // post.word is optional on the shared ForumPost type (community posts have none),
+      // so fall back to the word we published under rather than keying on `undefined`.
+      const norm = post.word ?? normalizeWord(word)
       set({ postsByWord: { ...get().postsByWord, [norm]: [post, ...(get().postsByWord[norm] || [])] } })
     }
     return post
