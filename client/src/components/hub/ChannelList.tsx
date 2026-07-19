@@ -3,7 +3,7 @@ import { useUserStore } from '@/stores/userStore'
 import { useNotificationStore } from '@/stores/notificationStore'
 import { useNavigationStore } from '@/stores/navigationStore'
 import { getPermissionsForUser } from '@/lib/hub/permissions'
-import { Hash, Megaphone, MessagesSquare, MessageSquare, ChevronDown, ChevronRight, Settings, UserPlus, Inbox, Loader2, SlidersHorizontal, Volume2, MicOff, HeadphoneOff, Camera, ScreenShare, X, User, Radar, Boxes, AlertTriangle, CalendarDays, Lock, Undo2 } from 'lucide-react'
+import { Hash, Megaphone, MessagesSquare, MessageSquare, ChevronDown, ChevronUp, ChevronRight, Settings, UserPlus, Inbox, Loader2, SlidersHorizontal, Volume2, MicOff, HeadphoneOff, Camera, ScreenShare, X, User, Radar, Boxes, AlertTriangle, CalendarDays, Lock, Undo2, AtSign } from 'lucide-react'
 import { cn, npubShort } from '@/lib/utils'
 import { BlossomImage } from '@/components/ui/BlossomImage'
 import { useState, useCallback, useEffect, useRef, useMemo, type ReactNode } from 'react'
@@ -34,6 +34,7 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
   const pubkey = useUserStore((s) => s.pubkey)
   const groupSecrets = useHubStore((s) => activeHubId ? s.groupSecrets[activeHubId] : undefined)
   const hubMembers = useHubStore((s) => activeHubId ? s.hubMembers[activeHubId] : undefined)
+  const channelScrollRef = useRef<HTMLDivElement>(null)
   const [showSettings, setShowSettings] = useState(false)
   const [showInfo, setShowInfo] = useState(false)
   const [showInvite, setShowInvite] = useState(false)
@@ -406,7 +407,8 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
           <p className="text-xs text-muted-foreground/50 italic">Channels unavailable</p>
         </div>
       ) : (
-        <div className="flex-1 overflow-y-auto py-2 scrollbar-hide rounded-lg bg-secondary/50 shadow-md">
+        <div className="flex-1 min-h-0 relative">
+        <div ref={channelScrollRef} className="h-full overflow-y-auto py-2 scrollbar-hide rounded-lg bg-secondary/50 shadow-md">
           {uncategorized.map((channel) => {
             const gid = getChannelGroupId(channel)
             const locked = !hasGroupAccess(gid)
@@ -438,6 +440,8 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
               pubkey={pubkey}
             />
           ))}
+        </div>
+        {activeHubId && <UnreadScrollHints scrollRef={channelScrollRef} hubDTag={activeHubId} activeChannelId={activeChannelId} />}
         </div>
       )}
 
@@ -621,6 +625,107 @@ function CategoryGroup({ name, channels, activeChannelId, onSelectChannel, categ
             )
           })}
     </div>
+  )
+}
+
+/**
+ * UnreadScrollHints — Discord-style sticky pills in the channel list.
+ *
+ * Shows "New unreads" at the top/bottom when a channel with unread messages is
+ * scrolled out of view in that direction. A mention takes priority over a plain
+ * unread (different styling + wording). Clicking scrolls to the nearest one —
+ * preferring the nearest mention when there is one.
+ */
+function UnreadScrollHints({ scrollRef, hubDTag, activeChannelId }: {
+  scrollRef: { current: HTMLDivElement | null }
+  hubDTag: string
+  activeChannelId: string | null
+}) {
+  const notifReady = useNotificationStore((s) => s.initialized)
+  const hubUnreads = useNotificationStore((s) => s.hubUnreads[hubDTag])
+
+  type Hint = { channelId: string; mention: boolean } | null
+  const [above, setAbove] = useState<Hint>(null)
+  const [below, setBelow] = useState<Hint>(null)
+
+  // Channels with unread messages (excluding the one you're currently reading).
+  const unreadList = useMemo(() => {
+    if (!notifReady || !hubUnreads) return []
+    return Object.entries(hubUnreads)
+      .filter(([cid, u]) => u.count > 0 && cid !== activeChannelId)
+      .map(([cid, u]) => ({ channelId: cid, mention: !!u.hasMention }))
+  }, [notifReady, hubUnreads, activeChannelId])
+
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+
+    const measure = () => {
+      if (unreadList.length === 0) { setAbove(null); setBelow(null); return }
+      const box = el.getBoundingClientRect()
+      // Track the nearest unread and the nearest mention separately per direction,
+      // then let a mention win (mentions take priority over plain unreads).
+      let aNear: Hint = null, aNearEdge = -Infinity
+      let aMent: Hint = null, aMentEdge = -Infinity
+      let bNear: Hint = null, bNearEdge = Infinity
+      let bMent: Hint = null, bMentEdge = Infinity
+
+      for (const u of unreadList) {
+        const node = el.querySelector(`[data-channel-id="${CSS.escape(u.channelId)}"]`)
+        if (!node) continue // e.g. inside a collapsed category — nothing to scroll to
+        const r = node.getBoundingClientRect()
+
+        if (r.bottom <= box.top + 2) {
+          // Above the viewport — nearest is the largest bottom edge
+          if (r.bottom > aNearEdge) { aNearEdge = r.bottom; aNear = u }
+          if (u.mention && r.bottom > aMentEdge) { aMentEdge = r.bottom; aMent = u }
+        } else if (r.top >= box.bottom - 2) {
+          // Below the viewport — nearest is the smallest top edge
+          if (r.top < bNearEdge) { bNearEdge = r.top; bNear = u }
+          if (u.mention && r.top < bMentEdge) { bMentEdge = r.top; bMent = u }
+        }
+      }
+      setAbove(aMent ?? aNear)
+      setBelow(bMent ?? bNear)
+    }
+
+    measure()
+    el.addEventListener('scroll', measure, { passive: true })
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => { el.removeEventListener('scroll', measure); ro.disconnect() }
+  }, [scrollRef, unreadList])
+
+  const scrollTo = (channelId: string) => {
+    const el = scrollRef.current
+    const node = el?.querySelector(`[data-channel-id="${CSS.escape(channelId)}"]`)
+    node?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  }
+
+  const pill = (hint: NonNullable<Hint>, dir: 'up' | 'down') => (
+    <button
+      onClick={() => scrollTo(hint.channelId)}
+      className={cn(
+        'absolute left-1/2 -translate-x-1/2 z-20 flex items-center gap-1 px-2.5 py-1 rounded-full',
+        'text-[10px] font-semibold shadow-md cursor-pointer transition-colors max-w-[92%]',
+        dir === 'up' ? 'top-1' : 'bottom-1',
+        hint.mention
+          ? 'bg-primary text-primary-foreground hover:bg-primary/90'
+          : 'bg-background/95 text-foreground border border-border hover:bg-accent',
+      )}
+    >
+      {dir === 'up' ? <ChevronUp size={11} className="shrink-0" /> : null}
+      {hint.mention && <AtSign size={11} className="shrink-0" />}
+      <span className="truncate">{hint.mention ? 'Someone mentioned you' : 'New unreads'}</span>
+      {dir === 'down' ? <ChevronDown size={11} className="shrink-0" /> : null}
+    </button>
+  )
+
+  return (
+    <>
+      {above && pill(above, 'up')}
+      {below && pill(below, 'down')}
+    </>
   )
 }
 
