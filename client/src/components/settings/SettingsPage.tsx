@@ -4177,7 +4177,7 @@ function SecurityTab() {
     finally { setExportLoading(false) }
   }
 
-  const resetExport = () => { setShowExport(false); setExportPwd(''); setExportPwdConfirm(''); setExportPinConfirm('') }
+  const resetExport = () => { setExportPinConfirm(''); setExportErr('') }
 
   const handleExportEncrypted = async () => {
     // Vault: the encrypted backup is produced + downloaded inside the vault overlay.
@@ -5598,7 +5598,7 @@ function RebroadcastHubTool() {
         let i = 0
         for (const [, bytes] of blobs) {
           i++
-          setProgress(`Uploading hub data… ${i}/${blobs.size}`)
+          setProgress(`Uploading member data to Blossom… ${i}/${blobs.size}`)
           try {
             await uploadToBlossomServers(bytes, signer, privateKey, undefined, 'application/octet-stream')
             uploaded++
@@ -5606,13 +5606,23 @@ function RebroadcastHubTool() {
         }
       }
       // 2. Rebroadcast the hub event itself.
-      setProgress('Rebroadcasting the hub event…')
-      const accepted = await publishToSpecificRelays(getPublishRelays(), event)
+      setProgress('Publishing the hub event to your relays…')
+      const targets = getPublishRelays()
+      const accepted = await publishToSpecificRelays(targets, event)
 
-      const parts = [accepted.length > 0 ? `Rebroadcast to ${accepted.length} relay(s).` : 'No relays accepted the event.']
-      if (blobs && blobs.size > 0) parts.push(`Re-uploaded ${uploaded}/${blobs.size} data file(s).`)
+      const parts: string[] = []
+      if (blobs && blobs.size > 0) {
+        parts.push(`Uploaded ${uploaded} of ${blobs.size} member-data file(s) to Blossom.`)
+      }
+      parts.push(accepted.length > 0
+        ? `Published the hub event to ${accepted.length} of ${targets.length} relay(s).`
+        : 'No relays accepted the hub event.')
       setResult(parts.join(' '))
       setConfirming(false)
+
+      // Re-check coverage so the user sees the actual result, not just a claim.
+      setProgress('Verifying…')
+      await runCoverage(event)
     } catch (err) {
       setResult(err instanceof Error ? err.message : 'Rebroadcast failed.')
     } finally {
@@ -5642,7 +5652,11 @@ function RebroadcastHubTool() {
           <div className="text-sm font-medium text-foreground">{hubName}</div>
           <div className="text-[11px] text-muted-foreground font-mono break-all">by {nip19.npubEncode(event.pubkey)}</div>
           <div className="text-[11px] text-muted-foreground">
-            {checking ? 'Checking current relay coverage…' : coverage ? `Currently on ${coverage.present} of ${coverage.total} of your relays.` : ''}
+            {checking
+              ? 'Checking relay coverage…'
+              : coverage
+                ? `${result ? 'Now' : 'Currently'} on ${coverage.present} of ${coverage.total} of your relays.`
+                : ''}
           </div>
           <div className="text-[11px] text-muted-foreground">
             {blobs ? `Full backup — includes ${blobs.size} member-data file(s) to re-upload.` : 'Event only — no member data included.'}
@@ -7348,7 +7362,7 @@ function AboutTab() {
       </div>
 
       {/* Profile Modal */}
-      <UserProfileModal pubkey={profilePubkey} onClose={() => setProfilePubkey(null)} />
+      <UserProfileModal open={!!profilePubkey} targetPubkey={profilePubkey} onClose={() => setProfilePubkey(null)} />
     </div>
   )
 }

@@ -40,6 +40,7 @@ import { useBlockStore } from '@/stores/blockStore'
 
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { truncateNpub } from '@/lib/utils'
+import { UserProfileModal } from '@/components/hub/UserProfileModal'
 import { nip19 } from 'nostr-tools'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 
@@ -793,6 +794,7 @@ function MineGifTab({ onSelect }: { onSelect: (g: { name: string; url: string; n
 /* ═══════════ Others Tab ═══════════ */
 
 function OthersGifTab({ onSelect, onPickerClose }: { onSelect: (g: { name: string; url: string; nsfw: boolean }) => void; onPickerClose?: () => void }) {
+  const [profilePubkey, setProfilePubkey] = useState<string | null>(null)
   const subscribedCollections = useGifStore((s) => s.subscribedCollections)
   const subscriptionAddresses = useGifStore((s) => s.subscriptionAddresses)
   const nsfwEnabled = useGifStore((s) => s.nsfwEnabled)
@@ -1021,6 +1023,11 @@ function OthersGifTab({ onSelect, onPickerClose }: { onSelect: (g: { name: strin
         </div>
 
       </div>
+
+      {profilePubkey && createPortal(
+        <UserProfileModal open={!!profilePubkey} onClose={() => setProfilePubkey(null)} targetPubkey={profilePubkey} />,
+        document.body,
+      )}
     </>
   )
 }
