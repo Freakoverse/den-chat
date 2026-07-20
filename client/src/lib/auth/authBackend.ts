@@ -71,22 +71,18 @@ export interface AuthBackend {
   promptsInVault: boolean
 }
 
-export interface BtcSignTx { utxos: UTXO[]; recipientAddress: string; amountSats: string | number; feeRate: number; addressType: 'taproot' | 'segwit' | 'segwit-odd' }
+export interface BtcSignTx { utxos: UTXO[]; recipientAddress: string; amountSats: string | number; feeRate: number; addressType: 'taproot' | 'segwit' | 'segwit-odd'; /** Address the UTXOs belong to — selects the correct key parity for P2WPKH. */ fromAddress?: string }
 export interface EvmSignTx { to: string; value: string | number; data?: Uint8Array; gasLimit: string | number; gasPrice: string | number; nonce: string | number; addressMode?: 'nostr' | 'standard' }
 
 function signTxLocally(privKey: string, chain: string, tx: BtcSignTx | EvmSignTx): { signed: string } {
   if (chain === 'bitcoin') {
     const t = tx as BtcSignTx
     const args = [privKey, t.utxos, t.recipientAddress, BigInt(t.amountSats), Number(t.feeRate)] as const
-    // NOTE: 'segwit-odd' is the P2WPKH address derived from the OPPOSITE y-parity of the
-    // same x-only key. Signing it requires negating the private key (n - d) to flip the
-    // parity before deriving the pubkey — createSegwitTransaction always uses natural
-    // parity, so it would produce the wrong scriptPubKey. Refuse rather than silently
-    // fall through to Taproot signing (which produced an invalid, unbroadcastable tx).
-    if (t.addressType === 'segwit-odd') {
-      throw new Error('Sending from a SegWit Odd address is not supported yet. Switch to Taproot or SegWit Even in the wallet, or move the funds from another wallet.')
-    }
-    return { signed: t.addressType === 'segwit' ? createSegwitTransaction(...args) : createTaprootTransaction(...args) }
+    // Both P2WPKH variants ('segwit' = 02‖x even-y, 'segwit-odd' = 03‖x odd-y) go to the
+    // same signer — it picks the key parity that actually controls `fromAddress`, and
+    // throws if neither does. Taproot forces even-y internally and is unaffected.
+    const isP2wpkh = t.addressType === 'segwit' || t.addressType === 'segwit-odd'
+    return { signed: isP2wpkh ? createSegwitTransaction(...args, t.fromAddress) : createTaprootTransaction(...args) }
   }
   const t = tx as EvmSignTx
   const signingKey = getEvmSigningKey(privKey, t.addressMode === 'standard' ? 'standard' : 'nostr')

@@ -290,7 +290,9 @@ export function SendModal({ chain, address, balance, selectedToken, onClose }: S
   // Bitcoin fee for a max send — matches the signer's vbytes model exactly (taproot vs segwit),
   // with a single recipient + change output, so change lands at 0.
   const btcFeeFor = (numInputs: number): bigint => {
-    const vbytes = bitcoinAddressType === 'segwit'
+    // Both P2WPKH variants (even/odd y) have identical sizes — only taproot differs.
+    const isP2wpkh = bitcoinAddressType === 'segwit' || bitcoinAddressType === 'segwit-odd'
+    const vbytes = isP2wpkh
       ? Math.ceil(numInputs * 68 + 2 * 31 + 10.5)
       : Math.ceil(numInputs * 57.5 + 2 * 43 + 10.5)
     return BigInt(Math.ceil(vbytes * btcFeeRate))
@@ -366,11 +368,6 @@ export function SendModal({ chain, address, balance, selectedToken, onClose }: S
         const { signed } = await backend.signTransaction(pubkey, evmChain, tx, pin || undefined)
         setTxHash(await sendRawTransaction(evmChain, signed))
       } else {
-        // Signing a SegWit Odd address needs opposite-parity key derivation, which the
-        // signer doesn't implement — fail before taking a PIN rather than at signing time.
-        if (bitcoinAddressType === 'segwit-odd') {
-          throw new Error('Sending from a SegWit Odd address is not supported yet. Switch to Taproot or SegWit Even in the wallet to send.')
-        }
         const { fetchUTXOs, broadcastTransaction } = await import('@/lib/crypto/btc-net')
         const utxos = await fetchUTXOs(address)
         if (utxos.length === 0) throw new Error('No UTXOs available')
@@ -381,7 +378,9 @@ export function SendModal({ chain, address, balance, selectedToken, onClose }: S
           const fee = btcFeeFor(utxos.length)
           amountSats = total > fee ? total - fee : 0n
         }
-        const tx: BtcSignTx = { utxos, recipientAddress: sendToAddress, amountSats: amountSats.toString(), feeRate: btcFeeRate, addressType: bitcoinAddressType }
+        // `address` is the wallet address these UTXOs were fetched from — the signer
+        // uses it to select the key parity that actually controls it (02‖x vs 03‖x).
+        const tx: BtcSignTx = { utxos, recipientAddress: sendToAddress, amountSats: amountSats.toString(), feeRate: btcFeeRate, addressType: bitcoinAddressType, fromAddress: address }
         const { signed } = await backend.signTransaction(pubkey, 'bitcoin', tx, pin || undefined)
         setTxHash(await broadcastTransaction(signed))
       }
