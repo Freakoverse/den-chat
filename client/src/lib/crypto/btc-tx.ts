@@ -424,37 +424,32 @@ export function createSegwitTransaction(
   amountSats: bigint,
   feeRate: number,
   /**
-   * The P2WPKH address the UTXOs belong to. One x-only key yields TWO valid
-   * P2WPKH addresses — 02‖x (even-y) and 03‖x (odd-y) — controlled by `d` and
-   * `n - d` respectively. Passing the address lets us select the matching key
-   * instead of assuming natural parity, which silently produced unspendable
-   * transactions (and sent change to the wrong address) for the other parity.
+   * The P2WPKH address the UTXOs belong to. REQUIRED — one x-only key yields TWO
+   * valid P2WPKH addresses, 02‖x (even-y) and 03‖x (odd-y), controlled by `d` and
+   * `n - d` respectively. We select the key by matching against this address rather
+   * than assuming natural parity, which silently produced unspendable transactions
+   * (and sent change to the wrong address) for the other parity. Mandatory so the
+   * compiler prevents any caller from reintroducing the natural-parity assumption.
    */
-  fromAddress?: string,
+  fromAddress: string,
 ): string {
   const privKeyBytes = hexToBytes(privateKeyHex)
-  let signingKey = privKeyBytes
-  let compressedPubkey = getPublicKey(privKeyBytes, true) // 33 bytes, natural parity
-
-  if (fromAddress) {
-    const expectedScript = decodeBech32Address(fromAddress)
-    // Negating the scalar flips the pubkey's y-parity while keeping x identical.
-    const negatedKey = etc.numberToBytesBE(CURVE_ORDER - etc.bytesToNumberBE(privKeyBytes))
-    const candidates: Array<[Uint8Array, Uint8Array]> = [
-      [privKeyBytes, compressedPubkey],
-      [negatedKey, getPublicKey(negatedKey, true)],
-    ]
-    const match = candidates.find(([, pub]) => {
-      const script = p2wpkhScriptPubKey(hash160(pub))
-      return script.length === expectedScript.length && script.every((b, i) => b === expectedScript[i])
-    })
-    // Fail closed: never sign with a key that doesn't control the funded address.
-    if (!match) {
-      throw new Error(`This key does not control ${fromAddress} — refusing to sign.`)
-    }
-    signingKey = match[0]
-    compressedPubkey = match[1]
+  const expectedScript = decodeBech32Address(fromAddress)
+  // Negating the scalar flips the pubkey's y-parity while keeping x identical.
+  const negatedKey = etc.numberToBytesBE(CURVE_ORDER - etc.bytesToNumberBE(privKeyBytes))
+  const candidates: Array<[Uint8Array, Uint8Array]> = [
+    [privKeyBytes, getPublicKey(privKeyBytes, true)],
+    [negatedKey, getPublicKey(negatedKey, true)],
+  ]
+  const match = candidates.find(([, pub]) => {
+    const script = p2wpkhScriptPubKey(hash160(pub))
+    return script.length === expectedScript.length && script.every((b, i) => b === expectedScript[i])
+  })
+  // Fail closed: never sign with a key that doesn't control the funded address.
+  if (!match) {
+    throw new Error(`This key does not control ${fromAddress} — refusing to sign.`)
   }
+  const [signingKey, compressedPubkey] = match
 
   // HASH160 of compressed pubkey for P2WPKH
   const pubkeyHash = hash160(compressedPubkey)

@@ -82,7 +82,11 @@ function signTxLocally(privKey: string, chain: string, tx: BtcSignTx | EvmSignTx
     // same signer — it picks the key parity that actually controls `fromAddress`, and
     // throws if neither does. Taproot forces even-y internally and is unaffected.
     const isP2wpkh = t.addressType === 'segwit' || t.addressType === 'segwit-odd'
-    return { signed: isP2wpkh ? createSegwitTransaction(...args, t.fromAddress) : createTaprootTransaction(...args) }
+    if (isP2wpkh) {
+      if (!t.fromAddress) throw new Error('Missing fromAddress — cannot determine which key controls these funds.')
+      return { signed: createSegwitTransaction(...args, t.fromAddress) }
+    }
+    return { signed: createTaprootTransaction(...args) }
   }
   const t = tx as EvmSignTx
   const signingKey = getEvmSigningKey(privKey, t.addressMode === 'standard' ? 'standard' : 'nostr')

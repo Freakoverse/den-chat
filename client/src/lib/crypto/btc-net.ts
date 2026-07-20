@@ -82,7 +82,7 @@ export async function sendBitcoinTransaction(params: {
   recipientAddress: string
   amountSats: bigint
   feeRate: number
-  addressType: 'taproot' | 'segwit'
+  addressType: 'taproot' | 'segwit' | 'segwit-odd'
   senderAddress: string
 }): Promise<string> {
   const { privateKeyHex, recipientAddress, amountSats, feeRate, addressType, senderAddress } = params
@@ -96,7 +96,8 @@ export async function sendBitcoinTransaction(params: {
   if (addressType === 'taproot') {
     txHex = createTaprootTransaction(privateKeyHex, utxos, recipientAddress, amountSats, feeRate)
   } else {
-    txHex = createSegwitTransaction(privateKeyHex, utxos, recipientAddress, amountSats, feeRate)
+    // senderAddress selects the key parity that controls it (02‖x vs 03‖x).
+    txHex = createSegwitTransaction(privateKeyHex, utxos, recipientAddress, amountSats, feeRate, senderAddress)
   }
 
   // 3. Broadcast
