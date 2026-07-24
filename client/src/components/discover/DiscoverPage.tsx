@@ -35,6 +35,7 @@ import {
 } from 'lucide-react'
 import type { Event } from 'nostr-tools'
 import { isTauri } from '@/lib/utils'
+import { ModsTab } from '@/components/discover/ModsTab'
 
 const PAGE_SIZE = 15
 
@@ -1443,8 +1444,10 @@ export function DiscoverPage() {
                 </div>
               )}
             </div>
+          ) : discoverTab === 'mods' ? (
+            <ModsTab />
           ) : (
-            /* Coming Soon placeholder for Games / Mods */
+            /* Coming Soon placeholder for Games */
             <div className="flex-1 flex flex-col items-center justify-center py-32 text-center px-4">
               <div className="w-16 h-16 rounded-2xl bg-secondary flex items-center justify-center mb-5">
                 {discoverTab === 'games' ? <Gamepad2 size={28} className="text-muted-foreground" /> : <Package size={28} className="text-muted-foreground" />}
