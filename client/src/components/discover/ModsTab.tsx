@@ -380,9 +380,9 @@ function DegRelaysEditor() {
 
   return (
     <div className="space-y-1.5">
-      <div className="text-xs font-medium text-foreground">DEG MODS relays</div>
+      <div className="text-xs font-medium text-foreground">Game mods focused relays</div>
       <div className="text-[11px] text-muted-foreground -mt-1">
-        Queried for mods in addition to your own relays. Not added to Settings → Network. Toggle off to stop using it.
+        Relays that carry game mods, queried in addition to your own relays. Not added to Settings → Network. Toggle off to stop using it.
       </div>
       <div className="flex flex-col gap-1.5 pt-1">
         {degRelays.map((r) => (
