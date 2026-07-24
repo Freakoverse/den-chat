@@ -10,14 +10,14 @@ import {
   Package, Loader2, ChevronLeft, ChevronRight, SlidersHorizontal, X, ExternalLink,
   Plus, Repeat2, Gamepad2, ImageOff,
 } from 'lucide-react'
-import { cn, truncateNpub } from '@/lib/utils'
+import { cn, truncateNpub, openExternalUrl } from '@/lib/utils'
 import { BlossomImage } from '@/components/ui/BlossomImage'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { usePreferencesStore } from '@/stores/preferencesStore'
 import { useModFeed } from '@/hooks/useModFeed'
 import { applyModFilters } from '@/lib/mods/filterMods'
-import { buildModOpenUrl, type Mod, MOD_ADMIN_PUBKEY, MOD_ADMIN_KIND, MODERATION_EXCLUDED_TAGS_DTAG, MOD_RELAYS } from '@/lib/mods/modEvent'
+import { buildModOpenUrl, type Mod, MOD_ADMIN_PUBKEY, MOD_ADMIN_KIND, MODERATION_EXCLUDED_TAGS_DTAG, getModRelays } from '@/lib/mods/modEvent'
 import { fetchEventsFromRelays } from '@/lib/nostr/relay-pool'
 import {
   useModFiltersStore, useModOpenTargetsStore, BUILTIN_SOURCES, UNTAGGED,
@@ -46,7 +46,7 @@ export function ModsTab() {
   // unless the user has customized them.
   useEffect(() => {
     let cancelled = false
-    fetchEventsFromRelays(MOD_RELAYS, { kinds: [MOD_ADMIN_KIND], authors: [MOD_ADMIN_PUBKEY], '#d': [MODERATION_EXCLUDED_TAGS_DTAG], limit: 1 })
+    fetchEventsFromRelays(getModRelays(), { kinds: [MOD_ADMIN_KIND], authors: [MOD_ADMIN_PUBKEY], '#d': [MODERATION_EXCLUDED_TAGS_DTAG], limit: 1 })
       .then((events) => {
         if (cancelled || events.length === 0) return
         const newest = events.sort((a, b) => b.created_at - a.created_at)[0]
@@ -112,7 +112,7 @@ export function ModsTab() {
           </button>
         </div>
 
-        {filtersOpen && <ModFiltersBar availableClients={availableClients} />}
+        {filtersOpen && <ModFiltersModal availableClients={availableClients} onClose={() => setFiltersOpen(false)} />}
 
         {/* Grid */}
         {feed.loading ? (
@@ -224,7 +224,7 @@ function ModOpenModal({ mod, onClose }: { mod: Mod; onClose: () => void }) {
   const [draft, setDraft] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
 
-  const open = (url: string) => { window.open(url, '_blank', 'noopener,noreferrer'); onClose() }
+  const open = (url: string) => { openExternalUrl(url); onClose() }
   const addAndOpen = () => {
     const v = draft.trim()
     if (!v) return
@@ -299,35 +299,52 @@ const NSFW_OPTS: { v: NsfwMode; label: string }[] = [{ v: 'hide', label: 'Hide N
 const REPOST_OPTS: { v: RepostMode; label: string }[] = [{ v: 'show', label: 'Show reposts' }, { v: 'originals', label: 'Hide reposts' }, { v: 'only', label: 'Only reposts' }]
 const EMU_OPTS: { v: EmulationMode; label: string }[] = [{ v: 'show', label: 'Show emulated' }, { v: 'native', label: 'Native only' }, { v: 'only', label: 'Only emulated' }]
 
-function ModFiltersBar({ availableClients }: { availableClients: string[] }) {
+function ModFiltersModal({ availableClients, onClose }: { availableClients: string[]; onClose: () => void }) {
   const s = useModFiltersStore()
 
   return (
-    <div className="rounded-xl border border-border bg-card p-4 space-y-4">
-      {/* Mode segmented rows */}
-      <SegRow label="Content" value={s.nsfwMode} options={NSFW_OPTS} onChange={s.setNsfwMode} />
-      <SegRow label="Reposts" value={s.repostMode} options={REPOST_OPTS} onChange={s.setRepostMode} />
-      <SegRow label="Emulation" value={s.emulationMode} options={EMU_OPTS} onChange={s.setEmulationMode} />
-
-      {/* PoW */}
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <div className="text-xs font-medium text-foreground">Minimum PoW</div>
-          <div className="text-[11px] text-muted-foreground">Hide mods below this proof-of-work. This setting is local to Mods.</div>
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-3" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/70" />
+      <div className="relative z-10 w-full max-w-md rounded-xl border border-border bg-background shadow-lg flex flex-col max-h-[85vh]" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
+          <div className="flex items-center gap-2">
+            <SlidersHorizontal size={15} className="text-primary" />
+            <h3 className="text-sm font-semibold text-foreground">Mod filters</h3>
+          </div>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground cursor-pointer"><X size={16} /></button>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <button onClick={() => s.setMinPow(s.minPow - 1)} className="w-7 h-7 rounded-md bg-secondary/60 text-foreground hover:bg-secondary cursor-pointer">–</button>
-          <span className="w-8 text-center text-sm tabular-nums text-foreground">{s.minPow}</span>
-          <button onClick={() => s.setMinPow(s.minPow + 1)} className="w-7 h-7 rounded-md bg-secondary/60 text-foreground hover:bg-secondary cursor-pointer">+</button>
+
+        <div className="p-4 space-y-4 overflow-y-auto">
+          {/* Mode segmented rows */}
+          <SegRow label="Content" value={s.nsfwMode} options={NSFW_OPTS} onChange={s.setNsfwMode} />
+          <SegRow label="Reposts" value={s.repostMode} options={REPOST_OPTS} onChange={s.setRepostMode} />
+          <SegRow label="Emulation" value={s.emulationMode} options={EMU_OPTS} onChange={s.setEmulationMode} />
+
+          {/* PoW */}
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-xs font-medium text-foreground">Minimum PoW</div>
+              <div className="text-[11px] text-muted-foreground">Hide mods below this proof-of-work. This setting is local to Mods.</div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button onClick={() => s.setMinPow(s.minPow - 1)} className="w-7 h-7 rounded-md bg-secondary/60 text-foreground hover:bg-secondary cursor-pointer">–</button>
+              <span className="w-8 text-center text-sm tabular-nums text-foreground">{s.minPow}</span>
+              <button onClick={() => s.setMinPow(s.minPow + 1)} className="w-7 h-7 rounded-md bg-secondary/60 text-foreground hover:bg-secondary cursor-pointer">+</button>
+            </div>
+          </div>
+
+          {/* Sources */}
+          <SourcesEditor availableClients={availableClients} />
+
+          {/* Tags + excluded tags */}
+          <TagEditor label="Tags" hint="Show only mods with these tags" values={s.searchTags} onChange={s.setSearchTags} />
+          <TagEditor label="Excluded tags" hint="Hide mods with these tags (auto-filled from DEG MODS moderation)" values={s.excludedTags} onChange={s.setExcludedTags} />
+        </div>
+
+        <div className="px-4 py-3 border-t border-border shrink-0">
+          <button onClick={onClose} className="w-full h-9 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 cursor-pointer">Done</button>
         </div>
       </div>
-
-      {/* Sources */}
-      <SourcesEditor availableClients={availableClients} />
-
-      {/* Tags + excluded tags */}
-      <TagEditor label="Tags" hint="Show only mods with these tags" values={s.searchTags} onChange={s.setSearchTags} />
-      <TagEditor label="Excluded tags" hint="Hide mods with these tags (auto-filled from DEG MODS moderation)" values={s.excludedTags} onChange={s.setExcludedTags} />
     </div>
   )
 }

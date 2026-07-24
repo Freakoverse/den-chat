@@ -64,7 +64,7 @@ export const useModFiltersStore = create<ModFiltersState>()(
       excludedTagsTouched: false,
       repostMode: 'show',
       emulationMode: 'show',
-      minPow: 0,
+      minPow: 15,
 
       setNsfwMode: (nsfwMode) => set({ nsfwMode }),
       setRepostMode: (repostMode) => set({ repostMode }),

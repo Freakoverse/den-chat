@@ -10,7 +10,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import type { Event } from 'nostr-tools'
 import { fetchEventsFromRelays } from '@/lib/nostr/relay-pool'
-import { MOD_KIND, MOD_RELAYS, constructModList, type Mod } from '@/lib/mods/modEvent'
+import { MOD_KIND, getModRelays, constructModList, type Mod } from '@/lib/mods/modEvent'
 
 const BATCH = 100
 
@@ -38,7 +38,7 @@ export function useModFeed() {
 
   const fetchBatch = useCallback(async (until?: number): Promise<number> => {
     const filter = { kinds: [MOD_KIND], limit: BATCH, ...(until ? { until } : {}) }
-    const events = await fetchEventsFromRelays(MOD_RELAYS, filter).catch(() => [] as Event[])
+    const events = await fetchEventsFromRelays(getModRelays(), filter).catch(() => [] as Event[])
     return ingest(events)
   }, [])
 

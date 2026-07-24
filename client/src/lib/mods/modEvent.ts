@@ -10,17 +10,32 @@
 import { nip19 } from 'nostr-tools'
 import type { Event } from 'nostr-tools'
 import { countLeadingZeroBits } from '@/lib/pow/pow'
+import { getRelays } from '@/lib/nostr/relay-pool'
+import { useUserListsStore } from '@/stores/userListsStore'
 
 export const MOD_KIND = 31142
 
-/** Relays that carry DEG MODS content — brs.degmods.com is the primary source. */
-export const MOD_RELAYS = [
-  'wss://brs.degmods.com',
-  'wss://relay.primal.net',
-  'wss://nos.lol',
-  'wss://nostr.mom',
-  'wss://relay.nostr.band',
-]
+/** DEG MODS' own relay — the primary source of mod events. Always queried. */
+export const DEG_SOURCE_RELAY = 'wss://brs.degmods.com'
+
+/**
+ * Relays to query for mods: DEG MODS' source relay (so mods are actually found)
+ * PLUS the user's own relays — client pool (Settings → Network) and their NIP-65
+ * list. Deduplicated. The DEG source is guaranteed present; it isn't hardcoded to
+ * the exclusion of the user's relays.
+ */
+export function getModRelays(): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  const add = (url: string) => {
+    const norm = url.replace(/\/+$/, '')
+    if (!seen.has(norm)) { seen.add(norm); out.push(url) }
+  }
+  add(DEG_SOURCE_RELAY)
+  for (const r of getRelays()) add(r)
+  for (const r of useUserListsStore.getState().userRelays) add(r)
+  return out
+}
 
 /** DEG MODS admin (NIP-78 moderation defaults — excluded tags). */
 export const MOD_ADMIN_PUBKEY = 'f4bf1fb5ba8be839f70c7331733e309f780822b311f63e01f9dc8abbb428f8d5'
@@ -84,7 +99,7 @@ export function parseModEvent(event: Event): Mod {
     pubkey: event.pubkey,
     dTag,
     aTag: `${MOD_KIND}:${event.pubkey}:${dTag}`,
-    naddr: nip19.naddrEncode({ identifier: dTag, pubkey: event.pubkey, kind: MOD_KIND, relays: [MOD_RELAYS[0]] }),
+    naddr: nip19.naddrEncode({ identifier: dTag, pubkey: event.pubkey, kind: MOD_KIND, relays: [DEG_SOURCE_RELAY] }),
     title: get('title'),
     summary: get('summary'),
     game: get('g'),

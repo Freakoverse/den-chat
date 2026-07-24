@@ -11,6 +11,21 @@ export function isTauri(): boolean {
 }
 
 /**
+ * Open an external URL in the system browser. In Tauri, `window.open`/`target=_blank`
+ * don't reach the OS browser from the webview, so use the opener plugin (the same
+ * path the global anchor-click handler in main.tsx uses); fall back to window.open.
+ */
+export function openExternalUrl(url: string): void {
+  if (isTauri()) {
+    import('@tauri-apps/plugin-opener')
+      .then(({ openUrl }) => openUrl(url).catch(() => window.open(url, '_blank', 'noopener,noreferrer')))
+      .catch(() => window.open(url, '_blank', 'noopener,noreferrer'))
+  } else {
+    window.open(url, '_blank', 'noopener,noreferrer')
+  }
+}
+
+/**
  * Detect mobile OS (Android / iOS) via userAgent.
  * NOT viewport-based — desktop users on narrow windows still return false.
  */
