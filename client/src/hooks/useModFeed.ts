@@ -11,6 +11,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import type { Event } from 'nostr-tools'
 import { fetchEventsFromRelays } from '@/lib/nostr/relay-pool'
 import { MOD_KIND, getModRelays, constructModList, type Mod } from '@/lib/mods/modEvent'
+import { useModFiltersStore } from '@/stores/modFiltersStore'
 
 const BATCH = 100
 
@@ -23,6 +24,9 @@ export function useModFeed() {
   const rawById = useRef<Map<string, Event>>(new Map())
   const oldest = useRef<number | undefined>(undefined)
   const inFlight = useRef(false)
+
+  // Re-fetch from scratch when the enabled DEG source relays change.
+  const degKey = useModFiltersStore((s) => s.degRelays.filter((r) => r.enabled).map((r) => r.url).join(','))
 
   const ingest = (events: Event[]): number => {
     let added = 0
@@ -42,13 +46,17 @@ export function useModFeed() {
     return ingest(events)
   }, [])
 
-  // Initial load
+  // Initial load — and a full reset+refetch whenever the relay set changes.
   useEffect(() => {
     let cancelled = false
+    rawById.current = new Map()
+    oldest.current = undefined
+    setMods([])
+    setReachedEnd(false)
     setLoading(true)
     fetchBatch().finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [fetchBatch])
+  }, [fetchBatch, degKey])
 
   const loadMore = useCallback(async () => {
     if (inFlight.current || reachedEnd || loading) return

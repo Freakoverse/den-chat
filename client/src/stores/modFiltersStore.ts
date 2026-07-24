@@ -23,6 +23,17 @@ export const UNTAGGED = 'untagged'
 export const BUILTIN_SOURCES = ['DEG MODS', 'DEG MODS Network']
 /** Fallback default excluded tags, used until the admin NIP-78 list loads. */
 export const DEFAULT_EXCLUDED_TAGS = ['loli', 'shota', 'gore', 'politics', 'religion']
+/** Default PoW threshold for the Mods listing. */
+export const DEFAULT_MIN_POW = 15
+
+export interface RelayToggle { url: string; enabled: boolean }
+
+/**
+ * DEG MODS' own source relay(s) — queried IN ADDITION to the user's client pool
+ * and NIP-65 relays, but never added to Settings → Network. Toggle off to stop
+ * querying it. Persisted with the mod filters.
+ */
+const DEFAULT_DEG_RELAYS: RelayToggle[] = [{ url: 'wss://brs.degmods.com', enabled: true }]
 
 const DEFAULT_SOURCES: SourceEntry[] = [
   { name: 'DEG MODS', enabled: true },
@@ -42,6 +53,8 @@ interface ModFiltersState {
   emulationMode: EmulationMode
   /** Own PoW threshold for this listing (leading-zero bits). 0 = off. */
   minPow: number
+  /** DEG MODS source relays, queried alongside the user's own relays. */
+  degRelays: RelayToggle[]
 
   setNsfwMode: (m: NsfwMode) => void
   setRepostMode: (m: RepostMode) => void
@@ -50,6 +63,7 @@ interface ModFiltersState {
   setSearchTags: (t: string[]) => void
   setExcludedTags: (t: string[]) => void
   setMinPow: (n: number) => void
+  setDegRelays: (r: RelayToggle[]) => void
   /** Apply moderation defaults, but only if the user hasn't customized. */
   applyExcludedTagsDefaults: (defaults: string[]) => void
 }
@@ -64,7 +78,8 @@ export const useModFiltersStore = create<ModFiltersState>()(
       excludedTagsTouched: false,
       repostMode: 'show',
       emulationMode: 'show',
-      minPow: 15,
+      minPow: DEFAULT_MIN_POW,
+      degRelays: DEFAULT_DEG_RELAYS,
 
       setNsfwMode: (nsfwMode) => set({ nsfwMode }),
       setRepostMode: (repostMode) => set({ repostMode }),
@@ -73,6 +88,7 @@ export const useModFiltersStore = create<ModFiltersState>()(
       setSearchTags: (searchTags) => set({ searchTags }),
       setExcludedTags: (excludedTags) => set({ excludedTags, excludedTagsTouched: true }),
       setMinPow: (minPow) => set({ minPow: Math.max(0, Math.floor(minPow)) }),
+      setDegRelays: (degRelays) => set({ degRelays }),
       applyExcludedTagsDefaults: (defaults) => {
         if (!get().excludedTagsTouched) set({ excludedTags: defaults })
       },

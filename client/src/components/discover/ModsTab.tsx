@@ -20,7 +20,7 @@ import { applyModFilters } from '@/lib/mods/filterMods'
 import { buildModOpenUrl, type Mod, MOD_ADMIN_PUBKEY, MOD_ADMIN_KIND, MODERATION_EXCLUDED_TAGS_DTAG, getModRelays } from '@/lib/mods/modEvent'
 import { fetchEventsFromRelays } from '@/lib/nostr/relay-pool'
 import {
-  useModFiltersStore, useModOpenTargetsStore, BUILTIN_SOURCES, UNTAGGED,
+  useModFiltersStore, useModOpenTargetsStore, BUILTIN_SOURCES, UNTAGGED, DEFAULT_MIN_POW,
   type NsfwMode, type RepostMode, type EmulationMode, type SourceEntry,
 } from '@/stores/modFiltersStore'
 
@@ -322,9 +322,14 @@ function ModFiltersModal({ availableClients, onClose }: { availableClients: stri
 
           {/* PoW */}
           <div className="flex items-center justify-between gap-3">
-            <div>
-              <div className="text-xs font-medium text-foreground">Minimum PoW</div>
-              <div className="text-[11px] text-muted-foreground">Hide mods below this proof-of-work. This setting is local to Mods.</div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-medium text-foreground">Minimum PoW</span>
+                {s.minPow !== DEFAULT_MIN_POW && (
+                  <button onClick={() => s.setMinPow(DEFAULT_MIN_POW)} className="text-[10px] text-primary hover:underline cursor-pointer">Reset to {DEFAULT_MIN_POW}</button>
+                )}
+              </div>
+              <div className="text-[11px] text-muted-foreground">Hide mods below this proof-of-work. Local to Mods.</div>
             </div>
             <div className="flex items-center gap-2 shrink-0">
               <button onClick={() => s.setMinPow(s.minPow - 1)} className="w-7 h-7 rounded-md bg-secondary/60 text-foreground hover:bg-secondary cursor-pointer">–</button>
@@ -332,6 +337,9 @@ function ModFiltersModal({ availableClients, onClose }: { availableClients: stri
               <button onClick={() => s.setMinPow(s.minPow + 1)} className="w-7 h-7 rounded-md bg-secondary/60 text-foreground hover:bg-secondary cursor-pointer">+</button>
             </div>
           </div>
+
+          {/* DEG MODS source relays */}
+          <DegRelaysEditor />
 
           {/* Sources */}
           <SourcesEditor availableClients={availableClients} />
@@ -360,6 +368,33 @@ function SegRow<T extends string>({ label, value, options, onChange }: { label: 
               value === o.v ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground')}>
             {o.label}
           </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function DegRelaysEditor() {
+  const { degRelays, setDegRelays } = useModFiltersStore()
+  const toggle = (url: string) => setDegRelays(degRelays.map((r) => r.url === url ? { ...r, enabled: !r.enabled } : r))
+
+  return (
+    <div className="space-y-1.5">
+      <div className="text-xs font-medium text-foreground">DEG MODS relays</div>
+      <div className="text-[11px] text-muted-foreground -mt-1">
+        Queried for mods in addition to your own relays. Not added to Settings → Network. Toggle off to stop using it.
+      </div>
+      <div className="flex flex-col gap-1.5 pt-1">
+        {degRelays.map((r) => (
+          <div key={r.url} className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-md bg-secondary/40 border border-border">
+            <span className="text-xs font-mono text-foreground/80 truncate">{r.url.replace(/^wss:\/\//, '')}</span>
+            <button
+              onClick={() => toggle(r.url)}
+              className={cn('relative w-9 h-5 rounded-full transition-colors shrink-0 cursor-pointer', r.enabled ? 'bg-primary' : 'bg-muted-foreground/30')}
+            >
+              <div className={cn('absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform', r.enabled ? 'translate-x-[18px]' : 'translate-x-[2px]')} />
+            </button>
+          </div>
         ))}
       </div>
     </div>

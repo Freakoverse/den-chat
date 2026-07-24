@@ -12,6 +12,7 @@ import type { Event } from 'nostr-tools'
 import { countLeadingZeroBits } from '@/lib/pow/pow'
 import { getRelays } from '@/lib/nostr/relay-pool'
 import { useUserListsStore } from '@/stores/userListsStore'
+import { useModFiltersStore } from '@/stores/modFiltersStore'
 
 export const MOD_KIND = 31142
 
@@ -19,10 +20,10 @@ export const MOD_KIND = 31142
 export const DEG_SOURCE_RELAY = 'wss://brs.degmods.com'
 
 /**
- * Relays to query for mods: DEG MODS' source relay (so mods are actually found)
- * PLUS the user's own relays — client pool (Settings → Network) and their NIP-65
- * list. Deduplicated. The DEG source is guaranteed present; it isn't hardcoded to
- * the exclusion of the user's relays.
+ * Relays to query for mods: the enabled DEG MODS source relay(s) — so mods are
+ * actually found — PLUS the user's own relays (client pool from Settings →
+ * Network, and their NIP-65 list). Deduplicated. The DEG relays are a per-Mods
+ * setting the user can toggle off; they are never written to the client pool.
  */
 export function getModRelays(): string[] {
   const seen = new Set<string>()
@@ -31,7 +32,7 @@ export function getModRelays(): string[] {
     const norm = url.replace(/\/+$/, '')
     if (!seen.has(norm)) { seen.add(norm); out.push(url) }
   }
-  add(DEG_SOURCE_RELAY)
+  for (const r of useModFiltersStore.getState().degRelays) if (r.enabled) add(r.url)
   for (const r of getRelays()) add(r)
   for (const r of useUserListsStore.getState().userRelays) add(r)
   return out
