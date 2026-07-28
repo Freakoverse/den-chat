@@ -22,6 +22,11 @@ import type { Event } from 'nostr-tools'
 import type { GroupedRole } from '@/lib/hub/groupEncryption'
 import { memberQualifiesForGroup } from '@/lib/hub/groupEncryption'
 
+/** Longer waits for the critical hub-definition fetch — a hub's event may live
+ *  on a single slow relay, and a false 'not-found' hides it from the sidebar. */
+const HUB_FETCH_MAX_WAIT_MS = 10000
+const HUB_FETCH_RETRY_MAX_WAIT_MS = 15000
+
 /**
  * Parse a hub event (kind 36942) into HubData.
  * Per NIP-CHAT spec §6.1:
@@ -642,12 +647,9 @@ export function useHubLoader() {
     // Fetch all hub events in one query
     const dTags = toLoad.map(e => e.dTag)
 
-    fetchEvents({
-      kinds: [KINDS.HUB_EVENT],
-      '#d': dTags,
-    }).then(async (events) => {
-      // Group by d tag, keep latest per d tag
-      const latestByDTag = new Map<string, Event>()
+    // Collect the newest HUB_EVENT per d tag into `latestByDTag`.
+    const latestByDTag = new Map<string, Event>()
+    const collect = (events: Event[]) => {
       for (const event of events) {
         const dTag = event.tags.find(t => t[0] === 'd')?.[1]
         if (!dTag) continue
@@ -656,8 +658,28 @@ export function useHubLoader() {
           latestByDTag.set(dTag, event)
         }
       }
+    }
 
-      // Identify not-found hubs (requested but no event returned)
+    // Hub loading is critical and each hub's event may live on only one relay,
+    // which can be slow. Wait longer than the default one-shot cap so a slow
+    // relay doesn't get a hub falsely marked 'not-found'. Anything still missing
+    // gets one more attempt with an even longer wait before we give up — a hub
+    // wrongly hidden from the sidebar is far worse than a couple extra seconds.
+    fetchEvents({ kinds: [KINDS.HUB_EVENT], '#d': dTags }, HUB_FETCH_MAX_WAIT_MS)
+      .then(async (events) => {
+      collect(events)
+
+      // Second chance for any coordinate no relay has answered yet.
+      const missing = dTags.filter((d) => !latestByDTag.has(d))
+      if (missing.length > 0) {
+        const retry = await fetchEvents(
+          { kinds: [KINDS.HUB_EVENT], '#d': missing },
+          HUB_FETCH_RETRY_MAX_WAIT_MS,
+        ).catch(() => [] as Event[])
+        collect(retry)
+      }
+
+      // Identify not-found hubs (still no event after the retry)
       for (const requestedDTag of dTags) {
         if (!latestByDTag.has(requestedDTag)) {
           setHubStatus(requestedDTag, 'not-found')

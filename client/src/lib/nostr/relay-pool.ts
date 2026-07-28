@@ -212,14 +212,19 @@ export async function publishToSpecificRelays(relays: string[], event: Event): P
  * Fetch events matching a filter from active relays.
  * Waits for all relays to respond (or timeout).
  */
-export async function fetchEvents(filter: Filter | Filter[]): Promise<Event[]> {
+export async function fetchEvents(
+  filter: Filter | Filter[],
+  maxWait: number = FETCH_MAX_WAIT_MS,
+): Promise<Event[]> {
   // nostr-tools querySync takes a single Filter; merge if array provided
   const merged = Array.isArray(filter)
     ? filter.reduce<Filter>((acc, f) => ({ ...acc, ...f }), {})
     : filter
   // Cap the wait so a single slow/dead relay can't stall the whole query — we
   // return everything the responsive relays gave us instead of hanging for the slowest.
-  return pool.querySync(getRelays(), merged, { maxWait: FETCH_MAX_WAIT_MS })
+  // Callers that must not miss an event living only on a slow relay (e.g. hub
+  // loading) can pass a longer maxWait.
+  return pool.querySync(getRelays(), merged, { maxWait })
 }
 
 /**
