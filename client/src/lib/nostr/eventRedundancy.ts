@@ -2,9 +2,12 @@
  * eventRedundancy — Cooperative event rebroadcasting
  *
  * Ensures critical Nostr events (profiles, relay lists, hub lists, hub events)
- * exist on all of the user's configured relays. If an event is missing from some
- * relays (e.g. due to DB purges), it rebroadcasts the already-signed event —
- * no signing needed.
+ * exist on at least TARGET_COPIES (3) of the user's relays — NOT all of them. If
+ * coverage is below the target, it tops up by rebroadcasting the already-signed
+ * event (no signing needed) to randomly chosen relays drawn from both the client
+ * list and the user (NIP-65) list, then re-checks and retries until it reaches the
+ * target or runs out of relays. This is the relay analogue of blossomRedundancy,
+ * which mirrors files to 3 servers.
  *
  * Relay sources (deduplicated):
  *   1. Client relays — from Settings > Network > Relays (enabled only)
@@ -22,6 +25,11 @@ import { useUserListsStore } from '@/stores/userListsStore'
 import type { Event, Filter } from 'nostr-tools'
 
 const RELAY_TIMEOUT_MS = 8_000
+
+/** Desired number of relays that should hold each critical event. */
+const TARGET_COPIES = 3
+/** Max top-up rounds before giving up (each round re-checks coverage). */
+const MAX_ROUNDS = 3
 
 /** Events already checked this session — keyed by "kind:pubkey:dTag" */
 const checkedThisSession = new Set<string>()
@@ -77,68 +85,112 @@ function getAllRelays(): string[] {
   return result
 }
 
-/**
- * Core: check a single event's presence across all user relays and rebroadcast if needed.
- */
-async function checkAndRebroadcast(filter: Filter, key: string): Promise<void> {
-  const relays = getAllRelays()
-  if (relays.length === 0) return
+/** Strip trailing slashes so the same relay from two lists dedups correctly. */
+function normalizeRelay(url: string): string {
+  return url.replace(/\/+$/, '')
+}
 
-  // Query each relay individually (in parallel, each with 8s timeout)
+/** Deduplicated, normalized, non-empty relay list (order preserved). */
+function uniqRelays(urls: string[]): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const u of urls) {
+    const n = normalizeRelay(u)
+    if (n && !seen.has(n)) { seen.add(n); out.push(n) }
+  }
+  return out
+}
+
+/** Random distinct sample of up to `n` items (Fisher-Yates). */
+function sample<T>(arr: T[], n: number): T[] {
+  if (n <= 0 || arr.length === 0) return []
+  const copy = [...arr]
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[copy[i], copy[j]] = [copy[j], copy[i]]
+  }
+  return copy.slice(0, Math.min(n, copy.length))
+}
+
+/**
+ * Which of `relays` currently hold an event matching `filter` (normalized set),
+ * plus the newest such event found — the signed event we rebroadcast. Each relay
+ * is queried individually with an 8s timeout.
+ */
+async function queryPresence(relays: string[], filter: Filter): Promise<{ present: Set<string>; event: Event | null }> {
+  const present = new Set<string>()
+  let best: Event | null = null
   const results = await Promise.allSettled(
     relays.map(async (relay) => {
       const events = await Promise.race([
         fetchEventsFromRelays([relay], filter),
-        new Promise<Event[]>((_, reject) =>
-          setTimeout(() => reject(new Error('timeout')), RELAY_TIMEOUT_MS)
-        ),
+        new Promise<Event[]>((_, reject) => setTimeout(() => reject(new Error('timeout')), RELAY_TIMEOUT_MS)),
       ])
       return { relay, events }
-    })
+    }),
   )
-
-  // Classify relays: which have the event, which don't
-  const presentOn: string[] = []
-  const missingFrom: string[] = []
-  let bestEvent: Event | null = null
-
-  for (let i = 0; i < results.length; i++) {
-    const result = results[i]
-    const relay = relays[i]
-
-    if (result.status === 'fulfilled' && result.value.events.length > 0) {
-      presentOn.push(relay)
-      // Keep the latest event for rebroadcasting
-      const event = result.value.events[0]
-      if (!bestEvent || event.created_at > bestEvent.created_at) {
-        bestEvent = event
-      }
-    } else {
-      missingFrom.push(relay)
+  for (const r of results) {
+    if (r.status === 'fulfilled' && r.value.events.length > 0) {
+      present.add(normalizeRelay(r.value.relay))
+      const ev = r.value.events[0]
+      if (!best || ev.created_at > best.created_at) best = ev
     }
   }
+  return { present, event: best }
+}
 
-  console.log(
-    `[EventRedundancy] ${key}: found on ${presentOn.length}/${relays.length} relays` +
-    (missingFrom.length > 0 ? ` (missing: ${missingFrom.join(', ')})` : '')
-  )
+/**
+ * Core: ensure a single event is held by at least TARGET_COPIES relays.
+ *
+ * 1. Check current coverage across every relay we know (client + NIP-65).
+ * 2. If already on ≥ TARGET_COPIES, done. If found nowhere, nothing to copy — done.
+ * 3. Otherwise top up: each round pick `needed` random relays from the client list
+ *    AND `needed` from the user list (deduped, excluding relays that already have it
+ *    or were tried), rebroadcast the signed event to them, then re-check just those
+ *    candidates and fold the confirmed ones into coverage. Repeat with fresh random
+ *    picks until coverage hits the target or we run out of untried relays.
+ */
+async function checkAndRebroadcast(filter: Filter, key: string): Promise<void> {
+  const clientRelays = uniqRelays(getRelays())
+  const userRelays = uniqRelays(useUserListsStore.getState().userRelays)
+  const allRelays = uniqRelays([...clientRelays, ...userRelays])
+  if (allRelays.length === 0) return
 
-  if (missingFrom.length === 0 || !bestEvent) {
-    return // Present on all relays, or event not found anywhere
+  const { present, event } = await queryPresence(allRelays, filter)
+  if (!event) {
+    console.log(`[EventRedundancy] ${key}: not found on any relay — nothing to rebroadcast`)
+    return
   }
 
-  // Rebroadcast to all relays that are missing the event
-  try {
-    const accepted = await publishToSpecificRelays(missingFrom, bestEvent)
-    if (accepted.length > 0) {
-      console.log(`[EventRedundancy] ${key}: rebroadcasted to ${accepted.length} relay(s):`, accepted)
+  const coverage = new Set(present)
+  if (coverage.size >= TARGET_COPIES) {
+    console.log(`[EventRedundancy] ${key}: already on ${coverage.size}/${TARGET_COPIES} relays`)
+    return
+  }
+
+  const tried = new Set<string>()
+  for (let round = 0; round < MAX_ROUNDS && coverage.size < TARGET_COPIES; round++) {
+    const needed = TARGET_COPIES - coverage.size
+    const pickFrom = (list: string[]) => sample(list.filter((r) => !coverage.has(r) && !tried.has(r)), needed)
+    const candidates = uniqRelays([...pickFrom(clientRelays), ...pickFrom(userRelays)])
+    if (candidates.length === 0) break // no untried relays left to try
+
+    candidates.forEach((c) => tried.add(c))
+    try {
+      await publishToSpecificRelays(candidates, event)
+    } catch (err) {
+      console.warn(`[EventRedundancy] ${key}: publish round ${round + 1} failed:`, err)
     }
-    const finalCoverage = presentOn.length + accepted.length
-    if (finalCoverage < relays.length) {
-      console.warn(`[EventRedundancy] ${key}: only on ${finalCoverage}/${relays.length} relays after rebroadcast`)
-    }
-  } catch (err) {
-    console.warn(`[EventRedundancy] Failed to rebroadcast ${key}:`, err)
+
+    // Confirm which candidates actually hold it now, and fold them into coverage.
+    const { present: nowPresent } = await queryPresence(candidates, filter)
+    nowPresent.forEach((r) => coverage.add(r))
+  }
+
+  if (coverage.size >= TARGET_COPIES) {
+    console.log(`[EventRedundancy] ${key}: ensured on ${coverage.size}/${TARGET_COPIES} relays`)
+  } else {
+    console.warn(`[EventRedundancy] ${key}: only ${coverage.size}/${TARGET_COPIES} relays after top-up (ran out of relays)`)
   }
 }
 
