@@ -11,7 +11,7 @@
 import { useEffect, useRef } from 'react'
 import { useHubStore, type HubData, type Channel, type Category, type Role } from '@/stores/hubStore'
 import { useUserStore } from '@/stores/userStore'
-import { fetchEvents } from '@/lib/nostr/relay-pool'
+import { fetchEvents, fetchEventsProgressive } from '@/lib/nostr/relay-pool'
 import { KINDS } from '@/lib/crypto/constants'
 import { downloadTextFromBlossom, parseIndexFile, decryptHubSecret, decryptGroupSecret, downloadBanList } from '@/lib/blossom'
 import { aesDecrypt } from '@/lib/crypto/aes'
@@ -575,6 +575,10 @@ export function useHubLoader() {
   const hubSecretRetryNonce = useHubStore((s) => s.hubSecretRetryNonce)
   const hubReloadNonce = useHubStore((s) => s.hubReloadNonce)
   const loadedRef = useRef<Set<string>>(new Set())
+  // Close fn for the most recent progressive hub-event stream, so it can be torn
+  // down on unmount (each stream also self-closes on EOSE / maxWait).
+  const hubStreamRef = useRef<(() => void) | null>(null)
+  useEffect(() => () => { hubStreamRef.current?.() }, [])
 
   // Manual per-hub retry (the "Try again" button on a not-found hub): forget the
   // "already attempted" mark for the targeted hub so the main effect re-fetches it
@@ -654,64 +658,90 @@ export function useHubLoader() {
       loadedRef.current.add(entry.dTag)
     }
 
-    // Fetch all hub events in one query
     const dTags = toLoad.map(e => e.dTag)
 
-    // Collect the newest HUB_EVENT per d tag into `latestByDTag`.
+    // Newest HUB_EVENT seen per d tag, and the created_at we've already handed to
+    // processHub — so each hub is processed once, but re-processed if a newer
+    // version arrives later from a slower relay.
+    const requested = new Set(dTags)
     const latestByDTag = new Map<string, Event>()
-    const collect = (events: Event[]) => {
-      for (const event of events) {
-        const dTag = event.tags.find(t => t[0] === 'd')?.[1]
-        if (!dTag) continue
-        const existing = latestByDTag.get(dTag)
-        if (!existing || event.created_at > existing.created_at) {
-          latestByDTag.set(dTag, event)
-        }
+    const processedAt = new Map<string, number>()
+
+    // ── Concurrency-limited hub processing (streamed) ──
+    // Each hub involves several I/O-bound Blossom fetches + crypto, so cap parallelism.
+    const HUB_CONCURRENCY = 10
+    let running = 0
+    const workQueue: [string, Event][] = []
+    const pump = () => {
+      while (running < HUB_CONCURRENCY && workQueue.length > 0) {
+        const [dTag, event] = workQueue.shift()!
+        running++
+        processHub(dTag, event)
+          .catch((err) => console.error(`Hub ${dTag}: processing failed:`, err))
+          .finally(() => { running--; pump() })
       }
     }
 
-    // Hub loading is critical and each hub's event may live on only one relay,
-    // which can be slow. Wait longer than the default one-shot cap so a slow
-    // relay doesn't get a hub falsely marked 'not-found'. Anything still missing
-    // gets one more attempt with an even longer wait before we give up — a hub
-    // wrongly hidden from the sidebar is far worse than a couple extra seconds.
-    fetchEvents({ kinds: [KINDS.HUB_EVENT], '#d': dTags }, HUB_FETCH_MAX_WAIT_MS)
-      .then(async (events) => {
-      collect(events)
+    // Fold newly-arrived events into latestByDTag and enqueue any hub whose newest
+    // event we haven't processed yet — so hubs render as their events stream in from
+    // the fastest relay, instead of only after the whole query completes.
+    const ingest = (events: Event[]) => {
+      let changed = false
+      for (const event of events) {
+        const dTag = event.tags.find(t => t[0] === 'd')?.[1]
+        if (!dTag || !requested.has(dTag)) continue
+        const existing = latestByDTag.get(dTag)
+        if (!existing || event.created_at > existing.created_at) {
+          latestByDTag.set(dTag, event)
+          changed = true
+        }
+      }
+      if (!changed) return
+      for (const [dTag, event] of latestByDTag) {
+        if (processedAt.get(dTag) !== event.created_at) {
+          processedAt.set(dTag, event.created_at)
+          workQueue.push([dTag, event])
+        }
+      }
+      pump()
+    }
 
-      // Second chance for any coordinate no relay has answered yet.
+    // Stream hub events progressively (paint the fastest relay's hubs immediately),
+    // still waiting up to HUB_FETCH_MAX_WAIT_MS for stragglers. Anything no relay
+    // answered gets one more attempt at a longer wait before we mark it not-found —
+    // a hub wrongly hidden from the sidebar is far worse than a couple extra seconds.
+    const stream = fetchEventsProgressive(
+      { kinds: [KINDS.HUB_EVENT], '#d': dTags },
+      ingest,
+      { maxWait: HUB_FETCH_MAX_WAIT_MS },
+    )
+    hubStreamRef.current = stream.close
+
+    stream.done.then(async () => {
       const missing = dTags.filter((d) => !latestByDTag.has(d))
       if (missing.length > 0) {
         const retry = await fetchEvents(
           { kinds: [KINDS.HUB_EVENT], '#d': missing },
           HUB_FETCH_RETRY_MAX_WAIT_MS,
         ).catch(() => [] as Event[])
-        collect(retry)
+        ingest(retry)
       }
-
-      // Identify not-found hubs (still no event after the retry)
+      // Mark not-found for anything still missing after the retry.
       for (const requestedDTag of dTags) {
         if (!latestByDTag.has(requestedDTag)) {
           setHubStatus(requestedDTag, 'not-found')
         }
       }
-
-      // ── Phase 4: Parallel hub processing with concurrency limit ──
-      // Process hubs in parallel instead of sequentially.
-      // Each hub involves multiple I/O-bound HTTP fetches to Blossom + crypto,
-      // so higher concurrency significantly reduces wall-clock time.
-      // At 200 hubs: concurrency 10 → ~20 rounds vs 67 rounds at 3.
-      const HUB_CONCURRENCY = 10
-
-      // Build ordered list of hubs to process (matching toLoad order for priority)
-      const hubsToProcess: [string, Event][] = []
+    }).catch((err) => {
+      console.error('Failed to load hub events:', err)
+      // Allow a later retry by forgetting the "attempted" mark.
       for (const entry of toLoad) {
-        const event = latestByDTag.get(entry.dTag)
-        if (event) hubsToProcess.push([entry.dTag, event])
+        loadedRef.current.delete(entry.dTag)
       }
+    })
 
-      /** Process a single hub: parse event, download secret, load bans, etc. */
-      const processHub = async (dTag: string, event: Event) => {
+    /** Process a single hub: parse event, download secret, load bans, etc. */
+    async function processHub(dTag: string, event: Event) {
         const hubData = parseHubEvent(event)
         if (!hubData) return
 
@@ -885,39 +915,7 @@ export function useHubLoader() {
 
         // Mark blossom secret resolution as complete for this hub
         setHubSecretsResolved(dTag, true)
-      }
-
-      // Run with concurrency limit
-      let running = 0
-      let nextIdx = 0
-      await new Promise<void>((resolve) => {
-        const startNext = () => {
-          while (running < HUB_CONCURRENCY && nextIdx < hubsToProcess.length) {
-            const [dTag, event] = hubsToProcess[nextIdx++]
-            running++
-            processHub(dTag, event)
-              .catch((err) => console.error(`Hub ${dTag}: processing failed:`, err))
-              .finally(() => {
-                running--
-                if (nextIdx >= hubsToProcess.length && running === 0) {
-                  resolve()
-                } else {
-                  startNext()
-                }
-              })
-          }
-          // Edge case: nothing to process at all
-          if (hubsToProcess.length === 0) resolve()
-        }
-        startNext()
-      })
-    }).catch((err) => {
-      console.error('Failed to load hub events:', err)
-      // Allow retry by removing from loaded set
-      for (const entry of toLoad) {
-        loadedRef.current.delete(entry.dTag)
-      }
-    })
+    }
   }, [hubEntries, hubs, hubSecrets, setHubData, setHubStatus, setHubSecret, setHubMembers, pubkey, privateKey, signer, setEpochSecrets, setGroupEpochSecrets, hubSecretRetryNonce, hubReloadNonce])
 }
 

@@ -549,19 +549,21 @@ function HubIcon({ label, isActive, onClick, children, isAction, isPreview, stat
       <Tooltip>
         <TooltipTrigger asChild>
           <button
-            onClick={onClick}
+            onClick={loadingEvent ? undefined : onClick}
             data-hub-dtag={hubDTag}
+            aria-busy={loadingEvent || undefined}
             className={cn(
-              'relative flex items-center justify-center transition-all duration-200 cursor-pointer overflow-hidden',
+              'relative flex items-center justify-center transition-all duration-200 overflow-hidden',
               size, rounding,
+              loadingEvent ? 'cursor-default' : 'cursor-pointer',
               isActive ? 'bg-primary text-primary-foreground' : '',
-              !isActive && !isAction && !isPreview && status !== 'not-found' && 'bg-secondary text-secondary-foreground hover:bg-primary hover:text-primary-foreground',
+              !isActive && !isAction && !isPreview && status !== 'not-found' && !loadingEvent && 'bg-secondary text-secondary-foreground hover:bg-primary hover:text-primary-foreground',
               isAction && 'bg-secondary text-green-500 hover:bg-green-600 hover:text-white',
               isPreview && !isActive && 'bg-secondary text-secondary-foreground hover:bg-primary hover:text-primary-foreground border-2 border-dashed border-primary/40',
               // Not-found: muted "broken" look, clickable to open the retry modal.
               status === 'not-found' && 'bg-secondary/60 text-amber-500 hover:bg-amber-500/20 ring-1 ring-amber-500/40',
-              // Still fetching the hub event: gently pulse the placeholder.
-              loadingEvent && 'animate-pulse',
+              // Still fetching the hub event: muted, non-interactive, gently pulsing.
+              loadingEvent && 'bg-secondary/70 text-secondary-foreground animate-pulse-soft',
             )}
           >
             {status === 'not-found' ? <Unplug size={18} /> : children}
@@ -569,12 +571,6 @@ function HubIcon({ label, isActive, onClick, children, isAction, isPreview, stat
             {loadingSecrets && (
               <div className="absolute inset-0 z-[5] flex items-center justify-center bg-background/45 backdrop-blur-[1px]">
                 <Loader2 size={16} className="animate-spin text-white" />
-              </div>
-            )}
-            {/* Fetching overlay while the hub event itself is still loading */}
-            {loadingEvent && !loadingSecrets && (
-              <div className="absolute inset-0 z-[5] flex items-center justify-center bg-background/35">
-                <Loader2 size={14} className="animate-spin text-muted-foreground" />
               </div>
             )}
           </button>

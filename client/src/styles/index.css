@@ -310,6 +310,24 @@ select:focus-visible {
   border-radius: 0.5rem;
 }
 
+/* Gentle pulse for a hub icon still fetching its event — slower and lower
+   amplitude than Tailwind's animate-pulse, which reads as too aggressive here. */
+@keyframes hub-pulse {
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.62;
+  }
+}
+
+.animate-pulse-soft {
+  animation: hub-pulse 2.6s ease-in-out infinite;
+}
+
 @keyframes shake {
 
   0%,
