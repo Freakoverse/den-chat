@@ -394,20 +394,27 @@ export function useStartup() {
   useHideMessages(activeHubId)
 
   // ─── Hub event redundancy (cooperative rebroadcasting) ───
-  // When the user opens a hub, check that its hub event (kind 36942) exists on ≥3
-  // hardcoded relays. Any member that opens a hub helps keep it alive.
-  // No cleanup on the timeout — rapid hub switching queues all visited hubs for checking.
+  // When the user opens a hub, check that its hub event (kind 36942) exists on the
+  // user's relays and rebroadcast to any that are missing it. Any member that opens
+  // a hub helps keep it alive.
+  //
+  // This MUST run only after the hub event has actually loaded — so we gate on the
+  // active hub's creatorPubkey (present once the event is fetched + parsed). Keying
+  // the effect on it means it re-runs when the hub finishes loading, however long
+  // that takes; a fixed timer alone would fire before a slow load and bail forever.
+  const activeHubCreator = useHubStore((s) => (s.activeHubId ? s.hubs[s.activeHubId]?.creatorPubkey : undefined))
   useEffect(() => {
-    if (!isAuthenticated || !activeHubId) return
+    if (!isAuthenticated || !activeHubId || !activeHubCreator) return
     const hubId = activeHubId
-    setTimeout(() => {
-      const hub = useHubStore.getState().hubs[hubId]
-      if (!hub) return
+    const creator = activeHubCreator
+    // Small settle delay; cancel on hub change so drive-by hubs aren't checked.
+    const timer = setTimeout(() => {
       import('@/lib/nostr/eventRedundancy').then(({ ensureAddressableRedundancy }) => {
-        ensureAddressableRedundancy(KINDS.HUB_EVENT, hub.creatorPubkey, hubId)
+        ensureAddressableRedundancy(KINDS.HUB_EVENT, creator, hubId)
       })
     }, 5000)
-  }, [isAuthenticated, activeHubId])
+    return () => clearTimeout(timer)
+  }, [isAuthenticated, activeHubId, activeHubCreator])
 
   // ─── Hub member-list Blossom redundancy (cooperative mirroring) ───
   // When the user opens a hub, check that its member-list files (index, spine/
