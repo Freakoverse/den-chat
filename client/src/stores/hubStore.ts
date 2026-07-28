@@ -156,10 +156,16 @@ export interface HubState {
   /** Bumped to force useHubLoader to re-attempt hubs whose secret failed to
    *  decrypt (e.g. after a remote-signer reconnect on app resume). */
   hubSecretRetryNonce: number
+  /** Bumped to force useHubLoader to re-fetch a single hub from scratch — used by
+   *  the "Try again" action on a not-found hub. `hubReloadTarget` names the hub. */
+  hubReloadNonce: number
+  hubReloadTarget: string | null
 
   /** Actions */
   setHubEntries: (entries: HubEntry[], folders: HubFolder[]) => void
   bumpHubSecretRetry: () => void
+  /** Clear a hub's status and force the loader to re-fetch it from scratch. */
+  retryHub: (dTag: string) => void
   setHubListLoaded: (loaded: boolean) => void
   setHubData: (dTag: string, data: HubData) => void
   setHubStatus: (dTag: string, status: HubStatus) => void
@@ -198,7 +204,10 @@ export const useHubStore = create<HubState>((set) => ({
   activeHubId: null,
   activeChannelId: null,
   hideDeletedHubs: localStorage.getItem('den_hide_deleted_hubs') !== 'false',
-  hideNotFoundHubs: localStorage.getItem('den_hide_notfound_hubs') !== 'false',
+  // Default to SHOWING not-found hubs: they render as a clickable "broken" icon
+  // with a retry action, so hiding them by default would bury that affordance.
+  // Only hide when the user has explicitly opted in.
+  hideNotFoundHubs: localStorage.getItem('den_hide_notfound_hubs') === 'true',
   hubMembers: {},
   previewHubId: null,
   hubPrefs: {},
@@ -215,7 +224,16 @@ export const useHubStore = create<HubState>((set) => ({
   hubSecretFailReason: {},
   _secretsVersion: 0,
   hubSecretRetryNonce: 0,
+  hubReloadNonce: 0,
+  hubReloadTarget: null,
   bumpHubSecretRetry: () => set((state) => ({ hubSecretRetryNonce: state.hubSecretRetryNonce + 1 })),
+  retryHub: (dTag) => set((state) => {
+    // Clear the terminal status so the sidebar shows the pending/loading state
+    // again, and point the loader at this hub via the reload nonce.
+    const hubStatus = { ...state.hubStatus }
+    delete hubStatus[dTag]
+    return { hubStatus, hubReloadTarget: dTag, hubReloadNonce: state.hubReloadNonce + 1 }
+  }),
 
   setHubEntries: (entries, folders) => set({ hubEntries: entries, folders, hubListLoaded: true }),
   setHubListLoaded: (loaded) => set({ hubListLoaded: loaded }),

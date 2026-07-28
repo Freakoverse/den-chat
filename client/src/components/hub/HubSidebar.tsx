@@ -8,7 +8,7 @@ import { useDM04Store } from '@/stores/dm04Store'
 import { useBlockStore } from '@/stores/blockStore'
 import { useWotStore } from '@/stores/wotStore'
 import { usePublicChatStore } from '@/stores/publicChatStore'
-import { Plus, Pencil, MessageSquare, MessagesSquare, Settings, AtSign, Compass, HelpCircle, XCircle, FolderClosed, Search, Sparkles, X, Volume2, RefreshCw, Loader2, Wallet } from 'lucide-react'
+import { Plus, Pencil, MessageSquare, MessagesSquare, Settings, AtSign, Compass, XCircle, FolderClosed, Search, Sparkles, X, Volume2, RefreshCw, Loader2, Wallet, Unplug } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { BlossomImage } from '@/components/ui/BlossomImage'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
@@ -95,6 +95,9 @@ export function HubSidebar({ activePage, onNavigate, compact = false }: { active
   const setShowHubChoice = useNavigationStore((s) => s.setShowHubChoiceModal)
   const setSettingsTab = useNavigationStore((s) => s.setSettingsTab)
   const [isRefreshing, setIsRefreshing] = useState(false)
+  const retryHub = useHubStore((s) => s.retryHub)
+  // dTag of the not-found hub whose "couldn't find / try again" modal is open
+  const [notFoundModalHub, setNotFoundModalHub] = useState<string | null>(null)
 
   // Retry fetching the hub list (kind 16942) from relays
   const refreshHubList = useCallback(async () => {
@@ -154,12 +157,13 @@ export function HubSidebar({ activePage, onNavigate, compact = false }: { active
     })
   }, [])
 
-  // Filter out hidden hubs
+  // Filter out hidden hubs. Pending hubs (no status yet) are always shown so they
+  // can render their "still fetching" pulse — we only hide once a hub has RESOLVED
+  // to a state the user has chosen to hide (deleted / not-found).
   const visibleEntries = hubEntries.filter((e) => {
     const status = hubStatus[e.dTag]
     if (hideDeletedHubs && status === 'deleted') return false
     if (hideNotFoundHubs && status === 'not-found') return false
-    if ((hideDeletedHubs || hideNotFoundHubs) && !status) return false
     return true
   })
 
@@ -171,11 +175,6 @@ export function HubSidebar({ activePage, onNavigate, compact = false }: { active
   }))
 
   const isLoading = !hubListLoaded
-
-  // Count hubs still waiting for status (pending check)
-  const pendingCount = (hideDeletedHubs || hideNotFoundHubs)
-    ? hubEntries.filter((e) => !hubStatus[e.dTag]).length
-    : 0
 
   return (
     <TooltipProvider delayDuration={200}>
@@ -218,11 +217,15 @@ export function HubSidebar({ activePage, onNavigate, compact = false }: { active
                     key={entry.dTag}
                     label={hub?.name ?? entry.dTag.slice(0, 6)}
                     isActive={activePage === 'hubs' && activeHubId === entry.dTag}
-                    onClick={() => { setActiveHub(entry.dTag); onNavigate?.('hubs') }}
+                    onClick={() => {
+                      if (status === 'not-found') { setNotFoundModalHub(entry.dTag); return }
+                      setActiveHub(entry.dTag); onNavigate?.('hubs')
+                    }}
                     status={status}
                     isInVoice={voiceHubDTag === entry.dTag}
                     hubDTag={entry.dTag}
                     loadingSecrets={status === 'loaded' && !hubSecretsResolved[entry.dTag]}
+                    loadingEvent={!hub && !status}
                   >
                     {hub?.icon ? (
                       <BlossomImage src={hub.icon} alt={hub.name} className="absolute inset-0 w-full h-full object-cover" fallback={
@@ -300,13 +303,17 @@ export function HubSidebar({ activePage, onNavigate, compact = false }: { active
                             key={entry.dTag}
                             label={hub?.name ?? entry.dTag.slice(0, 6)}
                             isActive={activePage === 'hubs' && activeHubId === entry.dTag}
-                            onClick={() => { setActiveHub(entry.dTag); onNavigate?.('hubs') }}
+                            onClick={() => {
+                              if (status === 'not-found') { setNotFoundModalHub(entry.dTag); return }
+                              setActiveHub(entry.dTag); onNavigate?.('hubs')
+                            }}
                             status={status}
                             compact
                             folderColor={folder.color}
                             isInVoice={voiceHubDTag === entry.dTag}
                             hubDTag={entry.dTag}
                             loadingSecrets={status === 'loaded' && !hubSecretsResolved[entry.dTag]}
+                            loadingEvent={!hub && !status}
                           >
                             {hub?.icon ? (
                               <BlossomImage src={hub.icon} alt={hub.name} className="absolute inset-0 w-full h-full object-cover" fallback={
@@ -324,11 +331,6 @@ export function HubSidebar({ activePage, onNavigate, compact = false }: { active
                   </div>
                 )
               })}
-
-              {/* Skeleton placeholders for hubs still being status-checked */}
-              {pendingCount > 0 && Array.from({ length: pendingCount }).map((_, i) => (
-                <div key={`pending-${i}`} className="w-12 h-12 rounded-[24px] bg-secondary animate-pulse" style={{ animationDelay: `${i * 150}ms` }} />
-              ))}
 
               {/* Preview hub (ephemeral, dashed border) */}
               {previewHubId && !hubEntries.some(e => e.dTag === previewHubId) && hubs[previewHubId] && (
@@ -454,6 +456,45 @@ export function HubSidebar({ activePage, onNavigate, compact = false }: { active
           </div>
         </div>
       )}
+
+      {/* Not-found hub — "couldn't find this hub on your relays" + retry */}
+      {notFoundModalHub && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-2" onClick={() => setNotFoundModalHub(null)}>
+          <div className="absolute inset-0 bg-black/60" />
+          <div
+            className="relative z-10 w-full max-w-sm rounded-xl border border-border bg-background shadow-2xl animate-in fade-in-0 zoom-in-95 p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex flex-col items-center text-center gap-3">
+              <div className="w-14 h-14 rounded-2xl bg-amber-500/15 flex items-center justify-center">
+                <Unplug size={26} className="text-amber-500" />
+              </div>
+              <h2 className="text-base font-semibold text-foreground">Couldn’t find this hub</h2>
+              <p className="text-[13px] text-muted-foreground leading-snug">
+                We couldn’t fetch this hub’s event from any of your relays. It may be
+                temporarily offline, or hasn’t propagated to a relay you’re connected to.
+                You can try again, or add more relays in Settings → Network.
+              </p>
+              <p className="text-[11px] text-muted-foreground/70 font-mono break-all">{notFoundModalHub}</p>
+            </div>
+
+            <div className="mt-5 flex gap-2">
+              <button
+                onClick={() => setNotFoundModalHub(null)}
+                className="flex-1 h-9 rounded-lg border border-border text-sm text-muted-foreground hover:text-foreground hover:bg-secondary/50 transition-colors cursor-pointer"
+              >
+                Close
+              </button>
+              <button
+                onClick={() => { retryHub(notFoundModalHub); setNotFoundModalHub(null) }}
+                className="flex-1 h-9 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition-opacity cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                <RefreshCw size={14} /> Try again
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </TooltipProvider>
   )
 }
@@ -474,9 +515,11 @@ interface HubIconProps {
   hasNotificationDot?: boolean
   /** Show a spinner overlay while the hub's blossom secret/data is still being fetched+decrypted. */
   loadingSecrets?: boolean
+  /** The hub event itself hasn't arrived yet — show a pulsating "still fetching" state. */
+  loadingEvent?: boolean
 }
 
-function HubIcon({ label, isActive, onClick, children, isAction, isPreview, status, compact, folderColor, isInVoice, hubDTag, dmUnreadCount, hasNotificationDot, loadingSecrets }: HubIconProps) {
+function HubIcon({ label, isActive, onClick, children, isAction, isPreview, status, compact, folderColor, isInVoice, hubDTag, dmUnreadCount, hasNotificationDot, loadingSecrets, loadingEvent }: HubIconProps) {
   const size = compact ? 'w-10 h-10' : 'w-12 h-12'
   const rounding = isActive ? 'rounded-2xl' : 'rounded-[24px] hover:rounded-2xl'
 
@@ -512,34 +555,34 @@ function HubIcon({ label, isActive, onClick, children, isAction, isPreview, stat
               'relative flex items-center justify-center transition-all duration-200 cursor-pointer overflow-hidden',
               size, rounding,
               isActive ? 'bg-primary text-primary-foreground' : '',
-              !isActive && !isAction && !isPreview && 'bg-secondary text-secondary-foreground hover:bg-primary hover:text-primary-foreground',
+              !isActive && !isAction && !isPreview && status !== 'not-found' && 'bg-secondary text-secondary-foreground hover:bg-primary hover:text-primary-foreground',
               isAction && 'bg-secondary text-green-500 hover:bg-green-600 hover:text-white',
-              isPreview && !isActive && 'bg-secondary text-secondary-foreground hover:bg-primary hover:text-primary-foreground border-2 border-dashed border-primary/40'
+              isPreview && !isActive && 'bg-secondary text-secondary-foreground hover:bg-primary hover:text-primary-foreground border-2 border-dashed border-primary/40',
+              // Not-found: muted "broken" look, clickable to open the retry modal.
+              status === 'not-found' && 'bg-secondary/60 text-amber-500 hover:bg-amber-500/20 ring-1 ring-amber-500/40',
+              // Still fetching the hub event: gently pulse the placeholder.
+              loadingEvent && 'animate-pulse',
             )}
           >
-            {children}
+            {status === 'not-found' ? <Unplug size={18} /> : children}
             {/* Loading overlay while blossom secret/data is being fetched + decrypted */}
             {loadingSecrets && (
               <div className="absolute inset-0 z-[5] flex items-center justify-center bg-background/45 backdrop-blur-[1px]">
                 <Loader2 size={16} className="animate-spin text-white" />
               </div>
             )}
+            {/* Fetching overlay while the hub event itself is still loading */}
+            {loadingEvent && !loadingSecrets && (
+              <div className="absolute inset-0 z-[5] flex items-center justify-center bg-background/35">
+                <Loader2 size={14} className="animate-spin text-muted-foreground" />
+              </div>
+            )}
           </button>
         </TooltipTrigger>
-        <TooltipContent side="right">{loadingSecrets ? `${label} — loading…` : label}</TooltipContent>
+        <TooltipContent side="right">
+          {status === 'not-found' ? `${label} — not found (click to retry)` : loadingEvent ? `${label} — loading…` : loadingSecrets ? `${label} — loading…` : label}
+        </TooltipContent>
       </Tooltip>
-
-      {/* Status badge */}
-      {status === 'not-found' && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <div className={cn('absolute -bottom-0.5 w-5 h-5 rounded-full bg-amber-500 flex items-center justify-center shadow-md z-10 cursor-default', compact ? '-right-0.5' : 'right-1')}>
-              <HelpCircle size={12} className="text-white" />
-            </div>
-          </TooltipTrigger>
-          <TooltipContent side="right">Hub not found</TooltipContent>
-        </Tooltip>
-      )}
       {status === 'deleted' && (
         <Tooltip>
           <TooltipTrigger asChild>

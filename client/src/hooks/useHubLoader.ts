@@ -573,7 +573,17 @@ export function useHubLoader() {
   const privateKey = useUserStore((s) => s.privateKey)
   const signer = useUserStore((s) => s.signer)
   const hubSecretRetryNonce = useHubStore((s) => s.hubSecretRetryNonce)
+  const hubReloadNonce = useHubStore((s) => s.hubReloadNonce)
   const loadedRef = useRef<Set<string>>(new Set())
+
+  // Manual per-hub retry (the "Try again" button on a not-found hub): forget the
+  // "already attempted" mark for the targeted hub so the main effect re-fetches it
+  // from scratch. retryHub() also cleared its status, so it shows as pending again.
+  useEffect(() => {
+    if (hubReloadNonce === 0) return
+    const target = useHubStore.getState().hubReloadTarget
+    if (target) loadedRef.current.delete(target)
+  }, [hubReloadNonce])
 
   // Retry trigger: when the secret-retry nonce bumps (e.g. remote signer
   // reconnected on app resume), forget the "loaded" mark for hubs whose secret
@@ -908,6 +918,6 @@ export function useHubLoader() {
         loadedRef.current.delete(entry.dTag)
       }
     })
-  }, [hubEntries, hubs, hubSecrets, setHubData, setHubStatus, setHubSecret, setHubMembers, pubkey, privateKey, signer, setEpochSecrets, setGroupEpochSecrets, hubSecretRetryNonce])
+  }, [hubEntries, hubs, hubSecrets, setHubData, setHubStatus, setHubSecret, setHubMembers, pubkey, privateKey, signer, setEpochSecrets, setGroupEpochSecrets, hubSecretRetryNonce, hubReloadNonce])
 }
 
