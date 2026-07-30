@@ -20,15 +20,17 @@ interface PostingBehaviourState {
   postToHubRelays: boolean
   limitRelaysPerList: boolean   // cap 3 per list
   limitBlossomsPerList: boolean // cap 3 per list
+  parallelBlossomUploads: boolean // upload to all target servers at once instead of one-by-one
 
   setPostToClientRelays: (v: boolean) => void
   setPostToUserRelays: (v: boolean) => void
   setPostToHubRelays: (v: boolean) => void
   setLimitRelaysPerList: (v: boolean) => void
   setLimitBlossomsPerList: (v: boolean) => void
+  setParallelBlossomUploads: (v: boolean) => void
 }
 
-function loadDefaults(): Pick<PostingBehaviourState, 'postToClientRelays' | 'postToUserRelays' | 'postToHubRelays' | 'limitRelaysPerList' | 'limitBlossomsPerList'> {
+function loadDefaults(): Pick<PostingBehaviourState, 'postToClientRelays' | 'postToUserRelays' | 'postToHubRelays' | 'limitRelaysPerList' | 'limitBlossomsPerList' | 'parallelBlossomUploads'> {
   try {
     const stored = localStorage.getItem(LS_KEY)
     if (stored) return { ...defaultValues, ...JSON.parse(stored) }
@@ -42,11 +44,12 @@ const defaultValues = {
   postToHubRelays: true,
   limitRelaysPerList: true,
   limitBlossomsPerList: true,
+  parallelBlossomUploads: false,
 }
 
 function persist(state: PostingBehaviourState) {
-  const { postToClientRelays, postToUserRelays, postToHubRelays, limitRelaysPerList, limitBlossomsPerList } = state
-  localStorage.setItem(LS_KEY, JSON.stringify({ postToClientRelays, postToUserRelays, postToHubRelays, limitRelaysPerList, limitBlossomsPerList }))
+  const { postToClientRelays, postToUserRelays, postToHubRelays, limitRelaysPerList, limitBlossomsPerList, parallelBlossomUploads } = state
+  localStorage.setItem(LS_KEY, JSON.stringify({ postToClientRelays, postToUserRelays, postToHubRelays, limitRelaysPerList, limitBlossomsPerList, parallelBlossomUploads }))
 }
 
 export const usePostingBehaviourStore = create<PostingBehaviourState>((set, get) => {
@@ -59,6 +62,7 @@ export const usePostingBehaviourStore = create<PostingBehaviourState>((set, get)
     setPostToHubRelays: (v) => { set({ postToHubRelays: v }); persist({ ...get(), postToHubRelays: v }) },
     setLimitRelaysPerList: (v) => { set({ limitRelaysPerList: v }); persist({ ...get(), limitRelaysPerList: v }) },
     setLimitBlossomsPerList: (v) => { set({ limitBlossomsPerList: v }); persist({ ...get(), limitBlossomsPerList: v }) },
+    setParallelBlossomUploads: (v) => { set({ parallelBlossomUploads: v }); persist({ ...get(), parallelBlossomUploads: v }) },
   }
 })
 

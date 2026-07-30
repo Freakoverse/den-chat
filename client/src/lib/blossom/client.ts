@@ -16,6 +16,21 @@ function normalize(url: string): string {
   return url.replace(/\/+$/, '')
 }
 
+/**
+ * Whether the user enabled "Simultaneous blossom uploads" (Settings → Network →
+ * Posting behavior). Read straight from localStorage — the postingBehaviourStore
+ * persists to this key — so this lib module doesn't have to import the store
+ * (which imports @/lib/blossom, i.e. this module → circular). Defaults off.
+ */
+function parallelUploadsEnabled(): boolean {
+  try {
+    const raw = localStorage.getItem('denchat_posting_behaviour')
+    return raw ? JSON.parse(raw).parallelBlossomUploads === true : false
+  } catch {
+    return false
+  }
+}
+
 // ─── Migration from old keys ───
 
 function migrateOldBlossomKeys(): void {
@@ -370,6 +385,45 @@ export async function uploadToBlossomServers(
     }
 
     return { hash, successCount: serverUrls.length, serverUrls }
+  }
+
+  // ── Parallel mode (with progress) — user opted into "Simultaneous blossom
+  // uploads". Fire every target server at once instead of one-by-one. The target
+  // list is whatever the caller passed (already honouring "Limit to max 3 blossoms
+  // per list"), so this just changes ordering, not which servers. Per-server
+  // progress is still reported (bars advance concurrently). ──
+  if (parallelUploadsEnabled()) {
+    const parallelUrls: string[] = []
+    const results = await Promise.allSettled(
+      shuffled.map(async (server, i) => {
+        const signal = getAbortSignal?.()
+
+        // HEAD check — skip if the file already exists on this server.
+        try {
+          const headCtrl = new AbortController()
+          const headTimer = setTimeout(() => headCtrl.abort(), 5000)
+          const headRes = await fetch(`${server}/${hash}`, { method: 'HEAD', signal: headCtrl.signal }).catch(() => null)
+          clearTimeout(headTimer)
+          if (headRes && headRes.ok) {
+            onProgress({ serverUrl: server, serverIndex: i, totalServers: shuffled.length, percent: 100, speed: 0, loaded: data.length, total: data.length })
+            return server
+          }
+        } catch { /* proceed with upload */ }
+
+        onProgress({ serverUrl: server, serverIndex: i, totalServers: shuffled.length, percent: 0, speed: 0, loaded: 0, total: data.length })
+        const ok = await uploadToServerWithProgress(server, data, authHeader, contentType, (p) => onProgress(p), i, shuffled.length, signal)
+        if (!ok) throw new Error(`upload rejected by ${server}`)
+        onProgress({ serverUrl: server, serverIndex: i, totalServers: shuffled.length, percent: 100, speed: 0, loaded: data.length, total: data.length })
+        return server
+      }),
+    )
+    for (const r of results) {
+      if (r.status === 'fulfilled' && r.value) parallelUrls.push(normalize(r.value))
+    }
+    if (parallelUrls.length === 0) {
+      throw new Error('Upload failed: no Blossom servers accepted the file')
+    }
+    return { hash, successCount: parallelUrls.length, serverUrls: parallelUrls }
   }
 
   // ── Sequential mode (with progress) — used for user-facing file uploads ──

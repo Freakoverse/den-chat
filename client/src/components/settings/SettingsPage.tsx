@@ -2801,6 +2801,7 @@ function PostingBehaviourSection() {
     postToHubRelays, setPostToHubRelays,
     limitRelaysPerList, setLimitRelaysPerList,
     limitBlossomsPerList, setLimitBlossomsPerList,
+    parallelBlossomUploads, setParallelBlossomUploads,
   } = usePostingBehaviourStore()
 
   return (
@@ -2854,6 +2855,13 @@ function PostingBehaviourSection() {
             <p className="text-xs text-muted-foreground">Upload media to at most 3 blossom servers from each list</p>
           </div>
           <ToggleSwitch checked={limitBlossomsPerList} onChange={setLimitBlossomsPerList} />
+        </div>
+        <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-border bg-secondary/30">
+          <div>
+            <p className="text-sm font-medium text-foreground">Simultaneous blossom uploads</p>
+            <p className="text-xs text-muted-foreground">Upload to all target servers at once instead of one-by-one. Faster, but heavier on your connection. Still respects the limit above.</p>
+          </div>
+          <ToggleSwitch checked={parallelBlossomUploads} onChange={setParallelBlossomUploads} />
         </div>
       </div>
       {!postToClientRelays && !postToUserRelays && !postToHubRelays && (
