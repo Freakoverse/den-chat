@@ -6,13 +6,13 @@
  */
 
 import { useState, useEffect, useRef } from 'react'
-import { X, Copy, Check, Tag, MoreVertical, Code, Link2, Radio, Loader2, Archive, AlertTriangle } from 'lucide-react'
+import { X, Copy, Check, Tag, MoreVertical, Code, Link2, Radio, Loader2, Archive, AlertTriangle, RefreshCw } from 'lucide-react'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Separator } from '@/components/ui/separator'
 import { BlossomImage } from '@/components/ui/BlossomImage'
 import { RawEventModal } from '@/components/social/SocialPost'
-import type { HubData } from '@/stores/hubStore'
+import { useHubStore, type HubData } from '@/stores/hubStore'
 import { truncateNpub } from '@/lib/utils'
 import { fetchEvents, fetchReplaceable } from '@/lib/nostr/relay-pool'
 import { checkEventAvailability, type RelayAvailability } from '@/lib/nostr/eventRedundancy'
@@ -52,6 +52,25 @@ export function HubInfoModal({ open, onClose, hub, blurMedia, onCreatorClick }: 
   const [backupBusy, setBackupBusy] = useState(false)
   const [backupProgress, setBackupProgress] = useState<{ done: number; total: number; bytes: number } | null>(null)
   const [backupError, setBackupError] = useState<string | null>(null)
+
+  // ── Hub version (event created_at) — lets members compare what they're seeing ──
+  const retryHub = useHubStore((s) => s.retryHub)
+  // Read the version live from the store so it updates after "Fetch latest".
+  const liveVersion = useHubStore((s) => s.hubs[hub.dTag]?.eventCreatedAt) ?? hub.eventCreatedAt
+  const [versionCopied, setVersionCopied] = useState(false)
+  const [fetchingLatest, setFetchingLatest] = useState(false)
+
+  const copyVersion = () => {
+    if (liveVersion == null) return
+    navigator.clipboard.writeText(String(liveVersion))
+    setVersionCopied(true)
+    setTimeout(() => setVersionCopied(false), 2000)
+  }
+  const fetchLatest = () => {
+    setFetchingLatest(true)
+    retryHub(hub.dTag) // re-fetch from relays (+ local cache) via the loader; store updates in place
+    setTimeout(() => setFetchingLatest(false), 4000)
+  }
 
   /** Resolve the signed hub event: relays first, local cache if it's been wiped. */
   const resolveHubEvent = async () => {
@@ -326,6 +345,46 @@ export function HubInfoModal({ open, onClose, hub, blurMedia, onCreatorClick }: 
             ) : (
               <div className="h-16 rounded-lg bg-secondary animate-pulse" />
             )}
+          </div>
+
+          <Separator />
+
+          {/* Hub version — so members can compare which event version they're on */}
+          <div>
+            <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2 block">Hub version</label>
+            <div className="flex items-center gap-2 p-3 rounded-lg bg-secondary/50 border border-border/50">
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium text-foreground font-mono truncate">{liveVersion ?? '—'}</div>
+                <div className="text-xs text-muted-foreground truncate">
+                  {liveVersion != null ? new Date(liveVersion * 1000).toLocaleString() : 'Unknown'}
+                </div>
+              </div>
+              <TooltipProvider delayDuration={300}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={copyVersion}
+                      disabled={liveVersion == null}
+                      className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors cursor-pointer shrink-0 disabled:opacity-40"
+                    >
+                      {versionCopied ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="text-xs">Copy version number</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+              <button
+                onClick={fetchLatest}
+                disabled={fetchingLatest}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-primary/10 text-primary hover:bg-primary/20 transition-colors cursor-pointer shrink-0 text-xs font-medium disabled:opacity-60 disabled:cursor-wait"
+              >
+                {fetchingLatest ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
+                {fetchingLatest ? 'Fetching…' : 'Fetch latest'}
+              </button>
+            </div>
+            <p className="text-[11px] text-muted-foreground mt-1.5 leading-snug">
+              This is the hub event's timestamp. If members see different channels or content, compare this number — the highest is newest — and fetch the latest.
+            </p>
           </div>
         </div>
       </div>
