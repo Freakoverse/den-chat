@@ -252,7 +252,7 @@ export function ForumView() {
       ) : (
         <>
           {/* Forum Header */}
-          <div className="flex items-center justify-between px-4 py-3">
+          <div className="flex items-center justify-between px-2 py-3">
             <div className="flex items-center gap-2 min-w-0">
               {isMobile && (
                 <button
@@ -302,7 +302,7 @@ export function ForumView() {
           </div>
 
           {/* Search + Filter Bar — inset, self-contained bordered + rounded bar */}
-          <div className="flex items-center gap-2 mx-4 mb-2 px-2 py-1.5 rounded-lg border border-border bg-secondary/30">
+          <div className="flex items-center gap-2 mx-2 mb-2 px-2 py-1.5 rounded-lg border border-border bg-secondary/30">
             <div className="flex-1 flex items-center gap-2 px-3 py-1.5 rounded-lg bg-background border border-border focus-within:border-primary/40 transition-colors">
               <Search size={14} className="text-muted-foreground shrink-0" />
               <input
@@ -338,7 +338,7 @@ export function ForumView() {
           </div>
 
           {/* Post List */}
-          <div className="flex-1 overflow-y-auto p-4">
+          <div className="flex-1 overflow-y-auto px-2 pb-4 pt-1">
             {initialLoading && filteredPosts.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-16 text-center">
                 <Loader2 size={24} className="text-primary animate-spin mb-3" />
