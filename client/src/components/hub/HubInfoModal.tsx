@@ -208,19 +208,19 @@ export function HubInfoModal({ open, onClose, hub, blurMedia, onCreatorClick }: 
               {rawLoading ? <Loader2 size={14} className="animate-spin" /> : <MoreVertical size={14} />}
             </button>
             {menuOpen && (
-              <div className="absolute right-0 mt-1 w-56 rounded-lg border border-border bg-popover shadow-lg py-1 text-sm">
-                <button onClick={viewRawEvent} className="flex items-center gap-2.5 w-full px-3 py-2 text-foreground/90 hover:bg-accent/50 transition-colors cursor-pointer">
+              <div className="absolute right-0 mt-1 w-56 rounded-xl border border-border bg-popover/95 backdrop-blur-md shadow-xl z-50 p-1 flex flex-col gap-0.5 text-sm animate-in fade-in-0 zoom-in-95">
+                <button onClick={viewRawEvent} className="flex items-center gap-2.5 w-full px-3 py-2 rounded-md text-foreground hover:bg-accent/50 transition-colors cursor-pointer">
                   <Code size={14} className="text-muted-foreground" /> View raw event
                 </button>
-                <button onClick={copyHubAddress} className="flex items-center gap-2.5 w-full px-3 py-2 text-foreground/90 hover:bg-accent/50 transition-colors cursor-pointer">
+                <button onClick={copyHubAddress} className="flex items-center gap-2.5 w-full px-3 py-2 rounded-md text-foreground hover:bg-accent/50 transition-colors cursor-pointer">
                   {addressCopied ? <Check size={14} className="text-emerald-400" /> : <Link2 size={14} className="text-muted-foreground" />}
                   {addressCopied ? 'Copied!' : 'Copy hub address'}
                 </button>
-                <button onClick={() => { setMenuOpen(false); setShowAvailability(true) }} className="flex items-center gap-2.5 w-full px-3 py-2 text-foreground/90 hover:bg-accent/50 transition-colors cursor-pointer">
+                <button onClick={() => { setMenuOpen(false); setShowAvailability(true) }} className="flex items-center gap-2.5 w-full px-3 py-2 rounded-md text-foreground hover:bg-accent/50 transition-colors cursor-pointer">
                   <Radio size={14} className="text-muted-foreground" /> Check hub availability
                 </button>
-                <button onClick={exportBackup} disabled={backupBusy} className="flex items-center gap-2.5 w-full px-3 py-2 text-foreground/90 hover:bg-accent/50 transition-colors cursor-pointer disabled:opacity-50">
-                  <Archive size={14} className="text-muted-foreground" /> Export hub backup (.json.gz)
+                <button onClick={exportBackup} disabled={backupBusy} className="flex items-center gap-2.5 w-full px-3 py-2 rounded-md text-foreground hover:bg-accent/50 transition-colors cursor-pointer disabled:opacity-50">
+                  <Archive size={14} className="text-muted-foreground" /> Export hub backup
                 </button>
               </div>
             )}
