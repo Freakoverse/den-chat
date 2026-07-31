@@ -14,6 +14,7 @@ import { resetSignerGuard } from '@/lib/auth/signerGuard'
 import { discover } from '@/lib/auth/pc55'
 import { fetchReplaceable, fetchEvents } from '@/lib/nostr/relay-pool'
 import { KINDS } from '@/lib/crypto/constants'
+import { useVoiceStore } from '@/stores/voiceStore'
 import { useHubLoader } from './useHubLoader'
 import { useHubSubscriptions } from './useHubSubscriptions'
 import { useTypingSubscription } from './useTypingSubscription'
@@ -419,6 +420,29 @@ export function useStartup() {
     }, 5000)
     return () => clearTimeout(timer)
   }, [isAuthenticated, activeHubId, activeHubCreator])
+
+  // ─── Voice-host event redundancy (cooperative rebroadcasting) ───
+  // When the user opens a hub where THEY host voice, keep their own voice-host
+  // event(s) (kind 36946) on ≥3 relays — same version-aware check as hub events —
+  // so the published hosting config isn't lost if relays purge it. One per scope
+  // (hub-wide d-tag = hubDTag, group-scoped = `hubDTag:groupId`).
+  const myVoiceHosts = useVoiceStore((s) => (activeHubId ? s.hostsByHub[activeHubId] : undefined))
+  useEffect(() => {
+    if (!isAuthenticated || !activeHubId || !pubkey || !myVoiceHosts) return
+    const mine = myVoiceHosts.filter((h) => h.pubkey === pubkey)
+    if (mine.length === 0) return
+    const hubId = activeHubId
+    const self = pubkey
+    const timer = setTimeout(() => {
+      import('@/lib/nostr/eventRedundancy').then(({ ensureAddressableRedundancy }) => {
+        for (const h of mine) {
+          const dTagValue = h.groupId ? `${hubId}:${h.groupId}` : hubId
+          ensureAddressableRedundancy(KINDS.VOICE_HOST, self, dTagValue, h.createdAt)
+        }
+      })
+    }, 6000)
+    return () => clearTimeout(timer)
+  }, [isAuthenticated, activeHubId, pubkey, myVoiceHosts])
 
   // ─── Hub member-list Blossom redundancy (cooperative mirroring) ───
   // When the user opens a hub, check that its member-list files (index, spine/
