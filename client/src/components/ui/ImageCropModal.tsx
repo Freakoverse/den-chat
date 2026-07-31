@@ -48,6 +48,12 @@ export function ImageCropModal({ file, aspect = 1, round, maxOutput = 1024, titl
   const [img, setImg] = useState<HTMLImageElement | null>(null)
   const [zoomFactor, setZoomFactor] = useState(1)     // 1 = cover (fills frame, no gaps)
   const [rotationDeg, setRotationDeg] = useState(0)
+  // Rotation is cyclic — wrap any angle into the slider's (-180, 180] range so the
+  // 90° buttons can't push the value (and the slider handle) past the track ends.
+  const wrapDeg = (d: number) => {
+    const x = ((Math.round(d) % 360) + 360) % 360 // [0, 360)
+    return x > 180 ? x - 360 : x                   // (-180, 180]
+  }
   const [pan, setPan] = useState({ x: 0, y: 0 })       // screen px from center
   const [busy, setBusy] = useState(false)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -210,9 +216,9 @@ export function ImageCropModal({ file, aspect = 1, round, maxOutput = 1024, titl
 
           {/* Rotation slider + 90° buttons */}
           <div className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg bg-card">
-            <button onClick={() => setRotationDeg((r) => r - 90)} title="Rotate left 90°" className="shrink-0 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/50 cursor-pointer"><RotateCcw size={15} /></button>
-            <GradientSlider min={-180} max={180} step={1} value={rotationDeg} onChange={(v) => setRotationDeg(Math.round(v))} />
-            <button onClick={() => setRotationDeg((r) => r + 90)} title="Rotate right 90°" className="shrink-0 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/50 cursor-pointer"><RotateCw size={15} /></button>
+            <button onClick={() => setRotationDeg((r) => wrapDeg(r - 90))} title="Rotate left 90°" className="shrink-0 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/50 cursor-pointer"><RotateCcw size={15} /></button>
+            <GradientSlider min={-180} max={180} step={1} value={rotationDeg} onChange={(v) => setRotationDeg(wrapDeg(v))} />
+            <button onClick={() => setRotationDeg((r) => wrapDeg(r + 90))} title="Rotate right 90°" className="shrink-0 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/50 cursor-pointer"><RotateCw size={15} /></button>
             <span className="text-sm font-medium tabular-nums text-foreground min-w-[42px] text-right">{rotationDeg}°</span>
           </div>
 

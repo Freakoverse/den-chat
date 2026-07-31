@@ -1137,7 +1137,7 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm p-2" onClick={onClose}>
       <div
-        className={`bg-card rounded-2xl w-full max-h-[85vh] overflow-hidden shadow-2xl border border-border/50 animate-in fade-in-0 zoom-in-95 duration-200 transition-[max-width] ${editing ? 'max-w-[540px]' : 'max-w-lg'}`}
+        className={`bg-card rounded-2xl w-full max-h-[85vh] overflow-hidden shadow-2xl border border-border/50 flex flex-col animate-in fade-in-0 zoom-in-95 duration-200 transition-[max-width] ${editing ? 'max-w-[540px]' : 'max-w-lg'}`}
         onClick={(e) => e.stopPropagation()}
       >
         {/* ── Banner ── (hidden in edit mode) */}
@@ -1302,8 +1302,8 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
           </div>
         )}
 
-        {/* ── Content ── */}
-        <div className={`px-5 pb-5 overflow-y-auto ${editing ? 'pt-4 max-h-[calc(85vh-4rem)]' : 'pt-3 max-h-[calc(85vh-11.5rem)]'}`}>
+        {/* ── Content (scrolls; header above and footer below stay fixed) ── */}
+        <div className={`px-5 pb-5 overflow-y-auto flex-1 min-h-0 ${editing ? 'pt-4' : 'pt-3'}`}>
           {editing ? (
             /* Edit mode */
             <>
@@ -1427,16 +1427,6 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
                 <Field label="NIP-05" value={editProfile.nip05} onChange={(v) => setEditProfile({ ...editProfile, nip05: v })} placeholder="user@domain.com" />
                 <Field label="Website" value={editProfile.website} onChange={(v) => setEditProfile({ ...editProfile, website: v })} placeholder="https://..." />
                 <Field label="Lightning Address" value={editProfile.lud16} onChange={(v) => setEditProfile({ ...editProfile, lud16: v })} placeholder="user@wallet.com" />
-
-                {/* Cancel / Publish buttons */}
-                <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
-                  <Button variant="ghost" size="sm" onClick={() => { setEditing(false); setEditProfile(profile) }} className="h-8 rounded-full text-xs px-3">
-                    Cancel
-                  </Button>
-                  <Button size="sm" onClick={handlePublish} disabled={!hasChanges || publishing} className="h-8 rounded-full text-xs px-3">
-                    {publishing ? 'Publishing...' : 'Publish'}
-                  </Button>
-                </div>
               </div>
 
               {/* File size warning modal */}
@@ -1579,6 +1569,17 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
             </div>
           )}
         </div>
+        {/* ── Sticky footer — Cancel / Publish (edit mode), always visible ── */}
+        {editing && (
+          <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-border shrink-0">
+            <Button variant="ghost" size="sm" onClick={() => { setEditing(false); setEditProfile(profile) }} className="h-8 rounded-full text-xs px-3">
+              Cancel
+            </Button>
+            <Button size="sm" onClick={handlePublish} disabled={!hasChanges || publishing} className="h-8 rounded-full text-xs px-3">
+              {publishing ? 'Publishing...' : 'Publish'}
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* Links modals */}
