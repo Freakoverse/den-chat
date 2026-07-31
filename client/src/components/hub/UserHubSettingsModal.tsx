@@ -351,29 +351,75 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
     return () => { cancelled = true }
   }, [open, activeTab, pubkey, hub.dTag, hub.blossomServers])
 
-  // Load existing voice host config on open
+  // Load existing voice host config on open (hub-wide scope). If the config hasn't
+  // been decrypted yet — the hub secret wasn't available when the host event was
+  // parsed (e.g. the hub was still resolving) — decrypt the stored ciphertext on
+  // demand here, and re-run when the secret arrives. Without this the published
+  // credentials show up as EMPTY fields even though they were saved.
   useEffect(() => {
     if (!open || !pubkey) return
     const hosts = hostsByHub[hub.dTag] || []
     // Initial scope is hub-wide (voiceScope = null), so only load hub-wide host (no groupId)
     const myHost = hosts.find((h) => h.pubkey === pubkey && !h.groupId)
-    if (myHost) {
-      setVoiceProviderType(myHost.providerType)
-      setVoiceHostStatus(myHost.status)
-      // Pre-fill decrypted credentials (if available)
-      const cfg = myHost.config as any
-      if (cfg && myHost.providerType === 'cloudflare') {
-        if (cfg.cfAppId) setCfAppId(cfg.cfAppId)
-        if (cfg.cfApiToken) setCfApiToken(cfg.cfApiToken)
-        if (cfg.cfTurnKeyId) setCfTurnKeyId(cfg.cfTurnKeyId)
-        if (cfg.cfTurnToken) setCfTurnToken(cfg.cfTurnToken)
-      } else if (cfg && myHost.providerType === 'livekit') {
-        if (cfg.lkUrl) setLkUrl(cfg.lkUrl)
-        if (cfg.lkApiKey) setLkApiKey(cfg.lkApiKey)
-        if (cfg.lkApiSecret) setLkApiSecret(cfg.lkApiSecret)
-      }
+    if (!myHost) return
+
+    setVoiceProviderType(myHost.providerType)
+    setVoiceHostStatus(myHost.status)
+
+    // Already-decrypted config → pre-fill directly.
+    const cfg = myHost.config as any
+    if (cfg && myHost.providerType === 'cloudflare') {
+      if (cfg.cfAppId) setCfAppId(cfg.cfAppId)
+      if (cfg.cfApiToken) setCfApiToken(cfg.cfApiToken)
+      if (cfg.cfTurnKeyId) setCfTurnKeyId(cfg.cfTurnKeyId)
+      if (cfg.cfTurnToken) setCfTurnToken(cfg.cfTurnToken)
+      return
     }
-  }, [open, pubkey, hostsByHub, hub.dTag])
+    if (cfg && myHost.providerType === 'livekit') {
+      if (cfg.lkUrl) setLkUrl(cfg.lkUrl)
+      if (cfg.lkApiKey) setLkApiKey(cfg.lkApiKey)
+      if (cfg.lkApiSecret) setLkApiSecret(cfg.lkApiSecret)
+      return
+    }
+
+    // Not decrypted yet — try now with the hub secret (or a historical epoch secret).
+    if (!myHost.encryptedContent) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const { decryptHostConfig, useVoiceStore } = await import('@/stores/voiceStore')
+        const { useHubStore } = await import('@/stores/hubStore')
+        let config: import('@/lib/voice/types').VoiceProviderConfig | null = null
+        const secret = hubSecrets[hub.dTag]
+        if (secret) config = await decryptHostConfig(myHost.encryptedContent!, secret, myHost.epoch)
+        if (!config) {
+          const oldSecret = useHubStore.getState().epochSecrets[hub.dTag]?.[myHost.epoch]
+          if (oldSecret) config = await decryptHostConfig(myHost.encryptedContent!, oldSecret, myHost.epoch)
+        }
+        if (!config || cancelled) return
+
+        // Cache the decrypted config in the store so other views pick it up too.
+        const vs = useVoiceStore.getState()
+        const currentHosts = vs.hostsByHub[hub.dTag] || []
+        const idx = currentHosts.findIndex((h) => h.pubkey === myHost.pubkey && h.groupId === myHost.groupId)
+        if (idx >= 0) {
+          const updated = [...currentHosts]
+          updated[idx] = { ...updated[idx], config, encryptedContent: undefined }
+          useVoiceStore.setState({ hostsByHub: { ...vs.hostsByHub, [hub.dTag]: updated } })
+        }
+
+        // Fill the form, but never clobber anything the user has started typing.
+        const c = config as any
+        if (myHost.providerType === 'cloudflare') {
+          setCfAppId((p) => p || c.cfAppId || ''); setCfApiToken((p) => p || c.cfApiToken || '')
+          setCfTurnKeyId((p) => p || c.cfTurnKeyId || ''); setCfTurnToken((p) => p || c.cfTurnToken || '')
+        } else {
+          setLkUrl((p) => p || c.lkUrl || ''); setLkApiKey((p) => p || c.lkApiKey || ''); setLkApiSecret((p) => p || c.lkApiSecret || '')
+        }
+      } catch { /* decryption failed — user can republish */ }
+    })()
+    return () => { cancelled = true }
+  }, [open, pubkey, hostsByHub, hub.dTag, hubSecrets])
 
   // Load own mesh list on open (members only)
   useEffect(() => {
