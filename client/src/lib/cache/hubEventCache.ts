@@ -7,11 +7,12 @@
  * (a newer event with ['deleted','true']) overwrites the live copy rather than
  * the other way around.
  *
- * The cooperative relay redundancy MAY read the cached copy to TOP UP the current
- * version onto relays that hold an older copy — version-aware, newest-only. It will
- * NOT recreate a coordinate that's absent from every relay (resurrection guard),
- * since a member who was offline during a deletion holds the pre-deletion live copy,
- * not the tombstone. Bulk / arbitrary rebroadcasting from this cache remains a
+ * The loader MAY read the cached copy to DISPLAY the newest version at load time
+ * (recovering a version relays only hold a stale copy of). But we NEVER auto-
+ * rebroadcast from this cache — the cooperative relay redundancy only ever pushes
+ * copies it finds ON RELAYS. Pushing a locally-held copy could resurrect a hub
+ * deleted while this client was offline (it would hold the pre-deletion live copy,
+ * not the tombstone), so propagating a local-only/newer version is always a
  * deliberate, warned, file-based user action (Settings → My Hubs).
  */
 

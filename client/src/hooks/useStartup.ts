@@ -410,16 +410,12 @@ export function useStartup() {
     const creator = activeHubCreator
     // Small settle delay; cancel on hub change so drive-by hubs aren't checked.
     const timer = setTimeout(() => {
+      // Pass the version the client currently holds so the check counts "has the
+      // latest" (not "has any copy"). If relays are all stale, the redundancy defers
+      // to a manual rebroadcast rather than auto-pushing our local copy.
       const knownLatest = useHubStore.getState().hubs[hubId]?.eventCreatedAt
-      // Pass the signed copy the client holds (recovered from the local cache when
-      // relays are stale) so the redundancy can actually PUSH the current version to
-      // relays that only have an older one — not just detect the gap.
-      Promise.all([
-        import('@/lib/nostr/eventRedundancy'),
-        import('@/lib/cache/hubEventCache'),
-      ]).then(async ([{ ensureAddressableRedundancy }, { getHubEvent }]) => {
-        const cached = await getHubEvent(KINDS.HUB_EVENT, creator, hubId)
-        ensureAddressableRedundancy(KINDS.HUB_EVENT, creator, hubId, knownLatest, cached)
+      import('@/lib/nostr/eventRedundancy').then(({ ensureAddressableRedundancy }) => {
+        ensureAddressableRedundancy(KINDS.HUB_EVENT, creator, hubId, knownLatest)
       })
     }, 5000)
     return () => clearTimeout(timer)
