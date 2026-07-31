@@ -12,6 +12,7 @@ import { useEffect, useRef } from 'react'
 import { useHubStore, type HubData, type Channel, type Category, type Role } from '@/stores/hubStore'
 import { useUserStore } from '@/stores/userStore'
 import { fetchEvents, fetchEventsProgressive } from '@/lib/nostr/relay-pool'
+import { getAllHubEvents } from '@/lib/cache/hubEventCache'
 import { KINDS } from '@/lib/crypto/constants'
 import { downloadTextFromBlossom, parseIndexFile, decryptHubSecret, decryptGroupSecret, downloadBanList } from '@/lib/blossom'
 import { aesDecrypt } from '@/lib/crypto/aes'
@@ -733,6 +734,22 @@ export function useHubLoader() {
       { maxWait: HUB_FETCH_MAX_WAIT_MS },
     )
     hubStreamRef.current = stream.close
+
+    // Seed from the local durable cache (IndexedDB) in parallel. A hub event is a
+    // replaceable event, so a relay can serve a STALE version while the newest one
+    // lives on a single (possibly slow/unreachable) relay. We cached every hub
+    // version we've ever seen, newest-wins, so feeding those in — merged by the
+    // same newest-wins logic — recovers the freshest version even when relays only
+    // hand back an old copy. A genuinely newer relay version still overrides it.
+    getAllHubEvents()
+      .then((cached) => {
+        const relevant = cached.filter((e) => {
+          const d = e.tags.find((t) => t[0] === 'd')?.[1]
+          return d !== undefined && requested.has(d)
+        })
+        if (relevant.length > 0) ingest(relevant)
+      })
+      .catch(() => {})
 
     stream.done.then(async () => {
       const missing = dTags.filter((d) => !latestByDTag.has(d))

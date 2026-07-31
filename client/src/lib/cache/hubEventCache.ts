@@ -64,6 +64,24 @@ export async function putHubEvent(event: Event): Promise<void> {
   } catch { /* IndexedDB unavailable (private mode, etc.) — ignore */ }
 }
 
+/**
+ * All cached hub events. Used at load time to recover the newest version of a hub
+ * when relays only return a stale copy (or the fresh copy lives on an unreachable
+ * relay) — matched by d tag, since the author pubkey isn't known up front. This is
+ * a read for DISPLAY only; it never triggers a rebroadcast.
+ */
+export async function getAllHubEvents(): Promise<Event[]> {
+  try {
+    const db = await openDb()
+    return await new Promise<Event[]>((res) => {
+      const tx = db.transaction(STORE, 'readonly')
+      const r = tx.objectStore(STORE).getAll()
+      r.onsuccess = () => res(((r.result as StoredHubEvent[] | undefined) ?? []).map((s) => s.event))
+      r.onerror = () => res([])
+    })
+  } catch { return [] }
+}
+
 /** Read a cached hub event, or null if not cached / unavailable. */
 export async function getHubEvent(kind: number, pubkey: string, dTag: string): Promise<Event | null> {
   try {
