@@ -660,25 +660,48 @@ export function useHubLoader() {
 
     const dTags = toLoad.map(e => e.dTag)
 
-    // Newest HUB_EVENT seen per d tag, and the created_at we've already handed to
-    // processHub — so each hub is processed once, but re-processed if a newer
-    // version arrives later from a slower relay.
     const requested = new Set(dTags)
+    // Newest HUB_EVENT seen per d tag; the created_at we've FULLY processed per d
+    // tag; and the set currently being processed. Because events stream in, an
+    // older version can arrive before a newer one — we must never run two
+    // processHub() for the same hub at once (they'd race on setHubData/secret and
+    // an older one finishing last would clobber the newer), and we must always
+    // process the newest known version.
     const latestByDTag = new Map<string, Event>()
-    const processedAt = new Map<string, number>()
+    const doneAt = new Map<string, number>()   // created_at last fully processed
+    const inFlight = new Set<string>()          // d tags currently processing
+    const queued = new Set<string>()            // d tags waiting in workQueue
 
-    // ── Concurrency-limited hub processing (streamed) ──
+    // ── Concurrency-limited, per-hub-serialized processing (streamed) ──
     // Each hub involves several I/O-bound Blossom fetches + crypto, so cap parallelism.
     const HUB_CONCURRENCY = 10
     let running = 0
-    const workQueue: [string, Event][] = []
+    const workQueue: string[] = []
+    const enqueue = (dTag: string) => {
+      if (queued.has(dTag)) return
+      queued.add(dTag)
+      workQueue.push(dTag)
+    }
     const pump = () => {
       while (running < HUB_CONCURRENCY && workQueue.length > 0) {
-        const [dTag, event] = workQueue.shift()!
+        const dTag = workQueue.shift()!
+        queued.delete(dTag)
+        if (inFlight.has(dTag)) continue
+        const event = latestByDTag.get(dTag) // always process the CURRENT newest
+        if (!event || doneAt.get(dTag) === event.created_at) continue
+        inFlight.add(dTag)
         running++
         processHub(dTag, event)
           .catch((err) => console.error(`Hub ${dTag}: processing failed:`, err))
-          .finally(() => { running--; pump() })
+          .finally(() => {
+            running--
+            inFlight.delete(dTag)
+            doneAt.set(dTag, event.created_at)
+            // A newer version may have arrived while we were processing — redo it.
+            const latest = latestByDTag.get(dTag)
+            if (latest && latest.created_at !== event.created_at) enqueue(dTag)
+            pump()
+          })
       }
     }
 
@@ -686,22 +709,16 @@ export function useHubLoader() {
     // event we haven't processed yet — so hubs render as their events stream in from
     // the fastest relay, instead of only after the whole query completes.
     const ingest = (events: Event[]) => {
-      let changed = false
       for (const event of events) {
         const dTag = event.tags.find(t => t[0] === 'd')?.[1]
         if (!dTag || !requested.has(dTag)) continue
         const existing = latestByDTag.get(dTag)
-        if (!existing || event.created_at > existing.created_at) {
-          latestByDTag.set(dTag, event)
-          changed = true
-        }
+        if (!existing || event.created_at > existing.created_at) latestByDTag.set(dTag, event)
       }
-      if (!changed) return
       for (const [dTag, event] of latestByDTag) {
-        if (processedAt.get(dTag) !== event.created_at) {
-          processedAt.set(dTag, event.created_at)
-          workQueue.push([dTag, event])
-        }
+        if (inFlight.has(dTag)) continue                 // re-checked when it finishes
+        if (doneAt.get(dTag) === event.created_at) continue // newest already processed
+        enqueue(dTag)
       }
       pump()
     }
