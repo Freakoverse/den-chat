@@ -145,35 +145,44 @@ async function queryPresence(relays: string[], filter: Filter): Promise<{ have: 
  * Core: ensure the LATEST version of a replaceable event is held by at least
  * TARGET_COPIES relays. Version-aware throughout.
  *
+ * The event to propagate is the NEWEST of what's on relays and `knownEvent` — the
+ * signed copy the client already holds (e.g. recovered from the local cache when
+ * relays only have a stale copy). This is how a version stranded on an unreachable
+ * relay still gets pushed back out.
+ *
  * 1. Check coverage across every relay we know (client + NIP-65), recording the
  *    created_at each relay holds.
- * 2. If the client holds a NEWER version than any reachable relay (`knownLatest` >
- *    the newest relay copy), the fresh copy can't be pushed from here — spreading
- *    the stale relay copy would be wrong — so we bail and leave it to a deliberate
- *    rebroadcast (Settings → My Hubs). If found nowhere, nothing to copy.
+ * 2. Pick the newest event we can push (relay copy vs `knownEvent`). If `knownLatest`
+ *    says an even newer version exists that we CAN'T push (no signed copy on hand),
+ *    bail rather than spread a stale one. If nothing to push, done.
  * 3. "Covered" = relays holding the LATEST created_at (a stale copy does NOT count).
  * 4. Top up: each round pick `needed` random relays from the client list AND the
  *    user list that DON'T have the latest (stale or absent), push the latest event,
  *    re-check, and fold confirmed ones into coverage. Repeat until the target or we
  *    run out of relays.
  */
-async function checkAndRebroadcast(filter: Filter, key: string, knownLatest?: number): Promise<void> {
+async function checkAndRebroadcast(filter: Filter, key: string, knownLatest?: number, knownEvent?: Event | null): Promise<void> {
   const clientRelays = uniqRelays(getRelays())
   const userRelays = uniqRelays(useUserListsStore.getState().userRelays)
   const allRelays = uniqRelays([...clientRelays, ...userRelays])
   if (allRelays.length === 0) return
 
-  const { have, event } = await queryPresence(allRelays, filter)
-  if (!event) {
-    console.log(`[EventRedundancy] ${key}: not found on any relay — nothing to rebroadcast`)
+  const { have, event: relayEvent } = await queryPresence(allRelays, filter)
+
+  // The newest signed copy we can actually push: relay copy or the one on hand.
+  let bestEvent = relayEvent
+  if (knownEvent && (!bestEvent || knownEvent.created_at > bestEvent.created_at)) bestEvent = knownEvent
+  if (!bestEvent) {
+    console.log(`[EventRedundancy] ${key}: not found on any relay or locally — nothing to rebroadcast`)
     return
   }
 
-  const relayLatest = event.created_at
-  // The client knows a newer version than any reachable relay has — don't spread
-  // the stale relay copy; the current version must be pushed deliberately.
-  if (knownLatest !== undefined && knownLatest > relayLatest) {
-    console.warn(`[EventRedundancy] ${key}: relays only have ${relayLatest}, client holds ${knownLatest} — relays are stale; skipping auto-rebroadcast (rebroadcast manually to propagate the current version).`)
+  const relayLatest = bestEvent.created_at
+  // A newer version is known to exist but we don't have its signed copy to push —
+  // don't spread a stale one; the current version must be pushed deliberately.
+  const known = Math.max(knownLatest ?? 0, knownEvent?.created_at ?? 0)
+  if (known > relayLatest) {
+    console.warn(`[EventRedundancy] ${key}: newest pushable copy is ${relayLatest} but ${known} is known to exist — skipping (rebroadcast manually to propagate the current version).`)
     return
   }
 
@@ -194,7 +203,7 @@ async function checkAndRebroadcast(filter: Filter, key: string, knownLatest?: nu
 
     candidates.forEach((c) => tried.add(c))
     try {
-      await publishToSpecificRelays(candidates, event)
+      await publishToSpecificRelays(candidates, bestEvent)
     } catch (err) {
       console.warn(`[EventRedundancy] ${key}: publish round ${round + 1} failed:`, err)
     }
@@ -252,7 +261,7 @@ export async function checkEventAvailability(filter: Filter, knownLatest?: numbe
  * @param knownLatest created_at of the version the client currently holds, if newer
  *                    than what relays return (so we never spread a stale copy over it)
  */
-export function ensureAddressableRedundancy(kind: number, pubkey: string, dTag?: string, knownLatest?: number) {
+export function ensureAddressableRedundancy(kind: number, pubkey: string, dTag?: string, knownLatest?: number, knownEvent?: Event | null) {
   const key = eventKey(kind, pubkey, dTag)
   if (checkedThisSession.has(key)) return
   checkedThisSession.add(key)
@@ -262,5 +271,5 @@ export function ensureAddressableRedundancy(kind: number, pubkey: string, dTag?:
     filter['#d'] = [dTag]
   }
 
-  enqueue(() => checkAndRebroadcast(filter, key, knownLatest))
+  enqueue(() => checkAndRebroadcast(filter, key, knownLatest, knownEvent))
 }
