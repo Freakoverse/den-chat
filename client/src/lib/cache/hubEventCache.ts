@@ -7,12 +7,12 @@
  * (a newer event with ['deleted','true']) overwrites the live copy rather than
  * the other way around.
  *
- * The cooperative relay redundancy MAY read the cached copy to propagate the
- * CURRENT version — but only ever the newest-known one, version-aware, and only to
- * relays that hold an older/no copy (it never spreads something staler than reality,
- * and tombstones win, so a deletion propagates rather than a resurrection). Bulk /
- * arbitrary rebroadcasting from this cache remains a deliberate, warned, file-based
- * user action (Settings → My Hubs).
+ * The cooperative relay redundancy MAY read the cached copy to TOP UP the current
+ * version onto relays that hold an older copy — version-aware, newest-only. It will
+ * NOT recreate a coordinate that's absent from every relay (resurrection guard),
+ * since a member who was offline during a deletion holds the pre-deletion live copy,
+ * not the tombstone. Bulk / arbitrary rebroadcasting from this cache remains a
+ * deliberate, warned, file-based user action (Settings → My Hubs).
  */
 
 import type { Event } from 'nostr-tools'

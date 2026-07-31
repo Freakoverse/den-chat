@@ -152,9 +152,12 @@ async function queryPresence(relays: string[], filter: Filter): Promise<{ have: 
  *
  * 1. Check coverage across every relay we know (client + NIP-65), recording the
  *    created_at each relay holds.
- * 2. Pick the newest event we can push (relay copy vs `knownEvent`). If `knownLatest`
+ * 2. RESURRECTION GUARD: if the coordinate is absent from EVERY relay, do nothing —
+ *    a locally-held copy is only ever used to top up an existing coordinate, never
+ *    to recreate a purged (possibly deleted) one.
+ * 3. Pick the newest event we can push (relay copy vs `knownEvent`). If `knownLatest`
  *    says an even newer version exists that we CAN'T push (no signed copy on hand),
- *    bail rather than spread a stale one. If nothing to push, done.
+ *    bail rather than spread a stale one.
  * 3. "Covered" = relays holding the LATEST created_at (a stale copy does NOT count).
  * 4. Top up: each round pick `needed` random relays from the client list AND the
  *    user list that DON'T have the latest (stale or absent), push the latest event,
@@ -169,13 +172,24 @@ async function checkAndRebroadcast(filter: Filter, key: string, knownLatest?: nu
 
   const { have, event: relayEvent } = await queryPresence(allRelays, filter)
 
-  // The newest signed copy we can actually push: relay copy or the one on hand.
-  let bestEvent = relayEvent
-  if (knownEvent && (!bestEvent || knownEvent.created_at > bestEvent.created_at)) bestEvent = knownEvent
-  if (!bestEvent) {
-    console.log(`[EventRedundancy] ${key}: not found on any relay or locally — nothing to rebroadcast`)
+  // RESURRECTION GUARD: a locally-held copy may only TOP UP a coordinate that still
+  // exists on at least one relay — never RECREATE one that's absent from every relay.
+  // If it's gone everywhere it may have been deleted and purged (and a member who was
+  // offline during the deletion holds the pre-deletion LIVE copy, not the tombstone),
+  // so pushing our cached copy would raise the dead. Reviving a genuinely-live-but-
+  // stranded coordinate from zero relay copies is left to a deliberate manual action.
+  if (!relayEvent) {
+    if (knownEvent) {
+      console.warn(`[EventRedundancy] ${key}: absent from all relays — not resurrecting from the local copy (it may have been deleted). Rebroadcast manually if you're certain it's still live.`)
+    } else {
+      console.log(`[EventRedundancy] ${key}: not found on any relay — nothing to rebroadcast`)
+    }
     return
   }
+
+  // Newest signed copy we can push: the relay copy, or a newer one the client holds.
+  let bestEvent = relayEvent
+  if (knownEvent && knownEvent.created_at > bestEvent.created_at) bestEvent = knownEvent
 
   const relayLatest = bestEvent.created_at
   // A newer version is known to exist but we don't have its signed copy to push —
