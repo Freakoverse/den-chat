@@ -338,7 +338,7 @@ export function ForumView() {
           </div>
 
           {/* Post List */}
-          <div className="flex-1 overflow-y-auto px-2 pb-4 pt-1">
+          <div className="flex-1 overflow-y-auto pb-4 pt-1">
             {initialLoading && filteredPosts.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-16 text-center">
                 <Loader2 size={24} className="text-primary animate-spin mb-3" />
