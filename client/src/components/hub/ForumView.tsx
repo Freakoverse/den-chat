@@ -86,14 +86,19 @@ export function ForumView() {
     && !!hubMembers?.some((m) => m.pubkey === facilitatorPk)
     && !!(hubFacilitatorMembers?.[facilitatorPk]?.includes(pubkey!))
 
+  // The hub creator is always a member with full permissions, even before the
+  // member list has resolved from Blossom. Without this, the very first time you
+  // open a forum channel in a hub you just created, canPublish is false (members
+  // not loaded yet) so "Create Post" is hidden until a refresh loads the members.
+  const isCreator = !!(pubkey && hub?.creatorPubkey === pubkey)
+
   // Role-based permission resolution
   const perms = usePermissions(activeHubId || undefined, activeChannelId || undefined)
-  const canPublish = (isMember || isFacilitated) && perms.send_messages
+  const canPublish = (isMember || isFacilitated || isCreator) && perms.send_messages
 
   // Hidden messages state
   const hiddenMessages = useHubStore((s) => (activeHubId ? s.hiddenMessages[activeHubId] : undefined) ?? EMPTY_HIDDEN)
-  const isCreatorForHide = !!(pubkey && hub?.creatorPubkey === pubkey)
-  const canHide = isCreatorForHide || perms.hide_messages
+  const canHide = isCreator || perms.hide_messages
 
   // ── Per-channel initial fetch ──
   // The global subscription fetches the latest 50 messages across ALL channels.
@@ -218,8 +223,6 @@ export function ForumView() {
 
   if (!channel || !hub) return null
 
-  const isCreator = pubkey && hub.creatorPubkey === pubkey
-
   const isMobile = useMobile()
   const setMobileView = useNavigationStore((s) => s.setMobileView)
 
@@ -249,7 +252,7 @@ export function ForumView() {
       ) : (
         <>
           {/* Forum Header */}
-          <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+          <div className="flex items-center justify-between px-4 py-3">
             <div className="flex items-center gap-2 min-w-0">
               {isMobile && (
                 <button
@@ -298,8 +301,8 @@ export function ForumView() {
             </div>
           </div>
 
-          {/* Search + Filter Bar */}
-          <div className="flex items-center gap-2 px-4 py-2 border-b border-border bg-secondary/30">
+          {/* Search + Filter Bar — inset, self-contained bordered + rounded bar */}
+          <div className="flex items-center gap-2 mx-4 mb-2 px-2 py-1.5 rounded-lg border border-border bg-secondary/30">
             <div className="flex-1 flex items-center gap-2 px-3 py-1.5 rounded-lg bg-background border border-border focus-within:border-primary/40 transition-colors">
               <Search size={14} className="text-muted-foreground shrink-0" />
               <input
