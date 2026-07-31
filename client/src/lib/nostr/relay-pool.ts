@@ -287,6 +287,12 @@ export function fetchEventsProgressive(
   }
 
   const sub = pool.subscribeMany(relays, filter, {
+    // Pass maxWait as the per-relay EOSE timeout too. Without it, subscribeMany
+    // uses nostr-tools' short default (~4.4s), so oneose (fires on all-EOSE) can
+    // trigger before a SLOW relay responds — and teardown would drop events that
+    // only that relay has (e.g. the newest version of a replaceable event). The
+    // deadline below is a hard cap on top of that.
+    maxWait,
     onevent(ev) { if (!byId.has(ev.id)) { byId.set(ev.id, ev); scheduleFlush() } },
     oneose() { teardown(true) },
   })
