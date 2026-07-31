@@ -113,12 +113,14 @@ function sample<T>(arr: T[], n: number): T[] {
 }
 
 /**
- * Which of `relays` currently hold an event matching `filter` (normalized set),
- * plus the newest such event found — the signed event we rebroadcast. Each relay
- * is queried individually with an 8s timeout.
+ * Which of `relays` hold an event matching `filter`, with the created_at of the
+ * version each holds (its newest), plus the newest event overall — the signed
+ * event we'd rebroadcast. Version-aware: a relay with a STALE copy is recorded
+ * with its OLDER created_at, so callers can tell "has the latest" apart from "has
+ * an old copy". Each relay is queried individually with an 8s timeout.
  */
-async function queryPresence(relays: string[], filter: Filter): Promise<{ present: Set<string>; event: Event | null }> {
-  const present = new Set<string>()
+async function queryPresence(relays: string[], filter: Filter): Promise<{ have: Map<string, number>; event: Event | null }> {
+  const have = new Map<string, number>()
   let best: Event | null = null
   const results = await Promise.allSettled(
     relays.map(async (relay) => {
@@ -131,46 +133,61 @@ async function queryPresence(relays: string[], filter: Filter): Promise<{ presen
   )
   for (const r of results) {
     if (r.status === 'fulfilled' && r.value.events.length > 0) {
-      present.add(normalizeRelay(r.value.relay))
-      const ev = r.value.events[0]
+      const ev = r.value.events.reduce((a, b) => (b.created_at > a.created_at ? b : a))
+      have.set(normalizeRelay(r.value.relay), ev.created_at)
       if (!best || ev.created_at > best.created_at) best = ev
     }
   }
-  return { present, event: best }
+  return { have, event: best }
 }
 
 /**
- * Core: ensure a single event is held by at least TARGET_COPIES relays.
+ * Core: ensure the LATEST version of a replaceable event is held by at least
+ * TARGET_COPIES relays. Version-aware throughout.
  *
- * 1. Check current coverage across every relay we know (client + NIP-65).
- * 2. If already on ≥ TARGET_COPIES, done. If found nowhere, nothing to copy — done.
- * 3. Otherwise top up: each round pick `needed` random relays from the client list
- *    AND `needed` from the user list (deduped, excluding relays that already have it
- *    or were tried), rebroadcast the signed event to them, then re-check just those
- *    candidates and fold the confirmed ones into coverage. Repeat with fresh random
- *    picks until coverage hits the target or we run out of untried relays.
+ * 1. Check coverage across every relay we know (client + NIP-65), recording the
+ *    created_at each relay holds.
+ * 2. If the client holds a NEWER version than any reachable relay (`knownLatest` >
+ *    the newest relay copy), the fresh copy can't be pushed from here — spreading
+ *    the stale relay copy would be wrong — so we bail and leave it to a deliberate
+ *    rebroadcast (Settings → My Hubs). If found nowhere, nothing to copy.
+ * 3. "Covered" = relays holding the LATEST created_at (a stale copy does NOT count).
+ * 4. Top up: each round pick `needed` random relays from the client list AND the
+ *    user list that DON'T have the latest (stale or absent), push the latest event,
+ *    re-check, and fold confirmed ones into coverage. Repeat until the target or we
+ *    run out of relays.
  */
-async function checkAndRebroadcast(filter: Filter, key: string): Promise<void> {
+async function checkAndRebroadcast(filter: Filter, key: string, knownLatest?: number): Promise<void> {
   const clientRelays = uniqRelays(getRelays())
   const userRelays = uniqRelays(useUserListsStore.getState().userRelays)
   const allRelays = uniqRelays([...clientRelays, ...userRelays])
   if (allRelays.length === 0) return
 
-  const { present, event } = await queryPresence(allRelays, filter)
+  const { have, event } = await queryPresence(allRelays, filter)
   if (!event) {
     console.log(`[EventRedundancy] ${key}: not found on any relay — nothing to rebroadcast`)
     return
   }
 
-  const coverage = new Set(present)
+  const relayLatest = event.created_at
+  // The client knows a newer version than any reachable relay has — don't spread
+  // the stale relay copy; the current version must be pushed deliberately.
+  if (knownLatest !== undefined && knownLatest > relayLatest) {
+    console.warn(`[EventRedundancy] ${key}: relays only have ${relayLatest}, client holds ${knownLatest} — relays are stale; skipping auto-rebroadcast (rebroadcast manually to propagate the current version).`)
+    return
+  }
+
+  // Coverage counts only relays that hold the LATEST version.
+  const coverage = new Set([...have.entries()].filter(([, ca]) => ca === relayLatest).map(([r]) => r))
   if (coverage.size >= TARGET_COPIES) {
-    console.log(`[EventRedundancy] ${key}: already on ${coverage.size}/${TARGET_COPIES} relays`)
+    console.log(`[EventRedundancy] ${key}: latest version already on ${coverage.size}/${TARGET_COPIES} relays`)
     return
   }
 
   const tried = new Set<string>()
   for (let round = 0; round < MAX_ROUNDS && coverage.size < TARGET_COPIES; round++) {
     const needed = TARGET_COPIES - coverage.size
+    // Candidates = relays without the latest (stale OR absent), not yet tried.
     const pickFrom = (list: string[]) => sample(list.filter((r) => !coverage.has(r) && !tried.has(r)), needed)
     const candidates = uniqRelays([...pickFrom(clientRelays), ...pickFrom(userRelays)])
     if (candidates.length === 0) break // no untried relays left to try
@@ -182,35 +199,44 @@ async function checkAndRebroadcast(filter: Filter, key: string): Promise<void> {
       console.warn(`[EventRedundancy] ${key}: publish round ${round + 1} failed:`, err)
     }
 
-    // Confirm which candidates actually hold it now, and fold them into coverage.
-    const { present: nowPresent } = await queryPresence(candidates, filter)
-    nowPresent.forEach((r) => coverage.add(r))
+    // Confirm which candidates now hold the LATEST version, and fold them in.
+    const { have: nowHave } = await queryPresence(candidates, filter)
+    for (const [r, ca] of nowHave) if (ca === relayLatest) coverage.add(r)
   }
 
   if (coverage.size >= TARGET_COPIES) {
-    console.log(`[EventRedundancy] ${key}: ensured on ${coverage.size}/${TARGET_COPIES} relays`)
+    console.log(`[EventRedundancy] ${key}: ensured latest on ${coverage.size}/${TARGET_COPIES} relays`)
   } else {
-    console.warn(`[EventRedundancy] ${key}: only ${coverage.size}/${TARGET_COPIES} relays after top-up (ran out of relays)`)
+    console.warn(`[EventRedundancy] ${key}: latest on only ${coverage.size}/${TARGET_COPIES} relays after top-up (ran out of relays)`)
   }
 }
 
+export type RelayAvailability = {
+  relay: string
+  /** present = holds the latest version; outdated = holds an older version; absent = has none. */
+  status: 'present' | 'outdated' | 'absent'
+  createdAt?: number
+}
+
 /**
- * Check which of the user's relays (client + NIP-65) currently hold an event
- * matching `filter`. Read-only — does NOT rebroadcast. Used by the hub
- * availability UI. Each relay is queried individually with an 8s timeout.
+ * Check which of the user's relays (client + NIP-65) hold the LATEST version of an
+ * event matching `filter`. Read-only — does NOT rebroadcast. Version-aware: a relay
+ * with an older copy is reported 'outdated', not 'present'. The reference version
+ * is the newest across relays, raised to `knownLatest` (the version the client is
+ * actually using) so a relay is 'outdated' even when the fresh copy is unreachable.
+ * Each relay is queried individually with an 8s timeout.
  */
-export async function checkEventAvailability(filter: Filter): Promise<{ relay: string; present: boolean }[]> {
+export async function checkEventAvailability(filter: Filter, knownLatest?: number): Promise<RelayAvailability[]> {
   const relays = getAllRelays()
-  const results = await Promise.allSettled(
-    relays.map(async (relay) => {
-      const events = await Promise.race([
-        fetchEventsFromRelays([relay], filter),
-        new Promise<Event[]>((_, reject) => setTimeout(() => reject(new Error('timeout')), RELAY_TIMEOUT_MS)),
-      ])
-      return { relay, present: events.length > 0 }
-    }),
-  )
-  return results.map((r, i) => (r.status === 'fulfilled' ? r.value : { relay: relays[i], present: false }))
+  const { have } = await queryPresence(relays, filter)
+  const relayMax = have.size > 0 ? Math.max(...have.values()) : 0
+  const reference = Math.max(relayMax, knownLatest ?? 0)
+  return relays.map((relay) => {
+    const ca = have.get(normalizeRelay(relay))
+    if (ca === undefined) return { relay, status: 'absent' as const }
+    if (reference > 0 && ca < reference) return { relay, status: 'outdated' as const, createdAt: ca }
+    return { relay, status: 'present' as const, createdAt: ca }
+  })
 }
 
 // ── Public API ──
@@ -220,11 +246,13 @@ export async function checkEventAvailability(filter: Filter): Promise<{ relay: s
  * (client relays + NIP-65 relays). Enqueued for sequential processing.
  * Skips if already checked this session.
  *
- * @param kind   Event kind
- * @param pubkey Event author pubkey
- * @param dTag   Optional d-tag for addressable events
+ * @param kind        Event kind
+ * @param pubkey      Event author pubkey
+ * @param dTag        Optional d-tag for addressable events
+ * @param knownLatest created_at of the version the client currently holds, if newer
+ *                    than what relays return (so we never spread a stale copy over it)
  */
-export function ensureAddressableRedundancy(kind: number, pubkey: string, dTag?: string) {
+export function ensureAddressableRedundancy(kind: number, pubkey: string, dTag?: string, knownLatest?: number) {
   const key = eventKey(kind, pubkey, dTag)
   if (checkedThisSession.has(key)) return
   checkedThisSession.add(key)
@@ -234,5 +262,5 @@ export function ensureAddressableRedundancy(kind: number, pubkey: string, dTag?:
     filter['#d'] = [dTag]
   }
 
-  enqueue(() => checkAndRebroadcast(filter, key))
+  enqueue(() => checkAndRebroadcast(filter, key, knownLatest))
 }

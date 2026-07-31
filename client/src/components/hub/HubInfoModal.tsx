@@ -15,7 +15,7 @@ import { RawEventModal } from '@/components/social/SocialPost'
 import type { HubData } from '@/stores/hubStore'
 import { truncateNpub } from '@/lib/utils'
 import { fetchEvents, fetchReplaceable } from '@/lib/nostr/relay-pool'
-import { checkEventAvailability } from '@/lib/nostr/eventRedundancy'
+import { checkEventAvailability, type RelayAvailability } from '@/lib/nostr/eventRedundancy'
 import { getHubEvent, putHubEvent } from '@/lib/cache/hubEventCache'
 import { buildHubBackup, fmtBytes } from '@/lib/hub/hubBackup'
 import { KINDS } from '@/lib/crypto/constants'
@@ -339,19 +339,22 @@ export function HubInfoModal({ open, onClose, hub, blurMedia, onCreatorClick }: 
 /** Queries each of the user's relays for the hub event and reports coverage. */
 function HubAvailabilityModal({ hub, onClose }: { hub: HubData; onClose: () => void }) {
   const [loading, setLoading] = useState(true)
-  const [results, setResults] = useState<{ relay: string; present: boolean }[]>([])
+  const [results, setResults] = useState<RelayAvailability[]>([])
 
   useEffect(() => {
     let cancelled = false
     setLoading(true)
-    checkEventAvailability({ kinds: [KINDS.HUB_EVENT], authors: [hub.creatorPubkey], '#d': [hub.dTag], limit: 1 })
+    // Pass the version the client holds so relays with an OLDER copy read as
+    // 'outdated' rather than 'present'.
+    checkEventAvailability({ kinds: [KINDS.HUB_EVENT], authors: [hub.creatorPubkey], '#d': [hub.dTag], limit: 1 }, hub.eventCreatedAt)
       .then((r) => { if (!cancelled) setResults(r) })
       .catch(() => { if (!cancelled) setResults([]) })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [hub.creatorPubkey, hub.dTag])
+  }, [hub.creatorPubkey, hub.dTag, hub.eventCreatedAt])
 
-  const presentCount = results.filter((r) => r.present).length
+  const presentCount = results.filter((r) => r.status === 'present').length
+  const outdatedCount = results.filter((r) => r.status === 'outdated').length
   const total = results.length
   const healthy = presentCount >= 3
 
@@ -379,22 +382,26 @@ function HubAvailabilityModal({ hub, onClose }: { hub: HubData; onClose: () => v
                 <span className={`text-2xl font-bold ${healthy ? 'text-emerald-400' : presentCount > 0 ? 'text-amber-400' : 'text-destructive'}`}>
                   {presentCount}
                 </span>
-                <span className="text-sm text-muted-foreground">of {total} relays have this hub</span>
+                <span className="text-sm text-muted-foreground">of {total} relays have the latest version</span>
               </div>
               <p className={`text-xs mb-3 ${healthy ? 'text-emerald-400/80' : 'text-amber-400/80'}`}>
                 {healthy
-                  ? 'Well-replicated — the hub event is safely redundant.'
+                  ? 'Well-replicated — the latest hub event is safely redundant.'
                   : presentCount > 0
                     ? 'Under-replicated. The background rebroadcast will try to fill gaps as you use the hub.'
-                    : 'Not found on any of your relays.'}
+                    : outdatedCount > 0
+                      ? 'No relay has the latest version — only older copies. Rebroadcast from Settings → My Hubs to propagate the current version.'
+                      : 'Not found on any of your relays.'}
               </p>
               <div className="flex flex-col gap-1 max-h-64 overflow-y-auto">
                 {results.map((r) => (
                   <div key={r.relay} className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-md bg-secondary/40 text-xs">
                     <span className="truncate text-foreground/80 font-mono">{r.relay.replace(/^wss:\/\//, '')}</span>
-                    {r.present
+                    {r.status === 'present'
                       ? <span className="flex items-center gap-1 text-emerald-400 shrink-0"><Check size={12} /> present</span>
-                      : <span className="flex items-center gap-1 text-muted-foreground shrink-0"><X size={12} /> absent</span>}
+                      : r.status === 'outdated'
+                        ? <span className="flex items-center gap-1 text-amber-400 shrink-0"><Radio size={12} /> outdated</span>
+                        : <span className="flex items-center gap-1 text-muted-foreground shrink-0"><X size={12} /> absent</span>}
                   </div>
                 ))}
               </div>
