@@ -16,7 +16,7 @@ import { useHubStore, type HubData } from '@/stores/hubStore'
 import { truncateNpub } from '@/lib/utils'
 import { fetchEvents, fetchReplaceable } from '@/lib/nostr/relay-pool'
 import { checkEventAvailability, type RelayAvailability } from '@/lib/nostr/eventRedundancy'
-import { checkBlossomFileAvailability, directUploadHubFiles, testUploadToAllServers, type BlossomFileAvailability } from '@/lib/blossom/blossomRedundancy'
+import { checkBlossomFileAvailability, directUploadHubFiles, type BlossomFileAvailability } from '@/lib/blossom/blossomRedundancy'
 import { useUserStore } from '@/stores/userStore'
 import { getHubEvent, putHubEvent } from '@/lib/cache/hubEventCache'
 import { buildHubBackup, fmtBytes } from '@/lib/hub/hubBackup'
@@ -529,20 +529,6 @@ function BlossomAvailabilityModal({ hub, onClose }: { hub: HubData; onClose: () 
     }
   }
 
-  // TEMPORARY: test which servers accept uploads.
-  const uploadToAll = async () => {
-    setMirroring(true)
-    setUploadNote(null)
-    try {
-      const { accepting, refusing } = await testUploadToAllServers(hub.dTag, pubkey || '')
-      await runCensus()
-      const host = (u: string) => u.replace(/^https?:\/\//, '')
-      setUploadNote(`Accepts (${accepting.length}): ${accepting.map(host).join(', ') || '—'}  •  Refuses (${refusing.length}): ${refusing.map(host).join(', ') || '—'}`)
-    } finally {
-      setMirroring(false)
-    }
-  }
-
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center px-2">
       <div className="absolute inset-0 bg-black/70" onClick={onClose} />
@@ -621,15 +607,6 @@ function BlossomAvailabilityModal({ hub, onClose }: { hub: HubData; onClose: () 
                   {mirroring ? 'Re-uploading…' : `Re-upload missing files (to ${target} servers)`}
                 </button>
               )}
-              {/* TEMPORARY test button — remove after testing which servers accept uploads */}
-              <button
-                onClick={uploadToAll}
-                disabled={mirroring || loading}
-                className="mt-2 w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-dashed border-amber-500/50 text-amber-400 text-xs font-medium hover:bg-amber-500/10 transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-wait"
-              >
-                {mirroring ? <Loader2 size={14} className="animate-spin" /> : <Database size={14} />}
-                Upload to ALL servers (test)
-              </button>
               {uploadNote && (
                 <p className="mt-2 flex items-start gap-1.5 text-[11px] text-amber-400/90 leading-snug">
                   <AlertTriangle size={12} className="shrink-0 mt-0.5" /> {uploadNote}

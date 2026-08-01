@@ -317,47 +317,6 @@ export async function directUploadHubFiles(dTag: string, memberPubkey: string): 
   return results
 }
 
-/**
- * TEMPORARY test helper: push every hub file to EVERY candidate server (no target
- * cap), then report which servers ended up holding the index — i.e. which servers
- * accept uploads from this user. For diagnosing read-only / allowlist servers.
- */
-export async function testUploadToAllServers(
-  dTag: string,
-  memberPubkey: string,
-): Promise<{ accepting: string[]; refusing: string[] }> {
-  const hub = useHubStore.getState().hubs[dTag]
-  if (!hub || !hub.indexFileHash) return { accepting: [], refusing: [] }
-  const candidates = getCandidateServers(hub)
-  if (candidates.length === 0) return { accepting: [], refusing: [] }
-  const { signer, privateKey } = useUserStore.getState()
-
-  const hashes: string[] = [hub.indexFileHash]
-  try {
-    const content = await downloadTextFromBlossom(hub.indexFileHash, hub.blossomServers)
-    const index = parseIndexFile(content)
-    if (index.spineHash) hashes.push(index.spineHash)
-    if (index.treeHash) hashes.push(index.treeHash)
-    const page = findPageForPubkey(index, memberPubkey)
-    if (page) hashes.push(page.hash)
-    if (index.historyHash) hashes.push(index.historyHash)
-    for (const b of index.banPages) hashes.push(b.hash)
-  } catch { /* still test the index file */ }
-
-  for (const hash of hashes) {
-    let bytes: Uint8Array
-    try { bytes = await downloadFromBlossom(hash, candidates) } catch { continue }
-    // no onProgress → uploads to every candidate in parallel (skips holders), no cap
-    await uploadToBlossomServers(bytes, signer, privateKey, candidates).catch(() => {})
-  }
-
-  const present = await Promise.all(candidates.map((s) => headExists(s, hub.indexFileHash)))
-  return {
-    accepting: candidates.filter((_, i) => present[i]),
-    refusing: candidates.filter((_, i) => !present[i]),
-  }
-}
-
 export interface BlossomFileAvailability {
   label: string
   hash: string
