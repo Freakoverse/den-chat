@@ -532,8 +532,8 @@ function BlossomAvailabilityModal({ hub, onClose }: { hub: HubData; onClose: () 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center px-2">
       <div className="absolute inset-0 bg-black/70" onClick={onClose} />
-      <div className="relative z-10 w-full max-w-md rounded-lg border border-border bg-background shadow-lg animate-in fade-in-0 zoom-in-95">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+      <div className="relative z-10 w-full max-w-md max-h-[85vh] flex flex-col rounded-lg border border-border bg-background shadow-lg animate-in fade-in-0 zoom-in-95">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
           <div className="flex items-center gap-2">
             <Database size={16} className="text-primary" />
             <h3 className="text-sm font-semibold text-foreground">Blossom file availability</h3>
@@ -541,7 +541,7 @@ function BlossomAvailabilityModal({ hub, onClose }: { hub: HubData; onClose: () 
           <button onClick={onClose} className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/50 cursor-pointer"><X size={15} /></button>
         </div>
 
-        <div className="p-4">
+        <div className="p-4 flex-1 min-h-0 flex flex-col">
           {loading ? (
             <div className="flex flex-col items-center gap-2 py-8 text-muted-foreground">
               <Loader2 size={22} className="animate-spin" />
@@ -562,7 +562,7 @@ function BlossomAvailabilityModal({ hub, onClose }: { hub: HubData; onClose: () 
                   ? 'Well-replicated — the hub\'s member data is safely redundant.'
                   : 'Some files are under-replicated. The background mirror re-uploads them as members open the hub.'}
               </p>
-              <div className="flex flex-col gap-1 max-h-72 overflow-y-auto">
+              <div className="flex flex-col gap-1 flex-1 min-h-0 overflow-y-auto">
                 {files.map((f) => {
                   const healthy = f.presentCount >= target
                   const isOpen = expanded === f.hash
@@ -581,7 +581,7 @@ function BlossomAvailabilityModal({ hub, onClose }: { hub: HubData; onClose: () 
                         </span>
                       </button>
                       {isOpen && (
-                        <div className="px-2.5 pb-2 pt-0.5 flex flex-col gap-1 border-t border-border/40">
+                        <div className="px-2.5 pb-2 pt-0.5 flex flex-col gap-1 border-t border-border/40 max-h-44 overflow-y-auto">
                           {f.servers.map((s) => (
                             <div key={s.server} className="flex items-center justify-between gap-2 text-[11px]">
                               <span className="truncate text-foreground/70 font-mono">{s.server.replace(/^https?:\/\//, '')}</span>
