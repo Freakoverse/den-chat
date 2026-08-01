@@ -10,6 +10,13 @@ const DEFAULT_SERVERS = [
   'https://blossom.nostr.hu',
   'https://cdn.sovbit.host',
   'https://blossom.data.haus',
+  'https://nostr.download',
+  'https://blossom.jumble.social',
+  'https://blossom.ditto.pub',
+  'https://milo.nostria.app',
+  'https://mibo.nostria.app',
+  'https://blossom-01.uid.ovh',
+  'https://blossom-02.uid.ovh',
 ]
 
 function normalize(url: string): string {
