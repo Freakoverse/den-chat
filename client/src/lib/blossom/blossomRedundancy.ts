@@ -224,3 +224,63 @@ export function ensureBlossomRedundancy(dTag: string, memberPubkey: string) {
 
   enqueue(() => mirrorHubFiles(hub, memberPubkey))
 }
+
+export interface BlossomFileAvailability {
+  label: string
+  hash: string
+  servers: { server: string; present: boolean }[]
+  presentCount: number
+}
+
+/**
+ * Read-only availability census of a hub's critical member-list Blossom files
+ * (index, spine/tree, epoch history, ban pages, the viewer's own leaf page) across
+ * the candidate servers. HEAD-only — does NOT mirror. The Blossom analogue of the
+ * hub-event availability check. Skips per-member leaf pages other than the viewer's
+ * (there can be many); TARGET_COPIES is the "well-replicated" bar.
+ */
+export async function checkBlossomFileAvailability(
+  dTag: string,
+  memberPubkey: string,
+): Promise<{ servers: string[]; files: BlossomFileAvailability[]; target: number }> {
+  const hub = useHubStore.getState().hubs[dTag]
+  if (!hub || !hub.indexFileHash) return { servers: [], files: [], target: TARGET_COPIES }
+
+  const candidates = getCandidateServers(hub)
+  if (candidates.length === 0) return { servers: [], files: [], target: TARGET_COPIES }
+
+  const targets: Array<{ hash: string; label: string }> = [
+    { hash: hub.indexFileHash, label: 'Index' },
+  ]
+  try {
+    const content = await downloadTextFromBlossom(hub.indexFileHash, hub.blossomServers)
+    const index = parseIndexFile(content)
+    if (index.pageSize > 0) {
+      if (index.spineHash) targets.push({ hash: index.spineHash, label: 'Member tree (spine)' })
+      const page = findPageForPubkey(index, memberPubkey)
+      if (page) targets.push({ hash: page.hash, label: 'Your member page' })
+    } else if (index.treeHash) {
+      targets.push({ hash: index.treeHash, label: 'Member tree' })
+    }
+    if (index.historyHash) targets.push({ hash: index.historyHash, label: 'Epoch history' })
+    index.banPages.forEach((b, i) =>
+      targets.push({ hash: b.hash, label: index.banPages.length > 1 ? `Ban page ${i + 1}` : 'Ban list' }),
+    )
+  } catch {
+    // Index unreadable from Blossom — still report the index file's own availability.
+  }
+
+  const files = await Promise.all(
+    targets.map(async (t) => {
+      const present = await Promise.all(candidates.map((s) => headExists(s, t.hash)))
+      return {
+        label: t.label,
+        hash: t.hash,
+        servers: candidates.map((s, i) => ({ server: s, present: present[i] })),
+        presentCount: present.filter(Boolean).length,
+      }
+    }),
+  )
+
+  return { servers: candidates, files, target: TARGET_COPIES }
+}

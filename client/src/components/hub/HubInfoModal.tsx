@@ -6,7 +6,7 @@
  */
 
 import { useState, useEffect, useRef } from 'react'
-import { X, Copy, Check, Tag, MoreVertical, Code, Link2, Radio, Loader2, Archive, AlertTriangle, RefreshCw } from 'lucide-react'
+import { X, Copy, Check, Tag, MoreVertical, Code, Link2, Radio, Loader2, Archive, AlertTriangle, RefreshCw, Database, ChevronDown } from 'lucide-react'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Separator } from '@/components/ui/separator'
@@ -16,6 +16,8 @@ import { useHubStore, type HubData } from '@/stores/hubStore'
 import { truncateNpub } from '@/lib/utils'
 import { fetchEvents, fetchReplaceable } from '@/lib/nostr/relay-pool'
 import { checkEventAvailability, type RelayAvailability } from '@/lib/nostr/eventRedundancy'
+import { checkBlossomFileAvailability, type BlossomFileAvailability } from '@/lib/blossom/blossomRedundancy'
+import { useUserStore } from '@/stores/userStore'
 import { getHubEvent, putHubEvent } from '@/lib/cache/hubEventCache'
 import { buildHubBackup, fmtBytes } from '@/lib/hub/hubBackup'
 import { KINDS } from '@/lib/crypto/constants'
@@ -49,6 +51,7 @@ export function HubInfoModal({ open, onClose, hub, blurMedia, onCreatorClick }: 
   const [rawJson, setRawJson] = useState<string | null>(null)
   const [rawLoading, setRawLoading] = useState(false)
   const [showAvailability, setShowAvailability] = useState(false)
+  const [showBlossomAvailability, setShowBlossomAvailability] = useState(false)
   const [backupBusy, setBackupBusy] = useState(false)
   const [backupProgress, setBackupProgress] = useState<{ done: number; total: number; bytes: number } | null>(null)
   const [backupError, setBackupError] = useState<string | null>(null)
@@ -218,6 +221,9 @@ export function HubInfoModal({ open, onClose, hub, blurMedia, onCreatorClick }: 
                 </button>
                 <button onClick={() => { setMenuOpen(false); setShowAvailability(true) }} className="flex items-center gap-2.5 w-full px-3 py-2 rounded-md text-foreground hover:bg-accent/50 transition-colors cursor-pointer">
                   <Radio size={14} className="text-muted-foreground" /> Check hub availability
+                </button>
+                <button onClick={() => { setMenuOpen(false); setShowBlossomAvailability(true) }} className="flex items-center gap-2.5 w-full px-3 py-2 rounded-md text-foreground hover:bg-accent/50 transition-colors cursor-pointer">
+                  <Database size={14} className="text-muted-foreground" /> Check Blossom files
                 </button>
                 <button onClick={exportBackup} disabled={backupBusy} className="flex items-center gap-2.5 w-full px-3 py-2 rounded-md text-foreground hover:bg-accent/50 transition-colors cursor-pointer disabled:opacity-50">
                   <Archive size={14} className="text-muted-foreground" /> Export hub backup
@@ -391,6 +397,7 @@ export function HubInfoModal({ open, onClose, hub, blurMedia, onCreatorClick }: 
 
       {rawJson !== null && <RawEventModal rawJson={rawJson} onClose={() => setRawJson(null)} />}
       {showAvailability && <HubAvailabilityModal hub={hub} onClose={() => setShowAvailability(false)} />}
+      {showBlossomAvailability && <BlossomAvailabilityModal hub={hub} onClose={() => setShowBlossomAvailability(false)} />}
     </div>
   )
 }
@@ -463,6 +470,102 @@ function HubAvailabilityModal({ hub, onClose }: { hub: HubData; onClose: () => v
                         : <span className="flex items-center gap-1 text-muted-foreground shrink-0"><X size={12} /> absent</span>}
                   </div>
                 ))}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function BlossomAvailabilityModal({ hub, onClose }: { hub: HubData; onClose: () => void }) {
+  const pubkey = useUserStore((s) => s.pubkey)
+  const [loading, setLoading] = useState(true)
+  const [files, setFiles] = useState<BlossomFileAvailability[]>([])
+  const [serverCount, setServerCount] = useState(0)
+  const [target, setTarget] = useState(3)
+  const [expanded, setExpanded] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    checkBlossomFileAvailability(hub.dTag, pubkey || '')
+      .then((r) => { if (!cancelled) { setFiles(r.files); setServerCount(r.servers.length); setTarget(r.target) } })
+      .catch(() => { if (!cancelled) setFiles([]) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [hub.dTag, pubkey])
+
+  const healthyCount = files.filter((f) => f.presentCount >= target).length
+  const allHealthy = files.length > 0 && healthyCount === files.length
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center px-2">
+      <div className="absolute inset-0 bg-black/70" onClick={onClose} />
+      <div className="relative z-10 w-full max-w-md rounded-lg border border-border bg-background shadow-lg animate-in fade-in-0 zoom-in-95">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+          <div className="flex items-center gap-2">
+            <Database size={16} className="text-primary" />
+            <h3 className="text-sm font-semibold text-foreground">Blossom file availability</h3>
+          </div>
+          <button onClick={onClose} className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/50 cursor-pointer"><X size={15} /></button>
+        </div>
+
+        <div className="p-4">
+          {loading ? (
+            <div className="flex flex-col items-center gap-2 py-8 text-muted-foreground">
+              <Loader2 size={22} className="animate-spin" />
+              <span className="text-xs">Checking Blossom servers…</span>
+            </div>
+          ) : files.length === 0 ? (
+            <p className="text-xs text-muted-foreground py-4">Couldn't read this hub's member-list files (no Blossom servers, or the index is unavailable).</p>
+          ) : (
+            <>
+              <div className="flex items-center gap-2 mb-1">
+                <span className={`text-2xl font-bold ${allHealthy ? 'text-emerald-400' : healthyCount > 0 ? 'text-amber-400' : 'text-destructive'}`}>
+                  {healthyCount}
+                </span>
+                <span className="text-sm text-muted-foreground">of {files.length} files replicated on ≥{target} of {serverCount} servers</span>
+              </div>
+              <p className={`text-xs mb-3 ${allHealthy ? 'text-emerald-400/80' : 'text-amber-400/80'}`}>
+                {allHealthy
+                  ? 'Well-replicated — the hub\'s member data is safely redundant.'
+                  : 'Some files are under-replicated. The background mirror re-uploads them as members open the hub.'}
+              </p>
+              <div className="flex flex-col gap-1 max-h-72 overflow-y-auto">
+                {files.map((f) => {
+                  const healthy = f.presentCount >= target
+                  const isOpen = expanded === f.hash
+                  return (
+                    <div key={f.hash} className="rounded-md bg-secondary/40 overflow-hidden">
+                      <button
+                        onClick={() => setExpanded(isOpen ? null : f.hash)}
+                        className="flex items-center justify-between gap-2 w-full px-2.5 py-1.5 text-xs hover:bg-secondary/60 transition-colors cursor-pointer"
+                      >
+                        <span className="flex items-center gap-1.5 min-w-0">
+                          <ChevronDown size={12} className={`text-muted-foreground shrink-0 transition-transform ${isOpen ? '' : '-rotate-90'}`} />
+                          <span className="truncate text-foreground/90">{f.label}</span>
+                        </span>
+                        <span className={`shrink-0 font-medium ${healthy ? 'text-emerald-400' : f.presentCount > 0 ? 'text-amber-400' : 'text-destructive'}`}>
+                          {f.presentCount}/{serverCount}
+                        </span>
+                      </button>
+                      {isOpen && (
+                        <div className="px-2.5 pb-2 pt-0.5 flex flex-col gap-1 border-t border-border/40">
+                          {f.servers.map((s) => (
+                            <div key={s.server} className="flex items-center justify-between gap-2 text-[11px]">
+                              <span className="truncate text-foreground/70 font-mono">{s.server.replace(/^https?:\/\//, '')}</span>
+                              {s.present
+                                ? <span className="flex items-center gap-1 text-emerald-400 shrink-0"><Check size={11} /> present</span>
+                                : <span className="flex items-center gap-1 text-muted-foreground shrink-0"><X size={11} /> absent</span>}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
               </div>
             </>
           )}
