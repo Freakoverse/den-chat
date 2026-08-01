@@ -16,7 +16,7 @@ import { useHubStore, type HubData } from '@/stores/hubStore'
 import { truncateNpub } from '@/lib/utils'
 import { fetchEvents, fetchReplaceable } from '@/lib/nostr/relay-pool'
 import { checkEventAvailability, type RelayAvailability } from '@/lib/nostr/eventRedundancy'
-import { checkBlossomFileAvailability, mirrorHubFilesNow, type BlossomFileAvailability } from '@/lib/blossom/blossomRedundancy'
+import { checkBlossomFileAvailability, directUploadHubFiles, type BlossomFileAvailability } from '@/lib/blossom/blossomRedundancy'
 import { useUserStore } from '@/stores/userStore'
 import { getHubEvent, putHubEvent } from '@/lib/cache/hubEventCache'
 import { buildHubBackup, fmtBytes } from '@/lib/hub/hubBackup'
@@ -487,6 +487,7 @@ function BlossomAvailabilityModal({ hub, onClose }: { hub: HubData; onClose: () 
   const [target, setTarget] = useState(3)
   const [expanded, setExpanded] = useState<string | null>(null)
   const [mirroring, setMirroring] = useState(false)
+  const [uploadNote, setUploadNote] = useState<string | null>(null)
 
   const runCensus = useCallback((signal?: { cancelled: boolean }) => {
     setLoading(true)
@@ -507,9 +508,22 @@ function BlossomAvailabilityModal({ hub, onClose }: { hub: HubData; onClose: () 
 
   const reupload = async () => {
     setMirroring(true)
+    setUploadNote(null)
     try {
-      await mirrorHubFilesNow(hub.dTag, pubkey || '')
+      const results = await directUploadHubFiles(hub.dTag, pubkey || '')
       await runCensus()
+      const refused = results.filter((r) => r.error === 'every server refused the upload').length
+      const partial = results.filter((r) => r.error && r.error.startsWith('only reached')).length
+      const unfetched = results.filter((r) => r.error === 'could not fetch the file from any server').length
+      if (refused > 0 && partial === 0 && unfetched === 0) {
+        setUploadNote('Every one of your Blossom servers refused the upload. You likely need a server you have write access to (your own, or one you have an account on) in Settings → Network.')
+      } else if (unfetched > 0) {
+        setUploadNote(`${unfetched} file(s) couldn't be fetched from any server.`)
+      } else if (refused > 0 || partial > 0) {
+        setUploadNote('Some files still couldn\'t reach 3 servers — the remaining servers refused the upload.')
+      } else {
+        setUploadNote(null)
+      }
     } finally {
       setMirroring(false)
     }
@@ -592,6 +606,11 @@ function BlossomAvailabilityModal({ hub, onClose }: { hub: HubData; onClose: () 
                   {mirroring ? <Loader2 size={14} className="animate-spin" /> : <Database size={14} />}
                   {mirroring ? 'Re-uploading…' : `Re-upload missing files (to ${target} servers)`}
                 </button>
+              )}
+              {uploadNote && (
+                <p className="mt-2 flex items-start gap-1.5 text-[11px] text-amber-400/90 leading-snug">
+                  <AlertTriangle size={12} className="shrink-0 mt-0.5" /> {uploadNote}
+                </p>
               )}
             </>
           )}

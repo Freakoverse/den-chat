@@ -225,15 +225,96 @@ export function ensureBlossomRedundancy(dTag: string, memberPubkey: string) {
   enqueue(() => mirrorHubFiles(hub, memberPubkey))
 }
 
+export interface DirectUploadResult { label: string; hash: string; okServers: number; error?: string }
+
 /**
- * Mirror a hub's member-list files to >= TARGET_COPIES servers RIGHT NOW (bypasses
- * the once-per-session guard) — for the manual "Re-upload" button. HEAD-census first,
- * download the bytes once only if under-replicated, then upload to fill the gap.
+ * DIRECT upload of a hub's member-list files toward TARGET_COPIES (for the manual
+ * "Re-upload" button). Plain BUD-02 uploads only — no server-side mirror endpoint,
+ * since not every server supports it. For each file: census who already holds it,
+ * fetch the bytes once, then upload in PARALLEL BATCHES sized to the shortfall —
+ * short by N ⇒ push to N non-holders at once, recount, and retry the remaining
+ * shortfall against the next untried servers — until it reaches TARGET_COPIES or
+ * runs out of servers. Returns a per-file result so the UI can explain what happened.
  */
-export async function mirrorHubFilesNow(dTag: string, memberPubkey: string): Promise<void> {
+export async function directUploadHubFiles(dTag: string, memberPubkey: string): Promise<DirectUploadResult[]> {
   const hub = useHubStore.getState().hubs[dTag]
-  if (!hub || !hub.indexFileHash) return
-  await mirrorHubFiles(hub, memberPubkey)
+  if (!hub || !hub.indexFileHash) return []
+  const candidates = getCandidateServers(hub)
+  if (candidates.length === 0) return []
+  const { signer, privateKey } = useUserStore.getState()
+
+  const targets: Array<{ hash: string; label: string }> = [{ hash: hub.indexFileHash, label: 'Index' }]
+  try {
+    const content = await downloadTextFromBlossom(hub.indexFileHash, hub.blossomServers)
+    const index = parseIndexFile(content)
+    if (index.pageSize > 0) {
+      if (index.spineHash) targets.push({ hash: index.spineHash, label: 'Member tree (spine)' })
+      const page = findPageForPubkey(index, memberPubkey)
+      if (page) targets.push({ hash: page.hash, label: 'Your member page' })
+    } else if (index.treeHash) {
+      targets.push({ hash: index.treeHash, label: 'Member tree' })
+    }
+    if (index.historyHash) targets.push({ hash: index.historyHash, label: 'Epoch history' })
+    index.banPages.forEach((b, i) =>
+      targets.push({ hash: b.hash, label: index.banPages.length > 1 ? `Ban page ${i + 1}` : 'Ban list' }),
+    )
+  } catch { /* index unreadable — still push the index file itself */ }
+
+  const results: DirectUploadResult[] = []
+  for (const t of targets) {
+    // Census who already holds it.
+    const present = await Promise.all(candidates.map((s) => headExists(s, t.hash)))
+    const holders = candidates.filter((_, i) => present[i])
+    const nonHolders = candidates.filter((_, i) => !present[i])
+    let copies = holders.length
+    if (copies >= TARGET_COPIES) {
+      results.push({ label: t.label, hash: t.hash, okServers: copies })
+      continue
+    }
+
+    // Fetch the bytes once (from a holder if possible, else any candidate).
+    let bytes: Uint8Array
+    try {
+      bytes = await downloadFromBlossom(t.hash, holders.length > 0 ? holders : candidates)
+    } catch {
+      results.push({ label: t.label, hash: t.hash, okServers: copies, error: 'could not fetch the file from any server' })
+      continue
+    }
+
+    // Upload in parallel batches sized to the remaining shortfall: short by N ⇒ try
+    // N non-holders at once, recount, then retry the new shortfall with the next N.
+    let anyAccepted = false
+    const untried = [...nonHolders]
+    while (copies < TARGET_COPIES && untried.length > 0) {
+      const need = TARGET_COPIES - copies
+      const batch = untried.splice(0, need)
+      const outcomes = await Promise.all(
+        batch.map(async (server) => {
+          try {
+            const { successCount } = await uploadToBlossomServers(bytes, signer, privateKey, [server])
+            return successCount > 0
+          } catch {
+            return false
+          }
+        }),
+      )
+      const gained = outcomes.filter(Boolean).length
+      copies += gained
+      if (gained > 0) anyAccepted = true
+    }
+
+    results.push({
+      label: t.label,
+      hash: t.hash,
+      okServers: copies,
+      error: copies >= TARGET_COPIES
+        ? undefined
+        : anyAccepted
+          ? `only reached ${copies}/${TARGET_COPIES} — remaining servers refused`
+          : 'every server refused the upload',
+    })
+  }
+  return results
 }
 
 export interface BlossomFileAvailability {
