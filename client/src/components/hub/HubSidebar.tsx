@@ -112,6 +112,7 @@ export function HubSidebar({ activePage, onNavigate, compact = false }: { active
         // No event found — keep list empty but mark as loaded
         setHubEntries([], [])
       } else {
+        useHubStore.getState().setHubListCreatedAt(event.created_at)
         const newFolders: HubFolder[] = []
         const newEntries: HubEntry[] = []
         for (const tag of event.tags) {

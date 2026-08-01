@@ -86,6 +86,8 @@ export function useStartup() {
         return
       }
 
+      useHubStore.getState().setHubListCreatedAt(event.created_at)
+
       const folders: HubFolder[] = []
       const entries: HubEntry[] = []
 
@@ -322,7 +324,7 @@ export function useStartup() {
         ensureAddressableRedundancy(10000, pubkey)                                  // kind 10000 — mute/block list
         ensureAddressableRedundancy(STANDARD_KINDS.RELAY_LIST, pubkey)              // kind 10002 — relay list
         ensureAddressableRedundancy(STANDARD_KINDS.BLOSSOM_SERVER_LIST, pubkey)     // kind 10063 — blossom servers
-        ensureAddressableRedundancy(KINDS.USER_HUB_LIST, pubkey)                   // kind 16942 — hub list
+        ensureAddressableRedundancy(KINDS.USER_HUB_LIST, pubkey, undefined, useHubStore.getState().hubListCreatedAt) // kind 16942 — hub list (version-aware)
 
         // Emoji sets (kind 30030) — user's own sets, dynamic d-tags
         for (const set of useEmojiStore.getState().myEmojiSets) {

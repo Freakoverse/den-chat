@@ -105,6 +105,9 @@ export interface HubState {
   folders: HubFolder[]
   /** Whether the hub list has been fetched from relays */
   hubListLoaded: boolean
+  /** created_at of the hub-list event (kind 16942) the client currently holds — so
+   *  the redundancy check can tell "relays are stale" from "relays have the latest". */
+  hubListCreatedAt?: number
   /** Loaded hub data (keyed by d tag) */
   hubs: Record<string, HubData>
   /** Per-hub load status */
@@ -163,6 +166,7 @@ export interface HubState {
 
   /** Actions */
   setHubEntries: (entries: HubEntry[], folders: HubFolder[]) => void
+  setHubListCreatedAt: (ts: number) => void
   bumpHubSecretRetry: () => void
   /** Clear a hub's status and force the loader to re-fetch it from scratch. */
   retryHub: (dTag: string) => void
@@ -237,6 +241,7 @@ export const useHubStore = create<HubState>((set) => ({
 
   setHubEntries: (entries, folders) => set({ hubEntries: entries, folders, hubListLoaded: true }),
   setHubListLoaded: (loaded) => set({ hubListLoaded: loaded }),
+  setHubListCreatedAt: (ts) => set({ hubListCreatedAt: ts }),
 
   setHubData: (dTag, data) =>
     set((state) => ({ hubs: { ...state.hubs, [dTag]: data } })),
