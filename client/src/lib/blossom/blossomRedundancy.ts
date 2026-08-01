@@ -225,6 +225,17 @@ export function ensureBlossomRedundancy(dTag: string, memberPubkey: string) {
   enqueue(() => mirrorHubFiles(hub, memberPubkey))
 }
 
+/**
+ * Mirror a hub's member-list files to >= TARGET_COPIES servers RIGHT NOW (bypasses
+ * the once-per-session guard) — for the manual "Re-upload" button. HEAD-census first,
+ * download the bytes once only if under-replicated, then upload to fill the gap.
+ */
+export async function mirrorHubFilesNow(dTag: string, memberPubkey: string): Promise<void> {
+  const hub = useHubStore.getState().hubs[dTag]
+  if (!hub || !hub.indexFileHash) return
+  await mirrorHubFiles(hub, memberPubkey)
+}
+
 export interface BlossomFileAvailability {
   label: string
   hash: string

@@ -5,7 +5,7 @@
  * Opened by clicking the hub name in the channel list banner.
  */
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { X, Copy, Check, Tag, MoreVertical, Code, Link2, Radio, Loader2, Archive, AlertTriangle, RefreshCw, Database, ChevronDown } from 'lucide-react'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -16,7 +16,7 @@ import { useHubStore, type HubData } from '@/stores/hubStore'
 import { truncateNpub } from '@/lib/utils'
 import { fetchEvents, fetchReplaceable } from '@/lib/nostr/relay-pool'
 import { checkEventAvailability, type RelayAvailability } from '@/lib/nostr/eventRedundancy'
-import { checkBlossomFileAvailability, type BlossomFileAvailability } from '@/lib/blossom/blossomRedundancy'
+import { checkBlossomFileAvailability, mirrorHubFilesNow, type BlossomFileAvailability } from '@/lib/blossom/blossomRedundancy'
 import { useUserStore } from '@/stores/userStore'
 import { getHubEvent, putHubEvent } from '@/lib/cache/hubEventCache'
 import { buildHubBackup, fmtBytes } from '@/lib/hub/hubBackup'
@@ -486,19 +486,34 @@ function BlossomAvailabilityModal({ hub, onClose }: { hub: HubData; onClose: () 
   const [serverCount, setServerCount] = useState(0)
   const [target, setTarget] = useState(3)
   const [expanded, setExpanded] = useState<string | null>(null)
+  const [mirroring, setMirroring] = useState(false)
+
+  const runCensus = useCallback((signal?: { cancelled: boolean }) => {
+    setLoading(true)
+    return checkBlossomFileAvailability(hub.dTag, pubkey || '')
+      .then((r) => { if (!signal?.cancelled) { setFiles(r.files); setServerCount(r.servers.length); setTarget(r.target) } })
+      .catch(() => { if (!signal?.cancelled) setFiles([]) })
+      .finally(() => { if (!signal?.cancelled) setLoading(false) })
+  }, [hub.dTag, pubkey])
 
   useEffect(() => {
-    let cancelled = false
-    setLoading(true)
-    checkBlossomFileAvailability(hub.dTag, pubkey || '')
-      .then((r) => { if (!cancelled) { setFiles(r.files); setServerCount(r.servers.length); setTarget(r.target) } })
-      .catch(() => { if (!cancelled) setFiles([]) })
-      .finally(() => { if (!cancelled) setLoading(false) })
-    return () => { cancelled = true }
-  }, [hub.dTag, pubkey])
+    const signal = { cancelled: false }
+    runCensus(signal)
+    return () => { signal.cancelled = true }
+  }, [runCensus])
 
   const healthyCount = files.filter((f) => f.presentCount >= target).length
   const allHealthy = files.length > 0 && healthyCount === files.length
+
+  const reupload = async () => {
+    setMirroring(true)
+    try {
+      await mirrorHubFilesNow(hub.dTag, pubkey || '')
+      await runCensus()
+    } finally {
+      setMirroring(false)
+    }
+  }
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center px-2">
@@ -567,6 +582,17 @@ function BlossomAvailabilityModal({ hub, onClose }: { hub: HubData; onClose: () 
                   )
                 })}
               </div>
+
+              {!allHealthy && (
+                <button
+                  onClick={reupload}
+                  disabled={mirroring || loading}
+                  className="mt-3 w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-wait"
+                >
+                  {mirroring ? <Loader2 size={14} className="animate-spin" /> : <Database size={14} />}
+                  {mirroring ? 'Re-uploading…' : `Re-upload missing files (to ${target} servers)`}
+                </button>
+              )}
             </>
           )}
         </div>
