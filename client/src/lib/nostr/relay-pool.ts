@@ -337,14 +337,18 @@ export async function fetchEventById(id: string): Promise<Event | null> {
 export async function fetchReplaceable(
   pubkey: string,
   kind: number,
-  dTag?: string
+  dTag?: string,
+  maxWait?: number,
 ): Promise<Event | null> {
   const filter: Filter = { authors: [pubkey], kinds: [kind], limit: 1 }
   if (dTag !== undefined) {
     filter['#d'] = [dTag]
   }
 
-  const events = await fetchEvents(filter)
+  // Callers fetching a critical replaceable (e.g. the hub list) can pass a longer
+  // maxWait so a relay holding the newest version isn't cut off at the 4s default —
+  // otherwise we'd pick "newest of what came back fast", i.e. a stale copy.
+  const events = await fetchEvents(filter, maxWait)
   // Replaceable events: different relays may return different versions — pick the
   // newest by created_at rather than whichever relay answered first.
   if (events.length === 0) return null

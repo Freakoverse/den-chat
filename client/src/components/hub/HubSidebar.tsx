@@ -106,7 +106,8 @@ export function HubSidebar({ activePage, onNavigate, compact = false }: { active
     setIsRefreshing(true)
     try {
       const setHubEntries = useHubStore.getState().setHubEntries
-      const event = await fetchReplaceable(pubkey, KINDS.USER_HUB_LIST)
+      // Longer wait so a relay holding the newest list isn't cut off (see useStartup).
+      const event = await fetchReplaceable(pubkey, KINDS.USER_HUB_LIST, undefined, 10000)
       if (!event) {
         // No event found — keep list empty but mark as loaded
         setHubEntries([], [])

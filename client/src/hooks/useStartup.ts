@@ -77,8 +77,10 @@ export function useStartup() {
       }
     })
 
-    // Fetch user hub list (kind 16942)
-    fetchReplaceable(pubkey, KINDS.USER_HUB_LIST).then((event) => {
+    // Fetch user hub list (kind 16942). Wait longer than the 4s default so a relay
+    // holding the newest list isn't cut off — otherwise we'd show a stale hub list
+    // (missing recently-joined hubs / wrong folders) until a manual refresh.
+    fetchReplaceable(pubkey, KINDS.USER_HUB_LIST, undefined, 10000).then((event) => {
       if (!event) {
         setHubEntries([], []) // marks hubListLoaded = true
         return
