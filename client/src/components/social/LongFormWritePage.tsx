@@ -168,6 +168,7 @@ export function LongFormWritePage() {
 
   // Featured image handlers
   const [featuredSizeWarning, setFeaturedSizeWarning] = useState<string | null>(null)
+  const [featuredDragActive, setFeaturedDragActive] = useState(false)
   const handleFeaturedSelect = useCallback((files: FileList | File[]) => {
     const file = Array.from(files).find(f => f.type.startsWith('image/'))
     if (!file) return
@@ -359,8 +360,17 @@ export function LongFormWritePage() {
           <div>
             <label className="text-xs font-medium text-foreground mb-1 block">Featured Image (optional)</label>
             {!featuredPreview && !featuredImage ? (
-              <div onClick={() => featuredFileInputRef.current?.click()}
-                className="w-full h-36 rounded-lg border-2 border-dashed border-border flex flex-col items-center justify-center gap-2 cursor-pointer hover:border-primary/50 hover:bg-accent/20 transition-colors">
+              <div
+                onClick={() => featuredFileInputRef.current?.click()}
+                onDragOver={(e) => { e.preventDefault(); if (!featuredDragActive) setFeaturedDragActive(true) }}
+                onDragLeave={(e) => { e.preventDefault(); setFeaturedDragActive(false) }}
+                onDrop={(e) => {
+                  e.preventDefault(); e.stopPropagation(); setFeaturedDragActive(false)
+                  const files = Array.from(e.dataTransfer.files).filter((f) => f.type.startsWith('image/'))
+                  if (files.length) handleFeaturedSelect(files)
+                }}
+                className={`w-full h-36 rounded-lg border-2 border-dashed flex flex-col items-center justify-center gap-2 cursor-pointer transition-colors ${featuredDragActive ? 'border-primary bg-accent/30' : 'border-border hover:border-primary/50 hover:bg-accent/20'}`}
+              >
                 <ImageIcon size={28} className="text-muted-foreground" />
                 <span className="text-xs text-muted-foreground">Click or drag & drop an image</span>
               </div>
