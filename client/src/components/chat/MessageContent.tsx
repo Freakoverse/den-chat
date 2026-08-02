@@ -257,7 +257,7 @@ function LazyInView({ minHeight = 0, skeleton = false, children }: { minHeight?:
   return (
     <div
       ref={ref}
-      className={skeleton ? 'media-skeleton rounded-lg max-w-[400px]' : undefined}
+      className={skeleton ? 'media-skeleton rounded-lg max-w-[min(400px,100%)]' : undefined}
       style={{ minHeight }}
     />
   )
@@ -303,7 +303,7 @@ export function LinkPreview({ href }: { href: string }) {
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      className="flex mt-1 rounded-lg border border-border overflow-hidden max-w-[400px] bg-secondary/30 hover:bg-secondary/50 transition-colors group"
+      className="flex mt-1 rounded-lg border border-border overflow-hidden max-w-[min(400px,100%)] bg-secondary/30 hover:bg-secondary/50 transition-colors group"
     >
       {preview.image && (
         <img
@@ -341,7 +341,7 @@ function BlossomImage({ src, alt, className }: { src: string; alt?: string; clas
 
   if (blossom.error === 'not-found') {
     return (
-      <div className="rounded-lg mt-1 bg-destructive/10 border border-destructive/30 flex flex-col items-center text-xs py-3 px-3 gap-1 max-w-[400px]">
+      <div className="rounded-lg mt-1 bg-destructive/10 border border-destructive/30 flex flex-col items-center text-xs py-3 px-3 gap-1 max-w-[min(400px,100%)]">
         <span className="text-muted-foreground">Image not found on any server</span>
         <a href={src} target="_blank" rel="noopener noreferrer" className="text-primary text-xs hover:underline">⬇ Try direct link</a>
       </div>
@@ -352,13 +352,13 @@ function BlossomImage({ src, alt, className }: { src: string; alt?: string; clas
   const isLoading = !loaded && !error
 
   return (
-    <div className="relative inline-block mt-1 max-w-[400px]">
+    <div className="relative inline-block mt-1 max-w-[min(400px,100%)]">
       {/* Shimmer skeleton while loading */}
       {isLoading && (
         <div className="media-skeleton" style={{ minHeight: 160, width: 400, maxWidth: '100%' }} />
       )}
       {error && (
-        <div className="rounded-lg bg-secondary/40 border border-border/50 flex items-center justify-center text-xs text-muted-foreground/60 py-6 max-w-[400px]">
+        <div className="rounded-lg bg-secondary/40 border border-border/50 flex items-center justify-center text-xs text-muted-foreground/60 py-6 max-w-[min(400px,100%)]">
           Failed to load image
         </div>
       )}
@@ -366,7 +366,7 @@ function BlossomImage({ src, alt, className }: { src: string; alt?: string; clas
       <img
         src={resolvedSrc}
         alt={alt || ''}
-        className={`${className || 'max-w-[400px] max-h-[300px] rounded-lg border border-transparent hover:border-border transition-colors object-contain'} transition-opacity duration-300 ${loaded ? 'opacity-100' : 'opacity-0 h-0 overflow-hidden'}`}
+        className={`${className || 'max-w-[min(400px,100%)] max-h-[300px] rounded-lg border border-transparent hover:border-border transition-colors object-contain'} transition-opacity duration-300 ${loaded ? 'opacity-100' : 'opacity-0 h-0 overflow-hidden'}`}
         onLoad={() => { setLoaded(true); setError(false) }}
         onError={() => { blossom.onImgError(); setError(true) }}
       />
@@ -521,7 +521,7 @@ export function VideoEmbed({ src }: { src: string }) {
 
   if (blossom.error === 'not-found') {
     return (
-      <div className="rounded-lg mt-1 bg-destructive/10 border border-destructive/30 flex flex-col items-center text-xs py-3 px-3 gap-1 max-w-[400px]">
+      <div className="rounded-lg mt-1 bg-destructive/10 border border-destructive/30 flex flex-col items-center text-xs py-3 px-3 gap-1 max-w-[min(400px,100%)]">
         <span className="text-muted-foreground">Video not found on any server</span>
         <a href={src} target="_blank" rel="noopener noreferrer" className="text-primary text-xs hover:underline">⬇ Try direct link</a>
       </div>
@@ -533,12 +533,12 @@ export function VideoEmbed({ src }: { src: string }) {
   // Cached blob ready — play inline
   if (cacheState === 'done' && cacheBlobUrl) {
     return (
-      <div className="relative inline-block mt-1 max-w-[400px]">
+      <div className="relative inline-block mt-1 max-w-[min(400px,100%)]">
         <video
           src={cacheBlobUrl}
           controls
           autoPlay
-          className="max-w-[400px] max-h-[300px] rounded-lg border border-transparent hover:border-border transition-colors"
+          className="max-w-[min(400px,100%)] max-h-[300px] rounded-lg border border-transparent hover:border-border transition-colors"
         />
       </div>
     )
@@ -546,7 +546,7 @@ export function VideoEmbed({ src }: { src: string }) {
 
   if (failed) {
     return (
-      <div className="flex items-center gap-2 px-3 py-2 mt-1 rounded-lg border border-border bg-secondary/40 max-w-[400px]">
+      <div className="flex items-center gap-2 px-3 py-2 mt-1 rounded-lg border border-border bg-secondary/40 max-w-[min(400px,100%)]">
         <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
           <Download size={18} className="text-primary" />
         </div>
@@ -612,11 +612,11 @@ export function VideoEmbed({ src }: { src: string }) {
   }
 
   return (
-    <div className="relative inline-block mt-1 max-w-[400px]">
+    <div className="relative inline-block mt-1 max-w-[min(400px,100%)]">
       <video
         src={resolvedSrc}
         controls
-        className="max-w-[400px] max-h-[300px] rounded-lg border border-transparent hover:border-border transition-colors"
+        className="max-w-[min(400px,100%)] max-h-[300px] rounded-lg border border-transparent hover:border-border transition-colors"
         preload="none"
         onError={() => setFailed(true)}
       />
@@ -654,7 +654,7 @@ function AudioEmbed({ src }: { src: string }) {
   const isLoading = !loaded
 
   return (
-    <div className="relative mt-1 max-w-[400px]">
+    <div className="relative mt-1 max-w-[min(400px,100%)]">
       {/* Shimmer skeleton while loading */}
       {isLoading && (
         <div className="media-skeleton" style={{ width: 300, height: 44 }} />
@@ -888,7 +888,7 @@ export const MessageContent = memo(function MessageContent({ content, suffix, on
                 {children}
               </a>
             </TooltipTrigger>
-            <TooltipContent side="top" className="max-w-[400px] break-all">
+            <TooltipContent side="top" className="max-w-[min(400px,100%)] break-all">
               {href}
             </TooltipContent>
           </Tooltip>

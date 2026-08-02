@@ -503,29 +503,32 @@ export function DM04ChatView({ recipientPubkey, onSwitchProtocol, onBack }: { re
   return (
     <div ref={chatContainerRef} className="flex flex-col flex-1 min-w-0 h-full overflow-hidden relative gap-2">
       {/* Chat header card */}
-      <div className="flex items-center gap-3 px-4 py-3 bg-secondary/50 rounded-md shadow-md shrink-0">
-        {onBack && (
-          <button onClick={onBack} className="hidden max-[1080px]:flex p-1.5 -ml-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors cursor-pointer shrink-0">
-            <ChevronLeft size={18} />
-          </button>
-        )}
-        <div
-          className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer hover:opacity-80 transition-opacity"
-          onClick={() => setShowProfile(true)}
-        >
-          <Avatar className="h-8 w-8">
-            {profile?.picture && <AvatarImage src={profile.picture} />}
-            <AvatarFallback className="text-xs bg-primary/20 text-primary">
-              {(profile?.display_name || profile?.name || npubStr).slice(0, 2).toUpperCase()}
-            </AvatarFallback>
-          </Avatar>
-          <div className="min-w-0">
-            <p className="text-sm font-semibold text-foreground truncate">
-              {profile?.display_name || profile?.name || truncateNpub(npubStr, 10)}
-            </p>
-            <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
-              <Shield size={9} />
-              <span>Private (NIP-04 Encrypted)</span>
+      <div className="flex items-center gap-3 px-4 py-3 bg-secondary/50 rounded-md shadow-md shrink-0 max-[1080px]:flex-col max-[1080px]:items-stretch max-[1080px]:gap-2">
+        {/* Identity row (back + avatar + name) */}
+        <div className="flex items-center gap-3 flex-1 min-w-0">
+          {onBack && (
+            <button onClick={onBack} className="hidden max-[1080px]:flex p-1.5 -ml-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors cursor-pointer shrink-0">
+              <ChevronLeft size={18} />
+            </button>
+          )}
+          <div
+            className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer hover:opacity-80 transition-opacity"
+            onClick={() => setShowProfile(true)}
+          >
+            <Avatar className="h-8 w-8">
+              {profile?.picture && <AvatarImage src={profile.picture} />}
+              <AvatarFallback className="text-xs bg-primary/20 text-primary">
+                {(profile?.display_name || profile?.name || npubStr).slice(0, 2).toUpperCase()}
+              </AvatarFallback>
+            </Avatar>
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-foreground truncate">
+                {profile?.display_name || profile?.name || truncateNpub(npubStr, 10)}
+              </p>
+              <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                <Shield size={9} />
+                <span>Private (NIP-04 Encrypted)</span>
+              </div>
             </div>
           </div>
         </div>
@@ -535,7 +538,7 @@ export function DM04ChatView({ recipientPubkey, onSwitchProtocol, onBack }: { re
               <TooltipTrigger asChild>
                 <button
                   onClick={onSwitchProtocol}
-                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 border border-border/50 transition-colors cursor-pointer shrink-0"
+                  className="flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 border border-border/50 transition-colors cursor-pointer shrink-0 max-[1080px]:w-full"
                 >
                   <ShieldCheck size={12} /> Switch to Extra Private
                 </button>

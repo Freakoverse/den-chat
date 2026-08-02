@@ -15,6 +15,7 @@
  * icon button (UserPanel) and the full-width button (Settings › General).
  */
 import { useState, useEffect, useMemo, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import { useUserStore } from '@/stores/userStore'
 import { isTauri, truncateNpub, cn } from '@/lib/utils'
 import { nip19 } from 'nostr-tools'
@@ -118,8 +119,8 @@ export function AccountSwitcher({ trigger }: { trigger: (open: () => void) => Re
     <>
       {trigger(() => setOpen(true))}
 
-      {open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center px-2 bg-black/60 backdrop-blur-sm" onClick={close}>
+      {open && createPortal((
+        <div className="fixed inset-0 z-[100] flex items-center justify-center px-2 bg-black/60 backdrop-blur-sm" onClick={close}>
           <div
             className="w-[380px] max-h-[70vh] bg-card border border-border rounded-xl shadow-2xl flex flex-col overflow-hidden"
             onClick={(e) => e.stopPropagation()}
@@ -233,7 +234,7 @@ export function AccountSwitcher({ trigger }: { trigger: (open: () => void) => Re
             )}
           </div>
         </div>
-      )}
+      ), document.body)}
     </>
   )
 }
