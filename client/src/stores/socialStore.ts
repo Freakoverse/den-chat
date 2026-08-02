@@ -118,7 +118,10 @@ export const useSocialStore = create<SocialState>((set) => ({
   activeForumPostId: null,
   navStack: [],
 
-  setActivePage: (page) => set({ activePage: page }),
+  // Navigating to the Write page via the nav = a NEW article: clear any lingering
+  // edit target so it doesn't reopen the last-edited article. (Edit mode is entered
+  // only via setEditingArticle, which sets editingArticleNaddr directly.)
+  setActivePage: (page) => set(page === 'longform-write' ? { activePage: page, editingArticleNaddr: null } : { activePage: page }),
   openForumFeed: () => set({ activePage: 'forum-feed', activeForumWord: null, activeForumCommunity: null, activeForumPostId: null, navStack: [] }),
   setActiveForumWord: (word) => set((s) => ({
     navStack: [...s.navStack, snapshot(s)].slice(-MAX_NAV_STACK),
