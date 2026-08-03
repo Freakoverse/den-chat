@@ -129,3 +129,7 @@ export const StorageKey = {
 /** Admin / creator identity */
 export const ADMIN_NPUB = 'npub1lw0alc5n7gpgc9hv7n230zcump7p63a8atfgf23d6gcxvqykm5xqqqmduf'
 export const ADMIN_PUBKEY = 'fb9fdfe293f2028c16ecf4d5178b1cd87c1d47a7ead284aa2dd230660096dd0c'
+
+/** Previous admin/creator identity — kept for credit in the About page (no donate). */
+export const PREV_ADMIN_NPUB = 'npub18ly7pqxzm4mmy8rd47cdt74ahc424y95xdtl9t7vek8777l5xqss3pttwf'
+export const PREV_ADMIN_PUBKEY = '3fc9e080c2dd77b21c6dafb0d5fabdbe2aaa90b43357f2afcccd8fef7bf43021'

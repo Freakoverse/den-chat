@@ -18,7 +18,7 @@ import { dnnService, type DnnNodeInfo } from '@/lib/dnn/dnnService'
 import { useVoiceStore } from '@/stores/voiceStore'
 import { usePreferencesStore, LANGUAGES, type LanguageCode } from '@/stores/preferencesStore'
 import { useTypingStore } from '@/stores/typingStore'
-import { StorageKey, ADMIN_NPUB, ADMIN_PUBKEY } from '@/lib/constants'
+import { StorageKey, ADMIN_NPUB, ADMIN_PUBKEY, PREV_ADMIN_NPUB, PREV_ADMIN_PUBKEY } from '@/lib/constants'
 import { STANDARD_KINDS, KINDS } from '@/lib/crypto/constants'
 import { blossomServers, uploadToBlossomServers, downloadFromBlossomWithProgress } from '@/lib/blossom'
 import type { DownloadProgress } from '@/lib/blossom'
@@ -5565,8 +5565,8 @@ function RebroadcastHubTool() {
   const runCoverage = async (ev: NostrEvent) => {
     setChecking(true)
     try {
-      const results = await checkEventAvailability({ kinds: [KINDS.HUB_EVENT], authors: [ev.pubkey], '#d': [ev.tags.find((t) => t[0] === 'd')?.[1] ?? ''], limit: 1 })
-      setCoverage({ present: results.filter((r) => r.present).length, total: results.length })
+      const results = await checkEventAvailability({ kinds: [KINDS.HUB_EVENT], authors: [ev.pubkey], '#d': [ev.tags.find((t) => t[0] === 'd')?.[1] ?? ''], limit: 1 }, ev.created_at)
+      setCoverage({ present: results.filter((r) => r.status === 'present').length, total: results.length })
     } catch { setCoverage(null) } finally { setChecking(false) }
   }
 
@@ -7122,9 +7122,34 @@ function GuideReaderModal({ guide, onClose }: { guide: ResolvedGuide; onClose: (
 
 /* ─────────── About ─────────── */
 
+function CreatorCard({ npub, profile, onClick }: {
+  pubkey: string
+  npub: string
+  profile: { picture?: string; display_name?: string; name?: string } | null | undefined
+  onClick: () => void
+}) {
+  const name = profile?.display_name || profile?.name
+  return (
+    <button
+      onClick={onClick}
+      className="flex-1 min-w-0 flex items-center gap-2.5 rounded-xl border border-border bg-secondary/40 p-2.5 text-left cursor-pointer hover:bg-secondary/60 transition-colors"
+    >
+      <Avatar className="h-9 w-9 shrink-0">
+        {profile?.picture ? <AvatarImage src={profile.picture} alt={name || 'Creator'} /> : null}
+        <AvatarFallback className="text-xs bg-primary/20 text-primary">{(name || 'D')[0].toUpperCase()}</AvatarFallback>
+      </Avatar>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-medium text-foreground truncate">{name || 'Loading...'}</p>
+        <p className="text-xs text-muted-foreground truncate">{truncateNpub(npub)}</p>
+      </div>
+    </button>
+  )
+}
+
 function AboutTab() {
   const { getProfile } = useProfileCache()
   const adminProfile = getProfile(ADMIN_PUBKEY)
+  const prevAdminProfile = getProfile(PREV_ADMIN_PUBKEY)
   const [donateOpen, setDonateOpen] = useState(false)
   const [profilePubkey, setProfilePubkey] = useState<string | null>(null)
 
@@ -7172,34 +7197,25 @@ function AboutTab() {
         </p>
       </div>
 
-      {/* By — creator card */}
-      <div className="mt-4 w-full max-w-xs">
-        <p className="text-xs text-muted-foreground text-center mb-2 uppercase tracking-wider">By</p>
-        <button
+      {/* Creators — current · BY · previous (side by side) */}
+      <div className="mt-4 w-full max-w-md flex items-stretch gap-2.5">
+        <CreatorCard
+          pubkey={ADMIN_PUBKEY}
+          npub={ADMIN_NPUB}
+          profile={adminProfile}
           onClick={() => setProfilePubkey(ADMIN_PUBKEY)}
-          className="flex items-center gap-3 rounded-xl border border-border bg-secondary/40 p-3 w-full text-left cursor-pointer hover:bg-secondary/60 transition-colors"
-        >
-          <Avatar className="h-10 w-10 shrink-0">
-            {adminProfile?.picture ? (
-              <AvatarImage src={adminProfile.picture} alt={adminProfile.display_name || adminProfile.name || 'Creator'} />
-            ) : null}
-            <AvatarFallback className="text-xs bg-primary/20 text-primary">
-              {(adminProfile?.display_name || adminProfile?.name || 'D')[0].toUpperCase()}
-            </AvatarFallback>
-          </Avatar>
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-medium text-foreground truncate">
-              {adminProfile?.display_name || adminProfile?.name || 'Loading...'}
-            </p>
-            <p className="text-xs text-muted-foreground truncate">
-              {truncateNpub(ADMIN_NPUB)}
-            </p>
-          </div>
-        </button>
+        />
+        <span className="shrink-0 self-center text-[10px] font-medium text-muted-foreground uppercase tracking-wider">By</span>
+        <CreatorCard
+          pubkey={PREV_ADMIN_PUBKEY}
+          npub={PREV_ADMIN_NPUB}
+          profile={prevAdminProfile}
+          onClick={() => setProfilePubkey(PREV_ADMIN_PUBKEY)}
+        />
       </div>
 
-      {/* Donate button */}
-      <div className="w-full max-w-xs">
+      {/* Donate button (spans under both) */}
+      <div className="w-full max-w-md -mt-2">
         <button
           onClick={() => setDonateOpen(true)}
           className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border border-rose-500/30 bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 hover:border-rose-500/40 transition-all cursor-pointer text-sm font-medium"
