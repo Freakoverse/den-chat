@@ -7358,23 +7358,34 @@ function AboutTab() {
                         ))}
                       </div>
                     ) : (
-                      <div className="flex flex-wrap gap-3">
+                      <div className="flex flex-wrap items-start gap-3">
                         {td.sponsors.map((s, i) => (
                           <a
                             key={i}
                             href={s.link || '#'}
                             target={s.link ? '_blank' : undefined}
                             rel={s.link ? 'noopener noreferrer' : undefined}
-                            className="flex flex-col items-center justify-center gap-1.5 rounded-xl border border-border bg-secondary/30 hover:bg-secondary/50 transition-colors overflow-hidden"
-                            style={{ width: tier === 'mythic' ? 208 : tier === 'legendary' ? 192 : tier === 'epic' ? 160 : 144, height: tier === 'mythic' ? 128 : tier === 'legendary' ? 112 : tier === 'epic' ? 96 : 80 }}
+                            className="flex flex-col items-center justify-center gap-3 pt-5 pb-3 rounded-xl border border-border bg-secondary/30 hover:bg-secondary/50 transition-colors overflow-hidden"
+                            style={{ width: tier === 'mythic' ? 208 : tier === 'legendary' ? 192 : tier === 'epic' ? 160 : 144 }}
                           >
-                            {s.logo && <img src={s.logo} alt={s.name} className="max-w-[80%] max-h-[55%] object-contain" />}
+                            {s.logo && <img src={s.logo} alt={s.name} className="max-w-[80%] object-contain" style={{ maxHeight: tier === 'mythic' ? 70 : tier === 'legendary' ? 62 : tier === 'epic' ? 52 : 44 }} />}
                             {s.name && <span className="text-[11px] text-muted-foreground font-medium text-center px-2 truncate w-full">{s.name}</span>}
                           </a>
                         ))}
+                        {td.anonymous > 0 && (
+                          <div
+                            className="flex flex-col items-center justify-center gap-3 pt-4 pb-3 rounded-xl border border-dashed border-border bg-secondary/20 text-center overflow-hidden"
+                            style={{ width: tier === 'mythic' ? 208 : tier === 'legendary' ? 192 : tier === 'epic' ? 160 : 144 }}
+                          >
+                            <div className="flex items-center justify-center" style={{ height: tier === 'mythic' ? 70 : tier === 'legendary' ? 62 : tier === 'epic' ? 52 : 44 }}>
+                              <span className="text-3xl font-bold text-foreground leading-none">{td.anonymous}</span>
+                            </div>
+                            <span className="text-[11px] text-muted-foreground">Anonymous</span>
+                          </div>
+                        )}
                       </div>
                     )}
-                    {td.anonymous > 0 && (
+                    {tier === 'common' && td.anonymous > 0 && (
                       <p className="text-xs text-muted-foreground/50 mt-2">Anonymous {TIER_LABELS[tier]} sponsors: {td.anonymous}</p>
                     )}
                   </div>
