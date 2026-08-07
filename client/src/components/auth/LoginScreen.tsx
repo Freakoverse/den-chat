@@ -13,6 +13,7 @@ import { Separator } from '@/components/ui/separator'
 import { DenChatLogo } from '@/components/ui/DenChatLogo'
 import { WarningCarousel } from '@/components/auth/WarningCarousel'
 import { PinInput } from '@/components/auth/PinInput'
+import { ImageCropModal } from '@/components/ui/ImageCropModal'
 import { QRCodeSVG } from 'qrcode.react'
 import { isValidMnemonic, generateSeedPhrase } from '@/lib/auth'
 import { uploadToBlossomServers, blossomServers as blossomServerManager } from '@/lib/blossom'
@@ -164,6 +165,7 @@ export function LoginScreen() {
   const [picUploadError, setPicUploadError] = useState<string | null>(null)
   const picInputRef = useRef<HTMLInputElement>(null)
   const picAbortRef = useRef<AbortController | null>(null)
+  const [picEditFile, setPicEditFile] = useState<File | null>(null) // crop-editor target
   const [showAdvancedModal, setShowAdvancedModal] = useState(false)
   const [onboardRelays, setOnboardRelays] = useState<{ url: string; enabled: boolean }[]>([])
   const [onboardBlossoms, setOnboardBlossoms] = useState<{ url: string; enabled: boolean }[]>([])
@@ -1658,9 +1660,21 @@ export function LoginScreen() {
               onChange={(e) => {
                 const file = e.target.files?.[0]
                 e.target.value = ''
-                if (file) handleOnboardingImageUpload(file)
+                if (file) setPicEditFile(file)
               }}
             />
+            {picEditFile && (
+              <ImageCropModal
+                file={picEditFile}
+                aspect={1}
+                round
+                maxOutput={1024}
+                title="Edit profile picture"
+                onCancel={() => setPicEditFile(null)}
+                onUploadOriginal={() => { const f = picEditFile; setPicEditFile(null); handleOnboardingImageUpload(f) }}
+                onSave={(f) => { setPicEditFile(null); handleOnboardingImageUpload(f) }}
+              />
+            )}
             <div className="flex flex-col items-center gap-1">
               <button
                 type="button"

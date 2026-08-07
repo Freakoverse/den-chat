@@ -13,6 +13,7 @@ import { Separator } from '@/components/ui/separator'
 import { Loader2, Plus, Hash, X, Camera, ImageIcon, Check, AlertTriangle, XCircle, ChevronDown, Trash2, Info, Lightbulb, KeyRound, Upload, FileSignature, Radio, ListPlus, Database, CheckCircle2 } from 'lucide-react'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
+import { ImageCropModal } from '@/components/ui/ImageCropModal'
 import { HUB_NAME_MAX, HUB_DESCRIPTION_MAX, MAX_GENERAL_RELAYS, MAX_BLOSSOM_SERVERS, MAX_HUB_LIST_ENTRIES } from '@/lib/hub/hubLimits'
 import { useUserStore } from '@/stores/userStore'
 import { useHubStore } from '@/stores/hubStore'
@@ -120,6 +121,10 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
   const [bannerStatus, setBannerStatus] = useState<UploadStatus>('idle')
   const [bannerProgress, setBannerProgress] = useState<UploadProgress | null>(null)
   const [bannerSuccessCount, setBannerSuccessCount] = useState(0)
+
+  // Crop-editor targets — a freshly picked file opens the editor before uploading
+  const [iconEditFile, setIconEditFile] = useState<File | null>(null)
+  const [bannerEditFile, setBannerEditFile] = useState<File | null>(null)
 
   const iconInputRef = useRef<HTMLInputElement>(null)
   const bannerInputRef = useRef<HTMLInputElement>(null)
@@ -233,28 +238,6 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
 
   if (!open) return null
 
-  const handleDrop = (
-    e: React.DragEvent,
-    setPreview: (url: string | null) => void,
-    setHash: (hash: string | null) => void,
-    setStatus: (s: UploadStatus) => void,
-    setProgress: (p: UploadProgress | null) => void,
-    setSuccessCount: (n: number) => void,
-    abortRef: React.MutableRefObject<AbortController | null>,
-    setDragOver: (v: boolean) => void,
-  ) => {
-    e.preventDefault()
-    e.stopPropagation()
-    setDragOver(false)
-    const file = e.dataTransfer.files?.[0]
-    if (!file) return
-    if (!isValidImageFile(file)) {
-      setError('Only image files are allowed (PNG, JPG, GIF, WebP)')
-      return
-    }
-    handleImageUpload(file, setPreview, setHash, setStatus, setProgress, setSuccessCount, abortRef)
-  }
-
   const handleDragOver = (e: React.DragEvent, setDragOver: (v: boolean) => void) => {
     e.preventDefault()
     e.stopPropagation()
@@ -327,6 +310,19 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
     abortRef.current?.abort()
     abortRef.current = null
   }
+
+  // Open the crop editor for a freshly-picked file (validates type + size first)
+  const startEdit = (f: File, set: (f: File | null) => void) => {
+    if (!isValidImageFile(f)) {
+      setError('Only image files are allowed (PNG, JPG, GIF, WebP)')
+      return
+    }
+    const limitMb = Number(localStorage.getItem('den-chat-upload-limit-mb')) || 10
+    if (f.size > limitMb * 1024 * 1024) { setFileSizeWarning({ name: f.name, limitMb }); return }
+    set(f)
+  }
+  const uploadIcon = (f: File) => handleImageUpload(f, setIconPreview, setIconHash, setIconStatus, setIconProgress, setIconSuccessCount, iconAbortRef)
+  const uploadBanner = (f: File) => handleImageUpload(f, setBannerPreview, setBannerHash, setBannerStatus, setBannerProgress, setBannerSuccessCount, bannerAbortRef)
 
   const removeImage = (
     setPreview: (v: null) => void,
@@ -653,7 +649,7 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
                   disabled={iconStatus === 'uploading'}
                   onDragOver={(e) => handleDragOver(e, setIconDragOver)}
                   onDragLeave={(e) => handleDragLeave(e, setIconDragOver)}
-                  onDrop={(e) => handleDrop(e, setIconPreview, setIconHash, setIconStatus, setIconProgress, setIconSuccessCount, iconAbortRef, setIconDragOver)}
+                  onDrop={(e) => { e.preventDefault(); e.stopPropagation(); setIconDragOver(false); const f = e.dataTransfer.files?.[0]; if (f) startEdit(f, setIconEditFile) }}
                   className={`relative w-16 h-16 rounded-2xl border-2 border-dashed flex items-center justify-center overflow-hidden transition-colors cursor-pointer group ${
                     iconDragOver ? 'border-primary bg-primary/10' : 'border-border hover:border-primary/50'
                   }`}
@@ -694,7 +690,7 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
                   disabled={bannerStatus === 'uploading'}
                   onDragOver={(e) => handleDragOver(e, setBannerDragOver)}
                   onDragLeave={(e) => handleDragLeave(e, setBannerDragOver)}
-                  onDrop={(e) => handleDrop(e, setBannerPreview, setBannerHash, setBannerStatus, setBannerProgress, setBannerSuccessCount, bannerAbortRef, setBannerDragOver)}
+                  onDrop={(e) => { e.preventDefault(); e.stopPropagation(); setBannerDragOver(false); const f = e.dataTransfer.files?.[0]; if (f) startEdit(f, setBannerEditFile) }}
                   className={`relative w-full h-16 rounded-lg border-2 border-dashed flex items-center justify-center overflow-hidden transition-colors cursor-pointer group ${
                     bannerDragOver ? 'border-primary bg-primary/10' : 'border-border hover:border-primary/50'
                   }`}
@@ -736,7 +732,7 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
               className="hidden"
               onChange={(e) => {
                 const file = e.target.files?.[0]
-                if (file) handleImageUpload(file, setIconPreview, setIconHash, setIconStatus, setIconProgress, setIconSuccessCount, iconAbortRef)
+                if (file) startEdit(file, setIconEditFile)
                 e.target.value = ''
               }}
             />
@@ -747,7 +743,7 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
               className="hidden"
               onChange={(e) => {
                 const file = e.target.files?.[0]
-                if (file) handleImageUpload(file, setBannerPreview, setBannerHash, setBannerStatus, setBannerProgress, setBannerSuccessCount, bannerAbortRef)
+                if (file) startEdit(file, setBannerEditFile)
                 e.target.value = ''
               }}
             />
@@ -1319,6 +1315,20 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Image crop editors — open before uploading a picked/dropped image */}
+      {iconEditFile && (
+        <ImageCropModal file={iconEditFile} aspect={1} maxOutput={512} title="Edit hub icon"
+          onCancel={() => setIconEditFile(null)}
+          onUploadOriginal={() => { const f = iconEditFile; setIconEditFile(null); uploadIcon(f) }}
+          onSave={(f) => { setIconEditFile(null); uploadIcon(f) }} />
+      )}
+      {bannerEditFile && (
+        <ImageCropModal file={bannerEditFile} aspect={3} maxOutput={1500} title="Edit hub banner"
+          onCancel={() => setBannerEditFile(null)}
+          onUploadOriginal={() => { const f = bannerEditFile; setBannerEditFile(null); uploadBanner(f) }}
+          onSave={(f) => { setBannerEditFile(null); uploadBanner(f) }} />
       )}
 
       {/* File size warning modal */}
