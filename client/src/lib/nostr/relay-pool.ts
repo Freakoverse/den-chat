@@ -36,6 +36,23 @@ const DEFAULT_RELAYS = [
 let activeRelaysCache: string[] | null = null
 
 /**
+ * Merge any default relays missing from a stored list, appended as enabled.
+ * This lets existing installs automatically pick up newly-added defaults
+ * (defaults are non-deletable anyway), while preserving stored order and each
+ * relay's enabled/disabled state. Non-destructive — callers decide whether to persist.
+ */
+function mergeMissingDefaults(
+  list: { url: string; enabled: boolean }[],
+): { url: string; enabled: boolean }[] {
+  const norm = (u: string) => u.replace(/\/+$/, '')
+  const have = new Set(list.map((r) => norm(r.url)))
+  const additions = DEFAULT_RELAYS
+    .filter((url) => !have.has(norm(url)))
+    .map((url) => ({ url, enabled: true }))
+  return additions.length > 0 ? [...list, ...additions] : list
+}
+
+/**
  * Load enabled relays from localStorage.
  * Falls back to DEFAULT_RELAYS if nothing stored or all disabled.
  */
@@ -44,7 +61,8 @@ function loadRelays(): string[] {
     const stored = localStorage.getItem(StorageKey.CLIENT_RELAYS)
     if (stored) {
       const parsed = JSON.parse(stored) as { url: string; enabled: boolean }[]
-      const enabled = parsed.filter((r) => r.enabled).map((r) => r.url)
+      const merged = mergeMissingDefaults(parsed)
+      const enabled = merged.filter((r) => r.enabled).map((r) => r.url)
       if (enabled.length > 0) return enabled
     }
   } catch { /* ignore */ }
@@ -89,7 +107,7 @@ export function getRelayList(): { url: string; enabled: boolean }[] {
     const stored = localStorage.getItem(StorageKey.CLIENT_RELAYS)
     if (stored) {
       const parsed = JSON.parse(stored)
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed
+      if (Array.isArray(parsed) && parsed.length > 0) return mergeMissingDefaults(parsed)
     }
   } catch { /* ignore */ }
   return DEFAULT_RELAYS.map((url) => ({ url, enabled: true }))
