@@ -501,10 +501,13 @@ function AddTopicModal({ onClose }: { onClose: () => void }) {
 
   const suggestions = ['games', 'movies', 'shows', 'music', 'travel', 'programming', 'ai', 'software', 'hardware', 'football', 'basketball', 'memes']
 
-  const handleAdd = async () => {
+  const handleAdd = () => {
     const t = value.trim().toLowerCase()
     if (!t || !myPubkey) return
-    await addTopic(t, myPubkey, signer, privateKey)
+    // addTopic updates the store synchronously (optimistic) then publishes the
+    // NIP-78 list in the background — a best-effort, non-blocking write. Don't
+    // await it, or the modal hangs for seconds waiting on the slowest relay.
+    void addTopic(t, myPubkey, signer, privateKey)
     setActiveTopic(t)
     onClose()
   }
