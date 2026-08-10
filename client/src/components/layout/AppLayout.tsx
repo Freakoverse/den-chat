@@ -26,7 +26,7 @@ import { useBlockStore } from '@/stores/blockStore'
 import { useWotStore } from '@/stores/wotStore'
 import { useMobile } from '@/hooks/useMobile'
 import { useMemo, useEffect, useState } from 'react'
-import { ShieldAlert, LogOut, Plus, MessageSquare, AtSign, Compass, Settings, Home, X, Wallet, Loader2 } from 'lucide-react'
+import { ShieldAlert, LogOut, Plus, MessageSquare, MessagesSquare, AtSign, Compass, Settings, Home, X, Wallet, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { OfflineBanner } from '@/components/ui/OfflineBanner'
 import { createHubListEvent, signWithSigner } from '@/lib/nostr/events'
@@ -180,6 +180,7 @@ export function AppLayout() {
             activePage={activePage}
             onNavigate={setActivePage}
             dmUnread={dmTotalUnread}
+            pcUnread={pcTotalUnread}
           />
         )}
       </div>
@@ -231,49 +232,56 @@ export function AppLayout() {
 
 // ─── Bottom Tab Bar (Mobile) ─────────────────────────────────
 
-function MobileTabBar({ activePage, onNavigate, dmUnread }: {
+function MobileTabBar({ activePage, onNavigate, dmUnread, pcUnread }: {
   activePage: string
   onNavigate: (page: 'hubs' | 'dms' | 'social' | 'discover' | 'settings' | 'wallet' | 'public-chat') => void
   dmUnread: number
+  pcUnread: number
 }) {
   const setMobileView = useNavigationStore((s) => s.setMobileView)
 
-  const tabs: { id: 'hubs' | 'dms' | 'social' | 'discover' | 'wallet' | 'settings'; label: string; icon: typeof Home; badge?: number }[] = [
+  const tabs: { id: 'hubs' | 'dms' | 'social' | 'discover' | 'public-chat' | 'wallet' | 'settings'; label: string; icon: typeof Home; badge?: number }[] = [
     { id: 'hubs', label: 'Hubs', icon: Home },
     { id: 'dms', label: 'DMs', icon: MessageSquare, badge: dmUnread },
     { id: 'social', label: 'Social', icon: AtSign },
     { id: 'discover', label: 'Discover', icon: Compass },
+    { id: 'public-chat', label: 'Public', icon: MessagesSquare, badge: pcUnread },
     { id: 'wallet', label: 'Wallet', icon: Wallet },
     { id: 'settings', label: 'Settings', icon: Settings },
   ]
 
   return (
-    <div className="flex items-center justify-around border-t border-border bg-background/95 backdrop-blur-sm px-1 py-1 shrink-0">
-      {tabs.map((tab) => {
-        const Icon = tab.icon
-        const isActive = activePage === tab.id
-        return (
-          <button
-            key={tab.id}
-            onClick={() => {
-              onNavigate(tab.id)
-              if (tab.id === 'hubs') setMobileView('home')
-            }}
-            className={cn(
-              'flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-lg transition-colors cursor-pointer relative',
-              isActive ? 'text-primary' : 'text-muted-foreground hover:text-foreground'
-            )}
-          >
-            <Icon size={20} />
-            <span className="text-[10px] font-medium">{tab.label}</span>
-            {!!tab.badge && tab.badge > 0 && (
-              <span className="absolute -top-0.5 right-1 min-w-[16px] h-[16px] flex items-center justify-center rounded-full bg-destructive text-destructive-foreground text-[9px] font-bold px-1">
-                {tab.badge > 99 ? '99+' : tab.badge}
-              </span>
-            )}
-          </button>
-        )
-      })}
+    <div className="relative border-t border-border bg-background/95 backdrop-blur-sm shrink-0">
+      {/* Edge fades hint that the row scrolls horizontally (too many tabs to fit) */}
+      <div className="pointer-events-none absolute inset-y-0 left-0 w-8 z-10 bg-gradient-to-r from-background to-transparent" />
+      <div className="pointer-events-none absolute inset-y-0 right-0 w-8 z-10 bg-gradient-to-l from-background to-transparent" />
+      <div className="flex items-center gap-1 overflow-x-auto scrollbar-hide px-1 py-1">
+        {tabs.map((tab) => {
+          const Icon = tab.icon
+          const isActive = activePage === tab.id
+          return (
+            <button
+              key={tab.id}
+              onClick={() => {
+                onNavigate(tab.id)
+                if (tab.id === 'hubs') setMobileView('home')
+              }}
+              className={cn(
+                'flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-lg transition-colors cursor-pointer relative shrink-0 min-w-[60px]',
+                isActive ? 'text-primary' : 'text-muted-foreground hover:text-foreground'
+              )}
+            >
+              <Icon size={20} />
+              <span className="text-[10px] font-medium">{tab.label}</span>
+              {!!tab.badge && tab.badge > 0 && (
+                <span className="absolute -top-0.5 right-1 min-w-[16px] h-[16px] flex items-center justify-center rounded-full bg-destructive text-destructive-foreground text-[9px] font-bold px-1">
+                  {tab.badge > 99 ? '99+' : tab.badge}
+                </span>
+              )}
+            </button>
+          )
+        })}
+      </div>
     </div>
   )
 }
