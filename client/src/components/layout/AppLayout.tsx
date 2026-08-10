@@ -26,7 +26,7 @@ import { useBlockStore } from '@/stores/blockStore'
 import { useWotStore } from '@/stores/wotStore'
 import { useMobile } from '@/hooks/useMobile'
 import { useMemo, useEffect, useState } from 'react'
-import { ShieldAlert, LogOut, Plus, MessageSquare, MessagesSquare, AtSign, Compass, Settings, Home, X, Wallet, Loader2 } from 'lucide-react'
+import { ShieldAlert, LogOut, Plus, MessageSquare, MessagesSquare, AtSign, Compass, Settings, Home, X, Wallet, Loader2, MoreHorizontal } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { OfflineBanner } from '@/components/ui/OfflineBanner'
 import { createHubListEvent, signWithSigner } from '@/lib/nostr/events'
@@ -239,53 +239,84 @@ function MobileTabBar({ activePage, onNavigate, dmUnread, pcUnread }: {
   pcUnread: number
 }) {
   const setMobileView = useNavigationStore((s) => s.setMobileView)
+  const [moreOpen, setMoreOpen] = useState(false)
 
-  const tabs: { id: 'hubs' | 'dms' | 'social' | 'discover' | 'public-chat' | 'wallet' | 'settings'; label: string; icon: typeof Home; badge?: number }[] = [
+  type TabId = 'hubs' | 'dms' | 'social' | 'discover' | 'settings' | 'wallet' | 'public-chat'
+  type Tab = { id: TabId; label: string; icon: typeof Home; badge?: number }
+
+  // Primary bar — always visible
+  const primaryTabs: Tab[] = [
     { id: 'hubs', label: 'Hubs', icon: Home },
     { id: 'dms', label: 'DMs', icon: MessageSquare, badge: dmUnread },
     { id: 'social', label: 'Social', icon: AtSign },
-    { id: 'discover', label: 'Discover', icon: Compass },
     { id: 'public-chat', label: 'Public', icon: MessagesSquare, badge: pcUnread },
+  ]
+  // Overflow — revealed by the "More" button
+  const moreTabs: Tab[] = [
+    { id: 'discover', label: 'Discover', icon: Compass },
     { id: 'wallet', label: 'Wallet', icon: Wallet },
     { id: 'settings', label: 'Settings', icon: Settings },
   ]
+  const moreActive = moreTabs.some((t) => t.id === activePage)
+
+  // Close the overflow panel whenever the page changes
+  useEffect(() => { setMoreOpen(false) }, [activePage])
+
+  const go = (id: TabId) => {
+    onNavigate(id)
+    if (id === 'hubs') setMobileView('home')
+    setMoreOpen(false)
+  }
+
+  const renderTab = (tab: Tab) => {
+    const Icon = tab.icon
+    const isActive = activePage === tab.id
+    return (
+      <button
+        key={tab.id}
+        onClick={() => go(tab.id)}
+        className={cn(
+          'flex flex-1 flex-col items-center gap-0.5 px-3 py-1.5 rounded-lg transition-colors cursor-pointer relative',
+          isActive ? 'text-primary' : 'text-muted-foreground hover:text-foreground'
+        )}
+      >
+        <Icon size={20} />
+        <span className="text-[10px] font-medium">{tab.label}</span>
+        {!!tab.badge && tab.badge > 0 && (
+          <span className="absolute -top-0.5 right-1 min-w-[16px] h-[16px] flex items-center justify-center rounded-full bg-destructive text-destructive-foreground text-[9px] font-bold px-1">
+            {tab.badge > 99 ? '99+' : tab.badge}
+          </span>
+        )}
+      </button>
+    )
+  }
 
   return (
-    <div className="relative border-t border-border bg-background/95 backdrop-blur-sm shrink-0">
-      {/* Behind the tabs — a black edge shadow so edge items look recessed (the "wheel" depth) */}
-      <div className="pointer-events-none absolute inset-y-0 left-0 w-8 z-0 bg-gradient-to-r from-black to-transparent" />
-      <div className="pointer-events-none absolute inset-y-0 right-0 w-8 z-0 bg-gradient-to-l from-black to-transparent" />
-      <div className="relative z-10 flex items-center gap-1 overflow-x-auto scrollbar-hide px-1 py-1">
-        {tabs.map((tab) => {
-          const Icon = tab.icon
-          const isActive = activePage === tab.id
-          return (
-            <button
-              key={tab.id}
-              onClick={() => {
-                onNavigate(tab.id)
-                if (tab.id === 'hubs') setMobileView('home')
-              }}
-              className={cn(
-                'flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-lg transition-colors cursor-pointer relative shrink-0 min-w-[60px]',
-                isActive ? 'text-primary' : 'text-muted-foreground hover:text-foreground'
-              )}
-            >
-              <Icon size={20} />
-              <span className="text-[10px] font-medium">{tab.label}</span>
-              {!!tab.badge && tab.badge > 0 && (
-                <span className="absolute -top-0.5 right-1 min-w-[16px] h-[16px] flex items-center justify-center rounded-full bg-destructive text-destructive-foreground text-[9px] font-bold px-1">
-                  {tab.badge > 99 ? '99+' : tab.badge}
-                </span>
-              )}
-            </button>
-          )
-        })}
+    <div className="relative shrink-0">
+      {/* Overflow ("More") panel — an identical bar that slides up above this one */}
+      {moreOpen && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setMoreOpen(false)} />
+          <div className="absolute bottom-full left-0 right-0 z-50 flex items-center border-t border-border bg-background/95 backdrop-blur-sm px-1 py-1 shadow-lg animate-in slide-in-from-bottom-2 fade-in duration-150">
+            {moreTabs.map(renderTab)}
+          </div>
+        </>
+      )}
+
+      {/* Primary bar */}
+      <div className="relative z-50 flex items-center border-t border-border bg-background/95 backdrop-blur-sm px-1 py-1">
+        {primaryTabs.map(renderTab)}
+        <button
+          onClick={() => setMoreOpen((v) => !v)}
+          className={cn(
+            'flex flex-1 flex-col items-center gap-0.5 px-3 py-1.5 rounded-lg transition-colors cursor-pointer relative',
+            moreOpen || moreActive ? 'text-primary' : 'text-muted-foreground hover:text-foreground'
+          )}
+        >
+          <MoreHorizontal size={20} />
+          <span className="text-[10px] font-medium">More</span>
+        </button>
       </div>
-      {/* Above the tabs — fade the edge items into black too (matching the shadow
-          behind), so the very edge stays darkest and there's no grey re-lightening */}
-      <div className="pointer-events-none absolute inset-y-0 left-0 w-8 z-20 bg-gradient-to-r from-black to-transparent" />
-      <div className="pointer-events-none absolute inset-y-0 right-0 w-8 z-20 bg-gradient-to-l from-black to-transparent" />
     </div>
   )
 }
