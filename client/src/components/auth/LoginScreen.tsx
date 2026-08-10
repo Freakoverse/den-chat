@@ -146,6 +146,7 @@ export function LoginScreen() {
   const [fileImportLoading, setFileImportLoading] = useState(false)
   const [showFilePasswordPrompt, setShowFilePasswordPrompt] = useState(false)
   const [showQrScanner, setShowQrScanner] = useState(false)
+  const [showBunkerScanner, setShowBunkerScanner] = useState(false)
   const [pendingFileData, setPendingFileData] = useState<string | null>(null)
 
   // Carousel state for account picker
@@ -531,16 +532,20 @@ export function LoginScreen() {
   }
 
   // ─── NIP-46 Bunker Login ───
-  const handleBunkerLogin = async () => {
-    if (!bunkerUrl.trim()) { setError('Enter a bunker:// URL'); return }
+  // Accepts an optional URL (e.g. from the QR scanner); falls back to the input field.
+  // Guarded with a typeof check so passing it directly as an onClick handler (which
+  // would supply a MouseEvent) doesn't break.
+  const handleBunkerLogin = async (urlArg?: string) => {
+    const url = (typeof urlArg === 'string' ? urlArg : bunkerUrl).trim()
+    if (!url) { setError('Enter a bunker:// URL'); return }
 
     setLoading('bunker')
     clearError()
     try {
       const signer = new BunkerSigner()
-      const pubkey = await signer.login(bunkerUrl.trim())
+      const pubkey = await signer.login(url)
       // Persist bunker URL + client secret for auto-login on startup
-      localStorage.setItem(StorageKey.BUNKER_URL, bunkerUrl.trim())
+      localStorage.setItem(StorageKey.BUNKER_URL, url)
       localStorage.setItem(StorageKey.BUNKER_CLIENT_SECRET, signer.getClientSecretKey())
       setSigner(signer)
       login(pubkey, 'nip46')
@@ -2107,7 +2112,10 @@ export function LoginScreen() {
                   className="h-10 flex-1"
                   onKeyDown={(e) => e.key === 'Enter' && handleBunkerLogin()}
                 />
-                <Button onClick={handleBunkerLogin} disabled={loading === 'bunker'} size="sm" className="shrink-0">
+                <Button variant="outline" size="sm" onClick={() => { setError(null); setShowBunkerScanner(true) }} disabled={loading === 'bunker'} className="shrink-0 px-2.5" title="Scan a bunker QR code" aria-label="Scan a bunker QR code">
+                  <QrCode size={16} />
+                </Button>
+                <Button onClick={() => handleBunkerLogin()} disabled={loading === 'bunker'} size="sm" className="shrink-0">
                   {loading === 'bunker' ? <Loader2 size={14} className="animate-spin" /> : 'Login'}
                 </Button>
               </div>
@@ -2117,6 +2125,14 @@ export function LoginScreen() {
                 </div>
               )}
             </div>
+
+            {showBunkerScanner && (
+              <QRScanner
+                caption="Point your camera at the bunker QR code"
+                onResult={(text) => { const v = text.trim(); setShowBunkerScanner(false); setBunkerUrl(v); handleBunkerLogin(v) }}
+                onClose={() => setShowBunkerScanner(false)}
+              />
+            )}
 
             <Button variant="ghost" onClick={goBack} className="w-full text-muted-foreground">Back</Button>
           </CardContent>

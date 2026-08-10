@@ -8,7 +8,7 @@ import { useEffect, useRef, useState } from 'react'
 import jsQR from 'jsqr'
 import { Loader2, X } from 'lucide-react'
 
-export function QRScanner({ onResult, onClose }: { onResult: (text: string) => void; onClose: () => void }) {
+export function QRScanner({ onResult, onClose, caption = 'Point your camera at the backup QR code' }: { onResult: (text: string) => void; onClose: () => void; caption?: string }) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const rafRef = useRef<number | null>(null)
@@ -81,7 +81,7 @@ export function QRScanner({ onResult, onClose }: { onResult: (text: string) => v
             {!ready && <div className="absolute inset-0 flex items-center justify-center"><Loader2 className="animate-spin text-white" /></div>}
             <div className="absolute inset-8 border-2 border-primary rounded-xl pointer-events-none" />
           </div>
-          <p className="text-sm text-white/80 mt-4 text-center">Point your camera at the backup QR code</p>
+          <p className="text-sm text-white/80 mt-4 text-center">{caption}</p>
         </>
       )}
       <canvas ref={canvasRef} className="hidden" />
