@@ -145,8 +145,9 @@ export function AppLayout() {
           ) : activePage === 'wallet' ? (
             <WalletPage />
           ) : activePage === 'hubs' && mobileView === 'chat' && activeHubId && activeChannelId ? (
-            /* Full-screen chat view */
-            <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
+            /* Full-screen chat view — px-2 replaces the desktop side-panel gutters
+               that don't exist here, so channel content isn't flush to the edges */
+            <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden px-2">
               {isBanned ? (isHardBanned ? <HardBanOverlay dTag={activeHubId} /> : <ModBanOverlay />) : (
                 isVoiceChannel ? <VoiceChannelView /> : isForumChannel ? <ForumView /> : <ChannelView />
               )}
