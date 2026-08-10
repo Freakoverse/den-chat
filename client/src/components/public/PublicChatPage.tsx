@@ -3,7 +3,7 @@
  * No encryption, no authority, PoW-based spam filtering.
  */
 
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo, type ReactNode } from 'react'
 import { getDraft, setDraft, clearDraft, pcDraftKey } from '@/stores/draftStore'
 import { usePublicChatStore, type PublicChatMessage, type PCStoredReaction } from '@/stores/publicChatStore'
 import { useNotificationStore } from '@/stores/notificationStore'
@@ -31,10 +31,11 @@ import { BlossomImg } from '@/components/ui/BlossomImg'
 import { useDnnStore } from '@/stores/dnnStore'
 import { useGifStore } from '@/stores/gifStore'
 import { publishGifFavorites } from '@/lib/nostr/customGif'
-import { Plus, Info, Hash, X, Loader2, MessagesSquare, Trash2, Reply, ArrowDown, Shield, Smile, Zap, MoreVertical, Copy, Code, Check, Filter, Minus, RotateCcw, Eye, EyeOff, AlertTriangle, ImageOff, LinkIcon, Sticker, Crown, BadgeCheck, Users, MessageCircleOff, Bell, ChevronRight, Star } from 'lucide-react'
+import { Plus, Info, Hash, X, Loader2, MessagesSquare, Trash2, Reply, ArrowDown, Shield, Smile, Zap, MoreVertical, Copy, Code, Check, Filter, Minus, RotateCcw, Eye, EyeOff, AlertTriangle, ImageOff, LinkIcon, Sticker, Crown, BadgeCheck, Users, MessageCircleOff, Bell, ChevronLeft, ChevronRight, Star } from 'lucide-react'
 import { DoodleBackground } from '@/components/ui/DoodleBackground'
 import { nip19 } from 'nostr-tools'
 import { cn, truncateNpub, formatTimestamp } from '@/lib/utils'
+import { useMobile } from '@/hooks/useMobile'
 
 import { getEmojiMap } from '@/stores/emojiStore'
 import { getHour12 } from '@/stores/preferencesStore'
@@ -71,31 +72,41 @@ export function PublicChatPage() {
     if (myPubkey && !topicListLoaded) fetchTopicList(myPubkey)
   }, [myPubkey, topicListLoaded, fetchTopicList])
 
+  const isMobile = useMobile()
+  // On mobile it's one pane at a time: the topic list, or the open chat/notifications.
+  const showingDetail = showNotifications || !!activeTopic
+  const handleMobileBack = () => { setShowNotifications(false); setActiveTopic(null) }
+
   return (
     <div className="flex flex-1 h-full overflow-hidden">
-      {/* Left — Topic list */}
-      <TopicListPanel
-        topics={topics}
-        activeTopic={activeTopic}
-        onSelect={(t) => { setShowNotifications(false); setActiveTopic(t) }}
-        onAdd={() => setShowAddTopic(true)}
-        onInfo={() => setShowInfo(true)}
-        onSettings={() => setShowSettings(true)}
-        onNotifications={() => { setShowNotifications(true); setActiveTopic(null) }}
-        showingNotifications={showNotifications}
-        loading={!topicListLoaded}
-      />
+      {/* Left — Topic list (full-screen on mobile when nothing is open) */}
+      {(!isMobile || !showingDetail) && (
+        <TopicListPanel
+          isMobile={isMobile}
+          topics={topics}
+          activeTopic={activeTopic}
+          onSelect={(t) => { setShowNotifications(false); setActiveTopic(t) }}
+          onAdd={() => setShowAddTopic(true)}
+          onInfo={() => setShowInfo(true)}
+          onSettings={() => setShowSettings(true)}
+          onNotifications={() => { setShowNotifications(true); setActiveTopic(null) }}
+          showingNotifications={showNotifications}
+          loading={!topicListLoaded}
+        />
+      )}
 
-      {/* Right — Chat view or Notification view */}
-      <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden bg-background">
-        {showNotifications ? (
-          <PublicChatNotificationView onNavigate={(topic, msgId) => { setShowNotifications(false); setActiveTopic(topic); setPendingHighlightId(msgId || null) }} />
-        ) : activeTopic ? (
-          <PublicChatView topic={activeTopic} pendingHighlightId={pendingHighlightId} onHighlightConsumed={() => setPendingHighlightId(null)} />
-        ) : (
-          <PublicChatEmptyState />
-        )}
-      </div>
+      {/* Right — Chat view or Notification view (full-screen on mobile when open) */}
+      {(!isMobile || showingDetail) && (
+        <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden bg-background">
+          {showNotifications ? (
+            <PublicChatNotificationView onNavigate={(topic, msgId) => { setShowNotifications(false); setActiveTopic(topic); setPendingHighlightId(msgId || null) }} onBack={isMobile ? handleMobileBack : undefined} />
+          ) : activeTopic ? (
+            <PublicChatView topic={activeTopic} pendingHighlightId={pendingHighlightId} onHighlightConsumed={() => setPendingHighlightId(null)} onBack={isMobile ? handleMobileBack : undefined} />
+          ) : (
+            <PublicChatEmptyState />
+          )}
+        </div>
+      )}
 
       {/* Add topic modal */}
       {showAddTopic && (
@@ -119,7 +130,24 @@ export function PublicChatPage() {
 /*  TOPIC LIST (Left Panel)                    */
 /* ═══════════════════════════════════════════ */
 
-function TopicListPanel({ topics, activeTopic, onSelect, onAdd, onInfo, onSettings, onNotifications, showingNotifications, loading }: {
+/** Fixed-width resizable sidebar on desktop; full-width pane on mobile. */
+function TopicListContainer({ isMobile, children }: { isMobile: boolean; children: ReactNode }) {
+  if (isMobile) {
+    return (
+      <div className="flex flex-1 flex-col bg-background p-2 gap-2 h-full overflow-hidden min-w-0">
+        {children}
+      </div>
+    )
+  }
+  return (
+    <ResizablePanel id="public-chat" defaultWidth={240} minWidth={180} maxWidth={360} className="flex flex-col bg-background pr-2 py-2 gap-2 h-full overflow-hidden max-[1080px]:p-2">
+      {children}
+    </ResizablePanel>
+  )
+}
+
+function TopicListPanel({ isMobile, topics, activeTopic, onSelect, onAdd, onInfo, onSettings, onNotifications, showingNotifications, loading }: {
+  isMobile: boolean
   topics: string[]
   activeTopic: string | null
   onSelect: (t: string) => void
@@ -156,7 +184,7 @@ function TopicListPanel({ topics, activeTopic, onSelect, onAdd, onInfo, onSettin
   }, [topics, allMessages, pcReadTimes])
 
   return (
-    <ResizablePanel id="public-chat" defaultWidth={240} minWidth={180} maxWidth={360} className="flex flex-col bg-background pr-2 py-2 gap-2 h-full overflow-hidden max-[1080px]:p-2">
+    <TopicListContainer isMobile={isMobile}>
       {/* Header card */}
       <div className="px-3 pt-3 pb-2 bg-secondary/50 rounded-md shadow-md shrink-0">
         <div className="flex items-center gap-2 mb-2">
@@ -268,7 +296,7 @@ function TopicListPanel({ topics, activeTopic, onSelect, onAdd, onInfo, onSettin
       </div>
 
       <UserPanel />
-    </ResizablePanel>
+    </TopicListContainer>
   )
 }
 
@@ -308,7 +336,7 @@ interface PCNotification {
   pow: number
 }
 
-function PublicChatNotificationView({ onNavigate }: { onNavigate: (topic: string, msgId?: string) => void }) {
+function PublicChatNotificationView({ onNavigate, onBack }: { onNavigate: (topic: string, msgId?: string) => void; onBack?: () => void }) {
   const myPubkey = useUserStore((s) => s.pubkey)
   const [notifications, setNotifications] = useState<PCNotification[]>([])
   const [loading, setLoading] = useState(true)
@@ -381,6 +409,11 @@ function PublicChatNotificationView({ onNavigate }: { onNavigate: (topic: string
       {/* Header + tabs card */}
       <div className="bg-secondary/50 rounded-md shadow-md shrink-0 overflow-hidden">
         <div className="flex items-center gap-3 px-4 py-3 border-b border-border/50">
+          {onBack && (
+            <button onClick={onBack} className="p-1 -ml-1 rounded-lg hover:bg-accent/50 text-muted-foreground hover:text-foreground transition-colors cursor-pointer shrink-0" aria-label="Back to topics">
+              <ChevronLeft size={18} />
+            </button>
+          )}
           <Bell size={16} className="text-muted-foreground" />
           <h3 className="text-sm font-semibold text-foreground flex-1">Notifications</h3>
         </div>
@@ -643,7 +676,7 @@ function GifImg({ src, alt, className, style }: { src: string; alt: string; clas
 /*  CHAT VIEW                                  */
 /* ═══════════════════════════════════════════ */
 
-function PublicChatView({ topic, pendingHighlightId, onHighlightConsumed }: { topic: string; pendingHighlightId?: string | null; onHighlightConsumed?: () => void }) {
+function PublicChatView({ topic, pendingHighlightId, onHighlightConsumed, onBack }: { topic: string; pendingHighlightId?: string | null; onHighlightConsumed?: () => void; onBack?: () => void }) {
   const myPubkey = useUserStore((s) => s.pubkey)
   const signer = useUserStore((s) => s.signer)
   const privateKey = useUserStore((s) => s.privateKey)
@@ -925,6 +958,11 @@ function PublicChatView({ topic, pendingHighlightId, onHighlightConsumed }: { to
     <div ref={chatContainerRef} className="flex flex-col flex-1 min-w-0 h-full overflow-hidden relative pr-2 py-2 gap-2 max-[1080px]:px-2">
       {/* Header card */}
       <div className="flex items-center gap-3 px-4 py-3 bg-secondary/50 rounded-md shadow-md shrink-0">
+        {onBack && (
+          <button onClick={onBack} className="p-1 -ml-1 rounded-lg hover:bg-accent/50 text-muted-foreground hover:text-foreground transition-colors cursor-pointer shrink-0" aria-label="Back to topics">
+            <ChevronLeft size={18} />
+          </button>
+        )}
         <Hash size={16} className="text-muted-foreground" />
         <h3 className="text-sm font-semibold text-foreground flex-1">{topic}</h3>
       </div>
