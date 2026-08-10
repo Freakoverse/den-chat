@@ -252,10 +252,10 @@ function MobileTabBar({ activePage, onNavigate, dmUnread, pcUnread }: {
 
   return (
     <div className="relative border-t border-border bg-background/95 backdrop-blur-sm shrink-0">
-      {/* Edge fades hint that the row scrolls horizontally (too many tabs to fit) */}
-      <div className="pointer-events-none absolute inset-y-0 left-0 w-8 z-10 bg-gradient-to-r from-background to-transparent" />
-      <div className="pointer-events-none absolute inset-y-0 right-0 w-8 z-10 bg-gradient-to-l from-background to-transparent" />
-      <div className="flex items-center gap-1 overflow-x-auto scrollbar-hide px-1 py-1">
+      {/* Behind the tabs — a black edge shadow so edge items look recessed (the "wheel" depth) */}
+      <div className="pointer-events-none absolute inset-y-0 left-0 w-8 z-0 bg-gradient-to-r from-black to-transparent" />
+      <div className="pointer-events-none absolute inset-y-0 right-0 w-8 z-0 bg-gradient-to-l from-black to-transparent" />
+      <div className="relative z-10 flex items-center gap-1 overflow-x-auto scrollbar-hide px-1 py-1">
         {tabs.map((tab) => {
           const Icon = tab.icon
           const isActive = activePage === tab.id
@@ -282,6 +282,9 @@ function MobileTabBar({ activePage, onNavigate, dmUnread, pcUnread }: {
           )
         })}
       </div>
+      {/* Above the tabs — fade the edge items into the bar (the scroll hint) */}
+      <div className="pointer-events-none absolute inset-y-0 left-0 w-8 z-20 bg-gradient-to-r from-background to-transparent" />
+      <div className="pointer-events-none absolute inset-y-0 right-0 w-8 z-20 bg-gradient-to-l from-background to-transparent" />
     </div>
   )
 }
