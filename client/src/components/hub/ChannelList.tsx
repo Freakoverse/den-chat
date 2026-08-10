@@ -260,6 +260,12 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
       return cat.channels.some((c) => canViewChannel(c.channelId))
     })
 
+  // Widest position number across the whole hub — used to right-align the index
+  // column so 1- and 2-digit numbers line up without zero-padding.
+  const positionDigits = hub.channels.length
+    ? String(Math.max(...hub.channels.map((c) => c.position))).length
+    : 1
+
 
 
   // On mobile, selecting a channel also transitions to chat view
@@ -417,6 +423,7 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
                 key={channel.channelId}
                 channel={channel}
                 position={channel.position}
+                positionDigits={positionDigits}
                 isActive={activeChannelId === channel.channelId}
                 onClick={() => !locked && handleSelectChannel(channel.channelId)}
                 isLocked={locked}
@@ -430,6 +437,7 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
               key={cat.categoryId}
               name={cat.name}
               channels={cat.channels}
+              positionDigits={positionDigits}
               activeChannelId={activeChannelId}
               onSelectChannel={handleSelectChannel}
               categoryEncryption={cat.encryption}
@@ -556,6 +564,7 @@ function DesktopWrapper({ children }: { children: ReactNode }) {
 interface CategoryGroupProps {
   name: string
   channels: Array<{ channelId: string; name: string; type: string; position: number; encryption: string | null; synced: boolean; categoryId: string | null }>
+  positionDigits: number
   activeChannelId: string | null
   onSelectChannel: (id: string) => void
   categoryEncryption: string | null
@@ -566,7 +575,7 @@ interface CategoryGroupProps {
   pubkey: string | null
 }
 
-function CategoryGroup({ name, channels, activeChannelId, onSelectChannel, categoryEncryption, groupSecrets, isCreator, hub, hubMembers, pubkey }: CategoryGroupProps) {
+function CategoryGroup({ name, channels, positionDigits, activeChannelId, onSelectChannel, categoryEncryption, groupSecrets, isCreator, hub, hubMembers, pubkey }: CategoryGroupProps) {
   const [collapsed, setCollapsed] = useState(false)
 
   const hasGroupAccess = (groupId: string | null): boolean => {
@@ -617,6 +626,7 @@ function CategoryGroup({ name, channels, activeChannelId, onSelectChannel, categ
                 key={channel.channelId}
                 channel={channel}
                 position={channel.position}
+                positionDigits={positionDigits}
                 isActive={activeChannelId === channel.channelId}
                 onClick={() => !locked && onSelectChannel(channel.channelId)}
                 isLocked={locked}
@@ -732,13 +742,14 @@ function UnreadScrollHints({ scrollRef, hubDTag, activeChannelId }: {
 interface ChannelItemProps {
   channel: { channelId: string; name: string; type: string }
   position: number
+  positionDigits: number
   isActive: boolean
   onClick: () => void
   isLocked?: boolean
   isPrivate?: boolean
 }
 
-function ChannelItem({ channel, position, isActive, onClick, isLocked = false, isPrivate = false }: ChannelItemProps) {
+function ChannelItem({ channel, position, positionDigits, isActive, onClick, isLocked = false, isPrivate = false }: ChannelItemProps) {
   // Voice channel presence count
   const presenceByHub = useVoiceStore((s) => s.presenceByHub)
   const getChannelPresence = useVoiceStore((s) => s.getChannelPresence)
@@ -825,7 +836,7 @@ function ChannelItem({ channel, position, isActive, onClick, isLocked = false, i
         ) : (
           <Hash size={18} className={cn('shrink-0', isUnread ? 'text-foreground/70' : 'text-muted-foreground')} />
         )}
-        <span className="text-md text-muted-foreground/60 font-bold">{position}</span>
+        <span className="text-md text-muted-foreground/60 font-bold tabular-nums text-right shrink-0" style={{ width: `${positionDigits}ch` }}>{position}</span>
         <span className={cn('truncate flex-1', isUnread && 'font-semibold')}>{channel.name}</span>
         {isPrivate && <Lock size={14} className={cn('shrink-0', isLocked ? 'text-muted-foreground/40' : 'text-muted-foreground/60')} />}
         {/* Unread count badge — or pulsing dot while loading */}
