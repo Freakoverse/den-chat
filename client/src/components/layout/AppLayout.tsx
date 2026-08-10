@@ -282,9 +282,10 @@ function MobileTabBar({ activePage, onNavigate, dmUnread, pcUnread }: {
           )
         })}
       </div>
-      {/* Above the tabs — fade the edge items into the bar (the scroll hint) */}
-      <div className="pointer-events-none absolute inset-y-0 left-0 w-8 z-20 bg-gradient-to-r from-background to-transparent" />
-      <div className="pointer-events-none absolute inset-y-0 right-0 w-8 z-20 bg-gradient-to-l from-background to-transparent" />
+      {/* Above the tabs — fade the edge items into black too (matching the shadow
+          behind), so the very edge stays darkest and there's no grey re-lightening */}
+      <div className="pointer-events-none absolute inset-y-0 left-0 w-8 z-20 bg-gradient-to-r from-black to-transparent" />
+      <div className="pointer-events-none absolute inset-y-0 right-0 w-8 z-20 bg-gradient-to-l from-black to-transparent" />
     </div>
   )
 }
