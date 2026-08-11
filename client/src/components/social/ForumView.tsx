@@ -58,7 +58,7 @@ function ForumBody({ body, className }: { body: string; className?: string }) {
   const showEmojis = useForumStore((s) => s.showCustomEmojis) && usePreferencesStore((s) => s.showCustomEmojis)
   if (!body.trim()) return null
   return (
-    <div className={cn('text-sm text-foreground/90 break-words', className)}>
+    <div className={cn('text-base text-foreground/90 break-words', className)}>
       <RichContent
         content={body}
         mutedWords={mutedWords}

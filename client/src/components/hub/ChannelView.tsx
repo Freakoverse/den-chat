@@ -1714,7 +1714,7 @@ function MessageList({ hubDTag, channelId, channelName, optimisticMessages, setO
                     <span className="text-xs text-muted-foreground">{formatTimestamp(optMsg.timestamp)}</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <div className="text-sm text-foreground/90 break-words"><MessageContent content={optMsg.content} /></div>
+                    <div className="text-base text-foreground/90 break-words"><MessageContent content={optMsg.content} /></div>
                     {optMsg.status === 'mining' && (
                       <span className="text-[10px] text-muted-foreground italic whitespace-nowrap">
                         processing...
@@ -3407,7 +3407,7 @@ export function ChatMessageRow({
             </div>
           ) : (
             <>
-              <div className={`text-sm text-foreground/90 break-words transition-opacity ${relayPending ? 'opacity-50' : ''}`}>
+              <div className={`text-base text-foreground/90 break-words transition-opacity ${relayPending ? 'opacity-50' : ''}`}>
                 <MessageContent content={contentForRender} onProfileClick={onOpenProfile} emojiTags={msg.emojiTags} mutedWords={mutedWords} disableLinkPreviews={!authorCanEmbed} disableHubInviteCards={!authorCanInvite} hubRoleNames={hubRoleNames} hubChannels={hubChannels} suffix={
                   <>
                     {msg.edited && <span className="text-[10px] text-muted-foreground ml-1"> (edited)</span>}
@@ -3633,7 +3633,7 @@ export function ChatMessageRow({
           <div className="flex items-center gap-x-2 gap-y-0.5 mb-1 flex-wrap">
             <button
               onClick={() => onOpenProfile(msg.pubkey)}
-              className="text-sm font-semibold cursor-pointer hover:underline text-foreground"
+              className="text-base font-semibold cursor-pointer hover:underline text-foreground"
             >
               {displayName}
             </button>
@@ -3700,7 +3700,7 @@ export function ChatMessageRow({
             </div>
           ) : (
             <>
-              <div className={`text-sm text-foreground/90 break-words transition-opacity ${relayPending ? 'opacity-50' : ''}`}>
+              <div className={`text-base text-foreground/90 break-words transition-opacity ${relayPending ? 'opacity-50' : ''}`}>
                 <MessageContent content={contentForRender} onProfileClick={onOpenProfile} emojiTags={msg.emojiTags} mutedWords={mutedWords} disableLinkPreviews={!authorCanEmbed} disableHubInviteCards={!authorCanInvite} hubRoleNames={hubRoleNames} hubChannels={hubChannels} suffix={
                   <>
                     {msg.edited && <span className="text-[10px] text-muted-foreground ml-1"> (edited)</span>}
@@ -7097,7 +7097,7 @@ function ThreadModal({ parentMsg, threadReplies, hubDTag, channelId, getProfile,
                     <span className="text-xs text-muted-foreground">{formatTimestamp(optMsg.timestamp)}</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <div className="text-sm text-foreground/90 break-words"><MessageContent content={optMsg.content} /></div>
+                    <div className="text-base text-foreground/90 break-words"><MessageContent content={optMsg.content} /></div>
                     {optMsg.status === 'mining' && (
                       <span className="text-[10px] text-muted-foreground italic whitespace-nowrap">
                         processing...

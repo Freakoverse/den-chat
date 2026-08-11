@@ -732,7 +732,7 @@ export function DM04ChatView({ recipientPubkey, onSwitchProtocol, onBack }: { re
                       <span className="text-xs text-muted-foreground">{formatShortTime(optMsg.timestamp)}</span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <div className="text-sm text-foreground/90 break-words"><MessageContent content={optMsg.content} /></div>
+                      <div className="text-base text-foreground/90 break-words"><MessageContent content={optMsg.content} /></div>
                       {optMsg.status === 'publishing' && !optMsg.relayProgress?.confirmed && (
                         <span className="text-[10px] text-muted-foreground italic whitespace-nowrap">
                           publishing...
@@ -1226,7 +1226,7 @@ function DM04MessageRow({
               return (
                 <>
                   {filteredContent && (
-                    <div className={`text-sm text-foreground/90 break-words prose-sm [&_p]:m-0 [&_pre]:my-1 [&_code]:text-xs transition-opacity ${relayPending ? 'opacity-50' : ''}`}>
+                    <div className={`text-base text-foreground/90 break-words [&_p]:m-0 [&_pre]:my-1 [&_code]:text-xs transition-opacity ${relayPending ? 'opacity-50' : ''}`}>
                       <MessageContent content={filteredContent} emojiTags={msg.emojiTags} mutedWords={mutedWords} suffix={msg.isMine ? <DM04RelayProgressIndicator eventId={msg.id} /> : undefined} />
                     </div>
                   )}
@@ -1703,7 +1703,7 @@ function DM04ThreadModal({ parentMsg, threadReplies, recipientPubkey, getProfile
                     <span className="text-sm font-semibold text-foreground">{parentName}</span>
                     <span className="text-[11px] text-muted-foreground">{formatTimestamp(parentMsg.createdAt)}</span>
                   </div>
-                  <div className="text-sm text-foreground/90 break-words prose-sm [&_p]:m-0">
+                  <div className="text-base text-foreground/90 break-words [&_p]:m-0">
                     <MessageContent content={parentMsg.content} emojiTags={parentMsg.emojiTags} mutedWords={mutedWords} />
                   </div>
                   {parentMsg.stickerTags && parentMsg.stickerTags.length > 0 && (
@@ -1767,7 +1767,7 @@ function DM04ThreadModal({ parentMsg, threadReplies, recipientPubkey, getProfile
                         <span className="text-[11px] text-muted-foreground">{formatTimestamp(reply.createdAt)}</span>
                       </div>
                     )}
-                    <div className="text-sm text-foreground/90 break-words prose-sm [&_p]:m-0 [&_pre]:my-1 [&_code]:text-xs">
+                    <div className="text-base text-foreground/90 break-words [&_p]:m-0 [&_pre]:my-1 [&_code]:text-xs">
                       <MessageContent content={reply.gifTags && reply.gifTags.length > 0 ? reply.content.split('\n').filter((l: string) => !reply.gifTags!.some(([, u]: [string, string, string]) => l.trim() === u)).join('\n').trim() : reply.content} emojiTags={reply.emojiTags} mutedWords={mutedWords} />
                     </div>
                     {reply.stickerTags && reply.stickerTags.length > 0 && (
@@ -1905,7 +1905,7 @@ function DM04ThreadModal({ parentMsg, threadReplies, recipientPubkey, getProfile
                     <span className="text-xs text-muted-foreground">{formatShortTime(optMsg.timestamp)}</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <div className="text-sm text-foreground/90 break-words"><MessageContent content={optMsg.content} /></div>
+                    <div className="text-base text-foreground/90 break-words"><MessageContent content={optMsg.content} /></div>
                     {optMsg.status === 'publishing' && !optMsg.relayProgress?.confirmed && (
                       <span className="text-[10px] text-muted-foreground italic whitespace-nowrap">publishing...</span>
                     )}

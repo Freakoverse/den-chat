@@ -1051,7 +1051,7 @@ function PublicChatView({ topic, pendingHighlightId, onHighlightConsumed, onBack
                     <span className="text-[10px] text-muted-foreground">{formatShortTime(Math.floor(Date.now() / 1000))}</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <div className="text-sm text-foreground/90 break-words"><MessageContent content={sendingContent} /></div>
+                    <div className="text-base text-foreground/90 break-words"><MessageContent content={sendingContent} /></div>
                     <span className="text-[10px] text-muted-foreground italic whitespace-nowrap">
                       processing...
                     </span>
@@ -1378,7 +1378,7 @@ function PublicMessageRow({ msg, showDateSep, isGrouped, onReply, onRequestDelet
         <div className="flex-1 min-w-0">
           {!isGrouped && (
             <div className="flex items-center gap-2">
-              <span className="text-sm font-semibold text-foreground hover:underline cursor-pointer" onClick={() => onOpenProfile?.(msg.pubkey)}>{displayName}</span>
+              <span className="text-base font-semibold text-foreground hover:underline cursor-pointer" onClick={() => onOpenProfile?.(msg.pubkey)}>{displayName}</span>
               <DnnBadge pubkey={msg.pubkey} />
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -1417,7 +1417,7 @@ function PublicMessageRow({ msg, showDateSep, isGrouped, onReply, onRequestDelet
           ) : (
             <>
               {strippedContent && (
-                <div className="text-sm text-foreground break-words">
+                <div className="text-base text-foreground break-words">
                   <MessageContent content={strippedContent} emojiTags={msg.emojiTags} onProfileClick={(pk) => onOpenProfile?.(pk)} disableLinkPreviews={!showLinkPreviews} disableCustomEmojis={!showCustomEmojis} disableMedia={!showMedia} mutedWords={hideMutedWords ? mutedWords : undefined} suffix={msg.pubkey === myPubkey ? <PCRelayProgressIndicator eventId={msg.id} /> : undefined} />
                 </div>
               )}

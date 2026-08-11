@@ -904,7 +904,7 @@ function ForumPostDetail({
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => setProfileModalPubkey(post.pubkey)}
-                      className="text-sm font-semibold cursor-pointer hover:underline text-foreground"
+                      className="text-base font-semibold cursor-pointer hover:underline text-foreground"
                     >
                       {displayName}
                     </button>
@@ -1046,7 +1046,7 @@ function ForumPostDetail({
 
             {/* Body — hidden for mods until revealed */}
             {(!isPostHidden || !canHide || hiddenPostRevealed) && (
-            <div className="prose prose-sm dark:prose-invert max-w-none mb-4">
+            <div className="prose dark:prose-invert max-w-none mb-4">
               <MessageContent content={post.content} mutedWords={mutedWords} hubRoleNames={hubRoleNames} hubChannels={hubChannels} />
             </div>
             )}
@@ -1188,7 +1188,7 @@ function ForumPostDetail({
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-semibold text-foreground">{myNpubName}</span>
-                      <div className="text-sm text-foreground/90 break-words"><MessageContent content={optMsg.content} hubRoleNames={hubRoleNames} hubChannels={hubChannels} /></div>
+                      <div className="text-base text-foreground/90 break-words"><MessageContent content={optMsg.content} hubRoleNames={hubRoleNames} hubChannels={hubChannels} /></div>
                       {optMsg.status === 'mining' && <span className="text-[10px] text-muted-foreground italic">processing...</span>}
                       {optMsg.status === 'publishing' && !optMsg.relayProgress?.confirmed && <span className="text-[10px] text-muted-foreground italic">publishing...</span>}
                       {optMsg.status === 'published' && <Check size={13} className="text-green-500 shrink-0" />}
