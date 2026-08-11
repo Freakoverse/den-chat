@@ -29,6 +29,7 @@ export interface NostrProfile {
 interface CachedEntry {
   profile: NostrProfile
   fetchedAt: number // Date.now() timestamp
+  empty?: boolean   // true = no profile found yet (likely a transient miss, still retrying)
 }
 
 /** Stale-while-revalidate TTL: 1 hour */
@@ -39,6 +40,29 @@ const profileCache = new Map<string, CachedEntry>()
 
 /** Pubkeys currently being fetched (avoid duplicate requests) */
 const pendingFetches = new Set<string>()
+
+/**
+ * Bounded retry for profiles that come back empty/failed. A kind:0 miss is
+ * usually a transient relay hiccup (slow relay, query window cutoff), not a
+ * genuine "no profile" — so retry a few times with a delay before giving up,
+ * instead of caching an empty profile for the full TTL and never trying again.
+ */
+const EMPTY_RETRY_DELAY_MS = 15_000
+const MAX_EMPTY_RETRIES = 6
+const emptyRetryCount = new Map<string, number>()
+
+/** Schedule a delayed retry for `pubkey`; returns false once retries are exhausted. */
+function scheduleEmptyRetry(pubkey: string): boolean {
+  const retries = emptyRetryCount.get(pubkey) ?? 0
+  if (retries >= MAX_EMPTY_RETRIES) return false
+  emptyRetryCount.set(pubkey, retries + 1)
+  setTimeout(() => {
+    // Only retry if we still don't have a real profile.
+    const c = profileCache.get(pubkey)
+    if (!c || c.empty) scheduleFetchProfile(pubkey)
+  }, EMPTY_RETRY_DELAY_MS)
+  return true
+}
 
 /** Listeners: pubkey → Set<callback> to notify when profile arrives */
 const listeners = new Map<string, Set<() => void>>()
@@ -92,7 +116,7 @@ function flushProfileBatch() {
   fetchEvents({
     kinds: [0],
     authors: batch,
-  })
+  }, 6000) // give slow relays a bit longer than the default before deciding it's a miss
     .then((events) => {
       // Group by author, keep newest per author
       const latestByAuthor = new Map<string, typeof events[0]>()
@@ -109,17 +133,27 @@ function flushProfileBatch() {
         if (event) {
           try {
             const profile: NostrProfile = JSON.parse(event.content)
+            emptyRetryCount.delete(pubkey) // got it — clear any retry state
             setCachedEntry(pubkey, profile)
           } catch { /* ignore parse errors */ }
         } else {
-          // No event found — mark as empty so we don't refetch constantly
-          profileCache.set(pubkey, { profile: {}, fetchedAt: Date.now() })
+          // No event found within the query window — probably a transient relay
+          // hiccup. Keep retrying a few times before giving up. Cache empty
+          // meanwhile so rows render a placeholder instead of hanging.
+          const willRetry = scheduleEmptyRetry(pubkey)
+          if (!willRetry) emptyRetryCount.delete(pubkey)
+          profileCache.set(pubkey, { profile: {}, fetchedAt: Date.now(), empty: willRetry })
           notifyListeners(pubkey)
         }
       }
     })
     .catch(() => {
-      // Failed to fetch — don't cache, allow retry
+      // Whole query failed (rare — querySync usually resolves with partial data).
+      // Retry the batch a few times so members aren't left as placeholders.
+      for (const pk of batch) {
+        const c = profileCache.get(pk)
+        if (!c || c.empty) scheduleEmptyRetry(pk)
+      }
     })
     .finally(() => {
       for (const pk of batch) pendingFetches.delete(pk)
