@@ -417,9 +417,11 @@ export function useStartup() {
       // Pass the version the client currently holds so the check counts "has the
       // latest" (not "has any copy"). If relays are all stale, the redundancy defers
       // to a manual rebroadcast rather than auto-pushing our local copy.
-      const knownLatest = useHubStore.getState().hubs[hubId]?.eventCreatedAt
+      const hub = useHubStore.getState().hubs[hubId]
+      const knownLatest = hub?.eventCreatedAt
+      const hubRelays = hub ? [...hub.generalRelays, ...hub.filterRelays] : []
       import('@/lib/nostr/eventRedundancy').then(({ ensureAddressableRedundancy }) => {
-        ensureAddressableRedundancy(KINDS.HUB_EVENT, creator, hubId, knownLatest)
+        ensureAddressableRedundancy(KINDS.HUB_EVENT, creator, hubId, knownLatest, hubRelays)
       })
     }, 5000)
     return () => clearTimeout(timer)
@@ -438,10 +440,12 @@ export function useStartup() {
     const hubId = activeHubId
     const self = pubkey
     const timer = setTimeout(() => {
+      const hub = useHubStore.getState().hubs[hubId]
+      const hubRelays = hub ? [...hub.generalRelays, ...hub.filterRelays] : []
       import('@/lib/nostr/eventRedundancy').then(({ ensureAddressableRedundancy }) => {
         for (const h of mine) {
           const dTagValue = h.groupId ? `${hubId}:${h.groupId}` : hubId
-          ensureAddressableRedundancy(KINDS.VOICE_HOST, self, dTagValue, h.createdAt)
+          ensureAddressableRedundancy(KINDS.VOICE_HOST, self, dTagValue, h.createdAt, hubRelays)
         }
       })
     }, 6000)

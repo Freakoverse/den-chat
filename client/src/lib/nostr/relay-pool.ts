@@ -18,18 +18,17 @@ const DEFAULT_RELAYS = [
   'wss://relay.nostr.band',
   'wss://relay.snort.social',
   'wss://relay.wellorder.net',
-  'wss://relay.nostr.info',
   'wss://nostr.mom',
   'wss://nostr.novacisko.cz',
   'wss://nostrcheck.me',
-  'wss://pyramid.fiatjaf.com',
   'wss://relay.cxplay.org',
   'wss://relay.layer.systems',
   'wss://relay.nostr.moe',
   'wss://relay.poster.place',
   'wss://wheat.happytavern.co',
-  'wss://relay.noswhere.com',
-  'wss://search.nos.today',
+  // Removed: relay.nostr.info (defunct), pyramid.fiatjaf.com (web-of-trust —
+  // rejects writes from non-trusted keys), relay.noswhere.com & search.nos.today
+  // (search-only NIP-50 relays — don't serve general REQ or accept these writes).
 ]
 
 /** In-memory cache — null means "not loaded yet" */
