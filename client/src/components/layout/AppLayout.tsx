@@ -20,6 +20,7 @@ import { DenChatLogo } from '@/components/ui/DenChatLogo'
 import { DoodleBackground } from '@/components/ui/DoodleBackground'
 import { UserPanel } from '@/components/ui/UserPanel'
 import { ResizablePanel } from '@/components/ui/ResizablePanel'
+import { BlossomImage } from '@/components/ui/BlossomImage'
 import { useVoicePresence } from '@/hooks/useVoicePresence'
 import { useUserStore } from '@/stores/userStore'
 import { useBlockStore } from '@/stores/blockStore'
@@ -117,6 +118,28 @@ export function AppLayout() {
   // Combined ban check — either type blocks access
   const isBanned = isModBanned || isHardBanned
 
+  // ── Awaiting-approval detection ──
+  // A user who requested to join but isn't approved yet can currently open the hub
+  // and read its (unencrypted) channels. Gate the whole hub area behind an overlay
+  // until they're approved (in the creator's member tree) or facilitated (have the
+  // hub secret). Mirrors the ChannelList "rescind" condition, plus a secret check.
+  const activeHubData = useHubStore((s) => (activeHubId ? s.hubs[activeHubId] : undefined))
+  const activeHubStatus = useHubStore((s) => (activeHubId ? s.hubStatus[activeHubId] : undefined))
+  const activeHubSecret = useHubStore((s) => (activeHubId ? s.hubSecrets[activeHubId] : undefined))
+  const activeSecretsResolved = useHubStore((s) => (activeHubId ? s.hubSecretsResolved[activeHubId] : undefined))
+  const activeSecretFail = useHubStore((s) => (activeHubId ? s.hubSecretFailReason[activeHubId] : undefined))
+  const awaitingApproval = useMemo(() => {
+    if (!activeHubId || !myPubkey || !activeHubData) return false
+    if (activeHubStatus !== 'loaded') return false          // only a fully-loaded hub
+    if (!activeSecretsResolved) return false                // still resolving — don't flash the overlay
+    if (!activeHubData.indexFileHash) return false          // no member tree → not a gated hub
+    if (activeHubData.creatorPubkey === myPubkey) return false   // creator is never awaiting
+    if (hubMembers?.some((m) => m.pubkey === myPubkey)) return false // approved member
+    if (activeHubSecret) return false                       // has the secret (creator OR facilitator)
+    if (activeSecretFail === 'signer-issue') return false   // approved but signer declined — transient
+    return true
+  }, [activeHubId, myPubkey, activeHubData, activeHubStatus, activeSecretsResolved, activeHubSecret, activeSecretFail, hubMembers])
+
   // When navigating to a non-hub page on mobile, reset to home view
   useEffect(() => {
     if (isMobile && activePage !== 'hubs') {
@@ -144,7 +167,7 @@ export function AppLayout() {
             <PublicChatPage />
           ) : activePage === 'wallet' ? (
             <WalletPage />
-          ) : activePage === 'hubs' && mobileView === 'chat' && activeHubId && activeChannelId ? (
+          ) : activePage === 'hubs' && mobileView === 'chat' && activeHubId && activeChannelId && !awaitingApproval ? (
             /* Full-screen chat view — px-2 replaces the desktop side-panel gutters
                that don't exist here, so channel content isn't flush to the edges */
             <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden px-2">
@@ -153,11 +176,15 @@ export function AppLayout() {
               )}
             </div>
           ) : (
-            /* Home view: compact sidebar + channel list */
+            /* Home view: compact sidebar + channel list (or awaiting-approval overlay) */
             <div className="flex flex-1 min-h-0 overflow-hidden">
               <HubSidebar activePage={activePage} onNavigate={setActivePage} compact />
               {activeHubId ? (
-                <ChannelList isModBanned={isBanned} isMobile />
+                awaitingApproval && !isBanned ? (
+                  <AwaitingApprovalOverlay dTag={activeHubId} />
+                ) : (
+                  <ChannelList isModBanned={isBanned} isMobile />
+                )
               ) : (
                 <EmptyState hasHub={false} />
               )}
@@ -207,6 +234,8 @@ export function AppLayout() {
         <PublicChatPage />
       ) : activePage === 'dms' ? (
         <DMPage />
+      ) : awaitingApproval && !isBanned ? (
+        <AwaitingApprovalOverlay dTag={activeHubId} />
       ) : (
         <>
           {activeHubId && <ChannelList isModBanned={isBanned} />}
@@ -347,6 +376,94 @@ function EmptyState({ hasHub }: { hasHub: boolean }) {
           </button>
         )}
       </div>
+    </div>
+  )
+}
+
+function AwaitingApprovalOverlay({ dTag }: { dTag: string | null }) {
+  const hub = useHubStore((s) => (dTag ? s.hubs[dTag] : null))
+  const pubkey = useUserStore((s) => s.pubkey)
+  const setActiveHub = useHubStore((s) => s.setActiveHub)
+  const [showConfirm, setShowConfirm] = useState(false)
+  const [withdrawing, setWithdrawing] = useState(false)
+
+  const handleWithdraw = async () => {
+    if (!hub || !pubkey || withdrawing) return
+    setWithdrawing(true)
+    try {
+      const { rescindJoinRequest } = await import('@/lib/hub/rescindJoinRequest')
+      await rescindJoinRequest(hub, pubkey)
+    } catch (err) {
+      console.error('Failed to withdraw join request:', err)
+    }
+    setActiveHub(null)
+    setWithdrawing(false)
+    setShowConfirm(false)
+  }
+
+  return (
+    <div className="flex-1 flex items-center justify-center bg-background p-6">
+      <div className="max-w-sm text-center space-y-4">
+        {/* Hub identity */}
+        <div className="mx-auto w-20 h-20 rounded-2xl overflow-hidden bg-secondary border border-border flex items-center justify-center">
+          {hub?.icon ? (
+            <BlossomImage src={hub.icon} alt={hub?.name || 'Hub'} className="w-full h-full" imgClassName="object-cover" />
+          ) : (
+            <Home size={28} className="text-muted-foreground" />
+          )}
+        </div>
+        <div className="space-y-1">
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-amber-400">Awaiting approval</div>
+          <h3 className="text-lg font-semibold text-foreground">{hub?.name || 'This hub'}</h3>
+        </div>
+        <p className="text-sm text-muted-foreground leading-relaxed">
+          Your request to join is pending. You'll get access to its channels, messages, and members once a hub admin
+          approves you — or a member with the right role facilitates you.
+        </p>
+        <button
+          onClick={() => setShowConfirm(true)}
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-secondary/60 border border-border/50 text-sm text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors cursor-pointer"
+        >
+          <LogOut size={14} />
+          Withdraw request
+        </button>
+      </div>
+
+      {/* Confirm: withdraw + remove from list */}
+      {showConfirm && (
+        <div
+          className="fixed inset-0 z-[300] flex items-center justify-center bg-black/60 backdrop-blur-sm"
+          onClick={() => { if (!withdrawing) setShowConfirm(false) }}
+        >
+          <div
+            className="bg-card rounded-xl border border-border shadow-2xl w-[320px] p-5 space-y-4 animate-in fade-in-0 zoom-in-95"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="space-y-1.5">
+              <h4 className="text-sm font-semibold text-foreground">Withdraw join request?</h4>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                This cancels your pending request and removes the hub from your list. You can request to join again later.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowConfirm(false)}
+                disabled={withdrawing}
+                className="flex-1 h-9 text-sm rounded-lg font-medium text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors cursor-pointer disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleWithdraw}
+                disabled={withdrawing}
+                className="flex-1 h-9 text-sm rounded-lg font-medium bg-destructive text-white hover:bg-destructive/90 transition-colors cursor-pointer disabled:opacity-50 flex items-center justify-center gap-1.5"
+              >
+                {withdrawing ? <><Loader2 size={14} className="animate-spin" /> Withdrawing…</> : 'Withdraw'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

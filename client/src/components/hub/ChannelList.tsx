@@ -82,52 +82,8 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
     if (!hub || !pubkey || rescinding) return
     setRescinding(true)
     try {
-      const { fetchEvents } = await import('@/lib/nostr/relay-pool')
-      const { publishToSpecificRelays } = await import('@/lib/nostr/relay-pool')
-      const { getPublishRelays } = await import('@/stores/postingBehaviourStore')
-      const { createDeletedJoinRequest, createDeletionEvent } = await import('@/lib/nostr/events')
-      const { signWithSigner: signFn } = await import('@/lib/nostr')
-      const { KINDS } = await import('@/lib/crypto/constants')
-      const { signer, privateKey } = useUserStore.getState()
-      const relays = [...hub.generalRelays, ...hub.filterRelays]
-      const publishRelays = getPublishRelays(relays)
-
-      // Fetch the existing join request to get its created_at
-      const existing = await fetchEvents({
-        kinds: [KINDS.JOIN_REQUEST],
-        authors: [pubkey],
-        '#d': [hub.dTag],
-        limit: 1,
-      })
-      const originalCreatedAt = existing.length > 0 ? existing[0].created_at : Math.floor(Date.now() / 1000)
-
-      // Step 1: Re-publish with deleted tag (created_at + 1)
-      const deleted = createDeletedJoinRequest(hub.dTag, hub.creatorPubkey, originalCreatedAt)
-      const signedDeleted = await signFn(deleted, signer, privateKey)
-      await publishToSpecificRelays(publishRelays, signedDeleted)
-
-      // Step 2: NIP-09 deletion request
-      const aRef = `${KINDS.JOIN_REQUEST}:${pubkey}:${hub.dTag}`
-      const deletionReq = createDeletionEvent([], [aRef], 'rescind join request')
-      const signedDeletion = await signFn(deletionReq, signer, privateKey)
-      await publishToSpecificRelays(publishRelays, signedDeletion)
-
-      // Step 3: Remove from user's hub list and publish
-      const { createHubListEvent } = await import('@/lib/nostr/events')
-      const hubStore = useHubStore.getState()
-      const remainingEntries = hubStore.hubEntries.filter(e => e.dTag !== hub.dTag)
-      const currentFolders = hubStore.folders
-      hubStore.removeHubEntry(hub.dTag)
-      // Clean up in-memory messages, reactions, and unread counts for this hub
-      const { useMessageStore: getMsgStore } = await import('@/stores/messageStore')
-      getMsgStore.getState().clearHubData(hub.dTag)
-      const hubListEv = createHubListEvent(
-        remainingEntries.map(e => ({ dTag: e.dTag, relayHint: e.relayHint, position: e.position, folderId: e.folderId })),
-        currentFolders,
-      )
-      const signedHubList = await signFn(hubListEv, signer, privateKey)
-      await publishToSpecificRelays(getPublishRelays(), signedHubList)
-
+      const { rescindJoinRequest } = await import('@/lib/hub/rescindJoinRequest')
+      await rescindJoinRequest(hub, pubkey)
       setRescindDone(true)
       setShowRescindConfirm(false)
     } catch (err) {
