@@ -299,6 +299,11 @@ export function LoginScreen() {
     } catch { /* corrupt data, ignore */ }
   }, [login])
 
+  // Set once the user manually starts a bunker connect, so the background
+  // auto-restore effect below stops retrying and stops writing its status/errors
+  // over the manual attempt (they share the same error slot).
+  const bunkerTakeoverRef = useRef(false)
+
   // ── Bunker auto-login from localStorage (NIP-46 remote signer) ──
   useEffect(() => {
     const bunkerStored = localStorage.getItem(StorageKey.BUNKER_URL)
@@ -319,16 +324,16 @@ export function LoginScreen() {
           signer.login(bunkerStored, false),
           new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Timed out reaching the remote signer')), 20_000)),
         ])
-        if (cancelled) return
+        if (cancelled || bunkerTakeoverRef.current) return
         setSigner(signer)
         login(pubkey, 'nip46')
       } catch (err) {
-        if (cancelled) return
+        if (cancelled || bunkerTakeoverRef.current) return
         retryCount++
         if (retryCount < maxRetries) {
           setError(`Reconnecting to remote signer… (${retryCount + 1}/${maxRetries})`)
           await new Promise((r) => setTimeout(r, 2000))
-          if (!cancelled) return attempt()
+          if (!cancelled && !bunkerTakeoverRef.current) return attempt()
         } else {
           const msg = err instanceof Error ? err.message : 'Connection failed'
           setError(`Remote signer unreachable: ${msg}. Try again from the Connect button below.`)
@@ -539,11 +544,20 @@ export function LoginScreen() {
     const url = (typeof urlArg === 'string' ? urlArg : bunkerUrl).trim()
     if (!url) { setError('Enter a bunker:// URL'); return }
 
+    // Take over from the background auto-restore so it stops clobbering this attempt.
+    bunkerTakeoverRef.current = true
     setLoading('bunker')
     clearError()
     try {
       const signer = new BunkerSigner()
-      const pubkey = await signer.login(url)
+      // Bound the attempt so a signer that never responds doesn't hang the button
+      // forever. 60s gives ample time to open the signer and approve the request.
+      const pubkey = await Promise.race([
+        signer.login(url),
+        new Promise<never>((_, reject) => setTimeout(() => reject(
+          new Error('Timed out reaching the signer. Open your signer app, make sure it\'s online, and approve the request — then try again.')
+        ), 60_000)),
+      ])
       // Persist bunker URL + client secret for auto-login on startup
       localStorage.setItem(StorageKey.BUNKER_URL, url)
       localStorage.setItem(StorageKey.BUNKER_CLIENT_SECRET, signer.getClientSecretKey())
