@@ -550,7 +550,13 @@ export function LoginScreen() {
       setSigner(signer)
       login(pubkey, 'nip46')
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Bunker login failed')
+      console.error('[Bunker] login failed:', err)
+      // An empty/generic error here almost always means the connect() couldn't reach
+      // the remote signer over its relay — not a bad URL. Say so instead of a vague fail.
+      const msg = err instanceof Error && err.message
+        ? err.message
+        : 'Could not reach the remote signer. Make sure your signer app is online and connected, then try again.'
+      setError(msg)
     } finally {
       setLoading(null)
     }
@@ -2129,7 +2135,22 @@ export function LoginScreen() {
             {showBunkerScanner && (
               <QRScanner
                 caption="Point your camera at the bunker QR code"
-                onResult={(text) => { const v = text.trim(); setShowBunkerScanner(false); setBunkerUrl(v); handleBunkerLogin(v) }}
+                onResult={(text) => {
+                  const v = text.trim()
+                  setShowBunkerScanner(false)
+                  const lower = v.toLowerCase()
+                  if (lower.startsWith('bunker://')) {
+                    // Fill the field and let the user tap Login when their signer is ready —
+                    // don't auto-attempt (a connect starts immediately and the signer needs
+                    // to be online to approve it).
+                    setBunkerUrl(v)
+                    setError(null)
+                  } else if (lower.startsWith('nostrconnect://')) {
+                    setError("That's a nostrconnect:// code (the reverse flow). For this field, scan your signer's bunker:// QR instead.")
+                  } else {
+                    setError("That QR isn't a bunker:// URL.")
+                  }
+                }}
                 onClose={() => setShowBunkerScanner(false)}
               />
             )}
