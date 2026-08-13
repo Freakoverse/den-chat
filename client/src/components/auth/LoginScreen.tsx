@@ -565,12 +565,16 @@ export function LoginScreen() {
       login(pubkey, 'nip46')
     } catch (err) {
       console.error('[Bunker] login failed:', err)
-      // Surface whatever detail we can — an empty message usually means connect()
-      // couldn't reach the signer over its relay, not a bad URL.
-      let msg = err instanceof Error && err.message ? err.message : ''
-      if (!msg) {
-        const detail = err instanceof Error ? err.name : typeof err === 'string' ? err : ''
-        msg = `Could not reach the remote signer${detail ? ` (${detail})` : ''}. Make sure your signer app is online and connected to the relay in the bunker URL, then try again.`
+      const raw = ((err instanceof Error ? err.message : typeof err === 'string' ? err : '') || (err instanceof Error ? err.name : '')).trim()
+      let msg: string
+      if (raw.toLowerCase().includes('secret')) {
+        // The signer WAS reached but rejected the connection secret — usually a
+        // stale/already-used secret (bunker secrets are typically single-use).
+        msg = 'The signer rejected the connection secret — it may be expired or already used. Generate a fresh bunker URL / QR in your signer and scan it again.'
+      } else if (!raw) {
+        msg = 'Could not reach the remote signer. Make sure your signer app is online and connected to the relay in the bunker URL, then try again.'
+      } else {
+        msg = raw
       }
       setError(msg)
     } finally {
