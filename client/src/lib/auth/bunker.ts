@@ -31,6 +31,11 @@ export class BunkerSigner {
     if (!bunkerPointer) {
       throw new Error('Invalid bunker URL')
     }
+    // A bunker URL must carry at least one relay (bunker://<pubkey>?relay=wss://…);
+    // without it connect() has nowhere to reach the signer and fails instantly.
+    if (!bunkerPointer.relays || bunkerPointer.relays.length === 0) {
+      throw new Error('This bunker URL has no relay. It must include ?relay=wss://… so the app can reach your signer.')
+    }
     this.bunkerUrl = bunker
 
     this.signer = NBunkerSigner.fromBunker(this.clientSecretKey, bunkerPointer, {

@@ -565,11 +565,13 @@ export function LoginScreen() {
       login(pubkey, 'nip46')
     } catch (err) {
       console.error('[Bunker] login failed:', err)
-      // An empty/generic error here almost always means the connect() couldn't reach
-      // the remote signer over its relay — not a bad URL. Say so instead of a vague fail.
-      const msg = err instanceof Error && err.message
-        ? err.message
-        : 'Could not reach the remote signer. Make sure your signer app is online and connected, then try again.'
+      // Surface whatever detail we can — an empty message usually means connect()
+      // couldn't reach the signer over its relay, not a bad URL.
+      let msg = err instanceof Error && err.message ? err.message : ''
+      if (!msg) {
+        const detail = err instanceof Error ? err.name : typeof err === 'string' ? err : ''
+        msg = `Could not reach the remote signer${detail ? ` (${detail})` : ''}. Make sure your signer app is online and connected to the relay in the bunker URL, then try again.`
+      }
       setError(msg)
     } finally {
       setLoading(null)
