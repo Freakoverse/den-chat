@@ -316,8 +316,8 @@ function uploadToServerWithProgress(
  * Pick N random servers from the list.
  */
 function pickRandomServers(servers: string[], count: number): string[] {
-  const shuffled = [...servers].sort(() => Math.random() - 0.5)
-  return shuffled.slice(0, count)
+  const ordered = [...servers].sort(() => Math.random() - 0.5)
+  return ordered.slice(0, count)
 }
 
 /**
@@ -344,8 +344,18 @@ export async function uploadToBlossomServers(
   getAbortSignal?: () => AbortSignal | undefined,
 ): Promise<{ hash: string; successCount: number; serverUrls: string[] }> {
   const allServers = servers || blossomServers.getServers()
-  const shuffled = [...allServers].sort(() => Math.random() - 0.5)
-  const targetCount = 3
+  // When the caller passes an explicit list, it's already in a deterministic,
+  // pubkey-seeded order (getUploadBlossoms) — preserve it so the sequential
+  // walk-until-3-succeed behaves as a stable failover ring (same servers, same
+  // order, every upload). Only our own default fallback gets a random spread.
+  const ordered = servers && servers.length > 0
+    ? [...allServers]
+    : [...allServers].sort(() => Math.random() - 0.5)
+  // When the caller passes an explicit list it has already decided the target set
+  // (getUploadBlossoms applies the per-list "limit to 3" toggles), so upload to ALL
+  // of them — this is what makes "limit off = all servers" true, matching relays.
+  // Only the default-pool fallback keeps the "3 copies is enough" heuristic.
+  const targetCount = servers && servers.length > 0 ? ordered.length : 3
   const hash = computeHash(data)
   const authHeader = await createAuthHeader('upload', hash, signer, privateKey)
 
@@ -356,7 +366,7 @@ export async function uploadToBlossomServers(
     const serverUrls: string[] = []
 
     const results = await Promise.allSettled(
-      shuffled.map(async (server) => {
+      ordered.map(async (server) => {
         // Quick HEAD check first (2s timeout)
         try {
           const headRes = await fetch(`${server}/${hash}`, {
@@ -402,7 +412,7 @@ export async function uploadToBlossomServers(
   if (parallelUploadsEnabled()) {
     const parallelUrls: string[] = []
     const results = await Promise.allSettled(
-      shuffled.map(async (server, i) => {
+      ordered.map(async (server, i) => {
         const signal = getAbortSignal?.()
 
         // HEAD check — skip if the file already exists on this server.
@@ -412,15 +422,15 @@ export async function uploadToBlossomServers(
           const headRes = await fetch(`${server}/${hash}`, { method: 'HEAD', signal: headCtrl.signal }).catch(() => null)
           clearTimeout(headTimer)
           if (headRes && headRes.ok) {
-            onProgress({ serverUrl: server, serverIndex: i, totalServers: shuffled.length, percent: 100, speed: 0, loaded: data.length, total: data.length })
+            onProgress({ serverUrl: server, serverIndex: i, totalServers: ordered.length, percent: 100, speed: 0, loaded: data.length, total: data.length })
             return server
           }
         } catch { /* proceed with upload */ }
 
-        onProgress({ serverUrl: server, serverIndex: i, totalServers: shuffled.length, percent: 0, speed: 0, loaded: 0, total: data.length })
-        const ok = await uploadToServerWithProgress(server, data, authHeader, contentType, (p) => onProgress(p), i, shuffled.length, signal)
+        onProgress({ serverUrl: server, serverIndex: i, totalServers: ordered.length, percent: 0, speed: 0, loaded: 0, total: data.length })
+        const ok = await uploadToServerWithProgress(server, data, authHeader, contentType, (p) => onProgress(p), i, ordered.length, signal)
         if (!ok) throw new Error(`upload rejected by ${server}`)
-        onProgress({ serverUrl: server, serverIndex: i, totalServers: shuffled.length, percent: 100, speed: 0, loaded: data.length, total: data.length })
+        onProgress({ serverUrl: server, serverIndex: i, totalServers: ordered.length, percent: 100, speed: 0, loaded: data.length, total: data.length })
         return server
       }),
     )
@@ -437,9 +447,9 @@ export async function uploadToBlossomServers(
   let successCount = 0
   const serverUrls: string[] = []
 
-  for (let i = 0; i < shuffled.length; i++) {
+  for (let i = 0; i < ordered.length; i++) {
     if (successCount >= targetCount) break
-    const server = shuffled[i]
+    const server = ordered[i]
     const signal = getAbortSignal?.()
 
     // Check if the file already exists on this server (HEAD request)
@@ -456,7 +466,7 @@ export async function uploadToBlossomServers(
         onProgress({
           serverUrl: server,
           serverIndex: i,
-          totalServers: shuffled.length,
+          totalServers: ordered.length,
           percent: 100,
           speed: 0,
           loaded: data.length,
@@ -471,7 +481,7 @@ export async function uploadToBlossomServers(
     onProgress({
       serverUrl: server,
       serverIndex: i,
-      totalServers: shuffled.length,
+      totalServers: ordered.length,
       percent: 0,
       speed: 0,
       loaded: 0,
@@ -485,7 +495,7 @@ export async function uploadToBlossomServers(
       contentType,
       (progress) => onProgress(progress),
       i,
-      shuffled.length,
+      ordered.length,
       signal,
     )
 
@@ -495,7 +505,7 @@ export async function uploadToBlossomServers(
       onProgress({
         serverUrl: server,
         serverIndex: i,
-        totalServers: shuffled.length,
+        totalServers: ordered.length,
         percent: 100,
         speed: 0,
         loaded: data.length,

@@ -2799,8 +2799,12 @@ function PostingBehaviourSection() {
     postToClientRelays, setPostToClientRelays,
     postToUserRelays, setPostToUserRelays,
     postToHubRelays, setPostToHubRelays,
-    limitRelaysPerList, setLimitRelaysPerList,
-    limitBlossomsPerList, setLimitBlossomsPerList,
+    limitClientRelays, setLimitClientRelays,
+    limitUserRelays, setLimitUserRelays,
+    limitHubRelays, setLimitHubRelays,
+    limitClientBlossoms, setLimitClientBlossoms,
+    limitUserBlossoms, setLimitUserBlossoms,
+    limitHubBlossoms, setLimitHubBlossoms,
     parallelBlossomUploads, setParallelBlossomUploads,
   } = usePostingBehaviourStore()
 
@@ -2844,17 +2848,45 @@ function PostingBehaviourSection() {
         </div>
         <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-border bg-secondary/30">
           <div>
-            <p className="text-sm font-medium text-foreground">Limit to max 3 relays per list</p>
-            <p className="text-xs text-muted-foreground">Randomly pick up to 3 relays from each enabled list to reduce publish load</p>
+            <p className="text-sm font-medium text-foreground">Limit client relays to 3</p>
+            <p className="text-xs text-muted-foreground">Publish to at most 3 of your client relays to reduce load</p>
           </div>
-          <ToggleSwitch checked={limitRelaysPerList} onChange={setLimitRelaysPerList} />
+          <ToggleSwitch checked={limitClientRelays} onChange={setLimitClientRelays} />
         </div>
         <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-border bg-secondary/30">
           <div>
-            <p className="text-sm font-medium text-foreground">Limit to max 3 blossoms per list</p>
-            <p className="text-xs text-muted-foreground">Upload media to at most 3 blossom servers from each list</p>
+            <p className="text-sm font-medium text-foreground">Limit user relays to 3</p>
+            <p className="text-xs text-muted-foreground">Publish to at most 3 of your NIP-65 relays to reduce load</p>
           </div>
-          <ToggleSwitch checked={limitBlossomsPerList} onChange={setLimitBlossomsPerList} />
+          <ToggleSwitch checked={limitUserRelays} onChange={setLimitUserRelays} />
+        </div>
+        <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-border bg-secondary/30">
+          <div>
+            <p className="text-sm font-medium text-foreground">Limit hub relays to 3</p>
+            <p className="text-xs text-muted-foreground">Publish hub messages to at most 3 hub relays to reduce load</p>
+          </div>
+          <ToggleSwitch checked={limitHubRelays} onChange={setLimitHubRelays} />
+        </div>
+        <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-border bg-secondary/30">
+          <div>
+            <p className="text-sm font-medium text-foreground">Limit client blossoms to 3</p>
+            <p className="text-xs text-muted-foreground">Upload media to at most 3 of your client blossom servers</p>
+          </div>
+          <ToggleSwitch checked={limitClientBlossoms} onChange={setLimitClientBlossoms} />
+        </div>
+        <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-border bg-secondary/30">
+          <div>
+            <p className="text-sm font-medium text-foreground">Limit user blossoms to 3</p>
+            <p className="text-xs text-muted-foreground">Upload media to at most 3 of your user (kind 10063) blossom servers</p>
+          </div>
+          <ToggleSwitch checked={limitUserBlossoms} onChange={setLimitUserBlossoms} />
+        </div>
+        <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-border bg-secondary/30">
+          <div>
+            <p className="text-sm font-medium text-foreground">Limit hub blossoms to 3</p>
+            <p className="text-xs text-muted-foreground">Upload media to at most 3 hub blossom servers</p>
+          </div>
+          <ToggleSwitch checked={limitHubBlossoms} onChange={setLimitHubBlossoms} />
         </div>
         <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-border bg-secondary/30">
           <div>

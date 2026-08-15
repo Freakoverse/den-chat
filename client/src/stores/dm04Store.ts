@@ -1222,17 +1222,18 @@ const PER_PERSON_LIMIT = 10
  * This ensures per-person fetch queries the same relays the user publishes to.
  */
 function getDMFetchRelays(): string[] {
-  const { postToClientRelays, postToUserRelays, limitRelaysPerList } = usePostingBehaviourStore.getState()
-  const limit = limitRelaysPerList ? 3 : Infinity
+  const { postToClientRelays, postToUserRelays, limitClientRelays, limitUserRelays } = usePostingBehaviourStore.getState()
   const result = new Set<string>()
 
   if (postToClientRelays) {
+    const limit = limitClientRelays ? 3 : Infinity
     const clientRelays = getRelays()
     const pick = clientRelays.length <= limit ? clientRelays : clientRelays.slice(0, limit)
     pick.forEach((r) => result.add(r))
   }
 
   if (postToUserRelays) {
+    const limit = limitUserRelays ? 3 : Infinity
     const userRelays = useUserListsStore.getState().userRelays
     const pick = userRelays.length <= limit ? userRelays : userRelays.slice(0, limit)
     pick.forEach((r) => result.add(r))
