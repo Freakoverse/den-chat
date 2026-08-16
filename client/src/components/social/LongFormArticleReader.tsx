@@ -9,7 +9,8 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { useSocialStore } from '@/stores/socialStore'
 import { useUserStore } from '@/stores/userStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
-import { fetchEvents, publishEventProgressive, publishToSpecificRelays } from '@/lib/nostr/relay-pool'
+import { publishEventProgressive, publishToSpecificRelays } from '@/lib/nostr/relay-pool'
+import { fetchEventsWide } from '@/lib/nostr/readRelays'
 import { getPublishRelays } from '@/stores/postingBehaviourStore'
 import { signWithSigner, createDeletionEvent } from '@/lib/nostr/events'
 import { DeleteConfirmDialog, RawEventModal } from '@/components/hub/ChannelView'
@@ -241,12 +242,12 @@ export function LongFormArticleReader() {
           decoded = result.data as nip19.AddressPointer
         } catch {
           // Fallback: treat as event ID
-          const events = await fetchEvents({ ids: [activeArticleNaddr], limit: 1 })
+          const events = await fetchEventsWide({ ids: [activeArticleNaddr], limit: 1 })
           if (events.length > 0) { setEvent(events[0]); return }
           throw new Error('Article not found')
         }
 
-        const events = await fetchEvents({
+        const events = await fetchEventsWide({
           kinds: [decoded.kind],
           authors: [decoded.pubkey],
           '#d': [decoded.identifier],
@@ -594,7 +595,7 @@ function ArticleInteractionBar({ event }: { event: Event }) {
 
   // Fetch reactions
   useEffect(() => {
-    fetchEvents({ kinds: [7], '#e': [event.id], limit: 100 }).then((rawReactions) => {
+    fetchEventsWide({ kinds: [7], '#e': [event.id], limit: 100 }).then((rawReactions) => {
       const parsed: ReactionInfo[] = rawReactions.map((r) => {
         const emojiTag = r.tags.find((t) => t[0] === 'emoji')
         let emoji = r.content || '+'
@@ -629,7 +630,7 @@ function ArticleInteractionBar({ event }: { event: Event }) {
   const zapTotal = zaps.reduce((sum: number, z: ZapInfo) => sum + z.amount, 0)
 
   useEffect(() => {
-    fetchEvents({ kinds: [9735], '#e': [event.id], limit: 50 }).then((receipts) => {
+    fetchEventsWide({ kinds: [9735], '#e': [event.id], limit: 50 }).then((receipts) => {
       const zapStore = useZapStore.getState()
       for (const receipt of receipts) {
         if (!zapStore.markZapProcessed(receipt.id)) continue
@@ -642,7 +643,7 @@ function ArticleInteractionBar({ event }: { event: Event }) {
   // Check bookmark state
   useEffect(() => {
     if (!myPubkey) return
-    fetchEvents({ kinds: [10003], authors: [myPubkey], limit: 1 }).then(async (events) => {
+    fetchEventsWide({ kinds: [10003], authors: [myPubkey], limit: 1 }).then(async (events) => {
       if (events.length === 0) return
       const latest = events.sort((a, b) => b.created_at - a.created_at)[0]
       if (latest.content) {
@@ -703,7 +704,7 @@ function ArticleInteractionBar({ event }: { event: Event }) {
     if (!myPubkey || (!signer && !privateKey)) return
     setBookmarkLoading(true)
     try {
-      const existing = await fetchEvents({ kinds: [10003], authors: [myPubkey], limit: 1 })
+      const existing = await fetchEventsWide({ kinds: [10003], authors: [myPubkey], limit: 1 })
       const latest = existing.sort((a, b) => b.created_at - a.created_at)[0]
 
       let tags: string[][] = []

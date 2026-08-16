@@ -12,7 +12,7 @@ import { useSocialStore } from '@/stores/socialStore'
 import { useFollowStore } from '@/stores/followStore'
 import { useUserStore } from '@/stores/userStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
-import { fetchEvents } from '@/lib/nostr/relay-pool'
+import { fetchEventsWide } from '@/lib/nostr/readRelays'
 import { BlossomImage } from '@/components/ui/BlossomImage'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Loader2, Newspaper, RefreshCw, Search, ChevronDown, Eye, EyeOff, ShieldAlert } from 'lucide-react'
@@ -252,7 +252,7 @@ export function LongFormFeedPage() {
     const filter: any = { kinds: [30023], authors, limit }
     if (until) filter.until = until
 
-    const events = await fetchEvents(filter)
+    const events = await fetchEventsWide(filter)
     return dedupeAndFilter(events)
   }, [])
 

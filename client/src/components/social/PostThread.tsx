@@ -5,7 +5,7 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import { useSocialStore } from '@/stores/socialStore'
-import { fetchEvents } from '@/lib/nostr/relay-pool'
+import { fetchEventsWide } from '@/lib/nostr/readRelays'
 import { SocialPost } from '@/components/social/SocialPost'
 import { ComposeBox } from '@/components/social/ComposeBox'
 import { ArrowLeft, Loader2 } from 'lucide-react'
@@ -52,9 +52,9 @@ export function PostThread() {
     const loadEngagement = () =>
       Promise.all([
         // Replies reference the root via an `e` tag…
-        fetchEvents({ kinds: [1], '#e': [activeThreadId], limit: 50 }),
+        fetchEventsWide({ kinds: [1], '#e': [activeThreadId], limit: 50 }),
         // …while NIP-18 quote-reposts reference it via a `q` tag (often no `e` tag).
-        fetchEvents({ kinds: [1], '#q': [activeThreadId], limit: 50 }),
+        fetchEventsWide({ kinds: [1], '#q': [activeThreadId], limit: 50 }),
       ]).then(([eTagged, qTagged]) => {
         const byId = new Map<string, Event>()
         for (const ev of [...eTagged, ...qTagged]) byId.set(ev.id, ev)
@@ -62,7 +62,7 @@ export function PostThread() {
       })
 
     Promise.all([
-      !found ? fetchEvents({ ids: [activeThreadId], limit: 1 }) : Promise.resolve([]),
+      !found ? fetchEventsWide({ ids: [activeThreadId], limit: 1 }) : Promise.resolve([]),
       loadEngagement(),
     ]).then(([rootEvents, engagement]) => {
       if (!found && rootEvents.length > 0) {
@@ -114,8 +114,8 @@ export function PostThread() {
                 placeholder="Post your reply..."
                 onPosted={() => {
                   Promise.all([
-                    fetchEvents({ kinds: [1], '#e': [activeThreadId!], limit: 50 }),
-                    fetchEvents({ kinds: [1], '#q': [activeThreadId!], limit: 50 }),
+                    fetchEventsWide({ kinds: [1], '#e': [activeThreadId!], limit: 50 }),
+                    fetchEventsWide({ kinds: [1], '#q': [activeThreadId!], limit: 50 }),
                   ]).then(([eTagged, qTagged]) => {
                     const byId = new Map<string, Event>()
                     for (const ev of [...eTagged, ...qTagged]) byId.set(ev.id, ev)

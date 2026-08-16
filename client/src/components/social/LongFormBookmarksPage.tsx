@@ -9,7 +9,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { useSocialStore } from '@/stores/socialStore'
 import { useUserStore } from '@/stores/userStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
-import { fetchEvents } from '@/lib/nostr/relay-pool'
+import { fetchEventsWide } from '@/lib/nostr/readRelays'
 import { BlossomImage } from '@/components/ui/BlossomImage'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Loader2, Bookmark, RefreshCw, Search } from 'lucide-react'
@@ -154,7 +154,7 @@ export function LongFormBookmarksPage() {
     setLoading(true)
     try {
       // Fetch the user's bookmark list
-      const lists = await fetchEvents({ kinds: [10003], authors: [pubkey], limit: 1 })
+      const lists = await fetchEventsWide({ kinds: [10003], authors: [pubkey], limit: 1 })
       const latest = lists.sort((a, b) => b.created_at - a.created_at)[0]
       if (!latest) { setArticles([]); return }
 
@@ -176,7 +176,7 @@ export function LongFormBookmarksPage() {
       if (eventIds.length === 0) { setArticles([]); return }
 
       // Resolve events and filter to kind:30023 articles only
-      const resolved = await fetchEvents({ ids: eventIds.slice(0, 100), limit: 100 })
+      const resolved = await fetchEventsWide({ ids: eventIds.slice(0, 100), limit: 100 })
       const articleEvents = resolved.filter(e => e.kind === 30023)
 
       // Deduplicate by pubkey:d-tag coordinate

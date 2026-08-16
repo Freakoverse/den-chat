@@ -26,7 +26,7 @@ import {
   parseForumWordPost, parseCommunityPost, parseForumComment, classifyReaction, reactionTargetId,
   type ForumPost, type ForumComment, type ForumSort, type CommunityDef, type WordProfile,
 } from '@/lib/nostr/forum'
-import { subscribeEvents, fetchEvents } from '@/lib/nostr/relay-pool'
+import { fetchEventsWide, subscribeEventsWide } from '@/lib/nostr/readRelays'
 import { KINDS } from '@/lib/crypto/constants'
 import { uploadToBlossomServers, type UploadProgress } from '@/lib/blossom'
 import { RichContent } from '@/components/social/RichContent'
@@ -596,14 +596,14 @@ export function ForumNotificationsPage() {
       setLoading(true)
       try {
         const [reactions, replies] = await Promise.all([
-          fetchEvents({ kinds: [7], '#p': [myPubkey], limit: 200 }),
-          fetchEvents({ kinds: [KINDS.FORUM_POST], '#p': [myPubkey], limit: 200 }),
+          fetchEventsWide({ kinds: [7], '#p': [myPubkey], limit: 200 }),
+          fetchEventsWide({ kinds: [KINDS.FORUM_POST], '#p': [myPubkey], limit: 200 }),
         ])
         // Resolve reaction targets + reply roots (by event id).
         const ids = new Set<string>()
         for (const r of reactions) { if (r.pubkey === myPubkey) continue; const t = reactionTargetId(r); if (t) ids.add(t) }
         for (const rep of replies) { if (rep.pubkey === myPubkey) continue; const root = rep.tags.find((t) => t[0] === 'E')?.[1] || rep.tags.find((t) => t[0] === 'e')?.[1]; if (root) ids.add(root) }
-        const resolved = ids.size ? await fetchEvents({ ids: [...ids].slice(0, 300) }) : []
+        const resolved = ids.size ? await fetchEventsWide({ ids: [...ids].slice(0, 300) }) : []
         const map = new Map(resolved.map((e) => [e.id, e]))
         // Reaction targets that are comments → resolve their root posts for scope.
         const second = new Set<string>()
@@ -612,7 +612,7 @@ export function ForumNotificationsPage() {
           const ev = map.get(t); if (!ev || scopeOf(ev)) continue
           const c = parseForumComment(ev); if (c?.rootId && !map.has(c.rootId)) second.add(c.rootId)
         }
-        if (second.size) { const more = await fetchEvents({ ids: [...second].slice(0, 300) }); for (const e of more) map.set(e.id, e) }
+        if (second.size) { const more = await fetchEventsWide({ ids: [...second].slice(0, 300) }); for (const e of more) map.set(e.id, e) }
 
         const out: ForumNotifItem[] = []
         for (const r of reactions) {
@@ -1352,7 +1352,7 @@ export function ForumFeedPage() {
     if (tab !== 'open') return
     const words = word ? [word] : followedWords
     if (words.length === 0) return
-    const sub = subscribeEvents({ kinds: [KINDS.FORUM_POST], '#w': words }, (ev) => ingestPost(ev))
+    const sub = subscribeEventsWide({ kinds: [KINDS.FORUM_POST], '#w': words }, (ev) => ingestPost(ev))
     return () => sub.close()
   }, [tab, word, followedWords, ingestPost])
 
@@ -1505,8 +1505,8 @@ function CommunityFeed({ address }: { address: string }) {
 
   useEffect(() => { if (!def) fetchCommunity(address); fetchCommunityPosts(address) }, [address, def, fetchCommunity, fetchCommunityPosts])
   useEffect(() => {
-    const subP = subscribeEvents({ kinds: [KINDS.FORUM_POST], '#a': [address] }, (ev) => ingestPost(ev))
-    const subA = subscribeEvents({ kinds: [4550], '#a': [address] }, (ev) => ingestApproval(ev))
+    const subP = subscribeEventsWide({ kinds: [KINDS.FORUM_POST], '#a': [address] }, (ev) => ingestPost(ev))
+    const subA = subscribeEventsWide({ kinds: [4550], '#a': [address] }, (ev) => ingestApproval(ev))
     return () => { subP.close(); subA.close() }
   }, [address, ingestPost, ingestApproval])
 
@@ -1815,8 +1815,8 @@ export function ForumThreadPage() {
   }, [postId, commentsByPost])
   useEffect(() => {
     if (!postId) return
-    const subC = subscribeEvents({ kinds: [KINDS.FORUM_POST], '#E': [postId] }, (ev) => ingestComment(ev))
-    const subR = subscribeEvents({ kinds: [7], '#e': reactionIds }, (ev) => ingestReaction(ev))
+    const subC = subscribeEventsWide({ kinds: [KINDS.FORUM_POST], '#E': [postId] }, (ev) => ingestComment(ev))
+    const subR = subscribeEventsWide({ kinds: [7], '#e': reactionIds }, (ev) => ingestReaction(ev))
     return () => { subC.close(); subR.close() }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [postId, reactionIds.join(','), ingestComment, ingestReaction])

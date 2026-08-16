@@ -10,7 +10,7 @@ import type { Event } from 'nostr-tools'
 import { useUserStore } from '@/stores/userStore'
 import { useSocialStore } from '@/stores/socialStore'
 import { useWotStore } from '@/stores/wotStore'
-import { fetchEvents } from '@/lib/nostr/relay-pool'
+import { fetchEventsWide } from '@/lib/nostr/readRelays'
 import { classifyReaction, reactionTargetId } from '@/lib/nostr/forum'
 import { NotificationList, type NotifItem } from '@/components/social/NotificationList'
 
@@ -43,8 +43,8 @@ export function LongFormNotificationsPage() {
       setLoading(true)
       try {
         const [reactions, replies] = await Promise.all([
-          fetchEvents({ kinds: [7], '#p': [myPubkey], limit: 200 }),
-          fetchEvents({ kinds: [1111], '#p': [myPubkey], limit: 200 }),
+          fetchEventsWide({ kinds: [7], '#p': [myPubkey], limit: 200 }),
+          fetchEventsWide({ kinds: [1111], '#p': [myPubkey], limit: 200 }),
         ])
         const out: NotifItem[] = []
         const openArticle = (coord: string | undefined) => {
@@ -76,7 +76,7 @@ export function LongFormNotificationsPage() {
 
         // Reactions on my long-form *comments* — resolve to confirm (K = 30023/24).
         if (commentTargets.size) {
-          const targets = await fetchEvents({ ids: [...commentTargets].slice(0, 200) })
+          const targets = await fetchEventsWide({ ids: [...commentTargets].slice(0, 200) })
           const tmap = new Map(targets.map((e) => [e.id, e]))
           for (const r of reactions) {
             if (r.pubkey === myPubkey || wotShouldHide(r.pubkey, 'social')) continue

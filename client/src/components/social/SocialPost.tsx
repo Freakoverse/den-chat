@@ -8,7 +8,8 @@ import { useUserStore } from '@/stores/userStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { useBlockStore } from '@/stores/blockStore'
 import { useWotStore } from '@/stores/wotStore'
-import { publishToSpecificRelays, fetchEvents, publishEventProgressive, assertPublished } from '@/lib/nostr/relay-pool'
+import { publishToSpecificRelays, publishEventProgressive, assertPublished } from '@/lib/nostr/relay-pool'
+import { fetchEventsWide } from '@/lib/nostr/readRelays'
 import { getPublishRelays } from '@/stores/postingBehaviourStore'
 import { signWithSigner, createDeletionEvent, withClientTag } from '@/lib/nostr/events'
 import { RichContent } from '@/components/social/RichContent'
@@ -146,7 +147,7 @@ export function SocialPost({ event, onOpenProfile, onOpenThread, compact, isBook
   useEffect(() => {
     if (isBookmarkedProp !== undefined) return  // Fed from batch — skip per-post fetch
     if (!myPubkey) return
-    fetchEvents({ kinds: [10003], authors: [myPubkey], limit: 1 }).then(async (events) => {
+    fetchEventsWide({ kinds: [10003], authors: [myPubkey], limit: 1 }).then(async (events) => {
       if (events.length > 0) {
         const latest = events.sort((a, b) => b.created_at - a.created_at)[0]
         // Check encrypted content for private bookmarks
@@ -175,7 +176,7 @@ export function SocialPost({ event, onOpenProfile, onOpenThread, compact, isBook
   // Fetch historical reactions for this post
   useEffect(() => {
     if (initialReactions !== undefined) return  // Fed from batch — skip per-post fetch
-    fetchEvents({ kinds: [7], '#e': [event.id], limit: 100 }).then((rawReactions) => {
+    fetchEventsWide({ kinds: [7], '#e': [event.id], limit: 100 }).then((rawReactions) => {
       const parsed: ReactionInfo[] = rawReactions.map((r) => {
         const emojiTag = r.tags.find((t) => t[0] === 'emoji')
         let emoji = r.content || '+'
@@ -211,7 +212,7 @@ export function SocialPost({ event, onOpenProfile, onOpenThread, compact, isBook
 
   useEffect(() => {
     if (skipZapFetch) return  // Fed from batch — skip per-post fetch
-    fetchEvents({ kinds: [9735], '#e': [event.id], limit: 50 }).then((receipts) => {
+    fetchEventsWide({ kinds: [9735], '#e': [event.id], limit: 50 }).then((receipts) => {
       const zapStore = useZapStore.getState()
       for (const receipt of receipts) {
         if (!zapStore.markZapProcessed(receipt.id)) continue
@@ -334,7 +335,7 @@ export function SocialPost({ event, onOpenProfile, onOpenThread, compact, isBook
     if (!myPubkey || (!signer && !privateKey)) return
     setBookmarkLoading(true)
     try {
-      const existing = await fetchEvents({ kinds: [10003], authors: [myPubkey], limit: 1 })
+      const existing = await fetchEventsWide({ kinds: [10003], authors: [myPubkey], limit: 1 })
       const latest = existing.sort((a, b) => b.created_at - a.created_at)[0]
 
       // Decrypt existing private bookmarks

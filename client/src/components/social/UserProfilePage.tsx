@@ -15,7 +15,7 @@ import { FollowSafetyModal } from '@/components/ui/FollowSafetyModal'
 import { useNavigationStore } from '@/stores/navigationStore'
 import { useDMStore } from '@/stores/dmStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
-import { fetchEvents } from '@/lib/nostr/relay-pool'
+import { fetchEventsWide } from '@/lib/nostr/readRelays'
 import { FilteredFeed, FeedFilterModal } from '@/components/social/SocialFeedPage'
 import { ArticleCardItem, dedupeAndFilter, type ArticleCard } from '@/components/social/LongFormFeedPage'
 import { UserProfileModal } from '@/components/hub/UserProfileModal'
@@ -101,7 +101,7 @@ export function UserProfilePage() {
     longLoadedRef.current = null // reset long-form cache
     setLongArticles([])
 
-    fetchEvents({ kinds: [1, 6], authors: [pubkey], limit: 80 }).then((events) => {
+    fetchEventsWide({ kinds: [1, 6], authors: [pubkey], limit: 80 }).then((events) => {
       setUserPosts(events.sort((a, b) => b.created_at - a.created_at))
       setLoading(false)
     })
@@ -112,7 +112,7 @@ export function UserProfilePage() {
     if (profileTab !== 'long' || !pubkey || longLoadedRef.current === pubkey) return
     longLoadedRef.current = pubkey
     setLongLoading(true)
-    fetchEvents({ kinds: [30023], authors: [pubkey], limit: 100 }).then((events) => {
+    fetchEventsWide({ kinds: [30023], authors: [pubkey], limit: 100 }).then((events) => {
       setLongArticles(dedupeAndFilter(events))
       setLongLoading(false)
     })
@@ -124,7 +124,7 @@ export function UserProfilePage() {
     loadingMoreRef.current = true
     try {
       const oldest = userPosts[userPosts.length - 1]
-      const events = await fetchEvents({
+      const events = await fetchEventsWide({
         kinds: [1, 6],
         authors: [pubkey],
         until: oldest.created_at,

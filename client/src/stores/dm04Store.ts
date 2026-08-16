@@ -10,7 +10,8 @@
  */
 
 import { create } from 'zustand'
-import { fetchEvents, fetchEventsFromRelays, publishEventProgressive, publishToSpecificRelays, subscribeEvents, subscribeToRelays, getRelays } from '@/lib/nostr/relay-pool'
+import { fetchEventsFromRelays, publishEventProgressive, publishToSpecificRelays, subscribeToRelays } from '@/lib/nostr/relay-pool'
+import { fetchEventsWide, subscribeEventsWide, getReadRelays } from '@/lib/nostr/readRelays'
 import { getPublishRelays, usePostingBehaviourStore } from '@/stores/postingBehaviourStore'
 import { STANDARD_KINDS } from '@/lib/crypto/constants'
 import { encryptNip04, decryptNip04 } from '@/lib/nostr/nip04dm'
@@ -375,13 +376,13 @@ export const useDM04Store = create<DM04State>((set, get) => ({
     // Track A subscriptions: last 100 events + live
     const TRACK_A_LIMIT = 100
 
-    const subReceived = subscribeEvents(
+    const subReceived = subscribeEventsWide(
       { kinds: [STANDARD_KINDS.NIP04_DM], '#p': [myPubkey], limit: TRACK_A_LIMIT },
       onDMEvent,
       onEose,
     )
 
-    const subSent = subscribeEvents(
+    const subSent = subscribeEventsWide(
       { kinds: [STANDARD_KINDS.NIP04_DM], authors: [myPubkey], limit: TRACK_A_LIMIT },
       onDMEvent,
       onEose,
@@ -406,11 +407,11 @@ export const useDM04Store = create<DM04State>((set, get) => ({
       await processReactionEvent(event, myPubkey, signer, privateKey, set, get)
     }
 
-    const reactionSubReceived = subscribeEvents(
+    const reactionSubReceived = subscribeEventsWide(
       { kinds: [STANDARD_KINDS.REACTION], '#p': [myPubkey], limit: TRACK_A_LIMIT },
       onReactionEvent,
     )
-    const reactionSubSent = subscribeEvents(
+    const reactionSubSent = subscribeEventsWide(
       { kinds: [STANDARD_KINDS.REACTION], authors: [myPubkey], limit: TRACK_A_LIMIT },
       onReactionEvent,
     )
@@ -451,14 +452,14 @@ export const useDM04Store = create<DM04State>((set, get) => ({
 
       // Fetch both sent and received
       const [receivedEvents, sentEvents] = await Promise.all([
-        fetchEvents({
+        fetchEventsWide({
           kinds: [STANDARD_KINDS.NIP04_DM],
           '#p': [myPubkey],
           authors: [counterpartyPubkey],
           until: until - 1,
           limit: PAGE_SIZE,
         }),
-        fetchEvents({
+        fetchEventsWide({
           kinds: [STANDARD_KINDS.NIP04_DM],
           authors: [myPubkey],
           '#p': [counterpartyPubkey],
@@ -1217,34 +1218,13 @@ const MAX_NON_FOLLOWED_FETCH = 100
 const PER_PERSON_LIMIT = 10
 
 /**
- * Build the relay set for DM fetching, respecting posting behaviour settings.
- * Combines client relays + NIP-65 user relays (no hub relays — DMs aren't hub-scoped).
- * This ensures per-person fetch queries the same relays the user publishes to.
+ * Build the relay set for DM fetching: all client + NIP-65 user relays (deduped),
+ * the same wide read set as mods/blogs/social — not a capped subset — so per-person
+ * fetch spans everywhere the user (and counterparties) might have published. No hub
+ * relays: DMs aren't hub-scoped.
  */
 function getDMFetchRelays(): string[] {
-  const { postToClientRelays, postToUserRelays, limitClientRelays, limitUserRelays } = usePostingBehaviourStore.getState()
-  const result = new Set<string>()
-
-  if (postToClientRelays) {
-    const limit = limitClientRelays ? 3 : Infinity
-    const clientRelays = getRelays()
-    const pick = clientRelays.length <= limit ? clientRelays : clientRelays.slice(0, limit)
-    pick.forEach((r) => result.add(r))
-  }
-
-  if (postToUserRelays) {
-    const limit = limitUserRelays ? 3 : Infinity
-    const userRelays = useUserListsStore.getState().userRelays
-    const pick = userRelays.length <= limit ? userRelays : userRelays.slice(0, limit)
-    pick.forEach((r) => result.add(r))
-  }
-
-  // Fallback: always include at least the client relays
-  if (result.size === 0) {
-    getRelays().forEach((r) => result.add(r))
-  }
-
-  return Array.from(result)
+  return getReadRelays()
 }
 
 /**
@@ -1486,8 +1466,8 @@ async function discoverCounterpartyRelays(
 
     // Fetch NIP-65 relay list and DM relay list in parallel
     const [relayListEvents, dmRelayListEvents] = await Promise.allSettled([
-      fetchEvents({ kinds: [STANDARD_KINDS.RELAY_LIST], authors: [counterpartyPubkey], limit: 1 }),
-      fetchEvents({ kinds: [STANDARD_KINDS.DM_RELAY_LIST], authors: [counterpartyPubkey], limit: 1 }),
+      fetchEventsWide({ kinds: [STANDARD_KINDS.RELAY_LIST], authors: [counterpartyPubkey], limit: 1 }),
+      fetchEventsWide({ kinds: [STANDARD_KINDS.DM_RELAY_LIST], authors: [counterpartyPubkey], limit: 1 }),
     ])
 
     // Parse NIP-65 relay list (kind 10002): tags are ['r', 'wss://...', 'read'|'write'|'']

@@ -10,7 +10,8 @@ import { useSocialStore } from '@/stores/socialStore'
 import { useFollowStore } from '@/stores/followStore'
 import { useUserStore } from '@/stores/userStore'
 import { useNotificationStore } from '@/stores/notificationStore'
-import { fetchEvents, fetchEventsProgressive } from '@/lib/nostr/relay-pool'
+import { fetchEventsProgressive } from '@/lib/nostr/relay-pool'
+import { fetchEventsWide, getReadRelays } from '@/lib/nostr/readRelays'
 import { nip19 } from 'nostr-tools'
 import { decryptNip04 } from '@/lib/nostr/nip04dm'
 import { ComposeBox } from '@/components/social/ComposeBox'
@@ -248,7 +249,7 @@ export function SocialFeedPage() {
   // Fetch bookmarks once
   useEffect(() => {
     if (!pubkey) return
-    fetchEvents({ kinds: [10003], authors: [pubkey], limit: 1 }).then(async (events) => {
+    fetchEventsWide({ kinds: [10003], authors: [pubkey], limit: 1 }).then(async (events) => {
       if (events.length === 0) return
       const latest = events.sort((a, b) => b.created_at - a.created_at)[0]
       let ids: string[] = []
@@ -282,7 +283,7 @@ export function SocialFeedPage() {
       for (let i = 0; i < newIds.length; i += 50) {
         const chunk = newIds.slice(i, i + 50)
         try {
-          const rawReactions = await fetchEvents({ kinds: [7], '#e': chunk, limit: chunk.length * 5 })
+          const rawReactions = await fetchEventsWide({ kinds: [7], '#e': chunk, limit: chunk.length * 5 })
           setReactionsMap(prev => {
             const next = new Map(prev)
             for (const r of rawReactions) {
@@ -320,7 +321,7 @@ export function SocialFeedPage() {
       for (let i = 0; i < newIds.length; i += 50) {
         const chunk = newIds.slice(i, i + 50)
         try {
-          const receipts = await fetchEvents({ kinds: [9735], '#e': chunk, limit: chunk.length * 3 })
+          const receipts = await fetchEventsWide({ kinds: [9735], '#e': chunk, limit: chunk.length * 3 })
           const zapStore = useZapStore.getState()
           for (const receipt of receipts) {
             if (!zapStore.markZapProcessed(receipt.id)) continue
@@ -366,6 +367,7 @@ export function SocialFeedPage() {
           setPosts(events)
           if (!painted) { painted = true; setLoading(false) }
         },
+        { relays: getReadRelays() },
       )
       feedFetchRef.current = handle
       await handle.done
@@ -387,7 +389,7 @@ export function SocialFeedPage() {
       const authors = Array.from(authorSet).slice(0, 500)
       if (authors.length === 0) { setLoadingMore(false); loadingMoreRef.current = false; return }
 
-      const events = await fetchEvents({
+      const events = await fetchEventsWide({
         kinds: [1, 6],
         authors,
         until: oldest.created_at,
@@ -432,14 +434,14 @@ export function SocialFeedPage() {
   useEffect(() => {
     if (feedTab !== 'reactions' || !pubkey) return
     setSubLoading(true)
-    fetchEvents({ kinds: [7], authors: [pubkey], limit: 100 })
+    fetchEventsWide({ kinds: [7], authors: [pubkey], limit: 100 })
       .then(async (reactions) => {
         const eventIds = reactions
           .map((r) => r.tags.find((t) => t[0] === 'e')?.[1])
           .filter((id): id is string => !!id)
         const unique = [...new Set(eventIds)]
         if (unique.length === 0) { setReactionPosts([]); return }
-        const resolved = await fetchEvents({ ids: unique.slice(0, 50), limit: 50 })
+        const resolved = await fetchEventsWide({ ids: unique.slice(0, 50), limit: 50 })
         setReactionPosts(resolved.sort((a, b) => b.created_at - a.created_at))
       })
       .finally(() => setSubLoading(false))
@@ -449,7 +451,7 @@ export function SocialFeedPage() {
   useEffect(() => {
     if (feedTab !== 'bookmarks' || !pubkey) return
     setSubLoading(true)
-    fetchEvents({ kinds: [10003], authors: [pubkey], limit: 1 })
+    fetchEventsWide({ kinds: [10003], authors: [pubkey], limit: 1 })
       .then(async (lists) => {
         const latest = lists.sort((a, b) => b.created_at - a.created_at)[0]
         if (!latest) { setBookmarkPosts([]); return }
@@ -471,7 +473,7 @@ export function SocialFeedPage() {
         }
 
         if (eventIds.length === 0) { setBookmarkPosts([]); return }
-        const resolved = await fetchEvents({ ids: eventIds.slice(0, 50), limit: 50 })
+        const resolved = await fetchEventsWide({ ids: eventIds.slice(0, 50), limit: 50 })
         setBookmarkPosts(resolved.sort((a, b) => b.created_at - a.created_at))
       })
       .finally(() => setSubLoading(false))
@@ -913,10 +915,10 @@ function SocialNotificationView({ onOpenProfile, onOpenThread }: {
       try {
         // Fetch all event types that tag us
         const [mentions, reactions, reposts, zaps] = await Promise.all([
-          fetchEvents({ kinds: [1], '#p': [myPubkey], limit: 50 }),
-          fetchEvents({ kinds: [7], '#p': [myPubkey], limit: 50 }),
-          fetchEvents({ kinds: [6], '#p': [myPubkey], limit: 30 }),
-          fetchEvents({ kinds: [9735], '#p': [myPubkey], limit: 30 }),
+          fetchEventsWide({ kinds: [1], '#p': [myPubkey], limit: 50 }),
+          fetchEventsWide({ kinds: [7], '#p': [myPubkey], limit: 50 }),
+          fetchEventsWide({ kinds: [6], '#p': [myPubkey], limit: 30 }),
+          fetchEventsWide({ kinds: [9735], '#p': [myPubkey], limit: 30 }),
         ])
 
         const notifs: SocialNotification[] = []
@@ -990,7 +992,7 @@ function SocialNotificationView({ onOpenProfile, onOpenThread }: {
           }
         }
         if (refIds.size > 0) {
-          const resolved = await fetchEvents({ ids: [...refIds].slice(0, 80), limit: 80 })
+          const resolved = await fetchEventsWide({ ids: [...refIds].slice(0, 80), limit: 80 })
           const resolvedMap = new Map(resolved.map(e => [e.id, e]))
           for (const n of notifs) {
             if (n.type === 'reaction' || n.type === 'repost' || n.type === 'zap') {
@@ -1351,7 +1353,7 @@ function ReplyContext({ eventId, onOpenThread }: { eventId: string; onOpenThread
       setFetched(true)
       return
     }
-    fetchEvents({ ids: [eventId], limit: 1 }).then((events) => {
+    fetchEventsWide({ ids: [eventId], limit: 1 }).then((events) => {
       const ev = events[0] ?? null
       replyCache.set(eventId, ev)
       setParent(ev)

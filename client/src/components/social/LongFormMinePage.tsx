@@ -6,7 +6,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useSocialStore } from '@/stores/socialStore'
 import { useUserStore } from '@/stores/userStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
-import { fetchEvents } from '@/lib/nostr/relay-pool'
+import { fetchEventsWide } from '@/lib/nostr/readRelays'
 import { BlossomImage } from '@/components/ui/BlossomImage'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Loader2, FileText, RefreshCw, Pencil } from 'lucide-react'
@@ -42,7 +42,7 @@ export function LongFormMinePage() {
     if (!pubkey) return
     setLoading(true)
     try {
-      const events = await fetchEvents({ kinds: [30023], authors: [pubkey], limit: 100 })
+      const events = await fetchEventsWide({ kinds: [30023], authors: [pubkey], limit: 100 })
       const coordMap = new Map<string, Event>()
       for (const ev of events) {
         const d = ev.tags.find(t => t[0] === 'd')?.[1] || ''

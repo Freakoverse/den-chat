@@ -12,7 +12,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useUserStore } from '@/stores/userStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
-import { fetchEvents } from '@/lib/nostr/relay-pool'
+import { fetchEventsWide } from '@/lib/nostr/readRelays'
 import { useComposeSettings, ComposeSettingsPanel, ComposeSettingsButton } from '@/components/social/ComposeSettings'
 import { EmojiPickerPopover } from '@/components/chat/EmojiPickerPopover'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -46,7 +46,7 @@ export function ArticleComments({ articleEvent }: ArticleCommentsProps) {
   // Fetch comments
   useEffect(() => {
     setLoading(true)
-    fetchEvents({
+    fetchEventsWide({
       kinds: [1111],
       '#A': [aCoordinate],
       limit: 200,

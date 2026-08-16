@@ -8,7 +8,8 @@
  */
 
 import { create } from 'zustand'
-import { fetchEvents, publishToSpecificRelays, publishEventProgressive, subscribeEvents } from '@/lib/nostr/relay-pool'
+import { publishToSpecificRelays, publishEventProgressive } from '@/lib/nostr/relay-pool'
+import { fetchEventsWide, subscribeEventsWide } from '@/lib/nostr/readRelays'
 import { getPublishRelays } from '@/stores/postingBehaviourStore'
 import { STANDARD_KINDS } from '@/lib/crypto/constants'
 import { createGiftWrap, unwrapGiftWrap, computeRumorId, type UnwrappedDM } from '@/lib/nostr/nip17'
@@ -198,7 +199,7 @@ export const useDMStore = create<DMState>((set, get) => ({
     let initialPhase = true
     const dmBuffer: UnwrappedDM[] = []
 
-    const sub = subscribeEvents(
+    const sub = subscribeEventsWide(
       {
         kinds: [STANDARD_KINDS.GIFT_WRAP],
         '#p': [myPubkey],
@@ -312,7 +313,7 @@ export const useDMStore = create<DMState>((set, get) => ({
       // Use the oldest wrap timestamp as the cursor
       const until = conv?.oldestWrapTimestamp || Math.floor(Date.now() / 1000)
 
-      const events = await fetchEvents({
+      const events = await fetchEventsWide({
         kinds: [STANDARD_KINDS.GIFT_WRAP],
         '#p': [myPubkey],
         until: until - 1, // strictly before the oldest we have
