@@ -73,6 +73,7 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
   const hubMembersRaw = useHubStore((s) => s.hubMembers[hub.dTag])
   const hubMembers = hubMembersRaw || EMPTY_MEMBERS
   const hubSecrets = useHubStore((s) => s.hubSecrets)
+  const hubBanList = useHubStore((s) => s.hubBanLists[hub.dTag])
   const setHubMembers = useHubStore((s) => s.setHubMembers)
   const setHubData = useHubStore((s) => s.setHubData)
   const { getProfile } = useProfileCache()
@@ -142,11 +143,13 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
         })
       }
 
-      // Filter out hub creator and existing members
+      // Filter out hub creator, existing members, and banned users
       const memberPubkeys = new Set(hubMembers.map(m => m.pubkey))
+      const bannedPubkeys = new Set(hubBanList || [])
       const filtered = Array.from(byPubkey.values()).filter(r => {
         if (r.pubkey === hub.creatorPubkey) return false
         if (memberPubkeys.has(r.pubkey)) return false
+        if (bannedPubkeys.has(r.pubkey)) return false
         // Filter by PoW requirement
         if (hub.minPow > 0 && r.powBits < hub.minPow) return false
         return true
@@ -161,7 +164,7 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
     } finally {
       setLoading(false)
     }
-  }, [hub.dTag, hub.generalRelays, hub.creatorPubkey, hub.minPow, hubMembers.length, timeFilterIdx])
+  }, [hub.dTag, hub.generalRelays, hub.creatorPubkey, hub.minPow, hubMembers.length, hubBanList, timeFilterIdx])
 
   // Reset transient UI state ONLY when the modal opens — not when loadRequests'
   // identity changes (e.g. hubMembers.length bumps after an approval), which
