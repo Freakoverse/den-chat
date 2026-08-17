@@ -11,7 +11,7 @@
  * propagate to all connected clients without requiring a page refresh.
  */
 
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useHubStore } from '@/stores/hubStore'
 import { useUserStore } from '@/stores/userStore'
 import { subscribeToRelays } from '@/lib/nostr/relay-pool'
@@ -45,6 +45,28 @@ export function useHubEventSubscription() {
       })
       .join('|')
   }, [hubs])
+
+  // Force a full re-subscribe on resume. Browsers drop WebSockets when a tab is
+  // backgrounded, and on Tauri the window is always "visible" so visibilitychange
+  // never fires — hence the periodic keepalive too. Without this the hub-event sub
+  // silently dies and epoch rotations (new hub secret) are missed until a manual
+  // refresh, even though the message sub (useHubSubscriptions) keeps flowing. A
+  // fresh REQ returns the latest hub event per coordinate, which then flows through
+  // the re-download → re-derive → re-decrypt pipeline below.
+  const [reconnectNonce, setReconnectNonce] = useState(0)
+  useEffect(() => {
+    const RECONNECT_INTERVAL_MS = 5 * 60 * 1000 // 5 minutes
+    const forceReconnect = () => setReconnectNonce((n) => n + 1)
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') forceReconnect()
+    }
+    document.addEventListener('visibilitychange', handleVisibility)
+    const intervalId = setInterval(forceReconnect, RECONNECT_INTERVAL_MS)
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility)
+      clearInterval(intervalId)
+    }
+  }, [])
 
   useEffect(() => {
     if (!hubListLoaded || !pubkey || !hubFingerprint) return
@@ -336,5 +358,5 @@ export function useHubEventSubscription() {
       for (const t of Object.values(pendingRef.current)) clearTimeout(t)
       pendingRef.current = {}
     }
-  }, [hubListLoaded, hubFingerprint, pubkey, signer, privateKey])
+  }, [hubListLoaded, hubFingerprint, pubkey, signer, privateKey, reconnectNonce])
 }
