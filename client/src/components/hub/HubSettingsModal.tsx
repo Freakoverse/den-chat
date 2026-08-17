@@ -28,7 +28,7 @@ import { useUserStore } from '@/stores/userStore'
 import { BlossomImage } from '@/components/ui/BlossomImage'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import { truncateNpub } from '@/lib/utils'
+import { truncateNpub, npubShort } from '@/lib/utils'
 import { uploadToBlossomServers, blossomServers as blossomServerManager } from '@/lib/blossom'
 import type { UploadProgress } from '@/lib/blossom'
 import { buildHubEvent } from '@/lib/hub/buildHubEvent'
@@ -3615,6 +3615,7 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
   const [unbanSteps, setUnbanSteps] = useState<string[]>([])
   const [refreshingModBans, setRefreshingModBans] = useState(false)
   const [unbanMode, setUnbanMode] = useState<'unban' | 'readd'>('unban')
+  const [profilePubkey, setProfilePubkey] = useState<string | null>(null)
   const UNBAN_STEPS = ['Downloading current index', 'Uploading ban pages', 'Publishing hub event']
 
   // Refresh mod ban lists from relays/Blossom
@@ -3640,6 +3641,7 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
     const q = search.toLowerCase().trim()
     return bannedPubkeys.filter((pk) => {
       if (pk.toLowerCase().includes(q)) return true
+      try { if (nip19.npubEncode(pk).toLowerCase().includes(q)) return true } catch { /* invalid pubkey */ }
       const profile = getProfile(pk)
       if (profile?.display_name?.toLowerCase().includes(q)) return true
       if (profile?.name?.toLowerCase().includes(q)) return true
@@ -4042,7 +4044,7 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
             ) : (
               filteredBanned.map((pk) => {
                 const profile = getProfile(pk)
-                const name = profile?.display_name || profile?.name || truncateNpub(pk, 10)
+                const name = profile?.display_name || profile?.name || npubShort(pk, 10)
                 const isSelected = selected.has(pk)
                 const stillInTree = memberPubkeySet.has(pk)
 
@@ -4060,15 +4062,29 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
                       onChange={() => toggleSelect(pk)}
                       className="rounded border-border"
                     />
-                    <Avatar className="h-7 w-7 shrink-0">
-                      {profile?.picture && <AvatarImage src={profile.picture} />}
-                      <AvatarFallback className="text-[10px] bg-destructive/10 text-destructive">
-                        {name.slice(0, 2).toUpperCase()}
-                      </AvatarFallback>
-                    </Avatar>
+                    <button
+                      type="button"
+                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); setProfilePubkey(pk) }}
+                      className="shrink-0 cursor-pointer"
+                      title="View profile"
+                    >
+                      <Avatar className="h-7 w-7 shrink-0">
+                        {profile?.picture && <AvatarImage src={profile.picture} />}
+                        <AvatarFallback className="text-[10px] bg-destructive/10 text-destructive">
+                          {name.slice(0, 2).toUpperCase()}
+                        </AvatarFallback>
+                      </Avatar>
+                    </button>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm text-foreground truncate">{name}</p>
-                      <p className="text-[10px] text-muted-foreground font-mono truncate">{truncateNpub(pk, 16)}</p>
+                      <button
+                        type="button"
+                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); setProfilePubkey(pk) }}
+                        className="block max-w-full text-left cursor-pointer"
+                        title="View profile"
+                      >
+                        <p className="text-sm text-foreground truncate hover:underline">{name}</p>
+                      </button>
+                      <p className="text-[10px] text-muted-foreground font-mono truncate">{npubShort(pk, 16)}</p>
                     </div>
                     {stillInTree && (
                       <Tip text="This user is still in the member tree. Remove them from the tree to revoke access.">
@@ -4357,6 +4373,16 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
           </div>
         </div>,
         document.body,
+      )}
+
+      {/* Banned user profile modal */}
+      {profilePubkey && createPortal(
+        <UserProfileModal
+          open={!!profilePubkey}
+          onClose={() => setProfilePubkey(null)}
+          targetPubkey={profilePubkey}
+        />,
+        document.body
       )}
     </div>
   )
