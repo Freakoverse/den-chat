@@ -3052,6 +3052,38 @@ export function ReactionBar({ reactions, messageId, onAddReaction, rawReactions,
 
   return (
     <div className="flex items-center gap-1 mt-1 flex-wrap relative">
+      {/* Add reaction button (left-most) — only show if there are reactions */}
+      {reactions.length > 0 && (
+        <div className="relative">
+          <button
+            ref={addReactionBtnRef}
+            onClick={() => setShowPicker(!showPicker)}
+            className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-secondary/50 border border-border text-muted-foreground hover:bg-secondary hover:text-foreground cursor-pointer transition-colors"
+          >
+            <Smile size={14} />
+          </button>
+          {showPicker && (
+            <EmojiPickerPopover
+              anchorRef={addReactionBtnRef}
+              onClose={() => setShowPicker(false)}
+              onSelect={(emoji, custom) => {
+                onAddReaction(messageId, emoji, custom?.url)
+                setShowPicker(false)
+              }}
+            />
+          )}
+        </div>
+      )}
+      {/* Total reaction count badge — clickable to view who reacted */}
+      {totalCount > 0 && (
+        <button
+          onClick={() => setShowReactionList(true)}
+          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs cursor-pointer transition-colors border bg-primary/10 border-primary/30 text-primary hover:bg-primary/20"
+        >
+          <Smile size={12} />
+          <span className="font-semibold">{totalCount}</span>
+        </button>
+      )}
       {reactions.map((r) => (
         <button
           key={r.emoji}
@@ -3099,38 +3131,6 @@ export function ReactionBar({ reactions, messageId, onAddReaction, rawReactions,
           )}
         </button>
       ))}
-      {/* Add reaction button — only show if there are reactions */}
-      {reactions.length > 0 && (
-        <div className="relative">
-          <button
-            ref={addReactionBtnRef}
-            onClick={() => setShowPicker(!showPicker)}
-            className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-secondary/50 border border-border text-muted-foreground hover:bg-secondary hover:text-foreground cursor-pointer transition-colors"
-          >
-            <Smile size={14} />
-          </button>
-          {showPicker && (
-            <EmojiPickerPopover
-              anchorRef={addReactionBtnRef}
-              onClose={() => setShowPicker(false)}
-              onSelect={(emoji, custom) => {
-                onAddReaction(messageId, emoji, custom?.url)
-                setShowPicker(false)
-              }}
-            />
-          )}
-        </div>
-      )}
-      {/* Total reaction count badge — clickable to view who reacted */}
-      {totalCount > 0 && (
-        <button
-          onClick={() => setShowReactionList(true)}
-          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs cursor-pointer transition-colors border bg-primary/10 border-primary/30 text-primary hover:bg-primary/20"
-        >
-          <Smile size={12} />
-          <span className="font-semibold">{totalCount}</span>
-        </button>
-      )}
       {children}
       {/* Reaction List Modal */}
       {showReactionList && (
