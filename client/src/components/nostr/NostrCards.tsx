@@ -38,7 +38,7 @@ export function ProfileCard({ pubkey, onProfileClick }: { pubkey: string; onProf
   return (
     <button
       onClick={handleClick}
-      className="inline text-primary font-medium bg-primary/10 hover:bg-primary/20 p-0.5 rounded transition-colors cursor-pointer"
+      className="inline text-primary font-medium bg-primary/10 hover:bg-primary/20 p-1 leading-none rounded transition-colors cursor-pointer"
     >
       @{name}
     </button>

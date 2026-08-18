@@ -937,7 +937,7 @@ export const MessageContent = memo(function MessageContent({ content, suffix, on
         }
         return (
           <span
-            className={`inline-flex items-center rounded px-1 py-0.5 text-xs font-medium cursor-default transition-colors ${colorClass}`}
+            className={`inline-flex items-center rounded p-1 leading-none text-xs font-medium cursor-default transition-colors ${colorClass}`}
           >
             {label}
           </span>
@@ -1341,7 +1341,7 @@ function mentionifyInline(node: React.ReactNode, hubRoleNames?: string[]): React
       parts.push(
         <span
           key={`mention-${fullMatchStart}`}
-          className={`inline-flex items-center rounded px-1 py-0.5 text-xs font-medium cursor-default transition-colors ${colorClass}`}
+          className={`inline-flex items-center rounded p-1 leading-none text-xs font-medium cursor-default transition-colors ${colorClass}`}
         >
           {label}
         </span>
