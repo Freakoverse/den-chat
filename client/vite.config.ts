@@ -62,13 +62,11 @@ export default defineConfig({
     port: 5173,
     strictPort: false,
   },
-  build: {
-    rollupOptions: {
-      // Tauri-only plugins — not available in web builds, imported dynamically at runtime
-      external: [
-        '@tauri-apps/plugin-deep-link',
-        '@tauri-apps/api/event',
-      ],
-    },
-  },
+  // NOTE: Do NOT externalize @tauri-apps/* here. These modules are only imported
+  // dynamically from Tauri-guarded code paths (useDeepLink checks `'__TAURI__' in
+  // window`; updateStore wraps them in try/catch), so bundling them is safe in the web
+  // build — the importing code never runs there. Externalizing instead left a bare
+  // `import('@tauri-apps/api/event')` in the desktop bundle, which the WebView can't
+  // resolve ("Failed to resolve module specifier"), breaking the in-app updater and
+  // deep-link handling. Bundling (the default) is what makes them resolve on desktop.
 })
