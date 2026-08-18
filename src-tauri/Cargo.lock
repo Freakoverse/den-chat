@@ -925,7 +925,7 @@ dependencies = [
 
 [[package]]
 name = "den-chat"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "bip39",
  "futures-util",
@@ -942,6 +942,7 @@ dependencies = [
  "tauri-plugin-deep-link",
  "tauri-plugin-opener",
  "tauri-plugin-single-instance",
+ "tokio",
  "tracing",
  "url",
  "uuid",
