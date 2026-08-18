@@ -357,15 +357,19 @@ export class CloudflareProvider implements VoiceProvider {
         console.log(`[CF Provider] ${kind} created new transceiver (no idle recvonly available)`)
       }
 
-      // Force VP8 for video consistency
+      // Prefer VP9 for video — ~20-30% less bandwidth than VP8 at equal quality.
+      // Capability-guarded: a platform without VP9 encode (some WebKitGTK/Safari
+      // builds) falls back to the default codec rather than failing. E2EE detects
+      // VP8/VP9 per frame, so a fallback still decrypts correctly.
       if (transceiver) {
         try {
-          const vp8 = RTCRtpSender.getCapabilities('video')?.codecs?.filter(
-            c => c.mimeType.toLowerCase() === 'video/vp8'
-          ) || []
-          if (vp8.length > 0) {
-            transceiver.setCodecPreferences(vp8)
-            console.log(`[CF Provider] VP8 codec preference set for ${kind} publish`)
+          const all = RTCRtpSender.getCapabilities('video')?.codecs || []
+          const vp9 = all.filter(c => c.mimeType.toLowerCase() === 'video/vp9')
+          if (vp9.length > 0) {
+            transceiver.setCodecPreferences(vp9)
+            console.log(`[CF Provider] VP9 codec preference set for ${kind} publish`)
+          } else {
+            console.warn(`[CF Provider] VP9 unavailable for ${kind} publish — using default. Available:`, all.map(c => c.mimeType))
           }
         } catch (e) {
           console.warn('[CF Provider] setCodecPreferences failed:', e)
@@ -704,15 +708,16 @@ export class CloudflareProvider implements VoiceProvider {
       const kind = name.endsWith(':video') || name.endsWith(':screenshare') ? 'video' : 'audio'
       const t = this.pc.addTransceiver(kind, { direction: 'recvonly' })
 
-      // Force VP8 for video — must match publish transceivers
+      // Prefer VP9 for video — must mirror the publish side. Capability-guarded.
       if (kind === 'video') {
         try {
-          const vp8 = RTCRtpReceiver.getCapabilities('video')?.codecs?.filter(
-            c => c.mimeType.toLowerCase() === 'video/vp8'
-          ) || []
-          if (vp8.length > 0) {
-            t.setCodecPreferences(vp8)
-            console.log('[CF Provider] VP8 codec preference set for video pull')
+          const all = RTCRtpReceiver.getCapabilities('video')?.codecs || []
+          const vp9 = all.filter(c => c.mimeType.toLowerCase() === 'video/vp9')
+          if (vp9.length > 0) {
+            t.setCodecPreferences(vp9)
+            console.log('[CF Provider] VP9 codec preference set for video pull')
+          } else {
+            console.warn('[CF Provider] VP9 unavailable for video pull — using default. Available:', all.map(c => c.mimeType))
           }
         } catch (e) {
           console.warn('[CF Provider] setCodecPreferences failed for pull:', e)

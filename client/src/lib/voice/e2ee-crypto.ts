@@ -94,11 +94,14 @@ const IV_LENGTH = 12
 const TAG_LENGTH = 16 // AES-GCM auth tag
 
 /**
- * Get the number of unencrypted header bytes for a video frame.
+ * Get the number of unencrypted header bytes for a video frame. Kept cleartext so
+ * the SFU can inspect frame metadata; the encrypt/decrypt round-trip is symmetric.
+ * VP9: 1 byte (frame_marker == 0b10 in the top two bits of byte 0).
  * VP8: 10 bytes for key frames, 3 bytes for inter frames.
- * These bytes must stay cleartext so the SFU can inspect frame metadata.
  */
 function getVideoHeaderSize(data: Uint8Array): number {
+  if (data.byteLength < 1) return 0
+  if ((data[0] & 0xc0) === 0x80) return 1 // VP9
   if (data.byteLength < 3) return 0
   const isKeyFrame = (data[0] & 0x01) === 0
   if (isKeyFrame && data.byteLength >= 10) return 10

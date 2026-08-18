@@ -35,17 +35,20 @@ const IV_LENGTH = 12
  * Reference: RFC 6386 §9.1 (VP8 bitstream format)
  */
 function getVideoHeaderSize(data: Uint8Array): number {
+  if (data.byteLength < 1) return 0
+
+  // VP9: the uncompressed header begins with frame_marker == 0b10 in the top two
+  // bits of byte 0. Keep 1 byte cleartext (frame marker + type bits). The
+  // encrypt/decrypt round-trip is symmetric — both sides read this same preserved
+  // byte — so the frame is reconstructed exactly on decrypt, and the SFU routes
+  // via the RTP payload descriptor (added after this transform), not the frame body.
+  if ((data[0] & 0xc0) === 0x80) return 1
+
+  // VP8: bit 0 of byte 0 is the frame type (0 = key, 1 = inter). Key frames carry a
+  // 10-byte uncompressed header; inter frames a 3-byte partition header.
   if (data.byteLength < 3) return 0
-
-  // VP8 detection: check if first byte looks like a VP8 frame
-  // Bit 0: frame type (0=key, 1=inter)
   const isKeyFrame = (data[0] & 0x01) === 0
-
-  // VP8 key frames start with a 10-byte "uncompressed data chunk"
-  // Inter frames have a 3-byte partition header
-  if (isKeyFrame && data.byteLength >= 10) {
-    return 10
-  }
+  if (isKeyFrame && data.byteLength >= 10) return 10
   return 3
 }
 
