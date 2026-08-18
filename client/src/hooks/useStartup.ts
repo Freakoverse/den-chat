@@ -365,6 +365,31 @@ export function useStartup() {
         ensureAddressableRedundancy(STANDARD_KINDS.APP_DATA, ADMIN_PUBKEY, 'den-chat-premium')
         ensureAddressableRedundancy(STANDARD_KINDS.APP_DATA, ADMIN_PUBKEY, 'den-chat-about-other-products')
         ensureAddressableRedundancy(STANDARD_KINDS.APP_DATA, ADMIN_PUBKEY, 'den-chat-guides')
+
+        // Admin build / update events. Without this a release published to a single
+        // flaky relay (deterministic relay-limit publishing can land it on just one)
+        // is invisible to clients whose short 4s update-fetch never reaches that relay.
+        // The latest-version pointer has a fixed d-tag; the build events it references
+        // use random per-version d-tags, so discover them with a generous timeout — a
+        // build stranded on one slow relay is missed by the normal 4s read — and keep
+        // every live build, plus the pointer, redundant on 3 relays. Any client helps.
+        ensureAddressableRedundancy(STANDARD_KINDS.APP_DATA, ADMIN_PUBKEY, 'den-chat-latest')
+        import('@/lib/nostr/relay-pool').then(async ({ fetchEvents }) => {
+          try {
+            const events = await fetchEvents({ authors: [ADMIN_PUBKEY], kinds: [STANDARD_KINDS.APP_DATA] }, 8000)
+            const seen = new Set<string>()
+            for (const ev of events) {
+              const dTag = ev.tags.find((t) => t[0] === 'd')?.[1]
+              if (!dTag || !dTag.startsWith('den-chat-build-') || seen.has(dTag)) continue
+              try {
+                const data = JSON.parse(ev.content)
+                if (data.deleted || ev.tags.some((t) => t[0] === 'deleted')) continue
+              } catch { continue }
+              seen.add(dTag)
+              ensureAddressableRedundancy(STANDARD_KINDS.APP_DATA, ADMIN_PUBKEY, dTag)
+            }
+          } catch { /* best-effort — the pointer redundancy above still runs */ }
+        })
       })
     }, 30_000)
 
