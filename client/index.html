@@ -2,6 +2,49 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <script>
+      // Bootstrap recovery (web only). If an initial JS chunk fails to load — e.g. a
+      // deploy/CDN race briefly serves an index.html whose hashed chunks aren't all
+      // propagated yet — React never mounts and the page is blank. The in-app reload
+      // handler can't help here: it lives inside the React tree that never rendered.
+      // This reloads once (twice max) to fetch a consistent asset set. Count-guarded
+      // so it can never loop forever; the counter resets on a successful mount.
+      (function () {
+        if (window.__TAURI_INTERNALS__) return // desktop bundles assets locally
+        var KEY = 'den-boot-retries'
+        function mounted() {
+          var r = document.getElementById('root')
+          return !!(r && r.childElementCount > 0)
+        }
+        function recover() {
+          if (mounted()) return
+          var n = 0
+          try { n = parseInt(sessionStorage.getItem(KEY) || '0', 10) || 0 } catch (e) {}
+          if (n >= 2) return // gave up — persistent failure, don't reload-loop
+          try { sessionStorage.setItem(KEY, String(n + 1)) } catch (e) {}
+          location.reload()
+        }
+        // An entry <script> or a modulepreload/stylesheet <link> failed to load.
+        window.addEventListener('error', function (e) {
+          var t = e && e.target
+          if (!t) return
+          if (t.tagName === 'SCRIPT') { recover(); return }
+          if (t.tagName === 'LINK') {
+            var rel = (t.getAttribute && t.getAttribute('rel')) || ''
+            if (rel === 'modulepreload' || rel === 'stylesheet') recover()
+          }
+        }, true)
+        // Backstop: a chunk that loaded but threw during init leaves #root empty with
+        // no resource error — reload once after a generous delay; clear the counter
+        // once we know the app mounted.
+        window.addEventListener('load', function () {
+          setTimeout(function () {
+            if (mounted()) { try { sessionStorage.removeItem(KEY) } catch (e) {} }
+            else recover()
+          }, 15000)
+        })
+      })()
+    </script>
     <link rel="icon" type="image/png" href="/favicon.png" />
     <link rel="apple-touch-icon" href="/favicon.png" />
     <link rel="manifest" href="/manifest.json" />
