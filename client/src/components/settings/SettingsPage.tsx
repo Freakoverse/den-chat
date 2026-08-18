@@ -4022,10 +4022,14 @@ function SecurityTab() {
   const pubkey = useUserStore((s) => s.pubkey)
   const logout = useUserStore((s) => s.logout)
 
-  // PIN entry
+  // PIN entry — the seed and nsec reveal sections each get their own PIN field so
+  // typing in one doesn't mirror into the other (both render for a seed account).
   const [pin, setPin] = useState('')
   const [showPin, setShowPin] = useState(false)
   const [pinErr, setPinErr] = useState('')
+  const [nsecPin, setNsecPin] = useState('')
+  const [showNsecPin, setShowNsecPin] = useState(false)
+  const [nsecPinErr, setNsecPinErr] = useState('')
   const [loading, setLoading] = useState(false)
 
   // Reveal seed
@@ -4038,6 +4042,10 @@ function SecurityTab() {
   const [seedRevealCountdown, setSeedRevealCountdown] = useState<number | null>(null)
   const seedRevealTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const [showSeedCopyConfirm, setShowSeedCopyConfirm] = useState(false)
+  // Which secret the shared uncensor/copy confirmations act on. A seed account now
+  // renders BOTH the seed-phrase and the nsec section, so the modals must know which
+  // one the user tapped — otherwise uncensoring/copying the nsec would leak the seed.
+  const [secretTarget, setSecretTarget] = useState<'seed' | 'nsec'>('seed')
 
   const startSeedRevealCountdown = () => {
     let remaining = 5
@@ -4049,8 +4057,9 @@ function SecurityTab() {
         if (seedRevealTimerRef.current) { clearInterval(seedRevealTimerRef.current); seedRevealTimerRef.current = null }
         setSeedRevealCountdown(null)
         setShowSeedRevealConfirm(false)
-        setShowSeedWords(true)
-        setShowNsecValue(true)   // only the active section is rendered, so this is harmless for seed
+        // Uncensor only the section the user asked for (seed accounts show both).
+        if (secretTarget === 'nsec') setShowNsecValue(true)
+        else setShowSeedWords(true)
       } else {
         setSeedRevealCountdown(remaining)
       }
@@ -4145,17 +4154,18 @@ function SecurityTab() {
   }
 
   // Vault: the secret is revealed (and downloadable) inside the vault overlay — the app
-  // never receives it. Shared by the seed + nsec reveal buttons.
-  const revealInVault = async () => {
+  // never receives it. Shared by the seed + nsec reveal buttons; each passes its own
+  // error setter so a failure surfaces under the section the user acted on.
+  const revealInVault = async (setErr: (m: string) => void = setPinErr) => {
     if (!pubkey || !backend.revealSecret) return
-    setPinErr('')
+    setErr('')
     try { await backend.revealSecret(pubkey) }
-    catch (err) { const m = err instanceof Error ? err.message : String(err); if (!/cancel/i.test(m)) setPinErr(m) }
+    catch (err) { const m = err instanceof Error ? err.message : String(err); if (!/cancel/i.test(m)) setErr(m) }
   }
 
   // ── Reveal Seed (PIN-gated) ──
   const handleRevealSeed = async () => {
-    if (backend.promptsInVault) { await revealInVault(); return }
+    if (backend.promptsInVault) { await revealInVault(setPinErr); return }
     if (!pubkey || !pin) { setPinErr('Enter your PIN'); return }
     setLoading(true); setPinErr('')
     try {
@@ -4167,17 +4177,17 @@ function SecurityTab() {
     } finally { setLoading(false) }
   }
 
-  // ── Reveal nsec (PIN-gated) ──
+  // ── Reveal nsec (PIN-gated) — own PIN field, separate from the seed section ──
   const handleRevealNsec = async () => {
-    if (backend.promptsInVault) { await revealInVault(); return }
-    if (!pubkey || !pin) { setPinErr('Enter your PIN'); return }
-    setLoading(true); setPinErr('')
+    if (backend.promptsInVault) { await revealInVault(setNsecPinErr); return }
+    if (!pubkey || !nsecPin) { setNsecPinErr('Enter your PIN'); return }
+    setLoading(true); setNsecPinErr('')
     try {
-      const nsec = await backend.exportNsec(pubkey, pin)
+      const nsec = await backend.exportNsec(pubkey, nsecPin)
       setRevealedNsec(nsec)
-      setPin(''); setShowPin(false)
+      setNsecPin(''); setShowNsecPin(false)
     } catch (err) {
-      setPinErr(err instanceof Error ? err.message : 'Wrong PIN')
+      setNsecPinErr(err instanceof Error ? err.message : 'Wrong PIN')
     } finally { setLoading(false) }
   }
 
@@ -4390,13 +4400,14 @@ function SecurityTab() {
                       setShowSeedWords(false)
                     } else {
                       // Uncensoring is gated behind an "are you sure" + countdown
+                      setSecretTarget('seed')
                       setSeedRevealCountdown(null)
                       setShowSeedRevealConfirm(true)
                     }
                   }} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-secondary/50 border border-border text-xs hover:bg-secondary transition-colors cursor-pointer">
                     {showSeedWords ? <><EyeOff size={14} /> Censor</> : <><Eye size={14} /> Uncensor</>}
                   </button>
-                  <button onClick={() => setShowSeedCopyConfirm(true)} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-secondary/50 border border-border text-xs hover:bg-secondary transition-colors cursor-pointer">
+                  <button onClick={() => { setSecretTarget('seed'); setShowSeedCopyConfirm(true) }} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-secondary/50 border border-border text-xs hover:bg-secondary transition-colors cursor-pointer">
                     {copied ? <><Check size={14} /> Copied!</> : <><Copy size={14} /> Copy</>}
                   </button>
                   <button onClick={() => { setRevealedSeed(null); setShowSeedWords(false) }} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-secondary/50 border border-border text-xs hover:bg-secondary transition-colors cursor-pointer">
@@ -4409,8 +4420,13 @@ function SecurityTab() {
         </section>
       )}
 
-      {/* ── nsec section (PIN-gated reveal) ── */}
-      {hasLocal && isNsec && (
+      {/* ── nsec section (PIN-gated reveal) ──
+          Shown for raw-nsec accounts, and for seed accounts on the desktop keyring
+          backend — where exportNsec returns the derived private key for the selected
+          account (derivation path), so a user can copy it into a browser extension.
+          Not shown on the vault backend for seed accounts: there the unified vault
+          reveal shows the seed, so an "nsec" button would be misleading. */}
+      {hasLocal && (isNsec || (isSeed && !backend.promptsInVault)) && (
         <section className="rounded-xl border border-border bg-secondary/10 overflow-hidden">
           <div className="flex items-center gap-2.5 px-4 py-3 border-b border-border/50 bg-secondary/20">
             <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
@@ -4431,16 +4447,16 @@ function SecurityTab() {
                 <div className="flex gap-2 items-end">
                   <div className="flex-1 relative">
                     <Input
-                      type={showPin ? 'text' : 'password'}
+                      type={showNsecPin ? 'text' : 'password'}
                       placeholder="Enter PIN to reveal"
-                      value={pin}
-                      onChange={(e) => { setPin(e.target.value); setPinErr('') }}
+                      value={nsecPin}
+                      onChange={(e) => { setNsecPin(e.target.value); setNsecPinErr('') }}
                       className="h-9 pr-9"
                       onKeyDown={(e) => e.key === 'Enter' && handleRevealNsec()}
                     />
-                    <button type="button" onClick={() => setShowPin(!showPin)}
+                    <button type="button" onClick={() => setShowNsecPin(!showNsecPin)}
                       className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
-                      {showPin ? <EyeOff size={14} /> : <Eye size={14} />}
+                      {showNsecPin ? <EyeOff size={14} /> : <Eye size={14} />}
                     </button>
                   </div>
                   <button onClick={handleRevealNsec} disabled={loading}
@@ -4448,7 +4464,7 @@ function SecurityTab() {
                     {loading ? <Loader2 size={14} className="animate-spin" /> : <Eye size={14} />} Reveal
                   </button>
                 </div>
-                {pinErr && <p className="text-xs text-destructive">{pinErr}</p>}
+                {nsecPinErr && <p className="text-xs text-destructive">{nsecPinErr}</p>}
               </div>
             ) : (
               <div className="space-y-3">
@@ -4461,13 +4477,14 @@ function SecurityTab() {
                       setShowNsecValue(false)
                     } else {
                       // Uncensoring is gated behind an "are you sure" + countdown
+                      setSecretTarget('nsec')
                       setSeedRevealCountdown(null)
                       setShowSeedRevealConfirm(true)
                     }
                   }} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-secondary/50 border border-border text-xs hover:bg-secondary transition-colors cursor-pointer">
                     {showNsecValue ? <><EyeOff size={14} /> Censor</> : <><Eye size={14} /> Uncensor</>}
                   </button>
-                  <button onClick={() => setShowSeedCopyConfirm(true)} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-secondary/50 border border-border text-xs hover:bg-secondary transition-colors cursor-pointer">
+                  <button onClick={() => { setSecretTarget('nsec'); setShowSeedCopyConfirm(true) }} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-secondary/50 border border-border text-xs hover:bg-secondary transition-colors cursor-pointer">
                     {copied ? <><Check size={14} /> Copied!</> : <><Copy size={14} /> Copy</>}
                   </button>
                   <button onClick={() => { setRevealedNsec(null); setShowNsecValue(false) }} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-secondary/50 border border-border text-xs hover:bg-secondary transition-colors cursor-pointer">
@@ -4764,7 +4781,7 @@ function SecurityTab() {
             <div className="w-12 h-12 rounded-full bg-destructive/10 flex items-center justify-center">
               <AlertTriangle size={22} className="text-destructive" />
             </div>
-            <h4 className="text-base font-bold text-foreground">Copy seed to clipboard?</h4>
+            <h4 className="text-base font-bold text-foreground">Copy {secretTarget === 'nsec' ? 'private key' : 'seed'} to clipboard?</h4>
             <p className="text-xs text-muted-foreground">
               Your clipboard can be read by other apps and clipboard-history tools, and may sync across your devices. Only copy if you're pasting it somewhere safe <strong>right now</strong> — and clear your clipboard afterward.
             </p>
@@ -4776,7 +4793,7 @@ function SecurityTab() {
                 Cancel
               </button>
               <button
-                onClick={() => { const s = revealedSeed || revealedNsec; if (s) copyText(s); setShowSeedCopyConfirm(false) }}
+                onClick={() => { const s = secretTarget === 'nsec' ? revealedNsec : revealedSeed; if (s) copyText(s); setShowSeedCopyConfirm(false) }}
                 className="flex items-center justify-center gap-2 flex-1 h-9 rounded-lg bg-destructive text-destructive-foreground text-sm font-medium hover:bg-destructive/90 transition-colors cursor-pointer"
               >
                 <Copy size={14} /> Yes, copy
