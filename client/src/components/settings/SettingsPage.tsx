@@ -6330,7 +6330,7 @@ function UpdateBanner() {
           <ArrowUp size={16} className="text-primary" />
         </div>
         <div>
-          <p className="text-sm font-semibold text-foreground">Update Available — v{version}</p>
+          <p className="text-sm font-semibold text-foreground">Update Available — v{version.replace(/^v/i, '')}</p>
           <p className="text-xs text-muted-foreground">You&apos;re on v{__APP_VERSION__}</p>
         </div>
       </div>
@@ -6567,7 +6567,7 @@ function UpdatesTab() {
               <div key={build.id} className="rounded-lg border border-border overflow-hidden bg-secondary/20">
                 <button onClick={() => toggle(idx)} className="flex items-center justify-between w-full px-4 py-3 text-left cursor-pointer hover:bg-secondary/40 transition-colors">
                   <div className="flex items-center gap-3 pr-4">
-                    <span className="text-sm font-semibold text-foreground">{build.version}</span>
+                    <span className="text-sm font-semibold text-foreground">v{build.version.replace(/^v/i, '')}</span>
                     <span className="text-xs text-muted-foreground">{date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}</span>
                   </div>
                   <svg className={`w-4 h-4 text-muted-foreground shrink-0 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

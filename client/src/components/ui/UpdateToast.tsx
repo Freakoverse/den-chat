@@ -22,7 +22,10 @@ const REFOCUS_COOLDOWN_MS = 60 * 60 * 1000      // 1 hour cooldown for tab refoc
 
 /** Simple semver comparison: returns true if `remote` is newer than `local` */
 function isNewerVersion(local: string, remote: string): boolean {
-  const parse = (v: string) => v.split('.').map((s) => parseInt(s, 10) || 0)
+  // Tolerate a leading "v" (some build events use "v0.3.2", version.json uses "0.3.2").
+  // Without stripping it, parseInt("v0") is NaN → 0, which silently zeroes the major
+  // version (harmless at 0.x, but would break comparison at v1.0.0).
+  const parse = (v: string) => v.replace(/^v/i, '').split('.').map((s) => parseInt(s, 10) || 0)
   const l = parse(local)
   const r = parse(remote)
   for (let i = 0; i < Math.max(l.length, r.length); i++) {
@@ -190,7 +193,7 @@ export function UpdateToast() {
           <p className="text-sm font-medium text-foreground">Update available</p>
           <p className="text-xs text-muted-foreground mt-0.5">
             {mode === 'web'
-              ? `A new version${serverVersion ? ` (v${serverVersion})` : ''} is ready. Refresh to get the latest features and fixes.`
+              ? `A new version${serverVersion ? ` (v${serverVersion.replace(/^v/i, '')})` : ''} is ready. Refresh to get the latest features and fixes.`
               : `Version ${serverVersion || 'update'} is available. Head to Updates to download it.`
             }
           </p>
