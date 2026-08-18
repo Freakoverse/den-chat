@@ -42,7 +42,8 @@ import { getHour12 } from '@/stores/preferencesStore'
 import { STANDARD_KINDS, KINDS } from '@/lib/crypto/constants'
 import { createUnsignedEvent } from '@/lib/nostr/events'
 import { signWithSigner } from '@/lib/nostr'
-import { publishEvent, fetchEvents } from '@/lib/nostr/relay-pool'
+import { publishToSpecificRelays, fetchEvents } from '@/lib/nostr/relay-pool'
+import { getDeletePublishRelays } from '@/stores/postingBehaviourStore'
 import { benchmarkHashRate, estimateSolveTime, countLeadingZeroBits } from '@/lib/pow/pow'
 import { useUnreadDivider } from '@/hooks/useUnreadDivider'
 import { NewMessagesDivider } from '@/components/chat/NewMessagesDivider'
@@ -1168,7 +1169,7 @@ function PublicChatView({ topic, pendingHighlightId, onHighlightConsumed, onBack
                 ['t', topic.toLowerCase()],
               ])
               const signed = await signWithSigner(unsigned, signer, privateKey)
-              await publishEvent(signed)
+              await publishToSpecificRelays(getDeletePublishRelays(), signed)
             } catch (err) {
               console.error('[PublicChat] Delete failed:', err)
             }

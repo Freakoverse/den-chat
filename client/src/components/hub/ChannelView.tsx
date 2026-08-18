@@ -725,11 +725,11 @@ function MessageList({ hubDTag, channelId, channelName, optimisticMessages, setO
       const { createDeletedHideEvent, createDeletionEvent } = await import('@/lib/nostr/events')
       const { signWithSigner: signFn } = await import('@/lib/nostr')
       const { publishToSpecificRelays } = await import('@/lib/nostr/relay-pool')
-      const { getPublishRelays } = await import('@/stores/postingBehaviourStore')
+      const { getDeletePublishRelays } = await import('@/stores/postingBehaviourStore')
       const { KINDS } = await import('@/lib/crypto/constants')
       const { signer, privateKey } = useUserStore.getState()
       const relays = hub ? [...hub.filterRelays, ...hub.generalRelays] : []
-      const publishRelays = getPublishRelays(relays)
+      const publishRelays = getDeletePublishRelays(relays)
 
       // Look up original hide event timestamp for created_at + 1 ordering
       const hideEntry = useHubStore.getState().hiddenMessages[hubDTag]?.[targetRef]

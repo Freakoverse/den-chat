@@ -24,8 +24,10 @@ import {
   subscribeEvents,
   publishEvent,
   publishEventProgressive,
+  publishToSpecificRelays,
   getRelays,
 } from '@/lib/nostr/relay-pool'
+import { getDeletePublishRelays } from '@/stores/postingBehaviourStore'
 import { parseZapReceipt, type ZapInfo } from '@/lib/nostr/zap'
 import type { ISigner } from '@/stores/userStore'
 import type { Event } from 'nostr-tools'
@@ -812,7 +814,7 @@ export const usePublicChatStore = create<PublicChatState>((set, get) => ({
     // Kind 5 deletion request for the reaction event
     const deletionEvent = createDeletionEvent([reactionEventId], [], 'User removed reaction')
     const signed = await signWithSigner(deletionEvent, signer, privateKey)
-    await publishEvent(signed)
+    await publishToSpecificRelays(getDeletePublishRelays(), signed)
   },
 
   // ── Zap state management ──

@@ -2489,11 +2489,11 @@ function ModHiddenMessagesTab({ hub, onClose }: { hub: HubData; onClose: () => v
       const { createDeletedHideEvent, createDeletionEvent } = await import('@/lib/nostr/events')
       const { signWithSigner: signFn } = await import('@/lib/nostr')
       const { publishToSpecificRelays } = await import('@/lib/nostr/relay-pool')
-      const { getPublishRelays } = await import('@/stores/postingBehaviourStore')
+      const { getDeletePublishRelays } = await import('@/stores/postingBehaviourStore')
       const { KINDS } = await import('@/lib/crypto/constants')
       const { signer, privateKey } = useUserStore.getState()
       const relays = [...hub.filterRelays, ...hub.generalRelays]
-      const publishRelays = getPublishRelays(relays)
+      const publishRelays = getDeletePublishRelays(relays)
 
       const deletedHide = createDeletedHideEvent(hub.dTag, entry.ref, entry.createdAt)
       const signedDeleted = await signFn(deletedHide, signer, privateKey)

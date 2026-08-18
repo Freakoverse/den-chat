@@ -26,7 +26,7 @@ import { getRelayList, getDefaultRelays, setRelays, publishToSpecificRelays, fet
 import { checkEventAvailability } from '@/lib/nostr/eventRedundancy'
 import { parseHubBackup } from '@/lib/hub/hubBackup'
 import { Button } from '@/components/ui/button'
-import { getPublishRelays } from '@/stores/postingBehaviourStore'
+import { getPublishRelays, getDeletePublishRelays } from '@/stores/postingBehaviourStore'
 import { createUnsignedEvent, signWithSigner, createHubListEvent, createDeletionEvent } from '@/lib/nostr/events'
 import { DeleteConfirmDialog } from '@/components/hub/ChannelView'
 import {
@@ -2806,6 +2806,7 @@ function PostingBehaviourSection() {
     limitUserBlossoms, setLimitUserBlossoms,
     limitHubBlossoms, setLimitHubBlossoms,
     parallelBlossomUploads, setParallelBlossomUploads,
+    bypassDeleteRelayLimits, setBypassDeleteRelayLimits,
   } = usePostingBehaviourStore()
 
   return (
@@ -2866,6 +2867,13 @@ function PostingBehaviourSection() {
             <p className="text-xs text-muted-foreground">Publish hub messages to at most 3 hub relays to reduce load</p>
           </div>
           <ToggleSwitch checked={limitHubRelays} onChange={setLimitHubRelays} />
+        </div>
+        <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-border bg-secondary/30">
+          <div>
+            <p className="text-sm font-medium text-foreground">Bypass relay limits for delete requests</p>
+            <p className="text-xs text-muted-foreground">Send deletion requests to every relay available (client, user and hub), ignoring the 3-relay caps above. A delete only works on relays that receive it, so this makes deletion as best-effort as possible.</p>
+          </div>
+          <ToggleSwitch checked={bypassDeleteRelayLimits} onChange={setBypassDeleteRelayLimits} />
         </div>
         <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-border bg-secondary/30">
           <div>
@@ -5000,7 +5008,7 @@ function MyHubsTab() {
         ['a', `36942:${hub.creatorPubkey}:${hub.dTag}`],
       ] as [string, ...string[]][])
       const signedDelete = await signWithSigner(deleteEvent, signer, privateKey)
-      await publishToSpecificRelays(getPublishRelays(), signedDelete)
+      await publishToSpecificRelays(getDeletePublishRelays(), signedDelete)
 
       const deleteCreatedAt = hub.eventCreatedAt ? hub.eventCreatedAt + 1 : undefined
       const deletedHubEvent = createUnsignedEvent(KINDS.HUB_EVENT, '', [
@@ -5010,7 +5018,7 @@ function MyHubsTab() {
         ['deleted', 'true'],
       ] as [string, ...string[]][], deleteCreatedAt)
       const signedDeletedHub = await signWithSigner(deletedHubEvent, signer, privateKey)
-      await publishToSpecificRelays(getPublishRelays(), signedDeletedHub)
+      await publishToSpecificRelays(getDeletePublishRelays(), signedDeletedHub)
 
       setHubStatus(dTag, 'deleted')
     } catch (err) {
@@ -10207,7 +10215,7 @@ function AdminBuildsSection({ pubkey, signer, privateKey }: { pubkey: string | n
           onConfirm={async () => {
             if (!pubkey || (!signer && !privateKey)) return
             const build = deleteTarget
-            const publishRelays = getPublishRelays()
+            const publishRelays = getDeletePublishRelays()
 
             // Step 1+2: Re-publish with deleted content (replaces original on relay)
             // Use created_at + 1 so the replacement doesn't jump in timeline (consistent with other soft-deletes)

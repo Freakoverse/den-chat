@@ -27,7 +27,7 @@ import { aesEncrypt, aesDecrypt } from '@/lib/crypto/aes'
 import { deriveEventsKey } from '@/lib/crypto/hkdf'
 
 import { publishEventProgressive, publishToSpecificRelays } from '@/lib/nostr/relay-pool'
-import { getPublishRelays } from '@/stores/postingBehaviourStore'
+import { getPublishRelays, getDeletePublishRelays } from '@/stores/postingBehaviourStore'
 import { isClientTagEnabled } from '@/components/social/ComposeSettings'
 
 // ─── Decrypted types ───
@@ -412,7 +412,7 @@ export function useCalendar(hubDTag: string | null) {
       )
       const signedDeleted = await signWithSigner(deletedEvent, signer, privateKey)
       const hubRelays = hub?.generalRelays || []
-      const publishRelays = getPublishRelays(hubRelays)
+      const publishRelays = getDeletePublishRelays(hubRelays)
       await publishToSpecificRelays(publishRelays, signedDeleted)
 
       // 2. NIP-09 deletion request as fallback
@@ -515,7 +515,7 @@ export function useCalendar(hubDTag: string | null) {
       const deletedEvent = createDeletedCalendarEvent(KINDS.CALENDAR_RSVP, dTag, hubDTag, epoch, originalCreatedAt)
       const signedDeleted = await signWithSigner(deletedEvent, signer, privateKey)
       const hubRelays = hub?.generalRelays || []
-      const publishRelays = getPublishRelays(hubRelays)
+      const publishRelays = getDeletePublishRelays(hubRelays)
       await publishToSpecificRelays(publishRelays, signedDeleted)
 
       // 2. NIP-09 deletion request as fallback

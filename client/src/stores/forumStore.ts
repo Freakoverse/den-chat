@@ -9,9 +9,10 @@
 
 import { create } from 'zustand'
 import type { Event } from 'nostr-tools'
-import { fetchEvents, fetchReplaceable, fetchEventById, publishEvent, assertPublished } from '@/lib/nostr/relay-pool'
+import { fetchEvents, fetchReplaceable, fetchEventById, publishEvent, publishToSpecificRelays, assertPublished } from '@/lib/nostr/relay-pool'
 import { signWithSigner, mineAndSign } from '@/lib/nostr'
 import { createDeletionEvent } from '@/lib/nostr/events'
+import { getDeletePublishRelays } from '@/stores/postingBehaviourStore'
 import { useUserStore } from '@/stores/userStore'
 import { useFollowStore } from '@/stores/followStore'
 import { KINDS } from '@/lib/crypto/constants'
@@ -777,7 +778,7 @@ export const useForumStore = create<ForumState>((set, get) => ({
       if (cur.mineId) {
         const del = createDeletionEvent([cur.mineId])
         const signedDel = await signWithSigner(del, signer, privateKey)
-        await publishEvent(signedDel)
+        await publishToSpecificRelays(getDeletePublishRelays(), signedDel)
       }
       // 2. Publish the new reaction unless we're just toggling off.
       if (!togglingOff) {

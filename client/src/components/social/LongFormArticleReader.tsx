@@ -11,7 +11,7 @@ import { useUserStore } from '@/stores/userStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { publishEventProgressive, publishToSpecificRelays } from '@/lib/nostr/relay-pool'
 import { fetchEventsWide } from '@/lib/nostr/readRelays'
-import { getPublishRelays } from '@/stores/postingBehaviourStore'
+import { getPublishRelays, getDeletePublishRelays } from '@/stores/postingBehaviourStore'
 import { signWithSigner, createDeletionEvent } from '@/lib/nostr/events'
 import { DeleteConfirmDialog, RawEventModal } from '@/components/hub/ChannelView'
 import { BlossomImage } from '@/components/ui/BlossomImage'
@@ -303,7 +303,7 @@ export function LongFormArticleReader() {
 
     const dTag = event.tags.find(t => t[0] === 'd')?.[1] || ''
     const aRef = `30023:${myPubkey}:${dTag}`
-    const publishRelays = getPublishRelays()
+    const publishRelays = getDeletePublishRelays()
 
     // Step 1: Re-publish with 'deleted' tag — relay replaces the original
     const deletedEvent = {

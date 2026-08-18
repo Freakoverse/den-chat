@@ -10,7 +10,7 @@ import { useBlockStore } from '@/stores/blockStore'
 import { useWotStore } from '@/stores/wotStore'
 import { publishToSpecificRelays, publishEventProgressive, assertPublished } from '@/lib/nostr/relay-pool'
 import { fetchEventsWide } from '@/lib/nostr/readRelays'
-import { getPublishRelays } from '@/stores/postingBehaviourStore'
+import { getPublishRelays, getDeletePublishRelays } from '@/stores/postingBehaviourStore'
 import { signWithSigner, createDeletionEvent, withClientTag } from '@/lib/nostr/events'
 import { RichContent } from '@/components/social/RichContent'
 import { DnnBadge } from '@/components/ui/DnnBadge'
@@ -397,7 +397,7 @@ export function SocialPost({ event, onOpenProfile, onOpenThread, compact, isBook
       const { signer, privateKey } = useUserStore.getState()
       const deletion = createDeletionEvent([event.id], [], 'User requested deletion')
       const signed = await signWithSigner(deletion, signer, privateKey)
-      assertPublished(await publishEventProgressive(signed, () => {}, getPublishRelays()))
+      assertPublished(await publishEventProgressive(signed, () => {}, getDeletePublishRelays()))
       setDeleted(true)
     } catch (err) {
       console.error('[Social] Delete request failed:', err)

@@ -77,11 +77,11 @@ export function LongFormDraftsPage() {
     try {
       const { signWithSigner } = await import('@/lib/nostr/events')
       const { publishToSpecificRelays } = await import('@/lib/nostr/relay-pool')
-      const { getPublishRelays } = await import('@/stores/postingBehaviourStore')
+      const { getDeletePublishRelays } = await import('@/stores/postingBehaviourStore')
       const aRef = `30024:${pubkey}:${d.dTag}`
       const unsigned = { kind: 5, pubkey, created_at: Math.floor(Date.now() / 1000), tags: [['a', aRef]], content: 'delete draft' }
       const signed = await signWithSigner(unsigned, signer, privateKey)
-      await publishToSpecificRelays(getPublishRelays(), signed)
+      await publishToSpecificRelays(getDeletePublishRelays(), signed)
       setDrafts(prev => prev.filter(x => x.dTag !== d.dTag))
     } catch (err) { console.error('[LongForm] Delete draft failed:', err) }
     finally { setDeleting(null) }

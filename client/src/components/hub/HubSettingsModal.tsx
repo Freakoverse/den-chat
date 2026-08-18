@@ -34,7 +34,7 @@ import type { UploadProgress } from '@/lib/blossom'
 import { buildHubEvent } from '@/lib/hub/buildHubEvent'
 import { signWithSigner, createUnsignedEvent } from '@/lib/nostr'
 import { publishToSpecificRelays, getRelayList } from '@/lib/nostr/relay-pool'
-import { getPublishRelays } from '@/stores/postingBehaviourStore'
+import { getPublishRelays, getDeletePublishRelays } from '@/stores/postingBehaviourStore'
 import { KINDS } from '@/lib/crypto/constants'
 import { aesDecrypt } from '@/lib/crypto/aes'
 import { deriveChannelKey } from '@/lib/crypto/hkdf'
@@ -3546,7 +3546,7 @@ function DangerousPage({ hub, onClose, setHubStatus }: DangerousPageProps) {
       ] as [string, ...string[]][], deleteCreatedAt)
 
       const signedDeletedHub = await signWithSigner(deletedHubEvent, signer, privateKey)
-      await publishToSpecificRelays(getPublishRelays([...hub.generalRelays, ...hub.filterRelays]), signedDeletedHub)
+      await publishToSpecificRelays(getDeletePublishRelays([...hub.generalRelays, ...hub.filterRelays]), signedDeletedHub)
 
       // 2. NIP-09 Kind 5 deletion request as fallback
       const deleteEvent = createUnsignedEvent(5, 'Hub deletion requested', [
@@ -3554,7 +3554,7 @@ function DangerousPage({ hub, onClose, setHubStatus }: DangerousPageProps) {
       ] as [string, ...string[]][])
 
       const signedDelete = await signWithSigner(deleteEvent, signer, privateKey)
-      await publishToSpecificRelays(getPublishRelays([...hub.generalRelays, ...hub.filterRelays]), signedDelete)
+      await publishToSpecificRelays(getDeletePublishRelays([...hub.generalRelays, ...hub.filterRelays]), signedDelete)
 
       // Update local state
       setHubStatus(hub.dTag, 'deleted')
@@ -4925,10 +4925,10 @@ function HiddenMessagesPage({ hub, onClose }: { hub: HubData; onClose: () => voi
       const { createDeletedHideEvent, createDeletionEvent } = await import('@/lib/nostr/events')
       const { signWithSigner: signFn } = await import('@/lib/nostr')
       const { publishToSpecificRelays } = await import('@/lib/nostr/relay-pool')
-      const { getPublishRelays } = await import('@/stores/postingBehaviourStore')
+      const { getDeletePublishRelays } = await import('@/stores/postingBehaviourStore')
       const { signer, privateKey } = useUserStore.getState()
       const relays = [...hub.filterRelays, ...hub.generalRelays]
-      const publishRelays = getPublishRelays(relays)
+      const publishRelays = getDeletePublishRelays(relays)
 
       // Phase 1: Re-publish with deleted tag
       const deletedHide = createDeletedHideEvent(hub.dTag, entry.ref, entry.createdAt)

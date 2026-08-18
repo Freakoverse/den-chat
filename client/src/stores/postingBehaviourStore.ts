@@ -26,6 +26,7 @@ interface PostingBehaviourState {
   limitUserBlossoms: boolean   // cap user (kind 10063) blossom servers to 3
   limitHubBlossoms: boolean    // cap hub blossom servers to 3
   parallelBlossomUploads: boolean // upload to all target servers at once instead of one-by-one
+  bypassDeleteRelayLimits: boolean // deletion requests ignore the per-list caps and go to every relay
 
   setPostToClientRelays: (v: boolean) => void
   setPostToUserRelays: (v: boolean) => void
@@ -37,9 +38,10 @@ interface PostingBehaviourState {
   setLimitUserBlossoms: (v: boolean) => void
   setLimitHubBlossoms: (v: boolean) => void
   setParallelBlossomUploads: (v: boolean) => void
+  setBypassDeleteRelayLimits: (v: boolean) => void
 }
 
-type PersistedKeys = 'postToClientRelays' | 'postToUserRelays' | 'postToHubRelays' | 'limitClientRelays' | 'limitUserRelays' | 'limitHubRelays' | 'limitClientBlossoms' | 'limitUserBlossoms' | 'limitHubBlossoms' | 'parallelBlossomUploads'
+type PersistedKeys = 'postToClientRelays' | 'postToUserRelays' | 'postToHubRelays' | 'limitClientRelays' | 'limitUserRelays' | 'limitHubRelays' | 'limitClientBlossoms' | 'limitUserBlossoms' | 'limitHubBlossoms' | 'parallelBlossomUploads' | 'bypassDeleteRelayLimits'
 
 function loadDefaults(): Pick<PostingBehaviourState, PersistedKeys> {
   try {
@@ -60,11 +62,12 @@ const defaultValues = {
   limitUserBlossoms: true,
   limitHubBlossoms: true,
   parallelBlossomUploads: false,
+  bypassDeleteRelayLimits: true,
 }
 
 function persist(state: PostingBehaviourState) {
-  const { postToClientRelays, postToUserRelays, postToHubRelays, limitClientRelays, limitUserRelays, limitHubRelays, limitClientBlossoms, limitUserBlossoms, limitHubBlossoms, parallelBlossomUploads } = state
-  localStorage.setItem(LS_KEY, JSON.stringify({ postToClientRelays, postToUserRelays, postToHubRelays, limitClientRelays, limitUserRelays, limitHubRelays, limitClientBlossoms, limitUserBlossoms, limitHubBlossoms, parallelBlossomUploads }))
+  const { postToClientRelays, postToUserRelays, postToHubRelays, limitClientRelays, limitUserRelays, limitHubRelays, limitClientBlossoms, limitUserBlossoms, limitHubBlossoms, parallelBlossomUploads, bypassDeleteRelayLimits } = state
+  localStorage.setItem(LS_KEY, JSON.stringify({ postToClientRelays, postToUserRelays, postToHubRelays, limitClientRelays, limitUserRelays, limitHubRelays, limitClientBlossoms, limitUserBlossoms, limitHubBlossoms, parallelBlossomUploads, bypassDeleteRelayLimits }))
 }
 
 export const usePostingBehaviourStore = create<PostingBehaviourState>((set, get) => {
@@ -82,6 +85,7 @@ export const usePostingBehaviourStore = create<PostingBehaviourState>((set, get)
     setLimitUserBlossoms: (v) => { set({ limitUserBlossoms: v }); persist({ ...get(), limitUserBlossoms: v }) },
     setLimitHubBlossoms: (v) => { set({ limitHubBlossoms: v }); persist({ ...get(), limitHubBlossoms: v }) },
     setParallelBlossomUploads: (v) => { set({ parallelBlossomUploads: v }); persist({ ...get(), parallelBlossomUploads: v }) },
+    setBypassDeleteRelayLimits: (v) => { set({ bypassDeleteRelayLimits: v }); persist({ ...get(), bypassDeleteRelayLimits: v }) },
   }
 })
 
@@ -143,6 +147,45 @@ export function getPublishRelays(hubRelays?: string[]): string[] {
     const limit = state.limitHubRelays ? 3 : Infinity
     const filtered = hubRelays.filter((r) => !disabledRelays.has(r.replace(/\/+$/, '')))
     pickForPubkey(filtered, limit, me).forEach((r) => result.add(r))
+  }
+
+  return Array.from(result)
+}
+
+/**
+ * Relay list for deletion requests (NIP-09 kind 5 + the app's "deleted" tombstones).
+ *
+ * A delete can only take effect on a relay that actually receives it, so when the
+ * `bypassDeleteRelayLimits` toggle is on (the default) we make deletion best-effort:
+ * publish to EVERY relay available — all client relays, the full NIP-65 user list, and
+ * the hub's relays — ignoring both the per-list 3-relay caps and the post-to-X
+ * destination toggles, so the request reaches any relay that might hold the original.
+ * Relays the user explicitly disabled in settings are still excluded.
+ *
+ * With the toggle off, deletions fall back to the normal getPublishRelays() behaviour.
+ *
+ * @param hubRelays Optional hub-specific relay list (from the hub event)
+ */
+export function getDeletePublishRelays(hubRelays?: string[]): string[] {
+  const state = usePostingBehaviourStore.getState()
+  if (!state.bypassDeleteRelayLimits) return getPublishRelays(hubRelays)
+
+  const result = new Set<string>()
+  const disabledRelays = new Set(
+    getRelayList().filter((r) => !r.enabled).map((r) => r.url.replace(/\/+$/, ''))
+  )
+
+  // Client relays (getRelays already returns enabled-only)
+  getRelays().forEach((r) => result.add(r))
+  // Full NIP-65 user list, minus any disabled in client settings
+  useUserListsStore.getState().userRelays
+    .filter((r) => !disabledRelays.has(r.replace(/\/+$/, '')))
+    .forEach((r) => result.add(r))
+  // Hub relays, minus any disabled in client settings
+  if (hubRelays && hubRelays.length > 0) {
+    hubRelays
+      .filter((r) => !disabledRelays.has(r.replace(/\/+$/, '')))
+      .forEach((r) => result.add(r))
   }
 
   return Array.from(result)

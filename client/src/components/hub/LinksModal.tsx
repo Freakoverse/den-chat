@@ -17,7 +17,7 @@ import { BlossomImage } from '@/components/ui/BlossomImage'
 import { useUserStore } from '@/stores/userStore'
 import { fetchEvents, publishToSpecificRelays } from '@/lib/nostr/relay-pool'
 import { signWithSigner } from '@/lib/nostr/events'
-import { getPublishRelays } from '@/stores/postingBehaviourStore'
+import { getPublishRelays, getDeletePublishRelays } from '@/stores/postingBehaviourStore'
 import { uploadToBlossomServers } from '@/lib/blossom'
 import type { UploadProgress } from '@/lib/blossom'
 import type { Event } from 'nostr-tools'
@@ -483,14 +483,14 @@ export function LinksEditorModal({ open, onClose, onSaved }: LinksEditorModalPro
         content: '',
       }
       const signed = await signWithSigner(unsigned, signer, privateKey)
-      await publishToSpecificRelays(getPublishRelays(), signed)
+      await publishToSpecificRelays(getDeletePublishRelays(), signed)
 
       // Also publish kind:5 deletion
       const { createDeletionEvent } = await import('@/lib/nostr/events')
       const aRef = `30003:${myPubkey}:${set.dTag}`
       const delEvent = createDeletionEvent([], [aRef], 'Deleted link set')
       const signedDel = await signWithSigner(delEvent, signer, privateKey)
-      await publishToSpecificRelays(getPublishRelays(), signedDel)
+      await publishToSpecificRelays(getDeletePublishRelays(), signedDel)
 
       setLinkSets((prev) => prev.filter((_, i) => i !== setIdx))
       if (expandedIdx === setIdx) setExpandedIdx(null)

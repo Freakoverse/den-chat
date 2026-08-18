@@ -12,7 +12,7 @@ import type { HubData } from '@/stores/hubStore'
  */
 export async function rescindJoinRequest(hub: HubData, pubkey: string): Promise<void> {
   const { fetchEvents, publishToSpecificRelays } = await import('@/lib/nostr/relay-pool')
-  const { getPublishRelays } = await import('@/stores/postingBehaviourStore')
+  const { getPublishRelays, getDeletePublishRelays } = await import('@/stores/postingBehaviourStore')
   const { createDeletedJoinRequest, createDeletionEvent, createHubListEvent } = await import('@/lib/nostr/events')
   const { signWithSigner } = await import('@/lib/nostr')
   const { KINDS } = await import('@/lib/crypto/constants')
@@ -22,7 +22,7 @@ export async function rescindJoinRequest(hub: HubData, pubkey: string): Promise<
 
   const { signer, privateKey } = useUserStore.getState()
   const relays = [...hub.generalRelays, ...hub.filterRelays]
-  const publishRelays = getPublishRelays(relays)
+  const publishRelays = getDeletePublishRelays(relays)
 
   // Fetch the existing join request to preserve its created_at.
   const existing = await fetchEvents({

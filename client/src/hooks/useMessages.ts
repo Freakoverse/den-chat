@@ -16,7 +16,7 @@ import { useMessageStore, type ChatMessage as RawChatMessage } from '@/stores/me
 import type { Attachment } from '@/stores/messageStore'
 export type { Attachment }
 import { publishEventProgressive, publishToSpecificRelays, assertPublished } from '@/lib/nostr/relay-pool'
-import { getPublishRelays } from '@/stores/postingBehaviourStore'
+import { getPublishRelays, getDeletePublishRelays } from '@/stores/postingBehaviourStore'
 import { signWithSigner, mineAndSign, createMessageEvent, createDeletionEvent, createDeletedMessageEvent, createReactionEvent, createEditHintEvent } from '@/lib/nostr/events'
 import { nip19 } from 'nostr-tools'
 import { KINDS, STANDARD_KINDS } from '@/lib/crypto/constants'
@@ -827,13 +827,14 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
     const signedDeleted = await signWithSigner(deletedEvent, signer, privateKey)
     const hubRelays = useHubStore.getState().hubs[hubDTag!]?.generalRelays || []
     const publishRelays = getPublishRelays(hubRelays)
-    await publishToSpecificRelays(publishRelays, signedDeleted)
+    const deleteRelays = getDeletePublishRelays(hubRelays)
+    await publishToSpecificRelays(deleteRelays, signedDeleted)
 
     // 2. NIP-09 deletion request as fallback
     const aRef = `${KINDS.MESSAGE}:${pubkey}:${dTag}`
     const deletionEvent = createDeletionEvent([], [aRef], 'User requested deletion')
     const signedDeletion = await signWithSigner(deletionEvent, signer, privateKey)
-    await publishToSpecificRelays(publishRelays, signedDeletion)
+    await publishToSpecificRelays(deleteRelays, signedDeletion)
 
     // Mark deleted locally for immediate UI feedback
     useMessageStore.getState().markDeleted(hubDTag, channelId, dTag)
@@ -935,7 +936,7 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
 
     const hub = useHubStore.getState().hubs[hubDTag!]
     const hubRelays = hub?.generalRelays || []
-    const publishRelays = getPublishRelays(hubRelays)
+    const publishRelays = getDeletePublishRelays(hubRelays)
 
     // Kind 5 deletion request for the reaction event
     const deletionEvent = createDeletionEvent([reactionEventId], [], 'User removed reaction')
