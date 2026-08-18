@@ -61,6 +61,9 @@ export class LiveKitProvider implements VoiceProvider {
 
   // E2EE
   private e2eeKey: CryptoKey | null = null
+  private e2eeRawKeyBytes: Uint8Array | null = null
+  private e2eeKeyProvider: any = null
+  private e2eeWorker: Worker | null = null
 
   constructor(config: LiveKitConfig) {
     this.config = config
@@ -82,15 +85,54 @@ export class LiveKitProvider implements VoiceProvider {
       // For now, we generate a simple JWT with the API key/secret
       const token = await this.generateToken(identity, roomName)
 
+      // Set up frame-level E2EE (LiveKit native, via insertable streams in a worker)
+      // when we have a hub-derived key and the browser supports encoded transforms.
+      // The key provider runs HKDF over the same raw key bytes every hub member
+      // derives, so all members — and only members — can decrypt; the SFU only ever
+      // forwards ciphertext. Must be wired at Room construction: that's the only point
+      // the SDK lets us install the key provider + worker.
+      let e2ee: { keyProvider: any; worker: Worker } | undefined
+      if (this.e2eeRawKeyBytes && supportsE2EE()) {
+        try {
+          this.e2eeWorker = new Worker(
+            new URL('livekit-client/e2ee-worker', import.meta.url),
+            { type: 'module' },
+          )
+          this.e2eeKeyProvider = new this.lk.ExternalE2EEKeyProvider()
+          e2ee = { keyProvider: this.e2eeKeyProvider, worker: this.e2eeWorker }
+        } catch (err) {
+          console.warn('[LK Provider] E2EE setup failed — continuing without it:', err)
+          e2ee = undefined
+        }
+      }
+
       // Create room with forced relay (LiveKit provides built-in TURN)
       this.room = new this.lk.Room({
         adaptiveStream: true,
         dynacast: true,
+        // Prefer VP9 for video (camera + screen share). LiveKit auto-publishes a VP8
+        // backup track for clients that can't encode/decode VP9 (backupCodec defaults
+        // to true for advanced codecs), so older subscribers never black out.
+        publishDefaults: {
+          videoCodec: 'vp9',
+        },
         // Force TURN relay for IP privacy — LiveKit Cloud provides its own TURN server
         rtcConfig: {
           iceTransportPolicy: 'relay',
         },
+        ...(e2ee ? { e2ee } : {}),
       })
+
+      // Feed the shared key and turn on E2EE before any track is published.
+      if (e2ee && this.e2eeKeyProvider) {
+        try {
+          await this.e2eeKeyProvider.setKey(this.e2eeRawKeyBytes!.slice().buffer)
+          await this.room.setE2EEEnabled(true)
+          console.log('[LK Provider] E2EE enabled (native insertable streams)')
+        } catch (err) {
+          console.warn('[LK Provider] Failed to enable E2EE:', err)
+        }
+      }
 
       // Wire up events
       this.setupRoomEvents()
@@ -130,6 +172,13 @@ export class LiveKitProvider implements VoiceProvider {
       await this.room.disconnect(true)
       this.room = null
     }
+
+    // Terminate the E2EE worker and drop the key provider
+    if (this.e2eeWorker) {
+      this.e2eeWorker.terminate()
+      this.e2eeWorker = null
+    }
+    this.e2eeKeyProvider = null
 
     // Notify all participants left
     for (const [id] of this.participants) {
@@ -391,20 +440,18 @@ export class LiveKitProvider implements VoiceProvider {
 
   setEncryptionKey(key: CryptoKey | null, rawKeyBytes?: Uint8Array): void {
     this.e2eeKey = key
-    // LiveKit has built-in E2EE support via room.setE2EEEnabled()
-    // If the LK SDK exposes it, use it. Otherwise frame encryption
-    // would require access to the underlying PeerConnection which
-    // LK doesn't expose. For now, we track the key for status reporting.
-    if (key) {
-      console.log('[LK Provider] E2EE key set — frame encryption enabled (if LK SDK supports it)')
-      // Attempt to enable LK native E2EE if available
-      try {
-        if (this.room?.setE2EEEnabled) {
-          this.room.setE2EEEnabled(true)
-        }
-      } catch (err) {
-        console.warn('[LK Provider] LK native E2EE not available:', err)
-      }
+    this.e2eeRawKeyBytes = rawKeyBytes ?? null
+    // E2EE is installed at Room construction (in connect) via LiveKit's native key
+    // provider + worker — the only point the SDK lets us enable it. setEncryptionKey
+    // runs before connect, so here we just stash the key material.
+    // If a key arrives mid-call (e.g. epoch rotation), push it to the live provider.
+    if (this.room && this.e2eeKeyProvider && rawKeyBytes) {
+      this.e2eeKeyProvider
+        .setKey(rawKeyBytes.slice().buffer)
+        .then(() => console.log('[LK Provider] E2EE key rotated on live room'))
+        .catch((err: unknown) => console.warn('[LK Provider] Failed to rotate E2EE key:', err))
+    } else if (key) {
+      console.log('[LK Provider] E2EE key stashed — will enable on connect')
     } else {
       console.log('[LK Provider] E2EE key cleared')
     }
