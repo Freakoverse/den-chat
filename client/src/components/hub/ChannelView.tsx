@@ -4606,7 +4606,7 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
     | { type: 'user'; pubkey: string; name: string; npub: string; picture?: string; dnnId?: string }
     | { type: 'group'; keyword: 'everyone' | 'here'; label: string; description: string }
     | { type: 'role'; roleId: string; roleName: string; color?: string }
-    | { type: 'channel'; channelId: string; channelName: string }
+    | { type: 'channel'; channelId: string; channelName: string; categoryName?: string; position?: number }
 
   // Compute filtered suggestions from hub members + group mentions + roles (or #channels)
   const mentionSuggestions: MentionSuggestion[] = useMemo(() => {
@@ -4617,7 +4617,10 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
       return (hub?.channels || [])
         .filter((c) => c.name && (!q || c.name.toLowerCase().includes(q)))
         .slice(0, 10)
-        .map((c) => ({ type: 'channel' as const, channelId: c.channelId, channelName: c.name }))
+        .map((c) => {
+          const cat = c.categoryId ? (hub?.categories || []).find((k) => k.categoryId === c.categoryId) : null
+          return { type: 'channel' as const, channelId: c.channelId, channelName: c.name, categoryName: cat?.name, position: c.position }
+        })
     }
     if (!hubMembers) return []
     const results: MentionSuggestion[] = []
@@ -4659,7 +4662,7 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
 
     results.push(...userResults)
     return results.slice(0, 10) // limit total suggestions
-  }, [mentionQuery, mentionTrigger, hub?.channels, hubMembers, getProfile, inputPerms.mention_everyone, inputPerms.mention_here, inputPerms.mention_roles, hub?.roles])
+  }, [mentionQuery, mentionTrigger, hub?.channels, hub?.categories, hubMembers, getProfile, inputPerms.mention_everyone, inputPerms.mention_here, inputPerms.mention_roles, hub?.roles])
 
   // Detect @mention or #channel query from cursor position
   const updateMentionQuery = useCallback((text: string, cursorPos: number) => {
@@ -5819,7 +5822,10 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
                         </div>
                         <div className="min-w-0 flex-1">
                           <span className="text-sm font-semibold text-primary truncate block">#{s.channelName}</span>
-                          <span className="text-[10px] text-muted-foreground truncate block">Open this channel</span>
+                          <span className="text-[10px] text-muted-foreground truncate block">
+                            {s.categoryName ? s.categoryName : 'Uncategorized'}
+                            {s.position != null && <span className="text-muted-foreground/60"> · #{s.position}</span>}
+                          </span>
                         </div>
                       </>
                     ) : (

@@ -1771,7 +1771,6 @@ function ChannelsPage({ editCategories, setEditCategories, editChannels, setEdit
     const key = categoryId || '__uncategorized'
     const n = (newChannelNames[key] || '').trim().toLowerCase().replace(/\s+/g, '-')
     if (!n) return
-    if (editChannels.some(ch => ch.name === n)) return
     const siblingsCount = editChannels.filter(c => c.categoryId === categoryId).length
     const selectedType = newChannelTypes[key] || 'chat'
     const ch: Channel = { channelId: crypto.randomUUID(), name: n, type: selectedType, categoryId, synced: false, encryption: null, position: siblingsCount }
@@ -1789,7 +1788,7 @@ function ChannelsPage({ editCategories, setEditCategories, editChannels, setEdit
   const commitEditChannel = () => {
     if (!editingChannelId) return
     const trimmed = editingChannelName.trim().toLowerCase().replace(/\s+/g, '-')
-    if (trimmed && !editChannels.some(c => c.channelId !== editingChannelId && c.name === trimmed)) {
+    if (trimmed) {
       setEditChannels(editChannels.map(c => c.channelId === editingChannelId ? { ...c, name: trimmed } : c))
     }
     setEditingChannelId(null)
@@ -1809,7 +1808,7 @@ function ChannelsPage({ editCategories, setEditCategories, editChannels, setEdit
   const commitEditCategory = () => {
     if (!editingCategoryId) return
     const trimmed = editingCategoryName.trim()
-    if (trimmed && !editCategories.some(c => c.categoryId !== editingCategoryId && c.name === trimmed)) {
+    if (trimmed) {
       setEditCategories(editCategories.map(c => c.categoryId === editingCategoryId ? { ...c, name: trimmed } : c))
     }
     setEditingCategoryId(null)
@@ -1864,11 +1863,37 @@ function ChannelsPage({ editCategories, setEditCategories, editChannels, setEdit
   const onDragEnd = () => { setDragItem(null); setDragOverTarget(null) }
   const toggleCategory = (catId: string) => { const next = new Set(collapsedCategories); if (next.has(catId)) next.delete(catId); else next.add(catId); setCollapsedCategories(next) }
 
+  // Touch-friendly reorder (▲/▼ + category dropdown) so channels can be arranged on
+  // mobile where HTML5 drag doesn't fire. Swaps position with the adjacent sibling.
+  const moveChannelStep = (channelId: string, dir: -1 | 1) => {
+    const ch = editChannels.find(c => c.channelId === channelId)
+    if (!ch) return
+    const siblings = editChannels.filter(c => c.categoryId === ch.categoryId).sort((a, b) => a.position - b.position)
+    const idx = siblings.findIndex(c => c.channelId === channelId)
+    const swap = idx + dir
+    if (swap < 0 || swap >= siblings.length) return
+    const a = siblings[idx], b = siblings[swap]
+    setEditChannels(editChannels.map(c => c.channelId === a.channelId ? { ...c, position: b.position } : c.channelId === b.channelId ? { ...c, position: a.position } : c))
+  }
+  const moveCategoryStep = (categoryId: string, dir: -1 | 1) => {
+    // Settings renders categories in array order, so reorder the array (and reindex).
+    const arr = [...editCategories]
+    const idx = arr.findIndex(c => c.categoryId === categoryId)
+    const swap = idx + dir
+    if (idx < 0 || swap < 0 || swap >= arr.length) return
+    ;[arr[idx], arr[swap]] = [arr[swap], arr[idx]]
+    setEditCategories(arr.map((c, i) => ({ ...c, position: i })))
+  }
+  const setChannelCategory = (channelId: string, targetCatId: string | null) => {
+    const maxPos = editChannels.filter(c => c.categoryId === targetCatId).reduce((m, c) => Math.max(m, c.position), -1)
+    setEditChannels(editChannels.map(c => c.channelId === channelId ? { ...c, categoryId: targetCatId, position: maxPos + 1 } : c))
+  }
+
   const uncategorizedChannels = editChannels.filter(c => !c.categoryId).sort((a, b) => a.position - b.position)
 
-  const renderChannelItem = (ch: Channel) => (
+  const renderChannelItem = (ch: Channel, index: number, arr: Channel[]) => (
     <div key={ch.channelId} draggable={editingChannelId !== ch.channelId} onDragStart={(e) => onChannelDragStart(e, ch.channelId)} onDragOver={(e) => { e.stopPropagation(); onChannelDragOver(e, ch.channelId) }} onDrop={(e) => { e.stopPropagation(); onChannelDrop(e, ch.channelId, ch.categoryId) }} onDragEnd={onDragEnd}
-      className={cn('flex items-center gap-3 px-3 py-2.5 rounded-lg bg-secondary text-sm group cursor-grab active:cursor-grabbing transition-colors', dragOverTarget === ch.channelId && 'ring-2 ring-primary/50', editingChannelId === ch.channelId && 'ring-1 ring-primary/30 cursor-default')}
+      className={cn('flex items-center gap-2 px-3 py-2.5 rounded-lg bg-secondary text-sm group cursor-grab active:cursor-grabbing transition-colors', dragOverTarget === ch.channelId && 'ring-2 ring-primary/50', editingChannelId === ch.channelId && 'ring-1 ring-primary/30 cursor-default')}
     >
       <GripVertical size={14} className="text-muted-foreground/50 shrink-0" />
       {ch.type === 'voice' ? <Volume2 size={16} className="text-emerald-400 shrink-0" /> : ch.type === 'forum' ? <MessagesSquare size={16} className="text-muted-foreground shrink-0" /> : ch.type === 'announcement' ? <Megaphone size={16} className="text-muted-foreground shrink-0" /> : <Hash size={16} className="text-muted-foreground shrink-0" />}
@@ -1897,8 +1922,17 @@ function ChannelsPage({ editCategories, setEditCategories, editChannels, setEdit
           >{ch.name}</span>
         </Tip>
       )}
-      <span className="text-xs text-muted-foreground">{ch.type}</span>
-      <div className="flex items-center gap-1">
+      {/* Reorder + move-to-category (touch-friendly; works where drag doesn't) */}
+      <Tip text="Move up"><button onClick={() => moveChannelStep(ch.channelId, -1)} disabled={index === 0} className={cn('p-1 rounded-md shrink-0 transition-colors', index === 0 ? 'opacity-30' : 'text-muted-foreground hover:text-foreground hover:bg-secondary/60 cursor-pointer')}><ChevronUp size={14} /></button></Tip>
+      <Tip text="Move down"><button onClick={() => moveChannelStep(ch.channelId, 1)} disabled={index === arr.length - 1} className={cn('p-1 rounded-md shrink-0 transition-colors', index === arr.length - 1 ? 'opacity-30' : 'text-muted-foreground hover:text-foreground hover:bg-secondary/60 cursor-pointer')}><ChevronDown size={14} /></button></Tip>
+      <CustomSelect
+        compact
+        value={ch.categoryId ?? '__none'}
+        onChange={(v) => setChannelCategory(ch.channelId, v === '__none' ? null : v)}
+        options={[{ value: '__none', label: 'Uncategorized' }, ...editCategories.map(c => ({ value: c.categoryId, label: c.name }))]}
+        className="shrink-0"
+      />
+      <div className="flex items-center gap-1 shrink-0">
         <Tip text="Rename"><button onClick={() => startEditChannel(ch)} className="p-1.5 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 cursor-pointer transition-colors"><Pencil size={14} /></button></Tip>
         <Tip text="Permissions"><button onClick={() => setPermEditTarget({ type: 'channel', id: ch.channelId })} className="p-1.5 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 cursor-pointer transition-colors"><Settings size={14} /></button></Tip>
         <Tip text="Delete channel"><button onClick={() => removeChannel(ch.channelId)} className="p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 cursor-pointer transition-colors"><Trash2 size={14} /></button></Tip>
@@ -1992,7 +2026,7 @@ function ChannelsPage({ editCategories, setEditCategories, editChannels, setEdit
         </div>
 
         {/* Categories */}
-        {editCategories.map((cat) => {
+        {editCategories.map((cat, ci) => {
           const catChannels = editChannels.filter(c => c.categoryId === cat.categoryId).sort((a, b) => a.position - b.position)
           const isCollapsed = collapsedCategories.has(cat.categoryId)
           const isDragTarget = dragOverTarget === cat.categoryId
@@ -2037,6 +2071,8 @@ function ChannelsPage({ editCategories, setEditCategories, editChannels, setEdit
                     </Tip>
                   )}
                   <div className="flex items-center gap-1">
+                    <Tip text="Move category up"><button onClick={() => moveCategoryStep(cat.categoryId, -1)} disabled={ci === 0} className={cn('p-1.5 rounded-md transition-colors', ci === 0 ? 'opacity-30' : 'text-muted-foreground hover:text-foreground hover:bg-secondary cursor-pointer')}><ChevronUp size={14} /></button></Tip>
+                    <Tip text="Move category down"><button onClick={() => moveCategoryStep(cat.categoryId, 1)} disabled={ci === editCategories.length - 1} className={cn('p-1.5 rounded-md transition-colors', ci === editCategories.length - 1 ? 'opacity-30' : 'text-muted-foreground hover:text-foreground hover:bg-secondary cursor-pointer')}><ChevronDown size={14} /></button></Tip>
                     <Tip text="Rename"><button onClick={() => startEditCategory(cat)} className="p-1.5 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 cursor-pointer transition-colors"><Pencil size={14} /></button></Tip>
                     <Tip text="Permissions"><button onClick={() => setPermEditTarget({ type: 'category', id: cat.categoryId })} className="p-1.5 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 cursor-pointer transition-colors"><Settings size={14} /></button></Tip>
                     <Tip text="Delete category"><button onClick={() => removeCategory(cat.categoryId)} className="p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 cursor-pointer transition-colors"><Trash2 size={14} /></button></Tip>

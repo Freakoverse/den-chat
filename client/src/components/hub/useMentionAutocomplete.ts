@@ -18,7 +18,7 @@ export type MentionSuggestion =
   | { type: 'user'; pubkey: string; name: string; npub: string; picture?: string; dnnId?: string }
   | { type: 'group'; keyword: 'everyone' | 'here'; label: string; description: string }
   | { type: 'role'; roleId: string; roleName: string; color?: string }
-  | { type: 'channel'; channelId: string; channelName: string }
+  | { type: 'channel'; channelId: string; channelName: string; categoryName?: string; position?: number }
 
 export function useMentionAutocomplete(opts: {
   hubDTag: string
@@ -48,7 +48,10 @@ export function useMentionAutocomplete(opts: {
       return (hub?.channels || [])
         .filter((c) => c.name && (!q || c.name.toLowerCase().includes(q)))
         .slice(0, 10)
-        .map((c) => ({ type: 'channel' as const, channelId: c.channelId, channelName: c.name }))
+        .map((c) => {
+          const cat = c.categoryId ? (hub?.categories || []).find((k) => k.categoryId === c.categoryId) : null
+          return { type: 'channel' as const, channelId: c.channelId, channelName: c.name, categoryName: cat?.name, position: c.position }
+        })
     }
     if (!hubMembers) return []
     const results: MentionSuggestion[] = []
@@ -90,7 +93,7 @@ export function useMentionAutocomplete(opts: {
 
     results.push(...userResults)
     return results.slice(0, 10) // limit total suggestions
-  }, [mentionQuery, mentionTrigger, hub?.channels, hubMembers, getProfile, inputPerms.mention_everyone, inputPerms.mention_here, inputPerms.mention_roles, hub?.roles])
+  }, [mentionQuery, mentionTrigger, hub?.channels, hub?.categories, hubMembers, getProfile, inputPerms.mention_everyone, inputPerms.mention_here, inputPerms.mention_roles, hub?.roles])
 
   // Detect @mention or #channel query from cursor position
   const updateMentionQuery = useCallback((value: string, cursorPos: number) => {

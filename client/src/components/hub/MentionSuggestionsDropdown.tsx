@@ -114,7 +114,10 @@ export function MentionSuggestionsDropdown({ suggestions, activeIndex, onSelect,
                 </div>
                 <div className="min-w-0 flex-1">
                   <span className="text-sm font-semibold text-primary truncate block">#{s.channelName}</span>
-                  <span className="text-[10px] text-muted-foreground truncate block">Open this channel</span>
+                  <span className="text-[10px] text-muted-foreground truncate block">
+                    {s.categoryName ? s.categoryName : 'Uncategorized'}
+                    {s.position != null && <span className="text-muted-foreground/60"> · #{s.position}</span>}
+                  </span>
                 </div>
               </>
             ) : (

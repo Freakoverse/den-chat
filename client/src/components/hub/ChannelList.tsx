@@ -1,14 +1,16 @@
-import { useHubStore } from '@/stores/hubStore'
+import { useHubStore, type HubData } from '@/stores/hubStore'
 import { useUserStore } from '@/stores/userStore'
 import { useNotificationStore } from '@/stores/notificationStore'
 import { useNavigationStore } from '@/stores/navigationStore'
 import { getPermissionsForUser } from '@/lib/hub/permissions'
-import { Hash, Megaphone, MessagesSquare, MessageSquare, ChevronDown, ChevronUp, ChevronRight, Settings, UserPlus, Inbox, Loader2, SlidersHorizontal, Volume2, MicOff, HeadphoneOff, Camera, ScreenShare, X, User, Radar, Boxes, AlertTriangle, CalendarDays, Lock, Undo2, AtSign } from 'lucide-react'
+import { Hash, Megaphone, MessagesSquare, MessageSquare, ChevronDown, ChevronUp, ChevronRight, Settings, UserPlus, Inbox, Loader2, SlidersHorizontal, Volume2, MicOff, HeadphoneOff, Camera, ScreenShare, X, User, Radar, Boxes, AlertTriangle, CalendarDays, Lock, Undo2, AtSign, GripVertical, ListOrdered, Check } from 'lucide-react'
 import { cn, npubShort } from '@/lib/utils'
 import { BlossomImage } from '@/components/ui/BlossomImage'
-import { useState, useCallback, useEffect, useRef, useMemo, type ReactNode } from 'react'
+import { useState, useCallback, useEffect, useRef, useMemo, type ReactNode, type DragEvent as ReactDragEvent } from 'react'
+import { createPortal } from 'react-dom'
 import { Separator } from '@/components/ui/separator'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
+import { CustomSelect } from '@/components/ui/custom-select'
 
 import { useVoiceStore } from '@/stores/voiceStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
@@ -24,6 +26,18 @@ import { UserPanel } from '@/components/ui/UserPanel'
 import { ResizablePanel } from '@/components/ui/ResizablePanel'
 import { CalendarPanel } from '@/components/hub/CalendarPanel'
 import { useCalendar, isEventLive } from '@/hooks/useCalendar'
+
+/** Small tooltip wrapper matching the rest of the app (self-contained provider). */
+function Tip({ children, text }: { children: ReactNode; text: string }) {
+  return (
+    <TooltipProvider delayDuration={300}>
+      <Tooltip>
+        <TooltipTrigger asChild>{children}</TooltipTrigger>
+        <TooltipContent side="top" className="text-xs">{text}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  )
+}
 
 export function ChannelList({ isModBanned = false, isMobile = false }: { isModBanned?: boolean; isMobile?: boolean } = {}) {
   const activeHubId = useHubStore((s) => s.activeHubId)
@@ -46,6 +60,29 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
   const [rescindDone, setRescindDone] = useState(false)
   const [showRescindConfirm, setShowRescindConfirm] = useState(false)
   const [userSettingsInitialTab, setUserSettingsInitialTab] = useState<'messages' | 'notifications' | 'voice' | undefined>(undefined)
+
+  // ── Creator-only channel/category reordering (drag & drop, desktop) ──
+  const signer = useUserStore((s) => s.signer)
+  const privateKey = useUserStore((s) => s.privateKey)
+  const setHubData = useHubStore((s) => s.setHubData)
+  // Staged layout: null = no pending change (render live hub). Set on a drag; the
+  // banner offers Publish / Discard. Nothing hits relays until Publish.
+  const [layoutDraft, setLayoutDraft] = useState<{ channels: HubData['channels']; categories: HubData['categories'] } | null>(null)
+  const [dragItem, setDragItem] = useState<{ type: 'category' | 'channel'; id: string } | null>(null)
+  const [dragOverTarget, setDragOverTarget] = useState<string | null>(null)
+  const [publishingLayout, setPublishingLayout] = useState(false)
+  const [layoutError, setLayoutError] = useState<string | null>(null)
+  // Progress modal for publishing a reorder: null = hidden. Mirrors the step
+  // overlay in Hub Settings → Channels.
+  const [layoutStep, setLayoutStep] = useState<null | 'signing' | 'publishing' | 'done'>(null)
+  // Reorder happens in a dedicated "edit mode" that swaps the heavy channel rows
+  // for lightweight drag rows (keeps HTML5 drag reliable) and avoids the drag-vs-
+  // click conflict in normal browsing.
+  const [editingLayout, setEditingLayout] = useState(false)
+  // Clear any staged reorder when switching hubs so it can't leak across hubs.
+  useEffect(() => {
+    setLayoutDraft(null); setDragItem(null); setDragOverTarget(null); setLayoutError(null); setEditingLayout(false); setLayoutStep(null)
+  }, [activeHubId])
 
   // Watch for pending notification settings action from context menu
   const pendingHubNotifDTag = useNavigationStore((s) => s.pendingHubNotifDTag)
@@ -197,17 +234,135 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
     return perms.view_channel
   }
 
-  const uncategorized = hub.channels
+  // Channels/categories to render: the staged draft while reordering, else live.
+  const workChannels = layoutDraft?.channels ?? hub.channels
+  const workCategories = layoutDraft?.categories ?? hub.categories
+
+  // Reindex positions from array order (categories globally; channels within their
+  // category) — the sidebar renders by `position`, so each drop arranges the array
+  // then normalizes here to keep positions consistent.
+  const normalizeLayout = (channels: HubData['channels'], categories: HubData['categories']) => {
+    const cats = categories.map((c, i) => ({ ...c, position: i }))
+    const counters: Record<string, number> = {}
+    const chans = channels.map((c) => {
+      const key = c.categoryId ?? '__none'
+      const p = counters[key] ?? 0
+      counters[key] = p + 1
+      return { ...c, position: p }
+    })
+    return { channels: chans, categories: cats }
+  }
+
+  const onCategoryDragStart = (e: ReactDragEvent, catId: string) => { setDragItem({ type: 'category', id: catId }); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', catId) }
+  const onCategoryDragOver = (e: ReactDragEvent, catId: string) => { e.preventDefault(); if (dragItem && dragItem.id !== catId) setDragOverTarget(catId) }
+  const onCategoryDrop = (e: ReactDragEvent, targetCatId: string) => {
+    e.preventDefault(); setDragOverTarget(null)
+    if (dragItem?.type === 'channel') { moveChannelToCategory(dragItem.id, targetCatId); return }
+    if (dragItem?.type !== 'category') { setDragItem(null); return }
+    const cats = workCategories.map((c) => ({ ...c }))
+    const fromIdx = cats.findIndex((c) => c.categoryId === dragItem.id)
+    const toIdx = cats.findIndex((c) => c.categoryId === targetCatId)
+    if (fromIdx < 0 || toIdx < 0 || fromIdx === toIdx) { setDragItem(null); return }
+    const [moved] = cats.splice(fromIdx, 1); cats.splice(toIdx, 0, moved)
+    setLayoutDraft(normalizeLayout(workChannels, cats)); setDragItem(null)
+  }
+  const onChannelDragStart = (e: ReactDragEvent, channelId: string) => { setDragItem({ type: 'channel', id: channelId }); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', channelId) }
+  const onChannelDragOver = (e: ReactDragEvent, targetChannelId: string) => { e.preventDefault(); if (dragItem?.type === 'channel' && dragItem.id !== targetChannelId) setDragOverTarget(targetChannelId) }
+  const onChannelDrop = (e: ReactDragEvent, targetChannelId: string, targetCategoryId: string | null) => {
+    e.preventDefault(); setDragOverTarget(null)
+    if (!dragItem || dragItem.type !== 'channel' || dragItem.id === targetChannelId) { setDragItem(null); return }
+    const channelsCopy = workChannels.map((c) => ({ ...c }))
+    const fromIdx = channelsCopy.findIndex((c) => c.channelId === dragItem.id)
+    if (fromIdx < 0) { setDragItem(null); return }
+    const [moved] = channelsCopy.splice(fromIdx, 1)
+    moved.categoryId = targetCategoryId
+    const insertAt = channelsCopy.findIndex((c) => c.channelId === targetChannelId)
+    channelsCopy.splice(insertAt < 0 ? channelsCopy.length : insertAt, 0, moved)
+    setLayoutDraft(normalizeLayout(channelsCopy, workCategories)); setDragItem(null)
+  }
+  // Move a channel into a category (or null = uncategorized at top), appended last.
+  const moveChannelToCategory = (channelId: string, targetCatId: string | null) => {
+    const moved = workChannels.find((c) => c.channelId === channelId)
+    if (!moved) { setDragItem(null); return }
+    const others = workChannels.filter((c) => c.channelId !== channelId).map((c) => ({ ...c }))
+    let lastIdx = -1
+    others.forEach((c, i) => { if (c.categoryId === targetCatId) lastIdx = i })
+    others.splice(lastIdx + 1, 0, { ...moved, categoryId: targetCatId })
+    setLayoutDraft(normalizeLayout(others, workCategories)); setDragItem(null); setDragOverTarget(null)
+  }
+  const onDragEnd = () => { setDragItem(null); setDragOverTarget(null) }
+
+  // Touch-friendly reorder: ▲/▼ buttons (HTML5 drag doesn't fire on touch, so this
+  // is what makes mobile work). Swaps a channel with its adjacent same-category
+  // sibling, or a category with its neighbour; normalizeLayout reindexes positions.
+  const moveChannelStep = (channelId: string, dir: -1 | 1) => {
+    const ch = workChannels.find((c) => c.channelId === channelId)
+    if (!ch) return
+    const arr = workChannels.map((c) => ({ ...c }))
+    const siblingIdxs = arr.map((c, i) => (c.categoryId === ch.categoryId ? i : -1)).filter((i) => i >= 0)
+    const pos = siblingIdxs.findIndex((i) => arr[i].channelId === channelId)
+    const swap = pos + dir
+    if (pos < 0 || swap < 0 || swap >= siblingIdxs.length) return
+    const a = siblingIdxs[pos], b = siblingIdxs[swap]
+    ;[arr[a], arr[b]] = [arr[b], arr[a]]
+    setLayoutDraft(normalizeLayout(arr, workCategories))
+  }
+  const moveCategoryStep = (categoryId: string, dir: -1 | 1) => {
+    const cats = [...workCategories].sort((a, b) => a.position - b.position).map((c) => ({ ...c }))
+    const idx = cats.findIndex((c) => c.categoryId === categoryId)
+    const swap = idx + dir
+    if (idx < 0 || swap < 0 || swap >= cats.length) return
+    ;[cats[idx], cats[swap]] = [cats[swap], cats[idx]]
+    setLayoutDraft(normalizeLayout(workChannels, cats))
+  }
+
+  const publishLayout = async () => {
+    if (!layoutDraft || publishingLayout) return
+    setPublishingLayout(true); setLayoutError(null); setLayoutStep('signing')
+    try {
+      const { buildHubEvent } = await import('@/lib/hub/buildHubEvent')
+      const { signWithSigner } = await import('@/lib/nostr/events')
+      const { publishToSpecificRelays } = await import('@/lib/nostr/relay-pool')
+      const { getPublishRelays } = await import('@/stores/postingBehaviourStore')
+      const unsigned = buildHubEvent({
+        dTag: hub.dTag, name: hub.name, description: hub.description || undefined,
+        epoch: hub.epoch, icon: hub.icon || undefined, banner: hub.banner || undefined,
+        tags: hub.tags && hub.tags.length ? hub.tags : undefined,
+        relays: [...hub.generalRelays, ...hub.filterRelays],
+        blossomServers: hub.blossomServers, indexFileHash: hub.indexFileHash,
+        channels: layoutDraft.channels, categories: layoutDraft.categories, roles: hub.roles,
+        minPow: hub.minPow > 0 ? hub.minPow : undefined, nsfw: hub.nsfw || undefined,
+        discoverable: hub.discoverable, groupedRoles: hub.groupedRoles && hub.groupedRoles.length ? hub.groupedRoles : undefined,
+        publishedAt: hub.publishedAt, eventCreatedAt: hub.eventCreatedAt,
+      })
+      const signed = await signWithSigner(unsigned, signer, privateKey)
+      setLayoutStep('publishing')
+      await publishToSpecificRelays(getPublishRelays([...hub.generalRelays, ...hub.filterRelays]), signed)
+      setHubData(hub.dTag, { ...hub, channels: layoutDraft.channels, categories: layoutDraft.categories, eventCreatedAt: signed.created_at })
+      setLayoutDraft(null)
+      setLayoutStep('done')
+    } catch (err: any) {
+      console.error('[ChannelList] Failed to publish channel order:', err)
+      setLayoutError(err?.message || 'Failed to publish')
+    } finally {
+      setPublishingLayout(false)
+    }
+  }
+  const discardLayout = () => { setLayoutDraft(null); setLayoutError(null); setDragItem(null); setDragOverTarget(null); setLayoutStep(null) }
+
+  const uncategorized = workChannels
     .filter((c) => !c.categoryId)
     .filter((c) => canViewChannel(c.channelId))
+    .slice()
     .sort((a, b) => a.position - b.position)
 
-  const categorized = hub.categories
+  const categorized = [...workCategories]
     .sort((a, b) => a.position - b.position)
     .map((cat) => ({
       ...cat,
-      channels: hub.channels
+      channels: workChannels
         .filter((c) => c.categoryId === cat.categoryId)
+        .slice()
         .sort((a, b) => a.position - b.position),
     }))
     .filter((cat) => {
@@ -216,10 +371,59 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
       return cat.channels.some((c) => canViewChannel(c.channelId))
     })
 
+  // Lightweight draggable channel row for edit mode. Deliberately minimal (no store
+  // subscriptions, no source-style change on drag) so HTML5 drag stays reliable —
+  // unlike the heavy ChannelItem used for normal browsing.
+  const layoutRow = (channel: HubData['channels'][number], categoryId: string | null, index: number, total: number) => (
+    <div
+      key={channel.channelId}
+      draggable
+      onDragStart={(e) => onChannelDragStart(e, channel.channelId)}
+      onDragOver={(e) => onChannelDragOver(e, channel.channelId)}
+      onDrop={(e) => { e.stopPropagation(); onChannelDrop(e, channel.channelId, categoryId) }}
+      onDragEnd={onDragEnd}
+      className={cn(
+        'flex items-center gap-1.5 px-2 py-1.5 rounded-md border bg-background/60 cursor-grab active:cursor-grabbing text-sm transition-colors',
+        dragOverTarget === channel.channelId ? 'border-primary ring-1 ring-primary/40' : 'border-border/60 hover:border-border',
+      )}
+    >
+      <GripVertical size={12} className="text-muted-foreground/70 shrink-0" />
+      <Hash size={12} className="text-muted-foreground shrink-0" />
+      <span className="truncate text-foreground flex-1 min-w-0">{channel.name}</span>
+      {/* Move to category (touch-friendly, matches the app's dropdown style) */}
+      <CustomSelect
+        compact
+        value={categoryId ?? '__none'}
+        onChange={(v) => moveChannelToCategory(channel.channelId, v === '__none' ? null : v)}
+        options={[{ value: '__none', label: 'No category' }, ...workCategories.map((c) => ({ value: c.categoryId, label: c.name }))]}
+        className="shrink-0"
+      />
+      {/* Up / down (work on touch) */}
+      <Tip text="Move up">
+        <button
+          onClick={() => moveChannelStep(channel.channelId, -1)}
+          disabled={index === 0}
+          className={cn('p-0.5 rounded shrink-0', index === 0 ? 'opacity-30' : 'text-muted-foreground hover:text-foreground hover:bg-secondary/60 cursor-pointer')}
+        >
+          <ChevronUp size={13} />
+        </button>
+      </Tip>
+      <Tip text="Move down">
+        <button
+          onClick={() => moveChannelStep(channel.channelId, 1)}
+          disabled={index === total - 1}
+          className={cn('p-0.5 rounded shrink-0', index === total - 1 ? 'opacity-30' : 'text-muted-foreground hover:text-foreground hover:bg-secondary/60 cursor-pointer')}
+        >
+          <ChevronDown size={13} />
+        </button>
+      </Tip>
+    </div>
+  )
+
   // Widest position number across the whole hub — used to right-align the index
   // column so 1- and 2-digit numbers line up without zero-padding.
-  const positionDigits = hub.channels.length
-    ? String(Math.max(...hub.channels.map((c) => c.position))).length
+  const positionDigits = workChannels.length
+    ? String(Math.max(...workChannels.map((c) => c.position))).length
     : 1
 
 
@@ -337,6 +541,16 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
                   </span>
                 )}
               </button>
+              <button
+                onClick={() => setEditingLayout((v) => !v)}
+                className={cn(
+                  'flex-1 flex items-center gap-2 px-2 py-1 rounded-md text-left text-sm whitespace-nowrap transition-colors cursor-pointer',
+                  editingLayout ? 'bg-primary/15 text-primary hover:bg-primary/20' : 'text-muted-foreground hover:text-foreground hover:bg-accent'
+                )}
+              >
+                {editingLayout ? <Check size={16} /> : <ListOrdered size={16} />}
+                <span>{editingLayout ? 'Done Reordering' : 'Edit Channels'}</span>
+              </button>
             </>
           )}
           <button
@@ -363,10 +577,98 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
       )}
       </div>
 
+      {/* Reorder banner (creator, desktop) — shows when there are staged changes */}
+      {isCreator && !isMobile && layoutDraft && (
+        <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/30 shrink-0">
+          <span className="text-[11px] font-medium text-amber-500 truncate">Unconfirmed changes</span>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button onClick={discardLayout} disabled={publishingLayout} className="px-2 py-1 rounded-md text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-accent transition-colors cursor-pointer disabled:opacity-40">Discard</button>
+            <button onClick={publishLayout} disabled={publishingLayout} className="flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors cursor-pointer disabled:opacity-50">
+              {publishingLayout ? <><Loader2 size={11} className="animate-spin" /> Publishing…</> : 'Publish'}
+            </button>
+          </div>
+        </div>
+      )}
+      {isCreator && layoutError && (
+        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-destructive/10 border border-destructive/30 text-[11px] text-destructive shrink-0">
+          <AlertTriangle size={11} className="shrink-0" /> {layoutError}
+        </div>
+      )}
+
       {/* Channel list — de-rendered when mod-banned */}
       {isModBanned ? (
         <div className="flex-1 flex items-center justify-center py-8 rounded-lg bg-secondary/50 shadow-md">
           <p className="text-xs text-muted-foreground/50 italic">Channels unavailable</p>
+        </div>
+      ) : editingLayout ? (
+        /* ── Edit mode: lightweight reorder view (creator, desktop) ── */
+        <div className="flex-1 min-h-0 overflow-y-auto scrollbar-hide rounded-lg bg-secondary/50 shadow-md p-2 space-y-2">
+          <p className="text-[10px] text-muted-foreground leading-snug px-1">
+            Use ▲ ▼ to reorder and the dropdown to move a channel between categories. On desktop you can also drag rows and drop a channel on a category header.
+          </p>
+
+          {/* No-category zone */}
+          <div
+            onDragOver={(e) => { if (dragItem?.type === 'channel') { e.preventDefault(); setDragOverTarget('__uncat_top') } }}
+            onDrop={(e) => { if (dragItem?.type === 'channel') { e.preventDefault(); moveChannelToCategory(dragItem.id, null) } }}
+            onDragLeave={() => setDragOverTarget((t) => (t === '__uncat_top' ? null : t))}
+            className={cn('rounded-md border border-dashed p-1.5 space-y-1 transition-colors', dragOverTarget === '__uncat_top' ? 'border-primary bg-primary/10' : 'border-border/50')}
+          >
+            <p className="text-[9px] uppercase tracking-wide text-muted-foreground/60 px-1">No category</p>
+            {uncategorized.length === 0 && (
+              <p className="text-[10px] text-muted-foreground/40 text-center py-1">Drop here to remove a channel from its category</p>
+            )}
+            {uncategorized.map((channel, i) => layoutRow(channel, null, i, uncategorized.length))}
+          </div>
+
+          {/* Categories (draggable headers) + their channels */}
+          {categorized.map((cat, ci) => (
+            <div key={cat.categoryId} onDragEnd={onDragEnd}>
+              <div
+                draggable
+                onDragStart={(e) => onCategoryDragStart(e, cat.categoryId)}
+                onDragOver={(e) => {
+                  e.preventDefault()
+                  if (dragItem?.type === 'category' && dragItem.id !== cat.categoryId) setDragOverTarget(cat.categoryId)
+                  else if (dragItem?.type === 'channel') setDragOverTarget(cat.categoryId)
+                }}
+                onDrop={(e) => {
+                  e.preventDefault()
+                  if (dragItem?.type === 'category') onCategoryDrop(e, cat.categoryId)
+                  else if (dragItem?.type === 'channel') moveChannelToCategory(dragItem.id, cat.categoryId)
+                }}
+                onDragLeave={() => setDragOverTarget((t) => (t === cat.categoryId ? null : t))}
+                className={cn('flex items-center gap-1.5 px-2 py-1.5 rounded-md cursor-grab active:cursor-grabbing transition-colors', dragOverTarget === cat.categoryId ? 'bg-primary/15 ring-1 ring-primary/40' : 'hover:bg-accent/40')}
+              >
+                <GripVertical size={12} className="text-muted-foreground shrink-0" />
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground truncate flex-1 min-w-0">{cat.name}</span>
+                <Tip text="Move category up">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); moveCategoryStep(cat.categoryId, -1) }}
+                    disabled={ci === 0}
+                    className={cn('p-0.5 rounded shrink-0', ci === 0 ? 'opacity-30' : 'text-muted-foreground hover:text-foreground hover:bg-secondary/60 cursor-pointer')}
+                  >
+                    <ChevronUp size={13} />
+                  </button>
+                </Tip>
+                <Tip text="Move category down">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); moveCategoryStep(cat.categoryId, 1) }}
+                    disabled={ci === categorized.length - 1}
+                    className={cn('p-0.5 rounded shrink-0', ci === categorized.length - 1 ? 'opacity-30' : 'text-muted-foreground hover:text-foreground hover:bg-secondary/60 cursor-pointer')}
+                  >
+                    <ChevronDown size={13} />
+                  </button>
+                </Tip>
+              </div>
+              <div className="pl-3 pt-1 space-y-1">
+                {cat.channels.length === 0 && (
+                  <p className="text-[10px] text-muted-foreground/40 px-1 py-0.5">Empty</p>
+                )}
+                {cat.channels.map((channel, i) => layoutRow(channel, cat.categoryId, i, cat.channels.length))}
+              </div>
+            </div>
+          ))}
         </div>
       ) : (
         <div className="flex-1 min-h-0 relative">
@@ -391,6 +693,7 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
           {categorized.map((cat) => (
             <CategoryGroup
               key={cat.categoryId}
+              categoryId={cat.categoryId}
               name={cat.name}
               channels={cat.channels}
               positionDigits={positionDigits}
@@ -410,6 +713,58 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
       )}
 
       {!isMobile && <UserPanel />}
+
+      {/* Publish-progress modal for reordering (mirrors Hub Settings → Channels) */}
+      {layoutStep !== null && createPortal(
+        <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-card rounded-xl border border-border shadow-2xl w-[320px] p-5 space-y-4 animate-in fade-in-0 zoom-in-95">
+            <div className="flex items-center gap-2.5">
+              {layoutError ? (
+                <div className="w-8 h-8 rounded-full bg-destructive/15 flex items-center justify-center shrink-0"><AlertTriangle size={16} className="text-destructive" /></div>
+              ) : layoutStep === 'done' ? (
+                <div className="w-8 h-8 rounded-full bg-emerald-500/15 flex items-center justify-center shrink-0"><Check size={16} className="text-emerald-400" /></div>
+              ) : (
+                <div className="w-8 h-8 rounded-full bg-primary/15 flex items-center justify-center shrink-0"><Loader2 size={16} className="text-primary animate-spin" /></div>
+              )}
+              <div className="min-w-0">
+                <h4 className="text-sm font-semibold text-foreground">
+                  {layoutError ? 'Failed to Publish' : layoutStep === 'done' ? 'Changes Published' : 'Publishing Changes…'}
+                </h4>
+                <p className="text-[11px] text-muted-foreground truncate">
+                  {layoutError ? layoutError : layoutStep === 'done' ? 'Channel order updated for everyone.' : layoutStep === 'signing' ? 'Signing hub event…' : 'Publishing to relays…'}
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              {([{ id: 'signing', label: 'Signing hub event' }, { id: 'publishing', label: 'Publishing to relays' }] as const).map((s) => {
+                const order = ['signing', 'publishing', 'done']
+                const curIdx = order.indexOf(layoutStep)
+                const sIdx = order.indexOf(s.id)
+                const isDone = layoutStep === 'done' || curIdx > sIdx
+                const isCurrent = layoutStep === s.id && !layoutError
+                return (
+                  <div key={s.id} className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-xs">
+                    {isDone ? <Check size={12} className="text-emerald-400 shrink-0" /> : isCurrent ? <Loader2 size={12} className="text-amber-400 animate-spin shrink-0" /> : <div className="w-3 h-3 rounded-full border border-border shrink-0" />}
+                    <span className={cn(isDone ? 'text-emerald-400' : isCurrent ? 'text-foreground' : 'text-muted-foreground/50')}>{s.label}</span>
+                  </div>
+                )
+              })}
+            </div>
+
+            {layoutStep === 'done' && !layoutError && (
+              <button onClick={() => setLayoutStep(null)} className="w-full h-9 text-sm rounded-lg font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors cursor-pointer">Close</button>
+            )}
+            {layoutError && (
+              <div className="flex items-center gap-2">
+                <button onClick={() => { setLayoutError(null); publishLayout() }} className="flex-1 h-8 text-xs rounded-lg font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors cursor-pointer">Retry</button>
+                <button onClick={() => { setLayoutStep(null); setLayoutError(null) }} className="flex-1 h-8 text-xs rounded-lg font-medium text-muted-foreground hover:text-foreground hover:bg-accent transition-colors cursor-pointer">Dismiss</button>
+              </div>
+            )}
+          </div>
+        </div>,
+        document.body,
+      )}
 
       {/* Settings modal */}
       {isCreator && (
@@ -517,7 +872,23 @@ function DesktopWrapper({ children }: { children: ReactNode }) {
   )
 }
 
+/** Drag-and-drop handlers threaded from ChannelList into CategoryGroup (creator only). */
+type HubDnd = {
+  dragItem: { type: 'category' | 'channel'; id: string } | null
+  dragOverTarget: string | null
+  setDragOverTarget: (t: string | null | ((prev: string | null) => string | null)) => void
+  onCategoryDragStart: (e: ReactDragEvent, catId: string) => void
+  onCategoryDragOver: (e: ReactDragEvent, catId: string) => void
+  onCategoryDrop: (e: ReactDragEvent, targetCatId: string) => void
+  onChannelDragStart: (e: ReactDragEvent, channelId: string) => void
+  onChannelDragOver: (e: ReactDragEvent, targetChannelId: string) => void
+  onChannelDrop: (e: ReactDragEvent, targetChannelId: string, targetCategoryId: string | null) => void
+  moveChannelToCategory: (channelId: string, targetCatId: string | null) => void
+  onDragEnd: () => void
+}
+
 interface CategoryGroupProps {
+  categoryId: string
   name: string
   channels: Array<{ channelId: string; name: string; type: string; position: number; encryption: string | null; synced: boolean; categoryId: string | null }>
   positionDigits: number
@@ -529,9 +900,10 @@ interface CategoryGroupProps {
   hub: import('@/stores/hubStore').HubData | null
   hubMembers?: Array<{ pubkey: string; roles: string }>
   pubkey: string | null
+  dnd?: HubDnd | null
 }
 
-function CategoryGroup({ name, channels, positionDigits, activeChannelId, onSelectChannel, categoryEncryption, groupSecrets, isCreator, hub, hubMembers, pubkey }: CategoryGroupProps) {
+function CategoryGroup({ categoryId, name, channels, positionDigits, activeChannelId, onSelectChannel, categoryEncryption, groupSecrets, isCreator, hub, hubMembers, pubkey, dnd }: CategoryGroupProps) {
   const [collapsed, setCollapsed] = useState(false)
 
   const hasGroupAccess = (groupId: string | null): boolean => {
@@ -549,11 +921,34 @@ function CategoryGroup({ name, channels, positionDigits, activeChannelId, onSele
   // If the entire category is locked, show lock icon next to name
   const categoryLocked = categoryEncryption ? !hasGroupAccess(categoryEncryption) : false
 
+  const isCatDropTarget = dnd?.dragOverTarget === categoryId
+
   return (
-    <div className="mt-3">
+    <div className="mt-3" onDragEnd={dnd ? dnd.onDragEnd : undefined}>
+      {/* Category-reorder drop indicator */}
+      {dnd && isCatDropTarget && dnd.dragItem?.type === 'category' && (
+        <div className="h-0.5 bg-primary rounded-full mx-2 mb-1" />
+      )}
       <button
         onClick={() => setCollapsed(!collapsed)}
-        className="flex items-center gap-1 px-2 py-1 w-full text-left cursor-pointer group"
+        draggable={!!dnd}
+        onDragStart={dnd ? (e) => dnd.onCategoryDragStart(e, categoryId) : undefined}
+        onDragOver={dnd ? (e) => {
+          e.preventDefault()
+          if (dnd.dragItem?.type === 'category' && dnd.dragItem.id !== categoryId) dnd.setDragOverTarget(categoryId)
+          else if (dnd.dragItem?.type === 'channel') dnd.setDragOverTarget(categoryId)
+        } : undefined}
+        onDrop={dnd ? (e) => {
+          e.preventDefault(); e.stopPropagation()
+          if (dnd.dragItem?.type === 'category') dnd.onCategoryDrop(e, categoryId)
+          else if (dnd.dragItem?.type === 'channel') dnd.moveChannelToCategory(dnd.dragItem.id, categoryId)
+        } : undefined}
+        onDragLeave={dnd ? () => dnd.setDragOverTarget((t) => (t === categoryId ? null : t)) : undefined}
+        className={cn(
+          'flex items-center gap-1 px-2 py-1 w-full text-left group rounded-md transition-colors',
+          dnd ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer',
+          isCatDropTarget && dnd?.dragItem?.type === 'channel' && 'ring-2 ring-primary/40 bg-primary/5',
+        )}
       >
         {collapsed ? (
           <ChevronRight size={10} className="text-muted-foreground" />
@@ -587,6 +982,15 @@ function CategoryGroup({ name, channels, positionDigits, activeChannelId, onSele
                 onClick={() => !locked && onSelectChannel(channel.channelId)}
                 isLocked={locked}
                 isPrivate={!!gid}
+                drag={dnd ? {
+                  draggable: true,
+                  onDragStart: (e) => dnd.onChannelDragStart(e, channel.channelId),
+                  onDragOver: (e) => dnd.onChannelDragOver(e, channel.channelId),
+                  onDrop: (e) => { e.stopPropagation(); dnd.onChannelDrop(e, channel.channelId, categoryId) },
+                  onDragEnd: dnd.onDragEnd,
+                  isOver: dnd.dragOverTarget === channel.channelId,
+                  isDragging: dnd.dragItem?.id === channel.channelId,
+                } : undefined}
               />
             )
           })}
@@ -703,9 +1107,21 @@ interface ChannelItemProps {
   onClick: () => void
   isLocked?: boolean
   isPrivate?: boolean
+  // Drag props live on the button itself — a `draggable` wrapper around a <button>
+  // never starts a drag (form controls swallow the gesture), which is why the
+  // category header (draggable directly on its button) works and a wrapper doesn't.
+  drag?: {
+    draggable: boolean
+    onDragStart: (e: ReactDragEvent) => void
+    onDragOver: (e: ReactDragEvent) => void
+    onDrop: (e: ReactDragEvent) => void
+    onDragEnd: (e: ReactDragEvent) => void
+    isOver: boolean
+    isDragging: boolean
+  }
 }
 
-function ChannelItem({ channel, position, positionDigits, isActive, onClick, isLocked = false, isPrivate = false }: ChannelItemProps) {
+function ChannelItem({ channel, position, positionDigits, isActive, onClick, isLocked = false, isPrivate = false, drag }: ChannelItemProps) {
   // Voice channel presence count
   const presenceByHub = useVoiceStore((s) => s.presenceByHub)
   const getChannelPresence = useVoiceStore((s) => s.getChannelPresence)
@@ -753,7 +1169,13 @@ function ChannelItem({ channel, position, positionDigits, isActive, onClick, isL
   const showPendingSelf = (isConnecting || (isInVoice && !selfAlreadyInPresence)) && !!myPubkey
 
   return (
-    <div className="mb-1 relative" data-channel-id={channel.channelId} data-channel-hub={activeHubId || undefined}>
+    <div
+      className={cn('mb-1 relative rounded-md transition-shadow', drag?.isOver && 'ring-2 ring-primary/40')}
+      data-channel-id={channel.channelId}
+      data-channel-hub={activeHubId || undefined}
+      onDragOver={drag?.onDragOver}
+      onDrop={drag?.onDrop}
+    >
       {/* Discord-style unread pill bar on the left edge */}
       {isUnread && (
         <div
@@ -765,6 +1187,9 @@ function ChannelItem({ channel, position, positionDigits, isActive, onClick, isL
       )}
 
       <button
+        draggable={drag?.draggable}
+        onDragStart={drag?.onDragStart}
+        onDragEnd={drag?.onDragEnd}
         onClick={() => {
           if (!isThisChannelActive && voiceChatMode) {
             setVoiceChatMode(false)
@@ -775,7 +1200,7 @@ function ChannelItem({ channel, position, positionDigits, isActive, onClick, isL
           'flex items-center gap-2 px-2 py-2 mx-2 rounded-md text-sm w-[calc(100%-16px)] text-left transition-colors',
           isLocked
             ? 'opacity-40 cursor-not-allowed'
-            : 'cursor-pointer',
+            : drag?.draggable ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer',
           !isLocked && isThisChannelActive
             ? 'bg-accent text-accent-foreground'
             : !isLocked ? 'text-muted-foreground hover:bg-accent/50 hover:text-foreground' : 'text-muted-foreground',
