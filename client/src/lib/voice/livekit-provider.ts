@@ -207,16 +207,41 @@ export class LiveKitProvider implements VoiceProvider {
         source: this.lk?.Track?.Source?.Microphone,
       })
     } else if (kind === 'video') {
-      await lp.publishTrack(track, {
+      const pub = await lp.publishTrack(track, {
         name: `${this.identity}:video`,
         source: this.lk?.Track?.Source?.Camera,
       })
+      this.logNegotiatedVideoCodec(pub?.track, 'camera')
     } else if (kind === 'screenshare') {
-      await lp.publishTrack(track, {
+      const pub = await lp.publishTrack(track, {
         name: `${this.identity}:screenshare`,
         source: this.lk?.Track?.Source?.ScreenShare,
       })
+      this.logNegotiatedVideoCodec(pub?.track, 'screenshare')
     }
+  }
+
+  /**
+   * Log the codec actually negotiated for a published video track (from getStats,
+   * not just what we requested), so VP9-vs-VP8 is verifiable. Codec stats only
+   * appear once RTP is flowing, so we sample after a short delay.
+   */
+  private logNegotiatedVideoCodec(lkTrack: any, label: string): void {
+    setTimeout(async () => {
+      try {
+        const sender: RTCRtpSender | undefined = lkTrack?.sender
+        if (!sender?.getStats) return
+        const report = await sender.getStats()
+        let codecId: string | undefined
+        report.forEach((s: any) => {
+          if (s.type === 'outbound-rtp' && s.kind === 'video' && s.codecId) codecId = s.codecId
+        })
+        const mime = codecId ? (report.get(codecId) as any)?.mimeType : undefined
+        console.log(`[LK Provider] ${label} publishing as ${mime || 'unknown codec'}`)
+      } catch (err) {
+        console.warn(`[LK Provider] Could not read ${label} codec:`, err)
+      }
+    }, 2500)
   }
 
   async unpublishTrack(kind: TrackKind): Promise<void> {
