@@ -5598,17 +5598,24 @@ function MembersPage({ hub, onFooterState }: { hub: HubData; onFooterState: (sta
     })
   }, [isDirty, saving, saveError, saveSuccess, modifiedCount, saveStep, saveStepsCompleted, onFooterState])
 
+  // Include the creator — they're a member too and may want to assign themselves a
+  // role they created (for display/grouping; their permissions are owner-level
+  // regardless). Synthesize an entry if they aren't in the loaded member set.
+  const membersWithCreator = useMemo(() => {
+    if (hubMembers.some(m => m.pubkey === hub.creatorPubkey)) return hubMembers
+    return [{ pubkey: hub.creatorPubkey, roles: 'everyone' } as HubMember, ...hubMembers]
+  }, [hubMembers, hub.creatorPubkey])
+
   const filteredMembers = useMemo(() => {
-    const list = hubMembers.filter(m => m.pubkey !== hub.creatorPubkey)
-    if (!search.trim()) return list
+    if (!search.trim()) return membersWithCreator
     const q = search.toLowerCase().trim()
-    return list.filter(m => {
+    return membersWithCreator.filter(m => {
       const profile = getProfile(m.pubkey)
       const name = (profile?.display_name || profile?.name || '').toLowerCase()
       const npub = nip19.npubEncode(m.pubkey).toLowerCase()
       return name.includes(q) || npub.includes(q)
     })
-  }, [hubMembers, hub.creatorPubkey, search, getProfile])
+  }, [membersWithCreator, search, getProfile])
 
   const getRolesForMember = (m: HubMember): string => {
     return stagedChanges[m.pubkey] ?? m.roles ?? 'everyone'
@@ -5616,7 +5623,7 @@ function MembersPage({ hub, onFooterState }: { hub: HubData; onFooterState: (sta
 
   const toggleRole = (memberPubkey: string, roleId: string, roleName: string) => {
     if (roleName === 'everyone') return
-    const currentMember = hubMembers.find(m => m.pubkey === memberPubkey)
+    const currentMember = membersWithCreator.find(m => m.pubkey === memberPubkey)
     if (!currentMember) return
     const currentRoles = getRolesForMember(currentMember)
     const roleIds = currentRoles.split('|').map(s => s.trim()).filter(Boolean)
@@ -6087,7 +6094,7 @@ function MembersPage({ hub, onFooterState }: { hub: HubData; onFooterState: (sta
       <div className="flex flex-col gap-2 max-h-[400px] overflow-y-auto">
         {filteredMembers.length === 0 ? (
           <p className="text-sm text-muted-foreground text-center py-6">
-            {hubMembers.length <= 1 ? 'No members besides you.' : 'No members match your search.'}
+            No members match your search.
           </p>
         ) : filteredMembers.map(member => {
           const profile = getProfile(member.pubkey)
@@ -6112,7 +6119,12 @@ function MembersPage({ hub, onFooterState }: { hub: HubData; onFooterState: (sta
                   </Avatar>
                 </span>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-foreground truncate">{name}</p>
+                  <p className="text-sm font-medium text-foreground truncate flex items-center gap-1.5">
+                    {name}
+                    {member.pubkey === hub.creatorPubkey && (
+                      <span className="shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-500/15 text-amber-500">Creator</span>
+                    )}
+                  </p>
                   <div className="flex flex-wrap gap-1 mt-0.5">
                     {hub.roles.filter(r => {
                       if (r.name === 'everyone') return roleIds.length === 0 || (roleIds.length === 1 && roleIds[0] === 'everyone')
