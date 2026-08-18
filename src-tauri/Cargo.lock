@@ -925,7 +925,7 @@ dependencies = [
 
 [[package]]
 name = "den-chat"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "bip39",
  "futures-util",

@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "DEN Chat",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "identifier": "top.denchat.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
