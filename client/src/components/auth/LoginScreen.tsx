@@ -494,8 +494,17 @@ export function LoginScreen() {
     setLoading('pc55')
     clearError()
     try {
-      // Step 1: Try to discover the signer first
-      const info = await discover()
+      // Step 1: Try to discover the signer first. Retry a few times before giving up —
+      // right after a logout, the signer app (e.g. DENOS) may still be releasing DEN
+      // Chat's previous WebSocket, and a single 2s probe fired into that window can
+      // spuriously miss a signer that's actually running. Quick re-probes let it recover
+      // without the user having to click Local twice. A genuinely-absent signer fails
+      // fast (connection refused), so this adds little delay when there's nothing there.
+      let info = await discover()
+      for (let attempt = 0; attempt < 3 && !info; attempt++) {
+        await new Promise((r) => setTimeout(r, 500))
+        info = await discover()
+      }
       if (!info) {
         // No signer found — show the friendly modal
         setShowLocalSignerModal(true)
