@@ -1931,6 +1931,7 @@ function ChannelsPage({ editCategories, setEditCategories, editChannels, setEdit
         onChange={(v) => setChannelCategory(ch.channelId, v === '__none' ? null : v)}
         options={[{ value: '__none', label: 'Uncategorized' }, ...editCategories.map(c => ({ value: c.categoryId, label: c.name }))]}
         className="shrink-0"
+        triggerClassName="max-w-[132px]"
       />
       <div className="flex items-center gap-1 shrink-0">
         <Tip text="Rename"><button onClick={() => startEditChannel(ch)} className="p-1.5 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 cursor-pointer transition-colors"><Pencil size={14} /></button></Tip>

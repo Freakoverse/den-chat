@@ -397,6 +397,7 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
         onChange={(v) => moveChannelToCategory(channel.channelId, v === '__none' ? null : v)}
         options={[{ value: '__none', label: 'No category' }, ...workCategories.map((c) => ({ value: c.categoryId, label: c.name }))]}
         className="shrink-0"
+        triggerClassName="max-w-[104px]"
       />
       {/* Up / down (work on touch) */}
       <Tip text="Move up">

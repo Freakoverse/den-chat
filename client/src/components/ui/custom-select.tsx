@@ -22,12 +22,14 @@ interface CustomSelectProps {
   className?: string
   /** Extra classes for the dropdown popup */
   popupClassName?: string
+  /** Extra classes for the trigger button (e.g. a max-width so the label truncates in tight rows) */
+  triggerClassName?: string
   /** Compact mode for inline usage */
   compact?: boolean
   disabled?: boolean
 }
 
-export function CustomSelect({ value, onChange, options, className, popupClassName, compact, disabled }: CustomSelectProps) {
+export function CustomSelect({ value, onChange, options, className, popupClassName, triggerClassName, compact, disabled }: CustomSelectProps) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   const popupRef = useRef<HTMLDivElement>(null)
@@ -93,10 +95,11 @@ export function CustomSelect({ value, onChange, options, className, popupClassNa
           'flex items-center justify-between gap-1.5 rounded-lg border border-input bg-background text-foreground cursor-pointer outline-none transition-colors hover:bg-accent/50 disabled:opacity-50 disabled:cursor-not-allowed',
           compact ? 'h-7 px-2 text-xs' : 'h-9 px-2.5 text-xs',
           open && 'border-primary/40 bg-accent/30',
+          triggerClassName,
         )}
         style={{ minWidth: compact ? 80 : 90 }}
       >
-        <span className="truncate">{selectedLabel}</span>
+        <span className="truncate min-w-0">{selectedLabel}</span>
         <ChevronDown size={12} className={cn('shrink-0 text-muted-foreground transition-transform duration-150', open && 'rotate-180')} />
       </button>
 
