@@ -248,7 +248,12 @@ export function ContextMenuProvider({ children }: { children: ReactNode }) {
           label: 'Open Link',
           icon: <MousePointerClick size={14} />,
           action: () => {
-            window.open(linkHref, '_blank', 'noopener,noreferrer')
+            // Defense-in-depth: never navigate to a script/data scheme even if some
+            // renderer let one through onto an anchor. Only the render layer is trusted
+            // to strip these today; guard here too so right-click → Open can't execute JS.
+            if (!/^\s*(javascript|data|vbscript):/i.test(linkHref)) {
+              window.open(linkHref, '_blank', 'noopener,noreferrer')
+            }
             close()
           },
         })
