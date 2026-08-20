@@ -635,47 +635,60 @@ function handleEditHint(event: Event) {
  * Callers should catch errors gracefully — if the key isn't available yet
  * (secret not loaded, wrong epoch) the message is treated as a normal message.
  */
+type MentionKind = 'personal' | 'everyone' | 'here' | 'role'
+
+/**
+ * Try to decrypt a message and classify its mention type. Returns whether we could
+ * actually read it — `decrypted: false` means we lack the key (restricted channel,
+ * epoch not synced yet, secret still loading), so it isn't shown in chat and must NOT
+ * drive a notification. Never throws.
+ */
 async function detectMentionType(
   hubDTag: string,
   channelId: string,
   epoch: number,
   encryptedContent: string,
   senderPubkey: string
-): Promise<'personal' | 'everyone' | 'here' | 'role' | undefined> {
+): Promise<{ decrypted: boolean; mentionType?: MentionKind }> {
   // Don't scan our own messages
   const myPubkey = useUserStore.getState().pubkey
-  if (!myPubkey || senderPubkey === myPubkey) return undefined
+  if (!myPubkey || senderPubkey === myPubkey) return { decrypted: false }
 
   // Get hub secret
   const secretHex = useHubStore.getState().hubSecrets[hubDTag]
-  if (!secretHex) return undefined // key not loaded yet — can't decrypt
+  if (!secretHex) return { decrypted: false } // key not loaded yet — can't decrypt
 
   // Derive channel key and decrypt
-  const secretBytes = new Uint8Array(secretHex.match(/.{2}/g)!.map((b: string) => parseInt(b, 16)))
-  const channelKey = deriveChannelKey(secretBytes, channelId, epoch)
-  const plaintext = await aesDecrypt(channelKey, encryptedContent)
+  let plaintext: string
+  try {
+    const secretBytes = new Uint8Array(secretHex.match(/.{2}/g)!.map((b: string) => parseInt(b, 16)))
+    const channelKey = deriveChannelKey(secretBytes, channelId, epoch)
+    plaintext = await aesDecrypt(channelKey, encryptedContent)
+  } catch {
+    return { decrypted: false } // wrong/absent key, restricted channel, epoch mismatch
+  }
 
   // Check for personal mention (nostr:npub1..., @npub1...)
   const myNpub = nip19.npubEncode(myPubkey)
   if (plaintext.includes(myNpub) || plaintext.includes(`nostr:${myNpub}`)) {
-    return 'personal'
+    return { decrypted: true, mentionType: 'personal' }
   }
 
   // Check for @everyone
-  if (plaintext.includes('@everyone')) return 'everyone'
+  if (plaintext.includes('@everyone')) return { decrypted: true, mentionType: 'everyone' }
 
   // Check for @here
-  if (plaintext.includes('@here')) return 'here'
+  if (plaintext.includes('@here')) return { decrypted: true, mentionType: 'here' }
 
   // Check for @role mentions — scan hub role names
   const hub = useHubStore.getState().hubs[hubDTag]
   if (hub?.roles?.length) {
     for (const role of hub.roles) {
-      if (role.name && plaintext.includes(`@${role.name}`)) return 'role'
+      if (role.name && plaintext.includes(`@${role.name}`)) return { decrypted: true, mentionType: 'role' }
     }
   }
 
-  return undefined // normal message, no special mention
+  return { decrypted: true } // decrypted, no special mention → normal message
 }
 
 export function useHubSubscriptions() {
@@ -899,6 +912,15 @@ export function useHubSubscriptions() {
       const minPow = hub?.minPow || 0
       if (minPow > 0 && countLeadingZeroBits(event.id) < minPow) return
 
+      // Is this a genuinely new message, or a replacement (edit / deletion) of one we
+      // already hold? Edits and deletions are re-published as KINDS.MESSAGE events with
+      // the same d-tag, so they must NOT ring the "new message" sound or bump unread —
+      // even when they slip past the session-start timestamp guard (e.g. a deletion that
+      // gets a "now" timestamp because the original wasn't cached locally). Checked here,
+      // BEFORE the store add/replace below, so the existence lookup reflects prior state.
+      const isReplacement = msg.deleted || !!useMessageStore.getState()
+        .messages[msg.hubDTag]?.[msg.channelId]?.some((m) => m.dTag === msg.dTag && m.pubkey === msg.pubkey)
+
       // Add to in-memory store (messageStore handles its own dedup)
       addMessageRef.current(msg)
 
@@ -926,28 +948,33 @@ export function useHubSubscriptions() {
       // Skip own messages — they should never count as "unread"
       const myPubkey = useUserStore.getState().pubkey
       if (event.pubkey === myPubkey) return
+      if (isReplacement) {
+        // Edit/deletion — not a new message: no sound, no unread bump. If it landed in
+        // the channel currently being viewed, still advance the read watermark (as the
+        // new-message path below does) so it isn't re-counted later.
+        if (msg.hubDTag === activeHubIdRef.current && msg.channelId === activeChannelIdRef.current) {
+          useNotificationStore.getState().advanceChannelRead(msg.hubDTag, msg.channelId, msg.createdAt)
+        }
+        return
+      }
       if (msg.hubDTag !== activeHubIdRef.current || msg.channelId !== activeChannelIdRef.current) {
-        // Attempt async mention detection, fall back to undefined (normal message)
+        // Decrypt + classify. Only notify for a message we could actually read: one we
+        // can't decrypt (restricted channel, unsynced epoch, key still loading) isn't
+        // shown in chat, so it must not bump unread or ring the sound.
         detectMentionType(msg.hubDTag, msg.channelId, msg.epoch, event.content, event.pubkey)
-          .then((mentionType) => {
+          .then(({ decrypted, mentionType }) => {
+            if (!decrypted) return
             useNotificationStore.getState().incrementChannelUnread(
               msg.hubDTag, msg.channelId, msg.createdAt, mentionType
             )
             // Play message sound if not muted for this hub/mention type
             playMessageSoundIfAllowed(msg.hubDTag, mentionType, msg.createdAt)
+            // Also bump the legacy per-hub counter for the old sidebar badge
+            if (msg.hubDTag !== activeHubIdRef.current) {
+              incrementUnreadRef.current(msg.hubDTag)
+            }
           })
-          .catch(() => {
-            // Decryption failed (key not ready, wrong epoch, etc.) — treat as normal message
-            useNotificationStore.getState().incrementChannelUnread(
-              msg.hubDTag, msg.channelId, msg.createdAt
-            )
-            playMessageSoundIfAllowed(msg.hubDTag, undefined, msg.createdAt)
-          })
-
-        // Also bump the legacy per-hub counter for the old sidebar badge
-        if (msg.hubDTag !== activeHubIdRef.current) {
-          incrementUnreadRef.current(msg.hubDTag)
-        }
+          .catch(() => { /* detectMentionType never throws; nothing to do */ })
       } else {
         // Message landed in the channel the user is actively viewing. Advance the
         // read watermark so it isn't re-counted as unread by a later refresh scan
