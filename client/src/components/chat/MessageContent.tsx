@@ -352,7 +352,7 @@ function BlossomImage({ src, alt, className }: { src: string; alt?: string; clas
   const isLoading = !loaded && !error
 
   return (
-    <div className="relative inline-block mt-1 max-w-[min(400px,100%)]">
+    <div className="relative block mt-1 max-w-[min(400px,100%)]">
       {/* Shimmer skeleton while loading */}
       {isLoading && (
         <div className="media-skeleton" style={{ minHeight: 160, width: 400, maxWidth: '100%' }} />
@@ -533,7 +533,7 @@ export function VideoEmbed({ src }: { src: string }) {
   // Cached blob ready — play inline
   if (cacheState === 'done' && cacheBlobUrl) {
     return (
-      <div className="relative inline-block mt-1 max-w-[min(400px,100%)]">
+      <div className="relative block mt-1 max-w-[min(400px,100%)]">
         <video
           src={cacheBlobUrl}
           controls
@@ -612,7 +612,7 @@ export function VideoEmbed({ src }: { src: string }) {
   }
 
   return (
-    <div className="relative inline-block mt-1 max-w-[min(400px,100%)]">
+    <div className="relative block mt-1 max-w-[min(400px,100%)]">
       <video
         src={resolvedSrc}
         controls
