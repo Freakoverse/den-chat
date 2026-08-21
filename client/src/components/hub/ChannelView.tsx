@@ -3058,6 +3058,7 @@ export function ReactionBar({ reactions, messageId, onAddReaction, rawReactions,
           <button
             ref={addReactionBtnRef}
             onClick={() => setShowPicker(!showPicker)}
+            title="Add a reaction"
             className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-secondary/50 border border-border text-muted-foreground hover:bg-secondary hover:text-foreground cursor-pointer transition-colors"
           >
             <Smile size={14} />
@@ -3074,13 +3075,16 @@ export function ReactionBar({ reactions, messageId, onAddReaction, rawReactions,
           )}
         </div>
       )}
-      {/* Total reaction count badge — clickable to view who reacted */}
+      {/* Total reaction count badge — clickable to view who reacted. Kept neutral
+          (gray) so blue is reserved exclusively for "you reacted / click to remove",
+          otherwise the view-reactions badge and a reacted pill look identical. */}
       {totalCount > 0 && (
         <button
           onClick={() => setShowReactionList(true)}
-          className="inline-flex items-center gap-1 h-7 px-2.5 rounded-full text-base cursor-pointer transition-colors border bg-primary/10 border-primary/30 text-primary hover:bg-primary/20"
+          title="See who reacted"
+          className="inline-flex items-center gap-1 h-7 px-2.5 rounded-full text-base cursor-pointer transition-colors border bg-secondary/50 border-border text-muted-foreground hover:bg-secondary hover:text-foreground"
         >
-          <Smile size={16} />
+          <Users size={15} />
           <span className="font-semibold">{totalCount}</span>
         </button>
       )}
@@ -3088,6 +3092,7 @@ export function ReactionBar({ reactions, messageId, onAddReaction, rawReactions,
         <button
           key={r.emoji}
           onClick={() => onAddReaction(messageId, r.emoji, r.customUrl)}
+          title={r.reacted ? 'Remove your reaction' : 'React'}
           className={`inline-flex items-center gap-1 h-7 px-2.5 rounded-full text-base cursor-pointer transition-colors border ${r.reacted
             ? 'bg-primary/20 border-primary/40 text-foreground'
             : 'bg-secondary/50 border-border text-muted-foreground hover:bg-secondary'
