@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { setDraftUser } from '@/stores/draftStore'
+import { resetSession } from '@/lib/session/resetSession'
 import { StorageKey } from '@/lib/constants'
 
 export type AuthMethod = 'upv2' | 'pc55' | 'nip46' | 'nsec' | 'seed' | 'vault' | null
@@ -63,6 +64,11 @@ export const useUserStore = create<UserState>((set) => ({
   accountIndex: 0,
 
   login: (pubkey, method, privateKey = null) => {
+    // If switching directly from another account without an explicit logout (e.g. the
+    // account carousel), clear the previous account's data/subscriptions first so it
+    // doesn't bleed into the new session. A fresh login (no prior pubkey) needs nothing.
+    const prevPubkey = useUserStore.getState().pubkey
+    if (prevPubkey && prevPubkey !== pubkey) resetSession()
     setDraftUser(pubkey)
     set({ isAuthenticated: true, pubkey, authMethod: method, privateKey })
   },
@@ -77,6 +83,11 @@ export const useUserStore = create<UserState>((set) => ({
     // Clear persisted bunker credentials so auto-login doesn't re-authenticate
     localStorage.removeItem(StorageKey.BUNKER_URL)
     localStorage.removeItem(StorageKey.BUNKER_CLIENT_SECRET)
+
+    // Tear down this account's live subscriptions and wipe its per-account stores, so
+    // the next account that logs in doesn't inherit ghost notifications, stale DMs, or
+    // a flash of the previous hub list.
+    resetSession()
 
     set({
       isAuthenticated: false,

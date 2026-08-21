@@ -811,10 +811,21 @@ export function useHubSubscriptions() {
   }, [])
 
   useEffect(() => {
-    if (!hubListLoaded) return
-
     const hubKeys = Object.keys(hubs)
-    if (hubKeys.length === 0) return
+
+    // No hubs to watch — the hub list hasn't loaded yet, or the account was cleared
+    // (logout / account switch empties the hub store). If we had live subscriptions,
+    // close them so the previous account stops receiving messages — otherwise those
+    // sockets keep firing and produce ghost notifications after switching accounts —
+    // and clear the fingerprint so a fresh login re-subscribes from scratch.
+    if (!hubListLoaded || hubKeys.length === 0) {
+      if (subsRef.current.length > 0) {
+        for (const sub of subsRef.current) sub.close()
+        subsRef.current = []
+        hubFingerprintRef.current = ''
+      }
+      return
+    }
 
     // Build a fingerprint to detect relay config changes
     const fingerprint = hubKeys
