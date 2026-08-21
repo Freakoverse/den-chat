@@ -266,6 +266,9 @@ export function useBlossomMedia(originalUrl: string | undefined, maxSizeMB?: num
     setDetectedSize(undefined)
 
     const findServer = async () => {
+      // Track whether any probe was inconclusive (threw) vs. a definitive HTTP miss,
+      // so a CORS-blocked HEAD isn't mistaken for "file absent".
+      let hadAmbiguous = false
       for (let i = 0; i < servers.length; i++) {
         if (cancelRef.current) return
         const url = buildUrl(i)
@@ -302,14 +305,31 @@ export function useBlossomMedia(originalUrl: string | undefined, maxSizeMB?: num
             return
           }
         } catch {
-          // Server didn't respond, try next
+          // CORS / network / timeout — inconclusive. The server may still serve the
+          // bytes to an <img> tag (which, unlike fetch(), does not require CORS), so a
+          // thrown probe must NOT be treated as "file absent".
+          hadAmbiguous = true
         }
       }
-      // No server responded at all
-      if (!cancelRef.current) {
-        setError('not-found')
-        setLoading(false)
+      if (cancelRef.current) return
+      // HEAD could not confirm any server. If every miss was a definitive HTTP response,
+      // the file genuinely isn't reachable → not-found. If any probe was inconclusive
+      // (e.g. blossom.primal.net redirecting to a CORS-less CDN), fall back to optimistic
+      // <img> rendering from the origin and let onImgError handle a genuine miss. Verify
+      // still runs in the background and simply stays "pending" if it's also CORS-blocked.
+      if (hadAmbiguous) {
+        const fallbackUrl = buildUrl(0)
+        if (fallbackUrl) {
+          imgErrorIdxRef.current = 0
+          setCurrentSrc(fallbackUrl)
+          setServerIdx(0)
+          setLoading(false)
+          verifyInBackground(0)
+          return
+        }
       }
+      setError('not-found')
+      setLoading(false)
     }
 
     // Background hash verification

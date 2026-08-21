@@ -4,17 +4,17 @@ import type { ISigner } from '@/stores/userStore'
 import { signWithSigner, createUnsignedEvent } from '@/lib/nostr'
 import { StorageKey } from '@/lib/constants'
 
+// Curated to servers that are reachable, CORS-clean, and accept anonymous uploads
+// from a browser origin. Removed 2026-08: cdn.sovbit.host (DNS no longer resolves),
+// blossom.nostr.hu (upload now 401 auth-walled), milo/mibo.nostria.app (missing CORS
+// headers + 301 redirect that browsers refuse to follow on a preflighted request).
 const DEFAULT_SERVERS = [
   'https://blossom.primal.net',
   'https://blossom.band',
-  'https://blossom.nostr.hu',
-  'https://cdn.sovbit.host',
   'https://blossom.data.haus',
   'https://nostr.download',
   'https://blossom.jumble.social',
   'https://blossom.ditto.pub',
-  'https://milo.nostria.app',
-  'https://mibo.nostria.app',
   'https://blossom-01.uid.ovh',
   'https://blossom-02.uid.ovh',
 ]
