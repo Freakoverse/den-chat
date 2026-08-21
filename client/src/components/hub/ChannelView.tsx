@@ -3051,18 +3051,23 @@ export function ReactionBar({ reactions, messageId, onAddReaction, rawReactions,
   if (reactions.length === 0 && !children) return null
 
   return (
+    <TooltipProvider delayDuration={200}>
     <div className="flex items-center gap-1 mt-1 flex-wrap relative">
       {/* Add reaction button (left-most) — only show if there are reactions */}
       {reactions.length > 0 && (
         <div className="relative">
-          <button
-            ref={addReactionBtnRef}
-            onClick={() => setShowPicker(!showPicker)}
-            title="Add a reaction"
-            className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-secondary/50 border border-border text-muted-foreground hover:bg-secondary hover:text-foreground cursor-pointer transition-colors"
-          >
-            <Smile size={14} />
-          </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                ref={addReactionBtnRef}
+                onClick={() => setShowPicker(!showPicker)}
+                className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-secondary/50 border border-border text-muted-foreground hover:bg-secondary hover:text-foreground cursor-pointer transition-colors"
+              >
+                <Smile size={14} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="text-xs">Add a reaction</TooltipContent>
+          </Tooltip>
           {showPicker && (
             <EmojiPickerPopover
               anchorRef={addReactionBtnRef}
@@ -3079,25 +3084,29 @@ export function ReactionBar({ reactions, messageId, onAddReaction, rawReactions,
           (gray) so blue is reserved exclusively for "you reacted / click to remove",
           otherwise the view-reactions badge and a reacted pill look identical. */}
       {totalCount > 0 && (
-        <button
-          onClick={() => setShowReactionList(true)}
-          title="See who reacted"
-          className="inline-flex items-center gap-1 h-7 px-2.5 rounded-full text-base cursor-pointer transition-colors border bg-secondary/50 border-border text-muted-foreground hover:bg-secondary hover:text-foreground"
-        >
-          <Users size={15} />
-          <span className="font-semibold">{totalCount}</span>
-        </button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              onClick={() => setShowReactionList(true)}
+              className="inline-flex items-center gap-1 h-7 px-2.5 rounded-full text-base cursor-pointer transition-colors border bg-secondary/50 border-border text-muted-foreground hover:bg-secondary hover:text-foreground"
+            >
+              <Users size={15} />
+              <span className="font-semibold">{totalCount}</span>
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="top" className="text-xs">See who reacted</TooltipContent>
+        </Tooltip>
       )}
       {reactions.map((r) => (
-        <button
-          key={r.emoji}
-          onClick={() => onAddReaction(messageId, r.emoji, r.customUrl)}
-          title={r.reacted ? 'Remove your reaction' : 'React'}
-          className={`inline-flex items-center gap-1 h-7 px-2.5 rounded-full text-base cursor-pointer transition-colors border ${r.reacted
-            ? 'bg-primary/20 border-primary/40 text-foreground'
-            : 'bg-secondary/50 border-border text-muted-foreground hover:bg-secondary'
-            }`}
-        >
+        <Tooltip key={r.emoji}>
+          <TooltipTrigger asChild>
+          <button
+            onClick={() => onAddReaction(messageId, r.emoji, r.customUrl)}
+            className={`inline-flex items-center gap-1 h-7 px-2.5 rounded-full text-base cursor-pointer transition-colors border ${r.reacted
+              ? 'bg-primary/20 border-primary/40 text-foreground'
+              : 'bg-secondary/50 border-border text-muted-foreground hover:bg-secondary'
+              }`}
+          >
           <span>{(() => {
             if (!disableCustomEmojis && r.customUrl) return <img src={r.customUrl} alt={r.emoji} className="h-5 w-5 object-contain inline" />
             if (!disableCustomEmojis) {
@@ -3134,7 +3143,10 @@ export function ReactionBar({ reactions, messageId, onAddReaction, rawReactions,
               </span>
             </TooltipProvider>
           )}
-        </button>
+          </button>
+          </TooltipTrigger>
+          <TooltipContent side="top" className="text-xs">{r.reacted ? 'Remove your reaction' : 'React'}</TooltipContent>
+        </Tooltip>
       ))}
       {children}
       {/* Reaction List Modal */}
@@ -3148,6 +3160,7 @@ export function ReactionBar({ reactions, messageId, onAddReaction, rawReactions,
         />
       )}
     </div>
+    </TooltipProvider>
   )
 }
 
