@@ -43,14 +43,35 @@ function openChannel(channelId: string, voice: boolean) {
 }
 
 export function ChannelPill({ channelId, name, voice }: { channelId: string; name: string; voice?: boolean }) {
+  // Resolve which category this channel sits under (in the active hub) so the hover
+  // tooltip can disambiguate duplicate channel names across categories — the pill text
+  // itself stays short (just #name), which is what a click already navigates to.
+  const categoryName = useHubStore((s) => {
+    const hub = s.activeHubId ? s.hubs[s.activeHubId] : undefined
+    if (!hub) return undefined
+    const ch = hub.channels.find((c) => c.channelId === channelId)
+    if (!ch?.categoryId) return undefined
+    return hub.categories.find((cat) => cat.categoryId === ch.categoryId)?.name
+  })
+
   return (
-    <button
-      onClick={(e) => { e.stopPropagation(); openChannel(channelId, !!voice) }}
-      className="inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-xs font-medium bg-primary/15 text-primary hover:bg-primary/25 transition-colors cursor-pointer align-baseline"
-      title={`#${name}`}
-    >
-      <Hash size={11} className="opacity-80" />{name}
-    </button>
+    <TooltipProvider delayDuration={200}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            onClick={(e) => { e.stopPropagation(); openChannel(channelId, !!voice) }}
+            className="inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-xs font-medium bg-primary/15 text-primary hover:bg-primary/25 transition-colors cursor-pointer align-baseline"
+          >
+            <Hash size={11} className="opacity-80" />{name}
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="text-xs">
+          {categoryName
+            ? <span>#{name} <span className="opacity-60">· {categoryName}</span></span>
+            : `#${name}`}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   )
 }
 
