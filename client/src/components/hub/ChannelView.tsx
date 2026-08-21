@@ -3078,9 +3078,9 @@ export function ReactionBar({ reactions, messageId, onAddReaction, rawReactions,
       {totalCount > 0 && (
         <button
           onClick={() => setShowReactionList(true)}
-          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs cursor-pointer transition-colors border bg-primary/10 border-primary/30 text-primary hover:bg-primary/20"
+          className="inline-flex items-center gap-1 h-7 px-2.5 rounded-full text-base cursor-pointer transition-colors border bg-primary/10 border-primary/30 text-primary hover:bg-primary/20"
         >
-          <Smile size={12} />
+          <Smile size={16} />
           <span className="font-semibold">{totalCount}</span>
         </button>
       )}
@@ -3088,18 +3088,18 @@ export function ReactionBar({ reactions, messageId, onAddReaction, rawReactions,
         <button
           key={r.emoji}
           onClick={() => onAddReaction(messageId, r.emoji, r.customUrl)}
-          className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-xs cursor-pointer transition-colors border ${r.reacted
+          className={`inline-flex items-center gap-1 h-7 px-2.5 rounded-full text-base cursor-pointer transition-colors border ${r.reacted
             ? 'bg-primary/20 border-primary/40 text-foreground'
             : 'bg-secondary/50 border-border text-muted-foreground hover:bg-secondary'
             }`}
         >
           <span>{(() => {
-            if (!disableCustomEmojis && r.customUrl) return <img src={r.customUrl} alt={r.emoji} className="h-4 w-4 object-contain inline" />
+            if (!disableCustomEmojis && r.customUrl) return <img src={r.customUrl} alt={r.emoji} className="h-5 w-5 object-contain inline" />
             if (!disableCustomEmojis) {
               const scMatch = r.emoji.match(/^:([a-zA-Z0-9_-]+):$/)
               if (scMatch) {
                 const entry = getEmojiMap().get(scMatch[1])
-                if (entry) return <img src={entry.url} alt={r.emoji} className="h-4 w-4 object-contain inline" />
+                if (entry) return <img src={entry.url} alt={r.emoji} className="h-5 w-5 object-contain inline" />
               }
             }
             // When disabled, show 'n/a' for custom emojis instead of raw :shortcode:
@@ -3116,7 +3116,7 @@ export function ReactionBar({ reactions, messageId, onAddReaction, rawReactions,
                   return (
                     <Tooltip key={pk}>
                       <TooltipTrigger asChild>
-                        <span className="w-4 h-4 rounded-full overflow-hidden border border-background bg-secondary inline-flex items-center justify-center text-[7px] font-semibold text-muted-foreground shrink-0">
+                        <span className="w-5 h-5 rounded-full overflow-hidden border border-background bg-secondary inline-flex items-center justify-center text-[9px] font-semibold text-muted-foreground shrink-0">
                           {p?.picture
                             ? <img src={p.picture} alt="" className="w-full h-full object-cover" />
                             : name.slice(0, 1).toUpperCase()}
