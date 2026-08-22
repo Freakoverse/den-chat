@@ -43,16 +43,20 @@ function openChannel(channelId: string, voice: boolean) {
 }
 
 export function ChannelPill({ channelId, name, voice }: { channelId: string; name: string; voice?: boolean }) {
-  // Resolve which category this channel sits under (in the active hub) so the hover
-  // tooltip can disambiguate duplicate channel names across categories — the pill text
-  // itself stays short (just #name), which is what a click already navigates to.
-  const categoryName = useHubStore((s) => {
-    const hub = s.activeHubId ? s.hubs[s.activeHubId] : undefined
-    if (!hub) return undefined
-    const ch = hub.channels.find((c) => c.channelId === channelId)
-    if (!ch?.categoryId) return undefined
-    return hub.categories.find((cat) => cat.categoryId === ch.categoryId)?.name
-  })
+  const hub = useHubStore((s) => (s.activeHubId ? s.hubs[s.activeHubId] : undefined))
+  // Resolve the channel's category (shown in the hover tooltip) and, when its name is
+  // ambiguous (another channel in the hub shares it), its position number — the same
+  // number the #channel input suggestions display — so the posted pill matches what was
+  // picked and is distinguishable at a glance. Unique names stay clean (just #name).
+  const { categoryName, position, ambiguous } = useMemo(() => {
+    const ch = hub?.channels.find((c) => c.channelId === channelId)
+    if (!hub || !ch) return { categoryName: undefined, position: undefined, ambiguous: false }
+    const categoryName = ch.categoryId
+      ? hub.categories.find((cat) => cat.categoryId === ch.categoryId)?.name
+      : undefined
+    const ambiguous = hub.channels.filter((c) => c.name === ch.name).length > 1
+    return { categoryName, position: ch.position, ambiguous }
+  }, [hub, channelId])
 
   return (
     <TooltipProvider delayDuration={200}>
@@ -63,6 +67,7 @@ export function ChannelPill({ channelId, name, voice }: { channelId: string; nam
             className="inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-xs font-medium bg-primary/15 text-primary hover:bg-primary/25 transition-colors cursor-pointer align-baseline"
           >
             <Hash size={11} className="opacity-80" />{name}
+            {ambiguous && position != null && <span className="opacity-50">·{position}</span>}
           </button>
         </TooltipTrigger>
         <TooltipContent side="top" className="text-xs">
