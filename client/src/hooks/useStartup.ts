@@ -325,6 +325,7 @@ export function useStartup() {
         ensureAddressableRedundancy(STANDARD_KINDS.RELAY_LIST, pubkey)              // kind 10002 — relay list
         ensureAddressableRedundancy(STANDARD_KINDS.BLOSSOM_SERVER_LIST, pubkey)     // kind 10063 — blossom servers
         ensureAddressableRedundancy(KINDS.USER_HUB_LIST, pubkey, undefined, useHubStore.getState().hubListCreatedAt) // kind 16942 — hub list (version-aware)
+        ensureAddressableRedundancy(STANDARD_KINDS.USER_STATUS, pubkey, 'general')  // kind 30315 — NIP-38 general status
 
         // Emoji sets (kind 30030) — user's own sets, dynamic d-tags
         for (const set of useEmojiStore.getState().myEmojiSets) {
