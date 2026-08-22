@@ -71,7 +71,7 @@ import { ZapTotalBadge } from '@/components/hub/ZapTotalBadge'
 import { formatSats, type ZapInfo } from '@/lib/nostr/zap'
 import { ReactionListModal, type ReactionInfo } from '@/components/social/ReactionListModal'
 import { ReportModal } from '@/components/hub/ReportModal'
-import { usePermissions, getPermissionsForUser } from '@/lib/hub/permissions'
+import { usePermissions, getPermissionsForUser, getChannelGroupId } from '@/lib/hub/permissions'
 import { useMentionAutocomplete } from './useMentionAutocomplete'
 import { MentionSuggestionsDropdown } from './MentionSuggestionsDropdown'
 import { useNotificationStore } from '@/stores/notificationStore'
@@ -245,6 +245,7 @@ export function ChannelView({ hideHeader = false }: { hideHeader?: boolean } = {
   const pubkey = useUserStore((s) => s.pubkey)
   const hubMembers = useHubStore((s) => activeHubId ? s.hubMembers[activeHubId] : undefined)
   const hubPrefs = useHubStore((s) => activeHubId ? s.hubPrefs[activeHubId] : undefined)
+  const groupSecrets = useHubStore((s) => activeHubId ? s.groupSecrets[activeHubId] : undefined)
 
   const [optimisticMessages, setOptimisticMessages] = useState<OptimisticMessage[]>([])
   const [replyContext, setReplyContext] = useState<ReplyContext | null>(null)
@@ -269,6 +270,15 @@ export function ChannelView({ hideHeader = false }: { hideHeader?: boolean } = {
   const channel = hub?.channels.find((c) => c.channelId === activeChannelId)
   if (!channel) return null
 
+  // Defense-in-depth: even if an inaccessible channel is somehow opened (e.g. a
+  // stale deep link), never render its messages. Mirrors the sidebar's visibility
+  // rule — view_channel permission plus any required group secret. Non-members fall
+  // back to the 'everyone' role, so this only hides channels genuinely gated.
+  const activeGroupId = getChannelGroupId(hub!, channel.channelId)
+  const noChannelAccess = !!pubkey && !isCreator && (
+    !perms.view_channel || (!!activeGroupId && !(groupSecrets && groupSecrets[activeGroupId]))
+  )
+
   const facilitatorPk = hubPrefs?.facilitator
   const isFacilitated = !isMember
     && !!facilitatorPk
@@ -287,6 +297,15 @@ export function ChannelView({ hideHeader = false }: { hideHeader?: boolean } = {
         <div className={`absolute inset-x-0 bottom-0 ${hideHeader ? 'top-0' : 'top-12'} z-40 flex flex-col items-center justify-center bg-background/90 backdrop-blur-sm`}>
           <Loader2 size={28} className="animate-spin text-primary mb-3" />
           <span className="text-sm text-muted-foreground">Loading hub data...</span>
+        </div>
+      )}
+      {/* No-access cover — shown once membership is resolved if the user can't view
+          this channel. Belt-and-suspenders behind the sidebar/#channel-link gating. */}
+      {secretsResolved && noChannelAccess && (
+        <div className={`absolute inset-x-0 bottom-0 ${hideHeader ? 'top-0' : 'top-12'} z-40 flex flex-col items-center justify-center bg-background/95 backdrop-blur-sm px-6 text-center`}>
+          <Lock size={28} className="text-muted-foreground mb-3" />
+          <span className="text-sm font-medium text-foreground mb-1">You don’t have access to this channel</span>
+          <span className="text-xs text-muted-foreground">You don’t have permission to view its messages.</span>
         </div>
       )}
       {/* Messages — bordered, rounded card */}
@@ -2650,9 +2669,30 @@ function BlobFile({ servers, hash, ext, name, size, type, encryption }: {
 /* ────────────── GIF Image with skeleton ────────────── */
 
 function GifImg({ src, alt, nsfw, className, style }: { src: string; alt: string; nsfw?: boolean; className?: string; style?: React.CSSProperties }) {
+  // Route through blossom media so a GIF whose origin server is down/CORS-blocked
+  // fails over to the other configured servers instead of showing a broken image
+  // (previously a bare <img> with no onError → infinite skeleton on any failure).
+  const blossom = useBlossomMedia(src)
   const [loaded, setLoaded] = useState(false)
+  const [error, setError] = useState(false)
   const w = (style?.maxWidth as number) || 220
   const h = (style?.maxHeight as number) || 220
+
+  // Reset load/error state on src change or blossom failover to a new server.
+  useEffect(() => { setLoaded(false); setError(false) }, [src, blossom.src])
+
+  if (blossom.error === 'not-found' || error) {
+    return (
+      <span
+        className="inline-flex items-center justify-center rounded-lg bg-secondary/40 border border-border/50 text-[11px] text-muted-foreground/60 px-3"
+        style={{ width: w, height: Math.min(h, 80), maxWidth: '100%' }}
+      >
+        GIF failed to load
+      </span>
+    )
+  }
+
+  const resolvedSrc = blossom.src || src
 
   return (
     <>
@@ -2660,11 +2700,12 @@ function GifImg({ src, alt, nsfw, className, style }: { src: string; alt: string
         <span className="media-skeleton inline-block" style={{ width: w, height: h, maxWidth: '100%' }} />
       )}
       <img
-        src={src}
+        src={resolvedSrc}
         alt={alt}
         className={`${className || ''} ${!loaded ? 'opacity-0 h-0 overflow-hidden block' : ''}`}
         style={style}
-        onLoad={() => setLoaded(true)}
+        onLoad={() => { setLoaded(true); setError(false) }}
+        onError={() => { blossom.onImgError(); setError(true) }}
       />
     </>
   )
