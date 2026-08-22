@@ -69,8 +69,8 @@ export function parseHubEvent(event: Event): (HubData & { creatorPubkey: string 
     const wTag = event.tags.find(t => t[0] === 'w')?.[1]
     let minPow = wTag ? parseInt(wTag, 10) : 0
 
-    // Parse join PoW from the W tag; fall back to message PoW when absent so
-    // existing hubs keep their current join behavior.
+    // Parse join PoW from the W tag. No W tag ⇒ 0 (no join PoW) — the join PoW is an
+    // explicit, opt-in setting; it does NOT inherit the message PoW.
     const wjTag = event.tags.find(t => t[0] === 'W')?.[1]
 
     // Parse NSFW from content-warning tag (source of truth)
@@ -224,7 +224,7 @@ export function parseHubEvent(event: Event): (HubData & { creatorPubkey: string 
       categories,
       roles,
       minPow,
-      joinMinPow: wjTag ? parseInt(wjTag, 10) : minPow,
+      joinMinPow: wjTag ? parseInt(wjTag, 10) : 0,
       nsfw,
       creatorPubkey: event.pubkey,
       deleted: isDeleted || undefined,

@@ -105,7 +105,7 @@ export function HubEventCard({ identifier, pubkey, relays }: HubEventCardProps) 
         // Read PoW from w tag (source of truth), fallback to legacy JSON
         const wTagVal = latest.tags.find(t => t[0] === 'w')?.[1]
         let minPow = wTagVal ? parseInt(wTagVal, 10) : 0
-        // Join PoW from the W tag; falls back to message PoW when absent
+        // Join PoW from the W tag. No W tag ⇒ 0 (join PoW is explicit, not inherited).
         const wjTagVal = latest.tags.find(t => t[0] === 'W')?.[1]
         // Read NSFW from content-warning tag (source of truth), fallback to legacy JSON
         let nsfw = latest.tags.some(t => t[0] === 'content-warning')
@@ -140,7 +140,7 @@ export function HubEventCard({ identifier, pubkey, relays }: HubEventCardProps) 
           categories: [],
           roles: [],
           minPow,
-          joinMinPow: wjTagVal ? parseInt(wjTagVal, 10) : minPow,
+          joinMinPow: wjTagVal ? parseInt(wjTagVal, 10) : 0,
           nsfw,
         }
 

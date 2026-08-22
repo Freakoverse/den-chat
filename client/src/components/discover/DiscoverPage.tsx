@@ -49,9 +49,8 @@ interface DiscoveredHub {
   banner?: string
   tags?: string[]
   minPow: number
+  /** Explicit join PoW (from the W tag); 0 when the hub set none — never inherits minPow. */
   joinMinPow: number
-  /** True when the hub explicitly set a join PoW (W tag present), vs. falling back to minPow. */
-  hasJoinPow: boolean
   nsfw: boolean
   discoverable: boolean
   creatorPubkey: string
@@ -84,7 +83,7 @@ function parseHubEventForDiscover(event: Event): DiscoveredHub | null {
     const wTagVal = event.tags.find(t => t[0] === 'w')?.[1]
     let minPow = wTagVal ? parseInt(wTagVal, 10) : 0
 
-    // Join PoW from the W tag; falls back to message PoW when absent
+    // Join PoW from the W tag. No W tag ⇒ 0 (join PoW is explicit, not inherited).
     const wjTagVal = event.tags.find(t => t[0] === 'W')?.[1]
 
     let description = ''
@@ -110,7 +109,7 @@ function parseHubEventForDiscover(event: Event): DiscoveredHub | null {
     return {
       event, dTag, name, description, icon, banner,
       tags: tags.length > 0 ? tags : undefined,
-      minPow, joinMinPow: wjTagVal ? parseInt(wjTagVal, 10) : minPow, hasJoinPow: !!wjTagVal,
+      minPow, joinMinPow: wjTagVal ? parseInt(wjTagVal, 10) : 0,
       nsfw, discoverable, creatorPubkey: event.pubkey,
       generalRelays, blossomServers, publishedAt, clientTag,
     }
@@ -410,7 +409,7 @@ function FilterModal({ open, onClose, showNsfw, setShowNsfw, powMin, setPowMin, 
     setClientTagOptions([...DEFAULT_CLIENT_OPTIONS])
   }
 
-  const hasChanges = localNsfw !== false || localPowMin !== 15 || localPowMax !== 25 || localTags.length > 0 || localClientTags.length > 0
+  const hasChanges = localNsfw !== false || localPowMin !== 15 || localPowMax !== 25 || localJoinPowMin !== 15 || localJoinPowMax !== 25 || localTags.length > 0 || localClientTags.length > 0
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center px-2" onClick={onClose}>
@@ -750,7 +749,7 @@ function DiscoverHubCard({ hub }: { hub: DiscoveredHub }) {
               PoW {hub.minPow}
             </span>
           )}
-          {hub.hasJoinPow && hub.joinMinPow > 0 && (
+          {hub.joinMinPow > 0 && (
             <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-amber-500/80 text-white backdrop-blur-sm">
               Join PoW {hub.joinMinPow}
             </span>
@@ -1236,8 +1235,9 @@ export function DiscoverPage() {
       result = result.filter(h => h.minPow >= powMin && h.minPow <= powMax)
     }
 
-    // Join PoW range filter (client-side only — includes the message-PoW fallback
-    // for hubs that carry no W tag, so a relay #W query would wrongly exclude them)
+    // Join PoW range filter. joinMinPow is 0 for hubs with no W tag, so any active
+    // min (default 15) excludes them — a hub only matches if it explicitly set a join
+    // PoW in range.
     if (joinPowMin > 0 || joinPowMax < 40) {
       result = result.filter(h => h.joinMinPow >= joinPowMin && h.joinMinPow <= joinPowMax)
     }
