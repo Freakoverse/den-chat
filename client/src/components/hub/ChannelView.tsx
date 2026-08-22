@@ -803,22 +803,47 @@ function MessageList({ hubDTag, channelId, channelName, optimisticMessages, setO
 
   useEffect(() => {
     const key = `${hubDTag}:${channelId}`
-    // Skip if we already fetched for this channel in this session
+    // Skip only if a previous open already succeeded in loading this channel — see below,
+    // we deliberately mark it fetched ONLY once messages actually arrived.
     if (channelFetchedRef.current.has(key)) return
-    channelFetchedRef.current.add(key)
 
-    // Only show loading spinner if the store has no messages yet (cache miss).
-    // If we already have cached/hub-wide messages, fetch silently in the background.
-    const rawCount = useMessageStore.getState().messages[hubDTag]?.[channelId]?.length ?? 0
-    if (rawCount === 0) setLoadingChannelFetch(true)
+    const getCount = () => useMessageStore.getState().messages[hubDTag]?.[channelId]?.length ?? 0
+    // Only show the loading spinner if the store has no messages yet (cache miss).
+    if (getCount() === 0) setLoadingChannelFetch(true)
 
-    fetchChannelLatest(hubDTag, channelId)
-      .then((count) => {
-        console.log(`[ChannelView] Channel-open fetch: ${count} messages for ${channelId}`)
-      })
-      .finally(() => {
-        setLoadingChannelFetch(false)
-      })
+    // A single relay hiccup on channel open used to leave the channel permanently blank
+    // (the fetch ran exactly once and its result was never checked). Retry a few times
+    // with backoff, and only cache the channel as "fetched" once it actually has messages
+    // — so a transient empty result recovers on the next open instead of sticking.
+    let cancelled = false
+    let attempts = 0
+    const MAX_ATTEMPTS = 3
+    const run = () => {
+      fetchChannelLatest(hubDTag, channelId)
+        .then((count) => {
+          if (cancelled) return
+          attempts++
+          if (count > 0 || getCount() > 0) {
+            channelFetchedRef.current.add(key)
+            setLoadingChannelFetch(false)
+          } else if (attempts < MAX_ATTEMPTS) {
+            setTimeout(() => { if (!cancelled) run() }, 1200 * attempts)
+          } else {
+            // Gave up for now (channel may genuinely be empty, or relays are down).
+            // Not cached, so re-opening the channel will try again.
+            setLoadingChannelFetch(false)
+          }
+        })
+        .catch(() => {
+          if (cancelled) return
+          attempts++
+          if (attempts < MAX_ATTEMPTS) setTimeout(() => { if (!cancelled) run() }, 1200 * attempts)
+          else setLoadingChannelFetch(false)
+        })
+    }
+    run()
+
+    return () => { cancelled = true }
   }, [hubDTag, channelId])
 
   // Build set of visible parent refs for thread filter

@@ -348,19 +348,19 @@ export function SocialFeedPage() {
     loadFeed()
   }, [followsLoaded, follows, pubkey])
 
-  const loadFeed = useCallback(async () => {
+  const loadFeed = useCallback(async (attempt = 0) => {
     setLoading(true)
-    try {
-      const authorSet = new Set(follows)
-      if (pubkey) authorSet.add(pubkey)
-      const authors = Array.from(authorSet).slice(0, 500)
-      if (authors.length === 0) { setLoading(false); return }
-      const since = Math.floor(Date.now() / 1000) - 86400
+    const authorSet = new Set(follows)
+    if (pubkey) authorSet.add(pubkey)
+    const authors = Array.from(authorSet).slice(0, 500)
+    if (authors.length === 0) { setLoading(false); return }
+    const since = Math.floor(Date.now() / 1000) - 86400
 
-      // Progressive: paint posts as they stream from the fastest relays instead of
-      // waiting for the whole batch. Abort any previous in-flight feed fetch first.
-      feedFetchRef.current?.close()
-      let painted = false
+    // Progressive: paint posts as they stream from the fastest relays instead of
+    // waiting for the whole batch. Abort any previous in-flight feed fetch first.
+    feedFetchRef.current?.close()
+    let painted = false
+    try {
       const handle = fetchEventsProgressive(
         { kinds: [1, 6], authors, since, limit: 40 },
         (events) => {
@@ -373,8 +373,16 @@ export function SocialFeedPage() {
       await handle.done
     } catch (err) {
       console.error('Failed to load feed:', err)
-    } finally {
-      setLoading(false)
+    }
+    // Nothing arrived — the user follows people, so an empty result is almost always a
+    // relay hiccup, not a genuinely empty feed. Retry with backoff (keeping the spinner
+    // up) instead of leaving the feed blank until a manual refresh.
+    if (!painted) {
+      if (attempt < 2) {
+        setTimeout(() => loadFeed(attempt + 1), 1500 * (attempt + 1))
+      } else {
+        setLoading(false)
+      }
     }
   }, [follows, pubkey, setPosts])
 
@@ -426,9 +434,10 @@ export function SocialFeedPage() {
   }, [loadMore, posts.length])
 
   const handleRefresh = useCallback(() => {
-    setPosts([])
+    // Don't clear first: loadFeed replaces posts as fresh ones stream in, so a hiccup
+    // during refresh keeps the existing feed instead of wiping it to an empty state.
     loadFeed()
-  }, [loadFeed, setPosts])
+  }, [loadFeed])
 
   // Load reactions when switching to reactions tab
   useEffect(() => {
