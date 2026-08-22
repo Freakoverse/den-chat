@@ -170,17 +170,19 @@ export function ContextMenuProvider({ children }: { children: ReactNode }) {
       const linkEl = target.closest('a[href]') as HTMLAnchorElement | null
       const linkHref = linkEl?.href
 
-      // Check if right-clicked on an image
+      // Check if right-clicked on an image. Prefer data-media-src — the resolved
+      // shareable server URL our media components expose — over the on-screen src,
+      // which may be a blob:/data: URL (cache hit / decrypted) that can't be shared.
       const imgEl = target.closest('img') as HTMLImageElement | null
-      const imgSrc = imgEl?.src
+      const imgSrc = imgEl ? (imgEl.getAttribute('data-media-src') || imgEl.src) : null
 
       // Check if right-clicked on a video
       const videoEl = target.closest('video') as HTMLVideoElement | null
-      const videoSrc = videoEl ? (videoEl.currentSrc || videoEl.src || videoEl.querySelector('source')?.src) : null
+      const videoSrc = videoEl ? (videoEl.getAttribute('data-media-src') || videoEl.currentSrc || videoEl.src || videoEl.querySelector('source')?.src) : null
 
       // Check if right-clicked on audio
       const audioEl = target.closest('audio') as HTMLAudioElement | null
-      const audioSrc = audioEl ? (audioEl.currentSrc || audioEl.src || audioEl.querySelector('source')?.src) : null
+      const audioSrc = audioEl ? (audioEl.getAttribute('data-media-src') || audioEl.currentSrc || audioEl.src || audioEl.querySelector('source')?.src) : null
 
       // --- Text selection actions ---
       if (hasSelection) {

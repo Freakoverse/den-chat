@@ -560,6 +560,23 @@ export function useBlossomMedia(originalUrl: string | undefined, maxSizeMB?: num
   }
 }
 
+/**
+ * The best shareable URL for media currently on screen — used by "Copy image
+ * address". Prefers the resolved server URL actually backing the render; when
+ * that's a blob:/data: URL (persistent-cache hit or decrypted attachment),
+ * reconstructs the http(s) URL of the server currently serving it, falling back
+ * to the original URL. Never returns a blob:/data: URL.
+ */
+export function shareableMediaUrl(blossom: BlossomMediaState, originalUrl: string): string {
+  const s = blossom.src
+  if (s && !s.startsWith('blob:') && !s.startsWith('data:')) return s
+  if (blossom.servers.length && blossom.expectedHash) {
+    const base = blossom.servers[blossom.serverIndex] || blossom.servers[0]
+    if (base) return `${base.replace(/\/+$/, '')}/${blossom.expectedHash}${blossom.ext}`
+  }
+  return originalUrl
+}
+
 // ── Standalone hash verification (for BlobImage/BlobMedia/BlobFile that don't use the hook) ──
 
 export { parseBlossomUrl, hashBlob, verifiedCache, KNOWN_BLOSSOM_HOSTS, SHA256_RE }

@@ -12,7 +12,7 @@ import { useNavigationStore } from '@/stores/navigationStore'
 import { useMessages, type ChatMessage, type Attachment } from '@/hooks/useMessages'
 import { fetchOlderMessages, fetchNewerMessages, fetchSingleMessage, fetchMessageContext, fetchChannelLatest, PAGE_SIZE } from '@/hooks/useHubSubscriptions'
 import { useProfileCache, getCachedProfile } from '@/hooks/useProfileCache'
-import { useBlossomMedia } from '@/hooks/useBlossomMedia'
+import { useBlossomMedia, shareableMediaUrl } from '@/hooks/useBlossomMedia'
 import { useDecryptedMedia, getDecryptedBlobUrl } from '@/hooks/useDecryptedMedia'
 import { UserProfileModal } from '@/components/hub/UserProfileModal'
 import { HubSettingsModal } from '@/components/hub/HubSettingsModal'
@@ -2701,6 +2701,7 @@ function GifImg({ src, alt, nsfw, className, style }: { src: string; alt: string
       )}
       <img
         src={resolvedSrc}
+        data-media-src={shareableMediaUrl(blossom, src)}
         alt={alt}
         className={`${className || ''} ${!loaded ? 'opacity-0 h-0 overflow-hidden block' : ''}`}
         style={style}

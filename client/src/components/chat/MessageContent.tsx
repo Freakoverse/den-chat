@@ -9,7 +9,7 @@
 
 import { useState, useEffect, useMemo, memo, useCallback, useRef, Children, isValidElement, cloneElement } from 'react'
 import { Download, Loader2, Check, Copy, Hash, Link as LinkIcon, Eye, Lock } from 'lucide-react'
-import { useBlossomMedia } from '@/hooks/useBlossomMedia'
+import { useBlossomMedia, shareableMediaUrl } from '@/hooks/useBlossomMedia'
 import { VerificationBadge } from '@/components/ui/VerificationBadge'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
 import Markdown from 'react-markdown'
@@ -429,6 +429,7 @@ function BlossomImage({ src, alt, className }: { src: string; alt?: string; clas
       {/* Always render img (hidden until loaded) — matches BlobMedia pattern */}
       <img
         src={resolvedSrc}
+        data-media-src={shareableMediaUrl(blossom, src)}
         alt={alt || ''}
         className={`${className || 'max-w-[min(400px,100%)] max-h-[300px] rounded-lg border border-transparent hover:border-border transition-colors object-contain'} transition-opacity duration-300 ${loaded ? 'opacity-100' : 'opacity-0 h-0 overflow-hidden'}`}
         onLoad={() => { setLoaded(true); setError(false) }}
@@ -601,6 +602,7 @@ export function VideoEmbed({ src }: { src: string }) {
       <div className="relative block mt-1 max-w-[min(400px,100%)]">
         <video
           src={cacheBlobUrl}
+          data-media-src={shareableMediaUrl(blossom, src)}
           controls
           autoPlay
           className="max-w-[min(400px,100%)] max-h-[300px] rounded-lg border border-transparent hover:border-border transition-colors"
@@ -709,6 +711,7 @@ export function VideoEmbed({ src }: { src: string }) {
     <div className="relative block mt-1 max-w-[min(400px,100%)]">
       <video
         src={resolvedSrc}
+        data-media-src={shareableMediaUrl(blossom, src)}
         controls
         className="max-w-[min(400px,100%)] max-h-[300px] rounded-lg border border-transparent hover:border-border transition-colors"
         preload="none"
