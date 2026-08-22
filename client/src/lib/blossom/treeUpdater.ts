@@ -93,7 +93,7 @@ export async function safeTreeUpdate(params: SafeTreeUpdateParams): Promise<Safe
   const { uploadToBlossomServers, downloadTextFromBlossom, deleteFromBlossom } = await import('./client')
   const { parseIndexFile, createIndexFile, uploadBanPages } = await import('./members')
   const { buildHubEvent } = await import('@/lib/hub/buildHubEvent')
-  const { signWithSigner } = await import('@/lib/nostr/events')
+  const { mineAndSign } = await import('@/lib/nostr/events')
   const { publishToSpecificRelays } = await import('@/lib/nostr/relay-pool')
   const { getPublishRelays } = await import('@/stores/postingBehaviourStore')
 
@@ -217,7 +217,7 @@ export async function safeTreeUpdate(params: SafeTreeUpdateParams): Promise<Safe
       publishedAt: hub.publishedAt,
       eventCreatedAt: hub.eventCreatedAt,
     })
-    const signedEvent = await signWithSigner(unsignedEvent, signer, privateKey)
+    const signedEvent = await mineAndSign(unsignedEvent, hub.minPow, hub.creatorPubkey, signer, privateKey)
     publishedCreatedAt = signedEvent.created_at
     await publishToSpecificRelays(
       getPublishRelays([...hub.generalRelays]),
@@ -342,7 +342,7 @@ export async function safePaginatedTreeUpdate(params: SafePaginatedTreeUpdatePar
   const { uploadToBlossomServers, downloadTextFromBlossom, deleteFromBlossom } = await import('./client')
   const { parseIndexFile, createPaginatedIndexFile, uploadBanPages } = await import('./members')
   const { buildHubEvent } = await import('@/lib/hub/buildHubEvent')
-  const { signWithSigner } = await import('@/lib/nostr/events')
+  const { mineAndSign } = await import('@/lib/nostr/events')
   const { publishToSpecificRelays } = await import('@/lib/nostr/relay-pool')
   const { getPublishRelays } = await import('@/stores/postingBehaviourStore')
 
@@ -529,7 +529,7 @@ export async function safePaginatedTreeUpdate(params: SafePaginatedTreeUpdatePar
       publishedAt: hub.publishedAt,
       eventCreatedAt: hub.eventCreatedAt,
     })
-    const signedEvent = await signWithSigner(unsignedEvent, signer, privateKey)
+    const signedEvent = await mineAndSign(unsignedEvent, hub.minPow, hub.creatorPubkey, signer, privateKey)
     publishedCreatedAt = signedEvent.created_at
     onStep?.('Publishing to relays')
     targetedRelays = getPublishRelays([...hub.generalRelays])

@@ -27,7 +27,7 @@ import { checkEventAvailability } from '@/lib/nostr/eventRedundancy'
 import { parseHubBackup } from '@/lib/hub/hubBackup'
 import { Button } from '@/components/ui/button'
 import { getPublishRelays, getDeletePublishRelays } from '@/stores/postingBehaviourStore'
-import { createUnsignedEvent, signWithSigner, createHubListEvent, createDeletionEvent } from '@/lib/nostr/events'
+import { createUnsignedEvent, signWithSigner, mineAndSign, createHubListEvent, createDeletionEvent } from '@/lib/nostr/events'
 import { DeleteConfirmDialog } from '@/components/hub/ChannelView'
 import {
   getSoundEffectsConfig as getSfxConfig,
@@ -5017,7 +5017,9 @@ function MyHubsTab() {
         ['epoch', hub.epoch.toString()],
         ['deleted', 'true'],
       ] as [string, ...string[]][], deleteCreatedAt)
-      const signedDeletedHub = await signWithSigner(deletedHubEvent, signer, privateKey)
+      // Mine the tombstone (a kind-36942 publish) to the hub's message PoW so PoW-enforcing
+      // relays accept the deletion overwrite. The kind-5 request above stays PoW-free.
+      const signedDeletedHub = await mineAndSign(deletedHubEvent, hub.minPow, hub.creatorPubkey, signer, privateKey)
       await publishToSpecificRelays(getDeletePublishRelays(), signedDeletedHub)
 
       setHubStatus(dTag, 'deleted')

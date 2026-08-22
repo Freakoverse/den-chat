@@ -32,7 +32,7 @@ import { truncateNpub, npubShort } from '@/lib/utils'
 import { uploadToBlossomServers, blossomServers as blossomServerManager } from '@/lib/blossom'
 import type { UploadProgress } from '@/lib/blossom'
 import { buildHubEvent } from '@/lib/hub/buildHubEvent'
-import { signWithSigner, createUnsignedEvent } from '@/lib/nostr'
+import { signWithSigner, mineAndSign, createUnsignedEvent } from '@/lib/nostr'
 import { publishToSpecificRelays, getRelayList } from '@/lib/nostr/relay-pool'
 import { getPublishRelays, getDeletePublishRelays } from '@/stores/postingBehaviourStore'
 import { KINDS } from '@/lib/crypto/constants'
@@ -748,7 +748,7 @@ export function HubSettingsModal({ open, onClose, hub }: HubSettingsModalProps) 
         eventCreatedAt: hub.eventCreatedAt,
       })
 
-      const signedEvent = await signWithSigner(unsignedEvent, signer, privateKey)
+      const signedEvent = await mineAndSign(unsignedEvent, editMinPow, pubkey, signer, privateKey)
       markStepDone('Signing hub event')
 
       await markStep('Publishing to relays')
@@ -3311,7 +3311,7 @@ function SecurityPage({ hub }: { hub: HubData }) {
         publishedAt: hub.publishedAt,
         eventCreatedAt: hub.eventCreatedAt,
       })
-      const signedEvent = await signWithSigner(unsignedEvent, signer, privateKey)
+      const signedEvent = await mineAndSign(unsignedEvent, hub.minPow, pubkey, signer, privateKey)
       await publishToSpecificRelays(getPublishRelays([...hub.generalRelays]), signedEvent)
       markDone('Publishing hub event')
 
@@ -3582,7 +3582,9 @@ function DangerousPage({ hub, onClose, setHubStatus }: DangerousPageProps) {
         ['deleted', 'true'],
       ] as [string, ...string[]][], deleteCreatedAt)
 
-      const signedDeletedHub = await signWithSigner(deletedHubEvent, signer, privateKey)
+      // Mine the tombstone (a kind-36942 publish) to the hub's message PoW so PoW-enforcing
+      // relays accept the deletion overwrite. The kind-5 request below stays PoW-free.
+      const signedDeletedHub = await mineAndSign(deletedHubEvent, hub.minPow, hub.creatorPubkey, signer, privateKey)
       await publishToSpecificRelays(getDeletePublishRelays([...hub.generalRelays]), signedDeletedHub)
 
       // 2. NIP-09 Kind 5 deletion request as fallback
@@ -3797,7 +3799,7 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
 
       // Re-publish hub event with new index hash
       await markStep('Publishing hub event')
-      const { signWithSigner } = await import('@/lib/nostr/events')
+      const { mineAndSign } = await import('@/lib/nostr/events')
       const { publishToSpecificRelays: pubToRelays } = await import('@/lib/nostr/relay-pool')
       const unsignedEvent = buildHubEvent({
         dTag: hub.dTag,
@@ -3821,7 +3823,7 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
         publishedAt: hub.publishedAt,
         eventCreatedAt: hub.eventCreatedAt,
       })
-      const signedEvent = await signWithSigner(unsignedEvent, signer, privateKey)
+      const signedEvent = await mineAndSign(unsignedEvent, hub.minPow, pubkey, signer, privateKey)
       await pubToRelays(getPublishRelays([...hub.generalRelays]), signedEvent)
       markDone('Publishing hub event')
 
@@ -3986,7 +3988,7 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
 
       // Publish hub event
       await markStep('Publishing hub event')
-      const { signWithSigner } = await import('@/lib/nostr/events')
+      const { mineAndSign } = await import('@/lib/nostr/events')
       const { publishToSpecificRelays: pubToRelays } = await import('@/lib/nostr/relay-pool')
       const unsignedEvent = buildHubEvent({
         dTag: hub.dTag,
@@ -4010,7 +4012,7 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
         publishedAt: hub.publishedAt,
         eventCreatedAt: hub.eventCreatedAt,
       })
-      const signedEvent = await signWithSigner(unsignedEvent, signer, privateKey)
+      const signedEvent = await mineAndSign(unsignedEvent, hub.minPow, pubkey, signer, privateKey)
       await pubToRelays(getPublishRelays([...hub.generalRelays]), signedEvent)
       markDone('Publishing hub event')
 
@@ -4320,7 +4322,7 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
                                           )
 
                                           // Publish hub event
-                                          const { signWithSigner: signFn } = await import('@/lib/nostr/events')
+                                          const { mineAndSign: signFn } = await import('@/lib/nostr/events')
                                           const { publishToSpecificRelays: pubRelays } = await import('@/lib/nostr/relay-pool')
                                           const evt = buildHubEvent({
                                             dTag: hub.dTag, name: hub.name, description: hub.description || undefined,
@@ -4333,7 +4335,7 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
                                             publishedAt: hub.publishedAt,
                                             eventCreatedAt: hub.eventCreatedAt,
                                           })
-                                          const signed = await signFn(evt, signer, privateKey)
+                                          const signed = await signFn(evt, hub.minPow, pubkey, signer, privateKey)
                                           await pubRelays(getPublishRelays([...hub.generalRelays]), signed)
                                           useHubStore.getState().setHubData(hub.dTag, { ...hub, indexFileHash: newIdxHash, eventCreatedAt: signed.created_at })
                                         }
@@ -5810,7 +5812,7 @@ function MembersPage({ hub, onFooterState }: { hub: HubData; onFooterState: (sta
           publishedAt: hub.publishedAt,
           eventCreatedAt: hub.eventCreatedAt,
         })
-        const signedEvent = await signWithSigner(unsignedEvent, signer, privateKey)
+        const signedEvent = await mineAndSign(unsignedEvent, hub.minPow, hub.creatorPubkey, signer, privateKey)
         await publishToSpecificRelays(getPublishRelays([...hub.generalRelays]), signedEvent)
         lastPublishedCreatedAt = signedEvent.created_at
       }
@@ -6075,7 +6077,7 @@ function MembersPage({ hub, onFooterState }: { hub: HubData; onFooterState: (sta
             publishedAt: hub.publishedAt,
             eventCreatedAt: hub.eventCreatedAt,
           })
-          const signedEvent = await signWithSigner(unsignedEvent, signer, privateKey)
+          const signedEvent = await mineAndSign(unsignedEvent, hub.minPow, hub.creatorPubkey, signer, privateKey)
           await publishToSpecificRelays(getPublishRelays([...hub.generalRelays]), signedEvent)
           lastPublishedCreatedAt = signedEvent.created_at
           markStepDone('Publishing hub update')

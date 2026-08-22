@@ -16,6 +16,7 @@ import { useUserStore } from '@/stores/userStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { useBlossomMedia } from '@/hooks/useBlossomMedia'
 import { fetchEvents } from '@/lib/nostr/relay-pool'
+import { countLeadingZeroBits } from '@/lib/pow/pow'
 import { KINDS } from '@/lib/crypto/constants'
 import { MAX_HUB_LIST_ENTRIES } from '@/lib/hub/hubLimits'
 
@@ -1230,10 +1231,16 @@ export function DiscoverPage() {
       return score >= scoreThreshold
     })
 
-    // PoW range filter
+    // PoW range filter (by the hub's claimed message PoW `w`)
     if (powMin > 0 || powMax < 40) {
       result = result.filter(h => h.minPow >= powMin && h.minPow <= powMax)
     }
+
+    // Nonce check (anti-spam, always on): the hub event must actually be mined to its
+    // claimed message PoW. A spammer can put a `w` tag without doing the work — this
+    // drops those (and any un-mined hub) by verifying the event id's real leading-zero
+    // bits locally. Hubs claiming w=0 need no PoW and pass trivially.
+    result = result.filter(h => h.minPow === 0 || countLeadingZeroBits(h.event.id) >= h.minPow)
 
     // Join PoW range filter. joinMinPow is 0 for hubs with no W tag, so any active
     // min (default 15) excludes them — a hub only matches if it explicitly set a join

@@ -18,7 +18,7 @@ import { HUB_NAME_MAX, HUB_DESCRIPTION_MAX, MAX_GENERAL_RELAYS, MAX_BLOSSOM_SERV
 import { useUserStore } from '@/stores/userStore'
 import { useHubStore } from '@/stores/hubStore'
 import { useUserListsStore } from '@/stores/userListsStore'
-import { createUnsignedEvent, signWithSigner, createHubListEvent } from '@/lib/nostr'
+import { createUnsignedEvent, signWithSigner, mineAndSign, createHubListEvent } from '@/lib/nostr'
 import { isClientTagEnabled } from '@/lib/nostr/events'
 import { publishToSpecificRelays, getRelayList } from '@/lib/nostr/relay-pool'
 import { getPublishRelays } from '@/stores/postingBehaviourStore'
@@ -541,7 +541,9 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
       const unsigned = createUnsignedEvent(KINDS.HUB_EVENT, JSON.stringify(contentObj), tags)
       // Set published_at to match created_at on first creation (per NIP-CHAT spec §6.1)
       unsigned.tags = [...unsigned.tags, ['published_at', unsigned.created_at.toString()]]
-      const signed = await signWithSigner(unsigned, signer, privateKey)
+      // Mine the message-PoW nonce (difficulty = the 'w' tag we just set) before signing
+      // so the hub event itself satisfies the difficulty it advertises.
+      const signed = await mineAndSign(unsigned, 15, pubkey, signer, privateKey)
       markDone('signing-event')
 
       // Publish to relays

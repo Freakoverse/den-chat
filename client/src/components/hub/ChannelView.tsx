@@ -29,7 +29,7 @@ import EmojiPickerReact, { EmojiStyle, Theme } from 'emoji-picker-react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { buildHubEvent } from '@/lib/hub/buildHubEvent'
-import { signWithSigner } from '@/lib/nostr'
+import { signWithSigner, mineAndSign } from '@/lib/nostr'
 import { publishToSpecificRelays, fetchEvents, fetchEventsFromRelays, getRelays } from '@/lib/nostr/relay-pool'
 import { getPublishRelays } from '@/stores/postingBehaviourStore'
 import { useTypingHeartbeat } from '@/hooks/useTypingHeartbeat'
@@ -506,7 +506,7 @@ export function ChannelDescriptionModal({ channelId, channelName, description, i
         eventCreatedAt: hub.eventCreatedAt,
       })
 
-      const signedEvent = await signWithSigner(unsignedEvent, signer, privateKey)
+      const signedEvent = await mineAndSign(unsignedEvent, hub.minPow, hub.creatorPubkey, signer, privateKey)
       await publishToSpecificRelays(getPublishRelays([...hub.generalRelays]), signedEvent)
 
       // Update local store

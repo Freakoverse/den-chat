@@ -345,7 +345,7 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
     setPublishingLayout(true); setLayoutError(null); setLayoutStep('signing')
     try {
       const { buildHubEvent } = await import('@/lib/hub/buildHubEvent')
-      const { signWithSigner } = await import('@/lib/nostr/events')
+      const { mineAndSign } = await import('@/lib/nostr/events')
       const { publishToSpecificRelays } = await import('@/lib/nostr/relay-pool')
       const { getPublishRelays } = await import('@/stores/postingBehaviourStore')
       const unsigned = buildHubEvent({
@@ -359,7 +359,7 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
         discoverable: hub.discoverable, groupedRoles: hub.groupedRoles && hub.groupedRoles.length ? hub.groupedRoles : undefined,
         publishedAt: hub.publishedAt, eventCreatedAt: hub.eventCreatedAt,
       })
-      const signed = await signWithSigner(unsigned, signer, privateKey)
+      const signed = await mineAndSign(unsigned, hub.minPow, pubkey, signer, privateKey)
       setLayoutStep('publishing')
       await publishToSpecificRelays(getPublishRelays([...hub.generalRelays]), signed)
       setHubData(hub.dTag, { ...hub, channels: layoutDraft.channels, categories: layoutDraft.categories, eventCreatedAt: signed.created_at })

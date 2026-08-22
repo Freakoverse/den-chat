@@ -906,7 +906,7 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
       // 4. Re-publish hub event
       await markStep('Publishing hub event')
       const { buildHubEvent } = await import('@/lib/hub/buildHubEvent')
-      const { signWithSigner: signFn } = await import('@/lib/nostr/events')
+      const { mineAndSign: signFn } = await import('@/lib/nostr/events')
       const { publishToSpecificRelays: pubToRelays } = await import('@/lib/nostr/relay-pool')
       const unsignedEvent = buildHubEvent({
         dTag: hub.dTag,
@@ -930,7 +930,7 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
         publishedAt: hub.publishedAt,
         eventCreatedAt: hub.eventCreatedAt,
       })
-      const signedEvent = await signFn(unsignedEvent, signer, privateKey)
+      const signedEvent = await signFn(unsignedEvent, hub.minPow, myPubkey, signer, privateKey)
       await pubToRelays(getPublishRelays([...hub.generalRelays]), signedEvent)
       markDone('Publishing hub event')
 
