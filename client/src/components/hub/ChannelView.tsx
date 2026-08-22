@@ -494,6 +494,11 @@ export function ChannelDescriptionModal({ channelId, channelName, description, i
         channels: updatedChannels,
         categories: hub.categories,
         roles: hub.roles,
+        // Preserve these — buildHubEvent drops the corresponding tags when they're
+        // absent, so omitting them here silently reset the hub's PoW to 0 (and cleared
+        // its NSFW flag) whenever a channel description was edited.
+        minPow: hub.minPow > 0 ? hub.minPow : undefined,
+        nsfw: hub.nsfw || undefined,
         discoverable: hub.discoverable,
         groupedRoles: hub.groupedRoles,
         publishedAt: hub.publishedAt,
