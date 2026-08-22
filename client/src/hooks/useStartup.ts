@@ -445,7 +445,7 @@ export function useStartup() {
       // to a manual rebroadcast rather than auto-pushing our local copy.
       const hub = useHubStore.getState().hubs[hubId]
       const knownLatest = hub?.eventCreatedAt
-      const hubRelays = hub ? [...hub.generalRelays, ...hub.filterRelays] : []
+      const hubRelays = hub ? [...hub.generalRelays] : []
       import('@/lib/nostr/eventRedundancy').then(({ ensureAddressableRedundancy }) => {
         ensureAddressableRedundancy(KINDS.HUB_EVENT, creator, hubId, knownLatest, hubRelays)
       })
@@ -467,7 +467,7 @@ export function useStartup() {
     const self = pubkey
     const timer = setTimeout(() => {
       const hub = useHubStore.getState().hubs[hubId]
-      const hubRelays = hub ? [...hub.generalRelays, ...hub.filterRelays] : []
+      const hubRelays = hub ? [...hub.generalRelays] : []
       import('@/lib/nostr/eventRedundancy').then(({ ensureAddressableRedundancy }) => {
         for (const h of mine) {
           const dTagValue = h.groupId ? `${hubId}:${h.groupId}` : hubId

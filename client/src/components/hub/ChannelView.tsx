@@ -352,10 +352,10 @@ function ChannelHeader({ channel, channelId, isCreator }: { channel: { name: str
   // Subscribe to pins when hub is active
   useEffect(() => {
     if (!activeHubId || !hub) return
-    const relays = [...hub.filterRelays, ...hub.generalRelays]
+    const relays = [...hub.generalRelays]
     subscribePins(activeHubId, relays)
     return () => unsubscribePins(activeHubId)
-  }, [activeHubId, hub?.filterRelays?.join(','), hub?.generalRelays?.join(',')])
+  }, [activeHubId, hub?.generalRelays?.join(',')])
 
   return (
     <>
@@ -488,7 +488,7 @@ export function ChannelDescriptionModal({ channelId, channelName, description, i
         icon: hub.icon || undefined,
         banner: hub.banner || undefined,
         tags: hub.tags,
-        relays: [...hub.generalRelays, ...hub.filterRelays],
+        relays: [...hub.generalRelays],
         blossomServers: hub.blossomServers,
         indexFileHash: hub.indexFileHash,
         channels: updatedChannels,
@@ -498,6 +498,7 @@ export function ChannelDescriptionModal({ channelId, channelName, description, i
         // absent, so omitting them here silently reset the hub's PoW to 0 (and cleared
         // its NSFW flag) whenever a channel description was edited.
         minPow: hub.minPow > 0 ? hub.minPow : undefined,
+        joinMinPow: hub.joinMinPow > 0 ? hub.joinMinPow : undefined,
         nsfw: hub.nsfw || undefined,
         discoverable: hub.discoverable,
         groupedRoles: hub.groupedRoles,
@@ -506,7 +507,7 @@ export function ChannelDescriptionModal({ channelId, channelName, description, i
       })
 
       const signedEvent = await signWithSigner(unsignedEvent, signer, privateKey)
-      await publishToSpecificRelays(getPublishRelays([...hub.generalRelays, ...hub.filterRelays]), signedEvent)
+      await publishToSpecificRelays(getPublishRelays([...hub.generalRelays]), signedEvent)
 
       // Update local store
       setHubData(activeHubId, {
@@ -710,7 +711,7 @@ function MessageList({ hubDTag, channelId, channelName, optimisticMessages, setO
       const { signer, privateKey } = useUserStore.getState()
       const unsigned = createHideMessageEvent(hubDTag, targetRef, targetPubkey, targetKind, isAddressable)
       const signed = await signFn(unsigned, signer, privateKey)
-      const relays = hub ? [...hub.filterRelays, ...hub.generalRelays] : []
+      const relays = hub ? [...hub.generalRelays] : []
       await publishToSpecificRelays(getPublishRelays(relays), signed)
       // Optimistic update
       useHubStore.getState().addHiddenMessage(hubDTag, {
@@ -733,7 +734,7 @@ function MessageList({ hubDTag, channelId, channelName, optimisticMessages, setO
       const { getDeletePublishRelays } = await import('@/stores/postingBehaviourStore')
       const { KINDS } = await import('@/lib/crypto/constants')
       const { signer, privateKey } = useUserStore.getState()
-      const relays = hub ? [...hub.filterRelays, ...hub.generalRelays] : []
+      const relays = hub ? [...hub.generalRelays] : []
       const publishRelays = getDeletePublishRelays(relays)
 
       // Look up original hide event timestamp for created_at + 1 ordering
@@ -3982,7 +3983,7 @@ export function MessageActionBar({ isMine, msgId, msgDTag, msgPubkey, emojiButto
 
   const handleTogglePin = async () => {
     if (!myPubkey) return
-    const relays = hub ? [...hub.filterRelays, ...hub.generalRelays] : []
+    const relays = hub ? [...hub.generalRelays] : []
     if (isPinned) {
       await unpinMessage(hubDTag, channelId, aRef, myPubkey, relays, signer, privateKey)
     } else {
@@ -4507,8 +4508,8 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
   // ── Typing indicator heartbeat (NIP-CHAT §6.14) — main channel composer only ──
   const _hubForTyping = useHubStore((s) => s.hubs[hubDTag])
   const _typingRelays = useMemo(
-    () => getPublishRelays(_hubForTyping ? [..._hubForTyping.generalRelays, ..._hubForTyping.filterRelays] : []),
-    [hubDTag, _hubForTyping?.generalRelays, _hubForTyping?.filterRelays],
+    () => getPublishRelays(_hubForTyping ? [..._hubForTyping.generalRelays] : []),
+    [hubDTag, _hubForTyping?.generalRelays],
   )
   const typing = useTypingHeartbeat({ scope: 'hub', hubDTag, channelId, relays: _typingRelays })
   const signalTyping = useCallback((value: string) => {
@@ -6443,7 +6444,7 @@ export function MessageHistoryModal({ pubkey, dTag, hubDTag, channelId, onClose 
         // to maximize chances of finding historical versions
         const hub = hubDTag ? hubs[hubDTag] : undefined
         const hubRelays = hub
-          ? [...(hub.generalRelays || []), ...(hub.filterRelays || [])]
+          ? [...(hub.generalRelays || [])]
           : []
         const userRelays = getRelays()
         const allRelays = [...new Set([...hubRelays, ...userRelays])]

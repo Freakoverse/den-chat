@@ -653,7 +653,7 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
       const creatorPubkey = hubData?.creatorPubkey || ''
       const unsignedEvent = createJoinRequest(hub.dTag, creatorPubkey, indexHash)
       const signedEvent = await signWithSigner(unsignedEvent, signer, privateKey)
-      await publishToSpecificRelays(getPublishRelays([...hub.generalRelays, ...hub.filterRelays]), signedEvent)
+      await publishToSpecificRelays(getPublishRelays([...hub.generalRelays]), signedEvent)
 
       console.log('Facilitation list created with index:', indexHash)
 
@@ -738,7 +738,7 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
       const creatorPubkey = hubData?.creatorPubkey || ''
       const unsignedEvent = createJoinRequest(hub.dTag, creatorPubkey, newIndexHash)
       const signedEvent = await signWithSigner(unsignedEvent, signer, privateKey)
-      await publishToSpecificRelays(getPublishRelays([...hub.generalRelays, ...hub.filterRelays]), signedEvent)
+      await publishToSpecificRelays(getPublishRelays([...hub.generalRelays]), signedEvent)
 
       setMeshListHash(newIndexHash)
       setMeshMembers(prev => [...prev, targetPubkey])
@@ -819,7 +819,7 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
       const creatorPubkey = hubData?.creatorPubkey || ''
       const unsignedEvent = createJoinRequest(hub.dTag, creatorPubkey, newIndexHash)
       const signedEvent = await signWithSigner(unsignedEvent, signer, privateKey)
-      await publishToSpecificRelays(getPublishRelays([...hub.generalRelays, ...hub.filterRelays]), signedEvent)
+      await publishToSpecificRelays(getPublishRelays([...hub.generalRelays]), signedEvent)
 
       setMeshListHash(newIndexHash)
       setMeshMembers(prev => prev.filter(pk => pk !== targetPubkey))
@@ -1618,7 +1618,7 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
                             }
                             : { provider: 'livekit' as const, lkUrl, lkApiKey, lkApiSecret }
 
-                          const relays = [...new Set([...hub.generalRelays, ...hub.filterRelays])].filter(Boolean)
+                          const relays = [...new Set(hub.generalRelays)].filter(Boolean)
                           await publishHostAvailability(
                             hub.dTag, config, voiceHostStatus,
                             epoch, secret, relays, signer, privateKey,
@@ -1783,7 +1783,7 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
                             await markStep('Publishing join request')
                             const unsignedEvent = createJoinRequest(hub.dTag, hub.creatorPubkey, newIndexHash)
                             const signedEvent = await signFn(unsignedEvent, signer, privateKey)
-                            await pubToRelays(getRelays([...hub.generalRelays, ...hub.filterRelays]), signedEvent)
+                            await pubToRelays(getRelays([...hub.generalRelays]), signedEvent)
                             markDone('Publishing join request')
 
                             useHubStore.getState().setModBanList(hub.dTag, pubkey, allBans)
@@ -1890,7 +1890,7 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
                                           await markStep('Publishing join request')
                                           const unsignedEvent = createJoinRequest(hub.dTag, hub.creatorPubkey, newIndexHash)
                                           const signedEvent = await signFn(unsignedEvent, signer, privateKey)
-                                          await pubToRelays(getRelays([...hub.generalRelays, ...hub.filterRelays]), signedEvent)
+                                          await pubToRelays(getRelays([...hub.generalRelays]), signedEvent)
                                           markDone('Publishing join request')
 
                                           useHubStore.getState().setModBanList(hub.dTag, pubkey, newBans)
@@ -2151,7 +2151,7 @@ function MyReportsPage({ hub, onClose }: { hub: HubData; onClose: () => void }) 
 
   useEffect(() => {
     if (!secret || !pubkey) return
-    const relays = [...new Set([...hub.filterRelays, ...hub.generalRelays])].filter(Boolean)
+    const relays = [...new Set(hub.generalRelays)].filter(Boolean)
     fetchMyReports(hub.dTag, hub.creatorPubkey, secret, pubkey, relays)
   }, [secret, pubkey, hub.dTag])
 
@@ -2159,7 +2159,7 @@ function MyReportsPage({ hub, onClose }: { hub: HubData; onClose: () => void }) 
     if (!secret || !pubkey) return
     setRetractingId(report.dTag)
     try {
-      const relays = [...new Set([...hub.filterRelays, ...hub.generalRelays])].filter(Boolean)
+      const relays = [...new Set(hub.generalRelays)].filter(Boolean)
       await retractReport({
         report,
         hubDTag: hub.dTag,
@@ -2492,7 +2492,7 @@ function ModHiddenMessagesTab({ hub, onClose }: { hub: HubData; onClose: () => v
       const { getDeletePublishRelays } = await import('@/stores/postingBehaviourStore')
       const { KINDS } = await import('@/lib/crypto/constants')
       const { signer, privateKey } = useUserStore.getState()
-      const relays = [...hub.filterRelays, ...hub.generalRelays]
+      const relays = [...hub.generalRelays]
       const publishRelays = getDeletePublishRelays(relays)
 
       const deletedHide = createDeletedHideEvent(hub.dTag, entry.ref, entry.createdAt)

@@ -50,7 +50,7 @@ export function useJoinRequestCount(
   const [count, setCount] = useState(0)
   // Track known pubkeys to avoid double-counting from initial fetch + subscription overlap
   const knownPubkeysRef = useRef<Map<string, number>>(new Map())
-  const hubRelays = hub ? [...hub.generalRelays, ...hub.filterRelays] : []
+  const hubRelays = hub ? [...hub.generalRelays] : []
 
   // Initial fetch to populate count
   const fetchInitial = useCallback(async () => {
@@ -93,7 +93,7 @@ export function useJoinRequestCount(
       for (const r of byPubkey.values()) {
         if (r.pubkey === hub.creatorPubkey) continue
         if (memberPubkeys.has(r.pubkey)) continue
-        if (hub.minPow > 0 && r.powBits < hub.minPow) continue
+        if (hub.joinMinPow > 0 && r.powBits < hub.joinMinPow) continue
         if (lastSeen > 0 && r.createdAt <= lastSeen) continue
         pending++
         known.set(r.pubkey, r.createdAt)
@@ -104,7 +104,7 @@ export function useJoinRequestCount(
     } catch (err) {
       console.warn('[useJoinRequestCount] Failed to fetch:', err)
     }
-  }, [hub?.dTag, hubRelays.length, hub?.creatorPubkey, hub?.minPow, hubMembers?.length, isCreator])
+  }, [hub?.dTag, hubRelays.length, hub?.creatorPubkey, hub?.joinMinPow, hubMembers?.length, isCreator])
 
   // Main effect: initial fetch + live subscription
   useEffect(() => {
@@ -142,8 +142,8 @@ export function useJoinRequestCount(
         if (event.pubkey === hub.creatorPubkey) return
         if (memberPubkeys.has(event.pubkey)) return
 
-        // Skip if below PoW requirement
-        if (hub.minPow > 0 && countLeadingZeroBits(event.id) < hub.minPow) return
+        // Skip if below join PoW requirement
+        if (hub.joinMinPow > 0 && countLeadingZeroBits(event.id) < hub.joinMinPow) return
 
         // Skip if before lastSeen
         if (lastSeen > 0 && event.created_at <= lastSeen) return
@@ -168,7 +168,7 @@ export function useJoinRequestCount(
     return () => {
       sub.close()
     }
-  }, [hub?.dTag, hubRelays.length, hub?.creatorPubkey, hub?.minPow, hubMembers?.length, isCreator])
+  }, [hub?.dTag, hubRelays.length, hub?.creatorPubkey, hub?.joinMinPow, hubMembers?.length, isCreator])
 
   // Listen for "seen" event (same-tab: custom event, cross-tab: storage event)
   useEffect(() => {

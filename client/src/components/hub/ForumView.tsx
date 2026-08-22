@@ -626,7 +626,7 @@ function ForumPostDetail({
       const { signer: s, privateKey: pk } = useUserStore.getState()
       const unsigned = createHideMessageEvent(hubDTag, postRef, post.pubkey, 36943, true)
       const signed = await signFn(unsigned, s, pk)
-      const relays = hub ? [...hub.filterRelays, ...hub.generalRelays] : []
+      const relays = hub ? [...hub.generalRelays] : []
       await publishToSpecificRelays(getPublishRelays(relays), signed)
       useHubStore.getState().addHiddenMessage(hubDTag, {
         ref: postRef,
@@ -651,7 +651,7 @@ function ForumPostDetail({
       const { getDeletePublishRelays } = await import('@/stores/postingBehaviourStore')
       const { KINDS } = await import('@/lib/crypto/constants')
       const { signer: s, privateKey: pk } = useUserStore.getState()
-      const relays = hub ? [...hub.filterRelays, ...hub.generalRelays] : []
+      const relays = hub ? [...hub.generalRelays] : []
       const publishRelays = getDeletePublishRelays(relays)
       const hideEntry = useHubStore.getState().hiddenMessages[hubDTag]?.[postRef]
       const deletedHide = createDeletedHideEvent(hubDTag, postRef, hideEntry?.createdAt)
@@ -1137,7 +1137,7 @@ function ForumPostDetail({
                           const { signer: s, privateKey: pk } = useUserStore.getState()
                           const unsigned = createHideMessageEvent(hubDTag, replyRef, reply.pubkey, 36943, true)
                           const signed = await signFn(unsigned, s, pk)
-                          const relays = hub ? [...hub.filterRelays, ...hub.generalRelays] : []
+                          const relays = hub ? [...hub.generalRelays] : []
                           await publishToSpecificRelays(getPublishRelays(relays), signed)
                           useHubStore.getState().addHiddenMessage(hubDTag, {
                             ref: replyRef, hiderPubkey: pubkey, kind: 36943, targetPubkey: reply.pubkey,
@@ -1151,7 +1151,7 @@ function ForumPostDetail({
                           const { getDeletePublishRelays } = await import('@/stores/postingBehaviourStore')
                           const { KINDS } = await import('@/lib/crypto/constants')
                           const { signer: s, privateKey: pk } = useUserStore.getState()
-                          const relays = hub ? [...hub.filterRelays, ...hub.generalRelays] : []
+                          const relays = hub ? [...hub.generalRelays] : []
                           const publishRelays = getDeletePublishRelays(relays)
                           const replyHideEntry = useHubStore.getState().hiddenMessages[hubDTag]?.[replyRef]
                           const deletedHide = createDeletedHideEvent(hubDTag, replyRef, replyHideEntry?.createdAt)

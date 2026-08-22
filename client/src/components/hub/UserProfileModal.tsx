@@ -916,13 +916,14 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
         icon: hub.icon,
         banner: hub.banner,
         tags: hub.tags,
-        relays: [...hub.generalRelays, ...hub.filterRelays],
+        relays: [...hub.generalRelays],
         blossomServers: hub.blossomServers,
         indexFileHash: newIndexHash,
         channels: hub.channels,
         categories: hub.categories,
         roles: hub.roles,
         minPow: hub.minPow || undefined,
+        joinMinPow: hub.joinMinPow > 0 ? hub.joinMinPow : undefined,
         nsfw: hub.nsfw || undefined,
         discoverable: hub.discoverable,
         groupedRoles: updatedGroupedRoles.length > 0 ? updatedGroupedRoles : hub.groupedRoles,
@@ -930,7 +931,7 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
         eventCreatedAt: hub.eventCreatedAt,
       })
       const signedEvent = await signFn(unsignedEvent, signer, privateKey)
-      await pubToRelays(getPublishRelays([...hub.generalRelays, ...hub.filterRelays]), signedEvent)
+      await pubToRelays(getPublishRelays([...hub.generalRelays]), signedEvent)
       markDone('Publishing hub event')
 
       // Update local store
@@ -1059,7 +1060,7 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
       await markStep('Publishing join request')
       const unsignedEvent = createJoinRequest(dTag, hubContext.creatorPubkey, newIndexHash)
       const signedEvent = await signFn(unsignedEvent, signer, privateKey)
-      await pubToRelays(getRelays([...hub.generalRelays, ...hub.filterRelays]), signedEvent)
+      await pubToRelays(getRelays([...hub.generalRelays]), signedEvent)
       markDone('Publishing join request')
 
       useHubStore.getState().setModBanList(dTag, myPubkey, allBanPubkeys)
@@ -1154,7 +1155,7 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
       await markStep('Publishing join request')
       const unsignedEvent = createJoinRequest(dTag, hubContext.creatorPubkey, newIndexHash)
       const signedEvent = await signFn(unsignedEvent, signer, privateKey)
-      await pubToRelays(getRelays([...hub.generalRelays, ...hub.filterRelays]), signedEvent)
+      await pubToRelays(getRelays([...hub.generalRelays]), signedEvent)
       markDone('Publishing join request')
 
       useHubStore.getState().setModBanList(dTag, myPubkey, remaining)

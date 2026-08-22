@@ -49,6 +49,7 @@ interface DiscoveredHub {
   banner?: string
   tags?: string[]
   minPow: number
+  joinMinPow: number
   nsfw: boolean
   discoverable: boolean
   creatorPubkey: string
@@ -81,6 +82,9 @@ function parseHubEventForDiscover(event: Event): DiscoveredHub | null {
     const wTagVal = event.tags.find(t => t[0] === 'w')?.[1]
     let minPow = wTagVal ? parseInt(wTagVal, 10) : 0
 
+    // Join PoW from wj tag; falls back to message PoW when absent
+    const wjTagVal = event.tags.find(t => t[0] === 'wj')?.[1]
+
     let description = ''
     let icon: string | undefined
     let banner: string | undefined
@@ -104,7 +108,8 @@ function parseHubEventForDiscover(event: Event): DiscoveredHub | null {
     return {
       event, dTag, name, description, icon, banner,
       tags: tags.length > 0 ? tags : undefined,
-      minPow, nsfw, discoverable, creatorPubkey: event.pubkey,
+      minPow, joinMinPow: wjTagVal ? parseInt(wjTagVal, 10) : minPow,
+      nsfw, discoverable, creatorPubkey: event.pubkey,
       generalRelays, blossomServers, publishedAt, clientTag,
     }
   } catch {
@@ -634,7 +639,7 @@ function DiscoverHubCard({ hub }: { hub: DiscoveredHub }) {
       const hubRelays = [...(hub.generalRelays || [])]
 
       let unsigned = createUnsignedEvent(KINDS.JOIN_REQUEST, '', [['d', hub.dTag]])
-      const signed = await mineAndSign(unsigned, hub.minPow, myPubkey, signer, privateKey)
+      const signed = await mineAndSign(unsigned, hub.joinMinPow, myPubkey, signer, privateKey)
       await publishToSpecificRelays(getPublishRelays(hubRelays), signed)
 
       if (!isAlreadyInList) {
@@ -643,8 +648,8 @@ function DiscoverHubCard({ hub }: { hub: DiscoveredHub }) {
         const hubData: HubData = {
           dTag: hub.dTag, creatorPubkey: hub.creatorPubkey, name: hub.name, icon: hub.icon, banner: hub.banner,
           tags: hub.tags, description: hub.description, epoch: 1, generalRelays: hub.generalRelays,
-          filterRelays: [], blossomServers: hub.blossomServers, indexFileHash: '', channels: [],
-          categories: [], roles: [], minPow: hub.minPow, nsfw: hub.nsfw, discoverable: hub.discoverable,
+          blossomServers: hub.blossomServers, indexFileHash: '', channels: [],
+          categories: [], roles: [], minPow: hub.minPow, joinMinPow: hub.joinMinPow, nsfw: hub.nsfw, discoverable: hub.discoverable,
         }
         setHubData(hub.dTag, hubData)
         // Mark it loaded now — we already have the full hub definition from discovery.
@@ -690,9 +695,9 @@ function DiscoverHubCard({ hub }: { hub: DiscoveredHub }) {
           {hub.nsfw && (
             <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-red-500/80 text-white backdrop-blur-sm">NSFW</span>
           )}
-          {hub.minPow > 0 && (
+          {hub.joinMinPow > 0 && (
             <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-amber-500/80 text-white backdrop-blur-sm">
-              PoW {hub.minPow}
+              PoW {hub.joinMinPow}
             </span>
           )}
         </div>
@@ -766,7 +771,7 @@ function DiscoverHubCard({ hub }: { hub: DiscoveredHub }) {
               className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors cursor-pointer disabled:opacity-50"
             >
               {joining ? (
-                <><Loader2 size={12} className="animate-spin" /> {hub.minPow > 0 ? 'Processing...' : 'Joining...'}</>
+                <><Loader2 size={12} className="animate-spin" /> {hub.joinMinPow > 0 ? 'Processing...' : 'Joining...'}</>
               ) : (
                 <><UserPlus size={12} /> Request Join</>
               )}
@@ -815,8 +820,8 @@ function DiscoverHubCard({ hub }: { hub: DiscoveredHub }) {
         hub={{
           dTag: hub.dTag, creatorPubkey: hub.creatorPubkey, name: hub.name, icon: hub.icon, banner: hub.banner,
           tags: hub.tags, description: hub.description, epoch: 1, generalRelays: hub.generalRelays,
-          filterRelays: [], blossomServers: hub.blossomServers, indexFileHash: '', channels: [],
-          categories: [], roles: [], minPow: hub.minPow, nsfw: hub.nsfw, discoverable: hub.discoverable,
+          blossomServers: hub.blossomServers, indexFileHash: '', channels: [],
+          categories: [], roles: [], minPow: hub.minPow, joinMinPow: hub.joinMinPow, nsfw: hub.nsfw, discoverable: hub.discoverable,
         }}
         blurMedia
         onCreatorClick={() => {

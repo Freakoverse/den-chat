@@ -88,7 +88,7 @@ export function ReportModal({
     if (minPow > 0) setMining(true)
 
     try {
-      const relays = [...new Set([...hub.filterRelays, ...hub.generalRelays])].filter(Boolean)
+      const relays = [...new Set(hub.generalRelays)].filter(Boolean)
 
       await submitReport({
         hubDTag,

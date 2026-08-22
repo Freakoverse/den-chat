@@ -27,8 +27,8 @@ export function buildRelayIndex(hubs: Record<string, HubData>): RelayBatch[] {
   const relayMap = new Map<string, Set<string>>()
 
   for (const [dTag, hub] of Object.entries(hubs)) {
-    // Combine general + filter relays (deduplicated per hub)
-    const allRelays = new Set([...hub.generalRelays, ...hub.filterRelays])
+    // The hub's relays (deduplicated per hub)
+    const allRelays = new Set(hub.generalRelays)
 
     for (const relay of allRelays) {
       if (!relay) continue

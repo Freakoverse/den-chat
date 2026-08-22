@@ -28,6 +28,7 @@ interface BuildHubEventOptions {
   categories: Category[]
   roles: Role[]
   minPow?: number
+  joinMinPow?: number
   nsfw?: boolean
   discoverable?: boolean
   groupedRoles?: GroupedRole[]
@@ -82,7 +83,7 @@ export function buildHubEvent(opts: BuildHubEventOptions) {
 
   const {
     dTag, name, description, epoch, icon, banner, tags,
-    relays, blossomServers, indexFileHash, channels, categories, roles, minPow, nsfw, discoverable, groupedRoles,
+    relays, blossomServers, indexFileHash, channels, categories, roles, minPow, joinMinPow, nsfw, discoverable, groupedRoles,
     publishedAt, eventCreatedAt
   } = opts
 
@@ -113,9 +114,13 @@ export function buildHubEvent(opts: BuildHubEventOptions) {
     eventTags.push(['content-warning', ''])
     eventTags.push(['L', 'content-warning'])
   }
-  // PoW difficulty tag
+  // PoW difficulty tag (message PoW)
   if (minPow && minPow > 0) {
     eventTags.push(['w', minPow.toString()])
+  }
+  // Join PoW difficulty tag (separate from message PoW)
+  if (joinMinPow && joinMinPow > 0) {
+    eventTags.push(['wj', joinMinPow.toString()])
   }
   // Discoverable flag — only emit when 'off' (default is discoverable)
   if (discoverable === false) {

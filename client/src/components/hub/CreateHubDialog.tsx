@@ -523,8 +523,10 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
         tags.push(['content-warning', ''])
         tags.push(['L', 'content-warning'])
       }
-      // PoW difficulty tag
+      // PoW difficulty tag (message PoW)
       tags.push(['w', '15'])
+      // Join PoW difficulty tag (separate from message PoW; defaults to the same)
+      tags.push(['wj', '15'])
       // Discoverable flag
       tags.push(['f', discoverable ? 'on' : 'off'])
       // Client tag for hub discovery
@@ -563,7 +565,6 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
         description: description.trim(),
         epoch,
         generalRelays: relays,
-        filterRelays: [],
         blossomServers: blossomServerList,
         indexFileHash: indexHash,
         channels: channelDefs.map((ch) => ({
@@ -583,6 +584,7 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
           permissions: r.permissions as Record<string, boolean>,
         })),
         minPow: 15,
+        joinMinPow: 15,
         nsfw,
         discoverable,
       })

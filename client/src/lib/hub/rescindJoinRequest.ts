@@ -21,7 +21,7 @@ export async function rescindJoinRequest(hub: HubData, pubkey: string): Promise<
   const { useMessageStore } = await import('@/stores/messageStore')
 
   const { signer, privateKey } = useUserStore.getState()
-  const relays = [...hub.generalRelays, ...hub.filterRelays]
+  const relays = [...hub.generalRelays]
   const publishRelays = getDeletePublishRelays(relays)
 
   // Fetch the existing join request to preserve its created_at.

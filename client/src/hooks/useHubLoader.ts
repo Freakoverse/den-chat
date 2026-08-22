@@ -43,16 +43,11 @@ export function parseHubEvent(event: Event): (HubData & { creatorPubkey: string 
     const epochTag = event.tags.find(t => t[0] === 'epoch')?.[1]
     const epoch = epochTag ? parseInt(epochTag, 10) : 1
 
-    // Parse relay tags
+    // Parse relay tags — every relay tag is a hub (general) relay
     const generalRelays: string[] = []
-    const filterRelays: string[] = []
     for (const tag of event.tags) {
       if (tag[0] === 'r' && tag[1]) {
-        if (tag[2] === 'filter') {
-          filterRelays.push(tag[1])
-        } else {
-          generalRelays.push(tag[1])
-        }
+        generalRelays.push(tag[1])
       }
     }
 
@@ -73,6 +68,10 @@ export function parseHubEvent(event: Event): (HubData & { creatorPubkey: string 
     // Parse PoW from w tag (source of truth), fallback to legacy JSON
     const wTag = event.tags.find(t => t[0] === 'w')?.[1]
     let minPow = wTag ? parseInt(wTag, 10) : 0
+
+    // Parse join PoW from wj tag; fall back to message PoW when absent so
+    // existing hubs keep their current join behavior.
+    const wjTag = event.tags.find(t => t[0] === 'wj')?.[1]
 
     // Parse NSFW from content-warning tag (source of truth)
     const nsfw = event.tags.some(t => t[0] === 'content-warning')
@@ -219,13 +218,13 @@ export function parseHubEvent(event: Event): (HubData & { creatorPubkey: string 
       description,
       epoch,
       generalRelays,
-      filterRelays,
       blossomServers,
       indexFileHash,
       channels,
       categories,
       roles,
       minPow,
+      joinMinPow: wjTag ? parseInt(wjTag, 10) : minPow,
       nsfw,
       creatorPubkey: event.pubkey,
       deleted: isDeleted || undefined,

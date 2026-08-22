@@ -352,16 +352,16 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
         dTag: hub.dTag, name: hub.name, description: hub.description || undefined,
         epoch: hub.epoch, icon: hub.icon || undefined, banner: hub.banner || undefined,
         tags: hub.tags && hub.tags.length ? hub.tags : undefined,
-        relays: [...hub.generalRelays, ...hub.filterRelays],
+        relays: [...hub.generalRelays],
         blossomServers: hub.blossomServers, indexFileHash: hub.indexFileHash,
         channels: layoutDraft.channels, categories: layoutDraft.categories, roles: hub.roles,
-        minPow: hub.minPow > 0 ? hub.minPow : undefined, nsfw: hub.nsfw || undefined,
+        minPow: hub.minPow > 0 ? hub.minPow : undefined, joinMinPow: hub.joinMinPow > 0 ? hub.joinMinPow : undefined, nsfw: hub.nsfw || undefined,
         discoverable: hub.discoverable, groupedRoles: hub.groupedRoles && hub.groupedRoles.length ? hub.groupedRoles : undefined,
         publishedAt: hub.publishedAt, eventCreatedAt: hub.eventCreatedAt,
       })
       const signed = await signWithSigner(unsigned, signer, privateKey)
       setLayoutStep('publishing')
-      await publishToSpecificRelays(getPublishRelays([...hub.generalRelays, ...hub.filterRelays]), signed)
+      await publishToSpecificRelays(getPublishRelays([...hub.generalRelays]), signed)
       setHubData(hub.dTag, { ...hub, channels: layoutDraft.channels, categories: layoutDraft.categories, eventCreatedAt: signed.created_at })
       setLayoutDraft(null)
       setLayoutStep('done')

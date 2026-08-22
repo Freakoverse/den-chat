@@ -390,10 +390,10 @@ export function VoiceChannelView() {
 
   useEffect(() => {
     if (!activeHubId || !hub) return
-    const relays = [...hub.filterRelays, ...hub.generalRelays]
+    const relays = [...hub.generalRelays]
     subscribePins(activeHubId, relays)
     return () => unsubscribePins(activeHubId)
-  }, [activeHubId, hub?.filterRelays?.join(','), hub?.generalRelays?.join(',')])
+  }, [activeHubId, hub?.generalRelays?.join(',')])
 
   const isCreator = !!(pubkey && hub.creatorPubkey === pubkey)
 
@@ -1059,7 +1059,7 @@ export function VoiceChannelView() {
               <button
                 onClick={() => {
                   if (!hub) return
-                  const relays = [...new Set([...hub.generalRelays, ...hub.filterRelays])].filter(Boolean)
+                  const relays = [...new Set(hub.generalRelays)].filter(Boolean)
                   const groupIds = hub.groupedRoles?.map((g) => g.groupId) || []
                   refreshHosts(hub.dTag, relays, hubSecret, groupIds)
                 }}

@@ -458,7 +458,7 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
             const hubStore = (await import('@/stores/hubStore')).useHubStore.getState()
             const oldHubData = hubStore.hubs[oldHub]
             const oldRelays = oldHubData
-              ? [...new Set([...oldHubData.generalRelays, ...oldHubData.filterRelays])].filter(Boolean)
+              ? [...new Set(oldHubData.generalRelays)].filter(Boolean)
               : []
             if (oldRelays.length > 0) {
               await publishToSpecificRelays(getPublishRelays(oldRelays), signed)
@@ -1380,7 +1380,7 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
           const hubStore = (await import('@/stores/hubStore')).useHubStore.getState()
           const hubData = hubStore.hubs[currentHubDTag]
           if (hubData) {
-            effectiveRelays = [...new Set([...hubData.generalRelays, ...hubData.filterRelays])].filter(Boolean)
+            effectiveRelays = [...new Set(hubData.generalRelays)].filter(Boolean)
           }
         } catch { }
       }

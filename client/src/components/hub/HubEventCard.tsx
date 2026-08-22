@@ -105,6 +105,8 @@ export function HubEventCard({ identifier, pubkey, relays }: HubEventCardProps) 
         // Read PoW from w tag (source of truth), fallback to legacy JSON
         const wTagVal = latest.tags.find(t => t[0] === 'w')?.[1]
         let minPow = wTagVal ? parseInt(wTagVal, 10) : 0
+        // Join PoW from wj tag; falls back to message PoW when absent
+        const wjTagVal = latest.tags.find(t => t[0] === 'wj')?.[1]
         // Read NSFW from content-warning tag (source of truth), fallback to legacy JSON
         let nsfw = latest.tags.some(t => t[0] === 'content-warning')
 
@@ -132,13 +134,13 @@ export function HubEventCard({ identifier, pubkey, relays }: HubEventCardProps) 
           description,
           epoch,
           generalRelays,
-          filterRelays: [],
           blossomServers,
           indexFileHash,
           channels: [],
           categories: [],
           roles: [],
           minPow,
+          joinMinPow: wjTagVal ? parseInt(wjTagVal, 10) : minPow,
           nsfw,
         }
 
@@ -187,8 +189,8 @@ export function HubEventCard({ identifier, pubkey, relays }: HubEventCardProps) 
         ['d', hubData.dTag],
       ])
 
-      // Mine PoW + sign (with automatic retry if signer invalidates PoW)
-      const signed = await mineAndSign(unsigned, hubData.minPow, myPubkey, signer, privateKey)
+      // Mine join PoW + sign (with automatic retry if signer invalidates PoW)
+      const signed = await mineAndSign(unsigned, hubData.joinMinPow, myPubkey, signer, privateKey)
       await publishToSpecificRelays(getPublishRelays(hubRelays), signed)
 
       // Add to user's hub list
@@ -290,9 +292,9 @@ export function HubEventCard({ identifier, pubkey, relays }: HubEventCardProps) 
             {hubData.nsfw && (
               <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-red-500/20 text-red-400">NSFW</span>
             )}
-            {hubData.minPow > 0 && (
+            {hubData.joinMinPow > 0 && (
               <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium bg-amber-500/15 text-amber-400">
-                Processing needed: {hubData.minPow}
+                Processing needed: {hubData.joinMinPow}
               </span>
             )}
           </div>
@@ -350,7 +352,7 @@ export function HubEventCard({ identifier, pubkey, relays }: HubEventCardProps) 
               className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors cursor-pointer disabled:opacity-50"
             >
               {joining ? (
-                <><Loader2 size={12} className="animate-spin" /> {hubData.minPow > 0 ? 'Mining PoW...' : 'Joining...'}</>
+                <><Loader2 size={12} className="animate-spin" /> {hubData.joinMinPow > 0 ? 'Mining PoW...' : 'Joining...'}</>
               ) : (
                 <><UserPlus size={12} /> Request Join</>
               )}

@@ -73,7 +73,7 @@ export function useVoicePresence() {
       unsubscribeHosts(hub.dTag)
     }
 
-    const relays = [...new Set([...hub.generalRelays, ...hub.filterRelays])].filter(Boolean)
+    const relays = [...new Set(hub.generalRelays)].filter(Boolean)
     if (relays.length > 0) {
       const groupIds = hub.groupedRoles?.map((g) => g.groupId) || []
       subscribeHosts(hub.dTag, relays, hubSecret, groupIds)
@@ -106,7 +106,7 @@ export function useVoicePresence() {
       const hub = useHubStore.getState().hubs[currentHubDTag]
       if (!hub) return
 
-      const relays = [...new Set([...hub.generalRelays, ...hub.filterRelays])].filter(Boolean)
+      const relays = [...new Set(hub.generalRelays)].filter(Boolean)
 
       // Restart DC state broadcast (idempotent — clears existing interval first)
       _startStateBroadcast()

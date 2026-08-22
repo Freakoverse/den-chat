@@ -412,7 +412,7 @@ function HubAvailabilityModal({ hub, onClose }: { hub: HubData; onClose: () => v
     setLoading(true)
     // Pass the version the client holds so relays with an OLDER copy read as
     // 'outdated' rather than 'present'.
-    checkEventAvailability({ kinds: [KINDS.HUB_EVENT], authors: [hub.creatorPubkey], '#d': [hub.dTag], limit: 1 }, hub.eventCreatedAt, [...hub.generalRelays, ...hub.filterRelays])
+    checkEventAvailability({ kinds: [KINDS.HUB_EVENT], authors: [hub.creatorPubkey], '#d': [hub.dTag], limit: 1 }, hub.eventCreatedAt, [...hub.generalRelays])
       .then((r) => { if (!cancelled) setResults(r) })
       .catch(() => { if (!cancelled) setResults([]) })
       .finally(() => { if (!cancelled) setLoading(false) })

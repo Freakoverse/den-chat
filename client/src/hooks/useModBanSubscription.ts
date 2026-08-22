@@ -61,7 +61,7 @@ export function useModBanSubscription() {
     // Include own pubkey if we're a moderator (to sync across sessions)
     const subscribePubkeys = [...new Set([...modPubkeys, ...(pubkey ? [pubkey] : [])])]
 
-    const relays = [...new Set([...hub.generalRelays, ...hub.filterRelays])].filter(Boolean)
+    const relays = [...new Set(hub.generalRelays)].filter(Boolean)
     if (relays.length === 0) return
 
     const now = Math.floor(Date.now() / 1000)

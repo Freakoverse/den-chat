@@ -126,7 +126,7 @@ export function useExceptionSubscriptions() {
     // Tear down old subscriptions
     cleanup()
 
-    const relays = [...hub.filterRelays, ...hub.generalRelays]
+    const relays = [...hub.generalRelays]
     if (relays.length === 0) return cleanup
 
     const hubDTag = activeHubId

@@ -203,13 +203,14 @@ export async function safeTreeUpdate(params: SafeTreeUpdateParams): Promise<Safe
       icon: hub.icon,
       banner: hub.banner,
       tags: hub.tags,
-      relays: [...hub.generalRelays, ...hub.filterRelays],
+      relays: [...hub.generalRelays],
       blossomServers: hub.blossomServers,
       indexFileHash: newIndexHash,
       channels: hub.channels,
       categories: hub.categories,
       roles: hub.roles,
       minPow: hub.minPow > 0 ? hub.minPow : undefined,
+      joinMinPow: hub.joinMinPow > 0 ? hub.joinMinPow : undefined,
       nsfw: hub.nsfw || undefined,
       discoverable: hub.discoverable,
       groupedRoles: hub.groupedRoles,
@@ -219,7 +220,7 @@ export async function safeTreeUpdate(params: SafeTreeUpdateParams): Promise<Safe
     const signedEvent = await signWithSigner(unsignedEvent, signer, privateKey)
     publishedCreatedAt = signedEvent.created_at
     await publishToSpecificRelays(
-      getPublishRelays([...hub.generalRelays, ...hub.filterRelays]),
+      getPublishRelays([...hub.generalRelays]),
       signedEvent,
     )
   }
@@ -514,13 +515,14 @@ export async function safePaginatedTreeUpdate(params: SafePaginatedTreeUpdatePar
       icon: hub.icon,
       banner: hub.banner,
       tags: hub.tags,
-      relays: [...hub.generalRelays, ...hub.filterRelays],
+      relays: [...hub.generalRelays],
       blossomServers: hub.blossomServers,
       indexFileHash: newIndexHash,
       channels: hub.channels,
       categories: hub.categories,
       roles: hub.roles,
       minPow: hub.minPow > 0 ? hub.minPow : undefined,
+      joinMinPow: hub.joinMinPow > 0 ? hub.joinMinPow : undefined,
       nsfw: hub.nsfw || undefined,
       discoverable: hub.discoverable,
       groupedRoles: hub.groupedRoles,
@@ -530,7 +532,7 @@ export async function safePaginatedTreeUpdate(params: SafePaginatedTreeUpdatePar
     const signedEvent = await signWithSigner(unsignedEvent, signer, privateKey)
     publishedCreatedAt = signedEvent.created_at
     onStep?.('Publishing to relays')
-    targetedRelays = getPublishRelays([...hub.generalRelays, ...hub.filterRelays])
+    targetedRelays = getPublishRelays([...hub.generalRelays])
     publishedRelays = await publishToSpecificRelays(targetedRelays, signedEvent)
   }
 

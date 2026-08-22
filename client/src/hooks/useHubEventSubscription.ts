@@ -41,7 +41,7 @@ export function useHubEventSubscription() {
       .sort()
       .map((k) => {
         const h = hubs[k]
-        return `${k}:${h.generalRelays.join(',')}:${h.filterRelays.join(',')}`
+        return `${k}:${h.generalRelays.join(',')}`
       })
       .join('|')
   }, [hubs])

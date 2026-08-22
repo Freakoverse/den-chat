@@ -154,7 +154,7 @@ export const usePollStore = create<PollStore>((set, get) => ({
       return
     }
 
-    const relays = [...new Set([...hub.generalRelays, ...hub.filterRelays])].filter(Boolean)
+    const relays = [...new Set(hub.generalRelays)].filter(Boolean)
     if (relays.length === 0) {
       set((state) => ({
         voteFetchStatus: { ...state.voteFetchStatus, [pollEventId]: 'done' },

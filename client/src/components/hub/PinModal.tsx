@@ -123,7 +123,7 @@ export function PinModal({ hubDTag, channelId, onClose, onJumpToMessage }: PinMo
 
   const handleUnpin = useCallback(async (aRef: string) => {
     if (!myPubkey) return
-    const relays = hub ? [...hub.filterRelays, ...hub.generalRelays] : []
+    const relays = hub ? [...hub.generalRelays] : []
     await unpinMessage(hubDTag, channelId, aRef, myPubkey, relays, signer, privateKey)
   }, [myPubkey, hub, hubDTag, channelId, signer, privateKey, unpinMessage])
 

@@ -244,6 +244,7 @@ export function HubSettingsModal({ open, onClose, hub }: HubSettingsModalProps) 
   const [editCategories, setEditCategories] = useState<Category[]>(() => [...hub.categories].sort((a, b) => a.position - b.position))
   const [editChannels, setEditChannels] = useState<Channel[]>(() => [...hub.channels])
   const [editMinPow, setEditMinPow] = useState(hub.minPow || 0)
+  const [editJoinMinPow, setEditJoinMinPow] = useState(hub.joinMinPow || 0)
   const [editNsfw, setEditNsfw] = useState(hub.nsfw || false)
   const [editDiscoverable, setEditDiscoverable] = useState(hub.discoverable !== false)
   const [editRelays, setEditRelays] = useState<string[]>(() => [...hub.generalRelays])
@@ -287,6 +288,7 @@ export function HubSettingsModal({ open, onClose, hub }: HubSettingsModalProps) 
       setEditCategories([...hub.categories].sort((a, b) => a.position - b.position))
       setEditChannels([...hub.channels])
       setEditMinPow(hub.minPow || 0)
+      setEditJoinMinPow(hub.joinMinPow || 0)
       setEditNsfw(hub.nsfw || false)
       setEditDiscoverable(hub.discoverable !== false)
       setEditRelays([...hub.generalRelays])
@@ -308,6 +310,7 @@ export function HubSettingsModal({ open, onClose, hub }: HubSettingsModalProps) 
     if (JSON.stringify(editChannels.map(c => ({ id: c.channelId, name: c.name, cat: c.categoryId, pos: c.position, type: c.type, perms: c.permissions }))) !==
       JSON.stringify(hub.channels.map(c => ({ id: c.channelId, name: c.name, cat: c.categoryId, pos: c.position, type: c.type, perms: c.permissions })))) return true
     if (editMinPow !== (hub.minPow || 0)) return true
+    if (editJoinMinPow !== (hub.joinMinPow || 0)) return true
     if (editNsfw !== (hub.nsfw || false)) return true
     if (editDiscoverable !== (hub.discoverable !== false)) return true
     if (JSON.stringify([...editRelays].sort()) !== JSON.stringify([...hub.generalRelays].sort())) return true
@@ -315,7 +318,7 @@ export function HubSettingsModal({ open, onClose, hub }: HubSettingsModalProps) 
     if (JSON.stringify(editRoles.map(r => ({ id: r.roleId, name: r.name, color: r.color, pos: r.position, hoist: r.hoist, perms: r.permissions }))) !==
       JSON.stringify(hub.roles.map(r => ({ id: r.roleId, name: r.name, color: r.color, pos: r.position, hoist: r.hoist, perms: r.permissions })))) return true
     return false
-  }, [editName, editDescription, editIcon, editBanner, editTags, editCategories, editChannels, editMinPow, editNsfw, editDiscoverable, editRelays, editBlossoms, editRoles, hub])
+  }, [editName, editDescription, editIcon, editBanner, editTags, editCategories, editChannels, editMinPow, editJoinMinPow, editNsfw, editDiscoverable, editRelays, editBlossoms, editRoles, hub])
 
   // Role change summary for the Roles page footer
   const roleChangeSummary = useMemo(() => {
@@ -345,11 +348,12 @@ export function HubSettingsModal({ open, onClose, hub }: HubSettingsModalProps) 
     if (editIcon !== (hub.icon || '')) fields.push('icon')
     if (editBanner !== (hub.banner || '')) fields.push('banner')
     if (JSON.stringify(editTags) !== JSON.stringify(hub.tags || [])) fields.push('tags')
-    if (editMinPow !== (hub.minPow || 0)) fields.push('proof of work')
+    if (editMinPow !== (hub.minPow || 0)) fields.push('message proof of work')
+    if (editJoinMinPow !== (hub.joinMinPow || 0)) fields.push('join proof of work')
     if (editNsfw !== (hub.nsfw || false)) fields.push('NSFW')
     if (editDiscoverable !== (hub.discoverable !== false)) fields.push('discoverability')
     return fields
-  }, [editName, editDescription, editIcon, editBanner, editTags, editMinPow, editNsfw, editDiscoverable, hub])
+  }, [editName, editDescription, editIcon, editBanner, editTags, editMinPow, editJoinMinPow, editNsfw, editDiscoverable, hub])
 
   // Channels page change summary
   const channelChangeSummary = useMemo(() => {
@@ -736,6 +740,7 @@ export function HubSettingsModal({ open, onClose, hub }: HubSettingsModalProps) 
         categories: finalCategories,
         roles: editRoles,
         minPow: editMinPow > 0 ? editMinPow : undefined,
+        joinMinPow: editJoinMinPow > 0 ? editJoinMinPow : undefined,
         nsfw: editNsfw || undefined,
         discoverable: editDiscoverable,
         groupedRoles: newGroupedRoles.length > 0 ? newGroupedRoles : undefined,
@@ -764,6 +769,7 @@ export function HubSettingsModal({ open, onClose, hub }: HubSettingsModalProps) 
         generalRelays: editRelays,
         blossomServers: editBlossoms,
         minPow: editMinPow,
+        joinMinPow: editJoinMinPow,
         nsfw: editNsfw,
         discoverable: editDiscoverable,
         groupedRoles: newGroupedRoles.length > 0 ? newGroupedRoles : undefined,
@@ -856,6 +862,7 @@ export function HubSettingsModal({ open, onClose, hub }: HubSettingsModalProps) 
                       editBanner={editBanner} setEditBanner={setEditBanner}
                       editTags={editTags} setEditTags={setEditTags}
                       editMinPow={editMinPow} setEditMinPow={setEditMinPow}
+                      editJoinMinPow={editJoinMinPow} setEditJoinMinPow={setEditJoinMinPow}
                       editNsfw={editNsfw} setEditNsfw={setEditNsfw}
                       editDiscoverable={editDiscoverable} setEditDiscoverable={setEditDiscoverable}
                     />
@@ -987,6 +994,7 @@ export function HubSettingsModal({ open, onClose, hub }: HubSettingsModalProps) 
                         setEditBanner(hub.banner || '')
                         setEditTags(hub.tags || [])
                         setEditMinPow(hub.minPow || 0)
+                        setEditJoinMinPow(hub.joinMinPow || 0)
                         setEditNsfw(hub.nsfw || false)
                         setEditDiscoverable(hub.discoverable !== false)
                       }}
@@ -1334,6 +1342,7 @@ interface GeneralPageProps {
   editBanner: string; setEditBanner: (v: string) => void
   editTags: string[]; setEditTags: (v: string[]) => void
   editMinPow: number; setEditMinPow: (v: number) => void
+  editJoinMinPow: number; setEditJoinMinPow: (v: number) => void
   editNsfw: boolean; setEditNsfw: (v: boolean) => void
   editDiscoverable: boolean; setEditDiscoverable: (v: boolean) => void
 }
@@ -1342,6 +1351,7 @@ function GeneralPage({
   hub, editName, setEditName, editDescription, setEditDescription,
   editIcon, setEditIcon, editBanner, setEditBanner,
   editTags, setEditTags, editMinPow, setEditMinPow,
+  editJoinMinPow, setEditJoinMinPow,
   editNsfw, setEditNsfw,
   editDiscoverable, setEditDiscoverable,
 }: GeneralPageProps) {
@@ -1702,7 +1712,7 @@ function GeneralPage({
         <Separator />
 
         {/* Proof of Work */}
-        <PowSection editMinPow={editMinPow} setEditMinPow={setEditMinPow} />
+        <PowSection editMinPow={editMinPow} setEditMinPow={setEditMinPow} editJoinMinPow={editJoinMinPow} setEditJoinMinPow={setEditJoinMinPow} />
 
       </div>
 
@@ -2450,38 +2460,32 @@ function ChannelPermissionsEditor({ target, editChannels, setEditChannels, editC
 // ── PoW Section ──
 
 
-function PowSection({ editMinPow, setEditMinPow }: { editMinPow: number; setEditMinPow: (v: number) => void }) {
-  const [hashRate, setHashRate] = useState<number | null>(null)
-  const [manualInput, setManualInput] = useState(editMinPow.toString())
-
-  // Benchmark on mount
-  useEffect(() => {
-    benchmarkHashRate().then(setHashRate)
-  }, [])
-
-  // Keep manual input in sync when slider changes
-  useEffect(() => {
-    setManualInput(editMinPow.toString())
-  }, [editMinPow])
-
+/** A single PoW difficulty slider + estimate. Shared by the Message and Join PoW controls. */
+function PowSlider({ label, description, value, setValue, hashRate }: {
+  label: string
+  description: string
+  value: number
+  setValue: (v: number) => void
+  hashRate: number | null
+}) {
   const solveTimeStr = useMemo(() => {
-    if (editMinPow <= 0) return 'Disabled'
-    const seconds = estimateSolveTime(editMinPow, hashRate ?? undefined)
+    if (value <= 0) return 'Disabled'
+    const seconds = estimateSolveTime(value, hashRate ?? undefined)
     if (seconds < 0.001) return '<1ms on this device'
     if (seconds < 1) return `~${Math.round(seconds * 1000)}ms on this device`
     if (seconds < 60) return `~${seconds.toFixed(1)}s on this device`
     if (seconds < 3600) return `~${(seconds / 60).toFixed(1)} min on this device`
     if (seconds < 86400) return `~${(seconds / 3600).toFixed(1)} hours on this device`
     return `~${(seconds / 86400).toFixed(1)} days on this device`
-  }, [editMinPow, hashRate])
+  }, [value, hashRate])
 
   return (
     <div>
       <label className="text-sm font-medium text-foreground mb-1 flex items-center gap-1.5">
-        Proof of Work
+        {label}
       </label>
       <p className="text-xs text-muted-foreground mb-3">
-        Require computational work before sending messages or join requests. Higher difficulty = more spam protection but slower sending.
+        {description}
       </p>
 
       <div className="flex items-center gap-3 mb-2">
@@ -2491,44 +2495,44 @@ function PowSection({ editMinPow, setEditMinPow }: { editMinPow: number; setEdit
           {/* Filled track */}
           <div
             className="absolute left-0 h-1.5 rounded-full bg-amber-400 transition-all"
-            style={{ width: `${Math.min(editMinPow, 100)}%` }}
+            style={{ width: `${Math.min(value, 100)}%` }}
           />
           {/* Visible thumb */}
           <div
             className="absolute w-4 h-4 rounded-full bg-amber-400 border-2 border-background shadow-lg pointer-events-none transition-all"
-            style={{ left: `calc(${Math.min(editMinPow, 100)}% - 8px)` }}
+            style={{ left: `calc(${Math.min(value, 100)}% - 8px)` }}
           />
           {/* Invisible native range */}
           <input
             type="range"
             min={0}
             max={100}
-            value={Math.min(editMinPow, 100)}
-            onChange={(e) => setEditMinPow(parseInt(e.target.value, 10))}
+            value={Math.min(value, 100)}
+            onChange={(e) => setValue(parseInt(e.target.value, 10))}
             className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
           />
         </div>
         <div className="flex items-center h-7 rounded-md border border-input bg-background overflow-hidden">
           <button
-            onClick={() => { const v = Math.max(0, editMinPow - 1); setEditMinPow(v) }}
+            onClick={() => { const v = Math.max(0, value - 1); setValue(v) }}
             className="h-full px-1.5 text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors cursor-pointer flex items-center"
           >
             <Minus size={12} />
           </button>
           <span className="px-2 text-sm text-foreground tabular-nums min-w-[28px] text-center">
-            {editMinPow}
+            {value}
           </span>
           <button
-            onClick={() => setEditMinPow(editMinPow + 1)}
+            onClick={() => setValue(value + 1)}
             className="h-full px-1.5 text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors cursor-pointer flex items-center"
           >
             <Plus size={12} />
           </button>
         </div>
-        {editMinPow !== 15 ? (
+        {value !== 15 ? (
           <Tip text="Reset to default (15)">
             <button
-              onClick={() => setEditMinPow(15)}
+              onClick={() => setValue(15)}
               className="p-1 rounded text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
             >
               <RotateCcw size={14} />
@@ -2542,14 +2546,45 @@ function PowSection({ editMinPow, setEditMinPow }: { editMinPow: number; setEdit
       <div className="flex items-center justify-between text-xs">
         <span className={cn(
           'font-medium',
-          editMinPow === 0 ? 'text-muted-foreground' : editMinPow <= 16 ? 'text-emerald-400' : editMinPow <= 24 ? 'text-amber-400' : 'text-red-400'
+          value === 0 ? 'text-muted-foreground' : value <= 16 ? 'text-emerald-400' : value <= 24 ? 'text-amber-400' : 'text-red-400'
         )}>
-          {editMinPow === 0 ? 'No PoW required' : `Difficulty: ${editMinPow} bits`}
+          {value === 0 ? 'No PoW required' : `Difficulty: ${value} bits`}
         </span>
         <span className="text-muted-foreground">
           {hashRate ? solveTimeStr : 'Benchmarking…'}
         </span>
       </div>
+    </div>
+  )
+}
+
+function PowSection({ editMinPow, setEditMinPow, editJoinMinPow, setEditJoinMinPow }: {
+  editMinPow: number; setEditMinPow: (v: number) => void
+  editJoinMinPow: number; setEditJoinMinPow: (v: number) => void
+}) {
+  const [hashRate, setHashRate] = useState<number | null>(null)
+
+  // Benchmark on mount (shared across both sliders)
+  useEffect(() => {
+    benchmarkHashRate().then(setHashRate)
+  }, [])
+
+  return (
+    <div className="space-y-6">
+      <PowSlider
+        label="Message PoW"
+        description="Require computational work before sending messages. Higher difficulty = more spam protection but slower sending."
+        value={editMinPow}
+        setValue={setEditMinPow}
+        hashRate={hashRate}
+      />
+      <PowSlider
+        label="Join PoW"
+        description="Require computational work before submitting a join request. Higher difficulty = more spam protection but slower joining."
+        value={editJoinMinPow}
+        setValue={setEditJoinMinPow}
+        hashRate={hashRate}
+      />
     </div>
   )
 }
@@ -3262,13 +3297,14 @@ function SecurityPage({ hub }: { hub: HubData }) {
         icon: hub.icon || undefined,
         banner: hub.banner || undefined,
         tags: hub.tags,
-        relays: [...hub.generalRelays, ...hub.filterRelays],
+        relays: [...hub.generalRelays],
         blossomServers: hub.blossomServers,
         indexFileHash: finalIndexHash,
         channels: hub.channels,
         categories: hub.categories,
         roles: hub.roles,
         minPow: hub.minPow > 0 ? hub.minPow : undefined,
+        joinMinPow: hub.joinMinPow > 0 ? hub.joinMinPow : undefined,
         nsfw: hub.nsfw || undefined,
         discoverable: hub.discoverable,
         groupedRoles: updatedGroupedRoles,
@@ -3276,7 +3312,7 @@ function SecurityPage({ hub }: { hub: HubData }) {
         eventCreatedAt: hub.eventCreatedAt,
       })
       const signedEvent = await signWithSigner(unsignedEvent, signer, privateKey)
-      await publishToSpecificRelays(getPublishRelays([...hub.generalRelays, ...hub.filterRelays]), signedEvent)
+      await publishToSpecificRelays(getPublishRelays([...hub.generalRelays]), signedEvent)
       markDone('Publishing hub event')
 
       // 10. Update local store
@@ -3547,7 +3583,7 @@ function DangerousPage({ hub, onClose, setHubStatus }: DangerousPageProps) {
       ] as [string, ...string[]][], deleteCreatedAt)
 
       const signedDeletedHub = await signWithSigner(deletedHubEvent, signer, privateKey)
-      await publishToSpecificRelays(getDeletePublishRelays([...hub.generalRelays, ...hub.filterRelays]), signedDeletedHub)
+      await publishToSpecificRelays(getDeletePublishRelays([...hub.generalRelays]), signedDeletedHub)
 
       // 2. NIP-09 Kind 5 deletion request as fallback
       const deleteEvent = createUnsignedEvent(5, 'Hub deletion requested', [
@@ -3555,7 +3591,7 @@ function DangerousPage({ hub, onClose, setHubStatus }: DangerousPageProps) {
       ] as [string, ...string[]][])
 
       const signedDelete = await signWithSigner(deleteEvent, signer, privateKey)
-      await publishToSpecificRelays(getDeletePublishRelays([...hub.generalRelays, ...hub.filterRelays]), signedDelete)
+      await publishToSpecificRelays(getDeletePublishRelays([...hub.generalRelays]), signedDelete)
 
       // Update local state
       setHubStatus(hub.dTag, 'deleted')
@@ -3771,13 +3807,14 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
         icon: hub.icon,
         banner: hub.banner,
         tags: hub.tags,
-        relays: [...hub.generalRelays, ...hub.filterRelays],
+        relays: [...hub.generalRelays],
         blossomServers: hub.blossomServers,
         indexFileHash: newIndexHash,
         channels: hub.channels,
         categories: hub.categories,
         roles: hub.roles,
         minPow: hub.minPow || undefined,
+        joinMinPow: hub.joinMinPow || undefined,
         nsfw: hub.nsfw || undefined,
         discoverable: hub.discoverable,
         groupedRoles: hub.groupedRoles,
@@ -3785,7 +3822,7 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
         eventCreatedAt: hub.eventCreatedAt,
       })
       const signedEvent = await signWithSigner(unsignedEvent, signer, privateKey)
-      await pubToRelays(getPublishRelays([...hub.generalRelays, ...hub.filterRelays]), signedEvent)
+      await pubToRelays(getPublishRelays([...hub.generalRelays]), signedEvent)
       markDone('Publishing hub event')
 
       // Update local store — only after publish succeeds for consistency
@@ -3959,13 +3996,14 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
         icon: hub.icon,
         banner: hub.banner,
         tags: hub.tags,
-        relays: [...hub.generalRelays, ...hub.filterRelays],
+        relays: [...hub.generalRelays],
         blossomServers: hub.blossomServers,
         indexFileHash: newIndexHash,
         channels: hub.channels,
         categories: hub.categories,
         roles: hub.roles,
         minPow: hub.minPow || undefined,
+        joinMinPow: hub.joinMinPow || undefined,
         nsfw: hub.nsfw || undefined,
         discoverable: hub.discoverable,
         groupedRoles: hub.groupedRoles,
@@ -3973,7 +4011,7 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
         eventCreatedAt: hub.eventCreatedAt,
       })
       const signedEvent = await signWithSigner(unsignedEvent, signer, privateKey)
-      await pubToRelays(getPublishRelays([...hub.generalRelays, ...hub.filterRelays]), signedEvent)
+      await pubToRelays(getPublishRelays([...hub.generalRelays]), signedEvent)
       markDone('Publishing hub event')
 
       // Cleanup old files (best-effort)
@@ -4287,16 +4325,16 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
                                           const evt = buildHubEvent({
                                             dTag: hub.dTag, name: hub.name, description: hub.description || undefined,
                                             epoch: hub.epoch, icon: hub.icon, banner: hub.banner, tags: hub.tags,
-                                            relays: [...hub.generalRelays, ...hub.filterRelays],
+                                            relays: [...hub.generalRelays],
                                             blossomServers: hub.blossomServers, indexFileHash: newIdxHash,
                                             channels: hub.channels, categories: hub.categories, roles: hub.roles,
-                                            minPow: hub.minPow || undefined, nsfw: hub.nsfw || undefined,
+                                            minPow: hub.minPow || undefined, joinMinPow: hub.joinMinPow || undefined, nsfw: hub.nsfw || undefined,
                                             discoverable: hub.discoverable, groupedRoles: hub.groupedRoles,
                                             publishedAt: hub.publishedAt,
                                             eventCreatedAt: hub.eventCreatedAt,
                                           })
                                           const signed = await signFn(evt, signer, privateKey)
-                                          await pubRelays(getPublishRelays([...hub.generalRelays, ...hub.filterRelays]), signed)
+                                          await pubRelays(getPublishRelays([...hub.generalRelays]), signed)
                                           useHubStore.getState().setHubData(hub.dTag, { ...hub, indexFileHash: newIdxHash, eventCreatedAt: signed.created_at })
                                         }
 
@@ -4928,7 +4966,7 @@ function HiddenMessagesPage({ hub, onClose }: { hub: HubData; onClose: () => voi
       const { publishToSpecificRelays } = await import('@/lib/nostr/relay-pool')
       const { getDeletePublishRelays } = await import('@/stores/postingBehaviourStore')
       const { signer, privateKey } = useUserStore.getState()
-      const relays = [...hub.filterRelays, ...hub.generalRelays]
+      const relays = [...hub.generalRelays]
       const publishRelays = getDeletePublishRelays(relays)
 
       // Phase 1: Re-publish with deleted tag
@@ -5171,7 +5209,7 @@ function ReportsPage({ hub, onClose }: { hub: HubData; onClose: () => void }) {
   // Fetch on mount and filter change
   useEffect(() => {
     if (!secret) return
-    const relays = [...new Set([...hub.filterRelays, ...hub.generalRelays])].filter(Boolean)
+    const relays = [...new Set(hub.generalRelays)].filter(Boolean)
     fetchHubReports(hub.dTag, hub.creatorPubkey, secret, relays, {
       since,
       until,
@@ -5758,13 +5796,14 @@ function MembersPage({ hub, onFooterState }: { hub: HubData; onFooterState: (sta
           icon: hub.icon || undefined,
           banner: hub.banner || undefined,
           tags: hub.tags,
-          relays: [...hub.generalRelays, ...hub.filterRelays],
+          relays: [...hub.generalRelays],
           blossomServers: hub.blossomServers,
           indexFileHash: newIndexHash,
           channels: hub.channels,
           categories: hub.categories,
           roles: hub.roles,
           minPow: hub.minPow || undefined,
+          joinMinPow: hub.joinMinPow || undefined,
           nsfw: hub.nsfw || undefined,
           discoverable: hub.discoverable,
           groupedRoles: hub.groupedRoles,
@@ -5772,7 +5811,7 @@ function MembersPage({ hub, onFooterState }: { hub: HubData; onFooterState: (sta
           eventCreatedAt: hub.eventCreatedAt,
         })
         const signedEvent = await signWithSigner(unsignedEvent, signer, privateKey)
-        await publishToSpecificRelays(getPublishRelays([...hub.generalRelays, ...hub.filterRelays]), signedEvent)
+        await publishToSpecificRelays(getPublishRelays([...hub.generalRelays]), signedEvent)
         lastPublishedCreatedAt = signedEvent.created_at
       }
       markStepDone('Uploading member tree')
@@ -6022,13 +6061,14 @@ function MembersPage({ hub, onFooterState }: { hub: HubData; onFooterState: (sta
             icon: hub.icon || undefined,
             banner: hub.banner || undefined,
             tags: hub.tags,
-            relays: [...hub.generalRelays, ...hub.filterRelays],
+            relays: [...hub.generalRelays],
             blossomServers: hub.blossomServers,
             indexFileHash: finalIndexHash,
             channels: hub.channels,
             categories: hub.categories,
             roles: hub.roles,
             minPow: hub.minPow || undefined,
+            joinMinPow: hub.joinMinPow || undefined,
             nsfw: hub.nsfw || undefined,
             discoverable: hub.discoverable,
             groupedRoles: updatedGroupedRoles,
@@ -6036,7 +6076,7 @@ function MembersPage({ hub, onFooterState }: { hub: HubData; onFooterState: (sta
             eventCreatedAt: hub.eventCreatedAt,
           })
           const signedEvent = await signWithSigner(unsignedEvent, signer, privateKey)
-          await publishToSpecificRelays(getPublishRelays([...hub.generalRelays, ...hub.filterRelays]), signedEvent)
+          await publishToSpecificRelays(getPublishRelays([...hub.generalRelays]), signedEvent)
           lastPublishedCreatedAt = signedEvent.created_at
           markStepDone('Publishing hub update')
 

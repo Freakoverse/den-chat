@@ -32,13 +32,13 @@ export interface HubData {
   description?: string
   epoch: number
   generalRelays: string[]
-  filterRelays: string[]
   blossomServers: string[]
   indexFileHash: string
   channels: Channel[]
   categories: Category[]
   roles: Role[]
   minPow: number
+  joinMinPow: number
   nsfw?: boolean
   discoverable?: boolean
   deleted?: boolean

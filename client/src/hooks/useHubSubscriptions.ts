@@ -145,7 +145,7 @@ export function fetchOlderMessages(
   const minPow = hub.minPow || 0
 
   // Collect relays for this hub
-  const relays = [...new Set([...hub.generalRelays, ...hub.filterRelays])].filter(Boolean)
+  const relays = [...new Set(hub.generalRelays)].filter(Boolean)
   if (relays.length === 0) return Promise.resolve(0)
 
   return new Promise((resolve) => {
@@ -206,7 +206,7 @@ export function fetchChannelLatest(
   const addMessage = useMessageStore.getState().addMessage
   const minPow = hub.minPow || 0
 
-  const relays = [...new Set([...hub.generalRelays, ...hub.filterRelays])].filter(Boolean)
+  const relays = [...new Set(hub.generalRelays)].filter(Boolean)
   if (relays.length === 0) return Promise.resolve(0)
 
   return new Promise((resolve) => {
@@ -267,7 +267,7 @@ export function fetchMentionsCatchUp(
   const addMessage = useMessageStore.getState().addMessage
   const minPow = hub.minPow || 0
 
-  const relays = [...new Set([...hub.generalRelays, ...hub.filterRelays])].filter(Boolean)
+  const relays = [...new Set(hub.generalRelays)].filter(Boolean)
   if (relays.length === 0) return Promise.resolve(0)
 
   let count = 0
@@ -343,7 +343,7 @@ export function fetchNewerMessages(
   const addMessage = useMessageStore.getState().addMessage
   const minPow = hub.minPow || 0
 
-  const relays = [...new Set([...hub.generalRelays, ...hub.filterRelays])].filter(Boolean)
+  const relays = [...new Set(hub.generalRelays)].filter(Boolean)
   if (relays.length === 0) return Promise.resolve(0)
 
   return new Promise((resolve) => {
@@ -402,7 +402,7 @@ export function fetchSingleMessage(
   const refPubkey = parts[1]
   const refDTag = parts.slice(2).join(':')
 
-  const relays = [...new Set([...hub.generalRelays, ...hub.filterRelays])].filter(Boolean)
+  const relays = [...new Set(hub.generalRelays)].filter(Boolean)
   if (relays.length === 0) return Promise.resolve(null)
 
   return new Promise((resolve) => {
@@ -454,7 +454,7 @@ export function fetchMessageContext(
 
   const addMessage = useMessageStore.getState().addMessage
   const minPow = hub.minPow || 0
-  const relays = [...new Set([...hub.generalRelays, ...hub.filterRelays])].filter(Boolean)
+  const relays = [...new Set(hub.generalRelays)].filter(Boolean)
   if (relays.length === 0) return Promise.resolve(0)
 
   const fetchDirection = (filter: any): Promise<number> => {
@@ -592,7 +592,7 @@ function handleEditHint(event: Event) {
   // Fetch the latest version from relays
   const hub = useHubStore.getState().hubs[hubDTag]
   if (!hub) return
-  const relays = [...new Set([...hub.generalRelays, ...hub.filterRelays])].filter(Boolean)
+  const relays = [...new Set(hub.generalRelays)].filter(Boolean)
   if (relays.length === 0) return
 
   console.log(`[EditHint] Received for dTag=${messageDTag.slice(0, 12)}… from ${event.pubkey.slice(0, 12)}…, fetching latest version`)
@@ -832,7 +832,7 @@ export function useHubSubscriptions() {
       .sort()
       .map((k) => {
         const h = hubs[k]
-        return `${k}:${h.generalRelays.join(',')}:${h.filterRelays.join(',')}`
+        return `${k}:${h.generalRelays.join(',')}`
       })
       .join('|')
 

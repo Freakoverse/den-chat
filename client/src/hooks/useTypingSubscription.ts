@@ -55,7 +55,7 @@ export function useTypingSubscription() {
   const activeHub = useHubStore((s) => (activeHubId ? s.hubs[activeHubId] : undefined))
 
   const hubRelays = useMemo(
-    () => (activeHub ? [...new Set([...activeHub.generalRelays, ...activeHub.filterRelays])].filter(Boolean) : []),
+    () => (activeHub ? [...new Set(activeHub.generalRelays)].filter(Boolean) : []),
     [activeHub],
   )
   const hubRelayKey = hubRelays.join(',')

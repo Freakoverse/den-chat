@@ -193,7 +193,7 @@ export const useCalendarStore = create<CalendarStore>((set, get) => ({
     }
 
     const relays = [
-      ...new Set([...hub.generalRelays, ...hub.filterRelays]),
+      ...new Set(hub.generalRelays),
     ].filter(Boolean)
     if (relays.length === 0) {
       set((state) => ({
@@ -253,7 +253,7 @@ export const useCalendarStore = create<CalendarStore>((set, get) => ({
     }
 
     const relays = [
-      ...new Set([...hub.generalRelays, ...hub.filterRelays]),
+      ...new Set(hub.generalRelays),
     ].filter(Boolean)
     if (relays.length === 0) {
       set((state) => ({
