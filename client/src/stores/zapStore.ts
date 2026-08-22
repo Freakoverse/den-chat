@@ -35,8 +35,11 @@ export const useZapStore = create<ZapState>((set, get) => ({
     set((state) => {
       const hubZaps = state.zaps[hubDTag] || {}
       const existing = hubZaps[messageId] || []
-      // Deduplicate by receiptId
-      if (existing.some((z) => z.receiptId === zap.receiptId)) return state
+      // Deduplicate by the bolt11 invoice: one payment has exactly one invoice, so a zap
+      // whose receipt is published as several kind-9735 events (different ids/created_at)
+      // still counts once. Distinct zaps always have distinct invoices. Fall back to the
+      // receiptId if an invoice is somehow missing.
+      if (existing.some((z) => (zap.invoice && z.invoice === zap.invoice) || z.receiptId === zap.receiptId)) return state
       return {
         zaps: {
           ...state.zaps,

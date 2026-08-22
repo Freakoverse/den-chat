@@ -822,8 +822,10 @@ export const usePublicChatStore = create<PublicChatState>((set, get) => ({
   addZap: (messageId, zap) =>
     set(s => {
       const existing = s.pcZaps[messageId] || []
-      // Deduplicate by receiptId
-      if (existing.some(z => z.receiptId === zap.receiptId)) return s
+      // Deduplicate by the bolt11 invoice (one payment = one invoice), so a zap whose
+      // receipt is published as several kind-9735 events counts once; fall back to
+      // receiptId when an invoice is missing.
+      if (existing.some(z => (zap.invoice && z.invoice === zap.invoice) || z.receiptId === zap.receiptId)) return s
       return {
         pcZaps: {
           ...s.pcZaps,
