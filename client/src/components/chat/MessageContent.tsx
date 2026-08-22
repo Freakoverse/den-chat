@@ -8,7 +8,7 @@
  */
 
 import { useState, useEffect, useMemo, memo, useCallback, useRef, Children, isValidElement, cloneElement } from 'react'
-import { Download, Loader2, Check, Copy, Hash, Link as LinkIcon, Eye } from 'lucide-react'
+import { Download, Loader2, Check, Copy, Hash, Link as LinkIcon, Eye, Lock } from 'lucide-react'
 import { useBlossomMedia } from '@/hooks/useBlossomMedia'
 import { VerificationBadge } from '@/components/ui/VerificationBadge'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
@@ -27,8 +27,10 @@ import { detectEmbed } from '@/lib/embeds'
 import { Embed } from '@/components/ui/Embed'
 import { usePreferencesStore } from '@/stores/preferencesStore'
 import { useHubStore } from '@/stores/hubStore'
+import { useUserStore } from '@/stores/userStore'
 import { useNavigationStore } from '@/stores/navigationStore'
 import { useVoiceStore } from '@/stores/voiceStore'
+import { canAccessChannel } from '@/lib/hub/permissions'
 import { CustomAudioPlayer } from '@/components/ui/CustomAudioPlayer'
 
 /* ─── Channel mention pill (#channel → click to open that channel) ─── */
@@ -43,7 +45,14 @@ function openChannel(channelId: string, voice: boolean) {
 }
 
 export function ChannelPill({ channelId, name, voice }: { channelId: string; name: string; voice?: boolean }) {
-  const hub = useHubStore((s) => (s.activeHubId ? s.hubs[s.activeHubId] : undefined))
+  const activeHubId = useHubStore((s) => s.activeHubId)
+  const hub = useHubStore((s) => (activeHubId ? s.hubs[activeHubId] : undefined))
+  const pubkey = useUserStore((s) => s.pubkey)
+  // Subscribe to the access inputs so a locked pill unlocks live if a group secret
+  // or the member roster arrives after render.
+  const hubMembers = useHubStore((s) => (activeHubId ? s.hubMembers[activeHubId] : undefined))
+  const groupSecrets = useHubStore((s) => (activeHubId ? s.groupSecrets[activeHubId] : undefined))
+
   // Resolve the channel's category (shown in the hover tooltip) and, when its name is
   // ambiguous (another channel in the hub shares it), its position number — the same
   // number the #channel input suggestions display — so the posted pill matches what was
@@ -57,6 +66,35 @@ export function ChannelPill({ channelId, name, voice }: { channelId: string; nam
     const ambiguous = hub.channels.filter((c) => c.name === ch.name).length > 1
     return { categoryName, position: ch.position, ambiguous }
   }, [hub, channelId])
+
+  // Gate on channel visibility: if the referenced channel exists in this hub but the
+  // reader can't see it (view_channel denied / missing group secret), render an inert
+  // "No access" chip instead of a clickable link — so a #channel-link can't be used to
+  // open a channel they have no permission to view.
+  const locked = useMemo(() => {
+    if (!hub || !pubkey || !activeHubId) return false
+    if (!hub.channels.some((c) => c.channelId === channelId)) return false // unknown channel — leave as-is
+    return !canAccessChannel(activeHubId, channelId, pubkey)
+    // hubMembers/groupSecrets are deps so this re-evaluates when access changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hub, pubkey, activeHubId, channelId, hubMembers, groupSecrets])
+
+  if (locked) {
+    return (
+      <TooltipProvider delayDuration={200}>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-xs font-medium bg-muted text-muted-foreground align-baseline cursor-default select-none">
+              <Lock size={10} className="opacity-70" />No access
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="top" className="text-xs">
+            You don’t have access to this channel
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    )
+  }
 
   return (
     <TooltipProvider delayDuration={200}>

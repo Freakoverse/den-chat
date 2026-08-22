@@ -28,6 +28,7 @@ import { useCalendarStore, parseCalendarEvent, parseCalendarRsvp } from '@/store
 import { processHideEvent } from '@/hooks/useHideMessages'
 import { useNotificationStore } from '@/stores/notificationStore'
 import { useUserStore } from '@/stores/userStore'
+import { canReceiveChannelNotification } from '@/lib/hub/permissions'
 import { aesDecrypt } from '@/lib/crypto/aes'
 import { deriveChannelKey } from '@/lib/crypto/hkdf'
 import { nip19 } from 'nostr-tools'
@@ -969,6 +970,11 @@ export function useHubSubscriptions() {
         return
       }
       if (msg.hubDTag !== activeHubIdRef.current || msg.channelId !== activeChannelIdRef.current) {
+        // Permission/membership gate — no unread badge or sound for hubs the user
+        // isn't a member of (e.g. a pending join request) or channels they lack
+        // access to (view_channel denied / missing group secret). Runs before the
+        // decrypt so a view-hidden but hub-encrypted channel never pings.
+        if (!myPubkey || !canReceiveChannelNotification(msg.hubDTag, msg.channelId, myPubkey)) return
         // Decrypt + classify. Only notify for a message we could actually read: one we
         // can't decrypt (restricted channel, unsynced epoch, key still loading) isn't
         // shown in chat, so it must not bump unread or ring the sound.
@@ -1080,6 +1086,10 @@ export function useHubSubscriptions() {
                                 return roleIds.some(rid => t[1] === `role:${rid}`)
                               })
                               if (hasPTag || hasMTag) {
+                                // Same permission/membership gate as the live path: never
+                                // surface mentions for hubs the user hasn't joined or
+                                // channels they can't access.
+                                if (!canReceiveChannelNotification(hubDTag, channelId, myPubkey)) continue
                                 const mentionType = hasPTag ? 'personal'
                                   : raw.tags?.some((t: string[]) => t[0] === 'M' && t[1] === 'all') ? 'everyone'
                                   : raw.tags?.some((t: string[]) => t[0] === 'M' && t[1] === 'here') ? 'here'

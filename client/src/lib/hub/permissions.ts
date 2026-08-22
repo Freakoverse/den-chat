@@ -338,3 +338,60 @@ export function getPermissionsForUser(
   const memberRoles = member?.roles || 'everyone'
   return getEffectivePermissions(hub, memberRoles, channelId, isCreator)
 }
+
+// ─── Channel Access (visibility) ───
+
+/**
+ * Resolve a channel's effective group-encryption id: its own, or (for a synced
+ * channel) its category's. Returns null for channels that use the hub-wide secret.
+ */
+export function getChannelGroupId(hub: HubData, channelId: string): string | null {
+  const ch = hub.channels.find(c => c.channelId === channelId)
+  if (!ch) return null
+  if (ch.encryption) return ch.encryption
+  if (ch.synced && ch.categoryId) {
+    const cat = hub.categories.find(c => c.categoryId === ch.categoryId)
+    if (cat?.encryption) return cat.encryption
+  }
+  return null
+}
+
+/**
+ * Can the given user SEE/open a channel? Mirrors the sidebar's visibility rule:
+ * the view_channel permission AND possession of any required group secret. The hub
+ * creator always has access. Reads live store state (hub, members, group secrets).
+ */
+export function canAccessChannel(hubDTag: string, channelId: string, userPubkey: string): boolean {
+  const state = useHubStore.getState()
+  const hub = state.hubs[hubDTag]
+  if (!hub) return false
+  if (userPubkey === hub.creatorPubkey) return true
+
+  const hubMembers = state.hubMembers[hubDTag]
+  const perms = getPermissionsForUser(hub, userPubkey, hubMembers, channelId)
+  if (!perms.view_channel) return false
+
+  const groupId = getChannelGroupId(hub, channelId)
+  if (groupId) {
+    const groupSecrets = state.groupSecrets[hubDTag]
+    if (!(groupSecrets && groupSecrets[groupId])) return false
+  }
+  return true
+}
+
+/**
+ * Should the user receive unread badges / notification sounds for a channel?
+ * Requires hub membership on top of channel visibility. Membership is proven by
+ * possession of the hub secret — a pending join request can't decrypt the LKH
+ * tree, so it never holds the secret. This suppresses notifications for hubs the
+ * user hasn't joined and for channels they can't access.
+ */
+export function canReceiveChannelNotification(hubDTag: string, channelId: string, userPubkey: string): boolean {
+  const state = useHubStore.getState()
+  const hub = state.hubs[hubDTag]
+  if (!hub) return false
+  if (userPubkey === hub.creatorPubkey) return true
+  // Membership proof — only synced members hold the hub secret.
+  if (!state.hubSecrets[hubDTag]) return false
+  return canAccessChannel(hubDTag, channelId, userPubkey)
+}
