@@ -10,7 +10,7 @@ import { useState, useRef, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Separator } from '@/components/ui/separator'
-import { Loader2, Plus, Hash, X, Camera, ImageIcon, Check, AlertTriangle, XCircle, ChevronDown, Trash2, Info, Lightbulb, KeyRound, Upload, FileSignature, Radio, ListPlus, Database, CheckCircle2 } from 'lucide-react'
+import { Loader2, Plus, Hash, X, Camera, ImageIcon, Check, AlertTriangle, XCircle, ChevronDown, Trash2, Info, Lightbulb, KeyRound, Upload, FileSignature, Radio, ListPlus, Database, CheckCircle2, Cpu } from 'lucide-react'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { ImageCropModal } from '@/components/ui/ImageCropModal'
@@ -19,6 +19,7 @@ import { useUserStore } from '@/stores/userStore'
 import { useHubStore } from '@/stores/hubStore'
 import { useUserListsStore } from '@/stores/userListsStore'
 import { createUnsignedEvent, signWithSigner, mineAndSign, createHubListEvent } from '@/lib/nostr'
+import { PowSection } from './PowSection'
 import { isClientTagEnabled } from '@/lib/nostr/events'
 import { publishToSpecificRelays, getRelayList } from '@/lib/nostr/relay-pool'
 import { getPublishRelays } from '@/stores/postingBehaviourStore'
@@ -35,6 +36,7 @@ type CreationStep =
   | 'generating-secret'
   | 'uploading-member-files'
   | 'building-event'
+  | 'mining-event'
   | 'signing-event'
   | 'publishing-hub'
   | 'updating-hub-list'
@@ -46,6 +48,7 @@ const CREATION_STEPS: { key: CreationStep; label: string; icon: typeof KeyRound 
   { key: 'generating-secret', label: 'Generating hub secret', icon: KeyRound },
   { key: 'uploading-member-files', label: 'Uploading member files', icon: Upload },
   { key: 'building-event', label: 'Building hub event', icon: Database },
+  { key: 'mining-event', label: 'Mining proof-of-work', icon: Cpu },
   { key: 'signing-event', label: 'Signing hub event', icon: FileSignature },
   { key: 'publishing-hub', label: 'Publishing to relays', icon: Radio },
   { key: 'updating-hub-list', label: 'Updating hub list', icon: ListPlus },
@@ -140,6 +143,9 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
 
   // ── Advanced relay selection ──
   const [showAdvanced, setShowAdvanced] = useState(false)
+  // Proof-of-work difficulty (message + join), default 15
+  const [createMinPow, setCreateMinPow] = useState(15)
+  const [createJoinPow, setCreateJoinPow] = useState(15)
   const userRelays = useUserListsStore((s) => s.userRelays)
   const userBlossoms = useUserListsStore((s) => s.userBlossoms)
 
@@ -523,10 +529,10 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
         tags.push(['content-warning', ''])
         tags.push(['L', 'content-warning'])
       }
-      // PoW difficulty tag (message PoW)
-      tags.push(['w', '15'])
-      // Join PoW difficulty tag (separate from message PoW; defaults to the same)
-      tags.push(['W', '15'])
+      // PoW difficulty tag (message PoW) — omitted when disabled (0)
+      if (createMinPow > 0) tags.push(['w', createMinPow.toString()])
+      // Join PoW difficulty tag (separate from message PoW) — omitted when disabled (0)
+      if (createJoinPow > 0) tags.push(['W', createJoinPow.toString()])
       // Discoverable flag
       tags.push(['f', discoverable ? 'on' : 'off'])
       // Client tag for hub discovery
@@ -543,7 +549,16 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
       unsigned.tags = [...unsigned.tags, ['published_at', unsigned.created_at.toString()]]
       // Mine the message-PoW nonce (difficulty = the 'w' tag we just set) before signing
       // so the hub event itself satisfies the difficulty it advertises.
-      const signed = await mineAndSign(unsigned, 15, pubkey, signer, privateKey)
+      let enteredMining = false
+      const signed = await mineAndSign(unsigned, createMinPow, pubkey, signer, privateKey, (phase) => {
+        if (phase === 'mining') {
+          enteredMining = true
+          setCreationStep('mining-event')
+        } else {
+          if (enteredMining) markDone('mining-event')
+          setCreationStep('signing-event')
+        }
+      })
       markDone('signing-event')
 
       // Publish to relays
@@ -585,8 +600,8 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
           position: r.position,
           permissions: r.permissions as Record<string, boolean>,
         })),
-        minPow: 15,
-        joinMinPow: 15,
+        minPow: createMinPow,
+        joinMinPow: createJoinPow,
         nsfw,
         discoverable,
       })
@@ -1179,6 +1194,20 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
                     <p className="text-[11px] text-destructive mt-0.5">Blossom URL must start with https://</p>
                   )}
                 </div>
+
+                <Separator className="my-2" />
+
+                {/* Proof-of-Work difficulty */}
+                <div>
+                  <h4 className="text-sm font-medium text-foreground mb-1">Proof of Work</h4>
+                  <p className="text-xs text-muted-foreground mb-4">Anti-spam difficulty for this hub. Message PoW gates posting; Join PoW gates join requests. Set 0 to disable.</p>
+                  <PowSection
+                    editMinPow={createMinPow}
+                    setEditMinPow={setCreateMinPow}
+                    editJoinMinPow={createJoinPow}
+                    setEditJoinMinPow={setCreateJoinPow}
+                  />
+                </div>
               </div>
             )}
           </div>
@@ -1228,8 +1257,9 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
 
             {/* Overall progress bar */}
             {(() => {
-              const doneCount = CREATION_STEPS.filter(s => completedSteps.has(s.key)).length
-              const pct = creationStep === 'done' ? 100 : Math.round((doneCount / CREATION_STEPS.length) * 100)
+              const visibleSteps = CREATION_STEPS.filter(s => s.key !== 'mining-event' || createMinPow > 0)
+              const doneCount = visibleSteps.filter(s => completedSteps.has(s.key)).length
+              const pct = creationStep === 'done' ? 100 : Math.round((doneCount / visibleSteps.length) * 100)
               return (
                 <div className="space-y-1">
                   <div className="w-full h-2 rounded-full bg-secondary overflow-hidden">
@@ -1248,7 +1278,7 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
 
             {/* Step list */}
             <div className="space-y-1">
-              {CREATION_STEPS.map((step) => {
+              {CREATION_STEPS.filter(s => s.key !== 'mining-event' || createMinPow > 0).map((step) => {
                 const isDone = completedSteps.has(step.key)
                 const isCurrent = creationStep === step.key
                 const Icon = step.icon

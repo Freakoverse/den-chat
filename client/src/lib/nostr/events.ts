@@ -106,13 +106,16 @@ export async function mineAndSign(
   minPow: number,
   pubkey: string | null,
   signer: ISigner | null,
-  privateKey: string | null
+  privateKey: string | null,
+  onPhase?: (phase: 'mining' | 'signing') => void
 ): Promise<Event> {
   if (minPow > 0 && pubkey) {
     const { mineEvent, countLeadingZeroBits } = await import('@/lib/pow/pow')
     const MAX_POW_RETRIES = 5
     let attempts = 0
+    onPhase?.('mining')
     let mined = await mineEvent(unsigned, minPow, pubkey)
+    onPhase?.('signing')
     let signed = await signWithSigner(mined, signer, privateKey)
     while (countLeadingZeroBits(signed.id) < minPow && attempts < MAX_POW_RETRIES) {
       attempts++
@@ -143,6 +146,7 @@ export async function mineAndSign(
     }
     return signed
   }
+  onPhase?.('signing')
   return signWithSigner(unsigned, signer, privateKey)
 }
 

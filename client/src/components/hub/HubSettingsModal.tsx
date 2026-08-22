@@ -38,7 +38,6 @@ import { getPublishRelays, getDeletePublishRelays } from '@/stores/postingBehavi
 import { KINDS } from '@/lib/crypto/constants'
 import { aesDecrypt } from '@/lib/crypto/aes'
 import { deriveChannelKey } from '@/lib/crypto/hkdf'
-import { benchmarkHashRate, estimateSolveTime } from '@/lib/pow/pow'
 import { createAndUploadMemberFiles } from '@/lib/blossom/members'
 import { toHex, fromHex } from '@/lib/crypto/lkh'
 import { buildHubEvent as rebuildHubEvent } from '@/lib/hub/buildHubEvent'
@@ -48,6 +47,7 @@ import { useReportStore, type HubReport } from '@/stores/reportStore'
 import { nip19 } from 'nostr-tools'
 import { PERMISSION_KEYS, PERMISSION_LABELS, PERMISSION_DESCRIPTIONS, DISABLED_PERMISSIONS, DEFAULT_EVERYONE_PERMISSIONS, getPermissionsForUser, type ResolvedPermissions } from '@/lib/hub/permissions'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
+import { PowSection } from './PowSection'
 import { Pagination } from '@/components/ui/Pagination'
 import { CustomSelect } from '@/components/ui/custom-select'
 import { HUB_NAME_MAX, HUB_DESCRIPTION_MAX, CHANNEL_NAME_MAX, CATEGORY_NAME_MAX, ROLE_NAME_MAX, TOPIC_TAG_MAX, MAX_CHANNELS, MAX_CATEGORIES, MAX_ROLES, MAX_TOPIC_TAGS, MAX_GENERAL_RELAYS, MAX_BLOSSOM_SERVERS } from '@/lib/hub/hubLimits'
@@ -748,7 +748,16 @@ export function HubSettingsModal({ open, onClose, hub }: HubSettingsModalProps) 
         eventCreatedAt: hub.eventCreatedAt,
       })
 
-      const signedEvent = await mineAndSign(unsignedEvent, editMinPow, pubkey, signer, privateKey)
+      let enteredMining = false
+      const signedEvent = await mineAndSign(unsignedEvent, editMinPow, pubkey, signer, privateKey, (phase) => {
+        if (phase === 'mining') {
+          enteredMining = true
+          setPublishStep('Mining proof-of-work')
+        } else {
+          if (enteredMining) markStepDone('Mining proof-of-work')
+          setPublishStep('Signing hub event')
+        }
+      })
       markStepDone('Signing hub event')
 
       await markStep('Publishing to relays')
@@ -1156,6 +1165,7 @@ const PUBLISH_STEP_ORDER = [
   'Uploading encryption index',
   'Cleaning deleted roles',
   'Updating member tree',
+  'Mining proof-of-work',
   'Signing hub event',
   'Publishing to relays',
 ]
@@ -2460,134 +2470,7 @@ function ChannelPermissionsEditor({ target, editChannels, setEditChannels, editC
 // ── PoW Section ──
 
 
-/** A single PoW difficulty slider + estimate. Shared by the Message and Join PoW controls. */
-function PowSlider({ label, description, value, setValue, hashRate }: {
-  label: string
-  description: string
-  value: number
-  setValue: (v: number) => void
-  hashRate: number | null
-}) {
-  const solveTimeStr = useMemo(() => {
-    if (value <= 0) return 'Disabled'
-    const seconds = estimateSolveTime(value, hashRate ?? undefined)
-    if (seconds < 0.001) return '<1ms on this device'
-    if (seconds < 1) return `~${Math.round(seconds * 1000)}ms on this device`
-    if (seconds < 60) return `~${seconds.toFixed(1)}s on this device`
-    if (seconds < 3600) return `~${(seconds / 60).toFixed(1)} min on this device`
-    if (seconds < 86400) return `~${(seconds / 3600).toFixed(1)} hours on this device`
-    return `~${(seconds / 86400).toFixed(1)} days on this device`
-  }, [value, hashRate])
-
-  return (
-    <div>
-      <label className="text-sm font-medium text-foreground mb-1 flex items-center gap-1.5">
-        {label}
-      </label>
-      <p className="text-xs text-muted-foreground mb-3">
-        {description}
-      </p>
-
-      <div className="flex items-center gap-3 mb-2">
-        <div className="flex-1 relative h-6 flex items-center">
-          {/* Track background */}
-          <div className="absolute left-0 right-0 h-1.5 rounded-full bg-muted-foreground/20" />
-          {/* Filled track */}
-          <div
-            className="absolute left-0 h-1.5 rounded-full bg-amber-400 transition-all"
-            style={{ width: `${Math.min(value, 100)}%` }}
-          />
-          {/* Visible thumb */}
-          <div
-            className="absolute w-4 h-4 rounded-full bg-amber-400 border-2 border-background shadow-lg pointer-events-none transition-all"
-            style={{ left: `calc(${Math.min(value, 100)}% - 8px)` }}
-          />
-          {/* Invisible native range */}
-          <input
-            type="range"
-            min={0}
-            max={100}
-            value={Math.min(value, 100)}
-            onChange={(e) => setValue(parseInt(e.target.value, 10))}
-            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-          />
-        </div>
-        <div className="flex items-center h-7 rounded-md border border-input bg-background overflow-hidden">
-          <button
-            onClick={() => { const v = Math.max(0, value - 1); setValue(v) }}
-            className="h-full px-1.5 text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors cursor-pointer flex items-center"
-          >
-            <Minus size={12} />
-          </button>
-          <span className="px-2 text-sm text-foreground tabular-nums min-w-[28px] text-center">
-            {value}
-          </span>
-          <button
-            onClick={() => setValue(value + 1)}
-            className="h-full px-1.5 text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors cursor-pointer flex items-center"
-          >
-            <Plus size={12} />
-          </button>
-        </div>
-        {value !== 15 ? (
-          <Tip text="Reset to default (15)">
-            <button
-              onClick={() => setValue(15)}
-              className="p-1 rounded text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-            >
-              <RotateCcw size={14} />
-            </button>
-          </Tip>
-        ) : (
-          <div className="p-1 w-[22px]" />
-        )}
-      </div>
-
-      <div className="flex items-center justify-between text-xs">
-        <span className={cn(
-          'font-medium',
-          value === 0 ? 'text-muted-foreground' : value <= 16 ? 'text-emerald-400' : value <= 24 ? 'text-amber-400' : 'text-red-400'
-        )}>
-          {value === 0 ? 'No PoW required' : `Difficulty: ${value} bits`}
-        </span>
-        <span className="text-muted-foreground">
-          {hashRate ? solveTimeStr : 'Benchmarking…'}
-        </span>
-      </div>
-    </div>
-  )
-}
-
-function PowSection({ editMinPow, setEditMinPow, editJoinMinPow, setEditJoinMinPow }: {
-  editMinPow: number; setEditMinPow: (v: number) => void
-  editJoinMinPow: number; setEditJoinMinPow: (v: number) => void
-}) {
-  const [hashRate, setHashRate] = useState<number | null>(null)
-
-  // Benchmark on mount (shared across both sliders)
-  useEffect(() => {
-    benchmarkHashRate().then(setHashRate)
-  }, [])
-
-  return (
-    <div className="space-y-6">
-      <PowSlider
-        label="Message PoW"
-        description="Require computational work before sending messages. Higher difficulty = more spam protection but slower sending."
-        value={editMinPow}
-        setValue={setEditMinPow}
-        hashRate={hashRate}
-      />
-      <PowSlider
-        label="Join PoW"
-        description="Require computational work before submitting a join request. Higher difficulty = more spam protection but slower joining."
-        value={editJoinMinPow}
-        setValue={setEditJoinMinPow}
-        hashRate={hashRate}
-      />
-    </div>
-  )
-}
+// PowSlider + PowSection now live in ./PowSection (shared with CreateHubDialog).
 
 // ── Upload Progress Bar ──
 
