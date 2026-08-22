@@ -414,6 +414,7 @@ function BlossomImage({ src, alt, className }: { src: string; alt?: string; clas
 export function VideoEmbed({ src }: { src: string }) {
   const blossom = useBlossomMedia(src)
   const [failed, setFailed] = useState(false)
+  const [copiedLink, setCopiedLink] = useState(false)
 
   // Cache-and-play state
   const [cacheState, setCacheState] = useState<'idle' | 'downloading' | 'done' | 'error' | 'too-large'>('idle')
@@ -614,6 +615,17 @@ export function VideoEmbed({ src }: { src: string }) {
             </button>
           ) : (
             <>
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(src)
+                  setCopiedLink(true)
+                  setTimeout(() => setCopiedLink(false), 2000)
+                }}
+                className="w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary/80 transition-colors cursor-pointer"
+                title={copiedLink ? 'Copied!' : 'Copy link'}
+              >
+                {copiedLink ? <Check size={15} className="text-emerald-400" /> : <Copy size={15} />}
+              </button>
               <a
                 href={src}
                 target="_blank"
