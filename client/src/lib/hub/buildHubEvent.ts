@@ -120,7 +120,7 @@ export function buildHubEvent(opts: BuildHubEventOptions) {
   }
   // Join PoW difficulty tag (separate from message PoW)
   if (joinMinPow && joinMinPow > 0) {
-    eventTags.push(['wj', joinMinPow.toString()])
+    eventTags.push(['W', joinMinPow.toString()])
   }
   // Discoverable flag — only emit when 'off' (default is discoverable)
   if (discoverable === false) {

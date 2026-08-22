@@ -69,9 +69,9 @@ export function parseHubEvent(event: Event): (HubData & { creatorPubkey: string 
     const wTag = event.tags.find(t => t[0] === 'w')?.[1]
     let minPow = wTag ? parseInt(wTag, 10) : 0
 
-    // Parse join PoW from wj tag; fall back to message PoW when absent so
+    // Parse join PoW from the W tag; fall back to message PoW when absent so
     // existing hubs keep their current join behavior.
-    const wjTag = event.tags.find(t => t[0] === 'wj')?.[1]
+    const wjTag = event.tags.find(t => t[0] === 'W')?.[1]
 
     // Parse NSFW from content-warning tag (source of truth)
     const nsfw = event.tags.some(t => t[0] === 'content-warning')

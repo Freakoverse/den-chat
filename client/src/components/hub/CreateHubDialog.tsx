@@ -526,7 +526,7 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
       // PoW difficulty tag (message PoW)
       tags.push(['w', '15'])
       // Join PoW difficulty tag (separate from message PoW; defaults to the same)
-      tags.push(['wj', '15'])
+      tags.push(['W', '15'])
       // Discoverable flag
       tags.push(['f', discoverable ? 'on' : 'off'])
       // Client tag for hub discovery

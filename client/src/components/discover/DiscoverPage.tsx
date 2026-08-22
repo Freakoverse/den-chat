@@ -82,8 +82,8 @@ function parseHubEventForDiscover(event: Event): DiscoveredHub | null {
     const wTagVal = event.tags.find(t => t[0] === 'w')?.[1]
     let minPow = wTagVal ? parseInt(wTagVal, 10) : 0
 
-    // Join PoW from wj tag; falls back to message PoW when absent
-    const wjTagVal = event.tags.find(t => t[0] === 'wj')?.[1]
+    // Join PoW from the W tag; falls back to message PoW when absent
+    const wjTagVal = event.tags.find(t => t[0] === 'W')?.[1]
 
     let description = ''
     let icon: string | undefined
