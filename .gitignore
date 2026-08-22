@@ -11,6 +11,10 @@ landing/
 # ── Vault (separate repo + origin — vault.denchat.top) ──
 vault/
 
+# ── Versioned design docs (kept local, not in the repo) ──
+docs/v1/
+docs/v2/
+
 # ── Tauri ──
 src-tauri/target/
 src-tauri/gen/schemas/
