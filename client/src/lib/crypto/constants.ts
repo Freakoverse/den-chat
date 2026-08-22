@@ -52,6 +52,7 @@ export const STANDARD_KINDS = {
   APP_DATA: 30078,
   UPV2: 24134,
   DNN_NODE: 64600,
+  USER_STATUS: 30315, // NIP-38 — addressable, d-tag identifies the status type ("general")
 } as const
 
 /** Nostr derivation path for BIP-32 HD keys */

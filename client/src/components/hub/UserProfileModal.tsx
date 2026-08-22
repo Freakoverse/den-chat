@@ -79,6 +79,9 @@ interface ProfileData {
   lud16: string
 }
 
+/** Client-side cap for the NIP-38 general status text. */
+const STATUS_MAX = 128
+
 const EMPTY_PROFILE: ProfileData = {
   name: '',
   display_name: '',
@@ -107,6 +110,11 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
   const [profile, setProfileData] = useState<ProfileData>(EMPTY_PROFILE)
   const [editProfile, setEditProfile] = useState<ProfileData>(EMPTY_PROFILE)
   const [editing, setEditing] = useState(false)
+  // NIP-38 general status (kind 30315, d="general")
+  const [status, setStatus] = useState('')
+  const [editingStatus, setEditingStatus] = useState(false)
+  const [statusDraft, setStatusDraft] = useState('')
+  const [statusSaving, setStatusSaving] = useState(false)
   const [publishing, setPublishing] = useState(false)
   const [copied, setCopied] = useState(false)
   const [loaded, setLoaded] = useState(false)
@@ -272,6 +280,14 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
       setLoaded(true)
     })
 
+    // Fetch NIP-38 general status (kind 30315, d="general")
+    fetchEvents({ kinds: [30315], authors: [displayPubkey], '#d': ['general'], limit: 1 }).then((events) => {
+      if (events.length > 0) {
+        const latest = events.sort((a, b) => b.created_at - a.created_at)[0]
+        setStatus(latest.content || '')
+      }
+    }).catch(() => { /* non-critical */ })
+
     // Fetch link sets to know if "Links" button should show
     fetchEvents({ kinds: [30003], authors: [displayPubkey] }).then((events) => {
       const linkSets = events.filter((ev) => ev.tags.some((t) => t[0] === 'd' && t[1]?.startsWith('links-')))
@@ -306,6 +322,9 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
       setShowFollowingList(false)
       setFollowingPubkeys([])
       setFollowingLoaded(false)
+      setStatus('')
+      setEditingStatus(false)
+      setStatusDraft('')
     } else if (startEditingProp && isSelf) {
       setEditing(true)
     }
@@ -317,6 +336,29 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
     navigator.clipboard.writeText(npub)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
+  }
+
+  const saveStatus = async () => {
+    if (statusSaving || !myPubkey || (!signer && !privateKey)) return
+    setStatusSaving(true)
+    try {
+      const content = statusDraft.trim().slice(0, STATUS_MAX)
+      const unsigned = {
+        kind: 30315, // NIP-38 user status
+        pubkey: myPubkey,
+        created_at: Math.floor(Date.now() / 1000),
+        tags: [['d', 'general']] as string[][],
+        content,
+      }
+      const signed = await signWithSigner(unsigned, signer, privateKey)
+      await publishToSpecificRelays(getPublishRelays(), signed)
+      setStatus(content)
+      setEditingStatus(false)
+    } catch (e) {
+      console.error('Failed to publish status:', e)
+    } finally {
+      setStatusSaving(false)
+    }
   }
 
   const handlePublish = async () => {
@@ -1492,6 +1534,64 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
                   </div>
                 )}
               </div>
+
+              {/* NIP-38 general status (kind 30315, d="general") */}
+              {editingStatus ? (
+                <div className="mb-2 flex items-center gap-1.5">
+                  <input
+                    autoFocus
+                    value={statusDraft}
+                    onChange={(e) => setStatusDraft(e.target.value.slice(0, STATUS_MAX))}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') saveStatus()
+                      if (e.key === 'Escape') { setEditingStatus(false); setStatusDraft(status) }
+                    }}
+                    maxLength={STATUS_MAX}
+                    placeholder="Set a status…"
+                    className="flex-1 min-w-0 bg-secondary/60 rounded-full px-3 py-1 text-xs text-foreground outline-none focus:ring-1 focus:ring-primary/40"
+                  />
+                  <span className={`text-[10px] font-mono tabular-nums select-none shrink-0 ${statusDraft.length >= STATUS_MAX ? 'text-amber-400' : 'text-muted-foreground/40'}`}>
+                    {statusDraft.length}/{STATUS_MAX}
+                  </span>
+                  <button
+                    onClick={saveStatus}
+                    disabled={statusSaving}
+                    title="Save status"
+                    className="p-1 rounded-md text-emerald-400 hover:bg-emerald-500/10 transition-colors cursor-pointer disabled:opacity-40"
+                  >
+                    {statusSaving ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+                  </button>
+                  <button
+                    onClick={() => { setEditingStatus(false); setStatusDraft(status) }}
+                    title="Cancel"
+                    className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors cursor-pointer"
+                  >
+                    <X size={13} />
+                  </button>
+                </div>
+              ) : status ? (
+                <div className="mb-2 flex items-center gap-1.5 min-w-0">
+                  <span className="inline-flex items-center min-w-0 max-w-full px-2.5 py-1 rounded-full bg-secondary/60 text-xs text-foreground/90">
+                    <span className="truncate">{status}</span>
+                  </span>
+                  {isSelf && (
+                    <button
+                      onClick={() => { setStatusDraft(status); setEditingStatus(true) }}
+                      title="Edit status"
+                      className="p-1 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors cursor-pointer shrink-0"
+                    >
+                      <Pencil size={12} />
+                    </button>
+                  )}
+                </div>
+              ) : isSelf ? (
+                <button
+                  onClick={() => { setStatusDraft(''); setEditingStatus(true) }}
+                  className="mb-2 inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-secondary/40 hover:bg-secondary/70 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                >
+                  <Pencil size={11} /> Set a status
+                </button>
+              ) : null}
 
               {/* npub */}
               <button
