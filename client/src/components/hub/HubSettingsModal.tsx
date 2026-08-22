@@ -1898,7 +1898,7 @@ function ChannelsPage({ editCategories, setEditCategories, editChannels, setEdit
       <GripVertical size={14} className="text-muted-foreground/50 shrink-0" />
       {ch.type === 'voice' ? <Volume2 size={16} className="text-emerald-400 shrink-0" /> : ch.type === 'forum' ? <MessagesSquare size={16} className="text-muted-foreground shrink-0" /> : ch.type === 'announcement' ? <Megaphone size={16} className="text-muted-foreground shrink-0" /> : <Hash size={16} className="text-muted-foreground shrink-0" />}
       {editingChannelId === ch.channelId ? (
-        <div className="flex-1 flex items-center gap-1.5">
+        <div className="flex-1 min-w-0 flex items-center gap-1.5">
           <input
             autoFocus
             value={editingChannelName}
@@ -1906,7 +1906,7 @@ function ChannelsPage({ editCategories, setEditCategories, editChannels, setEdit
             onBlur={commitEditChannel}
             onKeyDown={(e) => { if (e.key === 'Enter') commitEditChannel(); if (e.key === 'Escape') cancelEditChannel() }}
             maxLength={CHANNEL_NAME_MAX}
-            className="flex-1 bg-transparent text-foreground text-sm outline-none px-2 py-1 rounded-sm"
+            className="flex-1 min-w-0 bg-transparent text-foreground text-sm outline-none px-2 py-1 rounded-sm"
           />
           <span className={`text-[10px] font-mono tabular-nums select-none shrink-0 ${
             editingChannelName.length >= CHANNEL_NAME_MAX ? 'text-amber-400' : 'text-muted-foreground/40'
