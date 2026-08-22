@@ -752,9 +752,9 @@ export function HubSettingsModal({ open, onClose, hub }: HubSettingsModalProps) 
       const signedEvent = await mineAndSign(unsignedEvent, editMinPow, pubkey, signer, privateKey, (phase) => {
         if (phase === 'mining') {
           enteredMining = true
-          setPublishStep('Mining proof-of-work')
+          setPublishStep('Processing')
         } else {
-          if (enteredMining) markStepDone('Mining proof-of-work')
+          if (enteredMining) markStepDone('Processing')
           setPublishStep('Signing hub event')
         }
       })
@@ -1165,7 +1165,7 @@ const PUBLISH_STEP_ORDER = [
   'Uploading encryption index',
   'Cleaning deleted roles',
   'Updating member tree',
-  'Mining proof-of-work',
+  'Processing',
   'Signing hub event',
   'Publishing to relays',
 ]

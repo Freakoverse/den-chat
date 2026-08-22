@@ -48,7 +48,7 @@ const CREATION_STEPS: { key: CreationStep; label: string; icon: typeof KeyRound 
   { key: 'generating-secret', label: 'Generating hub secret', icon: KeyRound },
   { key: 'uploading-member-files', label: 'Uploading member files', icon: Upload },
   { key: 'building-event', label: 'Building hub event', icon: Database },
-  { key: 'mining-event', label: 'Mining proof-of-work', icon: Cpu },
+  { key: 'mining-event', label: 'Processing', icon: Cpu },
   { key: 'signing-event', label: 'Signing hub event', icon: FileSignature },
   { key: 'publishing-hub', label: 'Publishing to relays', icon: Radio },
   { key: 'updating-hub-list', label: 'Updating hub list', icon: ListPlus },

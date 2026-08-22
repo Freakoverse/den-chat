@@ -352,7 +352,7 @@ export function HubEventCard({ identifier, pubkey, relays }: HubEventCardProps) 
               className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors cursor-pointer disabled:opacity-50"
             >
               {joining ? (
-                <><Loader2 size={12} className="animate-spin" /> {hubData.joinMinPow > 0 ? 'Mining PoW...' : 'Joining...'}</>
+                <><Loader2 size={12} className="animate-spin" /> {hubData.joinMinPow > 0 ? 'Processing...' : 'Joining...'}</>
               ) : (
                 <><UserPlus size={12} /> Request Join</>
               )}

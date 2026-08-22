@@ -17,7 +17,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { truncateNpub } from '@/lib/utils'
 import { nip19 } from 'nostr-tools'
 import {
-  X, Flag, Loader2, Check, AlertTriangle, Pickaxe,
+  X, Flag, Loader2, Check, AlertTriangle, Cpu,
 } from 'lucide-react'
 import type { ReportType } from '@/lib/nostr/events'
 
@@ -208,9 +208,9 @@ export function ReportModal({
           {/* PoW notice */}
           {minPow > 0 && (
             <div className="flex items-start gap-2 p-2.5 rounded-lg bg-amber-500/5 border border-amber-500/10">
-              <Pickaxe size={12} className="text-amber-400 shrink-0 mt-0.5" />
+              <Cpu size={12} className="text-amber-400 shrink-0 mt-0.5" />
               <p className="text-[10px] text-amber-400/80 leading-relaxed">
-                This hub requires proof-of-work (difficulty {minPow}). Mining will run before publishing.
+                This hub requires proof-of-work (difficulty {minPow}). Processing will run before publishing.
               </p>
             </div>
           )}
@@ -233,7 +233,7 @@ export function ReportModal({
             {success ? (
               <><Check size={14} /> Report Submitted</>
             ) : mining ? (
-              <><Pickaxe size={14} className="animate-bounce" /> Mining PoW...</>
+              <><Loader2 size={14} className="animate-spin" /> Processing...</>
             ) : submitting ? (
               <><Loader2 size={14} className="animate-spin" /> Submitting...</>
             ) : (
