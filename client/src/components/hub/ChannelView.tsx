@@ -3553,7 +3553,7 @@ export function ChatMessageRow({
             )
           })()}
           </ScrollableContent>
-          <ReactionBar reactions={reactions} messageId={msg.id} onAddReaction={onAddReaction}>
+          <ReactionBar reactions={reactions} messageId={msg.id} onAddReaction={onAddReaction} rawReactions={rawReactions} onOpenProfile={onOpenProfile}>
             <ZapTotalBadge hubDTag={hubDTag} messageId={msg.dTag ? `36943:${msg.pubkey}:${msg.dTag}` : msg.id} onOpenProfile={onOpenProfile} />
           </ReactionBar>
           {msg.nsfw && !showNsfwPref && nsfwRevealed && (
@@ -7014,6 +7014,7 @@ function ThreadModal({ parentMsg, threadReplies, hubDTag, channelId, getProfile,
                   cancelEdit={cancelEdit}
                   getProfile={getProfile}
                   reactions={reactions[parentMsg.id] || []}
+                  rawReactions={storeReactions[parentMsg.id]}
                   onAddReaction={addReaction}
                   highlighted={highlightedId === parentMsg.id}
                   onScrollToMessage={scrollToThreadMessage}
