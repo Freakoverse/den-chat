@@ -748,7 +748,7 @@ function DiscoverHubCard({ hub }: { hub: DiscoveredHub }) {
               PoW {hub.minPow}
             </span>
           )}
-          {hub.joinMinPow > 0 && (
+          {hub.joinMinPow > 0 && hub.joinMinPow !== hub.minPow && (
             <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-amber-500/80 text-white backdrop-blur-sm">
               Join PoW {hub.joinMinPow}
             </span>
