@@ -604,47 +604,65 @@ export function VideoEmbed({ src }: { src: string }) {
             <p className="text-[11px] text-destructive mt-0.5">Too large to preview ({formatBytes(cacheTotal)})</p>
           )}
         </div>
-        <div className="flex items-center gap-1 shrink-0">
-          {cacheState === 'downloading' ? (
-            <button
-              onClick={handleCancelCache}
-              className="w-8 h-8 rounded-lg flex items-center justify-center text-destructive hover:bg-destructive/10 transition-colors cursor-pointer"
-              title="Cancel"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-            </button>
-          ) : (
-            <>
-              <button
-                onClick={() => {
-                  navigator.clipboard.writeText(src)
-                  setCopiedLink(true)
-                  setTimeout(() => setCopiedLink(false), 2000)
-                }}
-                className="w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary/80 transition-colors cursor-pointer"
-                title={copiedLink ? 'Copied!' : 'Copy link'}
-              >
-                {copiedLink ? <Check size={15} className="text-emerald-400" /> : <Copy size={15} />}
-              </button>
-              <a
-                href={src}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary/80 transition-colors"
-                title="Download"
-              >
-                <Download size={15} />
-              </a>
-              <button
-                onClick={handleCacheAndPlay}
-                className="w-8 h-8 rounded-lg flex items-center justify-center text-primary hover:bg-primary/10 transition-colors cursor-pointer"
-                title="Preview — download and play inline"
-              >
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8" fill="currentColor" stroke="none"/></svg>
-              </button>
-            </>
-          )}
-        </div>
+        <TooltipProvider delayDuration={200}>
+          <div className="flex items-center gap-1 shrink-0">
+            {cacheState === 'downloading' ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    onClick={handleCancelCache}
+                    className="w-8 h-8 rounded-lg flex items-center justify-center text-destructive hover:bg-destructive/10 transition-colors cursor-pointer"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="text-xs">Cancel</TooltipContent>
+              </Tooltip>
+            ) : (
+              <>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={() => {
+                        navigator.clipboard.writeText(src)
+                        setCopiedLink(true)
+                        setTimeout(() => setCopiedLink(false), 2000)
+                      }}
+                      className="w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary/80 transition-colors cursor-pointer"
+                    >
+                      {copiedLink ? <Check size={15} className="text-emerald-400" /> : <Copy size={15} />}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="text-xs">{copiedLink ? 'Copied!' : 'Copy link'}</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <a
+                      href={src}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary/80 transition-colors"
+                    >
+                      <Download size={15} />
+                    </a>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="text-xs">Download</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={handleCacheAndPlay}
+                      className="w-8 h-8 rounded-lg flex items-center justify-center text-primary hover:bg-primary/10 transition-colors cursor-pointer"
+                    >
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8" fill="currentColor" stroke="none"/></svg>
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="text-xs">Preview — download and play inline</TooltipContent>
+                </Tooltip>
+              </>
+            )}
+          </div>
+        </TooltipProvider>
       </div>
     )
   }
