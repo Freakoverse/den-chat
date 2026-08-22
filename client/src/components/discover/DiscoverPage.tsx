@@ -149,6 +149,160 @@ function DiscoverNav({ activeTab, onTabChange }: { activeTab: DiscoverTab; onTab
   )
 }
 
+// ── Reusable PoW min/max range slider (with magnetic pairing) ──
+function PowRangeSlider({
+  label,
+  description,
+  min,
+  max,
+  setMin,
+  setMax,
+}: {
+  label: string
+  description?: string
+  min: number
+  max: number
+  setMin: (v: number) => void
+  setMax: (v: number) => void
+}) {
+  const MAX_POW_RANGE = 10
+
+  const onMin = (val: number) => {
+    setMin(val)
+    // Enforce max gap of 10
+    if (max - val > MAX_POW_RANGE) {
+      setMax(val + MAX_POW_RANGE)
+    }
+    if (val > max) {
+      setMax(val)
+    }
+  }
+
+  const onMax = (val: number) => {
+    setMax(val)
+    // Enforce max gap of 10
+    if (val - min > MAX_POW_RANGE) {
+      setMin(val - MAX_POW_RANGE)
+    }
+    if (val < min) {
+      setMin(val)
+    }
+  }
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <label className="text-sm font-medium text-foreground">{label}</label>
+        <span className="text-xs font-mono text-primary bg-primary/10 px-2 py-0.5 rounded">
+          {min}{min !== max ? ` – ${max}` : ''}
+        </span>
+      </div>
+      <p className="text-xs text-muted-foreground mb-3">
+        {description || `Show hubs with PoW between min and max (max range: ${MAX_POW_RANGE})`}
+      </p>
+
+      {/* Min slider */}
+      <div className="space-y-3">
+        <div>
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-[11px] text-muted-foreground">Min</span>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="flex-1 relative h-6 flex items-center">
+              <div className="absolute left-0 right-0 h-1.5 rounded-full bg-muted-foreground/20" />
+              <div
+                className="absolute left-0 h-1.5 rounded-full bg-primary transition-all"
+                style={{ width: `${(min / 40) * 100}%` }}
+              />
+              <div
+                className="absolute w-4 h-4 rounded-full bg-primary border-2 border-background shadow-lg pointer-events-none transition-all"
+                style={{ left: `calc(${(min / 40) * 100}% - 8px)` }}
+              />
+              <input
+                type="range"
+                min={0}
+                max={40}
+                step={1}
+                value={min}
+                onChange={(e) => onMin(Number(e.target.value))}
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+              />
+            </div>
+            <div className="flex items-center h-7 rounded-md border border-border bg-background overflow-hidden">
+              <button
+                onClick={() => onMin(Math.max(0, min - 1))}
+                className="h-full px-1.5 text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors cursor-pointer flex items-center"
+              >
+                <ChevronLeft size={12} />
+              </button>
+              <span className="px-1.5 text-xs text-foreground tabular-nums min-w-[24px] text-center">
+                {min}
+              </span>
+              <button
+                onClick={() => onMin(Math.min(40, min + 1))}
+                className="h-full px-1.5 text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors cursor-pointer flex items-center"
+              >
+                <ChevronRight size={12} />
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Max slider */}
+        <div>
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-[11px] text-muted-foreground">Max</span>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="flex-1 relative h-6 flex items-center">
+              <div className="absolute left-0 right-0 h-1.5 rounded-full bg-muted-foreground/20" />
+              <div
+                className="absolute left-0 h-1.5 rounded-full bg-primary transition-all"
+                style={{ width: `${(max / 40) * 100}%` }}
+              />
+              <div
+                className="absolute w-4 h-4 rounded-full bg-primary border-2 border-background shadow-lg pointer-events-none transition-all"
+                style={{ left: `calc(${(max / 40) * 100}% - 8px)` }}
+              />
+              <input
+                type="range"
+                min={0}
+                max={40}
+                step={1}
+                value={max}
+                onChange={(e) => onMax(Number(e.target.value))}
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+              />
+            </div>
+            <div className="flex items-center h-7 rounded-md border border-border bg-background overflow-hidden">
+              <button
+                onClick={() => onMax(Math.max(0, max - 1))}
+                className="h-full px-1.5 text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors cursor-pointer flex items-center"
+              >
+                <ChevronLeft size={12} />
+              </button>
+              <span className="px-1.5 text-xs text-foreground tabular-nums min-w-[24px] text-center">
+                {max}
+              </span>
+              <button
+                onClick={() => onMax(Math.min(40, max + 1))}
+                className="h-full px-1.5 text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors cursor-pointer flex items-center"
+              >
+                <ChevronRight size={12} />
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between mt-1">
+        <span className="text-[10px] text-muted-foreground">0 (Any)</span>
+        <span className="text-[10px] text-muted-foreground">40</span>
+      </div>
+    </div>
+  )
+}
+
 // ── Filter Modal ──
 interface FilterModalProps {
   open: boolean
@@ -159,6 +313,10 @@ interface FilterModalProps {
   setPowMin: (v: number) => void
   powMax: number
   setPowMax: (v: number) => void
+  joinPowMin: number
+  setJoinPowMin: (v: number) => void
+  joinPowMax: number
+  setJoinPowMax: (v: number) => void
   filterTags: string[]
   setFilterTags: (v: string[]) => void
   filterClientTags: string[]
@@ -166,10 +324,12 @@ interface FilterModalProps {
   onApplySearch?: () => void
 }
 
-function FilterModal({ open, onClose, showNsfw, setShowNsfw, powMin, setPowMin, powMax, setPowMax, filterTags, setFilterTags, filterClientTags, setFilterClientTags, onApplySearch }: FilterModalProps) {
+function FilterModal({ open, onClose, showNsfw, setShowNsfw, powMin, setPowMin, powMax, setPowMax, joinPowMin, setJoinPowMin, joinPowMax, setJoinPowMax, filterTags, setFilterTags, filterClientTags, setFilterClientTags, onApplySearch }: FilterModalProps) {
   const [localNsfw, setLocalNsfw] = useState(showNsfw)
   const [localPowMin, setLocalPowMin] = useState(powMin)
   const [localPowMax, setLocalPowMax] = useState(powMax)
+  const [localJoinPowMin, setLocalJoinPowMin] = useState(joinPowMin)
+  const [localJoinPowMax, setLocalJoinPowMax] = useState(joinPowMax)
   const [localTags, setLocalTags] = useState<string[]>(filterTags)
   const [tagInput, setTagInput] = useState('')
 
@@ -185,6 +345,8 @@ function FilterModal({ open, onClose, showNsfw, setShowNsfw, powMin, setPowMin, 
       setLocalNsfw(showNsfw)
       setLocalPowMin(powMin)
       setLocalPowMax(powMax)
+      setLocalJoinPowMin(joinPowMin)
+      setLocalJoinPowMax(joinPowMax)
       setLocalTags([...filterTags])
       setTagInput('')
       setLocalClientTags([...filterClientTags])
@@ -193,33 +355,9 @@ function FilterModal({ open, onClose, showNsfw, setShowNsfw, powMin, setPowMin, 
       const combined = new Set([...DEFAULT_CLIENT_OPTIONS, ...filterClientTags])
       setClientTagOptions([...combined])
     }
-  }, [open, showNsfw, powMin, powMax, filterTags, filterClientTags])
+  }, [open, showNsfw, powMin, powMax, joinPowMin, joinPowMax, filterTags, filterClientTags])
 
   if (!open) return null
-
-  const MAX_POW_RANGE = 10
-
-  const handlePowMinChange = (val: number) => {
-    setLocalPowMin(val)
-    // Enforce max gap of 10
-    if (localPowMax - val > MAX_POW_RANGE) {
-      setLocalPowMax(val + MAX_POW_RANGE)
-    }
-    if (val > localPowMax) {
-      setLocalPowMax(val)
-    }
-  }
-
-  const handlePowMaxChange = (val: number) => {
-    setLocalPowMax(val)
-    // Enforce max gap of 10
-    if (val - localPowMin > MAX_POW_RANGE) {
-      setLocalPowMin(val - MAX_POW_RANGE)
-    }
-    if (val < localPowMin) {
-      setLocalPowMin(val)
-    }
-  }
 
   const addTag = (raw: string) => {
     const tag = raw.replace(/^#/, '').trim().toLowerCase()
@@ -246,6 +384,8 @@ function FilterModal({ open, onClose, showNsfw, setShowNsfw, powMin, setPowMin, 
     setShowNsfw(localNsfw)
     setPowMin(localPowMin)
     setPowMax(localPowMax)
+    setJoinPowMin(localJoinPowMin)
+    setJoinPowMax(localJoinPowMax)
     setFilterTags(localTags)
     setFilterClientTags(localClientTags)
     onClose()
@@ -259,6 +399,8 @@ function FilterModal({ open, onClose, showNsfw, setShowNsfw, powMin, setPowMin, 
     setLocalNsfw(false)
     setLocalPowMin(15)
     setLocalPowMax(25)
+    setLocalJoinPowMin(15)
+    setLocalJoinPowMax(25)
     setLocalTags([])
     setTagInput('')
     setLocalClientTags([])
@@ -304,117 +446,23 @@ function FilterModal({ open, onClose, showNsfw, setShowNsfw, powMin, setPowMin, 
             </button>
           </div>
 
-          {/* PoW range slider */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <label className="text-sm font-medium text-foreground">PoW Difficulty Range</label>
-              <span className="text-xs font-mono text-primary bg-primary/10 px-2 py-0.5 rounded">
-                {localPowMin}{localPowMin !== localPowMax ? ` – ${localPowMax}` : ''}
-              </span>
-            </div>
-            <p className="text-xs text-muted-foreground mb-3">
-              Show hubs with PoW between min and max (max range: {MAX_POW_RANGE})
-            </p>
+          {/* Message PoW range slider */}
+          <PowRangeSlider
+            label="PoW Difficulty Range"
+            min={localPowMin}
+            max={localPowMax}
+            setMin={setLocalPowMin}
+            setMax={setLocalPowMax}
+          />
 
-            {/* Min slider */}
-            <div className="space-y-3">
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-[11px] text-muted-foreground">Min</span>
-                </div>
-                <div className="flex items-center gap-3">
-                  <div className="flex-1 relative h-6 flex items-center">
-                    <div className="absolute left-0 right-0 h-1.5 rounded-full bg-muted-foreground/20" />
-                    <div
-                      className="absolute left-0 h-1.5 rounded-full bg-primary transition-all"
-                      style={{ width: `${(localPowMin / 40) * 100}%` }}
-                    />
-                    <div
-                      className="absolute w-4 h-4 rounded-full bg-primary border-2 border-background shadow-lg pointer-events-none transition-all"
-                      style={{ left: `calc(${(localPowMin / 40) * 100}% - 8px)` }}
-                    />
-                    <input
-                      type="range"
-                      min={0}
-                      max={40}
-                      step={1}
-                      value={localPowMin}
-                      onChange={(e) => handlePowMinChange(Number(e.target.value))}
-                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                    />
-                  </div>
-                  <div className="flex items-center h-7 rounded-md border border-border bg-background overflow-hidden">
-                    <button
-                      onClick={() => handlePowMinChange(Math.max(0, localPowMin - 1))}
-                      className="h-full px-1.5 text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors cursor-pointer flex items-center"
-                    >
-                      <ChevronLeft size={12} />
-                    </button>
-                    <span className="px-1.5 text-xs text-foreground tabular-nums min-w-[24px] text-center">
-                      {localPowMin}
-                    </span>
-                    <button
-                      onClick={() => handlePowMinChange(Math.min(40, localPowMin + 1))}
-                      className="h-full px-1.5 text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors cursor-pointer flex items-center"
-                    >
-                      <ChevronRight size={12} />
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* Max slider */}
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-[11px] text-muted-foreground">Max</span>
-                </div>
-                <div className="flex items-center gap-3">
-                  <div className="flex-1 relative h-6 flex items-center">
-                    <div className="absolute left-0 right-0 h-1.5 rounded-full bg-muted-foreground/20" />
-                    <div
-                      className="absolute left-0 h-1.5 rounded-full bg-primary transition-all"
-                      style={{ width: `${(localPowMax / 40) * 100}%` }}
-                    />
-                    <div
-                      className="absolute w-4 h-4 rounded-full bg-primary border-2 border-background shadow-lg pointer-events-none transition-all"
-                      style={{ left: `calc(${(localPowMax / 40) * 100}% - 8px)` }}
-                    />
-                    <input
-                      type="range"
-                      min={0}
-                      max={40}
-                      step={1}
-                      value={localPowMax}
-                      onChange={(e) => handlePowMaxChange(Number(e.target.value))}
-                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                    />
-                  </div>
-                  <div className="flex items-center h-7 rounded-md border border-border bg-background overflow-hidden">
-                    <button
-                      onClick={() => handlePowMaxChange(Math.max(0, localPowMax - 1))}
-                      className="h-full px-1.5 text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors cursor-pointer flex items-center"
-                    >
-                      <ChevronLeft size={12} />
-                    </button>
-                    <span className="px-1.5 text-xs text-foreground tabular-nums min-w-[24px] text-center">
-                      {localPowMax}
-                    </span>
-                    <button
-                      onClick={() => handlePowMaxChange(Math.min(40, localPowMax + 1))}
-                      className="h-full px-1.5 text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors cursor-pointer flex items-center"
-                    >
-                      <ChevronRight size={12} />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-between mt-1">
-              <span className="text-[10px] text-muted-foreground">0 (Any)</span>
-              <span className="text-[10px] text-muted-foreground">40</span>
-            </div>
-          </div>
+          {/* Join request PoW range slider */}
+          <PowRangeSlider
+            label="Join Request Difficulty"
+            min={localJoinPowMin}
+            max={localJoinPowMax}
+            setMin={setLocalJoinPowMin}
+            setMax={setLocalJoinPowMax}
+          />
 
           {/* Multi-tag filter */}
           <div>
@@ -695,9 +743,14 @@ function DiscoverHubCard({ hub }: { hub: DiscoveredHub }) {
           {hub.nsfw && (
             <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-red-500/80 text-white backdrop-blur-sm">NSFW</span>
           )}
+          {hub.minPow > 0 && (
+            <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-amber-500/80 text-white backdrop-blur-sm">
+              PoW {hub.minPow}
+            </span>
+          )}
           {hub.joinMinPow > 0 && (
             <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-amber-500/80 text-white backdrop-blur-sm">
-              PoW {hub.joinMinPow}
+              Join PoW {hub.joinMinPow}
             </span>
           )}
         </div>
@@ -921,6 +974,8 @@ export function DiscoverPage() {
   const [showNsfw, setShowNsfw] = useState(false)
   const [powMin, setPowMin] = useState(15)
   const [powMax, setPowMax] = useState(25)
+  const [joinPowMin, setJoinPowMin] = useState(15)
+  const [joinPowMax, setJoinPowMax] = useState(25)
   const [filterTags, setFilterTags] = useState<string[]>([])
   const [filterClientTags, setFilterClientTags] = useState<string[]>([])
   const [showFilterModal, setShowFilterModal] = useState(false)
@@ -1179,6 +1234,12 @@ export function DiscoverPage() {
       result = result.filter(h => h.minPow >= powMin && h.minPow <= powMax)
     }
 
+    // Join PoW range filter (client-side only — includes the message-PoW fallback
+    // for hubs that carry no W tag, so a relay #W query would wrongly exclude them)
+    if (joinPowMin > 0 || joinPowMax < 40) {
+      result = result.filter(h => h.joinMinPow >= joinPowMin && h.joinMinPow <= joinPowMax)
+    }
+
     // Tag filter (multi-tag — hub must match ALL specified tags)
     if (filterTags.length > 0) {
       result = result.filter(h =>
@@ -1200,7 +1261,7 @@ export function DiscoverPage() {
     }
 
     return result
-  }, [hubs, showNsfw, powMin, powMax, filterTags, filterClientTags, searchQuery, blockedPubkeys, wotSettings, wotGraphDepth])
+  }, [hubs, showNsfw, powMin, powMax, joinPowMin, joinPowMax, filterTags, filterClientTags, searchQuery, blockedPubkeys, wotSettings, wotGraphDepth])
 
   // Numbered pagination
   const totalPages = Math.max(1, Math.ceil(filteredHubs.length / PAGE_SIZE))
@@ -1212,7 +1273,7 @@ export function DiscoverPage() {
   // Reset to page 1 on filter/search change
   useEffect(() => {
     setCurrentPage(1)
-  }, [showNsfw, powMin, powMax, filterTags, filterClientTags, searchQuery])
+  }, [showNsfw, powMin, powMax, joinPowMin, joinPowMax, filterTags, filterClientTags, searchQuery])
 
   // Prefetch next batch when user is within 2 pages of the end
   useEffect(() => {
@@ -1224,7 +1285,7 @@ export function DiscoverPage() {
   }, [currentPage, totalPages, exhausted, loading, hubs.length, loadMoreHubs])
 
   // Active filter indicator count
-  const activeFilterCount = (showNsfw ? 1 : 0) + ((powMin !== 15 || powMax !== 25) ? 1 : 0) + (filterTags.length > 0 ? 1 : 0) + (filterClientTags.length > 0 ? 1 : 0)
+  const activeFilterCount = (showNsfw ? 1 : 0) + ((powMin !== 15 || powMax !== 25) ? 1 : 0) + ((joinPowMin !== 15 || joinPowMax !== 25) ? 1 : 0) + (filterTags.length > 0 ? 1 : 0) + (filterClientTags.length > 0 ? 1 : 0)
 
   const LeftPanel = (
     <ResizablePanel id="discover" defaultWidth={280} minWidth={200} maxWidth={420} className="flex flex-col bg-background pr-2 py-2 gap-2 max-[1080px]:hidden">
@@ -1486,6 +1547,10 @@ export function DiscoverPage() {
         setPowMin={setPowMin}
         powMax={powMax}
         setPowMax={setPowMax}
+        joinPowMin={joinPowMin}
+        setJoinPowMin={setJoinPowMin}
+        joinPowMax={joinPowMax}
+        setJoinPowMax={setJoinPowMax}
         filterTags={filterTags}
         setFilterTags={setFilterTags}
         filterClientTags={filterClientTags}
