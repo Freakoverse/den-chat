@@ -904,9 +904,7 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
                               entry.enabled ? 'translate-x-[16px]' : 'translate-x-[2px]'
                             )} />
                           </button>
-                          <span className="text-xs text-foreground font-mono truncate flex-1">{entry.url}</span>
-                          <span className="h-6 flex items-center text-[10px] rounded border border-border bg-background px-1.5 text-muted-foreground select-none">general</span>
-                        </div>
+                          <span className="text-xs text-foreground font-mono truncate flex-1">{entry.url}</span>                        </div>
                       ))}
                     </div>
                   </div>
@@ -936,9 +934,7 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
                               entry.enabled ? 'translate-x-[16px]' : 'translate-x-[2px]'
                             )} />
                           </button>
-                          <span className="text-xs text-foreground font-mono truncate flex-1">{entry.url}</span>
-                          <span className="h-6 flex items-center text-[10px] rounded border border-border bg-background px-1.5 text-muted-foreground select-none">general</span>
-                        </div>
+                          <span className="text-xs text-foreground font-mono truncate flex-1">{entry.url}</span>                        </div>
                       ))}
                     </div>
                   ) : (
@@ -970,9 +966,7 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
                               entry.enabled ? 'translate-x-[16px]' : 'translate-x-[2px]'
                             )} />
                           </button>
-                          <span className="text-xs text-foreground font-mono truncate flex-1">{entry.url}</span>
-                          <span className="h-6 flex items-center text-[10px] rounded border border-border bg-background px-1.5 text-muted-foreground select-none">general</span>
-                          <button
+                          <span className="text-xs text-foreground font-mono truncate flex-1">{entry.url}</span>                          <button
                             type="button"
                             onClick={() => setCustomRelayEntries(customRelayEntries.filter((_, j) => j !== i))}
                             className="text-muted-foreground hover:text-destructive transition-colors cursor-pointer"
