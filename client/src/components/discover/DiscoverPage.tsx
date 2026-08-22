@@ -50,6 +50,8 @@ interface DiscoveredHub {
   tags?: string[]
   minPow: number
   joinMinPow: number
+  /** True when the hub explicitly set a join PoW (W tag present), vs. falling back to minPow. */
+  hasJoinPow: boolean
   nsfw: boolean
   discoverable: boolean
   creatorPubkey: string
@@ -108,7 +110,7 @@ function parseHubEventForDiscover(event: Event): DiscoveredHub | null {
     return {
       event, dTag, name, description, icon, banner,
       tags: tags.length > 0 ? tags : undefined,
-      minPow, joinMinPow: wjTagVal ? parseInt(wjTagVal, 10) : minPow,
+      minPow, joinMinPow: wjTagVal ? parseInt(wjTagVal, 10) : minPow, hasJoinPow: !!wjTagVal,
       nsfw, discoverable, creatorPubkey: event.pubkey,
       generalRelays, blossomServers, publishedAt, clientTag,
     }
@@ -748,7 +750,7 @@ function DiscoverHubCard({ hub }: { hub: DiscoveredHub }) {
               PoW {hub.minPow}
             </span>
           )}
-          {hub.joinMinPow > 0 && hub.joinMinPow !== hub.minPow && (
+          {hub.hasJoinPow && hub.joinMinPow > 0 && (
             <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-amber-500/80 text-white backdrop-blur-sm">
               Join PoW {hub.joinMinPow}
             </span>
