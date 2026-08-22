@@ -23,6 +23,7 @@ import { useDM04Store } from '@/stores/dm04Store'
 import { useHubStore } from '@/stores/hubStore'
 import { useMessageStore } from '@/stores/messageStore'
 import { useNotificationStore } from '@/stores/notificationStore'
+import { clearCachedEvent } from '@/lib/notifications/readState'
 import { useSocialStore } from '@/stores/socialStore'
 import { useFollowStore } from '@/stores/followStore'
 import { useBlockStore } from '@/stores/blockStore'
@@ -79,10 +80,27 @@ export function resetSession(): void {
     }
   } catch { /* ignore */ }
 
-  // 2) Hard-reset every per-account store to its initial empty state.
+  // 2) Notifications need special handling. Their read-state is cached in
+  //    localStorage under GLOBAL (non-per-account) keys, and the store bakes that
+  //    cache into its initial state at module-eval. So a plain hardReset would
+  //    restore the PREVIOUS account's read-state, and the next account's init()
+  //    would then read the same shared cache (whose fresh created_at beats the new
+  //    account's relay event) — making the new account inherit "already read"
+  //    timestamps and show no unread badges. Empty the store via its reset() action
+  //    and wipe the shared caches so init() rehydrates purely from the new account's
+  //    own relay read-state. (Affects hub badges, channel unread, DMs, and social.)
+  try {
+    useNotificationStore.getState().reset()
+    clearCachedEvent('social')
+    clearCachedEvent('hub')
+    clearCachedEvent('dm')
+    clearCachedEvent('pc')
+  } catch { /* ignore */ }
+
+  // 3) Hard-reset every other per-account store to its initial empty state.
   const stores: AnyStore[] = [
     useHubStore, useMessageStore, useDMStore, useDM04Store,
-    useNotificationStore, useSocialStore, useFollowStore, useBlockStore,
+    useSocialStore, useFollowStore, useBlockStore,
     usePinStore, useForumStore, useEmojiStore, useStickerStore, useGifStore,
     useUserListsStore, useWotStore, useReportStore, useZapStore, usePublicChatStore,
   ] as unknown as AnyStore[]
