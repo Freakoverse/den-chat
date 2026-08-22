@@ -81,6 +81,40 @@ const DTAGS: Record<string, string> = {
 
 export type NotifDomain = 'social' | 'hub' | 'dm' | 'pc'
 
+// ── Per-account scoping ──
+// The read-state caches are namespaced by the active account's pubkey, so switching
+// accounts on the same device never lets one account inherit another's "already read"
+// timestamps. A separate pointer records the last-active account so the synchronous
+// module-eval preload knows which namespace to read before login completes.
+
+const ACTIVE_ACCOUNT_KEY = 'den-chat-notif-active'
+let _activeAccount = ''
+
+/** Point the read-state caches at a specific account. Call on login/account switch. */
+export function setReadStateAccount(pubkey: string): void {
+  _activeAccount = pubkey || ''
+  try {
+    if (_activeAccount) localStorage.setItem(ACTIVE_ACCOUNT_KEY, _activeAccount)
+  } catch { /* ignore */ }
+}
+
+/** Restore the last-active account synchronously (used by the module-eval preload). */
+export function restoreReadStateAccount(): string {
+  try {
+    _activeAccount = localStorage.getItem(ACTIVE_ACCOUNT_KEY) || ''
+  } catch {
+    _activeAccount = ''
+  }
+  return _activeAccount
+}
+
+/** Per-account localStorage key for a domain (falls back to the legacy global key
+ *  when no account is set yet — e.g. a first load before any login). */
+function cacheKey(domain: NotifDomain): string {
+  const base = STORAGE_KEYS[domain]
+  return _activeAccount ? `${base}:${_activeAccount}` : base
+}
+
 // ── localStorage Cache ──
 
 /**
@@ -89,7 +123,7 @@ export type NotifDomain = 'social' | 'hub' | 'dm' | 'pc'
  */
 export function loadCachedEvent(domain: NotifDomain): Event | null {
   try {
-    const raw = localStorage.getItem(STORAGE_KEYS[domain])
+    const raw = localStorage.getItem(cacheKey(domain))
     if (!raw) return null
     return JSON.parse(raw) as Event
   } catch {
@@ -101,14 +135,14 @@ export function loadCachedEvent(domain: NotifDomain): Event | null {
  * Save a NIP-78 event to localStorage cache.
  */
 export function saveCachedEvent(domain: NotifDomain, event: Event): void {
-  localStorage.setItem(STORAGE_KEYS[domain], JSON.stringify(event))
+  localStorage.setItem(cacheKey(domain), JSON.stringify(event))
 }
 
 /**
  * Clear a cached event from localStorage.
  */
 export function clearCachedEvent(domain: NotifDomain): void {
-  localStorage.removeItem(STORAGE_KEYS[domain])
+  localStorage.removeItem(cacheKey(domain))
 }
 
 // ── Relay Fetch ──

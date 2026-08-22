@@ -39,6 +39,8 @@ import {
   hasAnyMute,
   saveCachedEvent,
   loadCachedEvent,
+  setReadStateAccount,
+  restoreReadStateAccount,
 } from '@/lib/notifications/readState'
 
 // ── Helpers ──
@@ -215,6 +217,10 @@ function buildDmReadStateFromStore(
  * "badges flash up then snap down" race condition.
  */
 function preloadFromLocalStorage() {
+  // Point the caches at the last-active account so this synchronous preload reads
+  // that account's namespace (not a different account's, and not a shared bucket).
+  restoreReadStateAccount()
+
   // Hub read-state
   let hubUnreads: Record<string, Record<string, ChannelUnread>> = {}
   let hubMuteSettings: Record<string, HubMuteSettings> = {}
@@ -295,6 +301,10 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
   // ── Init ──
 
   init: async (pubkey, signer, privateKey) => {
+    // Scope all read-state caches to this account before any load/save, so an
+    // account switch never reads or overwrites another account's cache.
+    setReadStateAccount(pubkey)
+
     // Load all four domains in parallel
     const [socialEvent, hubEvent, dmEvent, pcEvent] = await Promise.all([
       loadReadState(pubkey, 'social'),
