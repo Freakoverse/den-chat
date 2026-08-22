@@ -156,6 +156,30 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
     if (isCreator) return true // creator always has access
     return !!(groupSecrets && groupSecrets[groupId])
   }
+
+  // ── Auto-select a channel on hub entry ──
+  // Entering a hub leaves no channel selected. Open the first *text* (chat) channel the
+  // user can actually use — visible to them (view_channel) and decryptable (hub-wide, or a
+  // grouped-role channel whose secret they hold) — walking the sidebar order (uncategorized
+  // first, then categories by position). Hidden channels and ones locked behind a role
+  // secret they don't have are skipped. Re-runs when a group secret arrives so a channel
+  // that was locked at first can be picked once it unlocks.
+  useEffect(() => {
+    if (!hub || activeChannelId) return
+    const byPos = (a: { position: number }, b: { position: number }) => a.position - b.position
+    const ordered = [
+      ...hub.channels.filter((c) => !c.categoryId).sort(byPos),
+      ...[...hub.categories].sort(byPos).flatMap((cat) =>
+        hub.channels.filter((c) => c.categoryId === cat.categoryId).sort(byPos)),
+    ]
+    const canView = (channelId: string) =>
+      isCreator || !pubkey ? true : getPermissionsForUser(hub, pubkey, hubMembers, channelId).view_channel
+    const first = ordered.find((c) =>
+      c.type === 'chat' && canView(c.channelId) && hasGroupAccess(getChannelGroupId(c)))
+    if (first) setActiveChannel(first.channelId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hub, activeChannelId, groupSecrets, hubMembers, pubkey, isCreator])
+
   const hostsByHub = useVoiceStore((s) => s.hostsByHub)
 
   // Check if any of user's voice hosts have an epoch mismatch
