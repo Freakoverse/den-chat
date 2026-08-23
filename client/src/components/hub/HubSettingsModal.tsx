@@ -1352,27 +1352,53 @@ function ProgressModal({
 // ── General Page ──
 
 /** Styled preset dropdown for the disappearing-messages timer (matches the app's
- *  filter dropdowns). Manages its own open state + click-outside. */
+ *  filter dropdowns). The popover is portaled to <body> with fixed positioning and
+ *  flips upward when there isn't room below — so it never extends/scrolls the
+ *  overflow container it lives in. */
 function ExpirationSelect({ value, onChange }: { value: number; onChange: (v: number) => void }) {
   const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    if (!open) return
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [open])
+  const btnRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const [pos, setPos] = useState<{ left: number; width: number; top: number; bottom: number; dropUp: boolean } | null>(null)
 
   // Include a synthetic option for a custom (non-preset) stored value.
   const options = EXPIRATION_PRESETS.some((p) => p.seconds === value)
     ? EXPIRATION_PRESETS
     : [...EXPIRATION_PRESETS, { label: formatDuration(value), seconds: value }]
 
+  useEffect(() => {
+    if (!open) return
+    const recompute = () => {
+      const btn = btnRef.current
+      if (!btn) return
+      const r = btn.getBoundingClientRect()
+      const menuH = Math.min(240, options.length * 34 + 8)
+      const spaceBelow = window.innerHeight - r.bottom
+      // Flip up only when there's not enough room below AND more room above.
+      const dropUp = spaceBelow < menuH + 8 && r.top > spaceBelow
+      setPos({ left: r.left, width: r.width, top: r.top, bottom: r.bottom, dropUp })
+    }
+    recompute()
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node
+      if (btnRef.current?.contains(t) || menuRef.current?.contains(t)) return
+      setOpen(false)
+    }
+    // Capture-phase scroll so we reposition when any ancestor container scrolls.
+    window.addEventListener('scroll', recompute, true)
+    window.addEventListener('resize', recompute)
+    document.addEventListener('mousedown', onDown)
+    return () => {
+      window.removeEventListener('scroll', recompute, true)
+      window.removeEventListener('resize', recompute)
+      document.removeEventListener('mousedown', onDown)
+    }
+  }, [open, options.length])
+
   return (
-    <div ref={ref} className="relative">
+    <div className="relative">
       <button
+        ref={btnRef}
         onClick={() => setOpen(!open)}
         className={cn(
           'flex items-center justify-between gap-1.5 h-9 w-full px-3 rounded-lg text-sm font-medium border transition-all cursor-pointer',
@@ -1384,8 +1410,20 @@ function ExpirationSelect({ value, onChange }: { value: number; onChange: (v: nu
         <span>{value > 0 ? formatDuration(value) : 'Off'}</span>
         <ChevronDown size={14} className={cn('transition-transform', open && 'rotate-180')} />
       </button>
-      {open && (
-        <div className="absolute z-[60] mt-1 left-0 right-0 max-h-[240px] overflow-y-auto bg-card border border-border rounded-xl shadow-2xl p-1 flex flex-col gap-1 animate-in fade-in-0 zoom-in-95">
+      {open && pos && createPortal(
+        <div
+          ref={menuRef}
+          style={{
+            position: 'fixed',
+            left: pos.left,
+            width: pos.width,
+            maxHeight: 240,
+            ...(pos.dropUp
+              ? { bottom: window.innerHeight - pos.top + 4 }
+              : { top: pos.bottom + 4 }),
+          }}
+          className="z-[80] overflow-y-auto bg-card border border-border rounded-xl shadow-2xl p-1 flex flex-col gap-1 animate-in fade-in-0 zoom-in-95"
+        >
           {options.map((p) => (
             <button
               key={p.seconds}
@@ -1398,7 +1436,8 @@ function ExpirationSelect({ value, onChange }: { value: number; onChange: (v: nu
               {p.label}
             </button>
           ))}
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   )
