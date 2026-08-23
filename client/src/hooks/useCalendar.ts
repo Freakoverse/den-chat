@@ -22,6 +22,7 @@ import {
   signWithSigner,
   mineAndSign,
 } from '@/lib/nostr/events'
+import { stampHubExpiration } from '@/lib/hub/messageExpiration'
 import { KINDS } from '@/lib/crypto/constants'
 import { aesEncrypt, aesDecrypt } from '@/lib/crypto/aes'
 import { deriveEventsKey } from '@/lib/crypto/hkdf'
@@ -296,6 +297,9 @@ export function useCalendar(hubDTag: string | null) {
         unsigned = { ...unsigned, tags: [...unsigned.tags, ['client', 'DEN Chat']] }
       }
 
+      // Disappearing messages: anchor a calendar event's expiry to its END time so
+      // a future event survives until it's over, then disappears one timer later.
+      stampHubExpiration(unsigned, hubDTag, data.endTimestamp || data.startTimestamp)
       const signed = await mineAndSign(unsigned, minPow, pubkey, signer, privateKey)
 
       const hubRelays = hub?.generalRelays || []
@@ -367,6 +371,8 @@ export function useCalendar(hubDTag: string | null) {
         unsigned = { ...unsigned, tags: [...unsigned.tags, ['client', 'DEN Chat']] }
       }
 
+      // Anchor expiry to the event's END time (see createEvent).
+      stampHubExpiration(unsigned, hubDTag, data.endTimestamp || data.startTimestamp)
       const signed = await mineAndSign(unsigned, minPow, pubkey, signer, privateKey)
       const hubRelays = hubs[hubDTag]?.generalRelays || []
       const publishRelays = getPublishRelays(hubRelays)
@@ -475,6 +481,7 @@ export function useCalendar(hubDTag: string | null) {
         unsigned = { ...unsigned, tags: [...unsigned.tags, ['client', 'DEN Chat']] }
       }
 
+      stampHubExpiration(unsigned, hubDTag)
       const signed = await mineAndSign(unsigned, minPow, pubkey, signer, privateKey)
       const hubRelays = hub?.generalRelays || []
       const publishRelays = getPublishRelays(hubRelays)

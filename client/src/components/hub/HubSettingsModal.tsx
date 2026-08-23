@@ -48,6 +48,7 @@ import { nip19 } from 'nostr-tools'
 import { PERMISSION_KEYS, PERMISSION_LABELS, PERMISSION_DESCRIPTIONS, DISABLED_PERMISSIONS, DEFAULT_EVERYONE_PERMISSIONS, getPermissionsForUser, type ResolvedPermissions } from '@/lib/hub/permissions'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
 import { PowSection } from './PowSection'
+import { EXPIRATION_PRESETS, formatDuration } from '@/lib/hub/messageExpiration'
 import { Pagination } from '@/components/ui/Pagination'
 import { CustomSelect } from '@/components/ui/custom-select'
 import { HUB_NAME_MAX, HUB_DESCRIPTION_MAX, CHANNEL_NAME_MAX, CATEGORY_NAME_MAX, ROLE_NAME_MAX, TOPIC_TAG_MAX, MAX_CHANNELS, MAX_CATEGORIES, MAX_ROLES, MAX_TOPIC_TAGS, MAX_GENERAL_RELAYS, MAX_BLOSSOM_SERVERS } from '@/lib/hub/hubLimits'
@@ -245,6 +246,7 @@ export function HubSettingsModal({ open, onClose, hub }: HubSettingsModalProps) 
   const [editChannels, setEditChannels] = useState<Channel[]>(() => [...hub.channels])
   const [editMinPow, setEditMinPow] = useState(hub.minPow || 0)
   const [editJoinMinPow, setEditJoinMinPow] = useState(hub.joinMinPow || 0)
+  const [editMessageExpiration, setEditMessageExpiration] = useState(hub.messageExpiration || 0)
   const [editNsfw, setEditNsfw] = useState(hub.nsfw || false)
   const [editDiscoverable, setEditDiscoverable] = useState(hub.discoverable !== false)
   const [editRelays, setEditRelays] = useState<string[]>(() => [...hub.generalRelays])
@@ -311,6 +313,7 @@ export function HubSettingsModal({ open, onClose, hub }: HubSettingsModalProps) 
       JSON.stringify(hub.channels.map(c => ({ id: c.channelId, name: c.name, cat: c.categoryId, pos: c.position, type: c.type, perms: c.permissions })))) return true
     if (editMinPow !== (hub.minPow || 0)) return true
     if (editJoinMinPow !== (hub.joinMinPow || 0)) return true
+    if (editMessageExpiration !== (hub.messageExpiration || 0)) return true
     if (editNsfw !== (hub.nsfw || false)) return true
     if (editDiscoverable !== (hub.discoverable !== false)) return true
     if (JSON.stringify([...editRelays].sort()) !== JSON.stringify([...hub.generalRelays].sort())) return true
@@ -318,7 +321,7 @@ export function HubSettingsModal({ open, onClose, hub }: HubSettingsModalProps) 
     if (JSON.stringify(editRoles.map(r => ({ id: r.roleId, name: r.name, color: r.color, pos: r.position, hoist: r.hoist, perms: r.permissions }))) !==
       JSON.stringify(hub.roles.map(r => ({ id: r.roleId, name: r.name, color: r.color, pos: r.position, hoist: r.hoist, perms: r.permissions })))) return true
     return false
-  }, [editName, editDescription, editIcon, editBanner, editTags, editCategories, editChannels, editMinPow, editJoinMinPow, editNsfw, editDiscoverable, editRelays, editBlossoms, editRoles, hub])
+  }, [editName, editDescription, editIcon, editBanner, editTags, editCategories, editChannels, editMinPow, editJoinMinPow, editMessageExpiration, editNsfw, editDiscoverable, editRelays, editBlossoms, editRoles, hub])
 
   // Role change summary for the Roles page footer
   const roleChangeSummary = useMemo(() => {
@@ -350,10 +353,11 @@ export function HubSettingsModal({ open, onClose, hub }: HubSettingsModalProps) 
     if (JSON.stringify(editTags) !== JSON.stringify(hub.tags || [])) fields.push('tags')
     if (editMinPow !== (hub.minPow || 0)) fields.push('message proof of work')
     if (editJoinMinPow !== (hub.joinMinPow || 0)) fields.push('join proof of work')
+    if (editMessageExpiration !== (hub.messageExpiration || 0)) fields.push('disappearing messages')
     if (editNsfw !== (hub.nsfw || false)) fields.push('NSFW')
     if (editDiscoverable !== (hub.discoverable !== false)) fields.push('discoverability')
     return fields
-  }, [editName, editDescription, editIcon, editBanner, editTags, editMinPow, editJoinMinPow, editNsfw, editDiscoverable, hub])
+  }, [editName, editDescription, editIcon, editBanner, editTags, editMinPow, editJoinMinPow, editMessageExpiration, editNsfw, editDiscoverable, hub])
 
   // Channels page change summary
   const channelChangeSummary = useMemo(() => {
@@ -741,6 +745,7 @@ export function HubSettingsModal({ open, onClose, hub }: HubSettingsModalProps) 
         roles: editRoles,
         minPow: editMinPow > 0 ? editMinPow : undefined,
         joinMinPow: editJoinMinPow > 0 ? editJoinMinPow : undefined,
+        messageExpiration: editMessageExpiration > 0 ? editMessageExpiration : undefined,
         nsfw: editNsfw || undefined,
         discoverable: editDiscoverable,
         groupedRoles: newGroupedRoles.length > 0 ? newGroupedRoles : undefined,
@@ -779,6 +784,7 @@ export function HubSettingsModal({ open, onClose, hub }: HubSettingsModalProps) 
         blossomServers: editBlossoms,
         minPow: editMinPow,
         joinMinPow: editJoinMinPow,
+        messageExpiration: editMessageExpiration,
         nsfw: editNsfw,
         discoverable: editDiscoverable,
         groupedRoles: newGroupedRoles.length > 0 ? newGroupedRoles : undefined,
@@ -872,6 +878,7 @@ export function HubSettingsModal({ open, onClose, hub }: HubSettingsModalProps) 
                       editTags={editTags} setEditTags={setEditTags}
                       editMinPow={editMinPow} setEditMinPow={setEditMinPow}
                       editJoinMinPow={editJoinMinPow} setEditJoinMinPow={setEditJoinMinPow}
+                      editMessageExpiration={editMessageExpiration} setEditMessageExpiration={setEditMessageExpiration}
                       editNsfw={editNsfw} setEditNsfw={setEditNsfw}
                       editDiscoverable={editDiscoverable} setEditDiscoverable={setEditDiscoverable}
                     />
@@ -1353,6 +1360,7 @@ interface GeneralPageProps {
   editTags: string[]; setEditTags: (v: string[]) => void
   editMinPow: number; setEditMinPow: (v: number) => void
   editJoinMinPow: number; setEditJoinMinPow: (v: number) => void
+  editMessageExpiration: number; setEditMessageExpiration: (v: number) => void
   editNsfw: boolean; setEditNsfw: (v: boolean) => void
   editDiscoverable: boolean; setEditDiscoverable: (v: boolean) => void
 }
@@ -1362,6 +1370,7 @@ function GeneralPage({
   editIcon, setEditIcon, editBanner, setEditBanner,
   editTags, setEditTags, editMinPow, setEditMinPow,
   editJoinMinPow, setEditJoinMinPow,
+  editMessageExpiration, setEditMessageExpiration,
   editNsfw, setEditNsfw,
   editDiscoverable, setEditDiscoverable,
 }: GeneralPageProps) {
@@ -1723,6 +1732,28 @@ function GeneralPage({
 
         {/* Proof of Work */}
         <PowSection editMinPow={editMinPow} setEditMinPow={setEditMinPow} editJoinMinPow={editJoinMinPow} setEditJoinMinPow={setEditJoinMinPow} />
+
+        <Separator />
+
+        {/* Disappearing messages */}
+        <div>
+          <h4 className="text-sm font-medium text-foreground mb-1">Disappearing messages</h4>
+          <p className="text-xs text-muted-foreground mb-3">
+            New messages, reactions, polls, and events in this hub are marked to expire after this long. Best-effort: relays that honor NIP-40 delete them, and clients hide and purge them locally. Existing messages keep the timer they were sent with, and calendar events survive until after they end.
+          </p>
+          <select
+            value={editMessageExpiration}
+            onChange={(e) => setEditMessageExpiration(parseInt(e.target.value, 10) || 0)}
+            className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground cursor-pointer"
+          >
+            {EXPIRATION_PRESETS.map((p) => (
+              <option key={p.seconds} value={p.seconds}>{p.label}</option>
+            ))}
+            {!EXPIRATION_PRESETS.some((p) => p.seconds === editMessageExpiration) && editMessageExpiration > 0 && (
+              <option value={editMessageExpiration}>{formatDuration(editMessageExpiration)}</option>
+            )}
+          </select>
+        </div>
 
       </div>
 

@@ -20,6 +20,7 @@ import { getPublishRelays, getDeletePublishRelays } from '@/stores/postingBehavi
 import { signWithSigner, mineAndSign, createMessageEvent, createDeletionEvent, createDeletedMessageEvent, createReactionEvent, createEditHintEvent } from '@/lib/nostr/events'
 import { nip19 } from 'nostr-tools'
 import { KINDS, STANDARD_KINDS } from '@/lib/crypto/constants'
+import { stampHubExpiration } from '@/lib/hub/messageExpiration'
 import { aesEncrypt, aesDecrypt } from '@/lib/crypto/aes'
 import { deriveChannelKey } from '@/lib/crypto/hkdf'
 import { countLeadingZeroBits } from '@/lib/pow/pow'
@@ -56,6 +57,7 @@ export interface ChatMessage {
   emojiTags?: [string, string, string?][]  // decrypted NIP-30 emoji tags [shortcode, url, set-ref?]
   stickerTags?: [string, string, string?][]  // decrypted sticker tags [shortcode, url, set-ref?]
   gifTags?: [string, string, string][]  // decrypted GIF tags [name, url, nsfw]
+  expiration?: number   // NIP-40 expiration (unix seconds) — disappearing messages
 }
 
 /** Stable empty array to avoid Zustand selector returning new reference each render */
@@ -293,6 +295,7 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
       attachments,
       nsfw: isNsfw,
       clientTag: raw.clientTag,
+      expiration: raw.expiration,
       facilitator: raw.facilitator,
       isForum: raw.isForum || !!title,  // derive from raw tag OR decrypted content
       title,
@@ -514,6 +517,10 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
       unsigned = { ...unsigned, tags: [...unsigned.tags, ...encGifs] }
     }
 
+    // Disappearing messages: stamp NIP-40 expiration BEFORE mining (the tag is
+    // part of the id the PoW is mined over).
+    stampHubExpiration(unsigned, hubDTag!)
+
     // Mine PoW + sign (with automatic retry if signer invalidates PoW)
     if (minPow > 0) onPhase?.('mining')
     const signed = await mineAndSign(unsigned, minPow, pubkey, signer, privateKey)
@@ -542,6 +549,7 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
       rawEvent: JSON.stringify(signed),
       clientTag: isClientTagEnabled() ? 'DEN Chat' : undefined,
       facilitator: facilitator,
+      expiration: (() => { const e = signed.tags.find((t: string[]) => t[0] === 'expiration')?.[1]; return e ? (parseInt(e, 10) || undefined) : undefined })(),
     }
 
     // ── Instant local injection (before publish) ──
@@ -572,6 +580,7 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
       title: forumFields?.title,
       featuredImage: forumFields?.featuredImage,
       forumTags: forumFields?.tags,
+      expiration: ownMsg.expiration,
     }
     selfDecryptedRef.current.set(ownMsg.dTag, selfMsg)
 
@@ -695,6 +704,13 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
         } catch { /* use fallback */ }
       }
       unsigned = { ...unsigned, tags: [...unsigned.tags, ['published_at', publishedAt]] }
+
+      // Disappearing messages: preserve the ORIGINAL message's expiration so an
+      // edit neither extends its life nor changes its policy (non-retroactive).
+      // If the original had no expiration, editing must not introduce one.
+      if (originalMsg.expiration) {
+        unsigned = { ...unsigned, tags: [...unsigned.tags, ['expiration', originalMsg.expiration.toString()]] }
+      }
     }
 
     // Add client tag if enabled in preferences
@@ -917,6 +933,9 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
     }
 
     // Client tag is added by createReactionEvent (respects the settings toggle)
+
+    // Disappearing messages: a reaction expires with the hub timer too.
+    stampHubExpiration(unsigned, hubDTag!)
 
     const signed = await signWithSigner(unsigned, signer, privateKey)
     const hubRelays = hub?.generalRelays || []

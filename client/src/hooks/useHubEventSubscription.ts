@@ -142,11 +142,18 @@ export function useHubEventSubscription() {
           categoryFP(hubData) !== categoryFP(currentHub) ||
           roleFP(hubData) !== roleFP(currentHub)
 
+        // Disappearing-messages timer is metadata (no index/epoch/structure change),
+        // but member SEND behaviour depends on it, so a timer-only edit must still
+        // propagate — otherwise members keep sending under the old policy.
+        const expirationChanged =
+          (hubData.messageExpiration || 0) !== (currentHub.messageExpiration || 0)
+
         if (
           hubData.indexFileHash === currentHub.indexFileHash &&
           hubData.epoch === currentHub.epoch &&
           !groupEpochsChanged &&
-          !structureChanged
+          !structureChanged &&
+          !expirationChanged
         ) {
           return // No meaningful change
         }

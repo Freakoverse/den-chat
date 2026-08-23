@@ -29,6 +29,8 @@ interface BuildHubEventOptions {
   roles: Role[]
   minPow?: number
   joinMinPow?: number
+  /** Disappearing-messages timer in SECONDS (duration). Omitted/0 = off. */
+  messageExpiration?: number
   nsfw?: boolean
   discoverable?: boolean
   groupedRoles?: GroupedRole[]
@@ -83,7 +85,7 @@ export function buildHubEvent(opts: BuildHubEventOptions) {
 
   const {
     dTag, name, description, epoch, icon, banner, tags,
-    relays, blossomServers, indexFileHash, channels, categories, roles, minPow, joinMinPow, nsfw, discoverable, groupedRoles,
+    relays, blossomServers, indexFileHash, channels, categories, roles, minPow, joinMinPow, messageExpiration, nsfw, discoverable, groupedRoles,
     publishedAt, eventCreatedAt
   } = opts
 
@@ -121,6 +123,13 @@ export function buildHubEvent(opts: BuildHubEventOptions) {
   // Join PoW difficulty tag (separate from message PoW)
   if (joinMinPow && joinMinPow > 0) {
     eventTags.push(['W', joinMinPow.toString()])
+  }
+  // Disappearing-messages timer (seconds). Distinct name from NIP-40's
+  // "expiration" ON PURPOSE — an "expiration" tag here would make relays delete
+  // the hub event itself. This is only the hub-wide policy; per-message NIP-40
+  // "expiration" tags are stamped at send time (see stampHubExpiration).
+  if (messageExpiration && messageExpiration > 0) {
+    eventTags.push(['message_expiration', Math.floor(messageExpiration).toString()])
   }
   // Discoverable flag — only emit when 'off' (default is discoverable)
   if (discoverable === false) {

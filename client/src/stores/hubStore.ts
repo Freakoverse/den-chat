@@ -39,6 +39,10 @@ export interface HubData {
   roles: Role[]
   minPow: number
   joinMinPow: number
+  /** Disappearing-messages timer in SECONDS (a duration, not a timestamp).
+   *  undefined or 0 = off. When set, durable chat events are stamped with a
+   *  NIP-40 expiration of created_at + this value. */
+  messageExpiration?: number
   nsfw?: boolean
   discoverable?: boolean
   deleted?: boolean

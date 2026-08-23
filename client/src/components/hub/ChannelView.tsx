@@ -13,6 +13,7 @@ import { useMessages, type ChatMessage, type Attachment } from '@/hooks/useMessa
 import { fetchOlderMessages, fetchNewerMessages, fetchSingleMessage, fetchMessageContext, fetchChannelLatest, PAGE_SIZE } from '@/hooks/useHubSubscriptions'
 import { useProfileCache, getCachedProfile } from '@/hooks/useProfileCache'
 import { useBlossomMedia, shareableMediaUrl } from '@/hooks/useBlossomMedia'
+import { formatDuration } from '@/lib/hub/messageExpiration'
 import { useDecryptedMedia, getDecryptedBlobUrl } from '@/hooks/useDecryptedMedia'
 import { UserProfileModal } from '@/components/hub/UserProfileModal'
 import { HubSettingsModal } from '@/components/hub/HubSettingsModal'
@@ -652,6 +653,18 @@ interface MessageListProps {
 function MessageList({ hubDTag, channelId, channelName, optimisticMessages, setOptimisticMessages, onReply, onThreadReply, canPublish, isAnnouncement }: MessageListProps) {
   const { messages, sendMessage, editMessage, deleteMessage, publishReaction, unreactReaction, getChannelKey } = useMessages(hubDTag, channelId)
   const { getProfile } = useProfileCache()
+
+  // Disappearing messages: when this hub has a timer, tick every 30s so expired
+  // messages drop out of the render even in an idle channel (the render maps below
+  // read `expiryNow`). No timer → no interval.
+  const hubExpirationTimer = useHubStore((s) => (hubDTag ? s.hubs[hubDTag]?.messageExpiration || 0 : 0))
+  const [, setExpiryTick] = useState(0)
+  useEffect(() => {
+    if (hubExpirationTimer <= 0) return
+    const id = setInterval(() => setExpiryTick((t) => t + 1), 30000)
+    return () => clearInterval(id)
+  }, [hubExpirationTimer])
+  const expiryNow = Math.floor(Date.now() / 1000)
   const bottomRef = useRef<HTMLDivElement>(null)
   const myPubkey = useUserStore((s) => s.pubkey)
   const myDisplayName = useUserStore((s) => s.displayName)
@@ -1620,6 +1633,11 @@ function MessageList({ hubDTag, channelId, channelName, optimisticMessages, setO
 
                 // Don't render deleted messages
                 if (msg.deleted) return null
+                // Disappearing messages: hide any that have expired (re-evaluated on
+                // each render; the expiryTick below forces a periodic re-render so
+                // they vanish even in an idle channel). Ingest/cache already exclude
+                // ones that were expired on arrival/load.
+                if (msg.expiration && msg.expiration <= expiryNow) return null
                 // In announcement channels, hide all replies and thread replies (even if posted externally)
                 if (isAnnouncement && (msg.replyTo || msg.isThread)) return null
                 // Only hide thread replies when their thread root (rootRef) is visible in the current view
@@ -3760,6 +3778,16 @@ export function ChatMessageRow({
                   </TooltipTrigger>
                   <TooltipContent side="top" className="text-xs">
                     This post was published through the {msg.clientTag} client
+                  </TooltipContent>
+                </Tooltip>
+              )}
+              {msg.expiration && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="text-muted-foreground/50 cursor-default"> · disappears after {formatDuration(Math.max(0, msg.expiration - msg.timestamp))}</span>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="text-xs">
+                    Best-effort disappearing message. Relays that honor NIP-40 delete it around {formatFullDate(msg.expiration)}; clients hide and purge it locally.
                   </TooltipContent>
                 </Tooltip>
               )}

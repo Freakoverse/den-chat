@@ -73,6 +73,10 @@ export function parseHubEvent(event: Event): (HubData & { creatorPubkey: string 
     // explicit, opt-in setting; it does NOT inherit the message PoW.
     const wjTag = event.tags.find(t => t[0] === 'W')?.[1]
 
+    // Parse disappearing-messages timer (seconds). Absent/0/malformed ⇒ off.
+    const meTag = event.tags.find(t => t[0] === 'message_expiration')?.[1]
+    const messageExpiration = meTag ? Math.max(0, parseInt(meTag, 10) || 0) : 0
+
     // Parse NSFW from content-warning tag (source of truth)
     const nsfw = event.tags.some(t => t[0] === 'content-warning')
 
@@ -225,6 +229,7 @@ export function parseHubEvent(event: Event): (HubData & { creatorPubkey: string 
       roles,
       minPow,
       joinMinPow: wjTag ? parseInt(wjTag, 10) : 0,
+      messageExpiration,
       nsfw,
       creatorPubkey: event.pubkey,
       deleted: isDeleted || undefined,

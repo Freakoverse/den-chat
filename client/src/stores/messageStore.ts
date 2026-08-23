@@ -53,6 +53,7 @@ export interface ChatMessage {
   clientTag?: string    // from ["client", "..."] tag — what app sent this message
   facilitator?: string  // from ["facilitator", "<npub>"] tag — facilitated posting
   isForum?: boolean     // true if this is a forum post (has ["forum"] tag)
+  expiration?: number   // from NIP-40 ["expiration", ...] tag (unix seconds) — disappearing messages
 }
 
 /** A single reaction stored in the message store */

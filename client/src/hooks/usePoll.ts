@@ -10,6 +10,7 @@ import { useHubStore } from '@/stores/hubStore'
 import { useUserStore } from '@/stores/userStore'
 import { usePollStore } from '@/stores/pollStore'
 import { createPollEvent, createVoteEvent, mineAndSign } from '@/lib/nostr/events'
+import { stampHubExpiration } from '@/lib/hub/messageExpiration'
 import { aesEncrypt } from '@/lib/crypto/aes'
 import { deriveChannelKey } from '@/lib/crypto/hkdf'
 
@@ -79,6 +80,7 @@ export function usePoll(hubDTag: string | null, channelId: string | null) {
       unsigned = { ...unsigned, tags: [...unsigned.tags, ['client', 'DEN Chat']] }
     }
 
+    stampHubExpiration(unsigned, hubDTag)
     const signed = await mineAndSign(unsigned, minPow, pubkey, signer, privateKey)
 
     const hubRelays = hub?.generalRelays || []
@@ -115,6 +117,7 @@ export function usePoll(hubDTag: string | null, channelId: string | null) {
 
     let unsigned = createVoteEvent(content, pollEventId, hubDTag, channelId, hub?.epoch || 1)
 
+    stampHubExpiration(unsigned, hubDTag)
     const signed = await mineAndSign(unsigned, minPow, pubkey, signer, privateKey)
 
     const hubRelays = hub?.generalRelays || []

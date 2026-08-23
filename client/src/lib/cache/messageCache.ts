@@ -571,9 +571,43 @@ export async function pruneGlobalBySize(): Promise<number> {
 }
 
 /**
- * Run all pruning: per-hub size limits, then global size limit.
+ * Purge messages whose NIP-40 expiration has passed (disappearing messages).
+ * Physically deletes them from IndexedDB — hiding is not disappearing, and the
+ * local cache is exactly what a seized device surrenders. Returns the count purged.
+ */
+export async function purgeExpiredMessages(): Promise<number> {
+  try {
+    const now = Math.floor(Date.now() / 1000)
+    const db = await openDB()
+    const all: ChatMessage[] = await new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, 'readonly')
+      const req = tx.objectStore(STORE_NAME).getAll()
+      req.onsuccess = () => resolve(req.result || [])
+      req.onerror = () => reject(req.error)
+    })
+    const expiredIds = all.filter((m) => m.expiration && m.expiration <= now).map((m) => m.id)
+    if (expiredIds.length === 0) return 0
+    await new Promise<void>((resolve) => {
+      const tx = db.transaction(STORE_NAME, 'readwrite')
+      const store = tx.objectStore(STORE_NAME)
+      for (const id of expiredIds) store.delete(id)
+      tx.oncomplete = () => resolve()
+      tx.onerror = () => resolve()
+    })
+    console.log(`[MessageCache] Purged ${expiredIds.length} expired message(s)`)
+    return expiredIds.length
+  } catch (err) {
+    console.warn('[MessageCache] Failed to purge expired messages:', err)
+    return 0
+  }
+}
+
+/**
+ * Run all pruning: expired messages, per-hub size limits, then global size limit.
  */
 export async function pruneAll(hubDTags: string[]): Promise<void> {
+  // Disappearing messages — physically remove expired ones first
+  await purgeExpiredMessages()
   // Per-hub pruning
   for (const dTag of hubDTags) {
     const sizePruned = await pruneHubBySize(dTag)

@@ -102,8 +102,15 @@ function parseMessage(event: Event): ChatMessage | null {
   const clientTagVal = event.tags.find((t) => t[0] === 'client')?.[1]
   const facilitatorTag = event.tags.find((t) => t[0] === 'facilitator')?.[1]
   const forumTag = event.tags.find((t) => t[0] === 'forum')
+  const expirationTag = event.tags.find((t) => t[0] === 'expiration')?.[1]
+  const expiration = expirationTag ? (parseInt(expirationTag, 10) || undefined) : undefined
 
   if (!dTag || !hubDTag || !channelId) return null
+
+  // Disappearing messages: an already-expired event must never enter the store or
+  // cache. Returning null here is the single ingest guard — every parseMessage
+  // caller (live, history, edit-hint, context) already skips a null result.
+  if (expiration && expiration <= Math.floor(Date.now() / 1000)) return null
 
   return {
     id: event.id,
@@ -125,6 +132,7 @@ function parseMessage(event: Event): ChatMessage | null {
     rawEvent: JSON.stringify(event),
     clientTag: clientTagVal,
     facilitator: facilitatorTag,
+    expiration,
   }
 }
 
@@ -737,10 +745,14 @@ export function useHubSubscriptions() {
     cacheLoadedRef.current = true
 
     const ingestCached = (cached: import('@/stores/messageStore').ChatMessage[]) => {
+      const nowSec = Math.floor(Date.now() / 1000)
       for (const msg of cached) {
         const hub = hubsRef.current[msg.hubDTag]
         const minPow = hub?.minPow || 0
         if (minPow > 0 && countLeadingZeroBits(msg.id) < minPow) continue
+        // Disappearing messages: don't load an already-expired cached message into
+        // the store (pruneAll physically removes it from IndexedDB separately).
+        if (msg.expiration && msg.expiration <= nowSec) continue
         addMessageRef.current(msg)
       }
     }
