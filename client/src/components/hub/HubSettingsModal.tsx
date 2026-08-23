@@ -1351,6 +1351,59 @@ function ProgressModal({
 
 // ── General Page ──
 
+/** Styled preset dropdown for the disappearing-messages timer (matches the app's
+ *  filter dropdowns). Manages its own open state + click-outside. */
+function ExpirationSelect({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  // Include a synthetic option for a custom (non-preset) stored value.
+  const options = EXPIRATION_PRESETS.some((p) => p.seconds === value)
+    ? EXPIRATION_PRESETS
+    : [...EXPIRATION_PRESETS, { label: formatDuration(value), seconds: value }]
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => setOpen(!open)}
+        className={cn(
+          'flex items-center justify-between gap-1.5 h-9 w-full px-3 rounded-lg text-sm font-medium border transition-all cursor-pointer',
+          value > 0
+            ? 'bg-primary/10 text-primary border-primary/20'
+            : 'bg-secondary/50 text-muted-foreground border-border hover:text-foreground hover:border-primary/20'
+        )}
+      >
+        <span>{value > 0 ? formatDuration(value) : 'Off'}</span>
+        <ChevronDown size={14} className={cn('transition-transform', open && 'rotate-180')} />
+      </button>
+      {open && (
+        <div className="absolute z-[60] mt-1 left-0 right-0 max-h-[240px] overflow-y-auto bg-card border border-border rounded-xl shadow-2xl p-1 flex flex-col gap-1 animate-in fade-in-0 zoom-in-95">
+          {options.map((p) => (
+            <button
+              key={p.seconds}
+              onClick={() => { onChange(p.seconds); setOpen(false) }}
+              className={cn(
+                'w-full text-left px-3 py-1.5 text-sm transition-colors cursor-pointer rounded-md',
+                value === p.seconds ? 'bg-primary/10 text-primary font-medium' : 'text-foreground hover:bg-accent/50'
+              )}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 interface GeneralPageProps {
   hub: HubData
   editName: string; setEditName: (v: string) => void
@@ -1739,20 +1792,9 @@ function GeneralPage({
         <div>
           <h4 className="text-sm font-medium text-foreground mb-1">Disappearing messages</h4>
           <p className="text-xs text-muted-foreground mb-3">
-            New messages, reactions, polls, and events in this hub are marked to expire after this long. Best-effort: relays that honor NIP-40 delete them, and clients hide and purge them locally. Existing messages keep the timer they were sent with, and calendar events survive until after they end.
+            New messages, reactions, polls, and events in this hub are marked to expire after this long. Best-effort: relays that honor the expiration tag delete them, and clients hide and purge them locally. Existing messages keep the timer they were sent with, and calendar events survive until after they end.
           </p>
-          <select
-            value={editMessageExpiration}
-            onChange={(e) => setEditMessageExpiration(parseInt(e.target.value, 10) || 0)}
-            className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground cursor-pointer"
-          >
-            {EXPIRATION_PRESETS.map((p) => (
-              <option key={p.seconds} value={p.seconds}>{p.label}</option>
-            ))}
-            {!EXPIRATION_PRESETS.some((p) => p.seconds === editMessageExpiration) && editMessageExpiration > 0 && (
-              <option value={editMessageExpiration}>{formatDuration(editMessageExpiration)}</option>
-            )}
-          </select>
+          <ExpirationSelect value={editMessageExpiration} onChange={setEditMessageExpiration} />
         </div>
 
       </div>

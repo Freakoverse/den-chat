@@ -3787,7 +3787,7 @@ export function ChatMessageRow({
                     <span className="text-muted-foreground/50 cursor-default"> · disappears after {formatDuration(Math.max(0, msg.expiration - msg.timestamp))}</span>
                   </TooltipTrigger>
                   <TooltipContent side="top" className="text-xs">
-                    Best-effort disappearing message. Relays that honor NIP-40 delete it around {formatFullDate(msg.expiration)}; clients hide and purge it locally.
+                    Best-effort disappearing message. Relays that honor the expiration tag delete it around {formatFullDate(msg.expiration)}; clients hide and purge it locally.
                   </TooltipContent>
                 </Tooltip>
               )}
