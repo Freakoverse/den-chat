@@ -380,13 +380,18 @@ export function createJoinRequest(
 export function createDeletedJoinRequest(
   hubDTag: string,
   creatorPubkey: string,
-  originalCreatedAt: number
+  originalCreatedAt: number,
+  /** v2: the hub coordinate (`36942:O:dTag`) the original request was indexed under. The tombstone
+   *  MUST carry the same `#a` tag, or a `#a`-filtered watcher (the creator's join-request badge)
+   *  never sees the withdrawal and can't un-count it. v1 indexes by `#d`, which is already present. */
+  coord?: string
 ): UnsignedEvent {
   const tags: Tag[] = [
     ['d', hubDTag],
     ['p', creatorPubkey],
     ['deleted', 'true'],
   ]
+  if (coord) tags.push(['a', coord])
 
   return createUnsignedEvent(KINDS.JOIN_REQUEST, '', tags, originalCreatedAt + 1)
 }

@@ -144,9 +144,18 @@ export function useJoinRequestCount(
       hubRelays,
       subFilter,
       (event) => {
-        // Skip rescinded
         const isDeleted = event.tags?.some((t: string[]) => t[0] === 'deleted' && t[1] === 'true')
-        if (isDeleted) return
+        if (isDeleted) {
+          // A withdrawal (rescind). If this applicant was counted, un-count them AND forget the pubkey,
+          // so that if they REQUEST AGAIN the new request increments the badge. Without this the pubkey
+          // stayed "known" from the first request and the re-request was silently deduped to nothing.
+          const known = knownPubkeysRef.current
+          if (known.has(event.pubkey)) {
+            known.delete(event.pubkey)
+            setCount((prev) => Math.max(0, prev - 1))
+          }
+          return
+        }
 
         // Skip creator and existing members
         if (event.pubkey === hub.creatorPubkey) return

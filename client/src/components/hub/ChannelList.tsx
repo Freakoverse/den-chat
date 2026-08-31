@@ -89,8 +89,12 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
   // click conflict in normal browsing.
   const [editingLayout, setEditingLayout] = useState(false)
   // Clear any staged reorder when switching hubs so it can't leak across hubs.
+  // Also clear the optimistic "withdrawn" flag: opening a hub (activeHubId change) is the reliable
+  // signal that we've (re-)entered it — e.g. after withdraw → request again → open — so the
+  // not-a-member guard reappears instead of staying hidden from a stale rescindDone.
   useEffect(() => {
     setLayoutDraft(null); setDragItem(null); setDragOverTarget(null); setLayoutError(null); setEditingLayout(false); setLayoutStep(null)
+    setRescindDone(false)
   }, [activeHubId])
 
   // Watch for pending notification settings action from context menu

@@ -55,8 +55,11 @@ export async function rescindJoinRequest(hub: HubData, pubkey: string): Promise<
     })
     const originalCreatedAt = existing.length > 0 ? existing[0].created_at : Math.floor(Date.now() / 1000)
 
-    // 1. Tombstone the JR under its own coordinate (kind:addrPub:addrPub), signed by addrPub.
-    const deleted = createDeletedJoinRequest(addrPub, hub.creatorPubkey, originalCreatedAt)
+    // 1. Tombstone the JR under its own coordinate (kind:addrPub:addrPub), signed by addrPub. Carry
+    //    the hub coordinate (`#a`) too — that's how the request was indexed, and how the creator's
+    //    join-request badge watches for it; without it the badge never learns the request was withdrawn.
+    const hubCoord = `${KINDS.HUB_EVENT}:${hub.creatorPubkey}:${hub.dTag}`
+    const deleted = createDeletedJoinRequest(addrPub, hub.creatorPubkey, originalCreatedAt, hubCoord)
     await publishToSpecificRelays(publishRelays, await mineAndSignAsSubkey(deleted, 0, addrSigner))
 
     // 2. NIP-09 deletion for that same addressable coordinate, authored by addrPub.
