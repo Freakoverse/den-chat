@@ -8,7 +8,8 @@
  */
 
 import { create } from 'zustand'
-import { getRelays, getRelayList } from '@/lib/nostr/relay-pool'
+import type { Event } from 'nostr-tools'
+import { getRelays, getRelayList, publishWithFailover } from '@/lib/nostr/relay-pool'
 import { useUserListsStore } from '@/stores/userListsStore'
 import { useUserStore } from '@/stores/userStore'
 import { blossomServers } from '@/lib/blossom'
@@ -163,6 +164,24 @@ export function getPublishRelays(hubRelays?: string[], opts?: { hubOnly?: boolea
   }
 
   return Array.from(result)
+}
+
+/**
+ * Publish a PERSONAL (real-key-authored) event with failover. Seeds with the normal getPublishRelays()
+ * pick, then routes around dead/write-rejecting relays across ALL enabled destinations the user has
+ * turned on (client + NIP-65 relays) — uncapped, and excluding relays disabled in settings — until
+ * `target` accept. Respects the same post-to-X toggles as getPublishRelays, so it never publishes to a
+ * destination the user turned off. For durable R-authored events (profile, relay/follow/mute lists,
+ * social posts, custom sets). NOT for hub/pseudonym events (kept hub-scoped) or DMs (recipient-scoped).
+ */
+export async function publishPersonal(event: Event, target = 3): Promise<string[]> {
+  const state = usePostingBehaviourStore.getState()
+  const norm = (u: string) => u.replace(/\/+$/, '')
+  const disabled = new Set(getRelayList().filter((r) => !r.enabled).map((r) => norm(r.url)))
+  const pool: string[] = []
+  if (state.postToClientRelays) pool.push(...getRelays()) // getRelays() is already enabled-only
+  if (state.postToUserRelays) pool.push(...useUserListsStore.getState().userRelays.filter((u) => !disabled.has(norm(u))))
+  return publishWithFailover(event, getPublishRelays(), { pool, target })
 }
 
 /**

@@ -10,7 +10,7 @@ import { useBlockStore } from '@/stores/blockStore'
 import { useWotStore } from '@/stores/wotStore'
 import { publishToSpecificRelays, publishEventProgressive, assertPublished } from '@/lib/nostr/relay-pool'
 import { fetchEventsWide } from '@/lib/nostr/readRelays'
-import { getPublishRelays, getDeletePublishRelays } from '@/stores/postingBehaviourStore'
+import { publishPersonal, getPublishRelays, getDeletePublishRelays } from '@/stores/postingBehaviourStore'
 import { signWithSigner, createDeletionEvent, withClientTag } from '@/lib/nostr/events'
 import { RichContent } from '@/components/social/RichContent'
 import { DnnBadge } from '@/components/ui/DnnBadge'
@@ -287,7 +287,7 @@ export function SocialPost({ event, onOpenProfile, onOpenThread, compact, isBook
         content: emoji,
       }
       const signed = await signWithSigner(unsigned, signer, privateKey)
-      await publishToSpecificRelays(getPublishRelays(), signed)
+      await publishPersonal(signed)
       setLiked(true)
       setReactionEmoji(emoji)
       setReactions((prev) => [...prev, {
@@ -322,7 +322,7 @@ export function SocialPost({ event, onOpenProfile, onOpenThread, compact, isBook
         content: JSON.stringify(event),
       }
       const signed = await signWithSigner(unsigned, signer, privateKey)
-      await publishToSpecificRelays(getPublishRelays(), signed)
+      await publishPersonal(signed)
       setReposted(true)
     } catch (err) {
       console.error('Failed to repost:', err)
@@ -372,7 +372,7 @@ export function SocialPost({ event, onOpenProfile, onOpenThread, compact, isBook
         content: encrypted,
       }
       const signed = await signWithSigner(unsigned, signer, privateKey)
-      await publishToSpecificRelays(getPublishRelays(), signed)
+      await publishPersonal(signed)
       setBookmarked(!bookmarked)
     } catch (err) {
       console.error('Failed to toggle bookmark:', err)

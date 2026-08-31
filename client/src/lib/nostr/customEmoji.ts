@@ -17,7 +17,7 @@ import { createUnsignedEvent, signWithSigner, withClientTag } from '@/lib/nostr/
 import type { ISigner } from '@/stores/userStore'
 import type { EmojiSet, CustomEmoji } from '@/stores/emojiStore'
 import type { Event } from 'nostr-tools'
-import { getPublishRelays } from '@/stores/postingBehaviourStore'
+import { publishPersonal, getPublishRelays } from '@/stores/postingBehaviourStore'
 import { useUserListsStore } from '@/stores/userListsStore'
 
 const KIND_EMOJI_SET = 30030
@@ -221,7 +221,7 @@ export async function publishEmojiSet(
 
   const unsigned = createUnsignedEvent(KIND_EMOJI_SET, '', withClientTag(tags))
   const signed = await signWithSigner(unsigned, signer, privateKey)
-  await publishToSpecificRelays(getPublishRelays(), signed)
+  await publishPersonal(signed)
 }
 
 /** Publish the emoji subscription list */
@@ -237,7 +237,7 @@ export async function publishEmojiSubscriptions(
 
   const unsigned = createUnsignedEvent(KIND_LIST, '', tags)
   const signed = await signWithSigner(unsigned, signer, privateKey)
-  await publishToSpecificRelays(getPublishRelays(), signed)
+  await publishPersonal(signed)
 }
 
 /** Delete an emoji set by publishing an empty replacement */
@@ -253,7 +253,7 @@ export async function deleteEmojiSet(
 
   const unsigned = createUnsignedEvent(KIND_EMOJI_SET, '', withClientTag(tags))
   const signed = await signWithSigner(unsigned, signer, privateKey)
-  await publishToSpecificRelays(getPublishRelays(), signed)
+  await publishPersonal(signed)
 }
 
 /**

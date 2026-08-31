@@ -17,7 +17,7 @@ import { BlossomImage } from '@/components/ui/BlossomImage'
 import { useUserStore } from '@/stores/userStore'
 import { fetchEvents, publishToSpecificRelays } from '@/lib/nostr/relay-pool'
 import { signWithSigner } from '@/lib/nostr/events'
-import { getPublishRelays, getDeletePublishRelays } from '@/stores/postingBehaviourStore'
+import { publishPersonal, getPublishRelays, getDeletePublishRelays } from '@/stores/postingBehaviourStore'
 import { uploadToBlossomServers } from '@/lib/blossom'
 import type { UploadProgress } from '@/lib/blossom'
 import type { Event } from 'nostr-tools'
@@ -442,7 +442,7 @@ export function LinksEditorModal({ open, onClose, onSaved }: LinksEditorModalPro
       }
 
       const signed = await signWithSigner(unsigned, signer, privateKey)
-      await publishToSpecificRelays(getPublishRelays(), signed)
+      await publishPersonal(signed)
 
       // Mark as no longer new + update original snapshot
       updateSet(setIdx, { isNew: false })

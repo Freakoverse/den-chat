@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { fetchEvents, publishToSpecificRelays } from '@/lib/nostr/relay-pool'
-import { getPublishRelays } from '@/stores/postingBehaviourStore'
+import { publishPersonal, getPublishRelays } from '@/stores/postingBehaviourStore'
 import { signWithSigner } from '@/lib/nostr/events'
 import type { ISigner } from '@/stores/userStore'
 
@@ -87,7 +87,7 @@ async function publishFollowList(
   }
 
   const signed = await signWithSigner(unsigned, signer, privateKey)
-  await publishToSpecificRelays(getPublishRelays(), signed)
+  await publishPersonal(signed)
 }
 
 /** Core fetch logic with retry (used by both load and refetch) */

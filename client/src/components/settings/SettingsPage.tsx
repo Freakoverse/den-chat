@@ -26,7 +26,7 @@ import { getRelayList, getDefaultRelays, setRelays, publishToSpecificRelays, fet
 import { checkEventAvailability } from '@/lib/nostr/eventRedundancy'
 import { parseHubBackup } from '@/lib/hub/hubBackup'
 import { Button } from '@/components/ui/button'
-import { getPublishRelays, getDeletePublishRelays } from '@/stores/postingBehaviourStore'
+import { publishPersonal, getPublishRelays, getDeletePublishRelays } from '@/stores/postingBehaviourStore'
 import { createUnsignedEvent, signWithSigner, mineAndSign, createHubListEvent, createDeletionEvent } from '@/lib/nostr/events'
 import { DeleteConfirmDialog } from '@/components/hub/ChannelView'
 import {
@@ -3173,7 +3173,7 @@ function UserRelayListSection() {
       const tags: [string, ...string[]][] = relays.map((url) => ['r', url])
       const unsigned = createUnsignedEvent(STANDARD_KINDS.RELAY_LIST, '', tags)
       const signed = await signWithSigner(unsigned, signer, privateKey)
-      await publishToSpecificRelays(getPublishRelays(), signed)
+      await publishPersonal(signed)
       setSavedRelays([...relays])
       setPublishResult('success')
       setTimeout(() => setPublishResult(null), 3000)
@@ -3315,7 +3315,7 @@ function UserBlossomListSection() {
       const tags: [string, ...string[]][] = servers.map((url) => ['server', url])
       const unsigned = createUnsignedEvent(STANDARD_KINDS.BLOSSOM_SERVER_LIST, '', tags)
       const signed = await signWithSigner(unsigned, signer, privateKey)
-      await publishToSpecificRelays(getPublishRelays(), signed)
+      await publishPersonal(signed)
       setSavedServers([...servers])
       setPublishResult('success')
       setTimeout(() => setPublishResult(null), 3000)
@@ -7583,7 +7583,7 @@ function AdminTab() {
       const content = entriesToContent(entries)
       const unsigned = createUnsignedEvent(30078, content, [['d', LOGIN_BG_DTAG]])
       const signed = await signWithSigner(unsigned, signer, privateKey)
-      const accepted = await publishToSpecificRelays(getPublishRelays(), signed)
+      const accepted = await publishPersonal(signed)
       setCachedContent(content)
       setPublishStatus(`Published to ${accepted.length} relay${accepted.length !== 1 ? 's' : ''}`)
     } catch (err) {
@@ -8043,7 +8043,7 @@ function AdminProductsSection({ pubkey, signer, privateKey }: { pubkey: string |
       const content = productsToContent(products)
       const unsigned = createUnsignedEvent(30078, content, [['d', PRODUCTS_DTAG]])
       const signed = await signWithSigner(unsigned, signer, privateKey)
-      const accepted = await publishToSpecificRelays(getPublishRelays(), signed)
+      const accepted = await publishPersonal(signed)
       setCachedContent(content)
       setPublishStatus(`Published to ${accepted.length} relay${accepted.length !== 1 ? 's' : ''}`)
     } catch (err) {
@@ -8599,7 +8599,7 @@ function AdminPremiumSection({ pubkey, signer, privateKey }: { pubkey: string | 
       const content = JSON.stringify(benefits.map((b) => ({ icon: b.icon, title: b.title, description: b.description })))
       const unsigned = createUnsignedEvent(30078, content, [['d', PREMIUM_DTAG]])
       const signed = await signWithSigner(unsigned, signer, privateKey)
-      const accepted = await publishToSpecificRelays(getPublishRelays(), signed)
+      const accepted = await publishPersonal(signed)
       setCachedContent(content)
       setPublishStatus(`Published to ${accepted.length} relay${accepted.length !== 1 ? 's' : ''}`)
     } catch (err) {
@@ -8788,7 +8788,7 @@ function AdminAdsSection({ pubkey, signer, privateKey }: { pubkey: string | null
       const content = productsToContent(ads)
       const unsigned = createUnsignedEvent(30078, content, [['d', ADS_DTAG]])
       const signed = await signWithSigner(unsigned, signer, privateKey)
-      const accepted = await publishToSpecificRelays(getPublishRelays(), signed)
+      const accepted = await publishPersonal(signed)
       setCachedContent(content)
       setPublishStatus(`Published to ${accepted.length} relay${accepted.length !== 1 ? 's' : ''}`)
     } catch (err) {
@@ -9456,7 +9456,7 @@ function AdminFaqSection({ pubkey, signer, privateKey }: { pubkey: string | null
       const content = itemsToContent(items)
       const unsigned = createUnsignedEvent(30078, content, [['d', FAQ_DTAG]])
       const signed = await signWithSigner(unsigned, signer, privateKey)
-      const accepted = await publishToSpecificRelays(getPublishRelays(), signed)
+      const accepted = await publishPersonal(signed)
       setCachedContent(content)
       setPublishStatus(`Published to ${accepted.length} relay${accepted.length !== 1 ? 's' : ''}`)
     } catch (err) {
@@ -9692,7 +9692,7 @@ function AdminGuidesSection({ pubkey, signer, privateKey }: { pubkey: string | n
       const content = coordinatesToContent(guides)
       const unsigned = createUnsignedEvent(30078, content, [['d', GUIDES_DTAG]])
       const signed = await signWithSigner(unsigned, signer, privateKey)
-      const accepted = await publishToSpecificRelays(getPublishRelays(), signed)
+      const accepted = await publishPersonal(signed)
       setCachedContent(content)
       setPublishStatus(`Published to ${accepted.length} relay${accepted.length !== 1 ? 's' : ''}`)
     } catch (err) {
@@ -10800,7 +10800,7 @@ function AdminSponsorsSection({ pubkey, signer, privateKey }: { pubkey: string |
       const dTag = SPONSORS_DTAG_PREFIX + year
       const unsigned = createUnsignedEvent(30078, content, [['d', dTag], ['first_year', '2026']])
       const signed = await signWithSigner(unsigned, signer, privateKey)
-      const accepted = await publishToSpecificRelays(getPublishRelays(), signed)
+      const accepted = await publishPersonal(signed)
       updateYearEntry(year, { cachedJson: content, publishing: false, publishStatus: `Published to ${accepted.length} relay${accepted.length !== 1 ? 's' : ''}` })
     } catch (err) {
       updateYearEntry(year, { publishing: false, publishStatus: `Error: ${err instanceof Error ? err.message : 'Publishing failed'}` })

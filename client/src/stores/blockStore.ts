@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { fetchEvents, publishToSpecificRelays } from '@/lib/nostr/relay-pool'
-import { getPublishRelays } from '@/stores/postingBehaviourStore'
+import { publishPersonal, getPublishRelays } from '@/stores/postingBehaviourStore'
 import { signWithSigner } from '@/lib/nostr/events'
 import { encryptNip04, decryptNip04 } from '@/lib/nostr/nip04dm'
 import type { ISigner } from '@/stores/userStore'
@@ -89,7 +89,7 @@ async function publishMuteList(
   }
 
   const signed = await signWithSigner(unsigned, signer, privateKey)
-  await publishToSpecificRelays(getPublishRelays(), signed)
+  await publishPersonal(signed)
 }
 
 export const useBlockStore = create<BlockState>((set, get) => ({

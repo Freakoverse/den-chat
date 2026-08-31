@@ -16,7 +16,7 @@ import type { ISigner } from '@/stores/userStore'
 import type { StickerSet, CustomSticker } from '@/stores/stickerStore'
 import type { Event } from 'nostr-tools'
 import { aesEncrypt, aesDecrypt } from '@/lib/crypto/aes'
-import { getPublishRelays } from '@/stores/postingBehaviourStore'
+import { publishPersonal, getPublishRelays } from '@/stores/postingBehaviourStore'
 import { useUserListsStore } from '@/stores/userListsStore'
 
 const KIND_STICKER_SET = 30031
@@ -236,7 +236,7 @@ export async function publishStickerSet(
 
   const unsigned = createUnsignedEvent(KIND_STICKER_SET, '', withClientTag(tags))
   const signed = await signWithSigner(unsigned, signer, privateKey)
-  await publishToSpecificRelays(getPublishRelays(), signed)
+  await publishPersonal(signed)
 }
 
 export async function publishStickerSubscriptions(
@@ -251,7 +251,7 @@ export async function publishStickerSubscriptions(
 
   const unsigned = createUnsignedEvent(KIND_LIST, '', tags)
   const signed = await signWithSigner(unsigned, signer, privateKey)
-  await publishToSpecificRelays(getPublishRelays(), signed)
+  await publishPersonal(signed)
 }
 
 export async function deleteStickerSet(
@@ -266,7 +266,7 @@ export async function deleteStickerSet(
 
   const unsigned = createUnsignedEvent(KIND_STICKER_SET, '', withClientTag(tags))
   const signed = await signWithSigner(unsigned, signer, privateKey)
-  await publishToSpecificRelays(getPublishRelays(), signed)
+  await publishPersonal(signed)
 }
 
 // ─── Sticker tag encryption (hub chat) ───

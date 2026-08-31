@@ -35,7 +35,7 @@ import { Input } from '@/components/ui/input'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { truncateNpub } from '@/lib/utils'
 import { fetchEvents, publishToSpecificRelays } from '@/lib/nostr/relay-pool'
-import { getPublishRelays } from '@/stores/postingBehaviourStore'
+import { publishPersonal, getPublishRelays } from '@/stores/postingBehaviourStore'
 import { signWithSigner } from '@/lib/nostr/events'
 import { nip19 } from 'nostr-tools'
 import { LinksViewerModal, LinksEditorModal } from '@/components/hub/LinksModal'
@@ -351,7 +351,7 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
         content,
       }
       const signed = await signWithSigner(unsigned, signer, privateKey)
-      await publishToSpecificRelays(getPublishRelays(), signed)
+      await publishPersonal(signed)
       setStatus(content)
       setEditingStatus(false)
     } catch (e) {
@@ -386,7 +386,7 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
       }
 
       const signed = await signWithSigner(unsigned, signer, privateKey)
-      await publishToSpecificRelays(getPublishRelays(), signed)
+      await publishPersonal(signed)
 
       setUserProfile({
         displayName: editProfile.display_name || editProfile.name,

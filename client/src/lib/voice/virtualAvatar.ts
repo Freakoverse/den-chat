@@ -14,7 +14,7 @@
 import type { Event } from 'nostr-tools'
 import { fetchReplaceable, publishToSpecificRelays } from '@/lib/nostr/relay-pool'
 import { createUnsignedEvent, signWithSigner } from '@/lib/nostr/events'
-import { getPublishRelays } from '@/stores/postingBehaviourStore'
+import { publishPersonal, getPublishRelays } from '@/stores/postingBehaviourStore'
 import { downloadFromBlossom } from '@/lib/blossom/client'
 import { getRenderLimit } from '@/lib/imageSizeGuard'
 import type { ISigner } from '@/stores/userStore'
@@ -50,7 +50,7 @@ export async function publishVirtualAvatar(
   const tags: [string, ...string[]][] = [['d', VIRTUAL_AVATAR_DTAG]]
   const unsigned = createUnsignedEvent(VIRTUAL_AVATAR_KIND, content, tags)
   const signed = await signWithSigner(unsigned, signer, privateKey)
-  await publishToSpecificRelays(getPublishRelays(), signed)
+  await publishPersonal(signed)
   if (signed?.pubkey) _cache.delete(signed.pubkey)   // our avatar changed — re-fetch next time
 }
 

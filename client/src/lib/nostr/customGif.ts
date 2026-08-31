@@ -20,7 +20,7 @@ import type { ISigner } from '@/stores/userStore'
 import type { GifCollection, GifEntry } from '@/stores/gifStore'
 import type { Event } from 'nostr-tools'
 import { aesEncrypt, aesDecrypt } from '@/lib/crypto/aes'
-import { getPublishRelays } from '@/stores/postingBehaviourStore'
+import { publishPersonal, getPublishRelays } from '@/stores/postingBehaviourStore'
 
 const KIND_GIF_SET = 30032
 const KIND_LIST = 30000
@@ -251,7 +251,7 @@ export async function publishGifCollection(
 
   const unsigned = createUnsignedEvent(KIND_GIF_SET, '', withClientTag(tags))
   const signed = await signWithSigner(unsigned, signer, privateKey)
-  await publishToSpecificRelays(getPublishRelays(), signed)
+  await publishPersonal(signed)
 }
 
 /** Publish the GIF subscription list */
@@ -267,7 +267,7 @@ export async function publishGifSubscriptions(
 
   const unsigned = createUnsignedEvent(KIND_LIST, '', tags)
   const signed = await signWithSigner(unsigned, signer, privateKey)
-  await publishToSpecificRelays(getPublishRelays(), signed)
+  await publishPersonal(signed)
 }
 
 /** Publish the GIF favorites list */
@@ -283,7 +283,7 @@ export async function publishGifFavorites(
 
   const unsigned = createUnsignedEvent(KIND_LIST, '', tags)
   const signed = await signWithSigner(unsigned, signer, privateKey)
-  await publishToSpecificRelays(getPublishRelays(), signed)
+  await publishPersonal(signed)
 }
 
 /** Delete a GIF collection by publishing an empty replacement */
@@ -299,7 +299,7 @@ export async function deleteGifCollection(
 
   const unsigned = createUnsignedEvent(KIND_GIF_SET, '', withClientTag(tags))
   const signed = await signWithSigner(unsigned, signer, privateKey)
-  await publishToSpecificRelays(getPublishRelays(), signed)
+  await publishPersonal(signed)
 }
 
 // ─── GIF tag encryption (hub chat) ───

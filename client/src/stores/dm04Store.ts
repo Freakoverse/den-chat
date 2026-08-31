@@ -12,7 +12,7 @@
 import { create } from 'zustand'
 import { fetchEventsFromRelays, publishEventProgressive, publishToSpecificRelays, subscribeToRelays } from '@/lib/nostr/relay-pool'
 import { fetchEventsWide, subscribeEventsWide, getReadRelays } from '@/lib/nostr/readRelays'
-import { getPublishRelays, usePostingBehaviourStore } from '@/stores/postingBehaviourStore'
+import { getPublishRelays, publishPersonal, usePostingBehaviourStore } from '@/stores/postingBehaviourStore'
 import { STANDARD_KINDS } from '@/lib/crypto/constants'
 import { encryptNip04, decryptNip04 } from '@/lib/nostr/nip04dm'
 import { useBlockStore } from '@/stores/blockStore'
@@ -691,8 +691,7 @@ export const useDM04Store = create<DM04State>((set, get) => ({
     const unsigned = createUnsignedEvent(STANDARD_KINDS.DELETION, 'User requested deletion', tags)
     const signed = await signWithSigner(unsigned, signer, privateKey)
 
-    const publishRelays = getPublishRelays()
-    await publishToSpecificRelays(publishRelays, signed)
+    await publishPersonal(signed) // failover across the user's own relays (see postingBehaviourStore)
 
     // Mark deleted locally (immutable update)
     set((s) => {
@@ -740,8 +739,7 @@ export const useDM04Store = create<DM04State>((set, get) => ({
       processedReactionIds: new Set(s.processedReactionIds).add(signed.id),
     }))
 
-    const publishRelays = getPublishRelays()
-    await publishToSpecificRelays(publishRelays, signed)
+    await publishPersonal(signed) // failover across the user's own relays (see postingBehaviourStore)
 
     // Add locally
     set((s) => {

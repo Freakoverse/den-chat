@@ -11,7 +11,7 @@ import { useUserStore } from '@/stores/userStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { publishEventProgressive, publishToSpecificRelays } from '@/lib/nostr/relay-pool'
 import { fetchEventsWide } from '@/lib/nostr/readRelays'
-import { getPublishRelays, getDeletePublishRelays } from '@/stores/postingBehaviourStore'
+import { publishPersonal, getPublishRelays, getDeletePublishRelays } from '@/stores/postingBehaviourStore'
 import { signWithSigner, createDeletionEvent } from '@/lib/nostr/events'
 import { DeleteConfirmDialog, RawEventModal } from '@/components/hub/ChannelView'
 import { BlossomImage } from '@/components/ui/BlossomImage'
@@ -679,7 +679,7 @@ function ArticleInteractionBar({ event }: { event: Event }) {
         content: emoji,
       }
       const signed = await signWithSigner(unsigned, signer, privateKey)
-      await publishToSpecificRelays(getPublishRelays(), signed)
+      await publishPersonal(signed)
       setLiked(true)
       setReactionEmoji(emoji)
       setReactions(prev => [...prev, {
@@ -735,7 +735,7 @@ function ArticleInteractionBar({ event }: { event: Event }) {
         content: encrypted,
       }
       const signed = await signWithSigner(unsigned, signer, privateKey)
-      await publishToSpecificRelays(getPublishRelays(), signed)
+      await publishPersonal(signed)
       setBookmarked(!bookmarked)
     } catch (err) {
       console.error('[ArticleReader] Failed to toggle bookmark:', err)
