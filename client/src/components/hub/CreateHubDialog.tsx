@@ -21,7 +21,7 @@ import { useUserListsStore } from '@/stores/userListsStore'
 import { createUnsignedEvent, signWithSigner, mineAndSign, createHubListEvent } from '@/lib/nostr'
 import { PowSection } from './PowSection'
 import { isClientTagEnabled } from '@/lib/nostr/events'
-import { publishToSpecificRelays, getRelayList } from '@/lib/nostr/relay-pool'
+import { publishToSpecificRelays, publishWithFailover, getRelayList } from '@/lib/nostr/relay-pool'
 import { getPublishRelays } from '@/stores/postingBehaviourStore'
 import { getRelays } from '@/lib/nostr/relay-pool'
 import { KINDS } from '@/lib/crypto/constants'
@@ -637,7 +637,12 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
       // R purely from the relay footprint (the same P→R leak the edit paths already guard). Also route
       // through the hub's own relays so members actually receive this first event.
       setCreationStep('publishing-hub')
-      const accepted = await publishToSpecificRelays(getPublishRelays([...relays], { hubOnly: wantV2 }), signed)
+      // Fail over so a dead/write-rejecting relay in the pick can't strand the hub event (v1 masks this
+      // by also hitting client+user relays; v2's hubOnly pick is narrow, so without failover a bad pick
+      // makes the whole hub un-findable). v2 fails over ONLY across the hub's own relays — never the
+      // creator's personal/NIP-65 relays — so the O-authored event can't be correlated to R by footprint.
+      const hubEventPool = wantV2 ? [...relays] : [...relays, ...getRelays()]
+      const accepted = await publishWithFailover(signed, getPublishRelays([...relays], { hubOnly: wantV2 }), { pool: hubEventPool, target: 3 })
       if (accepted.length === 0) {
         // No relay stored the hub event → the hub does not exist anywhere durable. Abort loudly
         // (this runs BEFORE the hub is written to the local store) instead of leaving a "ghost hub"
