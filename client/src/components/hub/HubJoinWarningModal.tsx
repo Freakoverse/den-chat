@@ -9,14 +9,17 @@
  */
 
 import { useState } from 'react'
-import { ShieldAlert, Eye } from 'lucide-react'
+import { ShieldAlert, ShieldCheck, Eye, Check, KeyRound } from 'lucide-react'
 
-const LS_KEY = 'den-chat-hub-join-warning-dismissed'
+// Separate dismiss keys: v1 and v2 carry different information (public-membership warning vs.
+// what-is-protected + the NIP-SKD login requirement), so dismissing one must NOT hide the other.
+const LS_KEY_V1 = 'den-chat-hub-join-warning-dismissed'
+const LS_KEY_V2 = 'den-chat-hub-join-warning-dismissed-v2'
 
-/** Returns true if the user has opted out of seeing the warning. */
-export function isJoinWarningDismissed(): boolean {
+/** Returns true if the user has opted out of seeing the warning for this hub type. */
+export function isJoinWarningDismissed(isV2 = false): boolean {
   try {
-    return localStorage.getItem(LS_KEY) === '1'
+    return localStorage.getItem(isV2 ? LS_KEY_V2 : LS_KEY_V1) === '1'
   } catch {
     return false
   }
@@ -27,16 +30,18 @@ interface HubJoinWarningModalProps {
   onClose: () => void
   /** Called when the user acknowledges the warning and wants to proceed. */
   onConfirm: () => void
+  /** Private (v2) hub — show what's protected + the NIP-SKD login requirement instead of the v1 warning. */
+  isV2?: boolean
 }
 
-export function HubJoinWarningModal({ open, onClose, onConfirm }: HubJoinWarningModalProps) {
+export function HubJoinWarningModal({ open, onClose, onConfirm, isV2 = false }: HubJoinWarningModalProps) {
   const [neverShow, setNeverShow] = useState(false)
 
   if (!open) return null
 
   const handleConfirm = () => {
     if (neverShow) {
-      try { localStorage.setItem(LS_KEY, '1') } catch { /* ignore */ }
+      try { localStorage.setItem(isV2 ? LS_KEY_V2 : LS_KEY_V1, '1') } catch { /* ignore */ }
     }
     onConfirm()
     onClose()
@@ -53,27 +58,54 @@ export function HubJoinWarningModal({ open, onClose, onConfirm }: HubJoinWarning
       >
         {/* Header icon */}
         <div className="flex flex-col items-center pt-6 pb-2 px-6">
-          <div className="w-12 h-12 rounded-full bg-amber-500/15 flex items-center justify-center mb-3">
-            <ShieldAlert size={22} className="text-amber-400" />
+          <div className={`w-12 h-12 rounded-full flex items-center justify-center mb-3 ${isV2 ? 'bg-emerald-500/15' : 'bg-amber-500/15'}`}>
+            {isV2 ? <ShieldCheck size={22} className="text-emerald-400" /> : <ShieldAlert size={22} className="text-amber-400" />}
           </div>
           <h3 className="text-sm font-semibold text-foreground text-center">
-            Before you join
+            {isV2 ? 'Joining a private hub' : 'Before you join'}
           </h3>
         </div>
 
         {/* Body */}
         <div className="px-6 pb-4 space-y-3">
-          <div className="rounded-xl bg-secondary/40 border border-border/50 p-3.5 space-y-2.5">
-            <div className="flex items-start gap-2.5">
-              <Eye size={14} className="text-amber-400 shrink-0 mt-0.5" />
-              <p className="text-xs text-foreground/85 leading-relaxed">
-                Your messages inside hubs are <span className="font-semibold text-emerald-400">encrypted</span>, but your hub membership is <span className="font-semibold text-amber-400">publicly visible</span>.
+          {isV2 ? (
+            <>
+              <div className="rounded-xl bg-emerald-500/[0.07] border border-emerald-500/20 p-3.5 space-y-2.5">
+                <div className="flex items-start gap-2.5">
+                  <ShieldCheck size={14} className="text-emerald-400 shrink-0 mt-0.5" />
+                  <p className="text-xs text-foreground/85 leading-relaxed">
+                    This is a <span className="font-semibold text-emerald-400">private hub</span>. Your identity and membership are protected:
+                  </p>
+                </div>
+                <ul className="text-[11px] text-muted-foreground leading-relaxed pl-[22px] space-y-1.5">
+                  <li className="flex items-start gap-1.5"><Check size={11} className="text-emerald-400 shrink-0 mt-0.5" /> You take part under a <span className="text-foreground/80">pseudonym</span> derived from your key — your real identity (npub) is never revealed to the hub or the public.</li>
+                  <li className="flex items-start gap-1.5"><Check size={11} className="text-emerald-400 shrink-0 mt-0.5" /> No one can see that <span className="text-foreground/80">you</span> joined this hub.</li>
+                  <li className="flex items-start gap-1.5"><Check size={11} className="text-emerald-400 shrink-0 mt-0.5" /> Who created it, who its members are, and who is posting are all hidden from the public.</li>
+                  <li className="flex items-start gap-1.5"><Check size={11} className="text-emerald-400 shrink-0 mt-0.5" /> Messages are end-to-end encrypted.</li>
+                </ul>
+              </div>
+              <div className="rounded-xl bg-secondary/40 border border-border/50 p-3.5">
+                <div className="flex items-start gap-2.5">
+                  <KeyRound size={14} className="text-amber-400 shrink-0 mt-0.5" />
+                  <p className="text-[11px] text-muted-foreground leading-relaxed">
+                    You can only join and chat in a private hub while signed in with the <span className="font-semibold text-foreground/85">DEN Chat client</span>, or a <span className="font-semibold text-foreground/85">remote or browser-extension signer that supports NIP-SKD</span>. A different login can’t open it.
+                  </p>
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="rounded-xl bg-secondary/40 border border-border/50 p-3.5 space-y-2.5">
+              <div className="flex items-start gap-2.5">
+                <Eye size={14} className="text-amber-400 shrink-0 mt-0.5" />
+                <p className="text-xs text-foreground/85 leading-relaxed">
+                  Your messages inside hubs are <span className="font-semibold text-emerald-400">encrypted</span>, but your hub membership is <span className="font-semibold text-amber-400">publicly visible</span>.
+                </p>
+              </div>
+              <p className="text-[11px] text-muted-foreground leading-relaxed pl-[22px]">
+                When you join a hub, a public join request is broadcast to Nostr relays, along with your list of joined hubs. Anyone can see that your account has joined this hub, or any hub.
               </p>
             </div>
-            <p className="text-[11px] text-muted-foreground leading-relaxed pl-[22px]">
-              When you join a hub, a public join request is broadcast to Nostr relays, along with your list of joined hubs. Anyone can see that your account has joined this hub, or any hub.
-            </p>
-          </div>
+          )}
         </div>
 
         {/* Footer */}

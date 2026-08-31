@@ -166,8 +166,8 @@ export function HubEventCard({ identifier, pubkey, relays }: HubEventCardProps) 
       return
     }
 
-    // Show warning modal if not dismissed
-    if (!isJoinWarningDismissed()) {
+    // Show warning modal if not dismissed (v1 and v2 carry different text + separate dismiss keys)
+    if (!isJoinWarningDismissed(hubData?.version === 2)) {
       setShowJoinWarning(true)
       return
     }
@@ -454,6 +454,7 @@ export function HubEventCard({ identifier, pubkey, relays }: HubEventCardProps) 
         open={showJoinWarning}
         onClose={() => setShowJoinWarning(false)}
         onConfirm={doJoin}
+        isV2={hubData?.version === 2}
       />
 
       {/* Hub limit reached modal */}
