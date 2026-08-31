@@ -809,23 +809,31 @@ function DiscoverHubCard({ hub }: { hub: DiscoveredHub }) {
       await publishToSpecificRelays(getPublishRelays(hubRelays, { hubOnly: isV2(hub) }), signed)
 
       if (!isAlreadyInList) {
-        // Set hub data BEFORE updating entries — prevents the hub loader from
-        // racing with the signer (which can drop the extension connection)
-        const hubData: HubData = {
-          dTag: hub.dTag, creatorPubkey: hub.creatorPubkey, name: hub.name, icon: hub.icon, banner: hub.banner,
-          tags: hub.tags, description: hub.description, epoch: 1, generalRelays: hub.generalRelays,
-          blossomServers: hub.blossomServers, indexFileHash: '', channels: [],
-          categories: [], roles: [], minPow: hub.minPow, joinMinPow: hub.joinMinPow, nsfw: hub.nsfw, discoverable: hub.discoverable,
-          // MUST carry version: buildHubListEvent (below) classifies v2-vs-public by hubs[dTag].version,
-          // and a private (v2) hub misclassified as public publishes its dTag as a PLAINTEXT `v` tag on
-          // our R-authored hub list — publicly linking our real key R to this private hub.
-          version: hub.version,
+        // Only stub the hub data if we don't ALREADY hold it loaded. Re-adding after a withdraw must not
+        // clobber the real indexFileHash with '' — AppLayout treats an empty indexFileHash as "not a
+        // gated hub" and hides the awaiting-approval guard, so a re-request would silently drop the guard
+        // until a restart reloads the real hub. (The store hub survives a withdraw; rescind only removes
+        // the list entry + cached messages.)
+        const existing = useHubStore.getState().hubs[hub.dTag]
+        if (!existing?.indexFileHash) {
+          // Set hub data BEFORE updating entries — prevents the hub loader from
+          // racing with the signer (which can drop the extension connection)
+          const hubData: HubData = {
+            dTag: hub.dTag, creatorPubkey: hub.creatorPubkey, name: hub.name, icon: hub.icon, banner: hub.banner,
+            tags: hub.tags, description: hub.description, epoch: 1, generalRelays: hub.generalRelays,
+            blossomServers: hub.blossomServers, indexFileHash: '', channels: [],
+            categories: [], roles: [], minPow: hub.minPow, joinMinPow: hub.joinMinPow, nsfw: hub.nsfw, discoverable: hub.discoverable,
+            // MUST carry version: buildHubListEvent (below) classifies v2-vs-public by hubs[dTag].version,
+            // and a private (v2) hub misclassified as public publishes its dTag as a PLAINTEXT `v` tag on
+            // our R-authored hub list — publicly linking our real key R to this private hub.
+            version: hub.version,
+          }
+          setHubData(hub.dTag, hubData)
+          // Mark it loaded now — we already have the full hub definition from discovery.
+          // Otherwise it has no status and renders as an endless pulsing skeleton in the
+          // sidebar until a reload runs the hub loader.
+          setHubStatus(hub.dTag, 'loaded')
         }
-        setHubData(hub.dTag, hubData)
-        // Mark it loaded now — we already have the full hub definition from discovery.
-        // Otherwise it has no status and renders as an endless pulsing skeleton in the
-        // sidebar until a reload runs the hub loader.
-        setHubStatus(hub.dTag, 'loaded')
 
         const relayHint = hub.generalRelays[0] || ''
         const newEntry = { dTag: hub.dTag, relayHint, position: hubEntries.length, folderId: undefined }
