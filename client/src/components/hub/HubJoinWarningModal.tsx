@@ -1,5 +1,5 @@
 /**
- * HubJoinWarningModal — Privacy warning shown before joining any hub.
+ * HubJoinWarningModal - Privacy warning shown before joining any hub.
  *
  * Warns the user that while messages inside hubs are encrypted, the act of
  * joining a hub (publishing a kind 36944 join request) is publicly visible
@@ -30,7 +30,7 @@ interface HubJoinWarningModalProps {
   onClose: () => void
   /** Called when the user acknowledges the warning and wants to proceed. */
   onConfirm: () => void
-  /** Private (v2) hub — show what's protected + the NIP-SKD login requirement instead of the v1 warning. */
+  /** Private (v2) hub: show what's protected + the NIP-SKD login requirement instead of the v1 warning. */
   isV2?: boolean
 }
 
@@ -74,21 +74,39 @@ export function HubJoinWarningModal({ open, onClose, onConfirm, isV2 = false }: 
                 <div className="flex items-start gap-2.5">
                   <ShieldCheck size={14} className="text-emerald-400 shrink-0 mt-0.5" />
                   <p className="text-xs text-foreground/85 leading-relaxed">
-                    This is a <span className="font-semibold text-emerald-400">private hub</span>. Your identity and membership are protected:
+                    This is a <span className="font-semibold text-emerald-400">private hub</span>. From the <span className="font-semibold text-emerald-400">public</span> it hides:
                   </p>
                 </div>
-                <ul className="text-[11px] text-muted-foreground leading-relaxed pl-[22px] space-y-1.5">
-                  <li className="flex items-start gap-1.5"><Check size={11} className="text-emerald-400 shrink-0 mt-0.5" /> You take part under a <span className="text-foreground/80">pseudonym</span> derived from your key — your real identity (npub) is never revealed to the hub or the public.</li>
-                  <li className="flex items-start gap-1.5"><Check size={11} className="text-emerald-400 shrink-0 mt-0.5" /> No one can see that <span className="text-foreground/80">you</span> joined this hub.</li>
-                  <li className="flex items-start gap-1.5"><Check size={11} className="text-emerald-400 shrink-0 mt-0.5" /> Who created it, who its members are, and who is posting are all hidden from the public.</li>
-                  <li className="flex items-start gap-1.5"><Check size={11} className="text-emerald-400 shrink-0 mt-0.5" /> Messages are end-to-end encrypted.</li>
+                <ul className="text-[11px] text-muted-foreground leading-relaxed space-y-2">
+                  <li className="flex items-start gap-2">
+                    <Check size={12} className="text-emerald-400 shrink-0 mt-0.5" />
+                    <span>That you joined. You take part under a <span className="text-foreground/80">pseudonym</span>, not your real npub.</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <Check size={12} className="text-emerald-400 shrink-0 mt-0.5" />
+                    <span>Who created the hub, who its members are, and who is posting.</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <Check size={12} className="text-emerald-400 shrink-0 mt-0.5" />
+                    <span>What is said. Messages are encrypted, so only members can read them.</span>
+                  </li>
                 </ul>
               </div>
+
+              <div className="rounded-xl bg-amber-500/[0.06] border border-amber-500/20 p-3.5">
+                <div className="flex items-start gap-2.5">
+                  <Eye size={14} className="text-amber-400 shrink-0 mt-0.5" />
+                  <p className="text-[11px] text-muted-foreground leading-relaxed">
+                    Members <span className="font-semibold text-foreground/85">inside</span> the hub can still see who you really are. The privacy is from the outside public, not from the people you chat with.
+                  </p>
+                </div>
+              </div>
+
               <div className="rounded-xl bg-secondary/40 border border-border/50 p-3.5">
                 <div className="flex items-start gap-2.5">
-                  <KeyRound size={14} className="text-amber-400 shrink-0 mt-0.5" />
+                  <KeyRound size={14} className="text-muted-foreground shrink-0 mt-0.5" />
                   <p className="text-[11px] text-muted-foreground leading-relaxed">
-                    You can only join and chat in a private hub while signed in with the <span className="font-semibold text-foreground/85">DEN Chat client</span>, or a <span className="font-semibold text-foreground/85">remote or browser-extension signer that supports NIP-SKD</span>. A different login can’t open it.
+                    You can only join and chat in a private hub while signed in with the <span className="font-semibold text-foreground/85">DEN Chat client</span>, or a <span className="font-semibold text-foreground/85">remote or browser-extension signer that supports NIP-SKD</span>. Other logins cannot open it.
                   </p>
                 </div>
               </div>
