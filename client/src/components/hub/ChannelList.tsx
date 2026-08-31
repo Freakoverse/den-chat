@@ -120,6 +120,15 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
   const isCreator = !!(hub && pubkey && (hub.creatorPubkey === pubkey || hub.ownerRealPubkey === pubkey))
   const isMember = !!(pubkey && hubMembers?.some((m) => m.pubkey === pubkey))
   const secretsResolved = useHubStore((s) => activeHubId ? !!s.hubSecretsResolved[activeHubId] : false)
+
+  // Reset the optimistic "withdrawn" flag whenever the hub is (re-)present in the user's list.
+  // Withdrawing sets rescindDone=true and removes the hub from the list; requesting AGAIN re-adds it,
+  // so this fires and lets the not-a-member guard reappear. Without it, rescindDone stayed true across
+  // a re-request and the guard silently never came back (looked like you were already in).
+  const hubEntries = useHubStore((s) => s.hubEntries)
+  const hubInList = !!(hub && hubEntries.some((e) => e.dTag === hub.dTag))
+  useEffect(() => { if (hubInList) setRescindDone(false) }, [hubInList])
+
   // Show rescind button when: not creator, not a direct member, and secrets are resolved
   const showRescind = !isCreator && !isMember && secretsResolved && !rescindDone
 
