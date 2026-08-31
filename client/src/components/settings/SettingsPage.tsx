@@ -4922,21 +4922,22 @@ function MyHubsTab() {
   // Created hubs not in list
   const createdHubsInList = hubEntries.filter((e) => {
     const hub = hubs[e.dTag]
-    return hub && hub.creatorPubkey === pubkey
+    return hub && (hub.creatorPubkey === pubkey || hub.ownerRealPubkey === pubkey)
   })
   const createdHubsNotInList = useMemo(() => {
     const inListDTags = new Set(hubEntries.map(e => e.dTag))
-    return Object.values(hubs).filter(h => h.creatorPubkey === pubkey && !inListDTags.has(h.dTag))
+    return Object.values(hubs).filter(h => (h.creatorPubkey === pubkey || h.ownerRealPubkey === pubkey) && !inListDTags.has(h.dTag))
   }, [hubs, hubEntries, pubkey])
 
   // ── Publish helper — only called explicitly ──
   const publishHubList = async (entries: typeof hubEntries, flds: typeof folders) => {
-    const ev = createHubListEvent(
+    const { buildHubListEvent, publishHubList: publishHubListFailover } = await import('@/lib/hub/hubListPrivacy')
+    const ev = await buildHubListEvent(
       entries.map(e => ({ dTag: e.dTag, relayHint: e.relayHint, position: e.position, folderId: e.folderId })),
       flds,
     )
     const signed = await signWithSigner(ev, signer, privateKey)
-    await publishToSpecificRelays(getPublishRelays(), signed)
+    await publishHubListFailover(signed) // failover across all the user's relays (see hubListPrivacy)
   }
 
   // ── Local-only update (no publish) ──
@@ -5164,7 +5165,7 @@ function MyHubsTab() {
           <p className="text-sm font-medium text-foreground truncate">{hub?.name ?? entry.dTag.slice(0, 12)}</p>
           {isNotFound && <p className="text-xs text-amber-500">Hub not found on relays</p>}
           {status === 'deleted' && <p className="text-xs text-destructive">Hub has been deleted</p>}
-          {hub && hub.creatorPubkey === pubkey && <p className="text-[10px] text-primary/60">Created by you</p>}
+          {hub && (hub.creatorPubkey === pubkey || hub.ownerRealPubkey === pubkey) && <p className="text-[10px] text-primary/60">Created by you</p>}
         </div>
 
         {/* Remove button */}

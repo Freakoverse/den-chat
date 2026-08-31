@@ -52,6 +52,23 @@ function hkdfSha256(ikm: Uint8Array, salt: Uint8Array, info: Uint8Array, length:
 }
 
 /**
+ * Low-level HKDF-SHA256 with an explicit salt string.
+ *
+ * Used by NIP-SKD (salt `"nip-skd-v1"`), which is deliberately domain-separated
+ * from NIP-CHAT's own {@link DOMAIN_SALT} and from NIP-44's `"nip44-v2"`, so a
+ * NIP-SKD derivation can never reproduce a NIP-CHAT hub key or a DM conversation
+ * key. Do NOT route SKD through {@link deriveKey} — that pins DOMAIN_SALT.
+ *
+ * @param ikm - Input key material (root private key, or a raw ECDH x-coordinate)
+ * @param salt - Scheme salt string (e.g. "nip-skd-v1")
+ * @param info - Context string (the NIP-SKD context)
+ * @param length - Output length in bytes (default 32)
+ */
+export function hkdfWithSalt(ikm: Uint8Array, salt: string, info: string, length = 32): Uint8Array {
+  return hkdfSha256(ikm, textEncoder.encode(salt), textEncoder.encode(info), length)
+}
+
+/**
  * Derive a 32-byte encryption key using HKDF-SHA256 with NIP-CHAT domain separation.
  *
  * @param inputKeyMaterial - The shared secret or hub secret (32 bytes)

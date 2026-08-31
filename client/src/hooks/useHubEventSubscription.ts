@@ -17,6 +17,7 @@ import { useUserStore } from '@/stores/userStore'
 import { subscribeToRelays } from '@/lib/nostr/relay-pool'
 import { KINDS } from '@/lib/crypto/constants'
 import { putHubEvent } from '@/lib/cache/hubEventCache'
+import { isV2 } from '@/lib/hub/version'
 import { parseHubEvent } from './useHubLoader'
 import { buildRelayIndex } from '@/lib/nostr/buildRelayIndex'
 import type { Event } from 'nostr-tools'
@@ -101,6 +102,16 @@ export function useHubEventSubscription() {
 
       const dTag = hubData.dTag
 
+      // Reject a forged (non-owner) hub event BEFORE advancing the newest-seen timestamp — otherwise a
+      // forged event with a far-future created_at would poison latestTsRef and cause the real owner's
+      // (lower created_at) event to be dropped. The binding is set once the real owner is confirmed
+      // (decrypt success, below); unknown-creator proceeds.
+      const { isForgedHubEvent } = await import('@/lib/hub/hubCreatorGuard')
+      if (isForgedHubEvent(dTag, event.pubkey)) {
+        console.warn(`[HubEventSub] Ignoring hub event for ${dTag} from non-owner ${event.pubkey.slice(0, 8)}…`)
+        return
+      }
+
       // Skip if we've already processed a newer event for this hub
       const prevTs = latestTsRef.current[dTag] || 0
       if (event.created_at <= prevTs) return
@@ -117,6 +128,165 @@ export function useHubEventSubscription() {
         const store = useHubStore.getState()
         const currentHub = store.hubs[dTag]
         if (!currentHub) return
+
+        // Creator binding was already enforced above (before the timestamp guard); recordTrustedCreator is
+        // used at decrypt-success below to establish/confirm the binding.
+        const { recordTrustedCreator } = await import('@/lib/hub/hubCreatorGuard')
+
+        // Version-downgrade CHECK: a hub's version only ever increases; refuse a below-mark event (a
+        // tampered event dropping the v2 `version` tag to force the plaintext-R v1 path). This only SKIPS,
+        // never mutates — safe before owner-proof. The RECORD is deferred to decrypt-success below so a
+        // forged event can't advance the mark. A `deleted:true` tombstone omits `version` by design →
+        // exempt (handled by the deleted branch, not the authoring path).
+        const { isVersionDowngrade } = await import('@/lib/hub/versionGuard')
+        if (!hubData.deleted && isVersionDowngrade(dTag, hubData.version)) {
+          console.warn(`[HubEventSub] Ignoring version-downgrade hub event for ${dTag}: version ${hubData.version ?? 1} below high-water mark`)
+          return
+        }
+
+        // v2: content is encrypted and the tree is P-keyed. Handle the whole update via the
+        // shared loader path — never the v1 re-download below (which would wipe the encrypted
+        // channels/roles and mis-key the tree by the real key R).
+        if (isV2(hubData)) {
+          // Epoch-rollback CHECK (record deferred to decrypt-success, same rationale as the version check).
+          const { isEpochRollback } = await import('@/lib/hub/epochGuard')
+          if (isEpochRollback(dTag, hubData.epoch)) {
+            console.warn(`[HubEventSub] Ignoring rollback hub event for ${dTag}: epoch ${hubData.epoch} below high-water mark`)
+            return
+          }
+
+          const indexChanged = hubData.indexFileHash !== currentHub.indexFileHash
+          let secretHex = store.hubSecrets[dTag]
+          let memberSecretRefreshed = false
+
+          // On an index change (kick/edit/rotation), re-bootstrap via loadHubSecret (handles v2:
+          // P derivation, roster members, encrypted bans).
+          if (indexChanged && pubkey) {
+            try {
+              const { loadHubSecret } = await import('./useHubLoader')
+              const res = await loadHubSecret(hubData, pubkey, privateKey, signer)
+              if (res) {
+                if (res.secretHex) {
+                  store.setHubSecret(dTag, res.secretHex); secretHex = res.secretHex; memberSecretRefreshed = true
+                  // Decrypt succeeded → advance the high-water marks now (a forged event that never
+                  // decrypts can't poison them). Bind the creator ONLY on v2 — a v2 decrypt proves the real
+                  // owner (P is unforgeable for a wrong ownerPub), whereas a v1 leaf keyed on the public R
+                  // could be crafted by an attacker to bind to the wrong key.
+                  const { recordVersionSeen } = await import('@/lib/hub/versionGuard')
+                  const { recordEpochSeen } = await import('@/lib/hub/epochGuard')
+                  if (hubData.version === 2) recordTrustedCreator(dTag, hubData.creatorPubkey)
+                  recordVersionSeen(dTag, hubData.version)
+                  recordEpochSeen(dTag, hubData.epoch)
+                }
+                if (res.members.length > 0) store.setHubMembers(dTag, res.members)
+                // Write the ban list only when it RESOLVED. loadHubSecret sets banListUnresolved on a transient
+                // ban-page fetch failure; overwriting with the [] it returns there would TRUNCATE the store's
+                // ban list and re-expose banned users. A genuinely-empty (resolved) list still writes, so a
+                // full unban propagates. Matches the initial-load consumer (useHubLoader).
+                if (!res.banListUnresolved) store.setHubBanList(dTag, res.bannedPubkeys)
+                if (res.pageCount > 0) store.setHubPageCount(dTag, res.pageCount)
+                if (res.secretHex && res.historyHash) {
+                  try {
+                    const { downloadTextFromBlossom } = await import('@/lib/blossom')
+                    const { aesDecrypt } = await import('@/lib/crypto/aes')
+                    const { fromHex } = await import('@/lib/crypto/lkh')
+                    const blob = await downloadTextFromBlossom(res.historyHash, hubData.blossomServers)
+                    const plaintext = await aesDecrypt(fromHex(res.secretHex), blob)
+                    const epochMap: Record<number, string> = {}
+                    for (const line of plaintext.split('\n')) {
+                      const t = line.trim(); if (!t.startsWith('hub:')) continue
+                      const p = t.split(':'); if (p.length >= 3) epochMap[parseInt(p[1], 10)] = p.slice(2).join(':')
+                    }
+                    if (Object.keys(epochMap).length > 0) store.setEpochSecrets(dTag, epochMap)
+                  } catch { /* history best-effort */ }
+                }
+              }
+            } catch (err) {
+              console.warn(`[HubEventSub] v2 re-bootstrap failed for ${dTag}:`, err)
+            }
+          }
+
+          // Facilitated (non-member) users have no leaf in the owner's tree, so loadHubSecret above
+          // couldn't refresh their secret — leaving the STALE pre-rotation one in place while the
+          // metadata branch below bumps the epoch. That mis-keys sends (old secret under the new epoch
+          // tag → undecryptable for everyone). On a rotation, clear it and re-fetch the facilitator's
+          // rebuilt tree (loadFacilitatorSecret's v2 path derives our Pf against P_fac). Mirrors v1's
+          // Part 4, but must live HERE — the v2 branch returns before that tail is reached.
+          if (indexChanged && pubkey && !memberSecretRefreshed && hubData.epoch > currentHub.epoch) {
+            const facilitator = store.hubPrefs[dTag]?.facilitator
+            if (facilitator) {
+              store.setHubSecret(dTag, ''); secretHex = '' // invalidate the stale secret NOW (falsy → skips content-decrypt below)
+              try {
+                const { loadFacilitatorSecret } = await import('./useHubLoader')
+                const facResult = await loadFacilitatorSecret(hubData, facilitator, pubkey, privateKey, signer)
+                if (facResult) {
+                  if (facResult.epochSecrets && Object.keys(facResult.epochSecrets).length > 0) store.setEpochSecrets(dTag, facResult.epochSecrets)
+                  if (facResult.epoch == null || facResult.epoch === hubData.epoch) {
+                    // Facilitator is current — safe to use their distributed secret.
+                    store.setHubSecret(dTag, facResult.secretHex); store.setHubPref(dTag, 'facilitatorSecret', facResult.secretHex); secretHex = facResult.secretHex
+                  } // else facilitator is behind → leave cleared (can read old epochs via history, can't send at the new one)
+                  if (facResult.facilitatorMembers.length > 0) store.setHubFacilitatorMembers(dTag, facilitator, facResult.facilitatorMembers)
+                }
+              } catch (err) { console.warn(`[HubEventSub] v2 facilitated re-fetch failed for ${dTag}:`, err) }
+            }
+          }
+
+          // Decrypt structural content with the (current or newly-bootstrapped) secret.
+          let full: (typeof hubData) | null = null
+          if (secretHex) {
+            try {
+              const { fromHex } = await import('@/lib/crypto/lkh')
+              const { deriveHubContentKey, decryptHubContent } = await import('@/lib/hub/hubContent')
+              const key = deriveHubContentKey(fromHex(secretHex), hubData.epoch)
+              const decrypted = await decryptHubContent(key, event.content)
+              full = parseHubEvent(event, JSON.stringify(decrypted))
+            } catch { /* couldn't decrypt — preserve existing structure below */ }
+          }
+
+          if (full) {
+            store.setHubData(dTag, full)
+          } else if (indexChanged || hubData.epoch !== currentHub.epoch || (hubData.messageExpiration || 0) !== (currentHub.messageExpiration || 0) || hubData.deleted) {
+            // Couldn't decrypt content (e.g. we were kicked) — update metadata only, keep channels.
+            store.setHubData(dTag, {
+              ...currentHub,
+              indexFileHash: hubData.indexFileHash,
+              epoch: hubData.epoch,
+              messageExpiration: hubData.messageExpiration,
+              deleted: hubData.deleted,
+              eventCreatedAt: hubData.eventCreatedAt,
+            })
+          }
+          // v2: re-decrypt group secrets when groups exist (rotation bumps their epoch/tree).
+          if (full && secretHex && full.groupedRoles && full.groupedRoles.length > 0 && pubkey) {
+            try {
+              const { makeSubkeySigner } = await import('@/lib/nostr/v2send')
+              const { ChatContext } = await import('@/lib/crypto/skd')
+              const { memberQualifiesForGroup } = await import('@/lib/hub/groupEncryption')
+              const { downloadTextFromBlossom, parseIndexFile, decryptGroupSecretV2 } = await import('@/lib/blossom')
+              const oPub = await makeSubkeySigner(ChatContext.owner(dTag), { privateKey, signer }).getPublicKey()
+              const isOwner = oPub === full.creatorPubkey
+              const groupP = await makeSubkeySigner(ChatContext.member(dTag), { privateKey, signer, peerPub: full.creatorPubkey }).getPublicKey()
+              const myRoles = store.hubMembers[dTag]?.find(m => m.pubkey === pubkey)?.roles || 'everyone'
+              const index = parseIndexFile(await downloadTextFromBlossom(full.indexFileHash, full.blossomServers))
+              for (const group of full.groupedRoles) {
+                if (!(isOwner || memberQualifiesForGroup(myRoles, group.roleIds))) continue
+                const ref = index.groupTrees.find(gt => gt.groupId === group.groupId)
+                if (!ref) continue
+                const gs = await decryptGroupSecretV2(groupP, full.dTag, privateKey, signer, full.creatorPubkey, await downloadTextFromBlossom(ref.hash, full.blossomServers))
+                if (!gs) continue
+                const hex = Array.from(gs).map(b => b.toString(16).padStart(2, '0')).join('')
+                const prev = useHubStore.getState().groupSecrets?.[dTag]?.[group.groupId]
+                const gmap: Record<number, string> = { ...(useHubStore.getState().groupEpochSecrets?.[dTag]?.[group.groupId] || {}) }
+                if (prev && prev !== hex) gmap[Math.max(1, group.epoch - 1)] = prev
+                gmap[group.epoch] = hex
+                store.setGroupEpochSecrets(dTag, group.groupId, gmap)
+                store.setGroupSecret(dTag, group.groupId, hex)
+              }
+            } catch (err) { console.warn(`[HubEventSub] v2 group re-decrypt failed for ${dTag}:`, err) }
+          }
+          if (hubData.deleted) store.setHubStatus(dTag, 'deleted')
+          return
+        }
 
         // Check if this is actually newer (different index hash, hub epoch, group epochs, or channel/role structure)
         const groupEpochsChanged = (() => {
@@ -326,8 +496,57 @@ export function useHubEventSubscription() {
                       console.warn(`[HubEventSub] Failed to process group secrets:`, err)
                     }
                   }
+
+                  // Facilitators rebuild their list to the new epoch MANUALLY, via the
+                  // "Update list to current epoch" button in User Settings → My Facilitation List.
+                  // (An automatic rebuild here only worked when the facilitator's client happened to
+                  // be online at the exact moment the rotation arrived — unreliable — so it was removed
+                  // in favor of the explicit button.)
                 } else {
                   console.log(`[HubEventSub] Cannot decrypt hub secret for ${dTag} — may have been removed`)
+
+                  // Part 4 — facilitated user auto-re-fetch on rotation. This tail is the v1 path only
+                  // (the isV2 branch above returns early — the v2 equivalent lives there); we couldn't
+                  // decrypt via the owner's tree (not a direct member) but have a saved facilitator.
+                  // On a rotation, re-run the facilitator load; if they haven't rebuilt yet, the guard
+                  // below keeps the epoch history but clears the stale current secret.
+                  const facilitator = useHubStore.getState().hubPrefs[dTag]?.facilitator
+                  if (facilitator && hubData.epoch > currentHub.epoch) {
+                    try {
+                      {
+                        // Invalidate the stale secret IMMEDIATELY, before the async re-fetch below.
+                        // The rotation just made our current secret old; without this synchronous
+                        // clear there's a window where a facilitated user could SEND at the new epoch
+                        // with the old key (nobody with the real new secret could then decrypt it).
+                        store.setHubSecret(dTag, '')
+                        const { loadFacilitatorSecret } = await import('./useHubLoader')
+                        const facResult = await loadFacilitatorSecret(hubData, facilitator, pubkey, privateKey, signer)
+                        if (facResult) {
+                          if (facResult.epochSecrets && Object.keys(facResult.epochSecrets).length > 0) {
+                            store.setEpochSecrets(dTag, facResult.epochSecrets)
+                          }
+                          if (facResult.epoch != null && facResult.epoch < hubData.epoch) {
+                            // Facilitator is behind — they haven't rebuilt for this rotation yet. Clear
+                            // the now-stale current secret so getChannelKey returns null for the new
+                            // epoch: no decrypt of new-epoch messages, and (crucially) no SEND under the
+                            // new epoch tag with an old secret. Epoch history stays (old msgs readable).
+                            store.setHubSecret(dTag, '')
+                          } else {
+                            // Facilitator is current (or legacy no-history): their distributed secret is
+                            // the current epoch's — safe to use as the live hub secret.
+                            store.setHubSecret(dTag, facResult.secretHex)
+                            store.setHubPref(dTag, 'facilitatorSecret', facResult.secretHex)
+                          }
+                          if (facResult.facilitatorMembers.length > 0) {
+                            store.setHubFacilitatorMembers(dTag, facilitator, facResult.facilitatorMembers)
+                          }
+                          console.log(`[HubEventSub] Re-fetched facilitator secret for ${dTag} (facilitator epoch ${facResult.epoch ?? 'legacy'}, hub epoch ${hubData.epoch})`)
+                        }
+                      }
+                    } catch (err) {
+                      console.warn(`[HubEventSub] Facilitated re-fetch failed for ${dTag}:`, err)
+                    }
+                  }
                 }
               } catch (err) {
                 console.warn(`[HubEventSub] Failed to re-decrypt hub secret for ${dTag}:`, err)

@@ -40,6 +40,9 @@ export class NostrConnectSigner {
   private clientSecretKey: Uint8Array
   private pubkey: string | null = null
   private bunkerString: string | null = null
+  // Whether the remote signer implements NIP-SKD (§7) — probed once at login. Gates v2-hub
+  // capability so `canUseV2`/the create toggle stay accurate for a signer that predates SKD.
+  private skdSupported = false
 
   constructor(clientSecretKey: Uint8Array) {
     this.clientSecretKey = clientSecretKey
@@ -61,6 +64,7 @@ export class NostrConnectSigner {
 
     this.bunkerString = toBunkerURL(this.signer.bp)
     this.pubkey = await this.signer.getPublicKey()
+    this.skdSupported = await this.probeSkd()
 
     return { bunkerString: this.bunkerString, pubkey: this.pubkey }
   }
@@ -116,6 +120,53 @@ export class NostrConnectSigner {
     return {
       encrypt: (pubkey: string, plaintext: string) => this.nip44Encrypt(pubkey, plaintext),
       decrypt: (pubkey: string, ciphertext: string) => this.nip44Decrypt(pubkey, ciphertext),
+    }
+  }
+
+  // ── NIP-SKD (§7): derive + act as v2-hub pseudonyms via the remote signer ──
+  // Forwards the §7 request methods over NIP-46. `peer` is the TRAILING positional param and is
+  // OMITTED for self derivations. The sub-key never leaves the signer.
+
+  async skdGetSubkeyPubkey(context: string, peerPub?: string): Promise<string> {
+    if (!this.signer) throw new Error('Not logged in')
+    return this.signer.sendRequest('skd_get_subkey_pubkey', peerPub ? [context, peerPub] : [context])
+  }
+  async skdSignAsSubkey(context: string, event: unknown, peerPub?: string): Promise<Record<string, unknown>> {
+    if (!this.signer) throw new Error('Not logged in')
+    const eventJson = JSON.stringify(event)
+    const resultJson = await this.signer.sendRequest('skd_sign_as_subkey', peerPub ? [context, eventJson, peerPub] : [context, eventJson])
+    return JSON.parse(resultJson)
+  }
+  async skdNip44EncryptAsSubkey(context: string, recipientPub: string, plaintext: string, peerPub?: string): Promise<string> {
+    if (!this.signer) throw new Error('Not logged in')
+    return this.signer.sendRequest('skd_nip44_encrypt_as_subkey', peerPub ? [context, recipientPub, plaintext, peerPub] : [context, recipientPub, plaintext])
+  }
+  async skdNip44DecryptAsSubkey(context: string, senderPub: string, ciphertext: string, peerPub?: string): Promise<string> {
+    if (!this.signer) throw new Error('Not logged in')
+    return this.signer.sendRequest('skd_nip44_decrypt_as_subkey', peerPub ? [context, senderPub, ciphertext, peerPub] : [context, senderPub, ciphertext])
+  }
+
+  /** One-shot capability probe (§7), capped so a non-SKD signer doesn't slow login. */
+  private async probeSkd(): Promise<boolean> {
+    try {
+      const pub = await Promise.race([
+        this.skdGetSubkeyPubkey('nip-skd:capability-probe'),
+        new Promise<string>((_, reject) => setTimeout(() => reject(new Error('probe timeout')), 8000)),
+      ])
+      return /^[0-9a-f]{64}$/i.test(pub)
+    } catch {
+      return false
+    }
+  }
+
+  /** NIP-SKD surface — present only when the signer advertised support (probed at login). */
+  get skd() {
+    if (!this.skdSupported) return undefined
+    return {
+      getSubkeyPubkey: (context: string, peerPub?: string) => this.skdGetSubkeyPubkey(context, peerPub),
+      signAsSubkey: (context: string, event: unknown, peerPub?: string) => this.skdSignAsSubkey(context, event, peerPub),
+      nip44EncryptAsSubkey: (context: string, recipientPub: string, plaintext: string, peerPub?: string) => this.skdNip44EncryptAsSubkey(context, recipientPub, plaintext, peerPub),
+      nip44DecryptAsSubkey: (context: string, senderPub: string, ciphertext: string, peerPub?: string) => this.skdNip44DecryptAsSubkey(context, senderPub, ciphertext, peerPub),
     }
   }
 

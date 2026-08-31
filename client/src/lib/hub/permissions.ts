@@ -13,6 +13,36 @@ import type { HubData, Channel, Category, Role } from '@/stores/hubStore'
 import { useHubStore } from '@/stores/hubStore'
 import { useUserStore } from '@/stores/userStore'
 
+/**
+ * True if `pubkey` owns the hub. In v1 the owner authors as their real key `R` (= creatorPubkey).
+ * In v2 the hub is authored by the owner pseudonym `O` (creatorPubkey), and the owner recognizes
+ * themselves by their real key `R`, recorded as `ownerRealPubkey`. Every owner check must accept
+ * both, or the v2 owner is treated as a stranger in their own hub.
+ */
+export function isHubOwner(hub: { creatorPubkey: string; ownerRealPubkey?: string }, pubkey: string): boolean {
+  return pubkey === hub.creatorPubkey || (!!hub.ownerRealPubkey && pubkey === hub.ownerRealPubkey)
+}
+
+/**
+ * Whether the given facilitator identity is a hub member who currently holds the `facilitate`
+ * permission — the authorization gate for showing a facilitated user's messages and unlocking them.
+ *
+ * The facilitator identity on a message's `["facilitator", …]` tag is the facilitator's **on-wire**
+ * key: the real key `R` in v1, but the member pseudonym `P` in v2. The roster keys members by `R`
+ * (`m.pubkey`) and carries `P` in `m.p`, so we resolve by EITHER field, then look permissions up by
+ * the member's real key. Without this a v2 facilitator (identified by `P`) is never found in the
+ * `R`-keyed roster and every message they vouch is wrongly hidden.
+ */
+export function isAuthorizedFacilitator(
+  hub: HubData,
+  facilitatorKey: string,
+  members: Array<{ pubkey: string; p?: string; roles?: string }> | undefined,
+): boolean {
+  const m = members?.find((mm) => mm.pubkey === facilitatorKey || mm.p === facilitatorKey)
+  if (!m) return false
+  return getPermissionsForUser(hub, m.pubkey, members as Array<{ pubkey: string; roles: string }>).facilitate === true
+}
+
 // ─── Types ───
 
 export interface ResolvedPermissions {
@@ -23,6 +53,7 @@ export interface ResolvedPermissions {
   create_invite: boolean
   ban_members: boolean
   hide_messages: boolean
+  facilitate: boolean
   embed_links: boolean
   attach_files: boolean
   mention_everyone: boolean
@@ -46,6 +77,7 @@ export const PERMISSION_KEYS: (keyof ResolvedPermissions)[] = [
   'create_invite',
   'ban_members',
   'hide_messages',
+  'facilitate',
   'embed_links',
   'attach_files',
   'mention_everyone',
@@ -69,6 +101,7 @@ export const PERMISSION_LABELS: Record<keyof ResolvedPermissions, string> = {
   create_invite: 'Share Hub',
   ban_members: 'Soft-Ban Members',
   hide_messages: 'Hide Messages',
+  facilitate: 'Facilitate Members',
   embed_links: 'Embed & Preview Links',
   attach_files: 'Attach Files',
   mention_everyone: 'Mention @everyone',
@@ -92,6 +125,7 @@ export const PERMISSION_DESCRIPTIONS: Record<keyof ResolvedPermissions, string> 
   create_invite: 'Can copy and share the hub address with others',
   ban_members: 'Can soft-ban members from the hub',
   hide_messages: 'Can hide specific messages in this hub',
+  facilitate: 'Can vouch people into the hub via a facilitation list (grants them access). Their messages appear only while this role keeps this permission.',
   embed_links: 'Links in messages from this role will show preview cards',
   attach_files: 'Can upload and attach files to messages in this hub',
   mention_everyone: '@everyone mentions from this role trigger notifications',
@@ -121,6 +155,7 @@ export const DEFAULT_EVERYONE_PERMISSIONS: ResolvedPermissions = {
   create_invite: false,
   ban_members: false,
   hide_messages: false,
+  facilitate: false,
   embed_links: true,
   attach_files: true,
   mention_everyone: false,
@@ -144,6 +179,7 @@ export const FULL_PERMISSIONS: ResolvedPermissions = {
   create_invite: true,
   ban_members: true,
   hide_messages: true,
+  facilitate: true,
   embed_links: true,
   attach_files: true,
   mention_everyone: true,
@@ -299,6 +335,7 @@ export function usePermissions(hubDTag?: string, channelId?: string): ResolvedPe
       create_invite: false,
       ban_members: false,
       hide_messages: false,
+      facilitate: false,
       embed_links: false,
       attach_files: false,
       mention_everyone: false,
@@ -314,7 +351,7 @@ export function usePermissions(hubDTag?: string, channelId?: string): ResolvedPe
     }
   }
 
-  const isCreator = pubkey === hub.creatorPubkey
+  const isCreator = isHubOwner(hub, pubkey)
 
   // Find the member's roles from the LKH tree
   const member = hubMembers?.find(m => m.pubkey === pubkey)
@@ -330,11 +367,20 @@ export function usePermissions(hubDTag?: string, channelId?: string): ResolvedPe
 export function getPermissionsForUser(
   hub: HubData,
   userPubkey: string,
-  hubMembers: Array<{ pubkey: string; roles: string }> | undefined,
+  hubMembers: Array<{ pubkey: string; roles: string; p?: string }> | undefined,
   channelId?: string,
 ): ResolvedPermissions {
-  const isCreator = userPubkey === hub.creatorPubkey
-  const member = hubMembers?.find(m => m.pubkey === userPubkey)
+  // Match by real key `R` (m.pubkey) OR pseudonym `P` (m.p): callers pass the ON-WIRE author key,
+  // which on a v2 hub is the member's pseudonym `P`, not `R`. Matching only `m.pubkey` would miss
+  // every v2 member, collapse them to the `everyone` role, and (e.g.) hide calendar events / polls
+  // from roles that grant the permission. Mirrors isAuthorizedFacilitator's dual match.
+  const member = hubMembers?.find(m => m.pubkey === userPubkey || m.p === userPubkey)
+  // Recognize the OWNER by their resolved real key too. On v2 the owner authors content under their
+  // member pseudonym `P_owner` (≠ `O` = creatorPubkey, ≠ `R_owner`), so `isHubOwner(hub, userPubkey)`
+  // with the on-wire `P_owner` is false, and the owner's own roster entry carries the `everyone` role —
+  // which would (e.g.) hide the OWNER's own calendar events on their OWN hub. `member.pubkey` is the
+  // real key `R`, so `isHubOwner(hub, member.pubkey)` restores full creator permissions for owner content.
+  const isCreator = isHubOwner(hub, userPubkey) || (!!member && isHubOwner(hub, member.pubkey))
   const memberRoles = member?.roles || 'everyone'
   return getEffectivePermissions(hub, memberRoles, channelId, isCreator)
 }
@@ -365,7 +411,7 @@ export function canAccessChannel(hubDTag: string, channelId: string, userPubkey:
   const state = useHubStore.getState()
   const hub = state.hubs[hubDTag]
   if (!hub) return false
-  if (userPubkey === hub.creatorPubkey) return true
+  if (isHubOwner(hub, userPubkey)) return true
 
   const hubMembers = state.hubMembers[hubDTag]
   const perms = getPermissionsForUser(hub, userPubkey, hubMembers, channelId)
@@ -390,7 +436,7 @@ export function canReceiveChannelNotification(hubDTag: string, channelId: string
   const state = useHubStore.getState()
   const hub = state.hubs[hubDTag]
   if (!hub) return false
-  if (userPubkey === hub.creatorPubkey) return true
+  if (isHubOwner(hub, userPubkey)) return true
   // Membership proof — only synced members hold the hub secret.
   if (!state.hubSecrets[hubDTag]) return false
   return canAccessChannel(hubDTag, channelId, userPubkey)

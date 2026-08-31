@@ -16,6 +16,7 @@ import { fetchEventsFromRelays } from '@/lib/nostr/relay-pool'
 import { subscribeToRelays } from '@/lib/nostr/relay-pool'
 import { KINDS } from '@/lib/crypto/constants'
 import { countLeadingZeroBits } from '@/lib/pow/pow'
+import { isV2 } from '@/lib/hub/version'
 import type { HubData, HubMember } from '@/stores/hubStore'
 
 const STORAGE_PREFIX = 'den-join-requests-seen:'
@@ -59,9 +60,13 @@ export function useJoinRequestCount(
 
     try {
       const lastSeen = getLastSeen(hub.dTag)
+      // v2 join requests are sealed-sender (authored under a throwaway address key, NOT the applicant's R)
+      // and indexed by the hub COORDINATE `#a`, not the d-tag — mirror JoinRequestsModal's loadRequests.
+      // Filtering v2 by `#d` matches nothing, so the creator's badge would silently read 0.
+      const coord = `${KINDS.HUB_EVENT}:${hub.creatorPubkey}:${hub.dTag}`
       const filter: any = {
         kinds: [KINDS.JOIN_REQUEST],
-        '#d': [hub.dTag],
+        ...(isV2(hub) ? { '#a': [coord] } : { '#d': [hub.dTag] }),
         limit: 500,
       }
       if (lastSeen > 0) {
@@ -119,9 +124,10 @@ export function useJoinRequestCount(
 
     // Open persistent subscription for new join requests
     const lastSeen = getLastSeen(hub.dTag)
+    const coord = `${KINDS.HUB_EVENT}:${hub.creatorPubkey}:${hub.dTag}`
     const subFilter: any = {
       kinds: [KINDS.JOIN_REQUEST],
-      '#d': [hub.dTag],
+      ...(isV2(hub) ? { '#a': [coord] } : { '#d': [hub.dTag] }),
     }
     // Only subscribe for events newer than what we've seen
     if (lastSeen > 0) {

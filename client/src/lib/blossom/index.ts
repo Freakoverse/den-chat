@@ -6,10 +6,13 @@ export { blossomServers, uploadToBlossomServers, downloadFromBlossom, downloadFr
 export type { UploadProgress, DownloadProgress } from './client'
 
 // Monolithic tree operations (group trees, facilitator mesh lists)
-export { createAndUploadMemberFiles, decryptHubSecret, addMemberToTree, removeMemberFromTree, updateMemberRoles, rehydrateTreeKeys, parseIndexFile, createIndexFile, createBanPage, parseBanPage, uploadBanPages, downloadBanList, createAndUploadGroupTree, addMemberToGroupTree, removeMemberFromGroupTree, decryptGroupSecret } from './members'
+export { createAndUploadMemberFiles, decryptHubSecret, addMemberToTree, removeMemberFromTree, updateMemberRoles, rehydrateTreeKeys, parseIndexFile, createIndexFile, banPageToken, createBanPage, parseBanPage, uploadBanPages, downloadBanList, createAndUploadGroupTree, addMemberToGroupTree, removeMemberFromGroupTree, decryptGroupSecret } from './members'
 
 // Paginated tree operations (hub creator/member)
 export { decryptHubSecretPaginated, rehydratePageKeys, addMemberToPage, removeMemberFromPage, updateMemberRolesInPage, createPaginatedIndexFile, findPageForPubkey, nip04Encrypt } from './members'
+
+// v2 (privacy) tree operations — P-keyed leaves, encrypted per-leaf R_pub (NIP-CHAT §0.2)
+export { createAndUploadMemberFilesV2, decryptHubSecretPaginatedV2, getPageMembersV2, rehydratePageKeysV2, addMemberToPageV2, removeMemberFromPageV2, uploadBanPagesV2, downloadBanListV2, createAndUploadGroupTreeV2, decryptGroupSecretV2, rehydrateGroupTreeV2, addMemberToGroupTreeV2, removeMemberFromGroupTreeV2 } from './members'
 
 export type { IndexFile, BanEntry } from './members'
 

@@ -19,7 +19,7 @@ import type {
   CloudflareConfig,
   DataChannelMessage,
 } from './types'
-import { supportsE2EE, getE2EESupport, attachSenderEncryption, attachReceiverDecryption } from './e2ee-crypto'
+import { supportsE2EE, getE2EESupport, attachSenderEncryption, attachReceiverDecryption, rekeyActiveTransforms } from './e2ee-crypto'
 
 const CF_API_BASE = 'https://rtc.live.cloudflare.com/v1'
 
@@ -1040,10 +1040,22 @@ export class CloudflareProvider implements VoiceProvider {
   // ── E2EE ──────────────────────────────────────────────────
 
   setEncryptionKey(key: CryptoKey | null, rawKeyBytes?: Uint8Array): void {
+    // If a key was ALREADY set and we're handed a new one, this is a mid-call rotation
+    // (a kick/ban bumped the epoch). The frame key is baked into each transform at attach
+    // time, so we must push the new key into the live transforms — assigning the fields
+    // alone would only affect transforms attached AFTER this point (leaving the running
+    // call, and any kicked member, on the old key). Initial attach (no prior key) needs no
+    // rekey: the transforms read these fields when they attach.
+    const isRotation = this.e2eeKey !== null && key !== null
     this.e2eeKey = key
     this.e2eeRawKeyBytes = rawKeyBytes ?? null
     if (key) {
-      console.log('[CF Provider] E2EE key set — frame encryption enabled')
+      if (isRotation) {
+        rekeyActiveTransforms(key, rawKeyBytes)
+        console.log('[CF Provider] E2EE key rotated on live transforms')
+      } else {
+        console.log('[CF Provider] E2EE key set — frame encryption enabled')
+      }
     } else {
       console.log('[CF Provider] E2EE key cleared — frame encryption disabled')
     }

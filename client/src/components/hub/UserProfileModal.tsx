@@ -65,7 +65,7 @@ interface UserProfileModalProps {
   /** If true, open directly in edit mode */
   startEditing?: boolean
   /** Hub context for ban actions (only when opened from hub) */
-  hubContext?: { dTag: string; creatorPubkey: string } | null
+  hubContext?: { dTag: string; creatorPubkey: string; ownerRealPubkey?: string } | null
 }
 
 interface ProfileData {
@@ -478,7 +478,12 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
   }
 
   // Hub-level ban
-  const isHubCreator = hubContext && myPubkey === hubContext.creatorPubkey
+  const isHubCreator = hubContext && (myPubkey === hubContext.creatorPubkey || myPubkey === hubContext.ownerRealPubkey)
+  // Whether the profile's target is a current member (so "Remove from Hub" only shows for members).
+  const targetIsMember = useHubStore((s) => {
+    const dTag = hubContext?.dTag
+    return !!(dTag && displayPubkey && s.hubMembers[dTag]?.some((m) => m.pubkey === displayPubkey))
+  })
   const [banning, setBanning] = useState(false)
   const [banStep, setBanStep] = useState<string | null>(null)
   const [banSteps, setBanSteps] = useState<string[]>([])
@@ -524,7 +529,7 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
 
   const CREATOR_BAN_STEPS = ['Downloading index & tree', 'Removing member & rotating secret', 'Rotating group encryption', 'Uploading ban page & index', 'Publishing hub event']
 
-  const handleBanFromHub = async () => {
+  const handleRemoveOrBan = async (mode: 'ban' | 'remove') => {
     if (!displayPubkey || !hubContext || !myPubkey || banning) return
     setShowDropdown(false)
     setBanning(true)
@@ -537,25 +542,226 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
     }
     const markDone = (step: string) => setBanSteps(prev => [...prev, step])
 
+    // Single-flight: serialize this kick/ban with every other membership mutation for this hub on this
+    // device, so it re-reads the CURRENT index below instead of racing a concurrent op. (The CAS in
+    // republishV2 is the cross-device backstop.)
+    const { acquireHubMutationLock } = await import('@/lib/hub/hubMutationGuard')
+    const releaseHubLock = await acquireHubMutationLock(hubContext.dTag)
     try {
       const { dTag } = hubContext
       const hub = useHubStore.getState().hubs[dTag]
       if (!hub) throw new Error('Hub not found')
 
-      // 1. Add to ban list locally
-      const currentBans = useHubStore.getState().hubBanLists[dTag] || []
-      if (currentBans.includes(displayPubkey)) {
+      // 1. Ban list. 'ban' adds the user (and persists it); 'remove' leaves the list untouched —
+      // the member is still kicked from the tree and the secret rotated (so they lose access), they
+      // just aren't blocked from rejoining. The ban PAGE below is rewritten with `effectiveBans`.
+      //
+      // Base the list on a FRESH, fail-closed download of the current ban pages — NOT the store. A partial
+      // hub load can leave hubBanLists[dTag] TRUNCATED (a ban page that failed to fetch/decrypt is swallowed
+      // to []), and rewriting that truncated set as the new ban page would durably ERASE every prior ban.
+      // downloadBanListV2 throws if any page is unreadable, so we block rather than silently truncate. (v1
+      // ban lists are plaintext/legacy — keep the store value there.)
+      const { isV2: isV2Ban } = await import('@/lib/hub/version')
+      let currentBans: string[]
+      if (isV2Ban(hub) && hub.indexFileHash && hub.blossomServers.length > 0) {
+        const secretHexBans = useHubStore.getState().hubSecrets[dTag]
+        if (!secretHexBans) throw new Error('Hub secret not available')
+        try {
+          const { downloadTextFromBlossom, parseIndexFile, downloadBanListV2 } = await import('@/lib/blossom')
+          const { fromHex } = await import('@/lib/crypto/lkh')
+          const idx = parseIndexFile(await downloadTextFromBlossom(hub.indexFileHash, hub.blossomServers))
+          currentBans = idx.banPages.length > 0
+            ? (await downloadBanListV2(idx.banPages, fromHex(secretHexBans), hub.blossomServers)).map(e => e.pubkey)
+            : []
+        } catch {
+          throw new Error('Could not load the hub’s current ban list — can’t safely update it right now. Please try again.')
+        }
+      } else {
+        currentBans = useHubStore.getState().hubBanLists[dTag] || []
+      }
+      if (mode === 'ban' && currentBans.includes(displayPubkey)) {
         setBanning(false)
         setBanSteps([])
         return // already banned
       }
-      const newBans = [...currentBans, displayPubkey]
-      useHubStore.getState().setHubBanList(dTag, newBans)
+      const effectiveBans = mode === 'ban' ? [...currentBans, displayPubkey] : currentBans
+      if (mode === 'ban') useHubStore.getState().setHubBanList(dTag, effectiveBans)
 
       await markStep('Downloading index & tree')
       // 2. Check if user is in member tree — if so, remove + rotate secret
       const members = useHubStore.getState().hubMembers[dTag] || []
       const isInTree = members.some(m => m.pubkey === displayPubkey)
+
+      // 'remove' only makes sense for an actual member — removing a non-member does nothing (and
+      // unlike 'ban' there's no ban-list entry to add for a non-member).
+      if (mode === 'remove' && !isInTree) {
+        setBanning(false)
+        setBanSteps([])
+        return
+      }
+
+      // ── v2 hubs: isolated kick (remove by pseudonym P + rotate secret + republish as O). ──
+      // Runs the whole flow in lib/hub/v2kick and short-circuits the v1 path below entirely.
+      const { isV2 } = await import('@/lib/hub/version')
+      if (isV2(hub)) {
+        if (!isInTree) {
+          // Not in the member tree, but a v2 ban must still be PERSISTED to the encrypted ban page and
+          // republished — otherwise it's local-only: invisible to other moderators/devices and lost on
+          // reload (the ban list is re-derived from Blossom). This mirrors the v1 non-member ban and the
+          // owner "Banned Members" flow — no tree surgery, no rotation: just rewrite the ban pages and
+          // republish the index as O, preserving the spine/leaf-pages/group-trees/history unchanged.
+          if (!hub.indexFileHash || hub.blossomServers.length === 0) {
+            markDone('Downloading index & tree')
+            await markStep('Done')
+            return // no index to update — the local add above is all we can do
+          }
+          const secretHexNM = useHubStore.getState().hubSecrets[dTag]
+          if (!secretHexNM) throw new Error('Hub secret not available')
+          const { fromHex: fromHexNM } = await import('@/lib/crypto/lkh')
+          const { makeSubkeySigner } = await import('@/lib/nostr/v2send')
+          const { ChatContext: ChatContextNM } = await import('@/lib/crypto/skd')
+          const { downloadTextFromBlossom, parseIndexFile, uploadBanPagesV2, createPaginatedIndexFile, uploadToBlossomServers } = await import('@/lib/blossom')
+          const { republishV2HubIndex } = await import('@/lib/hub/republishV2')
+
+          // Blossom 24242 auth + hub-event author as O (never R_owner).
+          const ownerSignerNM = makeSubkeySigner(ChatContextNM.owner(dTag), { privateKey, signer })
+          const ownerAuthNM = (e: any) => ownerSignerNM.signEvent(e)
+
+          markDone('Downloading index & tree')
+          await markStep('Uploading ban pages')
+          const indexContent = await downloadTextFromBlossom(hub.indexFileHash, hub.blossomServers)
+          const index = parseIndexFile(indexContent)
+          const banEntries = effectiveBans.map(pk => ({ pubkey: pk, reason: '' }))
+          const banPageHashes = await uploadBanPagesV2(banEntries, fromHexNM(secretHexNM), hub.epoch, signer, privateKey, hub.blossomServers, ownerAuthNM)
+          const newIndexContent = createPaginatedIndexFile(
+            index.spineHash, index.leafPages, banPageHashes, index.historyHash || undefined,
+            index.groupTrees && index.groupTrees.length > 0 ? index.groupTrees : undefined,
+          )
+          const indexBytes = new TextEncoder().encode(newIndexContent)
+          const { hash: newIndexHash } = await uploadToBlossomServers(
+            indexBytes, signer, privateKey, hub.blossomServers, 'text/plain', undefined, undefined, ownerAuthNM,
+          )
+          markDone('Uploading ban pages')
+
+          await markStep('Publishing hub event')
+          const pub = await republishV2HubIndex({ hub, ownerPub: hub.creatorPubkey, newIndexHash, privateKey, signer })
+          markDone('Publishing hub event')
+          useHubStore.getState().setHubData(dTag, { ...hub, indexFileHash: newIndexHash, eventCreatedAt: pub.eventCreatedAt ?? hub.eventCreatedAt })
+          await markStep('Done')
+          return
+        }
+        let memberP = members.find(m => m.pubkey === displayPubkey)?.p
+        if (!memberP && privateKey) {
+          // Local owner: re-derive P from R (ECDH symmetry) when it isn't cached.
+          const { deriveMemberPseudonymForOwner } = await import('@/lib/crypto/skd')
+          memberP = deriveMemberPseudonymForOwner(privateKey, dTag, displayPubkey)
+        }
+        if (!memberP) {
+          // Remote signer (no local ECDH shortcut): resolve P by scanning the roster segments.
+          const { resolveMemberPByRoster } = await import('@/lib/hub/v2kick')
+          const secretHexNow = useHubStore.getState().hubSecrets[dTag]
+          const epochSecretsNow = {
+            ...(useHubStore.getState().epochSecrets[dTag] || {}),
+            ...(secretHexNow ? { [hub.epoch]: secretHexNow } : {}),
+          }
+          memberP = (await resolveMemberPByRoster({ hub, memberR: displayPubkey, epochSecrets: epochSecretsNow })) ?? undefined
+        }
+        if (!memberP) throw new Error('Member pseudonym unknown — reload the hub and try again')
+        const oldSecretHexV2 = useHubStore.getState().hubSecrets[dTag]
+        if (!oldSecretHexV2) throw new Error('Hub secret not available')
+
+        const { fromHex: fromHexV2 } = await import('@/lib/crypto/lkh')
+        const { kickMemberV2 } = await import('@/lib/hub/v2kick')
+
+        let prevStep: string | null = null
+        const onStep = (s: string) => { if (prevStep) markDone(prevStep); void markStep(s); prevStep = s }
+
+        // Groups the kicked member was in → remove them INCREMENTALLY (kickMemberV2 patches each
+        // existing tree, preserving members on other roster pages). We just pass the group ids + the
+        // current group secret (which the owner holds); the tree itself supplies the full membership.
+        const kickFromGroups: Array<{ groupId: string; currentSecretHex: string }> = []
+        if (hub.groupedRoles && hub.groupedRoles.length > 0) {
+          const { memberQualifiesForGroup } = await import('@/lib/hub/groupEncryption')
+          const kickedRoles = members.find(m => m.pubkey === displayPubkey)?.roles || ''
+          const groupSecrets = useHubStore.getState().groupSecrets[dTag] || {}
+          for (const group of hub.groupedRoles) {
+            if (!memberQualifiesForGroup(kickedRoles, group.roleIds)) continue // wasn't in this group
+            // The kicked member MUST be removed from every group they were in — even if this client
+            // doesn't currently hold that group's secret. removeMemberFromGroupTreeV2 rebuilds the tree
+            // from the leaves (recovered via O↔P nip44) + a FRESH secret; the "current" secret we pass is
+            // only used to build a throwaway intermediate tree that removeLeaf discards. So when it's
+            // missing, pass a random placeholder rather than SKIP — skipping would leave the kicked
+            // member with the old group secret and continued read access to that group channel.
+            const curHex = groupSecrets[group.groupId]
+              ?? Array.from(crypto.getRandomValues(new Uint8Array(32))).map(b => b.toString(16).padStart(2, '0')).join('')
+            kickFromGroups.push({ groupId: group.groupId, currentSecretHex: curHex })
+          }
+        }
+        // Defensive coverage: also rotate any encryption group referenced by a CHANNEL or CATEGORY that
+        // has NO `groupedRoles` entry (so the qualification loop above never enumerated it). Without this,
+        // a kicked member could retain that group's secret → continued read access. removeMemberFromGroupTreeV2
+        // no-ops when the member has no leaf there, so including an extra group is safe/cheap.
+        {
+          const groupedRoleIds = new Set((hub.groupedRoles || []).map(g => g.groupId))
+          const covered = new Set(kickFromGroups.map(g => g.groupId))
+          const encIds = new Set<string>()
+          for (const ch of hub.channels || []) if (ch.encryption) encIds.add(ch.encryption)
+          for (const cat of hub.categories || []) if (cat.encryption) encIds.add(cat.encryption)
+          const gSecrets = useHubStore.getState().groupSecrets[dTag] || {}
+          for (const gid of encIds) {
+            if (groupedRoleIds.has(gid) || covered.has(gid)) continue // already handled (or intentionally skipped as not-qualified)
+            const curHex = gSecrets[gid]
+              ?? Array.from(crypto.getRandomValues(new Uint8Array(32))).map(b => b.toString(16).padStart(2, '0')).join('')
+            kickFromGroups.push({ groupId: gid, currentSecretHex: curHex })
+          }
+        }
+
+        const result = await kickMemberV2({
+          hub,
+          memberR: displayPubkey,
+          memberP,
+          oldSecret: fromHexV2(oldSecretHexV2),
+          epochSecrets: useHubStore.getState().epochSecrets[dTag] || {},
+          // Persist the full ban set as an encrypted ban page (real keys R) under the new secret.
+          banEntries: effectiveBans.map(pk => ({ pubkey: pk, reason: '' })),
+          kickFromGroups: kickFromGroups.length > 0 ? kickFromGroups : undefined,
+          privateKey, signer,
+          onStep,
+        })
+        if (prevStep) markDone(prevStep)
+
+        useHubStore.getState().setHubSecret(dTag, result.newSecretHex)
+        useHubStore.getState().setEpochSecrets(dTag, result.epochMap)
+        useHubStore.getState().setHubMembers(dTag, members.filter(m => m.pubkey !== displayPubkey))
+        for (const [gid, secretHex] of Object.entries(result.groupSecrets)) {
+          // Preserve the old group secret at its old epoch so old group messages stay readable.
+          const oldEpoch = hub.groupedRoles?.find(g => g.groupId === gid)?.epoch ?? 1
+          const newGEpoch = result.groupedRoles?.find(g => g.groupId === gid)?.epoch ?? (oldEpoch + 1)
+          const oldGSecret = useHubStore.getState().groupSecrets?.[dTag]?.[gid]
+          const gmap: Record<number, string> = { ...(useHubStore.getState().groupEpochSecrets?.[dTag]?.[gid] || {}) }
+          if (oldGSecret) gmap[oldEpoch] = oldGSecret
+          gmap[newGEpoch] = secretHex
+          useHubStore.getState().setGroupEpochSecrets(dTag, gid, gmap)
+          useHubStore.getState().setGroupSecret(dTag, gid, secretHex)
+        }
+        useHubStore.getState().setHubData(dTag, {
+          ...hub,
+          epoch: result.newEpoch,
+          indexFileHash: result.newIndexHash,
+          groupedRoles: result.groupedRoles ?? hub.groupedRoles,
+          eventCreatedAt: result.eventCreatedAt ?? hub.eventCreatedAt,
+        })
+
+        // Surface any group whose revocation FAILED — the kicked member still has access to it, so the
+        // owner needs to know to retry (a silent skip would leave a forward-secrecy hole unannounced).
+        if (result.groupsNotRotated && result.groupsNotRotated.length > 0) {
+          setBanError(`Kicked, but ${result.groupsNotRotated.length} group channel(s) couldn’t be re-keyed — the user may still read those. Run “Fix hub encryption” or retry.`)
+        }
+
+        await markStep('Done')
+        return
+      }
+
       let newEpoch = hub.epoch
       let newSpineHash = ''
       let newHistoryHash = ''
@@ -886,7 +1092,7 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
       }
 
       const banPageHashes = await uploadBanPages(
-        newBans.map(pk => ({ pubkey: pk, reason: '' })),
+        effectiveBans.map(pk => ({ pubkey: pk, reason: '' })),
         signer, privateKey, hub.blossomServers,
       )
 
@@ -924,6 +1130,7 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
         roles: hub.roles,
         minPow: hub.minPow || undefined,
         joinMinPow: hub.joinMinPow > 0 ? hub.joinMinPow : undefined,
+        messageExpiration: hub.messageExpiration || undefined, // preserve the disappearing-messages timer
         nsfw: hub.nsfw || undefined,
         discoverable: hub.discoverable,
         groupedRoles: updatedGroupedRoles.length > 0 ? updatedGroupedRoles : hub.groupedRoles,
@@ -964,14 +1171,24 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
 
       await markStep('Done')
     } catch (err: any) {
-      console.error('Ban from hub failed:', err)
-      setBanError(err?.message || 'Ban from hub failed')
+      console.error(`${mode === 'remove' ? 'Remove member' : 'Ban from hub'} failed:`, err)
+      // Revert the OPTIMISTIC ban-list add (done before publish): the change didn't land, so the target
+      // isn't actually banned — leaving it would show a phantom ban that a reload silently undoes.
+      if (mode === 'ban' && displayPubkey && hubContext) {
+        const cur = useHubStore.getState().hubBanLists[hubContext.dTag] || []
+        useHubStore.getState().setHubBanList(hubContext.dTag, cur.filter((pk) => pk !== displayPubkey))
+      }
+      setBanError(err?.message || `${mode === 'remove' ? 'Remove member' : 'Ban from hub'} failed`)
     } finally {
+      releaseHubLock()
       setBanning(false)
       // Don't clear banStep on success — keep 'Done' so the dialog shows the dismiss button
       // Only clear if there was no successful completion (error or early return)
     }
   }
+
+  const handleBanFromHub = () => handleRemoveOrBan('ban')
+  const handleRemoveMember = () => handleRemoveOrBan('remove')
 
   /**
    * Mod Ban: add the target user to the current user's own Blossom ban list.
@@ -999,6 +1216,85 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
       const existingModBans = useHubStore.getState().modBanLists[dTag]?.[myPubkey] || []
       if (existingModBans.includes(displayPubkey)) {
         setModBanning(false)
+        return
+      }
+
+      // ── v2 hubs: author the list JR under the mod's pseudonym P, encrypt the ban page
+      //    under the hub secret, and auth every Blossom write as P — so neither the mod's
+      //    real key R_mod nor the banned members' real keys R ever appear on the wire. ──
+      const { isV2 } = await import('@/lib/hub/version')
+      if (isV2(hub)) {
+        const { hubMemberIdentity } = await import('@/lib/hub/hubMemberSign')
+        const identity = await hubMemberIdentity(hub, { privateKey, signer })
+        if (!identity) throw new Error('This hub is private (v2) — a local key or NIP-SKD signer is required to moderate here.')
+        const { authKey: modP, authSigner } = identity
+
+        const hubSecretHexV2 = useHubStore.getState().hubSecrets[dTag]
+        if (!hubSecretHexV2) throw new Error('Hub secret not available')
+        const { fromHex: fromHexV2 } = await import('@/lib/crypto/lkh')
+        const hubSecretV2 = fromHexV2(hubSecretHexV2)
+
+        const {
+          downloadTextFromBlossom, parseIndexFile, uploadToBlossomServers,
+          uploadBanPagesV2, createIndexFile,
+        } = await import('@/lib/blossom')
+        const { createJoinRequest } = await import('@/lib/nostr/events')
+        const { publishToSpecificRelays: pubToRelays, fetchEvents: fetchEvt } = await import('@/lib/nostr/relay-pool')
+        const { getPublishRelays: getRelays } = await import('@/stores/postingBehaviourStore')
+        const { KINDS } = await import('@/lib/crypto/constants')
+
+        await markStep('Fetching join request')
+        // On v2 the mod's own list JR is authored by their pseudonym P, not R.
+        const joinRequestsV2 = await fetchEvt({
+          kinds: [KINDS.JOIN_REQUEST],
+          authors: [modP],
+          '#d': [dTag],
+          limit: 1,
+        })
+        let existingTreeHashV2 = ''
+        let existingHistoryHashV2 = ''
+        if (joinRequestsV2.length > 0) {
+          const listTag = joinRequestsV2[0].tags.find((t: string[]) => t[0] === 'list')
+          if (listTag?.[1]) {
+            try {
+              const index = parseIndexFile(await downloadTextFromBlossom(listTag[1], hub.blossomServers))
+              existingTreeHashV2 = index.treeHash
+              existingHistoryHashV2 = index.historyHash
+            } catch { /* fresh start */ }
+          }
+        }
+        markDone('Fetching join request')
+
+        await markStep('Uploading ban page')
+        const allBanPubkeysV2 = [...existingModBans, displayPubkey]
+        const banPageHashesV2 = await uploadBanPagesV2(
+          allBanPubkeysV2.map(pk => ({ pubkey: pk, reason: '' })),
+          hubSecretV2, hub.epoch, signer, privateKey, hub.blossomServers, authSigner,
+        )
+        markDone('Uploading ban page')
+
+        await markStep('Uploading index file')
+        const newIndexContentV2 = createIndexFile(
+          existingTreeHashV2,
+          banPageHashesV2,
+          existingHistoryHashV2 || undefined,
+        )
+        const indexBytesV2 = new TextEncoder().encode(newIndexContentV2)
+        const { hash: newIndexHashV2 } = await uploadToBlossomServers(
+          indexBytesV2, signer, privateKey, hub.blossomServers, 'text/plain', undefined, undefined, authSigner,
+        )
+        markDone('Uploading index file')
+
+        await markStep('Publishing join request')
+        const unsignedEventV2 = createJoinRequest(dTag, hubContext.creatorPubkey, newIndexHashV2)
+        const signedEventV2 = await authSigner({ ...unsignedEventV2, pubkey: modP })
+        await pubToRelays(getRelays([...hub.generalRelays], { hubOnly: true }), signedEventV2)
+        markDone('Publishing join request')
+
+        useHubStore.getState().setModBanList(dTag, myPubkey, allBanPubkeysV2)
+        console.log(`Mod-banned ${displayPubkey.slice(0, 8)}... from hub ${dTag} (v2)`)
+
+        await markStep('Done')
         return
       }
 
@@ -1096,6 +1392,85 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
 
       const existingModBans = useHubStore.getState().modBanLists[dTag]?.[myPubkey] || []
       const remaining = existingModBans.filter(pk => pk !== displayPubkey)
+
+      // ── v2 hubs: mirror handleModBan — author the list JR under the mod's pseudonym P,
+      //    encrypt any remaining ban page under the hub secret, and auth every Blossom write
+      //    as P — so neither R_mod nor the still-banned members' real keys R leak. ──
+      const { isV2 } = await import('@/lib/hub/version')
+      if (isV2(hub)) {
+        const { hubMemberIdentity } = await import('@/lib/hub/hubMemberSign')
+        const identity = await hubMemberIdentity(hub, { privateKey, signer })
+        if (!identity) throw new Error('This hub is private (v2) — a local key or NIP-SKD signer is required to moderate here.')
+        const { authKey: modP, authSigner } = identity
+
+        const {
+          downloadTextFromBlossom, parseIndexFile, uploadToBlossomServers,
+          uploadBanPagesV2, createIndexFile,
+        } = await import('@/lib/blossom')
+        const { createJoinRequest } = await import('@/lib/nostr/events')
+        const { publishToSpecificRelays: pubToRelays, fetchEvents: fetchEvt } = await import('@/lib/nostr/relay-pool')
+        const { getPublishRelays: getRelays } = await import('@/stores/postingBehaviourStore')
+        const { KINDS } = await import('@/lib/crypto/constants')
+
+        await markStep('Fetching join request')
+        // On v2 the mod's own list JR is authored by their pseudonym P, not R.
+        const joinRequestsV2 = await fetchEvt({
+          kinds: [KINDS.JOIN_REQUEST],
+          authors: [modP],
+          '#d': [dTag],
+          limit: 1,
+        })
+        let existingTreeHashV2 = ''
+        let existingHistoryHashV2 = ''
+        if (joinRequestsV2.length > 0) {
+          const listTag = joinRequestsV2[0].tags.find((t: string[]) => t[0] === 'list')
+          if (listTag?.[1]) {
+            try {
+              const index = parseIndexFile(await downloadTextFromBlossom(listTag[1], hub.blossomServers))
+              existingTreeHashV2 = index.treeHash
+              existingHistoryHashV2 = index.historyHash
+            } catch { /* fresh start */ }
+          }
+        }
+        markDone('Fetching join request')
+
+        await markStep('Uploading ban page')
+        let banPageHashesV2: string[] = []
+        if (remaining.length > 0) {
+          const hubSecretHexV2 = useHubStore.getState().hubSecrets[dTag]
+          if (!hubSecretHexV2) throw new Error('Hub secret not available')
+          const { fromHex: fromHexV2 } = await import('@/lib/crypto/lkh')
+          banPageHashesV2 = await uploadBanPagesV2(
+            remaining.map(pk => ({ pubkey: pk, reason: '' })),
+            fromHexV2(hubSecretHexV2), hub.epoch, signer, privateKey, hub.blossomServers, authSigner,
+          )
+        }
+        markDone('Uploading ban page')
+
+        await markStep('Uploading index file')
+        const newIndexContentV2 = createIndexFile(
+          existingTreeHashV2,
+          banPageHashesV2,
+          existingHistoryHashV2 || undefined,
+        )
+        const indexBytesV2 = new TextEncoder().encode(newIndexContentV2)
+        const { hash: newIndexHashV2 } = await uploadToBlossomServers(
+          indexBytesV2, signer, privateKey, hub.blossomServers, 'text/plain', undefined, undefined, authSigner,
+        )
+        markDone('Uploading index file')
+
+        await markStep('Publishing join request')
+        const unsignedEventV2 = createJoinRequest(dTag, hubContext.creatorPubkey, newIndexHashV2)
+        const signedEventV2 = await authSigner({ ...unsignedEventV2, pubkey: modP })
+        await pubToRelays(getRelays([...hub.generalRelays], { hubOnly: true }), signedEventV2)
+        markDone('Publishing join request')
+
+        useHubStore.getState().setModBanList(dTag, myPubkey, remaining)
+        console.log(`Mod-unbanned ${displayPubkey.slice(0, 8)}... from hub ${dTag} (v2)`)
+
+        await markStep('Done')
+        return
+      }
 
       await markStep('Fetching join request')
       const {
@@ -1289,6 +1664,16 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
                             <><ShieldBan size={14} /> Block User</>
                           )}
                         </button>
+                        {isHubCreator && displayPubkey && targetIsMember && (
+                          <button
+                            onClick={handleRemoveMember}
+                            disabled={banning}
+                            className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-amber-400 hover:bg-amber-500/10 transition-colors cursor-pointer disabled:opacity-40 rounded-md"
+                          >
+                            <UserMinus size={14} />
+                            {banning ? 'Removing...' : 'Remove from Hub'}
+                          </button>
+                        )}
                         {isHubCreator && displayPubkey && (
                           <button
                             onClick={handleBanFromHub}
@@ -1554,21 +1939,33 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
                   <span className={`text-[10px] font-mono tabular-nums select-none shrink-0 ${statusDraft.length >= STATUS_MAX ? 'text-amber-400' : 'text-muted-foreground/40'}`}>
                     {statusDraft.length}/{STATUS_MAX}
                   </span>
-                  <button
-                    onClick={saveStatus}
-                    disabled={statusSaving}
-                    title="Save status"
-                    className="p-1 rounded-md text-emerald-400 hover:bg-emerald-500/10 transition-colors cursor-pointer disabled:opacity-40"
-                  >
-                    {statusSaving ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
-                  </button>
-                  <button
-                    onClick={() => { setEditingStatus(false); setStatusDraft(status) }}
-                    title="Cancel"
-                    className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors cursor-pointer"
-                  >
-                    <X size={13} />
-                  </button>
+                  <TooltipProvider delayDuration={300}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          onClick={saveStatus}
+                          disabled={statusSaving}
+                          className="p-1 rounded-md text-emerald-400 hover:bg-emerald-500/10 transition-colors cursor-pointer disabled:opacity-40"
+                        >
+                          {statusSaving ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" className="text-xs">Save status</TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                  <TooltipProvider delayDuration={300}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          onClick={() => { setEditingStatus(false); setStatusDraft(status) }}
+                          className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors cursor-pointer"
+                        >
+                          <X size={13} />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" className="text-xs">Cancel</TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
                 </div>
               ) : status ? (
                 <div className="mb-2 flex items-center gap-1.5 min-w-0">
@@ -1576,13 +1973,19 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
                     <span className="truncate">{status}</span>
                   </span>
                   {isSelf && (
-                    <button
-                      onClick={() => { setStatusDraft(status); setEditingStatus(true) }}
-                      title="Edit status"
-                      className="p-1 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors cursor-pointer shrink-0"
-                    >
-                      <Pencil size={12} />
-                    </button>
+                    <TooltipProvider delayDuration={300}>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button
+                            onClick={() => { setStatusDraft(status); setEditingStatus(true) }}
+                            className="p-1 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors cursor-pointer shrink-0"
+                          >
+                            <Pencil size={12} />
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="text-xs">Edit status</TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
                   )}
                 </div>
               ) : isSelf ? (

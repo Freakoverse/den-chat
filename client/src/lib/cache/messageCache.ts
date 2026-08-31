@@ -210,6 +210,26 @@ export async function deleteCachedMessage(eventId: string): Promise<void> {
 }
 
 /**
+ * Wipe ALL cached messages. Called on account switch/logout: the cache is a single global IndexedDB
+ * store holding DECRYPTED message content (not namespaced by account), so leaving it intact would let
+ * the next account on this device read the previous account's private-hub messages at rest. The cache
+ * repopulates from relays on the next subscription (same as the version-migration wipes above).
+ */
+export async function clearAllCachedMessages(): Promise<void> {
+  try {
+    const db = await openDB()
+    const tx = db.transaction(STORE_NAME, 'readwrite')
+    tx.objectStore(STORE_NAME).clear()
+    await new Promise<void>((resolve, reject) => {
+      tx.oncomplete = () => resolve()
+      tx.onerror = () => reject(tx.error)
+    })
+  } catch (err) {
+    console.warn('[MessageCache] Failed to clear cached messages:', err)
+  }
+}
+
+/**
  * Atomically replace a cached message: delete old entry + write new entry in a
  * single IDB transaction. Avoids the serial readwrite queue stall that happens
  * when delete and put are separate transactions competing with subscription writes.
@@ -332,7 +352,12 @@ export async function loadCachedMessagesForHub(hubDTag: string): Promise<ChatMes
     // Deduplicate: same dTag + pubkey = keep newest eventCreatedAt
     const byKey = new Map<string, ChatMessage>()
     const staleIds: string[] = []
+    // Disappearing messages: never hand an EXPIRED message back to the display — the physical purge
+    // (pruneAll) only runs once relay subscriptions form, so a launch that reads the cache first would
+    // otherwise briefly show messages that were supposed to be gone. Drop them here and queue deletion.
+    const nowSec = Math.floor(Date.now() / 1000)
     for (const msg of all) {
+      if (msg.expiration && msg.expiration <= nowSec) { staleIds.push(msg.id); continue }
       const key = `${msg.dTag}:${msg.pubkey}`
       const existing = byKey.get(key)
       if (existing) {
@@ -409,7 +434,11 @@ export async function loadRemainingCachedMessagesProgressive(
         // Deduplicate: same dTag + pubkey = keep newest eventCreatedAt
         const byKey = new Map<string, ChatMessage>()
         const staleIds: string[] = []
+        // Disappearing messages: drop EXPIRED entries at load (see loadCachedMessagesForHub) so they
+        // never reach the display before the physical purge runs, and queue them for deletion.
+        const nowSec = Math.floor(Date.now() / 1000)
         for (const msg of hubMsgs) {
+          if (msg.expiration && msg.expiration <= nowSec) { staleIds.push(msg.id); continue }
           const key = `${msg.dTag}:${msg.pubkey}`
           const existing = byKey.get(key)
           if (existing) {

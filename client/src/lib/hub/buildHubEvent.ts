@@ -7,6 +7,9 @@ import type { HubData, Channel, Category, Role } from '@/stores/hubStore'
 import type { GroupedRole } from '@/lib/hub/groupEncryption'
 import { createUnsignedEvent } from '@/lib/nostr'
 import { KINDS } from '@/lib/crypto/constants'
+import { encryptHubContent, deriveHubContentKey, buildOwnerAttestation, type OwnerAttestation } from './hubContent'
+import type { UnsignedEvent, Event } from 'nostr-tools'
+import type { ISigner } from '@/stores/userStore'
 import {
   HUB_NAME_MAX, HUB_DESCRIPTION_MAX, CHANNEL_NAME_MAX, CHANNEL_DESCRIPTION_MAX,
   CATEGORY_NAME_MAX, ROLE_NAME_MAX, TOPIC_TAG_MAX,
@@ -193,4 +196,147 @@ export function buildHubEvent(opts: BuildHubEventOptions) {
   }
 
   return unsigned
+}
+
+/**
+ * Build a **v2** hub event (NIP-CHAT §0.3, §6.1): the structural content
+ * (roles, categories, channel names, permissions, plugins) is encrypted with
+ * `hub_content_key`, the public face (`n`, `picture`, `banner`, `about`, `t`)
+ * stays in plaintext tags, and the encrypted owner attestation is embedded in
+ * the content. The returned event is UNSIGNED with `pubkey` unset — the caller
+ * signs it as the owner pseudonym `O` (see `lib/nostr/v2send`).
+ */
+export async function buildHubEventV2(
+  opts: BuildHubEventOptions & {
+    /** hub_content_key = deriveHubContentKey(hubSecret, epoch). */
+    contentKey: Uint8Array
+    /** R_owner ↔ coordinate attestation (built by the caller via buildOwnerAttestation). */
+    ownerAttestation: OwnerAttestation
+    /** NIP-SKD scheme "family:version" (default "skd:1"). */
+    signerScheme?: string
+  },
+): Promise<UnsignedEvent> {
+  validateHubLimits(opts)
+
+  const {
+    dTag, name, description, epoch, icon, banner, tags,
+    relays, blossomServers, indexFileHash, channels, categories, roles,
+    minPow, joinMinPow, messageExpiration, nsfw, discoverable, groupedRoles,
+    publishedAt, eventCreatedAt, contentKey, ownerAttestation, signerScheme,
+  } = opts
+
+  const eventTags: [string, ...string[]][] = [
+    ['d', dTag],
+    ['n', name],
+    ['epoch', epoch.toString()],
+  ]
+  for (const relay of relays) eventTags.push(['r', relay, 'general'])
+  for (const server of blossomServers) eventTags.push(['o', server])
+  if (indexFileHash) eventTags.push(['m', indexFileHash, epoch.toString()])
+  if (tags) for (const t of tags) eventTags.push(['t', t])
+  if (nsfw) { eventTags.push(['content-warning', '']); eventTags.push(['L', 'content-warning']) }
+  if (minPow && minPow > 0) eventTags.push(['w', minPow.toString()])
+  if (joinMinPow && joinMinPow > 0) eventTags.push(['W', joinMinPow.toString()])
+  if (messageExpiration && messageExpiration > 0) eventTags.push(['message_expiration', Math.floor(messageExpiration).toString()])
+  eventTags.push(['f', discoverable === false ? 'off' : 'on'])
+
+  // v2 public face — plaintext so non-members can preview the join/Discover card.
+  if (icon) eventTags.push(['picture', icon])
+  if (banner) eventTags.push(['banner', banner])
+  if (description) eventTags.push(['about', description])
+
+  // Format version + NIP-SKD derivation scheme.
+  eventTags.push(['version', '2'])
+  const [fam, ver] = (signerScheme || 'skd:1').split(':')
+  eventTags.push(['signer_scheme', fam || 'skd', ver || '1'])
+
+  // Structural content (member-only) + the encrypted owner attestation, encrypted whole.
+  const contentObj = {
+    roles: roles.map(r => ({
+      role_id: r.roleId, name: r.name, ...(r.color ? { color: r.color } : {}),
+      position: r.position, ...(r.hoist ? { hoist: true } : {}), permissions: r.permissions,
+    })),
+    grouped_roles: (groupedRoles || []).map(g => ({ group_id: g.groupId, role_ids: g.roleIds, epoch: g.epoch })),
+    categories: categories.map(c => ({
+      category_id: c.categoryId, name: c.name, position: c.position, encryption: c.encryption, permissions: c.permissions || {},
+    })),
+    channels: channels.map(ch => ({
+      channel_id: ch.channelId, name: ch.name, type: ch.type, category_id: ch.categoryId,
+      synced: ch.synced, encryption: ch.encryption, position: ch.position,
+      description: ch.description || undefined, permissions: ch.permissions || {},
+    })),
+    plugins: {},
+    owner_attestation: ownerAttestation,
+  }
+  const encContent = await encryptHubContent(contentKey, contentObj)
+
+  const createdAt = eventCreatedAt != null ? eventCreatedAt + 1 : undefined
+  const unsigned = createUnsignedEvent(KINDS.HUB_EVENT, encContent, eventTags, createdAt)
+  unsigned.tags = [...unsigned.tags, ['published_at', (publishedAt ?? unsigned.created_at).toString()]]
+  return unsigned
+}
+
+/**
+ * Build **and sign** a v2 hub event for re-publishing after an edit (rename, channel/role
+ * change, delete, etc.). Derives the content key from the hub secret, rebuilds the owner
+ * attestation, encrypts the (edited) structural content, and signs as the owner pseudonym `O`.
+ *
+ * Use this wherever v1 code does `mineAndSign(buildHubEvent(...))` — that path signs with the
+ * root key and emits plaintext, which corrupts a v2 hub.
+ */
+export async function buildAndSignV2HubEvent(
+  opts: BuildHubEventOptions & {
+    /** The hub's current secret (bytes). */
+    hubSecret: Uint8Array
+    /** The real owner key `R_owner` (for the attestation). */
+    ownerRealPub: string
+    /** The owner pseudonym `O` — the hub event author (== hub.creatorPubkey). */
+    ownerPub: string
+    /** Message-PoW difficulty (mined before signing). */
+    minPow?: number
+    privateKey: string | null
+    signer: ISigner | null
+    signerScheme?: string
+  },
+): Promise<Event> {
+  const { makeSubkeySigner, mineAndSignAsSubkey } = await import('@/lib/nostr/v2send')
+  const { ChatContext } = await import('@/lib/crypto/skd')
+
+  const contentKey = deriveHubContentKey(opts.hubSecret, opts.epoch)
+  const coord = `${KINDS.HUB_EVENT}:${opts.ownerPub}:${opts.dTag}`
+  const ownerAttestation = await buildOwnerAttestation(coord, opts.ownerRealPub, opts.signer, opts.privateKey)
+  const unsigned = await buildHubEventV2({ ...opts, contentKey, ownerAttestation, signerScheme: opts.signerScheme })
+  const ownerSigner = makeSubkeySigner(ChatContext.owner(opts.dTag), { privateKey: opts.privateKey, signer: opts.signer })
+  return mineAndSignAsSubkey(unsigned, opts.minPow && opts.minPow > 0 ? opts.minPow : 0, ownerSigner)
+}
+
+/**
+ * One-liner for UI re-publish sites: build + sign a hub event the right way for the hub's
+ * format. v1 → `mineAndSign(buildHubEvent(...))` (root key, plaintext); v2 →
+ * `buildAndSignV2HubEvent` (owner `O`, encrypted content, reading the hub secret from the
+ * store). Replaces the inline `mineAndSign(buildHubEvent(...))` pattern everywhere.
+ */
+export async function signHubEventForPublish(
+  hub: { dTag: string; creatorPubkey: string; version?: number; signerScheme?: string },
+  params: BuildHubEventOptions,
+  opts: { pubkey: string; privateKey: string | null; signer: ISigner | null; minPow?: number },
+): Promise<Event> {
+  const { isV2 } = await import('@/lib/hub/version')
+  if (isV2(hub)) {
+    const { useHubStore } = await import('@/stores/hubStore')
+    const secretHex = useHubStore.getState().hubSecrets[hub.dTag]
+    if (!secretHex) throw new Error('Hub secret not available for v2 re-publish')
+    const { fromHex } = await import('@/lib/crypto/lkh')
+    return buildAndSignV2HubEvent({
+      ...params,
+      hubSecret: fromHex(secretHex),
+      ownerRealPub: opts.pubkey,
+      ownerPub: hub.creatorPubkey,
+      minPow: opts.minPow ?? params.minPow,
+      privateKey: opts.privateKey,
+      signer: opts.signer,
+    })
+  }
+  const { mineAndSign } = await import('@/lib/nostr/events')
+  return mineAndSign(buildHubEvent(params), opts.minPow ?? params.minPow ?? 0, opts.pubkey, opts.signer, opts.privateKey)
 }

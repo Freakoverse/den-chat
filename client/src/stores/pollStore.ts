@@ -37,6 +37,8 @@ export interface VoteData {
   createdAt: number
   /** Raw encrypted content — decrypted client-side */
   content: string
+  /** Raw event JSON — needed to resolve the v2 `identity` tag (P → real key R) */
+  rawEvent?: string
 }
 
 interface PollStore {
@@ -83,6 +85,7 @@ export function parseVoteEvent(event: Event): VoteData | null {
     pollEventId,
     createdAt: event.created_at,
     content: event.content,
+    rawEvent: JSON.stringify(event),
   }
 }
 

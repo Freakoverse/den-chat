@@ -35,6 +35,8 @@ export interface SafeTreeUpdateParams {
   preserveGroupTrees?: boolean
   /** Skip publishing the hub event (caller will publish its own with updated data) */
   skipPublish?: boolean
+  /** v2: signs Blossom upload/delete auth as the owner pseudonym O (avoids leaking R_owner). */
+  authSigner?: (e: import('nostr-tools').UnsignedEvent) => Promise<import('nostr-tools').Event>
 }
 
 export interface SafeTreeUpdateResult {
@@ -44,6 +46,12 @@ export interface SafeTreeUpdateResult {
   newEpoch: number
   /** Hashes that were cleaned up (best-effort deleted) */
   cleanedUpHashes: string[]
+  /**
+   * Old blob hashes NOT yet deleted because `skipPublish` was set — the caller publishes the new hub
+   * event itself, so it must delete these only AFTER that publish succeeds (deleting them here would strip
+   * blobs the still-live hub event references → brick on the caller's publish failure).
+   */
+  deferredCleanupHashes?: string[]
   /** The created_at of the signed event (for +1 pattern on future updates) */
   eventCreatedAt?: number
   /** Blossom servers that accepted the new index file (subset of targetedServers). */
@@ -85,6 +93,7 @@ export async function safeTreeUpdate(params: SafeTreeUpdateParams): Promise<Safe
     banEntries,
     preserveGroupTrees = true,
     skipPublish = false,
+    authSigner,
   } = params
 
   const epoch = epochOverride ?? hub.epoch
@@ -119,7 +128,7 @@ export async function safeTreeUpdate(params: SafeTreeUpdateParams): Promise<Safe
   // ── Step 1: Upload new tree ──
   const treeBytes = new TextEncoder().encode(newTreeContent)
   const { hash: newTreeHash } = await uploadToBlossomServers(
-    treeBytes, signer, privateKey, hub.blossomServers, 'text/plain',
+    treeBytes, signer, privateKey, hub.blossomServers, 'text/plain', undefined, undefined, authSigner,
   )
 
   // ── Step 2: Verify new tree is downloadable ──
@@ -157,7 +166,7 @@ export async function safeTreeUpdate(params: SafeTreeUpdateParams): Promise<Safe
     const updatedBlob = await aesEncrypt(newHubSecret, lines.join('\n'))
     const historyBytes = new TextEncoder().encode(updatedBlob)
     const { hash: hHash } = await uploadToBlossomServers(
-      historyBytes, signer, privateKey, hub.blossomServers, 'text/plain',
+      historyBytes, signer, privateKey, hub.blossomServers, 'text/plain', undefined, undefined, authSigner,
     )
     newHistoryHash = hHash
   }
@@ -165,6 +174,12 @@ export async function safeTreeUpdate(params: SafeTreeUpdateParams): Promise<Safe
   // ── Step 4: Upload ban pages (if provided) ──
   let banPageHashes: string[] = []
   if (banEntries && banEntries.length > 0) {
+    // v1 ban pages store real keys R in PLAINTEXT. No current v2 path passes banEntries here (v2 bans
+    // go through v2kick / uploadBanPagesV2). Fail loudly rather than silently leak if that changes:
+    // an authSigner being present means we're in a v2 context.
+    if (authSigner) {
+      throw new Error('treeUpdater: v2 ban pages must use uploadBanPagesV2 (encrypted) — not the v1 plaintext path')
+    }
     banPageHashes = await uploadBanPages(banEntries, signer, privateKey, hub.blossomServers)
   }
 
@@ -178,7 +193,7 @@ export async function safeTreeUpdate(params: SafeTreeUpdateParams): Promise<Safe
   )
   const indexBytes = new TextEncoder().encode(newIndexContent)
   const { hash: newIndexHash } = await uploadToBlossomServers(
-    indexBytes, signer, privateKey, hub.blossomServers, 'text/plain',
+    indexBytes, signer, privateKey, hub.blossomServers, 'text/plain', undefined, undefined, authSigner,
   )
 
   // ── Step 6: Verify new index is correct ──
@@ -195,6 +210,11 @@ export async function safeTreeUpdate(params: SafeTreeUpdateParams): Promise<Safe
   // with updated data (e.g., bumped groupedRoles epochs after group rotation).
   let publishedCreatedAt: number | undefined
   if (!skipPublish) {
+    // Fail-closed: this path signs under the ROOT key R with PLAINTEXT content (the v1 shape). A v2 hub
+    // MUST republish as O with encrypted content (republishV2*), so v2 callers pass skipPublish. Guard
+    // against a future v2 caller forgetting it — that would leak R_owner AND destroy content encryption.
+    const { isV2 } = await import('@/lib/hub/version')
+    if (isV2(hub)) throw new Error('safeTreeUpdate: refusing to publish a v2 hub event under the root key — pass skipPublish and republish as O')
     const unsignedEvent = buildHubEvent({
       dTag: hub.dTag,
       name: hub.name,
@@ -211,6 +231,7 @@ export async function safeTreeUpdate(params: SafeTreeUpdateParams): Promise<Safe
       roles: hub.roles,
       minPow: hub.minPow > 0 ? hub.minPow : undefined,
       joinMinPow: hub.joinMinPow > 0 ? hub.joinMinPow : undefined,
+      messageExpiration: hub.messageExpiration || undefined, // preserve the disappearing-messages timer
       nsfw: hub.nsfw || undefined,
       discoverable: hub.discoverable,
       groupedRoles: hub.groupedRoles,
@@ -219,10 +240,17 @@ export async function safeTreeUpdate(params: SafeTreeUpdateParams): Promise<Safe
     })
     const signedEvent = await mineAndSign(unsignedEvent, hub.minPow, hub.creatorPubkey, signer, privateKey)
     publishedCreatedAt = signedEvent.created_at
-    await publishToSpecificRelays(
+    // CAS (version-agnostic lost-update guard): abort if another writer moved the hub's index pointer
+    // since this op read `hub.indexFileHash`. Fail-closed (throws on a real move OR if the current state
+    // can't be confirmed) — see casCheckIndex.
+    const { casCheckIndex } = await import('@/lib/hub/hubMutationGuard')
+    await casCheckIndex(hub.dTag, hub.creatorPubkey, hub.indexFileHash)
+    const pub = await publishToSpecificRelays(
       getPublishRelays([...hub.generalRelays]),
       signedEvent,
     )
+    // Zero relays accepted → don't delete the old blobs the still-live event points at (see paginated path).
+    if (pub.length === 0) throw new Error('safeTreeUpdate: hub event not accepted by any relay')
   }
 
   // ── Step 8: Cleanup old files (best-effort) ──
@@ -238,10 +266,16 @@ export async function safeTreeUpdate(params: SafeTreeUpdateParams): Promise<Safe
   if (oldHistoryHash && newHubSecret && oldHistoryHash !== newHistoryHash) {
     oldHashes.push(oldHistoryHash)
   }
+  // When skipPublish, the caller publishes afterward — defer deletion so we never strip blobs the still-live
+  // hub event references (brick-on-publish-failure). See safePaginatedTreeUpdate for the full rationale.
+  if (skipPublish) {
+    return { newIndexHash, newEpoch: epoch, cleanedUpHashes, deferredCleanupHashes: oldHashes, eventCreatedAt: publishedCreatedAt }
+  }
+
   // Remove updated pages that are no longer referenced
   for (const hash of oldHashes) {
     try {
-      await deleteFromBlossom(hash, signer, privateKey, hub.blossomServers)
+      await deleteFromBlossom(hash, signer, privateKey, hub.blossomServers, authSigner)
       cleanedUpHashes.push(hash)
     } catch {
       // Never throw on cleanup failure
@@ -295,6 +329,8 @@ export interface SafePaginatedTreeUpdateParams {
 
   /** Skip publishing the hub event (caller will publish) */
   skipPublish?: boolean
+  /** v2: signs Blossom upload/delete auth as the owner pseudonym O (avoids leaking R_owner). */
+  authSigner?: (e: import('nostr-tools').UnsignedEvent) => Promise<import('nostr-tools').Event>
 
   /** Pre-fetched old index data — avoids redundant download if caller already has it */
   existingIndexData?: {
@@ -333,6 +369,7 @@ export async function safePaginatedTreeUpdate(params: SafePaginatedTreeUpdatePar
     banEntries,
     preserveGroupTrees = true,
     skipPublish = false,
+    authSigner,
     existingIndexData,
     onStep,
   } = params
@@ -390,7 +427,7 @@ export async function safePaginatedTreeUpdate(params: SafePaginatedTreeUpdatePar
     uploadTasks.push((async () => {
       const pageBytes = new TextEncoder().encode(page.content)
       const { hash } = await uploadToBlossomServers(
-        pageBytes, signer, privateKey, hub.blossomServers, 'text/plain',
+        pageBytes, signer, privateKey, hub.blossomServers, 'text/plain', undefined, undefined, authSigner,
       )
       await verifyFileExists(hash, hub.blossomServers)
       updatedPageHashes.set(page.pageIndex, { firstPubkey: page.firstPubkey, hash })
@@ -403,7 +440,7 @@ export async function safePaginatedTreeUpdate(params: SafePaginatedTreeUpdatePar
     uploadTasks.push((async () => {
       const pageBytes = new TextEncoder().encode(newPages[idx].content)
       const { hash } = await uploadToBlossomServers(
-        pageBytes, signer, privateKey, hub.blossomServers, 'text/plain',
+        pageBytes, signer, privateKey, hub.blossomServers, 'text/plain', undefined, undefined, authSigner,
       )
       await verifyFileExists(hash, hub.blossomServers)
       newPageEntries.push({
@@ -418,7 +455,7 @@ export async function safePaginatedTreeUpdate(params: SafePaginatedTreeUpdatePar
   uploadTasks.push((async () => {
     const spineBytes = new TextEncoder().encode(newSpineContent)
     const { hash } = await uploadToBlossomServers(
-      spineBytes, signer, privateKey, hub.blossomServers, 'text/plain',
+      spineBytes, signer, privateKey, hub.blossomServers, 'text/plain', undefined, undefined, authSigner,
     )
     await verifyFileExists(hash, hub.blossomServers)
     newSpineHash = hash
@@ -455,7 +492,7 @@ export async function safePaginatedTreeUpdate(params: SafePaginatedTreeUpdatePar
     const updatedBlob = await aesEncrypt(newHubSecret, lines.join('\n'))
     const historyBytes = new TextEncoder().encode(updatedBlob)
     const { hash: hHash } = await uploadToBlossomServers(
-      historyBytes, signer, privateKey, hub.blossomServers, 'text/plain',
+      historyBytes, signer, privateKey, hub.blossomServers, 'text/plain', undefined, undefined, authSigner,
     )
     newHistoryHash = hHash
   }
@@ -488,7 +525,7 @@ export async function safePaginatedTreeUpdate(params: SafePaginatedTreeUpdatePar
   )
   const indexBytes = new TextEncoder().encode(newIndexContent)
   const { hash: newIndexHash, serverUrls: indexServerUrls } = await uploadToBlossomServers(
-    indexBytes, signer, privateKey, hub.blossomServers, 'text/plain',
+    indexBytes, signer, privateKey, hub.blossomServers, 'text/plain', undefined, undefined, authSigner,
   )
 
   // ── Step 8: Verify index ──
@@ -506,6 +543,9 @@ export async function safePaginatedTreeUpdate(params: SafePaginatedTreeUpdatePar
   let targetedRelays: string[] = []
   let publishedRelays: string[] = []
   if (!skipPublish) {
+    // Fail-closed (see safeTreeUpdate): v2 must republish as O with encrypted content, never here under R.
+    const { isV2 } = await import('@/lib/hub/version')
+    if (isV2(hub)) throw new Error('safePaginatedTreeUpdate: refusing to publish a v2 hub event under the root key — pass skipPublish and republish as O')
     onStep?.('Signing hub event')
     const unsignedEvent = buildHubEvent({
       dTag: hub.dTag,
@@ -523,6 +563,7 @@ export async function safePaginatedTreeUpdate(params: SafePaginatedTreeUpdatePar
       roles: hub.roles,
       minPow: hub.minPow > 0 ? hub.minPow : undefined,
       joinMinPow: hub.joinMinPow > 0 ? hub.joinMinPow : undefined,
+      messageExpiration: hub.messageExpiration || undefined, // preserve the disappearing-messages timer
       nsfw: hub.nsfw || undefined,
       discoverable: hub.discoverable,
       groupedRoles: hub.groupedRoles,
@@ -532,8 +573,16 @@ export async function safePaginatedTreeUpdate(params: SafePaginatedTreeUpdatePar
     const signedEvent = await mineAndSign(unsignedEvent, hub.minPow, hub.creatorPubkey, signer, privateKey)
     publishedCreatedAt = signedEvent.created_at
     onStep?.('Publishing to relays')
+    // CAS (version-agnostic): abort if another writer moved the index pointer since this op started
+    // (fail-closed — throws on move OR if the current state can't be confirmed).
+    const { casCheckIndex } = await import('@/lib/hub/hubMutationGuard')
+    await casCheckIndex(hub.dTag, hub.creatorPubkey, hub.indexFileHash)
     targetedRelays = getPublishRelays([...hub.generalRelays])
     publishedRelays = await publishToSpecificRelays(targetedRelays, signedEvent)
+    // publishToSpecificRelays returns [] (not a throw) when every relay rejected. If the new hub event
+    // landed nowhere, the cleanup below would delete the OLD index/spine/pages the still-live event points
+    // at → brick. Fail loudly instead so cleanup is skipped and the caller doesn't advance local state.
+    if (publishedRelays.length === 0) throw new Error('safePaginatedTreeUpdate: hub event not accepted by any relay')
   }
 
   // ── Step 10: Cleanup old files ──
@@ -560,10 +609,28 @@ export async function safePaginatedTreeUpdate(params: SafePaginatedTreeUpdatePar
     }
   }
 
+  // When skipPublish, the CALLER publishes the new hub event AFTER we return. Deleting the old blobs now
+  // would remove them while the LIVE hub event still points at the old index → any reader loading during
+  // the caller's publish window (or if that publish fails) can't fetch the tree. Defer: hand the hashes
+  // back for the caller to delete only after its own publish succeeds.
+  if (skipPublish) {
+    return {
+      newIndexHash,
+      newEpoch: epoch,
+      cleanedUpHashes,
+      deferredCleanupHashes: oldHashes,
+      eventCreatedAt: publishedCreatedAt,
+      uploadedServers: indexServerUrls,
+      targetedServers: hub.blossomServers,
+      publishedRelays,
+      targetedRelays,
+    }
+  }
+
   // Fire all cleanup deletes in parallel (best-effort, non-blocking)
   const cleanupResults = await Promise.allSettled(
     oldHashes.map(hash =>
-      deleteFromBlossom(hash, signer, privateKey, hub.blossomServers)
+      deleteFromBlossom(hash, signer, privateKey, hub.blossomServers, authSigner)
         .then(() => hash)
     )
   )
@@ -591,7 +658,7 @@ export async function safePaginatedTreeUpdate(params: SafePaginatedTreeUpdatePar
  * Verify a file exists on at least one Blossom server via HEAD request.
  * Throws if file cannot be found on any server.
  */
-async function verifyFileExists(hash: string, servers: string[]): Promise<void> {
+export async function verifyFileExists(hash: string, servers: string[]): Promise<void> {
   // Fire all HEAD requests simultaneously — resolve on first success
   try {
     await Promise.any(

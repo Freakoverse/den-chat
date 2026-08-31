@@ -13,6 +13,7 @@ import { useHubStore, type HideEntry } from '@/stores/hubStore'
 import { useUserStore } from '@/stores/userStore'
 import { getPermissionsForUser } from '@/lib/hub/permissions'
 import { KINDS } from '@/lib/crypto/constants'
+import { isV2 } from '@/lib/hub/version'
 
 /**
  * Parse a hide message event into a HideEntry, or null if invalid/deleted.
@@ -37,6 +38,7 @@ export function parseHideEvent(event: any): HideEntry | null {
     kind: kTag?.[1] ? parseInt(kTag[1], 10) : KINDS.MESSAGE,
     targetPubkey: pTag?.[1] || '',
     createdAt: event.created_at || 0,
+    channelId: event.tags?.find((t: string[]) => t[0] === 'c')?.[1],
   }
 }
 
@@ -56,13 +58,30 @@ export function useHideMessages(hubDTag: string | null) {
 
     const members = useHubStore.getState().hubMembers[hubDTag] || []
 
-    // Build list of pubkeys who can hide: creator + members with hide_messages permission
-    const authorizedPubkeys: string[] = [hub.creatorPubkey]
-    for (const m of members) {
-      if (m.pubkey === hub.creatorPubkey) continue
-      const perms = getPermissionsForUser(hub, m.pubkey, members)
-      if (perms.hide_messages) {
-        authorizedPubkeys.push(m.pubkey)
+    // Build the set of pubkeys allowed to hide. v1: real keys R (creator + hide_messages roles).
+    // v2: the pseudonyms P of those members (moderation is pseudonymous). We can authorize by P
+    // because members hold the roster (P→R map): a P is allowed iff its R has hide permission, or
+    // its R is the owner (R_owner, from the attestation). The owner's role is `O`, not R_owner, so
+    // `getPermissionsForUser` won't flag them — hence the explicit owner check.
+    const v2 = isV2(hub)
+    const authorizedPubkeys: string[] = []
+    // Query set = anyone who can hide at hub-level OR via ANY per-channel override (so channel-scoped
+    // moderators' hides are fetched); each fetched hide is then re-validated against ITS channel below.
+    const canHideAnywhere = (userKey: string) =>
+      getPermissionsForUser(hub, userKey, members).hide_messages
+      || (hub.channels || []).some(ch => getPermissionsForUser(hub, userKey, members, ch.channelId).hide_messages)
+    if (v2) {
+      // Owner authors hides as O (creatorPubkey — globally known, so cross-page verifiable).
+      authorizedPubkeys.push(hub.creatorPubkey)
+      for (const m of members) {
+        if (!m.p || m.pubkey === hub.ownerRealPubkey) continue // owner handled via O above
+        if (canHideAnywhere(m.pubkey)) authorizedPubkeys.push(m.p)
+      }
+    } else {
+      authorizedPubkeys.push(hub.creatorPubkey)
+      for (const m of members) {
+        if (m.pubkey === hub.creatorPubkey) continue
+        if (canHideAnywhere(m.pubkey)) authorizedPubkeys.push(m.pubkey)
       }
     }
 
@@ -84,8 +103,13 @@ export function useHideMessages(hubDTag: string | null) {
         for (const ev of events) {
           const entry = parseHideEvent(ev)
           if (!entry) continue
-          // Validate the author is still authorized
-          if (!authorizedPubkeys.includes(entry.hiderPubkey)) continue
+          // Re-validate the author is authorized to hide IN THIS HIDE'S CHANNEL (`c` tag) — not just at
+          // hub level — so a channel-scoped mod's out-of-channel hides aren't applied. Owner (O) always ok.
+          if (entry.hiderPubkey !== hub.creatorPubkey) {
+            const chId = ev.tags.find((t: string[]) => t[0] === 'c')?.[1]
+            const hiderR = v2 ? members.find(m => m.p === entry.hiderPubkey)?.pubkey : entry.hiderPubkey
+            if (!hiderR || !getPermissionsForUser(hub, hiderR, members, chId).hide_messages) continue
+          }
           entries[entry.ref] = entry
         }
 
@@ -149,12 +173,21 @@ export function processHideEvent(event: any, hubDTag: string) {
     return
   }
 
-  // Validate permission
-  const isCreator = event.pubkey === hub.creatorPubkey
-  if (!isCreator) {
-    const members = useHubStore.getState().hubMembers[hubDTag] || []
-    const perms = getPermissionsForUser(hub, event.pubkey, members)
-    if (!perms.hide_messages) return
+  // Validate permission. v2: the hider is a pseudonym P — map P→R via the roster, then check.
+  // Scope the check to the hidden message's CHANNEL (from the `c` tag) so PER-CHANNEL hide_messages
+  // overrides are honored — a mod restricted to certain channels can't hide elsewhere, and a mod granted
+  // hide only via a channel override isn't wrongly rejected. Absent `c` tag (legacy) → hub-level check.
+  const members = useHubStore.getState().hubMembers[hubDTag] || []
+  const hideChannelId = event.tags.find((t: string[]) => t[0] === 'c')?.[1]
+  if (isV2(hub)) {
+    if (event.pubkey !== hub.creatorPubkey) {
+      // Not the owner (who signs as O) — must be a same-page member with the hide role.
+      const hider = members.find(m => m.p === event.pubkey)
+      if (!hider || !getPermissionsForUser(hub, hider.pubkey, members, hideChannelId).hide_messages) return
+    }
+  } else {
+    const isCreator = event.pubkey === hub.creatorPubkey
+    if (!isCreator && !getPermissionsForUser(hub, event.pubkey, members, hideChannelId).hide_messages) return
   }
 
   useHubStore.getState().addHiddenMessage(hubDTag, entry)

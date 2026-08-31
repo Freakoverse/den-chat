@@ -18,11 +18,18 @@ export type { Attachment }
 import { publishEventProgressive, publishToSpecificRelays, assertPublished } from '@/lib/nostr/relay-pool'
 import { getPublishRelays, getDeletePublishRelays } from '@/stores/postingBehaviourStore'
 import { signWithSigner, mineAndSign, createMessageEvent, createDeletionEvent, createDeletedMessageEvent, createReactionEvent, createEditHintEvent } from '@/lib/nostr/events'
-import { nip19 } from 'nostr-tools'
+import { nip19, type Event } from 'nostr-tools'
 import { KINDS, STANDARD_KINDS } from '@/lib/crypto/constants'
 import { stampHubExpiration } from '@/lib/hub/messageExpiration'
 import { aesEncrypt, aesDecrypt } from '@/lib/crypto/aes'
 import { deriveChannelKey } from '@/lib/crypto/hkdf'
+import { makeSubkeySigner, mineAndSignAsSubkey } from '@/lib/nostr/v2send'
+import { buildIdentityTag, verifyEventIdentity } from '@/lib/nostr/identity'
+import { signHubMemberEvent, resolveV2PostingSigner } from '@/lib/hub/hubMemberSign'
+import { ChatContext, canUseV2 } from '@/lib/crypto/skd'
+import { isAuthorizedFacilitator } from '@/lib/hub/permissions'
+import { isV2 } from '@/lib/hub/version'
+import { filterCacheable } from '@/lib/hub/verifyMessageForCache'
 import { countLeadingZeroBits } from '@/lib/pow/pow'
 import { isClientTagEnabled } from '@/components/social/ComposeSettings'
 import { extractEmojiTags, encryptEmojiTags, decryptEmojiTags } from '@/lib/nostr/customEmoji'
@@ -58,10 +65,67 @@ export interface ChatMessage {
   stickerTags?: [string, string, string?][]  // decrypted sticker tags [shortcode, url, set-ref?]
   gifTags?: [string, string, string][]  // decrypted GIF tags [name, url, nsfw]
   expiration?: number   // NIP-40 expiration (unix seconds) — disappearing messages
+  /** v2: the real key R resolved from the encrypted `identity` tag. Display author
+   *  (name/avatar/own-message checks) should use this, not `pubkey` (= P). */
+  realPubkey?: string
+  /** v2: true when an `identity` tag is present but its per-message signature failed
+   *  to verify — such a message MUST NOT render (spoofed/tampered). */
+  identityInvalid?: boolean
 }
 
 /** Stable empty array to avoid Zustand selector returning new reference each render */
 const EMPTY_MESSAGES: RawChatMessage[] = []
+// Dedup set for lazy facilitator-member-list loads (`${dTag}:${facilitatorPubkey}`) — module-level
+// so a load is triggered at most once per facilitator across renders/components.
+const _facListLoadTriggered = new Set<string>()
+// Facilitators whose cached list we've already background-revalidated this session (once each).
+const _facListRevalidated = new Set<string>()
+
+/**
+ * Clear the module-level facilitator-load dedup sets. MUST be called on account switch — otherwise a
+ * `dTag:facilitatorPubkey` marked "loaded/revalidated" under the previous account suppresses the fetch
+ * for the new account, leaving a facilitated user with no vouched-member list until a hard reload.
+ */
+export function clearFacListDedup() {
+  _facListLoadTriggered.clear()
+  _facListRevalidated.clear()
+}
+
+
+/**
+ * Load a facilitator's vouched-member list into the store, with a few backoff retries.
+ *
+ * Why retry: `loadFacilitatorMemberList` returns an empty array on a transient relay miss (the
+ * facilitator's join request simply wasn't returned in time), not just on a real "no list". Without
+ * retry that transient empty would be treated as final and permanently hide the facilitator's
+ * vouched messages until an app restart — the exact "sometimes they never appear" symptom.
+ *
+ * On success we keep the dedup key (don't reload). On final give-up we RELEASE the key so a later
+ * decrypt pass (new messages, re-open) can try again. `revalidate` = we already have a cached list
+ * (possibly from localStorage): do a single quiet refresh and never clear a good cached value.
+ */
+async function loadFacListWithRetry(
+  hubForPerms: { dTag: string; blossomServers: string[] },
+  fac: string,
+  dTag: string,
+  cacheKey: string,
+  revalidate = false,
+): Promise<void> {
+  const delays = revalidate ? [0] : [0, 1500, 3000, 5000]
+  for (let i = 0; i < delays.length; i++) {
+    if (delays[i]) await new Promise((r) => setTimeout(r, delays[i]))
+    try {
+      const { loadFacilitatorMemberList } = await import('@/hooks/useHubLoader')
+      const list = await loadFacilitatorMemberList(hubForPerms, fac)
+      if (list.length > 0) {
+        useHubStore.getState().setHubFacilitatorMembers(dTag, fac, list)
+        return
+      }
+    } catch { /* fall through to retry */ }
+  }
+  // Ran out of attempts. For a fresh (non-cached) load, release the key so we can retry later.
+  if (!revalidate) _facListLoadTriggered.delete(cacheKey)
+}
 
 /**
  * Extract relay-queryable mention tags from plaintext message content.
@@ -219,8 +283,44 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
     return deriveChannelKey(secret, channelId, epoch)
   }, [hubDTag, channelId, secretsVersion])
 
+  // Resolve the epoch to STAMP on an outgoing content event for this channel. Group channels rotate on
+  // their OWN epoch counter (groupedRoles[].epoch), independent of the hub-wide epoch — and the write
+  // key comes from getChannelKey() at that group epoch. Stamping hub.epoch instead would let a reader
+  // whose group-epoch history happens to hold a secret at that same integer value derive the wrong key
+  // (group and hub epoch counters collide freely). Stamp the same epoch getChannelKey() encrypted with.
+  const getChannelEpoch = useCallback((): number => {
+    if (!hubDTag || !channelId) return 1
+    const hub = useHubStore.getState().hubs[hubDTag]
+    if (!hub) return 1
+    const channel = hub.channels.find(ch => ch.channelId === channelId)
+    let groupId: string | null = null
+    if (channel?.encryption) {
+      groupId = channel.encryption
+    } else if (channel?.synced && channel.categoryId) {
+      const cat = hub.categories.find(c => c.categoryId === channel.categoryId)
+      if (cat?.encryption) groupId = cat.encryption
+    }
+    if (groupId) {
+      const group = hub.groupedRoles?.find(g => g.groupId === groupId)
+      return group?.epoch || 1
+    }
+    return hub.epoch || 1
+  }, [hubDTag, channelId, secretsVersion])
+
+  // Decrypt+verify result cache, keyed by message id. The decrypt effect re-fires on EVERY `addMessage`
+  // (rawMessages is a fresh array ref each time) — during hub-open, dozens of cache-ingest + subscription
+  // batches stream in, so without this every pass would re-run the SYNCHRONOUS schnorr verify
+  // (verifyEventIdentity) + AES decrypt for the whole channel, freezing the main thread for seconds. The
+  // signature captures everything the decrypted result depends on beyond the (immutable-per-id) event:
+  // the secrets generation (a key may have just loaded) and the mutable deleted/edited flags. A hit skips
+  // all crypto. Cleared on channel switch (below) to bound growth.
+  const decryptCacheRef = useRef<Map<string, { sig: string; result: ChatMessage }>>(new Map())
+
   // Decrypt a raw message using its epoch tag for the correct key
   const decryptContent = useCallback(async (raw: RawChatMessage): Promise<ChatMessage> => {
+    const sig = `${secretsVersion}|${raw.deleted ? 1 : 0}|${raw.edited ? 1 : 0}`
+    const cached = decryptCacheRef.current.get(raw.id)
+    if (cached && cached.sig === sig) return cached.result
     const key = getChannelKey(raw.epoch)
     let content = raw.content
     let decrypted = false
@@ -279,10 +379,27 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
       gifTags = await decryptGifTags(raw.rawEvent, channelKey)
     }
 
-    return {
+    // v2 identity — resolve the real key R for display and validate the
+    // per-message signature (drop-rule stage 2, NIP-CHAT §0.1).
+    let realPubkey: string | undefined
+    let identityInvalid = false
+    const hubForId = raw.hubDTag ? useHubStore.getState().hubs[raw.hubDTag] : null
+    if (hubForId && isV2(hubForId) && raw.rawEvent && channelKey) {
+      try {
+        const res = await verifyEventIdentity(JSON.parse(raw.rawEvent) as Event, channelKey)
+        if (res.ok) realPubkey = res.rPub
+        else identityInvalid = true
+      } catch {
+        identityInvalid = true
+      }
+    }
+
+    const result: ChatMessage = {
       id: raw.id,
       dTag: raw.dTag,
       pubkey: raw.pubkey,
+      realPubkey,
+      identityInvalid: identityInvalid || undefined,
       content,
       timestamp: raw.createdAt,
       replyTo: raw.replyTo,
@@ -305,7 +422,15 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
       stickerTags,
       gifTags,
     }
-  }, [getChannelKey])
+    decryptCacheRef.current.set(raw.id, { sig, result })
+    return result
+  }, [getChannelKey, secretsVersion])
+
+  // Bound the decrypt cache — drop it when the channel changes (message ids are globally unique, so a stale
+  // entry is never wrong, but this keeps the map from growing unbounded across channel switches).
+  useEffect(() => {
+    decryptCacheRef.current.clear()
+  }, [hubDTag, channelId])
 
   // Clear unread when viewing a hub
   useEffect(() => {
@@ -319,6 +444,14 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
   // cleaned up once the pipeline produces the same message (matched by dTag).
   const selfDecryptedRef = useRef<Map<string, ChatMessage>>(new Map())
 
+  // IDs we've already run the durable-cache re-sweep over (see the effect below), so a re-sweep
+  // never re-touches IndexedDB for the same message twice WITHIN one secrets generation. The set is
+  // cleared whenever `secretsVersion` advances (a key just loaded), so every message is re-evaluated
+  // exactly once per key-load — otherwise a message skipped for a not-yet-loaded key would be marked
+  // swept and never persisted after its key arrives.
+  const cacheSweptRef = useRef<Set<string>>(new Set())
+  const cacheSweptVersionRef = useRef<number>(-1)
+
   // Decrypt raw messages whenever they change
   // NOTE: We intentionally do NOT include `hubs` in the dependency array.
   // The hubs object changes frequently during startup (metadata, members,
@@ -326,6 +459,16 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
   // via the `cancelled` flag — causing recently-injected messages to vanish.
   // minPow is read from a Zustand snapshot instead. The `decryptContent`
   // callback already reacts to key changes via `secretsVersion`.
+  //
+  // Reactive: re-run the filter when a facilitator's member list loads (lazily, below) so a
+  // facilitated author's messages appear once their facilitator's tree is fetched. This changes
+  // only on a facilitator-list load (rare) — unlike `hubs`, so it won't churn the async decrypt.
+  const facilitatorMembersReactive = useHubStore((s) => (hubDTag ? s.hubFacilitatorMembers[hubDTag] : undefined))
+  // Reactive so the filter re-runs when: the member list loads (else the lazy facilitator load is
+  // skipped and never retried until a new message arrives → facilitated messages "sometimes don't
+  // appear"); and when the "show facilitated messages" pref toggles (else the toggle does nothing).
+  const hubMembersReactive = useHubStore((s) => (hubDTag ? s.hubMembers[hubDTag] : undefined))
+  const showFacilitatedReactive = useHubStore((s) => (hubDTag ? s.hubPrefs[hubDTag]?.showFacilitatedMessages : undefined))
   useEffect(() => {
     if (rawMessages.length === 0) {
       // Even with no raw messages, show any self-decrypted cache entries
@@ -363,6 +506,7 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
         // Apply hub prefs visibility filtering
         const prefs = hubDTag ? useHubStore.getState().hubPrefs[hubDTag] : undefined
         const members = hubDTag ? useHubStore.getState().hubMembers[hubDTag] : undefined
+        const hubForPerms = hubDTag ? useHubStore.getState().hubs[hubDTag] : undefined
         const banList = hubDTag ? useHubStore.getState().hubBanLists[hubDTag] : undefined
         const facMembers = hubDTag ? useHubStore.getState().hubFacilitatorMembers[hubDTag] : undefined
         const modBans = hubDTag ? useHubStore.getState().modBanLists[hubDTag] : undefined
@@ -384,17 +528,55 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
         const showFacilitated = prefs?.showFacilitatedMessages ?? true
         const hideNonMember = useHubStore.getState().hideNonMemberMessages
 
+        // Lazily load the member list of any facilitator referenced by a message we can't yet
+        // validate — so members (who never load facilitator trees themselves) can still show
+        // facilitated messages. Only facilitators actually cited by a message, once each, in the
+        // background; once loaded, `hubFacilitatorMembers` updates and this re-filters to show them.
+        if (hubForPerms && members) {
+          const refFac = new Set<string>()
+          for (const m of decrypted) if (m.facilitator) refFac.add(m.facilitator)
+          for (const fac of refFac) {
+            const cacheKey = `${hubDTag}:${fac}`
+            if (!isAuthorizedFacilitator(hubForPerms, fac, members)) continue // member (by P or R) with the permission
+            if (facMembers?.[fac]) {
+              // Already have a list (in memory or restored from localStorage) — messages show
+              // immediately. Quietly revalidate once per session to pick up any add/remove.
+              if (_facListRevalidated.has(cacheKey)) continue
+              _facListRevalidated.add(cacheKey)
+              loadFacListWithRetry(hubForPerms, fac, hubDTag!, cacheKey, true)
+            } else {
+              // No list yet — load it with backoff retries (a transient relay miss otherwise
+              // hides this facilitator's vouched messages until restart).
+              if (_facListLoadTriggered.has(cacheKey)) continue
+              _facListLoadTriggered.add(cacheKey)
+              loadFacListWithRetry(hubForPerms, fac, hubDTag!, cacheKey, false)
+            }
+          }
+        }
+
         const visible = decrypted.filter((msg) => {
+          // v2 drop rule stage 2: hide messages whose identity attestation failed
+          // to verify (spoofed/tampered `identity` tag) — NIP-CHAT §0.1.
+          if (msg.identityInvalid) return false
+          // Author's real key: v2 resolves R from the identity tag; v1 uses the
+          // wire pubkey. Membership/bans/own-message all key on the real key.
+          const authorKey = msg.realPubkey ?? msg.pubkey
           // Always show own messages
-          if (msg.pubkey === pubkey) return true
+          if (authorKey === pubkey) return true
           // Never show messages from banned users
-          if (bannedPubkeys.has(msg.pubkey)) return false
+          if (bannedPubkeys.has(authorKey)) return false
           // Members always shown
-          if (memberPubkeys.size === 0 || memberPubkeys.has(msg.pubkey)) return true
-          // Facilitated messages — verify facilitator is a member AND author is in facilitator's tree
-          if (msg.facilitator && memberPubkeys.has(msg.facilitator)) {
-            const isInFacTree = facMembers?.[msg.facilitator]?.includes(msg.pubkey)
-            if (isInFacTree) return showFacilitated
+          if (memberPubkeys.size === 0 || memberPubkeys.has(authorKey)) return true
+          // Facilitated messages — the facilitator must (a) be a member, (b) still hold the
+          // `facilitate` permission (revoking the role/permission hides everyone they vouched),
+          // and (c) actually have this author in their tree.
+          if (msg.facilitator && hubForPerms) {
+            // The facilitator must be a member who still holds `facilitate` (resolved by P OR R, since
+            // the tag carries the on-wire key — P in v2, R in v1), AND the ON-WIRE author (msg.pubkey:
+            // Pf in v2, R in v1) must be a leaf in their tree — exactly what the tree is keyed on.
+            const facAuthorized = isAuthorizedFacilitator(hubForPerms, msg.facilitator, members)
+            const isInFacTree = !!facMembers?.[msg.facilitator]?.includes(msg.pubkey)
+            if (facAuthorized && isInFacTree) return showFacilitated
           }
           // Non-member without valid facilitation — respect hideNonMemberMessages toggle
           return !hideNonMember
@@ -422,7 +604,41 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
     })
 
     return () => { cancelled = true }
-  }, [rawMessages, decryptContent, hubDTag, pubkey])
+  }, [rawMessages, decryptContent, hubDTag, pubkey, facilitatorMembersReactive, hubMembersReactive, showFacilitatedReactive])
+
+  // Durable-cache re-sweep for v2 (companion to the verify-before-cache gate).
+  // The cache-admission gate (verifyMessageForCache) refuses to persist a v2 message whose channel key
+  // isn't loaded yet — correct at ingest, but it means messages that arrived BEFORE the secret loaded
+  // (notably history-paginated ones, which are only evaluated once) are never written to IndexedDB. When
+  // the key later becomes available (secretsVersion bumps), re-run the gate over the current channel's raw
+  // store messages and persist the ones that now verify. `cacheSweptRef` bounds this to one attempt per id
+  // so it isn't hammering IndexedDB on every unrelated rawMessages change. v1/unknown hubs cache eagerly at
+  // ingest and don't need this.
+  useEffect(() => {
+    if (!hubDTag || !channelId) return
+    const hub = useHubStore.getState().hubs[hubDTag]
+    if (!hub || !isV2(hub)) return
+    // A key just loaded → forget prior verdicts and re-evaluate everything once. (A channel switch needs
+    // no reset: the new channel's messages have ids not yet in the set, so they're evaluated anyway.)
+    if (cacheSweptVersionRef.current !== secretsVersion) {
+      cacheSweptRef.current.clear()
+      cacheSweptVersionRef.current = secretsVersion
+    }
+    const pending = rawMessages.filter((m) => !cacheSweptRef.current.has(m.id))
+    if (pending.length === 0) return
+    let cancelled = false
+    ;(async () => {
+      const cacheable = await filterCacheable(pending)
+      if (cancelled) return
+      // Mark every message we examined (not just the cacheable ones) so an un-verifiable message isn't
+      // re-checked forever; it re-enters the set only if the store hands us a fresh object for that id.
+      for (const m of pending) cacheSweptRef.current.add(m.id)
+      if (cacheable.length === 0) return
+      const { cacheMessagesWithDedup } = await import('@/lib/cache/messageCache')
+      cacheMessagesWithDedup(cacheable).catch(() => { /* non-fatal; re-fetched from relays otherwise */ })
+    })()
+    return () => { cancelled = true }
+  }, [rawMessages, hubDTag, channelId, secretsVersion])
 
   // Send a message
   const sendMessage = useCallback(async (
@@ -441,9 +657,13 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
   ) => {
     if (!hubDTag || !channelId || (!signer && !privateKey)) return
 
-    // Determine if we should encrypt (default: yes if we have a key)
+    // Determine if we should encrypt (default: yes if we have a key). Snapshot the epoch FIRST, then derive
+    // the key FOR THAT epoch, so the key and the stamped epoch are consistent even if a rotation (kick/ban)
+    // lands mid-send. Reading them separately (key now, epoch after the await) could encrypt with the old
+    // key but stamp the new epoch → every reader derives the wrong key → on v2 the message is DROPPED.
     const shouldEncrypt = encrypted !== false
-    const key = shouldEncrypt ? getChannelKey() : null
+    const epoch = getChannelEpoch()
+    const key = shouldEncrypt ? getChannelKey(epoch) : null
 
     // Guard: don't send to an encrypted channel without a key.
     // During startup, the hub secret may still be loading. Sending plaintext
@@ -481,12 +701,24 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
       throw new Error('Hub data not loaded yet')
     }
     const minPow = hub.minPow || 0
-    const epoch = hub.epoch || 1
+    // epoch was snapshotted above (before key derivation) so the key and stamp stay consistent
 
     // Extract mention tags from plaintext for relay-queryable p and M tags
     const { mentionPubkeys, mentionGroups } = extractMentionTags(text, hubDTag!)
 
-    let unsigned = createMessageEvent(content, hubDTag, channelId, epoch, replyTo, undefined, rootRef, nsfw, isThread, facilitator, !!forumFields, mentionPubkeys.length > 0 ? mentionPubkeys : undefined, mentionGroups.length > 0 ? mentionGroups : undefined)
+    // Only a genuinely-facilitated (non-member) author tags a message with `facilitator`. Guard
+    // against a stale `facilitator` pref leaking onto a member/creator's own posts (which would
+    // wrongly show the "facilitated" pill). The roster keys members by real key R in BOTH versions,
+    // so `pubkey (R) ∈ members` (or creator/owner) is the correct membership check for v1 and v2.
+    let effectiveFacilitator = facilitator
+    if (facilitator) {
+      const members = useHubStore.getState().hubMembers[hubDTag!]
+      const amMember = pubkey === hub.creatorPubkey || pubkey === hub.ownerRealPubkey
+        || !!members?.some((m) => m.pubkey === pubkey)
+      if (amMember) effectiveFacilitator = undefined
+    }
+
+    let unsigned = createMessageEvent(content, hubDTag, channelId, epoch, replyTo, undefined, rootRef, nsfw, isThread, effectiveFacilitator, !!forumFields, (isV2(hub) ? undefined : (mentionPubkeys.length > 0 ? mentionPubkeys : undefined)), mentionGroups.length > 0 ? mentionGroups : undefined)
 
     // Tag with the original publication time — edits carry this forward so
     // all clients can order the message at its original position
@@ -521,9 +753,27 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
     // part of the id the PoW is mined over).
     stampHubExpiration(unsigned, hubDTag!)
 
-    // Mine PoW + sign (with automatic retry if signer invalidates PoW)
+    // Mine PoW + sign. v2 hubs author under the member pseudonym P with a
+    // per-message identity attestation; v1 authors under the real key.
     if (minPow > 0) onPhase?.('mining')
-    const signed = await mineAndSign(unsigned, minPow, pubkey, signer, privateKey)
+    let signed: Event
+    if (isV2(hub)) {
+      if (!canUseV2({ privateKey, signer })) {
+        throw new Error('This hub is private (v2) — use the DEN client or a NIP-SKD signer to post here.')
+      }
+      if (!key) throw new Error('v2 hub requires an encryption key (hub secret still loading)')
+      // Author under P (real member) or Pf (facilitated non-member) — see myV2PostingSigner.
+      const pSigner = await resolveV2PostingSigner(hub, pubkey!, privateKey, signer)
+      const pPub = await pSigner.getPublicKey()
+      // Author as P, then attach the per-message R attestation — BEFORE mining
+      // (the digest excludes the identity + nonce tags, so it stays stable).
+      unsigned = { ...unsigned, pubkey: pPub }
+      const identityTag = await buildIdentityTag(unsigned, pubkey ?? '', signer, privateKey, key)
+      unsigned = { ...unsigned, tags: [...unsigned.tags, identityTag] }
+      signed = await mineAndSignAsSubkey(unsigned, minPow, pSigner)
+    } else {
+      signed = await mineAndSign(unsigned, minPow, pubkey, signer, privateKey)
+    }
 
     const sentDTag = unsigned.tags.find((t: string[]) => t[0] === 'd')![1]
     onPhase?.('publishing', { confirmed: 0, total: 0 }, sentDTag)
@@ -548,7 +798,7 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
       isForum: !!forumFields,
       rawEvent: JSON.stringify(signed),
       clientTag: isClientTagEnabled() ? 'DEN Chat' : undefined,
-      facilitator: facilitator,
+      facilitator: effectiveFacilitator,
       expiration: (() => { const e = signed.tags.find((t: string[]) => t[0] === 'expiration')?.[1]; return e ? (parseInt(e, 10) || undefined) : undefined })(),
     }
 
@@ -564,6 +814,10 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
       id: signed.id,
       dTag: ownMsg.dTag,
       pubkey: signed.pubkey,
+      // On v2 the on-wire author is our pseudonym P; the real author is R (our own pubkey). Set realPubkey
+      // now so the optimistic render resolves the same identity the echoed-back event will (parseMessage
+      // recovers R from the attestation) — otherwise the avatar/name briefly shows P, then flips to R.
+      realPubkey: isV2(hub) ? (pubkey ?? undefined) : undefined,
       content: text,          // use original user text, not JSON-wrapped plaintext
       timestamp: ownMsg.createdAt,
       replyTo: ownMsg.replyTo,
@@ -575,7 +829,7 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
       attachments: (attachments && attachments.length > 0) ? attachments : undefined,
       nsfw: nsfw,
       clientTag: ownMsg.clientTag,
-      facilitator: facilitator,
+      facilitator: effectiveFacilitator,
       isForum: !!forumFields,
       title: forumFields?.title,
       featuredImage: forumFields?.featuredImage,
@@ -595,7 +849,7 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
     // Progress callbacks update relay indicators; if ALL relays reject,
     // the onPhase callback notifies the component to show a failed state.
     const hubRelays = hub?.generalRelays || []
-    const publishRelays = getPublishRelays(hubRelays)
+    const publishRelays = getPublishRelays(hubRelays, { hubOnly: !!hub && isV2(hub) })
     const { setRelayProgress, clearRelayProgress } = useMessageStore.getState()
 
     // Seed relay progress at 0/N immediately so the counter is visible
@@ -611,10 +865,13 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
         }, publishRelays)
 
         if (accepted.length === 0) {
-          // All relays rejected — remove from local store to avoid phantom message
+          // All relays rejected — remove from local store AND the durable cache to avoid a phantom message.
+          // ownMsg was written to IndexedDB before publishing (optimistic); without this delete it resurrects
+          // as a "sent" message on the next reload even though no relay ever accepted it.
           useMessageStore.getState().removeMessage(hubDTag!, channelId!, ownMsg.dTag)
           selfDecryptedRef.current.delete(ownMsg.dTag)
           setDecryptedMessages((prev) => prev.filter((m) => !(m.dTag === ownMsg.dTag && m.pubkey === signed.pubkey)))
+          import('@/lib/cache/messageCache').then(({ deleteCachedMessage }) => deleteCachedMessage(ownMsg.id).catch(() => {}))
           onPhase?.('publishing', { confirmed: 0, total: publishRelays.length })
           throw new Error('Message rejected by all relays')
         }
@@ -641,7 +898,21 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
   ) => {
     if (!hubDTag || !channelId || (!signer && !privateKey)) return
 
-    const key = getChannelKey()
+    // Snapshot the epoch FIRST, derive the key for THAT epoch (see sendMessage): keeps the encryption key
+    // and the stamped epoch consistent if a rotation lands mid-edit, else the edit is undecryptable/dropped.
+    const editEpoch = getChannelEpoch()
+    const key = getChannelKey(editEpoch)
+
+    // Fail CLOSED on a missing key (mirror sendMessage's guard). On a v2 hub every channel is encrypted, so
+    // a null key means the secret isn't loaded yet (e.g. mid-rotation) — NOT an unencrypted channel. Without
+    // this, the edit body below stays plaintext (the `if (key)` at ~line 900 is skipped) and gets published
+    // to the hub relays in the clear, AND signHubMemberEvent attaches no identity attestation (it needs the
+    // channel key) so every reader drops the event: the plaintext leaks on-wire while the edit silently
+    // vanishes for everyone. (v1 is left alone — its getChannelKey is legitimately null for public channels.)
+    const hubForEdit = useHubStore.getState().hubs[hubDTag]
+    if (!key && hubForEdit && isV2(hubForEdit)) {
+      throw new Error('Encryption key not ready — hub secret is still loading')
+    }
 
     // Wrap as JSON if attachments, nsfw, or forum fields present (same as sendMessage)
     let plaintext = newText
@@ -673,14 +944,23 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
 
     const hub = useHubStore.getState().hubs[hubDTag!]
     const minPow = hub?.minPow || 0
-    const epoch = hub?.epoch || 1
+    const epoch = editEpoch // same snapshot the key was derived from (above)
+    // v2: messages are stored + addressed by the member pseudonym P; edits key on it too.
+    let authorKey = pubkey!
+    if (hub && isV2(hub)) {
+      authorKey = await (await resolveV2PostingSigner(hub, pubkey!, privateKey, signer)).getPublicKey()
+    }
     // Re-publish with same d-tag — relay replaces the previous version
     // Extract mention tags from edited text for relay-queryable p and M tags
     const { mentionPubkeys, mentionGroups } = extractMentionTags(newText, hubDTag!)
 
     // Preserve nsfw + thread markers on edit — otherwise an edited thread-reply
     // loses its ['thread'] tag and re-renders as a normal reply in the main chat.
-    let unsigned = createMessageEvent(content, hubDTag, channelId, epoch, replyToObj, dTag, rootRef, nsfw, isThread, undefined, !!forumFields, mentionPubkeys.length > 0 ? mentionPubkeys : undefined, mentionGroups.length > 0 ? mentionGroups : undefined)
+    // Also preserve the original `facilitator` tag: a facilitated author's edit must keep it, or the
+    // edited message fails the facilitated-visibility check and is hidden for everyone.
+    const origMsg = useMessageStore.getState().messages[hubDTag!]?.[channelId!]?.find((m) => m.dTag === dTag)
+    const editFacilitator = origMsg?.facilitator
+    let unsigned = createMessageEvent(content, hubDTag, channelId, epoch, replyToObj, dTag, rootRef, nsfw, isThread, editFacilitator, !!forumFields, (isV2(hub) ? undefined : (mentionPubkeys.length > 0 ? mentionPubkeys : undefined)), mentionGroups.length > 0 ? mentionGroups : undefined)
 
     // Carry forward published_at from the original message so the edited
     // version stays at its original position in the timeline for all clients.
@@ -688,7 +968,7 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
     // but keeps the event in its original chronological bucket (prevents
     // edited old messages from stealing slots in limit-based fetches).
     const existingMessages = useMessageStore.getState().messages[hubDTag]?.[channelId] || []
-    const originalMsg = existingMessages.find((m) => m.dTag === dTag && m.pubkey === pubkey)
+    const originalMsg = existingMessages.find((m) => m.dTag === dTag && m.pubkey === authorKey)
     if (originalMsg) {
       // +1 from the actual event timestamp (not published_at) so repeated edits accumulate
       const prevEventTs = originalMsg.eventCreatedAt || originalMsg.createdAt
@@ -726,16 +1006,18 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
     }
 
     // Mine PoW + sign (with automatic retry if signer invalidates PoW)
-    const signed = await mineAndSign(unsigned, minPow, pubkey, signer, privateKey)
+    const signed = await (hub
+      ? signHubMemberEvent({ hub, unsigned, pubkey: pubkey!, privateKey, signer, minPow, channelKey: key })
+      : mineAndSign(unsigned, minPow, pubkey, signer, privateKey))
     const eventId = signed.id
     const hubRelays = useHubStore.getState().hubs[hubDTag!]?.generalRelays || []
-    const publishRelays = getPublishRelays(hubRelays)
+    const publishRelays = getPublishRelays(hubRelays, { hubOnly: !!hub && isV2(hub) })
 
     // Optimistic local update — immediately reflect the edit in the UI
     // Uses the new event ID so RelayProgressIndicator can track publish progress
     const { setRelayProgress, clearRelayProgress, updateMessageContent } = useMessageStore.getState()
     updateMessageContent(
-      hubDTag!, channelId!, dTag, pubkey!,
+      hubDTag!, channelId!, dTag, authorKey,
       content, // the (possibly encrypted) content — store holds raw content
       signed.created_at,
       eventId,
@@ -748,7 +1030,7 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
     // Same pattern as sendMessage (line 534).
     // Uses functional updater to avoid stale closure on decryptedMessages.
     setDecryptedMessages((prev) => {
-      const existingDecrypted = prev.find((m) => m.dTag === dTag && m.pubkey === pubkey)
+      const existingDecrypted = prev.find((m) => m.dTag === dTag && m.pubkey === authorKey)
       if (!existingDecrypted) return prev
       const selfEditedMsg: ChatMessage = {
         ...existingDecrypted,
@@ -764,7 +1046,7 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
         forumTags: forumFields?.tags,
       }
       selfDecryptedRef.current.set(dTag, selfEditedMsg)
-      return prev.map((m) => (m.dTag === dTag && m.pubkey === pubkey) ? selfEditedMsg : m)
+      return prev.map((m) => (m.dTag === dTag && m.pubkey === authorKey) ? selfEditedMsg : m)
     })
 
     // Persist edited message to IndexedDB cache so the stale pre-edit version
@@ -809,7 +1091,7 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
     // Fire-and-forget — hint failure should not affect the edit itself.
     // Uses mineAndSign to meet hub PoW difficulty (prevents amplification abuse, §6.13).
     const hintUnsigned = createEditHintEvent(hubDTag!, dTag, channelId!)
-    mineAndSign(hintUnsigned, minPow, pubkey, signer, privateKey)
+    ;(hub ? signHubMemberEvent({ hub, unsigned: hintUnsigned, pubkey: pubkey!, privateKey, signer, minPow }) : mineAndSign(hintUnsigned, minPow, pubkey, signer, privateKey))
       .then((hintSigned) => {
         console.log(`[EditHint] Publishing hint id=${hintSigned.id.slice(0, 12)}… kind=${hintSigned.kind} to ${publishRelays.length} relays, tags=${JSON.stringify(hintSigned.tags)}`)
         return publishToSpecificRelays(publishRelays, hintSigned)
@@ -831,25 +1113,36 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
   const deleteMessage = useCallback(async (dTag: string) => {
     if (!hubDTag || !channelId || (!signer && !privateKey) || !pubkey) return
 
-    // Look up original message timestamp for created_at + 1 ordering
-    const existingMessages = useMessageStore.getState().messages[hubDTag]?.[channelId] || []
-    const originalMsg = existingMessages.find((m) => m.dTag === dTag && m.pubkey === pubkey)
-    const originalCreatedAt = originalMsg?.eventCreatedAt || originalMsg?.createdAt
-
     // 1. Re-publish with same d-tag + deleted tag (primary — replaces original on relay)
     const hub = useHubStore.getState().hubs[hubDTag!]
-    const epoch = hub?.epoch || 1
+    const epoch = getChannelEpoch()
+    const key = getChannelKey()
+    // v2: messages are stored + addressed by P; the tombstone + kind-5 must author as P too.
+    let authorKey = pubkey!
+    if (hub && isV2(hub)) {
+      authorKey = await (await resolveV2PostingSigner(hub, pubkey!, privateKey, signer)).getPublicKey()
+    }
+
+    // Look up original message timestamp for created_at + 1 ordering
+    const existingMessages = useMessageStore.getState().messages[hubDTag]?.[channelId] || []
+    const originalMsg = existingMessages.find((m) => m.dTag === dTag && m.pubkey === authorKey)
+    const originalCreatedAt = originalMsg?.eventCreatedAt || originalMsg?.createdAt
+
     const deletedEvent = createDeletedMessageEvent(dTag, hubDTag, channelId, epoch, originalCreatedAt)
-    const signedDeleted = await signWithSigner(deletedEvent, signer, privateKey)
+    const signedDeleted = await (hub
+      ? signHubMemberEvent({ hub, unsigned: deletedEvent, pubkey: pubkey!, privateKey, signer, channelKey: key })
+      : signWithSigner(deletedEvent, signer, privateKey))
     const hubRelays = useHubStore.getState().hubs[hubDTag!]?.generalRelays || []
-    const publishRelays = getPublishRelays(hubRelays)
-    const deleteRelays = getDeletePublishRelays(hubRelays)
+    const publishRelays = getPublishRelays(hubRelays, { hubOnly: !!hub && isV2(hub) })
+    const deleteRelays = getDeletePublishRelays(hubRelays, { hubOnly: !!hub && isV2(hub) })
     await publishToSpecificRelays(deleteRelays, signedDeleted)
 
-    // 2. NIP-09 deletion request as fallback
-    const aRef = `${KINDS.MESSAGE}:${pubkey}:${dTag}`
+    // 2. NIP-09 deletion request as fallback (authored by P in v2 so relays honor it)
+    const aRef = `${KINDS.MESSAGE}:${authorKey}:${dTag}`
     const deletionEvent = createDeletionEvent([], [aRef], 'User requested deletion')
-    const signedDeletion = await signWithSigner(deletionEvent, signer, privateKey)
+    const signedDeletion = await (hub
+      ? signHubMemberEvent({ hub, unsigned: deletionEvent, pubkey: pubkey!, privateKey, signer })
+      : signWithSigner(deletionEvent, signer, privateKey))
     await publishToSpecificRelays(deleteRelays, signedDeletion)
 
     // Mark deleted locally for immediate UI feedback
@@ -883,7 +1176,7 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
     // Fire-and-forget — hint failure should not affect the deletion itself.
     const minPow = hub?.minPow || 0
     const hintUnsigned = createEditHintEvent(hubDTag!, dTag, channelId!)
-    mineAndSign(hintUnsigned, minPow, pubkey, signer, privateKey)
+    ;(hub ? signHubMemberEvent({ hub, unsigned: hintUnsigned, pubkey: pubkey!, privateKey, signer, minPow }) : mineAndSign(hintUnsigned, minPow, pubkey, signer, privateKey))
       .then((hintSigned) => {
         console.log(`[DeleteHint] Publishing hint id=${hintSigned.id.slice(0, 12)}… kind=${hintSigned.kind} to ${publishRelays.length} relays`)
         return publishToSpecificRelays(publishRelays, hintSigned)
@@ -908,7 +1201,7 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
 
     const key = getChannelKey()
     const hub = useHubStore.getState().hubs[hubDTag!]
-    const epoch = hub?.epoch || 1
+    const epoch = getChannelEpoch()
 
     // Encrypt emoji content
     let content = emoji
@@ -937,9 +1230,11 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
     // Disappearing messages: a reaction expires with the hub timer too.
     stampHubExpiration(unsigned, hubDTag!)
 
-    const signed = await signWithSigner(unsigned, signer, privateKey)
+    const signed = await (hub
+      ? signHubMemberEvent({ hub, unsigned, pubkey: pubkey!, privateKey, signer, channelKey: key })
+      : signWithSigner(unsigned, signer, privateKey))
     const hubRelays = hub?.generalRelays || []
-    const publishRelays = getPublishRelays(hubRelays)
+    const publishRelays = getPublishRelays(hubRelays, { hubOnly: !!hub && isV2(hub) })
 
     // Mark as processed to avoid dedup with subscription
     useMessageStore.getState().markReactionProcessed(signed.id)
@@ -955,11 +1250,13 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
 
     const hub = useHubStore.getState().hubs[hubDTag!]
     const hubRelays = hub?.generalRelays || []
-    const publishRelays = getDeletePublishRelays(hubRelays)
+    const publishRelays = getDeletePublishRelays(hubRelays, { hubOnly: !!hub && isV2(hub) })
 
-    // Kind 5 deletion request for the reaction event
+    // Kind 5 deletion request for the reaction event (authored by P in v2)
     const deletionEvent = createDeletionEvent([reactionEventId], [], 'User removed reaction')
-    const signedDeletion = await signWithSigner(deletionEvent, signer, privateKey)
+    const signedDeletion = await (hub
+      ? signHubMemberEvent({ hub, unsigned: deletionEvent, pubkey: pubkey!, privateKey, signer })
+      : signWithSigner(deletionEvent, signer, privateKey))
     await publishToSpecificRelays(publishRelays, signedDeletion)
   }, [hubDTag, channelId, signer, privateKey])
 

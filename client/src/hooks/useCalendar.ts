@@ -23,6 +23,10 @@ import {
   mineAndSign,
 } from '@/lib/nostr/events'
 import { stampHubExpiration } from '@/lib/hub/messageExpiration'
+import { signHubMemberEvent, resolveV2PostingSigner } from '@/lib/hub/hubMemberSign'
+import { isV2 } from '@/lib/hub/version'
+import { verifyEventIdentity } from '@/lib/nostr/identity'
+import { resolveMemberPubkey } from '@/lib/hub/resolveMemberPubkey'
 import { KINDS } from '@/lib/crypto/constants'
 import { aesEncrypt, aesDecrypt } from '@/lib/crypto/aes'
 import { deriveEventsKey } from '@/lib/crypto/hkdf'
@@ -35,7 +39,15 @@ import { isClientTagEnabled } from '@/components/social/ComposeSettings'
 
 export interface DecryptedCalendarEvent {
   id: string
+  /** Wire author: the member pseudonym `P` on v2, the real key `R` on v1. */
   pubkey: string
+  /**
+   * The author's **real key `R`**, for attribution + own-event controls. On v2 it is resolved from
+   * the event's `identity` tag (cryptographically verified, unforgeable even by the owner); if that
+   * tag can't be verified we fall back to the roster (`P → R`), then to the wire key. On v1 it equals
+   * `pubkey`.
+   */
+  realPubkey: string
   dTag: string
   createdAt: number
   title: string
@@ -51,7 +63,10 @@ export interface DecryptedCalendarEvent {
 }
 
 export interface DecryptedRsvp {
+  /** Wire author: `P` on v2, `R` on v1. */
   pubkey: string
+  /** Real key `R` — identity-tag-verified on v2 (roster/wire fallback), equals `pubkey` on v1. */
+  realPubkey: string
   dTag: string
   status: 'accepted' | 'declined' | 'tentative'
   note?: string
@@ -140,6 +155,38 @@ export function useCalendar(hubDTag: string | null) {
     return deriveEventsKey(secret, hubDTag, epoch)
   }, [hubDTag, hubSecrets, hubs])
 
+  // Resolve an event/RSVP author's real key `R` for attribution + own-item controls. On v2 the wire
+  // author is a pseudonym `P`; the event's `identity` tag is `R`'s attestation, UNFORGEABLE even by the
+  // owner (who can author as any member's `P` but cannot produce `R`'s signature over the event digest).
+  //
+  // CRITICAL: a present-but-INVALID identity tag is a FORGERY signal — we must NOT then roster-resolve
+  // `P→R`, or we'd re-attribute the forged event to the victim's real key (fake own-item controls, the
+  // victim's name/face on an event they never made). So: identity tag present ⇒ it must verify, else
+  // return the wire `P` (shows as an unrecognized pseudonym, never the victim). The roster fallback is
+  // reserved for the genuinely tag-LESS case (legacy/edge; on v2 every current-epoch member event
+  // carries a tag, and a facilitated `Pf` with no roster entry degrades to `P`). v1: wire key IS `R`.
+  const resolveAuthorReal = useCallback(
+    async (wirePubkey: string, rawEvent: string | undefined, key: Uint8Array): Promise<string> => {
+      if (!hubDTag) return wirePubkey
+      const hub = hubs[hubDTag]
+      if (!hub || !isV2(hub)) return wirePubkey
+      if (rawEvent) {
+        let parsed: Parameters<typeof verifyEventIdentity>[0] | null = null
+        try { parsed = JSON.parse(rawEvent) } catch { parsed = null }
+        const hasIdentityTag = !!parsed?.tags?.some((t: string[]) => t[0] === 'identity')
+        if (hasIdentityTag) {
+          try {
+            const res = await verifyEventIdentity(parsed!, key)
+            if (res.ok && res.rPub) return res.rPub
+          } catch { /* invalid → treat as forgery, fall to wire P below */ }
+          return wirePubkey // present-but-unverifiable ⇒ do NOT map to R
+        }
+      }
+      return resolveMemberPubkey(wirePubkey, useHubStore.getState().hubMembers[hubDTag])
+    },
+    [hubDTag, hubs],
+  )
+
   // Decrypt a single tag value
   const decryptTagValue = useCallback(
     async (key: Uint8Array, tags: string[][], tagName: string): Promise<string | undefined> => {
@@ -201,9 +248,12 @@ export function useCalendar(hubDTag: string | null) {
       const startTimestamp = startStr ? parseInt(startStr, 10) : 0
       const endTimestamp = endStr ? parseInt(endStr, 10) : undefined
 
+      const realPubkey = await resolveAuthorReal(raw.pubkey, raw.rawEvent, key)
+
       return {
         id: raw.id,
         pubkey: raw.pubkey,
+        realPubkey,
         dTag: raw.dTag,
         createdAt: raw.createdAt,
         title,
@@ -218,7 +268,7 @@ export function useCalendar(hubDTag: string | null) {
         rawEvent: raw.rawEvent,
       }
     },
-    [getEventsKey, decryptTagValue, decryptTagValues]
+    [getEventsKey, decryptTagValue, decryptTagValues, resolveAuthorReal]
   )
 
   // Decrypt all events when raw events change
@@ -251,7 +301,16 @@ export function useCalendar(hubDTag: string | null) {
 
       const hub = hubs[hubDTag]
       const minPow = hub?.minPow || 0
-      const facilitator = hubPrefs?.facilitator || undefined
+      // Only a genuinely-facilitated (non-member) author tags the event `facilitator`. Guard against a
+      // stale `facilitator` pref leaking the "facilitated" badge onto a member/owner's own event
+      // (mirrors usePoll.createPoll + useMessages.sendMessage). Signer/attribution are unaffected.
+      let facilitator = hubPrefs?.facilitator || undefined
+      if (facilitator && hub) {
+        const members = useHubStore.getState().hubMembers[hubDTag]
+        const amMember = pubkey === hub.creatorPubkey || pubkey === hub.ownerRealPubkey
+          || !!members?.some((m) => m.pubkey === pubkey)
+        if (amMember) facilitator = undefined
+      }
       const epoch = hub?.epoch || 1
 
       // Encrypt tag values
@@ -299,11 +358,18 @@ export function useCalendar(hubDTag: string | null) {
 
       // Disappearing messages: anchor a calendar event's expiry to its END time so
       // a future event survives until it's over, then disappears one timer later.
-      stampHubExpiration(unsigned, hubDTag, data.endTimestamp || data.startTimestamp)
-      const signed = await mineAndSign(unsigned, minPow, pubkey, signer, privateKey)
+      // Anchor a calendar event's expiry to its END time so a future event survives until it's over —
+      // but ONLY on v1. On v2 the start/end/location tags are AES-encrypted, whereas `expiration` is a
+      // PLAINTEXT NIP-40 tag and the hub timer is public, so `expiration = endTime + timer` would let a
+      // relay recover the otherwise-hidden end time as `expiration − timer`. On v2 anchor to created_at
+      // (like messages/polls) — reveals nothing beyond the already-public post time.
+      stampHubExpiration(unsigned, hubDTag, (hub && isV2(hub)) ? undefined : (data.endTimestamp || data.startTimestamp))
+      const signed = await (hub
+        ? signHubMemberEvent({ hub, unsigned, pubkey: pubkey!, privateKey, signer, minPow, channelKey: key })
+        : mineAndSign(unsigned, minPow, pubkey, signer, privateKey))
 
       const hubRelays = hub?.generalRelays || []
-      const publishRelays = getPublishRelays(hubRelays)
+      const publishRelays = getPublishRelays(hubRelays, { hubOnly: !!hub && isV2(hub) })
       await publishEventProgressive(signed, () => {}, publishRelays)
 
       // Add to local store immediately
@@ -372,10 +438,17 @@ export function useCalendar(hubDTag: string | null) {
       }
 
       // Anchor expiry to the event's END time (see createEvent).
-      stampHubExpiration(unsigned, hubDTag, data.endTimestamp || data.startTimestamp)
-      const signed = await mineAndSign(unsigned, minPow, pubkey, signer, privateKey)
+      // Anchor a calendar event's expiry to its END time so a future event survives until it's over —
+      // but ONLY on v1. On v2 the start/end/location tags are AES-encrypted, whereas `expiration` is a
+      // PLAINTEXT NIP-40 tag and the hub timer is public, so `expiration = endTime + timer` would let a
+      // relay recover the otherwise-hidden end time as `expiration − timer`. On v2 anchor to created_at
+      // (like messages/polls) — reveals nothing beyond the already-public post time.
+      stampHubExpiration(unsigned, hubDTag, (hub && isV2(hub)) ? undefined : (data.endTimestamp || data.startTimestamp))
+      const signed = await (hub
+        ? signHubMemberEvent({ hub, unsigned, pubkey: pubkey!, privateKey, signer, minPow, channelKey: key })
+        : mineAndSign(unsigned, minPow, pubkey, signer, privateKey))
       const hubRelays = hubs[hubDTag]?.generalRelays || []
-      const publishRelays = getPublishRelays(hubRelays)
+      const publishRelays = getPublishRelays(hubRelays, { hubOnly: !!hub && isV2(hub) })
       await publishToSpecificRelays(publishRelays, signed)
 
       // Update local store
@@ -402,10 +475,16 @@ export function useCalendar(hubDTag: string | null) {
 
       const hub = hubs[hubDTag]
       const epoch = hub?.epoch || 1
+      const key = getEventsKey()
+      // v2: calendar events are authored + addressed by the member pseudonym P.
+      let authorKey = pubkey!
+      if (hub && isV2(hub)) {
+        authorKey = await (await resolveV2PostingSigner(hub, pubkey!, privateKey, signer)).getPublicKey()
+      }
 
       // Look up original event timestamp for created_at + 1 ordering
       const rawEvents = useCalendarStore.getState().events[hubDTag] || []
-      const originalEvent = rawEvents.find((e) => e.dTag === dTag && e.pubkey === pubkey)
+      const originalEvent = rawEvents.find((e) => e.dTag === dTag && e.pubkey === authorKey)
       const originalCreatedAt = originalEvent?.createdAt
 
       // 1. Re-publish with deleted tag (primary — addressable replaceable overwrite)
@@ -416,15 +495,19 @@ export function useCalendar(hubDTag: string | null) {
         epoch,
         originalCreatedAt
       )
-      const signedDeleted = await signWithSigner(deletedEvent, signer, privateKey)
+      const signedDeleted = await (hub
+        ? signHubMemberEvent({ hub, unsigned: deletedEvent, pubkey: pubkey!, privateKey, signer, channelKey: key })
+        : signWithSigner(deletedEvent, signer, privateKey))
       const hubRelays = hub?.generalRelays || []
-      const publishRelays = getDeletePublishRelays(hubRelays)
+      const publishRelays = getDeletePublishRelays(hubRelays, { hubOnly: !!hub && isV2(hub) })
       await publishToSpecificRelays(publishRelays, signedDeleted)
 
-      // 2. NIP-09 deletion request as fallback
-      const aRef = `${KINDS.CALENDAR_TIME_EVENT}:${pubkey}:${dTag}`
+      // 2. NIP-09 deletion request as fallback (authored by P in v2)
+      const aRef = `${KINDS.CALENDAR_TIME_EVENT}:${authorKey}:${dTag}`
       const deletionEvent = createDeletionEvent([], [aRef], 'Event deletion requested')
-      const signedDeletion = await signWithSigner(deletionEvent, signer, privateKey)
+      const signedDeletion = await (hub
+        ? signHubMemberEvent({ hub, unsigned: deletionEvent, pubkey: pubkey!, privateKey, signer })
+        : signWithSigner(deletionEvent, signer, privateKey))
       await publishToSpecificRelays(publishRelays, signedDeletion)
 
       // Update local store
@@ -482,9 +565,11 @@ export function useCalendar(hubDTag: string | null) {
       }
 
       stampHubExpiration(unsigned, hubDTag)
-      const signed = await mineAndSign(unsigned, minPow, pubkey, signer, privateKey)
+      const signed = await (hub
+        ? signHubMemberEvent({ hub, unsigned, pubkey: pubkey!, privateKey, signer, minPow, channelKey: key })
+        : mineAndSign(unsigned, minPow, pubkey, signer, privateKey))
       const hubRelays = hub?.generalRelays || []
-      const publishRelays = getPublishRelays(hubRelays)
+      const publishRelays = getPublishRelays(hubRelays, { hubOnly: !!hub && isV2(hub) })
       await publishEventProgressive(signed, () => {}, publishRelays)
 
       // Add to local store
@@ -512,23 +597,32 @@ export function useCalendar(hubDTag: string | null) {
 
       const hub = hubs[hubDTag]
       const epoch = hub?.epoch || 1
+      const key = getEventsKey()
+      let authorKey = pubkey!
+      if (hub && isV2(hub)) {
+        authorKey = await (await resolveV2PostingSigner(hub, pubkey!, privateKey, signer)).getPublicKey()
+      }
 
       // Look up original RSVP timestamp for created_at + 1 ordering
       const rawRsvps = useCalendarStore.getState().rsvps[eventARef] || []
-      const originalRsvp = rawRsvps.find((r) => r.dTag === dTag && r.pubkey === pubkey)
+      const originalRsvp = rawRsvps.find((r) => r.dTag === dTag && r.pubkey === authorKey)
       const originalCreatedAt = originalRsvp?.createdAt
 
       // 1. Re-publish with deleted tag (primary — addressable replaceable overwrite)
       const deletedEvent = createDeletedCalendarEvent(KINDS.CALENDAR_RSVP, dTag, hubDTag, epoch, originalCreatedAt)
-      const signedDeleted = await signWithSigner(deletedEvent, signer, privateKey)
+      const signedDeleted = await (hub
+        ? signHubMemberEvent({ hub, unsigned: deletedEvent, pubkey: pubkey!, privateKey, signer, channelKey: key })
+        : signWithSigner(deletedEvent, signer, privateKey))
       const hubRelays = hub?.generalRelays || []
-      const publishRelays = getDeletePublishRelays(hubRelays)
+      const publishRelays = getDeletePublishRelays(hubRelays, { hubOnly: !!hub && isV2(hub) })
       await publishToSpecificRelays(publishRelays, signedDeleted)
 
-      // 2. NIP-09 deletion request as fallback
-      const aRef = `${KINDS.CALENDAR_RSVP}:${pubkey}:${dTag}`
+      // 2. NIP-09 deletion request as fallback (authored by P in v2)
+      const aRef = `${KINDS.CALENDAR_RSVP}:${authorKey}:${dTag}`
       const deletionEvent = createDeletionEvent([], [aRef], 'RSVP deletion requested')
-      const signedDeletion = await signWithSigner(deletionEvent, signer, privateKey)
+      const signedDeletion = await (hub
+        ? signHubMemberEvent({ hub, unsigned: deletionEvent, pubkey: pubkey!, privateKey, signer })
+        : signWithSigner(deletionEvent, signer, privateKey))
       await publishToSpecificRelays(publishRelays, signedDeletion)
 
       // Update local store
@@ -581,8 +675,11 @@ export function useCalendar(hubDTag: string | null) {
             }
           }
 
+          const realPubkey = await resolveAuthorReal(raw.pubkey, raw.rawEvent, key)
+
           results.push({
             pubkey: raw.pubkey,
+            realPubkey,
             dTag: raw.dTag,
             status,
             note,
@@ -596,7 +693,7 @@ export function useCalendar(hubDTag: string | null) {
 
       return results.filter((r) => !r.deleted)
     },
-    [getEventsKey]
+    [getEventsKey, resolveAuthorReal]
   )
 
   // Tick every 30s so live status recalculates as time passes

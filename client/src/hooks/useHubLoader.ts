@@ -14,6 +14,7 @@ import { useUserStore } from '@/stores/userStore'
 import { fetchEvents, fetchEventsProgressive } from '@/lib/nostr/relay-pool'
 import { getAllHubEvents } from '@/lib/cache/hubEventCache'
 import { KINDS } from '@/lib/crypto/constants'
+import { getTrustedCreator } from '@/lib/hub/hubCreatorGuard'
 import { downloadTextFromBlossom, parseIndexFile, decryptHubSecret, decryptGroupSecret, downloadBanList } from '@/lib/blossom'
 import { aesDecrypt } from '@/lib/crypto/aes'
 import type { BanEntry } from '@/lib/blossom'
@@ -34,14 +35,18 @@ const HUB_FETCH_RETRY_MAX_WAIT_MS = 15000
  * - Tags: d, n, epoch, r, o, m, w, b
  * - Content: JSON with settings, roles, channels, categories, grouped_roles, plugins
  */
-export function parseHubEvent(event: Event): (HubData & { creatorPubkey: string }) | null {
+export function parseHubEvent(event: Event, contentOverride?: string): (HubData & { creatorPubkey: string }) | null {
   try {
     const dTag = event.tags.find(t => t[0] === 'd')?.[1]
     if (!dTag) return null
 
     const name = event.tags.find(t => t[0] === 'n')?.[1] || 'Unnamed Hub'
+    // Epoch: prefer an explicit `epoch` tag, else the `m` tag's 3rd field (where hub creation and
+    // rotation actually write it: `["m", indexHash, epoch]`), else 1. Without the `m` fallback a
+    // rotated hub (epoch > 1) would derive its content key at the wrong epoch and fail to decrypt.
     const epochTag = event.tags.find(t => t[0] === 'epoch')?.[1]
-    const epoch = epochTag ? parseInt(epochTag, 10) : 1
+    const mEpoch = event.tags.find(t => t[0] === 'm')?.[2]
+    const epoch = epochTag ? parseInt(epochTag, 10) : (mEpoch ? parseInt(mEpoch, 10) : 1)
 
     // Parse relay tags — every relay tag is a hub (general) relay
     const generalRelays: string[] = []
@@ -77,6 +82,15 @@ export function parseHubEvent(event: Event): (HubData & { creatorPubkey: string 
     const meTag = event.tags.find(t => t[0] === 'message_expiration')?.[1]
     const messageExpiration = meTag ? Math.max(0, parseInt(meTag, 10) || 0) : 0
 
+    // Parse hub format version (NIP-CHAT §0). Absent ⇒ v1. This reads the live
+    // tag only; the authoritative v2 decision (fail-safe) also weighs the
+    // hub-list record and encrypted content — see lib/hub/version.ts.
+    const versionTag = event.tags.find(t => t[0] === 'version')?.[1]
+    const version = versionTag ? (parseInt(versionTag, 10) || undefined) : undefined
+    // NIP-SKD scheme: ['signer_scheme', family, version] ⇒ 'family:version'.
+    const ssTag = event.tags.find(t => t[0] === 'signer_scheme')
+    const signerScheme = ssTag && ssTag[1] ? `${ssTag[1]}:${ssTag[2] || '1'}` : undefined
+
     // Parse NSFW from content-warning tag (source of truth)
     const nsfw = event.tags.some(t => t[0] === 'content-warning')
 
@@ -89,9 +103,13 @@ export function parseHubEvent(event: Event): (HubData & { creatorPubkey: string 
     let icon: string | undefined
     let banner: string | undefined
 
-    if (event.content) {
+    // v2 structural content is encrypted; the caller passes the decrypted JSON as
+    // `contentOverride` once it holds the hub secret. Without it, a v2 hub's content won't
+    // JSON.parse (channels/roles stay empty until the override is supplied).
+    const rawContent = contentOverride ?? event.content
+    if (rawContent) {
       try {
-        const content = JSON.parse(event.content)
+        const content = JSON.parse(rawContent)
 
         // Settings
         if (content.settings?.description) {
@@ -178,10 +196,19 @@ export function parseHubEvent(event: Event): (HubData & { creatorPubkey: string 
           }))
         }
       } catch {
-        // Content is not valid JSON — could be a legacy event
-        console.warn(`Hub ${dTag}: failed to parse content JSON`)
+        // Content is not valid JSON — a legacy event, or v2 encrypted content without the
+        // decrypted override (channels/roles fill in once the caller re-parses with the secret).
       }
     }
+
+    // v2 public face lives in plaintext tags (the structural content is encrypted). Apply them
+    // over content.settings so the join/Discover card and header render before the secret.
+    const pictureTag = event.tags.find(t => t[0] === 'picture')?.[1]
+    const bannerTag = event.tags.find(t => t[0] === 'banner')?.[1]
+    const aboutTag = event.tags.find(t => t[0] === 'about')?.[1]
+    if (pictureTag) icon = pictureTag
+    if (bannerTag) banner = bannerTag
+    if (aboutTag) description = aboutTag
 
     // Fallback: try legacy tag-based format for backwards compat
     if (channels.length === 0) {
@@ -230,6 +257,8 @@ export function parseHubEvent(event: Event): (HubData & { creatorPubkey: string 
       minPow,
       joinMinPow: wjTag ? parseInt(wjTag, 10) : 0,
       messageExpiration,
+      version,
+      signerScheme,
       nsfw,
       creatorPubkey: event.pubkey,
       deleted: isDeleted || undefined,
@@ -249,12 +278,12 @@ export function parseHubEvent(event: Event): (HubData & { creatorPubkey: string 
  * Auto-detects monolithic vs paginated index format.
  * Also downloads ban pages from the index file.
  */
-async function loadHubSecret(
+export async function loadHubSecret(
   hubData: HubData & { creatorPubkey: string },
   memberPubkey: string,
   memberPrivateKey: string | null,
   signer: any,
-): Promise<{ secretHex: string; members: HubMember[]; bannedPubkeys: string[]; historyHash: string; pageCount: number; failReason?: 'signer-issue' | 'not-a-member' } | null> {
+): Promise<{ secretHex: string; members: HubMember[]; bannedPubkeys: string[]; banListUnresolved?: boolean; historyHash: string; pageCount: number; failReason?: 'signer-issue' | 'not-a-member' } | null> {
   if (!hubData.indexFileHash || hubData.blossomServers.length === 0) {
     return null
   }
@@ -264,29 +293,62 @@ async function loadHubSecret(
     const indexContent = await downloadTextFromBlossom(hubData.indexFileHash, hubData.blossomServers)
     const index = parseIndexFile(indexContent)
 
-    // 2. Download ban pages (non-blocking — don't fail if bans can't be fetched)
+    // 2. Download ban pages (non-blocking). v1 ban pages are plaintext; v2 ban pages are
+    // encrypted with the hub secret, so they're decrypted later (after the secret is obtained).
+    const { isV2: isV2Check } = await import('@/lib/hub/version')
+    const v2Hub = isV2Check(hubData)
     let bannedPubkeys: string[] = []
-    if (index.banPages.length > 0) {
+    // "We couldn't load the ban list" vs "there are no bans" — consumers must NOT overwrite the store's
+    // ban list with [] when it's unresolved (that un-hides banned users). For v2 the list is loaded only
+    // AFTER the secret (below), so EVERY early/failure return before that point is unresolved; for v1 the
+    // list is attempted here, so the flag tracks this download's outcome.
+    let banListUnresolved = v2Hub && index.banPages.length > 0
+    if (!v2Hub && index.banPages.length > 0) {
       try {
         const banEntries = await downloadBanList(index.banPages, hubData.blossomServers)
         bannedPubkeys = banEntries.map(e => e.pubkey)
         console.log(`Hub ${hubData.dTag}: loaded ${bannedPubkeys.length} banned pubkeys from ${index.banPages.length} ban page(s)`)
       } catch (err) {
         console.warn(`Hub ${hubData.dTag}: failed to download ban pages:`, err)
+        banListUnresolved = true // v1 download failed → don't let the caller clobber the existing list
       }
     }
 
     // ── Paginated format ──
     if (index.pageSize > 0 && index.spineHash && index.leafPages.length > 0) {
-      const { findPageForPubkey, decryptHubSecretPaginated } = await import('@/lib/blossom')
+      const { findPageForPubkey, decryptHubSecretPaginated, decryptHubSecretPaginatedV2, getPageMembersV2 } = await import('@/lib/blossom')
       const { deserializeLeafPage, getPageMembers } = await import('@/lib/crypto/lkh')
+      const { isV2 } = await import('@/lib/hub/version')
 
-      // Find which page contains our pubkey
-      const pageEntry = findPageForPubkey(index, memberPubkey)
+      const v2 = isV2(hubData)
+      const ownerPub = hubData.creatorPubkey // in v2 the hub author is the owner pseudonym O
+
+      // In v2 the leaf is keyed on the member's pseudonym P (NIP-SKD), not their real key.
+      let lookupPubkey = memberPubkey // R for v1
+      if (v2) {
+        const { isSupportedSignerScheme, getSignerScheme } = await import('@/lib/hub/version')
+        if (!isSupportedSignerScheme(hubData)) {
+          // Hub advertises a signer scheme this client doesn't implement (a future `skd:2`, or a malformed
+          // value). Deriving P under the wrong scheme yields a MISMATCHED pseudonym → fail closed (guard,
+          // don't derive) rather than silently produce wrong keys / an undecryptable hub.
+          console.warn(`Hub ${hubData.dTag}: unsupported signer scheme ${getSignerScheme(hubData)} — refusing to derive`)
+          return { secretHex: '', members: [], bannedPubkeys, banListUnresolved, historyHash: index.historyHash, pageCount: index.leafPages.length, failReason: 'signer-issue' as const }
+        }
+        const { makeSubkeySigner } = await import('@/lib/nostr/v2send')
+        const { ChatContext, canUseV2 } = await import('@/lib/crypto/skd')
+        if (!canUseV2({ privateKey: memberPrivateKey, signer })) {
+          // No local key / NIP-SKD signer → cannot derive P → cannot read this v2 hub.
+          return { secretHex: '', members: [], bannedPubkeys, banListUnresolved, historyHash: index.historyHash, pageCount: index.leafPages.length, failReason: 'signer-issue' as const }
+        }
+        const pSigner = makeSubkeySigner(ChatContext.member(hubData.dTag), { privateKey: memberPrivateKey, signer, peerPub: ownerPub })
+        lookupPubkey = await pSigner.getPublicKey()
+      }
+
+      // Find which page contains our leaf (P in v2, R in v1)
+      const pageEntry = findPageForPubkey(index, lookupPubkey)
       if (!pageEntry) {
         console.warn(`Hub ${hubData.dTag}: pubkey not found in any page (paginated index)`)
-        // Return approximate member count from page count
-        return { secretHex: '', members: [], bannedPubkeys, historyHash: index.historyHash, pageCount: index.leafPages.length }
+        return { secretHex: '', members: [], bannedPubkeys, banListUnresolved, historyHash: index.historyHash, pageCount: index.leafPages.length }
       }
 
       // Download our page + spine
@@ -295,44 +357,64 @@ async function loadHubSecret(
         downloadTextFromBlossom(index.spineHash, hubData.blossomServers),
       ])
 
-      // Extract members from our page (lazy — we only see our page's members)
-      let members: HubMember[] = []
-      try {
-        const page = deserializeLeafPage(pageContent)
-        members = getPageMembers(page)
-      } catch (err) {
-        console.warn(`Hub ${hubData.dTag}: failed to extract members from page:`, err)
-      }
-
       // Decrypt hub secret via page + spine
       let hubSecret: Uint8Array | null = null
       let signerFailed = false
       try {
-        hubSecret = await decryptHubSecretPaginated(
-          memberPubkey,
-          memberPrivateKey,
-          signer,
-          hubData.creatorPubkey,
-          pageContent,
-          spineContent,
-        )
+        hubSecret = v2
+          ? await decryptHubSecretPaginatedV2(lookupPubkey, memberPrivateKey, signer, ownerPub, pageContent, spineContent)
+          : await decryptHubSecretPaginated(memberPubkey, memberPrivateKey, signer, hubData.creatorPubkey, pageContent, spineContent)
       } catch (err) {
-        // decryptHubSecretPaginated throws on signer errors (declined/circuit open)
-        // but returns null when pubkey not found in tree
+        // Throws on signer errors (declined/circuit open); returns null when not in the tree.
         console.warn(`Hub ${hubData.dTag}: signer error during paginated decrypt:`, err)
         signerFailed = true
+      }
+
+      // Extract members: v1 from leaf pubkeys (no secret needed); v2 by decrypting the page's
+      // group roster segment → P→R map (requires the hub secret, so this runs after the decrypt).
+      let members: HubMember[] = []
+      try {
+        if (v2) {
+          if (hubSecret) {
+            // Roster segments are stamped per-epoch; resolve the right secret from history,
+            // falling back to the current secret (single-epoch / freshly-touched pages).
+            const epochMap = useHubStore.getState().epochSecrets[hubData.dTag] || {}
+            const { fromHex } = await import('@/lib/crypto/lkh')
+            const resolveEpochSecret = (epoch: number): Uint8Array | undefined =>
+              epochMap[epoch] ? fromHex(epochMap[epoch]) : (hubSecret ?? undefined)
+            members = (await getPageMembersV2(pageContent, resolveEpochSecret)).map(m => ({ pubkey: m.pubkey, roles: m.roles, flags: m.flags, p: m.p }))
+          }
+        } else {
+          members = getPageMembers(deserializeLeafPage(pageContent))
+        }
+      } catch (err) {
+        console.warn(`Hub ${hubData.dTag}: failed to extract members from page:`, err)
       }
 
       if (!hubSecret) {
         const failReason = signerFailed ? 'signer-issue' as const : 'not-a-member' as const
         console.warn(`Hub ${hubData.dTag}: could not decrypt hub secret (paginated, ${failReason})`)
         return members.length > 0 || signerFailed
-          ? { secretHex: '', members, bannedPubkeys, historyHash: index.historyHash, pageCount: index.leafPages.length, failReason }
+          ? { secretHex: '', members, bannedPubkeys, banListUnresolved, historyHash: index.historyHash, pageCount: index.leafPages.length, failReason }
           : null
       }
 
+      // v2: the ban list is encrypted with the hub secret — decrypt it now (real keys R).
+      if (v2 && index.banPages.length > 0) {
+        try {
+          const { downloadBanListV2 } = await import('@/lib/blossom')
+          bannedPubkeys = (await downloadBanListV2(index.banPages, hubSecret, hubData.blossomServers)).map(e => e.pubkey)
+          banListUnresolved = false // loaded successfully → safe to write (clears the pre-secret "unresolved")
+        } catch (err) {
+          // Distinguish "couldn't load the ban list" from "no bans" — the caller must NOT overwrite the
+          // store's ban list with [] on a transient failure (that would un-hide banned users).
+          console.warn(`Hub ${hubData.dTag}: failed to decrypt v2 ban pages:`, err)
+          banListUnresolved = true
+        }
+      }
+
       const secretHex = Array.from(hubSecret).map(b => b.toString(16).padStart(2, '0')).join('')
-      return { secretHex, members, bannedPubkeys, historyHash: index.historyHash, pageCount: index.leafPages.length }
+      return { secretHex, members, bannedPubkeys, banListUnresolved, historyHash: index.historyHash, pageCount: index.leafPages.length }
     }
 
     // ── Monolithic format (legacy / facilitator) ──
@@ -373,12 +455,12 @@ async function loadHubSecret(
       const failReason = signerFailed ? 'signer-issue' as const : 'not-a-member' as const
       console.warn(`Hub ${hubData.dTag}: could not decrypt hub secret (${failReason})`)
       return members.length > 0 || signerFailed
-        ? { secretHex: '', members, bannedPubkeys, historyHash: index.historyHash, pageCount: 0, failReason }
+        ? { secretHex: '', members, bannedPubkeys, banListUnresolved, historyHash: index.historyHash, pageCount: 0, failReason }
         : null
     }
 
     const secretHex = Array.from(hubSecret).map(b => b.toString(16).padStart(2, '0')).join('')
-    return { secretHex, members, bannedPubkeys, historyHash: index.historyHash, pageCount: 0 }
+    return { secretHex, members, bannedPubkeys, banListUnresolved, historyHash: index.historyHash, pageCount: 0 }
   } catch (err) {
     console.warn(`Hub ${hubData.dTag}: failed to load hub secret from Blossom:`, err)
     return null
@@ -393,13 +475,144 @@ async function loadHubSecret(
  * 2. Download the facilitator's index → tree from blossom
  * 3. Decrypt the hub secret from the facilitator's tree (leaf NIP-04 uses facilitator's pubkey)
  */
-async function loadFacilitatorSecret(
+/**
+ * Parse a facilitator tree's epoch-history blob (byte-identical to the owner/v1 format:
+ * `AES(treeSecret, "hub:<epoch>:<hex>\n…")`). Shared by the v1 and v2 load paths. Returns the full
+ * epoch→secret map and the facilitator's current epoch (the MAX line). Empty result if no history.
+ */
+async function parseFacilitatorHistory(
+  treeSecret: Uint8Array,
+  historyHash: string | undefined,
+  hubData: { dTag: string; blossomServers: string[] },
+): Promise<{ epoch?: number; epochSecrets?: Record<number, string> }> {
+  if (!historyHash) return {}
+  try {
+    const historyBlob = await downloadTextFromBlossom(historyHash, hubData.blossomServers)
+    const plaintext = await aesDecrypt(treeSecret, historyBlob)
+    const map: Record<number, string> = {}
+    let maxEpoch = 0
+    for (const line of plaintext.split('\n')) {
+      const trimmed = line.trim()
+      if (!trimmed.startsWith('hub:')) continue
+      const parts = trimmed.split(':')
+      if (parts.length < 3) continue
+      const ep = parseInt(parts[1], 10)
+      map[ep] = parts.slice(2).join(':')
+      if (ep > maxEpoch) maxEpoch = ep
+    }
+    if (Object.keys(map).length > 0) return { epoch: maxEpoch, epochSecrets: map }
+  } catch (err) {
+    console.warn(`Hub ${hubData.dTag}: failed to parse facilitator epoch history:`, err)
+  }
+  return {}
+}
+
+/**
+ * Extract the owner's real pubkey (R_owner) from decrypted hub content — but ONLY if the owner
+ * attestation's signature verifies (R_owner signed the hub coordinate). The attestation is the one
+ * artifact binding the pseudonymous hub to a real identity for members; a malicious owner controls the
+ * encrypted content and could embed any `rOwnerPub` (e.g. a victim's npub) with a bogus signature, which
+ * would otherwise make every client show the hub as created by the victim AND grant that key owner
+ * permissions via `isHubOwner`. Fail closed: an absent or invalid attestation yields undefined.
+ */
+function verifiedOwnerRealPubkey(
+  decrypted: unknown,
+  creatorPubkey: string,
+  dTag: string,
+  verify: (coord: string, att: { rOwnerPub: string; createdAt: number; sigOwner: string }) => boolean,
+): string | undefined {
+  const att = (decrypted as { owner_attestation?: { rOwnerPub?: string; createdAt?: number; sigOwner?: string } })?.owner_attestation
+  if (!att?.rOwnerPub || !att.sigOwner || typeof att.createdAt !== 'number') return undefined
+  const coord = `${KINDS.HUB_EVENT}:${creatorPubkey}:${dTag}`
+  if (verify(coord, att as { rOwnerPub: string; createdAt: number; sigOwner: string })) return att.rOwnerPub
+  console.warn(`Hub ${dTag}: owner attestation failed verification — ignoring claimed owner R`)
+  return undefined
+}
+
+/**
+ * v2 hubs encrypt their structural content (channels/roles/categories) with the hub content key.
+ * `parseHubEvent` leaves those empty until we hold the secret — so once we do (via the owner tree OR
+ * a facilitator), decrypt the content, re-parse, and merge it in. Shared by the member and
+ * facilitator load paths (a facilitated user would otherwise see an empty hub with no channels).
+ */
+export async function decryptAndMergeV2HubContent(
+  dTag: string,
+  event: Event,
+  hubData: HubData & { creatorPubkey: string },
+  secretHex: string,
+): Promise<boolean> {
+  if (hubData.version !== 2) return false
+  try {
+    const { fromHex } = await import('@/lib/crypto/lkh')
+    const { deriveHubContentKey, decryptHubContent, verifyOwnerAttestation } = await import('@/lib/hub/hubContent')
+    const key = deriveHubContentKey(fromHex(secretHex), hubData.epoch)
+    const decrypted = await decryptHubContent(key, event.content)
+    const full = parseHubEvent(event, JSON.stringify(decrypted))
+    const ownerRealPubkey = verifiedOwnerRealPubkey(decrypted, hubData.creatorPubkey, dTag, verifyOwnerAttestation)
+    if (full) {
+      useHubStore.getState().setHubData(dTag, {
+        ...hubData,
+        channels: full.channels,
+        categories: full.categories,
+        roles: full.roles,
+        groupedRoles: full.groupedRoles,
+        description: full.description,
+        icon: full.icon,
+        banner: full.banner,
+        ownerRealPubkey,
+      })
+      // "authentic" (used ONLY to bind the creator on the facilitator path) requires a VERIFIED owner
+      // attestation, NOT just a successful content decrypt. The content key is derived from the hub
+      // secret + epoch alone (no author binding) and the ciphertext is public on relays, so an attacker
+      // can replay the real owner's content blob inside an event signed by their OWN key — a content
+      // decrypt would succeed and (if we trusted it) bind the hub to the attacker, hijacking it for
+      // facilitated users. The attestation commits R_owner's signature to THIS event's coordinate
+      // (36942:creatorPubkey:dTag), so a forged event (different author → different coord) can't produce
+      // a verifying attestation. ownerRealPubkey is defined only when that check passed.
+      return ownerRealPubkey !== undefined
+    }
+  } catch (err) {
+    console.warn(`Hub ${dTag}: failed to decrypt v2 hub content:`, err)
+  }
+  return false
+}
+
+export async function loadFacilitatorSecret(
   hubData: HubData & { creatorPubkey: string },
   facilitatorPubkey: string,
   memberPubkey: string,
   memberPrivateKey: string | null,
   signer: any,
-): Promise<{ secretHex: string; facilitatorMembers: string[] } | null> {
+): Promise<{ secretHex: string; facilitatorMembers: string[]; epoch?: number; epochSecrets?: Record<number, string> } | null> {
+  // v2: `facilitatorPubkey` is the facilitator's member pseudonym `P_fac`. Their list is `P_fac`-
+  // authored; each leaf is keyed on a facilitated pseudonym `Pf = ECDH(P_fac, R_f)`. We derive OUR
+  // `Pf` (peer = `P_fac`) internally, unwrap our leaf, and recover the secret — no roster needed, so
+  // it works even for someone the owner never added to the main tree.
+  const { isV2 } = await import('@/lib/hub/version')
+  if (isV2(hubData)) {
+    try {
+      const jrs = await fetchEvents({ kinds: [KINDS.JOIN_REQUEST], authors: [facilitatorPubkey], '#d': [hubData.dTag], limit: 1 })
+      if (jrs.length === 0) return null
+      const lt = jrs[0].tags.find((t: string[]) => t[0] === 'list')
+      if (!lt?.[1]) return null
+      let indexContent: string | null = null
+      try { indexContent = await downloadTextFromBlossom(lt[1], hubData.blossomServers) } catch { return null }
+      if (!indexContent) return null
+      const index = parseIndexFile(indexContent)
+      if (!index.treeHash) return null
+      const treeContent = await downloadTextFromBlossom(index.treeHash, hubData.blossomServers)
+      const { decryptSecretFromFacilitatorTreeV2 } = await import('@/lib/blossom/members')
+      const { toHex, deserializeTree } = await import('@/lib/crypto/lkh')
+      const secret = await decryptSecretFromFacilitatorTreeV2(facilitatorPubkey, hubData.dTag, memberPrivateKey, signer, treeContent)
+      if (!secret) return null
+      const facilitatorMembers = deserializeTree(treeContent).leaves.map((l: any) => l.pubkey)
+      const { epoch, epochSecrets } = await parseFacilitatorHistory(secret, index.historyHash, hubData)
+      return { secretHex: toHex(secret), facilitatorMembers, epoch, epochSecrets }
+    } catch (e) {
+      console.warn(`Hub ${hubData.dTag}: v2 facilitator secret load failed`, e)
+      return null
+    }
+  }
   try {
     // 1. Fetch the facilitator's join request to get the `list` tag
     const joinRequests = await fetchEvents({
@@ -474,12 +687,44 @@ async function loadFacilitatorSecret(
       console.warn(`Hub ${hubData.dTag}: failed to extract facilitator member list:`, err)
     }
 
-    return { secretHex, facilitatorMembers }
+    // Epoch history — same single-AES-blob format the owner tree uses; parse so the facilitated
+    // user can decrypt every epoch and knows the facilitator's current epoch (the MAX line).
+    const { epoch, epochSecrets } = await parseFacilitatorHistory(hubSecret, index.historyHash, hubData)
+
+    return { secretHex, facilitatorMembers, epoch, epochSecrets }
   } catch (err) {
     console.warn(`Hub ${hubData.dTag}: failed to load facilitator secret:`, err)
     return null
   }
 }
+
+/**
+ * Load ONLY the member list (leaf pubkeys) of a facilitator's tree — no secret decryption. A
+ * member already holds the hub secret; to validate + show a facilitated author's messages they only
+ * need to know who each facilitator vouched. Called lazily (per facilitator actually referenced by a
+ * message, cached), so members don't fetch every facilitation list on load.
+ */
+export async function loadFacilitatorMemberList(
+  hubData: { dTag: string; blossomServers: string[] },
+  facilitatorPubkey: string,
+): Promise<string[]> {
+  try {
+    const jrs = await fetchEvents({ kinds: [KINDS.JOIN_REQUEST], authors: [facilitatorPubkey], '#d': [hubData.dTag], limit: 1 })
+    if (jrs.length === 0) return []
+    const listTag = jrs[0].tags.find((t: string[]) => t[0] === 'list')
+    if (!listTag?.[1]) return []
+    const indexContent = await downloadTextFromBlossom(listTag[1], hubData.blossomServers)
+    const index = parseIndexFile(indexContent)
+    if (!index.treeHash) return []
+    const treeContent = await downloadTextFromBlossom(index.treeHash, hubData.blossomServers)
+    const { deserializeTree } = await import('@/lib/crypto/lkh')
+    return deserializeTree(treeContent).leaves.map((l) => l.pubkey)
+  } catch (err) {
+    console.warn(`Hub ${hubData.dTag}: failed to load facilitator member list for ${facilitatorPubkey.slice(0, 8)}…:`, err)
+    return []
+  }
+}
+
 
 /**
  * Load ban lists from members who have the `ban_members` permission.
@@ -495,18 +740,37 @@ export async function loadModBanLists(
   try {
     // Find all members with ban_members permission
     const { getPermissionsForUser } = await import('@/lib/hub/permissions')
+    const { isV2 } = await import('@/lib/hub/version')
+    const v2 = isV2(hubData)
     const modPubkeys: string[] = []
+    // Map the key we QUERY by → the mod's real key R we KEY the result by. v2 mods author their
+    // ban-list JR under their pseudonym P (m.p), so we must query by P (never R + hub scope — that
+    // would leak R to the relay), but store the ban set under R so it agrees with the local writer
+    // (UserProfileModal keys the user's own list by R) and the live subscription (also keyed by R).
+    const authorToReal = new Map<string, string>()
 
     for (const member of members) {
       // Skip the creator — they have the main ban list
       if (member.pubkey === hubData.creatorPubkey) continue
       const perms = getPermissionsForUser(hubData, member.pubkey, members)
       if (perms.ban_members) {
-        modPubkeys.push(member.pubkey)
+        // v2: query by the mod's pseudonym P — never fall back to R (that would leak R + hub scope
+        // to the relay AND miss the P-authored ban-list JR). Skip a v2 mod with no resolved P.
+        if (v2 && !member.p) continue
+        const author = v2 ? member.p! : member.pubkey
+        modPubkeys.push(author)
+        authorToReal.set(author, member.pubkey)
       }
     }
 
     if (modPubkeys.length === 0) return result
+
+    // v2 ban pages are AES-encrypted with the hub secret; load it now (skip decrypt if not ready).
+    let secretBytes: Uint8Array | undefined
+    if (v2) {
+      const secretHex = useHubStore.getState().hubSecrets[hubData.dTag]
+      if (secretHex) { const { fromHex } = await import('@/lib/crypto/lkh'); secretBytes = fromHex(secretHex) }
+    }
 
     // Fetch all join requests for these moderators in one query
     const joinRequests = await fetchEvents({
@@ -525,7 +789,8 @@ export async function loadModBanLists(
     }
 
     // For each mod with a list tag, download their ban pages
-    for (const [modPubkey, jr] of latestByAuthor) {
+    for (const [author, jr] of latestByAuthor) {
+      const modRealKey = authorToReal.get(author) || author // key by the mod's real key R
       const listTag = jr.tags.find((t: string[]) => t[0] === 'list')
       if (!listTag?.[1]) continue
 
@@ -534,14 +799,21 @@ export async function loadModBanLists(
         const index = parseIndexFile(indexContent)
 
         if (index.banPages.length > 0) {
-          const banEntries = await downloadBanList(index.banPages, hubData.blossomServers)
+          let banEntries
+          if (v2) {
+            if (!secretBytes) continue // hub secret not loaded yet — subscription will pick it up later
+            const { downloadBanListV2 } = await import('@/lib/blossom')
+            banEntries = await downloadBanListV2(index.banPages, secretBytes, hubData.blossomServers)
+          } else {
+            banEntries = await downloadBanList(index.banPages, hubData.blossomServers)
+          }
           if (banEntries.length > 0) {
-            result[modPubkey] = banEntries.map(e => e.pubkey)
-            console.log(`Hub ${hubData.dTag}: loaded ${banEntries.length} mod ban(s) from ${modPubkey.slice(0, 8)}...`)
+            result[modRealKey] = banEntries.map(e => e.pubkey)
+            console.log(`Hub ${hubData.dTag}: loaded ${banEntries.length} mod ban(s) from ${modRealKey.slice(0, 8)}...`)
           }
         }
       } catch (err) {
-        console.warn(`Hub ${hubData.dTag}: failed to load mod ban list from ${modPubkey.slice(0, 8)}...:`, err)
+        console.warn(`Hub ${hubData.dTag}: failed to load mod ban list from ${author.slice(0, 8)}...:`, err)
       }
     }
   } catch (err) {
@@ -677,6 +949,27 @@ export function useHubLoader() {
     const inFlight = new Set<string>()          // d tags currently processing
     const queued = new Set<string>()            // d tags waiting in workQueue
 
+    // Cold-start forged-event fallback (v2). Hub-event queries filter by `#d` only, so a relay can serve a
+    // forged 36942 for this dTag (attacker key + far-future created_at). On a FIRST-EVER load there's no
+    // creator binding yet to reject it (getTrustedCreator undefined), so plain newest-wins would pick the
+    // forgery, discard the real owner's (lower created_at) event, and leave the hub unreadable / showing
+    // spoofed metadata. Keep the newest event PER AUTHOR so, when a v2 candidate fails to bind (a forgery
+    // can't decrypt; the real owner's tree can), we advance to the next author. Bounded by distinct authors.
+    const candidatesByDTag = new Map<string, Map<string, Event>>() // dTag → (author → newest event)
+    const triedAuthors = new Map<string, Set<string>>()            // dTag → authors whose v2 event didn't bind
+    const MAX_CANDIDATE_AUTHORS = 64
+    const newestCandidate = (dTag: string, skipTried: boolean): Event | undefined => {
+      const byAuthor = candidatesByDTag.get(dTag)
+      if (!byAuthor) return undefined
+      const tried = triedAuthors.get(dTag)
+      let best: Event | undefined
+      for (const e of byAuthor.values()) {
+        if (skipTried && tried?.has(e.pubkey)) continue
+        if (!best || e.created_at > best.created_at) best = e
+      }
+      return best
+    }
+
     // ── Concurrency-limited, per-hub-serialized processing (streamed) ──
     // Each hub involves several I/O-bound Blossom fetches + crypto, so cap parallelism.
     const HUB_CONCURRENCY = 10
@@ -702,9 +995,23 @@ export function useHubLoader() {
             running--
             inFlight.delete(dTag)
             doneAt.set(dTag, event.created_at)
-            // A newer version may have arrived while we were processing — redo it.
-            const latest = latestByDTag.get(dTag)
-            if (latest && latest.created_at !== event.created_at) enqueue(dTag)
+            const evV2 = event.tags.some(t => t[0] === 'version' && t[1] === '2')
+            if (evV2 && !getTrustedCreator(dTag)) {
+              // This v2 event didn't bind the creator (a forgery can't decrypt; or we're genuinely not a
+              // member). Mark its author tried and advance to the next UNTRIED candidate author, so a forged
+              // newest event can't shadow the real owner's on cold start. If every author has been tried
+              // (none decrypted), stop — leave the newest for display, no re-enqueue (avoids an oscillation
+              // loop for a legitimate non-member).
+              const tried = triedAuthors.get(dTag) ?? new Set<string>()
+              tried.add(event.pubkey)
+              triedAuthors.set(dTag, tried)
+              const nextUntried = newestCandidate(dTag, true)
+              if (nextUntried) { latestByDTag.set(dTag, nextUntried); enqueue(dTag) }
+            } else {
+              // A newer version may have arrived while we were processing — redo it.
+              const latest = latestByDTag.get(dTag)
+              if (latest && latest.created_at !== event.created_at) enqueue(dTag)
+            }
             pump()
           })
       }
@@ -717,8 +1024,23 @@ export function useHubLoader() {
       for (const event of events) {
         const dTag = event.tags.find(t => t[0] === 'd')?.[1]
         if (!dTag || !requested.has(dTag)) continue
-        const existing = latestByDTag.get(dTag)
-        if (!existing || event.created_at > existing.created_at) latestByDTag.set(dTag, event)
+        // If this hub's real owner is already bound, IGNORE events from any other author at ingest.
+        // Otherwise a forged event with a far-future created_at would crowd out the real owner's
+        // (deliberately low, original+1) event here — processHub would then reject the forgery but have no
+        // fallback, leaving the hub stuck loading. Filtering at ingest keeps the real owner's event.
+        const trusted = getTrustedCreator(dTag)
+        if (trusted && event.pubkey !== trusted) continue
+        // Track the newest event PER AUTHOR, then select the newest whose author hasn't already failed to
+        // bind — so the cold-start fallback (in processHub's finally) can reject a forged newest event in
+        // favour of the real owner's decryptable one. Cap distinct authors to bound memory under flooding.
+        const byAuthor = candidatesByDTag.get(dTag) ?? new Map<string, Event>()
+        if (byAuthor.has(event.pubkey) || byAuthor.size < MAX_CANDIDATE_AUTHORS) {
+          const prev = byAuthor.get(event.pubkey)
+          if (!prev || event.created_at > prev.created_at) byAuthor.set(event.pubkey, event)
+          candidatesByDTag.set(dTag, byAuthor)
+        }
+        const selected = newestCandidate(dTag, true) ?? newestCandidate(dTag, false)
+        if (selected) latestByDTag.set(dTag, selected)
       }
       for (const [dTag, event] of latestByDTag) {
         if (inFlight.has(dTag)) continue                 // re-checked when it finishes
@@ -778,10 +1100,87 @@ export function useHubLoader() {
       }
     })
 
+    /**
+     * Apply a facilitator secret result: populate epoch history (so every epoch is decryptable),
+     * and set the live hub secret ONLY when the facilitator's epoch matches the hub's current epoch
+     * (or when the tree has no history — legacy). If the facilitator is behind a rotation, we keep
+     * their history but don't publish a stale secret as current — which would mis-key sends under
+     * the newer epoch tag. A later live update re-triggers once the facilitator rebuilds.
+     */
+    async function applyFacilitatorResult(
+      dTag: string,
+      hubEpoch: number,
+      facilitator: string,
+      facResult: { secretHex: string; facilitatorMembers: string[]; epoch?: number; epochSecrets?: Record<number, string> },
+      event: Event,
+      hubData: HubData & { creatorPubkey: string },
+    ) {
+      if (facResult.epochSecrets && Object.keys(facResult.epochSecrets).length > 0) {
+        setEpochSecrets(dTag, facResult.epochSecrets)
+      }
+      if (facResult.epoch == null || facResult.epoch === hubEpoch) {
+        setHubSecret(dTag, facResult.secretHex)
+        setHubPref(dTag, 'facilitatorSecret', facResult.secretHex)
+        // Decrypt the v2 structural content now that we hold the secret (else: empty hub, no channels).
+        const authentic = await decryptAndMergeV2HubContent(dTag, event, hubData, facResult.secretHex)
+        // A SUCCESSFUL content decrypt proves this hub event is the real owner's (its content is encrypted
+        // under the hub secret only the real owner could have set) — so facilitated users, who never touch
+        // the owner tree, still bind the creator + advance the marks here. Without this they'd get NO
+        // forged-event/rollback protection: a relay could serve a forged 36942 with the victim's dTag to
+        // overwrite relays/blossom/name or spuriously delete the hub for them.
+        if (authentic && hubData.version === 2) {
+          const { recordTrustedCreator } = await import('@/lib/hub/hubCreatorGuard')
+          const { recordVersionSeen } = await import('@/lib/hub/versionGuard')
+          const { recordEpochSeen } = await import('@/lib/hub/epochGuard')
+          recordTrustedCreator(dTag, hubData.creatorPubkey)
+          recordVersionSeen(dTag, hubData.version)
+          recordEpochSeen(dTag, hubData.epoch)
+        }
+      } else {
+        // Facilitator is behind (hasn't rebuilt for the current epoch). Keep the epoch history
+        // (old messages readable) but CLEAR any stale current secret so we never read/send at the
+        // new epoch with an old key. Invariant: hubSecrets[dTag] is the current secret, or empty.
+        setHubSecret(dTag, '')
+      }
+      if (facResult.facilitatorMembers.length > 0) {
+        setHubFacilitatorMembers(dTag, facilitator, facResult.facilitatorMembers)
+      }
+    }
+
     /** Process a single hub: parse event, download secret, load bans, etc. */
     async function processHub(dTag: string, event: Event) {
         const hubData = parseHubEvent(event)
         if (!hubData) return
+
+        // Creator binding: hub-event queries filter by `#d` only (no `authors`), so a relay can serve a
+        // kind-36942 for this dTag signed by ANY pubkey. Once we've cryptographically confirmed the real
+        // owner (its hub secret decrypted — recorded below on success), reject any event from a different
+        // author before it can touch the store or the guards. This is what stops a forged event from
+        // poisoning the epoch/version marks (a permanent lockout), injecting fake state, or spuriously
+        // deleting the hub. Unknown-creator (first ever load) proceeds; the binding is set on decrypt.
+        const { isForgedHubEvent, recordTrustedCreator } = await import('@/lib/hub/hubCreatorGuard')
+        if (isForgedHubEvent(dTag, event.pubkey)) {
+          console.warn(`[HubLoader] Ignoring hub event for ${dTag} from non-owner ${event.pubkey.slice(0, 8)}…`)
+          return
+        }
+
+        // Version-downgrade + epoch-rollback CHECKS (a hub's version/epoch only ever increase). These only
+        // SKIP a stale/downgraded event; they never mutate state, so they're safe to run before the event
+        // is proven owner-authored. The corresponding RECORDs, which advance the persisted high-water
+        // marks, are deferred to decrypt-success below — a forged event that never decrypts must never
+        // advance a mark. A `deleted:true` tombstone omits `version` by design → exempt from the version
+        // check (handled by the deleted branch, not the authoring path).
+        const { isVersionDowngrade, recordVersionSeen } = await import('@/lib/hub/versionGuard')
+        if (!hubData.deleted && isVersionDowngrade(dTag, hubData.version)) {
+          console.warn(`[HubLoader] Ignoring version-downgrade hub event for ${dTag}: version ${hubData.version ?? 1} below high-water mark`)
+          return
+        }
+        const { isV2: isV2Loader } = await import('@/lib/hub/version')
+        const { isEpochRollback, recordEpochSeen } = await import('@/lib/hub/epochGuard')
+        if (isV2Loader(hubData) && isEpochRollback(dTag, hubData.epoch)) {
+          console.warn(`[HubLoader] Ignoring rollback hub event for ${dTag}: epoch ${hubData.epoch} below high-water mark`)
+          return
+        }
 
         setHubData(dTag, hubData)
 
@@ -802,11 +1201,62 @@ export function useHubLoader() {
             }
             if (result.secretHex) {
               setHubSecret(dTag, result.secretHex)
+              // Decryption succeeded — advance the version/epoch high-water marks (a forged event that
+              // never decrypts can't poison them). Bind the creator ONLY on v2: a v2 leaf is keyed by the
+              // pseudonym P = f(memberPriv, ownerPub), which an attacker can't compute for a forged owner
+              // key, so a v2 decrypt-success PROVES the real owner. A v1 leaf is keyed by the member's
+              // PUBLIC key R, so an attacker could craft a v1 tree the victim decrypts and bind to the
+              // attacker — don't bind (v1 has no R to hide anyway, and this avoids a v1-only lockout).
+              if (hubData.version === 2) recordTrustedCreator(dTag, hubData.creatorPubkey)
+              recordVersionSeen(dTag, hubData.version)
+              recordEpochSeen(dTag, hubData.epoch)
+              // Decrypting via the OWNER's tree means we're a real member. If we still carry a
+              // facilitator pref (e.g. we were facilitated before being admitted), clear it — else
+              // resolveV2PostingSigner could mis-sign our posts as Pf during the roster-load window.
+              const facPref = useHubStore.getState().hubPrefs[dTag]
+              if (facPref?.facilitator) {
+                setHubPref(dTag, 'facilitator', undefined)
+                setHubPref(dTag, 'facilitatorSecret', undefined)
+              }
+              // v2: the structural content (channels/roles/categories) is encrypted with the
+              // hub content key. parseHubEvent left it empty; decrypt it now and merge.
+              if (hubData.version === 2) {
+                try {
+                  const { fromHex } = await import('@/lib/crypto/lkh')
+                  const { deriveHubContentKey, decryptHubContent, verifyOwnerAttestation } = await import('@/lib/hub/hubContent')
+                  const key = deriveHubContentKey(fromHex(result.secretHex), hubData.epoch)
+                  const decrypted = await decryptHubContent(key, event.content)
+                  const full = parseHubEvent(event, JSON.stringify(decrypted))
+                  // The owner attestation reveals the owner's real key R_owner (members-only) — but only
+                  // trust it if its signature (by R_owner over the hub coordinate) VERIFIES. Otherwise a
+                  // malicious owner could embed a victim's npub as rOwnerPub and every client would show the
+                  // hub as created by the victim + grant that key owner permissions (isHubOwner).
+                  const ownerRealPubkey = verifiedOwnerRealPubkey(decrypted, hubData.creatorPubkey, dTag, verifyOwnerAttestation)
+                  if (full) {
+                    setHubData(dTag, {
+                      ...hubData,
+                      channels: full.channels,
+                      categories: full.categories,
+                      roles: full.roles,
+                      groupedRoles: full.groupedRoles,
+                      description: full.description,
+                      icon: full.icon,
+                      banner: full.banner,
+                      ownerRealPubkey,
+                    })
+                  }
+                } catch (err) {
+                  console.warn(`Hub ${dTag}: failed to decrypt v2 hub content:`, err)
+                }
+              }
             }
             if (result.members.length > 0) {
               setHubMembers(dTag, result.members)
             }
-            if (result.bannedPubkeys.length > 0) {
+            // Write the ban list whenever it RESOLVED (even if genuinely empty, so a full unban clears the
+            // display) — but never on a transient ban-page fetch failure (banListUnresolved), which would
+            // truncate the store to [] and re-expose banned users.
+            if (!result.banListUnresolved) {
               setHubBanList(dTag, result.bannedPubkeys)
             }
             if (result.pageCount > 0) {
@@ -892,9 +1342,20 @@ export function useHubLoader() {
               const member = result.members.find(m => m.pubkey === pubkey)
               const memberRoles = member?.roles || 'everyone'
 
+              // v2: group trees are keyed on the member's pseudonym P and authored by O; the
+              // owner is identified by deriving O (not by pubkey === creatorPubkey, which is O).
+              let groupLookupKey = pubkey! // v1: R
+              let isCreator = pubkey === hubData.creatorPubkey
+              if (hubData.version === 2) {
+                const { makeSubkeySigner } = await import('@/lib/nostr/v2send')
+                const { ChatContext } = await import('@/lib/crypto/skd')
+                const oPub = await makeSubkeySigner(ChatContext.owner(hubData.dTag), { privateKey, signer }).getPublicKey()
+                isCreator = oPub === hubData.creatorPubkey
+                groupLookupKey = await makeSubkeySigner(ChatContext.member(hubData.dTag), { privateKey, signer, peerPub: hubData.creatorPubkey }).getPublicKey()
+              }
+
               for (const group of hubData.groupedRoles) {
                 // Hub creator qualifies for ALL groups (including creator-only groups with empty roleIds)
-                const isCreator = pubkey === hubData.creatorPubkey
                 const qualifies = isCreator || memberQualifiesForGroup(memberRoles, group.roleIds)
                 if (qualifies) {
                   try {
@@ -904,7 +1365,9 @@ export function useHubLoader() {
                     const groupRef = index.groupTrees.find(gt => gt.groupId === group.groupId)
                     if (groupRef) {
                       const groupTreeContent = await downloadTextFromBlossom(groupRef.hash, hubData.blossomServers)
-                      const groupSecret = await decryptGroupSecret(pubkey!, privateKey, signer, hubData.creatorPubkey, groupTreeContent)
+                      const groupSecret = hubData.version === 2
+                        ? await (await import('@/lib/blossom')).decryptGroupSecretV2(groupLookupKey, hubData.dTag, privateKey, signer, hubData.creatorPubkey, groupTreeContent)
+                        : await decryptGroupSecret(pubkey!, privateKey, signer, hubData.creatorPubkey, groupTreeContent)
                       if (groupSecret) {
                         const groupSecretHex = Array.from(groupSecret).map(b => b.toString(16).padStart(2, '0')).join('')
                         setGroupSecret(dTag, group.groupId, groupSecretHex)
@@ -918,18 +1381,14 @@ export function useHubLoader() {
               }
             }
 
-            // If no secret from creator's tree (non-member), try facilitator fallback
+            // If no secret from creator's tree (non-member), try the user's saved facilitator.
             if (!result.secretHex) {
               const prefs = hubPrefs[dTag]
               const facilitator = prefs?.facilitator
               if (facilitator) {
                 const facResult = await loadFacilitatorSecret(hubData, facilitator, pubkey, privateKey, signer)
                 if (facResult) {
-                  setHubSecret(dTag, facResult.secretHex)
-                  setHubPref(dTag, 'facilitatorSecret', facResult.secretHex)
-                  if (facResult.facilitatorMembers.length > 0) {
-                    setHubFacilitatorMembers(dTag, facilitator, facResult.facilitatorMembers)
-                  }
+                  await applyFacilitatorResult(dTag, hubData.epoch, facilitator, facResult, event, hubData)
                 }
               }
             }
@@ -941,11 +1400,7 @@ export function useHubLoader() {
             if (facilitator) {
               const facResult = await loadFacilitatorSecret(hubData, facilitator, pubkey, privateKey, signer)
               if (facResult) {
-                setHubSecret(dTag, facResult.secretHex)
-                setHubPref(dTag, 'facilitatorSecret', facResult.secretHex)
-                if (facResult.facilitatorMembers.length > 0) {
-                  setHubFacilitatorMembers(dTag, facilitator, facResult.facilitatorMembers)
-                }
+                await applyFacilitatorResult(dTag, hubData.epoch, facilitator, facResult, event, hubData)
               }
             }
           }

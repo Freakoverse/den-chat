@@ -17,7 +17,23 @@ import {
   subscribeToRelays,
 } from '@/lib/nostr/relay-pool'
 import { getPublishRelays } from '@/stores/postingBehaviourStore'
+import { useHubStore } from '@/stores/hubStore'
+import { isV2 } from '@/lib/hub/version'
 import type { Event, Filter } from 'nostr-tools'
+
+/**
+ * v2 fail-closed guard: a PIN_LIST is a hub-scoped event, so on a private hub it MUST be authored under
+ * the member pseudonym `P` (via `authSigner`), never `R`. If `authSigner` is absent on a v2 hub —
+ * because the async `hubMemberIdentity` derivation hasn't resolved yet (a race reachable by clicking pin
+ * immediately), or the signer can't do SKD — refuse rather than fall back to `signWithSigner(R)`, which
+ * would leak the real key onto the hub relays. Mirrors signHubMemberEvent's throw.
+ */
+function assertV2AuthReady(hubDTag: string, authSigner: unknown): void {
+  const hub = useHubStore.getState().hubs[hubDTag]
+  if (hub && isV2(hub) && !authSigner) {
+    throw new Error('Pin unavailable — your private-hub identity is still loading. Please try again in a moment.')
+  }
+}
 
 /* ─── Types ─── */
 
@@ -59,11 +75,14 @@ interface PinState {
   pinMessage: (
     hubDTag: string,
     channelId: string,
+    /** The author key the pin list is stored under: pseudonym `P` in a v2 hub, real key `R` in v1. */
     aRef: string,
     myPubkey: string,
     relays: string[],
     signer: any,
     privateKey: string | null,
+    /** v2: signs the pin-list event as `P` (so it doesn't reveal `R`'s hub membership). */
+    authSigner?: (unsigned: import('nostr-tools').UnsignedEvent) => Promise<import('nostr-tools').Event>,
   ) => Promise<void>
 
   /** Unpin a message */
@@ -75,6 +94,7 @@ interface PinState {
     relays: string[],
     signer: any,
     privateKey: string | null,
+    authSigner?: (unsigned: import('nostr-tools').UnsignedEvent) => Promise<import('nostr-tools').Event>,
   ) => Promise<void>
 }
 
@@ -170,7 +190,7 @@ export const usePinStore = create<PinState>((set, get) => ({
     return mine.pins.some((p) => p.channelId === channelId && p.aRef === aRef)
   },
 
-  pinMessage: async (hubDTag, channelId, aRef, myPubkey, relays, signer, privateKey) => {
+  pinMessage: async (hubDTag, channelId, aRef, myPubkey, relays, signer, privateKey, authSigner) => {
     if (!signer && !privateKey) return
 
     // Get current pins for this hub
@@ -184,7 +204,8 @@ export const usePinStore = create<PinState>((set, get) => ({
     const newPins = [...currentPins, { channelId, aRef }]
     const tags = buildPinTags(hubDTag, newPins)
     const unsigned = createUnsignedEvent(KINDS.PIN_LIST, '', tags)
-    const signed = await signWithSigner(unsigned, signer, privateKey)
+    assertV2AuthReady(hubDTag, authSigner)
+    const signed = authSigner ? await authSigner(unsigned) : await signWithSigner(unsigned, signer, privateKey)
 
     // Optimistic local update
     const newPinEvent: PinEvent = { pubkey: myPubkey, pins: newPins, createdAt: signed.created_at }
@@ -197,11 +218,12 @@ export const usePinStore = create<PinState>((set, get) => ({
       return { pinsByHub: { ...s.pinsByHub, [hubDTag]: updated } }
     })
 
-    // Publish
-    await publishToSpecificRelays(getPublishRelays(relays), signed)
+    // Publish — hub relays only on v2 (a P-authored PIN_LIST pushed to the pinner's personal NIP-65 relays
+    // would let an observer link their pseudonym P → real key R by relay footprint).
+    await publishToSpecificRelays(getPublishRelays(relays, { hubOnly: isV2(useHubStore.getState().hubs[hubDTag]) }), signed)
   },
 
-  unpinMessage: async (hubDTag, channelId, aRef, myPubkey, relays, signer, privateKey) => {
+  unpinMessage: async (hubDTag, channelId, aRef, myPubkey, relays, signer, privateKey, authSigner) => {
     if (!signer && !privateKey) return
 
     const all = get().pinsByHub[hubDTag] || []
@@ -211,7 +233,8 @@ export const usePinStore = create<PinState>((set, get) => ({
     const newPins = mine.pins.filter((p) => !(p.channelId === channelId && p.aRef === aRef))
     const tags = buildPinTags(hubDTag, newPins)
     const unsigned = createUnsignedEvent(KINDS.PIN_LIST, '', tags)
-    const signed = await signWithSigner(unsigned, signer, privateKey)
+    assertV2AuthReady(hubDTag, authSigner)
+    const signed = authSigner ? await authSigner(unsigned) : await signWithSigner(unsigned, signer, privateKey)
 
     // Optimistic local update
     const newPinEvent: PinEvent = { pubkey: myPubkey, pins: newPins, createdAt: signed.created_at }
@@ -221,7 +244,7 @@ export const usePinStore = create<PinState>((set, get) => ({
       return { pinsByHub: { ...s.pinsByHub, [hubDTag]: updated } }
     })
 
-    // Publish
-    await publishToSpecificRelays(getPublishRelays(relays), signed)
+    // Publish — hub relays only on v2 (see pinMessage).
+    await publishToSpecificRelays(getPublishRelays(relays, { hubOnly: isV2(useHubStore.getState().hubs[hubDTag]) }), signed)
   },
 }))

@@ -192,9 +192,12 @@ export const vaultBackend: AuthBackend = {
     const r = await getVaultClient().importInteractive()
     return { pubkey: r.pubkey, npub: npubOf(r.pubkey) }
   },
-  async verifyPin(pubkey, pin) {
-    // exportBackup is PIN-gated and side-effect-free — succeeds iff the PIN is right.
-    try { await getVaultClient().exportBackup(pubkey, pin); return true } catch { return false }
+  async verifyPin(pubkey) {
+    // The PIN is confirmed INSIDE the vault overlay (never enters the app), like every other vault flow —
+    // succeeds iff the PIN is right. The `pin` arg is ignored here (the overlay collects it). This replaces
+    // the old app-side-PIN exportBackup oracle. In practice the vault's verifyPin isn't reached today (both
+    // callers are desktop-only), but this keeps it correct + leak-free if that changes.
+    try { await getVaultClient().verifyPinInteractive(pubkey); return true } catch { return false }
   },
   async deleteAccount(pubkey) {
     await getVaultClient().removeInteractive(pubkey) // PIN confirmed in the vault overlay

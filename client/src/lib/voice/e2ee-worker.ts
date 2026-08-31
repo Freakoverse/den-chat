@@ -141,31 +141,53 @@ async function decryptFrame(
   }
 }
 
+// ─── Key Management ─────────────────────────────────────────────
+
+// Module-level current key. Each Worker instance handles exactly ONE transform
+// (createE2EEWorker() spins up a dedicated Worker per sender/receiver), so a single
+// module-level key is unambiguous. The transform reads THIS variable on every frame,
+// so a mid-call re-key (a kick/ban rotating the epoch) can swap it live via a 'rekey'
+// message without re-attaching the transform.
+let currentKey: CryptoKey | null = null
+
+async function importAesKey(keyBytesArray: number[] | undefined): Promise<CryptoKey | null> {
+  if (!keyBytesArray || keyBytesArray.length === 0) return null
+  try {
+    return await crypto.subtle.importKey(
+      'raw',
+      new Uint8Array(keyBytesArray),
+      { name: 'AES-GCM', length: 128 },
+      false,
+      ['encrypt', 'decrypt'],
+    )
+  } catch (err) {
+    console.error('[E2EE Worker] Failed to import key:', err)
+    return null
+  }
+}
+
+// Live re-key: a rotation posts the new key bytes so existing transforms pick it up
+// on their next frame. Ordering is safe — transforms are attached (rtctransform fires)
+// at join/track-add, well before any rotation, so this never clobbers a fresh attach.
+addEventListener('message', async (event: MessageEvent) => {
+  if (event.data?.type === 'rekey') {
+    const k = await importAesKey(event.data.keyBytes)
+    if (k) {
+      currentKey = k
+      console.log('[E2EE Worker] Key rotated on live transform')
+    }
+  }
+})
+
 // ─── RTCRtpScriptTransform Handler ──────────────────────────────
 
 addEventListener('rtctransform', async (event: any) => {
   const transformer = event.transformer
   const options = transformer.options || {}
   const operation: 'encrypt' | 'decrypt' = options.operation || 'encrypt'
-  const keyBytesArray: number[] | undefined = options.keyBytes
 
-  // Import the AES-GCM key from the options
-  let key: CryptoKey | null = null
-  if (keyBytesArray && keyBytesArray.length > 0) {
-    try {
-      const rawBytes = new Uint8Array(keyBytesArray)
-      key = await crypto.subtle.importKey(
-        'raw',
-        rawBytes,
-        { name: 'AES-GCM', length: 128 },
-        false,
-        ['encrypt', 'decrypt'],
-      )
-      console.log(`[E2EE Worker] Key imported — ${operation} transform ready`)
-    } catch (err) {
-      console.error('[E2EE Worker] Failed to import key:', err)
-    }
-  }
+  currentKey = await importAesKey(options.keyBytes)
+  if (currentKey) console.log(`[E2EE Worker] Key imported — ${operation} transform ready`)
 
   const { readable, writable } = transformer
 
@@ -174,6 +196,7 @@ addEventListener('rtctransform', async (event: any) => {
       frame: RTCEncodedAudioFrame | RTCEncodedVideoFrame,
       controller: TransformStreamDefaultController,
     ) {
+      const key = currentKey
       if (!key) {
         // No key — pass frame through unmodified
         controller.enqueue(frame)

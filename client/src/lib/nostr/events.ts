@@ -398,10 +398,16 @@ export function createDeletedJoinRequest(
  * @param entries - Hub entries with position, relay hint, and optional folder
  * @param folders - Folder definitions
  */
-export function createHubListEvent(
+export async function createHubListEvent(
   entries: Array<{ dTag: string; relayHint?: string; position: number; folderId?: string }>,
-  folders: Array<{ id: string; name: string; color?: string; position: number }>
-): UnsignedEvent {
+  folders: Array<{ id: string; name: string; color?: string; position: number }>,
+  /**
+   * v2 (private) hubs: their membership must NOT be public. Entries whose dTag is in `v2DTags`
+   * are moved into the NIP-51 **encrypted** content (nip44-to-self via `selfEncrypt`) instead of
+   * public `v` tags, so a private hub the user belongs to isn't readable from their hub list.
+   */
+  opts?: { v2DTags?: Set<string>; selfEncrypt?: (plaintext: string) => Promise<string> },
+): Promise<UnsignedEvent> {
   const tags: Tag[] = []
 
   // Add folder definitions: [folder, id, name, color, position]
@@ -409,15 +415,22 @@ export function createHubListEvent(
     tags.push(['folder', folder.id, folder.name, folder.color || '', folder.position.toString()])
   }
 
-  // Add hub entries: [v, dTag, relayHint, position] or [v, dTag, relayHint, position:folderId]
+  // Hub entries: [v, dTag, relayHint, position] — public for v1, encrypted (to self) for v2.
+  const privateEntries: Tag[] = []
   for (const entry of entries) {
     const posValue = entry.folderId
       ? `${entry.position}:${entry.folderId}`
       : entry.position.toString()
-    tags.push(['v', entry.dTag, entry.relayHint || '', posValue])
+    const vTag: Tag = ['v', entry.dTag, entry.relayHint || '', posValue]
+    if (opts?.v2DTags?.has(entry.dTag) && opts.selfEncrypt) privateEntries.push(vTag)
+    else tags.push(vTag)
   }
 
-  return createUnsignedEvent(KINDS.USER_HUB_LIST, '', tags)
+  const content = privateEntries.length > 0 && opts?.selfEncrypt
+    ? await opts.selfEncrypt(JSON.stringify(privateEntries))
+    : ''
+
+  return createUnsignedEvent(KINDS.USER_HUB_LIST, content, tags)
 }
 
 /**
@@ -575,7 +588,8 @@ export function createHideMessageEvent(
   targetRef: string,
   targetPubkey: string,
   targetKind: number,
-  isAddressable: boolean = true
+  isAddressable: boolean = true,
+  channelId?: string,
 ): UnsignedEvent {
   const dTag = `${hubDTag}:${targetRef}`
   const tags: Tag[] = [
@@ -585,6 +599,10 @@ export function createHideMessageEvent(
     ['p', targetPubkey],
     ['k', targetKind.toString()],
   ]
+  // The channel the hidden message lives in — lets receivers authorize the hide against the hider's
+  // PER-CHANNEL `hide_messages` permission (overrides), not just the hub-level role. Optional/
+  // backward-compatible: hides without it fall back to the hub-level check.
+  if (channelId) tags.push(['c', channelId])
 
   return createUnsignedEvent(KINDS.HIDE_MESSAGE, '', tags)
 }

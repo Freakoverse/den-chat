@@ -43,6 +43,15 @@ export interface HubData {
    *  undefined or 0 = off. When set, durable chat events are stamped with a
    *  NIP-40 expiration of created_at + this value. */
   messageExpiration?: number
+  /** Hub format version from the `version` tag (NIP-CHAT §0). undefined/1 = v1
+   *  (public); 2 = v2 (member-identity privacy). */
+  version?: number
+  /** NIP-SKD derivation scheme from the `signer_scheme` tag, as "family:version"
+   *  (v2 only). undefined ⇒ default "skd:1". */
+  signerScheme?: string
+  /** v2 only: the owner's REAL key R_owner (from the decrypted owner attestation). Members-only;
+   *  used to authorize the owner's pseudonymous moderation actions (hide/unhide). */
+  ownerRealPubkey?: string
   nsfw?: boolean
   discoverable?: boolean
   deleted?: boolean
@@ -94,12 +103,20 @@ export interface HideEntry {
   kind: number        // kind of the hidden event
   targetPubkey: string // author of the hidden message
   createdAt: number   // timestamp of the hide event
+  /**
+   * Channel (`c` tag) the hide was authored in and authorized against. A hide only takes effect when
+   * rendered in THIS channel — so a mod authorized to hide only in channel X can't hide a message that
+   * actually lives in channel Y by tagging it `c:X` (the Y render won't match). Absent ⇒ legacy hub-wide.
+   */
+  channelId?: string
 }
 
 export interface HubMember {
   pubkey: string
   roles: string
   flags?: string
+  /** v2 only: the member's pseudonym `P` (leaf id in the tree; `pubkey` is their real key `R`). */
+  p?: string
 }
 
 export interface HubState {
@@ -112,6 +129,11 @@ export interface HubState {
   /** created_at of the hub-list event (kind 16942) the client currently holds — so
    *  the redundancy check can tell "relays are stale" from "relays have the latest". */
   hubListCreatedAt?: number
+  /** Raw NIP-44-encrypted content of the hub-list event, kept so the v2 (private) memberships
+   *  can be re-decrypted once a remote signer becomes available — the first decrypt at startup
+   *  can fail (signer not yet connected / awaiting approval), and we must not permanently drop
+   *  the private hubs when it does. */
+  hubListPrivateContent?: string
   /** Loaded hub data (keyed by d tag) */
   hubs: Record<string, HubData>
   /** Per-hub load status */
@@ -171,6 +193,7 @@ export interface HubState {
   /** Actions */
   setHubEntries: (entries: HubEntry[], folders: HubFolder[]) => void
   setHubListCreatedAt: (ts: number) => void
+  setHubListPrivateContent: (content: string | undefined) => void
   bumpHubSecretRetry: () => void
   /** Clear a hub's status and force the loader to re-fetch it from scratch. */
   retryHub: (dTag: string) => void
@@ -200,6 +223,85 @@ export interface HubState {
   removeHiddenMessage: (dTag: string, ref: string) => void
   clearHiddenMessages: (dTag: string) => void
   setHubSecretFailReason: (dTag: string, reason: 'signer-issue' | 'not-a-member') => void
+  /** Load the account's namespaced hub prefs + facilitator member-lists (call on login/session restore). */
+  hydratePersistedForAccount: (account: string) => void
+}
+
+// ── hubPrefs persistence ──
+// We persist ONLY the public bits across reloads: the chosen `facilitator` (npub) and the
+// `showFacilitatedMessages` toggle. The `facilitatorSecret` is deliberately NOT persisted — it's a
+// hub secret and gets re-derived from the facilitator's tree on load. Persisting `facilitator` is
+// what lets a facilitated user avoid re-entering the npub every session (the loader auto-fetches).
+// SECURITY: hub prefs (facilitator npub per hub) + facilitator member-lists (Pf pseudonyms) are
+// namespaced by the logged-in account — `den_hub_prefs:<account>` — so one account's hub relationships
+// don't bleed to another account on the same device, and a hard-reset on switch doesn't restore the
+// first account's data. `_currentAccount` is set by `hydratePersistedForAccount` (called on login);
+// until then nothing is persisted (no un-namespaced global write). The legacy un-namespaced keys are
+// deleted on hydrate (one-time; a facilitated user re-enters their facilitator handle, and the Pf
+// member-lists are a background-revalidated cache, so the loss is minor and self-healing).
+const HUB_PREFS_LEGACY_KEY = 'den_hub_prefs'
+const FAC_MEMBERS_LEGACY_KEY = 'den_hub_fac_members'
+let _currentAccount: string | null = null
+function hubPrefsKey(account: string): string { return `den_hub_prefs:${account}` }
+function facMembersKey(account: string): string { return `den_hub_fac_members:${account}` }
+
+function loadPersistedHubPrefs(account: string | null): Record<string, HubPrefs> {
+  if (!account) return {}
+  try {
+    const raw = localStorage.getItem(hubPrefsKey(account))
+    if (!raw) return {}
+    const parsed = JSON.parse(raw) as Record<string, Partial<HubPrefs>>
+    const out: Record<string, HubPrefs> = {}
+    for (const [dTag, p] of Object.entries(parsed)) {
+      out[dTag] = {
+        showFacilitatedMessages: p.showFacilitatedMessages ?? true,
+        ...(p.facilitator ? { facilitator: p.facilitator } : {}),
+      }
+    }
+    return out
+  } catch {
+    return {}
+  }
+}
+
+function persistHubPrefs(prefs: Record<string, HubPrefs>): void {
+  if (!_currentAccount) return
+  try {
+    const slim: Record<string, { showFacilitatedMessages: boolean; facilitator?: string }> = {}
+    for (const [dTag, p] of Object.entries(prefs)) {
+      // Skip default-only entries to keep storage tidy; drop the secret.
+      if (p.showFacilitatedMessages === false || p.facilitator) {
+        slim[dTag] = {
+          showFacilitatedMessages: p.showFacilitatedMessages,
+          ...(p.facilitator ? { facilitator: p.facilitator } : {}),
+        }
+      }
+    }
+    localStorage.setItem(hubPrefsKey(_currentAccount), JSON.stringify(slim))
+  } catch { /* storage unavailable — non-fatal */ }
+}
+
+// ── Facilitator member-list cache persistence ──
+// Persist the vouched-member lists (public Pf pseudonyms only — no secrets, no real keys R) so that on
+// a fresh app start a member can immediately validate a facilitated author's messages instead of
+// re-fetching each facilitator's tree and waiting. Revalidated in the background on hub open.
+function loadPersistedFacilitatorMembers(account: string | null): Record<string, Record<string, string[]>> {
+  if (!account) return {}
+  try {
+    const raw = localStorage.getItem(facMembersKey(account))
+    if (!raw) return {}
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+function persistFacilitatorMembers(map: Record<string, Record<string, string[]>>): void {
+  if (!_currentAccount) return
+  try {
+    localStorage.setItem(facMembersKey(_currentAccount), JSON.stringify(map))
+  } catch { /* storage unavailable / quota — non-fatal */ }
 }
 
 export const useHubStore = create<HubState>((set) => ({
@@ -218,6 +320,8 @@ export const useHubStore = create<HubState>((set) => ({
   hideNotFoundHubs: localStorage.getItem('den_hide_notfound_hubs') === 'true',
   hubMembers: {},
   previewHubId: null,
+  // Start empty — hydrated per-account by hydratePersistedForAccount() on login (persistence is
+  // namespaced by account, and there is no account at module-eval time).
   hubPrefs: {},
   hubBanLists: {},
   hubFacilitatorMembers: {},
@@ -246,9 +350,21 @@ export const useHubStore = create<HubState>((set) => ({
   setHubEntries: (entries, folders) => set({ hubEntries: entries, folders, hubListLoaded: true }),
   setHubListLoaded: (loaded) => set({ hubListLoaded: loaded }),
   setHubListCreatedAt: (ts) => set({ hubListCreatedAt: ts }),
+  setHubListPrivateContent: (content) => set({ hubListPrivateContent: content }),
 
   setHubData: (dTag, data) =>
-    set((state) => ({ hubs: { ...state.hubs, [dTag]: data } })),
+    set((state) => {
+      const prev = state.hubs[dTag]
+      // v2: `ownerRealPubkey` is decoded from the encrypted owner attestation (async, only after the
+      // hub secret loads). A re-parse of a republished/live-updated event (via `parseHubEvent`) has
+      // no way to include it, so it arrives undefined. Carry the known value forward — it's stable
+      // per hub and only ever set on load — so `isCreator` doesn't briefly flicker to false (which
+      // made the owner UI disappear for a second or two after every hub update).
+      const merged = (prev?.ownerRealPubkey && !data.ownerRealPubkey)
+        ? { ...data, ownerRealPubkey: prev.ownerRealPubkey }
+        : data
+      return { hubs: { ...state.hubs, [dTag]: merged } }
+    }),
 
   setHubStatus: (dTag, status) =>
     set((state) => ({ hubStatus: { ...state.hubStatus, [dTag]: status } })),
@@ -292,22 +408,37 @@ export const useHubStore = create<HubState>((set) => ({
 
   setPreviewHub: (dTag) => set({ previewHubId: dTag }),
 
+  hydratePersistedForAccount: (account) => {
+    _currentAccount = account
+    // One-time deletion of the legacy un-namespaced keys (they bled across accounts). No migration:
+    // assigning the shared blob to whichever account hydrates first would itself be a cross-account bleed.
+    try { localStorage.removeItem(HUB_PREFS_LEGACY_KEY); localStorage.removeItem(FAC_MEMBERS_LEGACY_KEY) } catch { /* non-fatal */ }
+    set({
+      hubPrefs: loadPersistedHubPrefs(account),
+      hubFacilitatorMembers: loadPersistedFacilitatorMembers(account),
+    })
+  },
+
   setHubPref: (dTag, key, value) =>
     set((state) => {
       const existing = state.hubPrefs[dTag] || { showFacilitatedMessages: true }
-      return { hubPrefs: { ...state.hubPrefs, [dTag]: { ...existing, [key]: value } } }
+      const hubPrefs = { ...state.hubPrefs, [dTag]: { ...existing, [key]: value } }
+      persistHubPrefs(hubPrefs)
+      return { hubPrefs }
     }),
 
   setHubBanList: (dTag, pubkeys) =>
     set((state) => ({ hubBanLists: { ...state.hubBanLists, [dTag]: pubkeys } })),
 
   setHubFacilitatorMembers: (dTag, facilitatorPubkey, members) =>
-    set((state) => ({
-      hubFacilitatorMembers: {
+    set((state) => {
+      const hubFacilitatorMembers = {
         ...state.hubFacilitatorMembers,
         [dTag]: { ...(state.hubFacilitatorMembers[dTag] || {}), [facilitatorPubkey]: members },
-      },
-    })),
+      }
+      persistFacilitatorMembers(hubFacilitatorMembers)
+      return { hubFacilitatorMembers }
+    }),
 
   setModBanList: (dTag, modPubkey, bannedPubkeys) =>
     set((state) => ({

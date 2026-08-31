@@ -60,9 +60,24 @@ export function useStartup() {
     })
   }, [])
 
+  // Physically purge expired (disappearing) messages at launch, independent of relay subscriptions —
+  // pruneAll only fires once subscriptions form, so a launch where they never do (all relays down, or
+  // no hubs yet) would otherwise leave expired messages sitting in IndexedDB. The load-time filter keeps
+  // them off-screen; this removes them from disk (the copy a seized device would surrender).
+  useEffect(() => {
+    import('@/lib/cache/messageCache')
+      .then(({ purgeExpiredMessages }) => purgeExpiredMessages())
+      .catch(() => { /* non-fatal */ })
+  }, [])
+
   // After login: fetch profile + hub list
   useEffect(() => {
     if (!isAuthenticated || !pubkey) return
+
+    // Load THIS account's namespaced hub prefs (facilitator handle per hub) + facilitator member-lists
+    // before anything reads them. Persistence is per-account, so this fires on every login / account
+    // switch / session restore (pubkey change) and never bleeds another account's data.
+    useHubStore.getState().hydratePersistedForAccount(pubkey)
 
     // Fetch user profile (kind 0)
     fetchReplaceable(pubkey, 0).then((event) => {
@@ -80,13 +95,17 @@ export function useStartup() {
     // Fetch user hub list (kind 16942). Wait longer than the 4s default so a relay
     // holding the newest list isn't cut off — otherwise we'd show a stale hub list
     // (missing recently-joined hubs / wrong folders) until a manual refresh.
-    fetchReplaceable(pubkey, KINDS.USER_HUB_LIST, undefined, 10000).then((event) => {
+    fetchReplaceable(pubkey, KINDS.USER_HUB_LIST, undefined, 10000).then(async (event) => {
       if (!event) {
         setHubEntries([], []) // marks hubListLoaded = true
         return
       }
 
       useHubStore.getState().setHubListCreatedAt(event.created_at)
+      // Keep the encrypted content so the v2 (private) memberships can be re-decrypted once a
+      // remote signer is available — the decrypt below can fail on reload (signer not yet
+      // connected / awaiting approval), and the retry effect below recovers them.
+      useHubStore.getState().setHubListPrivateContent(event.content || undefined)
 
       const folders: HubFolder[] = []
       const entries: HubEntry[] = []
@@ -115,6 +134,23 @@ export function useStartup() {
 
           entries.push({ dTag: tag[1], relayHint, position, folderId })
         }
+      }
+
+      // v2 (private) hub memberships live in the ENCRYPTED content — decrypt (to self) + merge.
+      if (event.content) {
+        try {
+          const { parsePrivateHubEntries } = await import('@/lib/hub/hubListPrivacy')
+          const privTags = await parsePrivateHubEntries(event.content, pubkey, signer, privateKey)
+          for (const tag of privTags) {
+            if (tag[0] !== 'v' || !tag[1]) continue
+            const relayHint = tag[2] || ''
+            const posField = tag[3] || '0'
+            const colonIdx = posField.indexOf(':')
+            const position = colonIdx !== -1 ? parseInt(posField.substring(0, colonIdx), 10) : parseInt(posField, 10)
+            const folderId = colonIdx !== -1 ? posField.substring(colonIdx + 1) : undefined
+            entries.push({ dTag: tag[1], relayHint, position, folderId })
+          }
+        } catch { /* private entries best-effort */ }
       }
 
       setHubEntries(entries, folders)
@@ -402,6 +438,43 @@ export function useStartup() {
       clearTimeout(signerRetryTimer)
     }
   }, [isAuthenticated, pubkey])
+
+  // Recover v2 (private) hub memberships when a signer becomes available.
+  //
+  // v2 memberships live in the NIP-44-ENCRYPTED content of the kind-16942 hub list (see
+  // hubListPrivacy.ts). The initial decrypt happens in the effect above, but on reload with a
+  // REMOTE signer that decrypt can fail — the signer may not be connected yet, or the nip44_decrypt
+  // is awaiting approval — and the private hubs would then be silently dropped from the sidebar with
+  // no retry (the effect above keys only on [isAuthenticated, pubkey], not on `signer`). This effect
+  // re-decrypts whenever the signer/key changes and MERGES any recovered v2 entries (add-only; it
+  // never removes), so a private hub reappears once the signer connects / the decrypt is approved.
+  const hubListPrivateContent = useHubStore((s) => s.hubListPrivateContent)
+  useEffect(() => {
+    if (!pubkey || !hubListPrivateContent || (!signer && !privateKey)) return
+    let cancelled = false
+    ;(async () => {
+      const { parsePrivateHubEntries } = await import('@/lib/hub/hubListPrivacy')
+      const privTags = await parsePrivateHubEntries(hubListPrivateContent, pubkey, signer, privateKey)
+      if (cancelled || privTags.length === 0) return
+      const store = useHubStore.getState()
+      const existing = store.hubEntries
+      const have = new Set(existing.map((e) => e.dTag))
+      const additions: HubEntry[] = []
+      for (const tag of privTags) {
+        if (tag[0] !== 'v' || !tag[1] || have.has(tag[1])) continue
+        const relayHint = tag[2] || ''
+        const posField = tag[3] || '0'
+        const colonIdx = posField.indexOf(':')
+        const position = colonIdx !== -1 ? parseInt(posField.substring(0, colonIdx), 10) : parseInt(posField, 10)
+        const folderId = colonIdx !== -1 ? posField.substring(colonIdx + 1) : undefined
+        additions.push({ dTag: tag[1], relayHint, position, folderId })
+      }
+      if (!cancelled && additions.length > 0) {
+        store.setHubEntries([...existing, ...additions], store.folders)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [pubkey, signer, privateKey, hubListPrivateContent])
 
   // Load hub event data from relays for all hub entries
   useHubLoader()

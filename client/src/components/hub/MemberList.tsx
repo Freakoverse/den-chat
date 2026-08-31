@@ -44,10 +44,13 @@ export function MemberList() {
     const members: Array<{ pubkey: string; roles: string; isCreator: boolean }> = []
     const seen = new Set<string>()
 
-    // Add creator first
-    if (hub.creatorPubkey) {
-      members.push({ pubkey: hub.creatorPubkey, roles: 'creator', isCreator: true })
-      seen.add(hub.creatorPubkey)
+    // Add creator first. v2: the hub is authored by the owner pseudonym O (creatorPubkey), but the
+    // member list shows real identities (members hold the roster), so display the owner's real key R
+    // (ownerRealPubkey) — matching how their own leaf appears — not the faceless O.
+    const ownerKey = hub.ownerRealPubkey || hub.creatorPubkey
+    if (ownerKey) {
+      members.push({ pubkey: ownerKey, roles: 'creator', isCreator: true })
+      seen.add(ownerKey)
     }
 
     // Add LKH tree members
@@ -61,7 +64,7 @@ export function MemberList() {
     }
 
     return members
-  }, [hub.creatorPubkey, hubMembers])
+  }, [hub.creatorPubkey, hub.ownerRealPubkey, hubMembers])
 
   // Filter by search
   const filtered = useMemo(() => {
@@ -245,7 +248,7 @@ export function MemberList() {
         open={!!profileModalPubkey}
         onClose={() => setProfileModalPubkey(null)}
         targetPubkey={profileModalPubkey}
-        hubContext={hub.creatorPubkey ? { dTag: hub.dTag, creatorPubkey: hub.creatorPubkey } : null}
+        hubContext={hub.creatorPubkey ? { dTag: hub.dTag, creatorPubkey: hub.creatorPubkey, ownerRealPubkey: hub.ownerRealPubkey } : null}
         onDM={(pubkey) => {
           useDM04Store.getState().setActiveConversation(pubkey)
           useDMStore.getState().setActiveConversation(pubkey)

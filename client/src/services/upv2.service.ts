@@ -33,6 +33,12 @@ type UPV2Action =
   | 'nip04_decrypt'
   | 'nip44_encrypt'
   | 'nip44_decrypt'
+  // NIP-SKD (§7 methods, used as the UPV2 action). `skd_sign_as_subkey` gets a 'signed_event'
+  // response (like sign_event); the others echo their own action name with a { result } body.
+  | 'skd_get_subkey_pubkey'
+  | 'skd_sign_as_subkey'
+  | 'skd_nip44_encrypt_as_subkey'
+  | 'skd_nip44_decrypt_as_subkey'
   | 'error'
 
 export interface UPV2Session {
@@ -54,6 +60,9 @@ class UPV2Service {
   private static instance: UPV2Service
   private pool: SimplePool
   private currentSession: UPV2Session | null = null
+  // Whether the connected signer (DENOS) implements NIP-SKD over UPV2 — probed once at login.
+  // Gates v2-hub capability so `canUseV2`/the create toggle stay accurate.
+  private skdSupported = false
 
   constructor() {
     this.pool = new SimplePool()
@@ -209,6 +218,7 @@ class UPV2Service {
         expiresAt: session.expiresAt,
       }
 
+      this.skdSupported = await this.probeSkd()
       return { success: true, session: this.currentSession }
     } catch (error) {
       return { success: false, error: (error as Error).message }
@@ -484,6 +494,81 @@ class UPV2Service {
     return {
       encrypt: (pubkey: string, plaintext: string) => this.nip44Encrypt(pubkey, plaintext),
       decrypt: (pubkey: string, ciphertext: string) => this.nip44Decrypt(pubkey, ciphertext),
+    }
+  }
+
+  // ── NIP-SKD (§7 methods over UPV2) — derive + act as v2-hub pseudonyms via DENOS ──
+  // UPV2 is bespoke, so (unlike NIP-46/PC55's positional array) the params are a JSON OBJECT:
+  // { context, peerPub?, nonce, + event | (recipientPub, plaintext) | (senderPub, ciphertext) }.
+  // Matches DENOS's handle_skd (upv2.rs): session-authenticated (no challenge_signature), the
+  // sign op replies with a 'signed_event' { event } and the rest echo their own action + { result }.
+
+  async skdGetSubkeyPubkey(context: string, peerPub?: string): Promise<string> {
+    const s = this.currentSession
+    if (!s) throw new Error('Not logged in via UPV2')
+    const nonce = bytesToHex(crypto.getRandomValues(new Uint8Array(16)))
+    const requestTime = Math.floor(Date.now() / 1000)
+    await this.sendUPV2Event(s.relays, s.loginPk, s.loginSk, s.signerPubkey, 'skd_get_subkey_pubkey', s.sessionId,
+      { context, ...(peerPub ? { peerPub } : {}), nonce })
+    const response = await this.pollForResponse(s.relays, s.loginPk, s.loginSk, 'skd_get_subkey_pubkey', 30000, s.sessionId, requestTime, nonce)
+    if (response?.result) return response.result as string
+    throw new Error('skd_get_subkey_pubkey failed: no result from signer')
+  }
+  async skdSignAsSubkey(context: string, event: unknown, peerPub?: string): Promise<Record<string, unknown>> {
+    const s = this.currentSession
+    if (!s) throw new Error('Not logged in via UPV2')
+    const nonce = bytesToHex(crypto.getRandomValues(new Uint8Array(16)))
+    const requestTime = Math.floor(Date.now() / 1000)
+    await this.sendUPV2Event(s.relays, s.loginPk, s.loginSk, s.signerPubkey, 'skd_sign_as_subkey', s.sessionId,
+      { context, ...(peerPub ? { peerPub } : {}), nonce, event })
+    const response = await this.pollForResponse(s.relays, s.loginPk, s.loginSk, 'signed_event', 30000, s.sessionId, requestTime, nonce)
+    if (response?.event) return response.event as Record<string, unknown>
+    throw new Error('skd_sign_as_subkey failed: no signed event from signer')
+  }
+  async skdNip44EncryptAsSubkey(context: string, recipientPub: string, plaintext: string, peerPub?: string): Promise<string> {
+    const s = this.currentSession
+    if (!s) throw new Error('Not logged in via UPV2')
+    const nonce = bytesToHex(crypto.getRandomValues(new Uint8Array(16)))
+    const requestTime = Math.floor(Date.now() / 1000)
+    await this.sendUPV2Event(s.relays, s.loginPk, s.loginSk, s.signerPubkey, 'skd_nip44_encrypt_as_subkey', s.sessionId,
+      { context, ...(peerPub ? { peerPub } : {}), nonce, recipientPub, plaintext })
+    const response = await this.pollForResponse(s.relays, s.loginPk, s.loginSk, 'skd_nip44_encrypt_as_subkey', 30000, s.sessionId, requestTime, nonce)
+    if (response?.result) return response.result as string
+    throw new Error('skd_nip44_encrypt_as_subkey failed: no result from signer')
+  }
+  async skdNip44DecryptAsSubkey(context: string, senderPub: string, ciphertext: string, peerPub?: string): Promise<string> {
+    const s = this.currentSession
+    if (!s) throw new Error('Not logged in via UPV2')
+    const nonce = bytesToHex(crypto.getRandomValues(new Uint8Array(16)))
+    const requestTime = Math.floor(Date.now() / 1000)
+    await this.sendUPV2Event(s.relays, s.loginPk, s.loginSk, s.signerPubkey, 'skd_nip44_decrypt_as_subkey', s.sessionId,
+      { context, ...(peerPub ? { peerPub } : {}), nonce, senderPub, ciphertext })
+    const response = await this.pollForResponse(s.relays, s.loginPk, s.loginSk, 'skd_nip44_decrypt_as_subkey', 30000, s.sessionId, requestTime, nonce)
+    if (response?.result) return response.result as string
+    throw new Error('skd_nip44_decrypt_as_subkey failed: no result from signer')
+  }
+
+  /** One-shot capability probe (§7), capped so a non-SKD signer doesn't slow login. */
+  private async probeSkd(): Promise<boolean> {
+    try {
+      const pub = await Promise.race([
+        this.skdGetSubkeyPubkey('nip-skd:capability-probe'),
+        new Promise<string>((_, reject) => setTimeout(() => reject(new Error('probe timeout')), 8000)),
+      ])
+      return /^[0-9a-f]{64}$/i.test(pub)
+    } catch {
+      return false
+    }
+  }
+
+  /** NIP-SKD surface — present only when the signer advertised support (probed at login). */
+  get skd() {
+    if (!this.skdSupported) return undefined
+    return {
+      getSubkeyPubkey: (context: string, peerPub?: string) => this.skdGetSubkeyPubkey(context, peerPub),
+      signAsSubkey: (context: string, event: unknown, peerPub?: string) => this.skdSignAsSubkey(context, event, peerPub),
+      nip44EncryptAsSubkey: (context: string, recipientPub: string, plaintext: string, peerPub?: string) => this.skdNip44EncryptAsSubkey(context, recipientPub, plaintext, peerPub),
+      nip44DecryptAsSubkey: (context: string, senderPub: string, ciphertext: string, peerPub?: string) => this.skdNip44DecryptAsSubkey(context, senderPub, ciphertext, peerPub),
     }
   }
 

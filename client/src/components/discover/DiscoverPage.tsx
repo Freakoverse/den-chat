@@ -16,8 +16,8 @@ import { useUserStore } from '@/stores/userStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { useBlossomMedia } from '@/hooks/useBlossomMedia'
 import { fetchEvents } from '@/lib/nostr/relay-pool'
-import { countLeadingZeroBits } from '@/lib/pow/pow'
 import { KINDS } from '@/lib/crypto/constants'
+import { countLeadingZeroBits } from '@/lib/pow/pow'
 import { MAX_HUB_LIST_ENTRIES } from '@/lib/hub/hubLimits'
 
 import { truncateNpub, cn } from '@/lib/utils'
@@ -29,11 +29,13 @@ import { UserProfileModal } from '@/components/hub/UserProfileModal'
 import { HubJoinWarningModal, isJoinWarningDismissed } from '@/components/hub/HubJoinWarningModal'
 import { useBlockStore } from '@/stores/blockStore'
 import { useWotStore } from '@/stores/wotStore'
+import { useNavigationStore } from '@/stores/navigationStore'
 import {
   Compass, Search, Loader2, Hash, Info, UserPlus, Check, AlertTriangle,
   X, ShieldAlert, SlidersHorizontal, ChevronLeft, ChevronRight, Plus,
-  Gamepad2, Package, Globe, Monitor,
+  Gamepad2, Package, Globe, Monitor, ChevronDown,
 } from 'lucide-react'
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import type { Event } from 'nostr-tools'
 import { isTauri } from '@/lib/utils'
 import { ModsTab } from '@/components/discover/ModsTab'
@@ -50,11 +52,16 @@ interface DiscoveredHub {
   banner?: string
   tags?: string[]
   minPow: number
+  /** Whether the advertised message-PoW (`w`) is backed by real work: the event id carries >= `w`
+   *  leading-zero bits AND the `nonce` tag commits to a target >= `w`. `true` when the hub claims no
+   *  PoW (`w` absent or 0). Enforced by the filter ONLY when the message-PoW toggle is on. */
+  powVerified: boolean
   /** Explicit join PoW (from the W tag); 0 when the hub set none — never inherits minPow. */
   joinMinPow: number
   nsfw: boolean
   discoverable: boolean
   creatorPubkey: string
+  version?: number
   generalRelays: string[]
   blossomServers: string[]
   /** Original publication time (from published_at tag) — used for display ordering */
@@ -84,6 +91,23 @@ function parseHubEventForDiscover(event: Event): DiscoveredHub | null {
     const wTagVal = event.tags.find(t => t[0] === 'w')?.[1]
     let minPow = wTagVal ? parseInt(wTagVal, 10) : 0
 
+    // VERIFY the advertised message-PoW is real (NIP-13), not just a number the owner wrote. An honest
+    // client mines the hub event to its own `w` (CreateHubDialog / buildAndSignV2HubEvent), so the event
+    // id must carry >= w leading-zero bits AND commit to a target >= w in its `nonce` tag. This does NOT
+    // drop the hub — it records `powVerified`, and the filter enforces it ONLY when the user turns the
+    // message-PoW toggle on (off by default, so old hubs that were never mined to their `w` still show).
+    // Checked only for the `w` TAG (not the legacy JSON `min_pow` fallback below, which predates
+    // event-mining and would false-flag old hubs). No `w` / claimed 0 ⇒ nothing claimed ⇒ verified.
+    let powVerified = true
+    if (wTagVal) {
+      const claimed = parseInt(wTagVal, 10) || 0
+      if (claimed > 0) {
+        const actualBits = countLeadingZeroBits(event.id)
+        const committedTarget = parseInt(event.tags.find(t => t[0] === 'nonce')?.[2] || '0', 10) || 0
+        powVerified = actualBits >= claimed && committedTarget >= claimed
+      }
+    }
+
     // Join PoW from the W tag. No W tag ⇒ 0 (join PoW is explicit, not inherited).
     const wjTagVal = event.tags.find(t => t[0] === 'W')?.[1]
 
@@ -106,12 +130,14 @@ function parseHubEventForDiscover(event: Event): DiscoveredHub | null {
 
     // Extract client tag
     const clientTag = event.tags.find(t => t[0] === 'client')?.[1]
+    const versionVal = event.tags.find(t => t[0] === 'version')?.[1]
 
     return {
       event, dTag, name, description, icon, banner,
       tags: tags.length > 0 ? tags : undefined,
-      minPow, joinMinPow: wjTagVal ? parseInt(wjTagVal, 10) : 0,
+      minPow, powVerified, joinMinPow: wjTagVal ? parseInt(wjTagVal, 10) : 0,
       nsfw, discoverable, creatorPubkey: event.pubkey,
+      version: versionVal ? (parseInt(versionVal, 10) || undefined) : undefined,
       generalRelays, blossomServers, publishedAt, clientTag,
     }
   } catch {
@@ -159,6 +185,7 @@ function PowRangeSlider({
   max,
   setMin,
   setMax,
+  disabled = false,
 }: {
   label: string
   description?: string
@@ -166,6 +193,7 @@ function PowRangeSlider({
   max: number
   setMin: (v: number) => void
   setMax: (v: number) => void
+  disabled?: boolean
 }) {
   const MAX_POW_RANGE = 10
 
@@ -192,7 +220,7 @@ function PowRangeSlider({
   }
 
   return (
-    <div>
+    <div className={cn(disabled && 'opacity-50')}>
       <div className="flex items-center justify-between mb-2">
         <label className="text-sm font-medium text-foreground">{label}</label>
         <span className="text-xs font-mono text-primary bg-primary/10 px-2 py-0.5 rounded">
@@ -204,7 +232,7 @@ function PowRangeSlider({
       </p>
 
       {/* Min slider */}
-      <div className="space-y-3">
+      <div className={cn('space-y-3', disabled && 'pointer-events-none')}>
         <div>
           <div className="flex items-center justify-between mb-1">
             <span className="text-[11px] text-muted-foreground">Min</span>
@@ -315,10 +343,14 @@ interface FilterModalProps {
   setPowMin: (v: number) => void
   powMax: number
   setPowMax: (v: number) => void
+  requireMessagePow: boolean
+  setRequireMessagePow: (v: boolean) => void
   joinPowMin: number
   setJoinPowMin: (v: number) => void
   joinPowMax: number
   setJoinPowMax: (v: number) => void
+  requireJoinPow: boolean
+  setRequireJoinPow: (v: boolean) => void
   filterTags: string[]
   setFilterTags: (v: string[]) => void
   filterClientTags: string[]
@@ -326,14 +358,19 @@ interface FilterModalProps {
   onApplySearch?: () => void
 }
 
-function FilterModal({ open, onClose, showNsfw, setShowNsfw, powMin, setPowMin, powMax, setPowMax, joinPowMin, setJoinPowMin, joinPowMax, setJoinPowMax, filterTags, setFilterTags, filterClientTags, setFilterClientTags, onApplySearch }: FilterModalProps) {
+function FilterModal({ open, onClose, showNsfw, setShowNsfw, powMin, setPowMin, powMax, setPowMax, requireMessagePow, setRequireMessagePow, joinPowMin, setJoinPowMin, joinPowMax, setJoinPowMax, requireJoinPow, setRequireJoinPow, filterTags, setFilterTags, filterClientTags, setFilterClientTags, onApplySearch }: FilterModalProps) {
   const [localNsfw, setLocalNsfw] = useState(showNsfw)
   const [localPowMin, setLocalPowMin] = useState(powMin)
   const [localPowMax, setLocalPowMax] = useState(powMax)
+  const [localRequireMessagePow, setLocalRequireMessagePow] = useState(requireMessagePow)
   const [localJoinPowMin, setLocalJoinPowMin] = useState(joinPowMin)
   const [localJoinPowMax, setLocalJoinPowMax] = useState(joinPowMax)
+  const [localRequireJoinPow, setLocalRequireJoinPow] = useState(requireJoinPow)
   const [localTags, setLocalTags] = useState<string[]>(filterTags)
   const [tagInput, setTagInput] = useState('')
+
+  // Advanced accordion (PoW filters + client filter live here). Collapsed by default.
+  const [showAdvanced, setShowAdvanced] = useState(false)
 
   // Client tag filter state
   const DEFAULT_CLIENT_OPTIONS = ['DEN Chat']
@@ -347,8 +384,10 @@ function FilterModal({ open, onClose, showNsfw, setShowNsfw, powMin, setPowMin, 
       setLocalNsfw(showNsfw)
       setLocalPowMin(powMin)
       setLocalPowMax(powMax)
+      setLocalRequireMessagePow(requireMessagePow)
       setLocalJoinPowMin(joinPowMin)
       setLocalJoinPowMax(joinPowMax)
+      setLocalRequireJoinPow(requireJoinPow)
       setLocalTags([...filterTags])
       setTagInput('')
       setLocalClientTags([...filterClientTags])
@@ -357,7 +396,7 @@ function FilterModal({ open, onClose, showNsfw, setShowNsfw, powMin, setPowMin, 
       const combined = new Set([...DEFAULT_CLIENT_OPTIONS, ...filterClientTags])
       setClientTagOptions([...combined])
     }
-  }, [open, showNsfw, powMin, powMax, joinPowMin, joinPowMax, filterTags, filterClientTags])
+  }, [open, showNsfw, powMin, powMax, requireMessagePow, joinPowMin, joinPowMax, requireJoinPow, filterTags, filterClientTags])
 
   if (!open) return null
 
@@ -386,8 +425,10 @@ function FilterModal({ open, onClose, showNsfw, setShowNsfw, powMin, setPowMin, 
     setShowNsfw(localNsfw)
     setPowMin(localPowMin)
     setPowMax(localPowMax)
+    setRequireMessagePow(localRequireMessagePow)
     setJoinPowMin(localJoinPowMin)
     setJoinPowMax(localJoinPowMax)
+    setRequireJoinPow(localRequireJoinPow)
     setFilterTags(localTags)
     setFilterClientTags(localClientTags)
     onClose()
@@ -401,8 +442,10 @@ function FilterModal({ open, onClose, showNsfw, setShowNsfw, powMin, setPowMin, 
     setLocalNsfw(false)
     setLocalPowMin(15)
     setLocalPowMax(25)
+    setLocalRequireMessagePow(false)
     setLocalJoinPowMin(15)
     setLocalJoinPowMax(25)
+    setLocalRequireJoinPow(false)
     setLocalTags([])
     setTagInput('')
     setLocalClientTags([])
@@ -410,7 +453,7 @@ function FilterModal({ open, onClose, showNsfw, setShowNsfw, powMin, setPowMin, 
     setClientTagOptions([...DEFAULT_CLIENT_OPTIONS])
   }
 
-  const hasChanges = localNsfw !== false || localPowMin !== 15 || localPowMax !== 25 || localJoinPowMin !== 15 || localJoinPowMax !== 25 || localTags.length > 0 || localClientTags.length > 0
+  const hasChanges = localNsfw !== false || localPowMin !== 15 || localPowMax !== 25 || localRequireMessagePow !== false || localJoinPowMin !== 15 || localJoinPowMax !== 25 || localRequireJoinPow !== false || localTags.length > 0 || localClientTags.length > 0
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center px-2" onClick={onClose}>
@@ -447,24 +490,6 @@ function FilterModal({ open, onClose, showNsfw, setShowNsfw, powMin, setPowMin, 
                 ${localNsfw ? 'translate-x-[22px]' : 'translate-x-[3px]'}`} />
             </button>
           </div>
-
-          {/* Message PoW range slider */}
-          <PowRangeSlider
-            label="PoW Difficulty Range"
-            min={localPowMin}
-            max={localPowMax}
-            setMin={setLocalPowMin}
-            setMax={setLocalPowMax}
-          />
-
-          {/* Join request PoW range slider */}
-          <PowRangeSlider
-            label="Join Request Difficulty"
-            min={localJoinPowMin}
-            max={localJoinPowMax}
-            setMin={setLocalJoinPowMin}
-            setMax={setLocalJoinPowMax}
-          />
 
           {/* Multi-tag filter */}
           <div>
@@ -509,6 +534,73 @@ function FilterModal({ open, onClose, showNsfw, setShowNsfw, powMin, setPowMin, 
                 Add
               </button>
             </div>
+          </div>
+
+          {/* Advanced — PoW filters + Filter by Client. Collapsed by default. */}
+          <div className="border-t border-border pt-4 space-y-4">
+            <button
+              type="button"
+              onClick={() => setShowAdvanced(!showAdvanced)}
+              className="flex items-center justify-between w-full text-sm font-semibold text-foreground cursor-pointer"
+            >
+              <span>Advanced</span>
+              <ChevronDown size={16} className={cn('text-muted-foreground transition-transform', showAdvanced ? '' : '-rotate-90')} />
+            </button>
+            {showAdvanced && (
+            <div className="space-y-6 pt-2">
+          {/* Message PoW range slider (`w`) — the difficulty members must mine to post here */}
+          <PowRangeSlider
+            label="PoW Difficulty Range"
+            min={localPowMin}
+            max={localPowMax}
+            setMin={setLocalPowMin}
+            setMax={setLocalPowMax}
+            disabled={!localRequireMessagePow}
+          />
+
+          {/* Require message-PoW (`w`) toggle — OFF (default) applies NO message-PoW filtering and does
+              NOT verify the hub event's own PoW (old un-mined hubs show). ON restricts to hubs whose
+              advertised PoW is in the range above AND is backed by real work. */}
+          <div className="flex items-center justify-between -mt-2">
+            <div>
+              <label className="text-sm font-medium text-foreground">Require a message difficulty</label>
+              <p className="text-xs text-muted-foreground mt-0.5">Off shows all hubs and skips PoW verification</p>
+            </div>
+            <button
+              onClick={() => setLocalRequireMessagePow(!localRequireMessagePow)}
+              className={`relative w-10 h-[22px] rounded-full transition-colors cursor-pointer shrink-0
+                ${localRequireMessagePow ? 'bg-primary' : 'bg-muted-foreground/30'}`}
+            >
+              <div className={`absolute top-[3px] w-4 h-4 rounded-full bg-white shadow transition-transform
+                ${localRequireMessagePow ? 'translate-x-[22px]' : 'translate-x-[3px]'}`} />
+            </button>
+          </div>
+
+          {/* Join request PoW range slider (`W`) */}
+          <PowRangeSlider
+            label="Join Request Difficulty"
+            min={localJoinPowMin}
+            max={localJoinPowMax}
+            setMin={setLocalJoinPowMin}
+            setMax={setLocalJoinPowMax}
+            disabled={!localRequireJoinPow}
+          />
+
+          {/* Require join-PoW (`W`) toggle — OFF (default) shows hubs even if they set no join
+              difficulty (no `W` tag). ON restricts to hubs that set a join PoW in the range above. */}
+          <div className="flex items-center justify-between -mt-2">
+            <div>
+              <label className="text-sm font-medium text-foreground">Require a join difficulty</label>
+              <p className="text-xs text-muted-foreground mt-0.5">Off shows hubs even if they set no join PoW</p>
+            </div>
+            <button
+              onClick={() => setLocalRequireJoinPow(!localRequireJoinPow)}
+              className={`relative w-10 h-[22px] rounded-full transition-colors cursor-pointer shrink-0
+                ${localRequireJoinPow ? 'bg-primary' : 'bg-muted-foreground/30'}`}
+            >
+              <div className={`absolute top-[3px] w-4 h-4 rounded-full bg-white shadow transition-transform
+                ${localRequireJoinPow ? 'translate-x-[22px]' : 'translate-x-[3px]'}`} />
+            </button>
           </div>
 
           {/* Client tag filter */}
@@ -593,6 +685,9 @@ function FilterModal({ open, onClose, showNsfw, setShowNsfw, powMin, setPowMin, 
               </button>
             </div>
           </div>
+            </div>
+            )}
+          </div>
         </div>
 
         {/* Footer */}
@@ -660,6 +755,12 @@ function DiscoverHubCard({ hub }: { hub: DiscoveredHub }) {
     setShowInfoModal(true)
   }
 
+  // Already a member → clicking "Joined" opens the hub instead of being a dead status chip.
+  const handleOpenHub = () => {
+    useHubStore.getState().setActiveHub(hub.dTag)
+    useNavigationStore.getState().setActivePage('hubs')
+  }
+
   const handleRequestJoin = async () => {
     if (!myPubkey || joining) return
 
@@ -688,9 +789,24 @@ function DiscoverHubCard({ hub }: { hub: DiscoveredHub }) {
       const { getPublishRelays } = await import('@/stores/postingBehaviourStore')
       const hubRelays = [...(hub.generalRelays || [])]
 
-      let unsigned = createUnsignedEvent(KINDS.JOIN_REQUEST, '', [['d', hub.dTag]])
-      const signed = await mineAndSign(unsigned, hub.joinMinPow, myPubkey, signer, privateKey)
-      await publishToSpecificRelays(getPublishRelays(hubRelays), signed)
+      const { isV2 } = await import('@/lib/hub/version')
+      let signed
+      if (isV2(hub)) {
+        const { buildV2JoinRequest } = await import('@/lib/hub/v2join')
+        const { canUseV2 } = await import('@/lib/crypto/skd')
+        if (!canUseV2({ privateKey, signer })) {
+          throw new Error('This hub is private (v2) — use the DEN client or a NIP-SKD signer to join.')
+        }
+        const coord = `${KINDS.HUB_EVENT}:${hub.creatorPubkey}:${hub.dTag}`
+        signed = await buildV2JoinRequest({ hubDTag: hub.dTag, ownerPub: hub.creatorPubkey, coord, joinPow: hub.joinMinPow || 0, rPub: myPubkey, privateKey, signer })
+      } else {
+        const unsigned = createUnsignedEvent(KINDS.JOIN_REQUEST, '', [['d', hub.dTag]])
+        signed = await mineAndSign(unsigned, hub.joinMinPow, myPubkey, signer, privateKey)
+      }
+      // v2: hub relays ONLY. The join request is authored by a throwaway `addr` key (R is sealed to O
+      // inside), but it carries the hub coordinate; publishing it to the applicant's personal NIP-65 relays
+      // would let an observer correlate that addr key → R by relay footprint ("R is joining private hub X").
+      await publishToSpecificRelays(getPublishRelays(hubRelays, { hubOnly: isV2(hub) }), signed)
 
       if (!isAlreadyInList) {
         // Set hub data BEFORE updating entries — prevents the hub loader from
@@ -700,6 +816,10 @@ function DiscoverHubCard({ hub }: { hub: DiscoveredHub }) {
           tags: hub.tags, description: hub.description, epoch: 1, generalRelays: hub.generalRelays,
           blossomServers: hub.blossomServers, indexFileHash: '', channels: [],
           categories: [], roles: [], minPow: hub.minPow, joinMinPow: hub.joinMinPow, nsfw: hub.nsfw, discoverable: hub.discoverable,
+          // MUST carry version: buildHubListEvent (below) classifies v2-vs-public by hubs[dTag].version,
+          // and a private (v2) hub misclassified as public publishes its dTag as a PLAINTEXT `v` tag on
+          // our R-authored hub list — publicly linking our real key R to this private hub.
+          version: hub.version,
         }
         setHubData(hub.dTag, hubData)
         // Mark it loaded now — we already have the full hub definition from discovery.
@@ -712,12 +832,13 @@ function DiscoverHubCard({ hub }: { hub: DiscoveredHub }) {
         const newEntries = [...hubEntries, newEntry]
         setHubEntries(newEntries, folders)
 
-        const hubListEvent = createHubListEvent(
+        const { buildHubListEvent, publishHubList } = await import('@/lib/hub/hubListPrivacy')
+        const hubListEvent = await buildHubListEvent(
           newEntries.map(e => ({ dTag: e.dTag, relayHint: e.relayHint, position: e.position, folderId: e.folderId })),
           folders,
         )
         const signedList = await signWithSigner(hubListEvent, signer, privateKey)
-        await publishToSpecificRelays(getPublishRelays(), signedList)
+        await publishHubList(signedList) // failover across all the user's relays (see hubListPrivacy)
       }
 
       setJoined(true)
@@ -742,6 +863,18 @@ function DiscoverHubCard({ hub }: { hub: DiscoveredHub }) {
 
         {/* Badges — 7. No bolt icon on PoW */}
         <div className="absolute top-2 right-2 flex items-center gap-1">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className={`px-1.5 py-0.5 rounded text-[9px] font-medium text-white backdrop-blur-sm cursor-help ${hub.version === 2 ? 'bg-violet-500/80' : 'bg-sky-500/70'}`}>
+                {hub.version === 2 ? 'Private' : 'Public'}
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="text-xs max-w-[240px]">
+              {hub.version === 2
+                ? "Messages are encrypted, activity is hidden behind mask addresses, and a hub's structure is hidden."
+                : "Messages are encrypted/hidden, but all other activity and a hub's structure are public."}
+            </TooltipContent>
+          </Tooltip>
           {hub.nsfw && (
             <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-red-500/80 text-white backdrop-blur-sm">NSFW</span>
           )}
@@ -812,9 +945,12 @@ function DiscoverHubCard({ hub }: { hub: DiscoveredHub }) {
             <Info size={12} /> Info
           </button>
           {isMember ? (
-            <span className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-medium bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+            <button
+              onClick={handleOpenHub}
+              className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-medium bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/25 transition-colors cursor-pointer"
+            >
               <Check size={12} /> Joined
-            </span>
+            </button>
           ) : isAlreadyInList || joined ? (
             <span className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
               <Check size={12} /> Request Sent
@@ -974,10 +1110,20 @@ export function DiscoverPage() {
 
   // Filter state (defaults: NSFW off, PoW 15-25, no tags)
   const [showNsfw, setShowNsfw] = useState(false)
+  // Default range 15–25 for both PoW (`w`) and join PoW (`W`). Both ranges are INERT by default:
+  // message-PoW filtering + hub-event PoW verification apply only when "Require a message difficulty"
+  // is on, and join-PoW filtering only when "Require a join difficulty" is on. So out of the box every
+  // hub shows regardless of its `w`/`W` — the ranges just define what each toggle constrains when enabled.
   const [powMin, setPowMin] = useState(15)
   const [powMax, setPowMax] = useState(25)
   const [joinPowMin, setJoinPowMin] = useState(15)
   const [joinPowMax, setJoinPowMax] = useState(25)
+  // OFF by default: hubs with no join PoW (no `W` tag) are shown. ON requires a join PoW.
+  const [requireJoinPow, setRequireJoinPow] = useState(false)
+  // OFF by default: no message-PoW filtering AND no hub-event PoW verification — every hub shows,
+  // including old hubs that were never mined to their advertised `w`. ON filters by the range and
+  // drops hubs whose `w` claim isn't backed by real work (powVerified === false).
+  const [requireMessagePow, setRequireMessagePow] = useState(false)
   const [filterTags, setFilterTags] = useState<string[]>([])
   const [filterClientTags, setFilterClientTags] = useState<string[]>([])
   const [showFilterModal, setShowFilterModal] = useState(false)
@@ -1231,22 +1377,22 @@ export function DiscoverPage() {
       return score >= scoreThreshold
     })
 
-    // PoW range filter (by the hub's claimed message PoW `w`)
-    if (powMin > 0 || powMax < 40) {
-      result = result.filter(h => h.minPow >= powMin && h.minPow <= powMax)
+    // Message-PoW (`w`) filter — governed ENTIRELY by the `requireMessagePow` toggle (OFF by default):
+    //   OFF → no message-PoW filtering and NO hub-event PoW verification; every hub shows (old hubs
+    //         that were never mined to their advertised `w` included).
+    //   ON  → keep only hubs whose advertised PoW is within [powMin, powMax] AND is backed by real
+    //         work (powVerified) — i.e. the event id actually carries the claimed leading-zero bits.
+    if (requireMessagePow) {
+      result = result.filter(h => h.powVerified && h.minPow >= powMin && h.minPow <= powMax)
     }
 
-    // Nonce check (anti-spam, always on): the hub event must actually be mined to its
-    // claimed message PoW. A spammer can put a `w` tag without doing the work — this
-    // drops those (and any un-mined hub) by verifying the event id's real leading-zero
-    // bits locally. Hubs claiming w=0 need no PoW and pass trivially.
-    result = result.filter(h => h.minPow === 0 || countLeadingZeroBits(h.event.id) >= h.minPow)
-
-    // Join PoW range filter. joinMinPow is 0 for hubs with no W tag, so any active
-    // min (default 15) excludes them — a hub only matches if it explicitly set a join
-    // PoW in range.
-    if (joinPowMin > 0 || joinPowMax < 40) {
-      result = result.filter(h => h.joinMinPow >= joinPowMin && h.joinMinPow <= joinPowMax)
+    // Join-PoW (`W`) filter — governed ENTIRELY by the `requireJoinPow` toggle (OFF by default):
+    //   OFF → no join-PoW filtering at all; every hub shows regardless of its join difficulty.
+    //   ON  → keep only hubs that set a join PoW within [joinPowMin, joinPowMax].
+    // Previously the range constrained W-tagged hubs even with the toggle off, which hid hubs whose
+    // join PoW fell outside the default 15–25 window without the user opting in — the toggle now gates it.
+    if (requireJoinPow) {
+      result = result.filter(h => h.joinMinPow > 0 && h.joinMinPow >= joinPowMin && h.joinMinPow <= joinPowMax)
     }
 
     // Tag filter (multi-tag — hub must match ALL specified tags)
@@ -1270,7 +1416,7 @@ export function DiscoverPage() {
     }
 
     return result
-  }, [hubs, showNsfw, powMin, powMax, joinPowMin, joinPowMax, filterTags, filterClientTags, searchQuery, blockedPubkeys, wotSettings, wotGraphDepth])
+  }, [hubs, showNsfw, powMin, powMax, joinPowMin, joinPowMax, requireJoinPow, requireMessagePow, filterTags, filterClientTags, searchQuery, blockedPubkeys, wotSettings, wotGraphDepth])
 
   // Numbered pagination
   const totalPages = Math.max(1, Math.ceil(filteredHubs.length / PAGE_SIZE))
@@ -1282,7 +1428,7 @@ export function DiscoverPage() {
   // Reset to page 1 on filter/search change
   useEffect(() => {
     setCurrentPage(1)
-  }, [showNsfw, powMin, powMax, joinPowMin, joinPowMax, filterTags, filterClientTags, searchQuery])
+  }, [showNsfw, powMin, powMax, joinPowMin, joinPowMax, requireJoinPow, requireMessagePow, filterTags, filterClientTags, searchQuery])
 
   // Prefetch next batch when user is within 2 pages of the end
   useEffect(() => {
@@ -1294,7 +1440,7 @@ export function DiscoverPage() {
   }, [currentPage, totalPages, exhausted, loading, hubs.length, loadMoreHubs])
 
   // Active filter indicator count
-  const activeFilterCount = (showNsfw ? 1 : 0) + ((powMin !== 15 || powMax !== 25) ? 1 : 0) + ((joinPowMin !== 15 || joinPowMax !== 25) ? 1 : 0) + (filterTags.length > 0 ? 1 : 0) + (filterClientTags.length > 0 ? 1 : 0)
+  const activeFilterCount = (showNsfw ? 1 : 0) + (requireMessagePow ? 1 : 0) + ((powMin !== 15 || powMax !== 25) ? 1 : 0) + ((joinPowMin !== 15 || joinPowMax !== 25) ? 1 : 0) + (requireJoinPow ? 1 : 0) + (filterTags.length > 0 ? 1 : 0) + (filterClientTags.length > 0 ? 1 : 0)
 
   const LeftPanel = (
     <ResizablePanel id="discover" defaultWidth={280} minWidth={200} maxWidth={420} className="flex flex-col bg-background pr-2 py-2 gap-2 max-[1080px]:hidden">
@@ -1556,10 +1702,14 @@ export function DiscoverPage() {
         setPowMin={setPowMin}
         powMax={powMax}
         setPowMax={setPowMax}
+        requireMessagePow={requireMessagePow}
+        setRequireMessagePow={setRequireMessagePow}
         joinPowMin={joinPowMin}
         setJoinPowMin={setJoinPowMin}
         joinPowMax={joinPowMax}
         setJoinPowMax={setJoinPowMax}
+        requireJoinPow={requireJoinPow}
+        setRequireJoinPow={setRequireJoinPow}
         filterTags={filterTags}
         setFilterTags={setFilterTags}
         filterClientTags={filterClientTags}

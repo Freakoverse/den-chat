@@ -64,12 +64,22 @@ export interface StoredReaction {
   customUrl?: string
   /** Unix timestamp (seconds) of the reaction event */
   createdAt?: number
+  /** Epoch the reaction was encrypted under (its `epoch` tag) — a reaction is always encrypted+stamped
+   *  with the CURRENT epoch at creation, so lazy decryption must use THIS epoch's channel key, not the
+   *  hub's current one (otherwise reactions made before a rotation fail to decrypt afterwards). */
+  epoch?: number
   /** Raw encrypted content from the event (for lazy decryption) */
   rawContent?: string
   /** Raw encrypted emoji tag [shortcode, url] (for lazy decryption) */
   rawEmojiTag?: [string, string]
   /** Whether this reaction has been decrypted */
   decrypted?: boolean
+  /** v2: encrypted identity tag (`enc(channelKey, R‖sig)`) — decoded to `realPubkey` lazily. */
+  identityTag?: string
+  /** v2: the reactor's real key R (decoded from `identityTag`); undefined in v1 (pubkey IS R). */
+  realPubkey?: string
+  /** Full raw Nostr event JSON (for the reaction's "View raw event"). */
+  rawEvent?: string
 }
 
 interface MessageState {

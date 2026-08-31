@@ -68,7 +68,17 @@ export const useUserStore = create<UserState>((set) => ({
     // account carousel), clear the previous account's data/subscriptions first so it
     // doesn't bleed into the new session. A fresh login (no prior pubkey) needs nothing.
     const prevPubkey = useUserStore.getState().pubkey
-    if (prevPubkey && prevPubkey !== pubkey) resetSession()
+    if (prevPubkey && prevPubkey !== pubkey) {
+      resetSession()
+      // Clear the PREVIOUS account's bunker credentials on a carousel switch (logout does this, but the
+      // switch path didn't). Skip when the new account is a nip46 login: a fresh bunker connect writes these
+      // same keys just before calling login('nip46'), so clearing here would break it. (A nip46 *extension*
+      // switch leaves the old bunker creds — a narrow, non-breaking residual.)
+      if (method !== 'nip46') {
+        localStorage.removeItem(StorageKey.BUNKER_URL)
+        localStorage.removeItem(StorageKey.BUNKER_CLIENT_SECRET)
+      }
+    }
     setDraftUser(pubkey)
     set({ isAuthenticated: true, pubkey, authMethod: method, privateKey })
   },

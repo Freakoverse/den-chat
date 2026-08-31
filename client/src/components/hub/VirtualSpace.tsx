@@ -19,8 +19,10 @@ import * as THREE from 'three'
 import { OBJLoader } from 'three-stdlib'
 import { X } from 'lucide-react'
 import { useVoiceStore } from '@/stores/voiceStore'
-import { useUserStore } from '@/stores/userStore'
+import { useHubStore } from '@/stores/hubStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
+import { resolveMemberPubkey } from '@/lib/hub/resolveMemberPubkey'
+import { useMyVoicePubkey } from '@/hooks/useVoiceDisplayPubkey'
 import { npubShort, cn } from '@/lib/utils'
 import {
   fetchVirtualAvatarCached, loadAvatarBlobUrl, parseVirtualAvatar, clearVirtualAvatarCache,
@@ -480,14 +482,16 @@ function RemoteAvatars({ showRanges }: { showRanges: boolean }) {
   const currentHubDTag = useVoiceStore((s) => s.currentHubDTag)
   const currentChannelId = useVoiceStore((s) => s.currentChannelId)
   const currentHostPubkey = useVoiceStore((s) => s.currentHostPubkey)
-  const myPubkey = useUserStore((s) => s.pubkey)
+  const hubMembers = useHubStore((s) => (currentHubDTag ? s.hubMembers[currentHubDTag] : undefined))
+  // v2: my own presence is authored under my pseudonym P, not R — exclude self by the voice P.
+  const myVoicePubkey = useMyVoicePubkey(currentHubDTag)
 
   const presences = currentHubDTag
     ? (presenceByHub[currentHubDTag] || []).filter(
         (p) =>
           p.channelId === currentChannelId &&
           p.status === 'joined' &&
-          p.pubkey !== myPubkey &&
+          p.pubkey !== myVoicePubkey &&
           participants[p.pubkey] &&
           // virtual-space + plain (non-spatial) people; only 2D-spatial people are sealed off
           (participants[p.pubkey].hasVspace || !participants[p.pubkey].hasSpatial) &&
@@ -495,26 +499,41 @@ function RemoteAvatars({ showRanges }: { showRanges: boolean }) {
       )
     : []
 
-  // Hook must run every render — live avatars for the current participants.
-  const avatars = useVirtualAvatars(presences.map((p) => p.pubkey))
+  // v2: the presence wire pubkey is the member pseudonym P, but a virtual-avatar (kind 30078) is a
+  // GLOBAL per-user record authored under the real key R. Resolve P→R via the hub roster before
+  // fetching avatars + rendering profiles/nameplates — otherwise nothing matches and every remote
+  // standee silently falls back to a blank color with an unrecognizable npub. No-op on v1 (wire=R).
+  const presenceKey = presences.map((p) => p.pubkey).join(',')
+  const realOf = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const p of presences) m.set(p.pubkey, resolveMemberPubkey(p.pubkey, hubMembers))
+    return m
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [presenceKey, hubMembers])
+
+  // Hook must run every render — live avatars for the current participants, keyed by real key R.
+  const avatars = useVirtualAvatars(presences.map((p) => realOf.get(p.pubkey) ?? p.pubkey))
 
   return (
     <>
-      {presences.map((p) => (
-        <RemoteAvatar
-          key={p.pubkey}
-          pubkey={p.pubkey}
-          avatar={avatars[p.pubkey] ?? null}
-          x={p.position.x}
-          z={p.position.y}
-          elevation={p.elevation ?? 0}
-          heading={p.heading ?? 0}
-          speaking={participants[p.pubkey]?.isSpeaking ?? activeSpeakers.includes(p.pubkey)}
-          showRange={showRanges}
-          radius={p.sphereRadius}
-          conePercent={p.cone ?? 0}
-        />
-      ))}
+      {presences.map((p) => {
+        const realPubkey = realOf.get(p.pubkey) ?? p.pubkey
+        return (
+          <RemoteAvatar
+            key={p.pubkey}
+            pubkey={realPubkey}
+            avatar={avatars[realPubkey] ?? null}
+            x={p.position.x}
+            z={p.position.y}
+            elevation={p.elevation ?? 0}
+            heading={p.heading ?? 0}
+            speaking={participants[p.pubkey]?.isSpeaking ?? activeSpeakers.includes(p.pubkey)}
+            showRange={showRanges}
+            radius={p.sphereRadius}
+            conePercent={p.cone ?? 0}
+          />
+        )
+      })}
     </>
   )
 }

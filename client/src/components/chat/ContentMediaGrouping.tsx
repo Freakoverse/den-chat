@@ -191,7 +191,7 @@ export function ContentMediaGroups({ groups, galleryImages, onGalleryOpen }: {
             <ContentMediaImage
               key={`cg-${gi}`}
               src={url}
-              className="rounded-lg mt-2 max-w-[400px] max-[1080px]:max-w-full max-h-[300px] object-contain cursor-pointer hover:brightness-110 transition-all border border-transparent hover:border-border"
+              className="rounded-lg mt-2 max-w-[400px] max-[1080px]:max-w-full max-h-[300px] object-contain cursor-pointer transition-all border border-transparent hover:border-border"
               onClick={() => onGalleryOpen(url)}
             />
           )
@@ -203,7 +203,7 @@ export function ContentMediaGroups({ groups, galleryImages, onGalleryOpen }: {
               <div key={`cg-${gi}-${j}`} className="relative overflow-hidden">
                 <ContentMediaImage
                   src={url}
-                  className="w-full h-full object-cover cursor-pointer hover:brightness-110 transition-all"
+                  className="w-full h-full object-cover cursor-pointer transition-all"
                   onClick={() => onGalleryOpen(url)}
                 />
               </div>

@@ -45,7 +45,8 @@ import { DeleteConfirmDialog } from '@/components/hub/ChannelView'
 import { useUserListsStore } from '@/stores/userListsStore'
 import { useReportStore, type HubReport } from '@/stores/reportStore'
 import { nip19 } from 'nostr-tools'
-import { PERMISSION_KEYS, PERMISSION_LABELS, PERMISSION_DESCRIPTIONS, DISABLED_PERMISSIONS, DEFAULT_EVERYONE_PERMISSIONS, getPermissionsForUser, type ResolvedPermissions } from '@/lib/hub/permissions'
+import { PERMISSION_KEYS, PERMISSION_LABELS, PERMISSION_DESCRIPTIONS, DISABLED_PERMISSIONS, DEFAULT_EVERYONE_PERMISSIONS, getPermissionsForUser, isHubOwner, type ResolvedPermissions } from '@/lib/hub/permissions'
+import { isV2 } from '@/lib/hub/version'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
 import { PowSection } from './PowSection'
 import { EXPIRATION_PRESETS, formatDuration } from '@/lib/hub/messageExpiration'
@@ -277,7 +278,7 @@ export function HubSettingsModal({ open, onClose, hub }: HubSettingsModalProps) 
   const setHubData = useHubStore((s) => s.setHubData)
   const setHubStatus = useHubStore((s) => s.setHubStatus)
 
-  const isCreator = pubkey === hub.creatorPubkey
+  const isCreator = pubkey === hub.creatorPubkey || pubkey === hub.ownerRealPubkey
 
   // Reset when hub changes or modal reopens
   useEffect(() => {
@@ -296,6 +297,7 @@ export function HubSettingsModal({ open, onClose, hub }: HubSettingsModalProps) 
       setEditRelays([...hub.generalRelays])
       setEditBlossoms([...hub.blossomServers])
       setEditRoles([...hub.roles])
+      setEditMessageExpiration(hub.messageExpiration || 0) // was missing → the timer bled across hubs
       setPublishError(null)
     }
   }, [open, hub])
@@ -507,11 +509,16 @@ export function HubSettingsModal({ open, onClose, hub }: HubSettingsModalProps) 
 
       // Fetch the current index to get existing group tree hashes
       if (newGroupedRoles.length > 0) {
+        // v2 hubs build P-keyed group trees (leaf keys wrapped O→R); v1 uses R-keyed trees.
+        const { isV2: isV2Group } = await import('@/lib/hub/version')
+        const v2Hub = isV2Group(hub)
         try {
           await markStep('Fetching encryption index')
           const { downloadTextFromBlossom } = await import('@/lib/blossom/client')
-          const { parseIndexFile, createAndUploadGroupTree } = await import('@/lib/blossom/members')
+          const { parseIndexFile, createAndUploadGroupTree, createAndUploadGroupTreeV2 } = await import('@/lib/blossom/members')
           const { getGroupMembers } = await import('@/lib/hub/groupEncryption')
+          const { makeSubkeySigner } = await import('@/lib/nostr/v2send')
+          const { ChatContext } = await import('@/lib/crypto/skd')
           const indexContent = await downloadTextFromBlossom(hub.indexFileHash, hub.blossomServers)
           const index = parseIndexFile(indexContent)
           markStepDone('Fetching encryption index')
@@ -537,9 +544,23 @@ export function HubSettingsModal({ open, onClose, hub }: HubSettingsModalProps) 
 
               // Generate random group secret (32 bytes)
               const groupSecret = crypto.getRandomValues(new Uint8Array(32))
-              const groupTreeHash = await createAndUploadGroupTree(
-                memberPubkeys, groupSecret, signer, privateKey, hub.blossomServers,
-              )
+              let groupTreeHash: string
+              if (v2Hub) {
+                // v2: P-keyed group tree. Members from the main roster {p,r}, plus the owner.
+                // getGroupMembers strips `p`, so recover it from hubMembers by pubkey.
+                const groupMembersV2 = qualifying
+                  .map(q => { const hm = hubMembers.find(m => m.pubkey === q.pubkey); return hm?.p ? { p: hm.p, r: hm.pubkey } : null })
+                  .filter((x): x is { p: string; r: string } => !!x)
+                if (!groupMembersV2.some(m => m.r === pubkey)) {
+                  const ownerP = await makeSubkeySigner(
+                    ChatContext.member(hub.dTag), { privateKey, signer, peerPub: hub.creatorPubkey },
+                  ).getPublicKey()
+                  groupMembersV2.push({ p: ownerP, r: pubkey! })
+                }
+                groupTreeHash = await createAndUploadGroupTreeV2(groupMembersV2, groupSecret, hub.dTag, privateKey, signer, hub.blossomServers)
+              } else {
+                groupTreeHash = await createAndUploadGroupTree(memberPubkeys, groupSecret, signer, privateKey, hub.blossomServers)
+              }
 
               existingGroupTrees.push({ groupId: group.groupId, hash: groupTreeHash })
               indexChanged = true
@@ -562,8 +583,8 @@ export function HubSettingsModal({ open, onClose, hub }: HubSettingsModalProps) 
           // Re-upload index file if it changed
           if (indexChanged) {
             await markStep('Uploading encryption index')
-            const banPageHashes = index.banPages.map(bp => bp.hash)
-            const { createPaginatedIndexFile } = await import('@/lib/blossom/members')
+            const { createPaginatedIndexFile, banPageToken } = await import('@/lib/blossom/members')
+            const banPageHashes = index.banPages.map(banPageToken) // preserve: keep the epoch stamp
             const newIndexContent = createPaginatedIndexFile(
               index.spineHash, index.leafPages, banPageHashes,
               index.historyHash || undefined,
@@ -571,8 +592,16 @@ export function HubSettingsModal({ open, onClose, hub }: HubSettingsModalProps) 
             )
             const indexBytes = new TextEncoder().encode(newIndexContent)
             const { uploadToBlossomServers } = await import('@/lib/blossom/client')
+            // v2: sign the Blossom auth as the owner O, not the real key R_owner (which would leak).
+            let groupIndexAuth: ((e: import('nostr-tools').UnsignedEvent) => Promise<import('nostr-tools').Event>) | undefined
+            const { isV2: isV2ForGroupIdx } = await import('@/lib/hub/version')
+            if (isV2ForGroupIdx(hub)) {
+              const { makeSubkeySigner } = await import('@/lib/nostr/v2send')
+              const { ChatContext } = await import('@/lib/crypto/skd')
+              groupIndexAuth = makeSubkeySigner(ChatContext.owner(hub.dTag), { privateKey, signer }).signEvent
+            }
             const { hash: newIndexHash } = await uploadToBlossomServers(
-              indexBytes, signer, privateKey, hub.blossomServers, 'text/plain',
+              indexBytes, signer, privateKey, hub.blossomServers, 'text/plain', undefined, undefined, groupIndexAuth,
             )
 
             // Verify the new index is downloadable and correct before committing
@@ -677,12 +706,22 @@ export function HubSettingsModal({ open, onClose, hub }: HubSettingsModalProps) 
             if (anyChanged) {
               // Upload updated pages + rebuild spine (spine keys unchanged since no add/remove)
               const { uploadToBlossomServers } = await import('@/lib/blossom/client')
+              // v2: sign every Blossom auth as the owner pseudonym O (never R_owner). The pages
+              // stay P-keyed with their roster segments intact — only role metadata changed.
+              const { isV2: isV2Cascade } = await import('@/lib/hub/version')
+              let cascadeAuth: ((e: import('nostr-tools').UnsignedEvent) => Promise<import('nostr-tools').Event>) | undefined
+              if (isV2Cascade(hub)) {
+                const { makeSubkeySigner } = await import('@/lib/nostr/v2send')
+                const { ChatContext } = await import('@/lib/crypto/skd')
+                const cascadeOwnerSigner = makeSubkeySigner(ChatContext.owner(hub.dTag), { privateKey, signer })
+                cascadeAuth = (e) => cascadeOwnerSigner.signEvent(e)
+              }
               const newLeafPages = [...index.leafPages]
 
               for (const up of updatedPages) {
                 const pageBytes = new TextEncoder().encode(up.content)
                 const { hash } = await uploadToBlossomServers(
-                  pageBytes, signer, privateKey, hub.blossomServers, 'text/plain',
+                  pageBytes, signer, privateKey, hub.blossomServers, 'text/plain', undefined, undefined, cascadeAuth,
                 )
                 const idx = newLeafPages.findIndex(p => p.pageIndex === up.pageIndex)
                 if (idx >= 0) newLeafPages[idx] = { ...newLeafPages[idx], firstPubkey: up.firstPubkey, hash }
@@ -693,12 +732,12 @@ export function HubSettingsModal({ open, onClose, hub }: HubSettingsModalProps) 
               const newSpineContent = serializeSpine(newSpine)
               const spineBytes = new TextEncoder().encode(newSpineContent)
               const { hash: newSpineHash } = await uploadToBlossomServers(
-                spineBytes, signer, privateKey, hub.blossomServers, 'text/plain',
+                spineBytes, signer, privateKey, hub.blossomServers, 'text/plain', undefined, undefined, cascadeAuth,
               )
 
               // Create new index
-              const { createPaginatedIndexFile } = await import('@/lib/blossom/members')
-              const banPageHashes = index.banPages.map(bp => bp.hash)
+              const { createPaginatedIndexFile, banPageToken } = await import('@/lib/blossom/members')
+              const banPageHashes = index.banPages.map(banPageToken) // preserve: keep the epoch stamp
               const groupTrees = index.groupTrees.length > 0 ? index.groupTrees : undefined
               const newIndexContent = createPaginatedIndexFile(
                 newSpineHash, newLeafPages, banPageHashes,
@@ -706,7 +745,7 @@ export function HubSettingsModal({ open, onClose, hub }: HubSettingsModalProps) 
               )
               const indexBytes = new TextEncoder().encode(newIndexContent)
               const { hash: newIndexHash } = await uploadToBlossomServers(
-                indexBytes, signer, privateKey, hub.blossomServers, 'text/plain',
+                indexBytes, signer, privateKey, hub.blossomServers, 'text/plain', undefined, undefined, cascadeAuth,
               )
               currentIndexHash = newIndexHash
 
@@ -729,7 +768,7 @@ export function HubSettingsModal({ open, onClose, hub }: HubSettingsModalProps) 
       }
 
       await markStep('Signing hub event')
-      const unsignedEvent = buildHubEvent({
+      const hubEventParams = {
         dTag: hub.dTag,
         name: editName.trim(),
         description: editDescription.trim() || undefined,
@@ -751,22 +790,47 @@ export function HubSettingsModal({ open, onClose, hub }: HubSettingsModalProps) 
         groupedRoles: newGroupedRoles.length > 0 ? newGroupedRoles : undefined,
         publishedAt: hub.publishedAt,
         eventCreatedAt: hub.eventCreatedAt,
-      })
+      }
 
-      let enteredMining = false
-      const signedEvent = await mineAndSign(unsignedEvent, editMinPow, pubkey, signer, privateKey, (phase) => {
-        if (phase === 'mining') {
-          enteredMining = true
-          setPublishStep('Processing')
-        } else {
-          if (enteredMining) markStepDone('Processing')
-          setPublishStep('Signing hub event')
-        }
-      })
+      let signedEvent
+      const { isV2: isV2Edit } = await import('@/lib/hub/version')
+      if (isV2Edit(hub)) {
+        // v2: encrypt the (edited) structural content + sign as the owner pseudonym O.
+        const secretHexEdit = useHubStore.getState().hubSecrets[hub.dTag]
+        if (!secretHexEdit) throw new Error('Hub secret not available')
+        const { fromHex: fromHexEdit } = await import('@/lib/crypto/lkh')
+        const { buildAndSignV2HubEvent } = await import('@/lib/hub/buildHubEvent')
+        setPublishStep('Signing hub event')
+        signedEvent = await buildAndSignV2HubEvent({
+          ...hubEventParams,
+          hubSecret: fromHexEdit(secretHexEdit),
+          ownerRealPub: pubkey!,
+          ownerPub: hub.creatorPubkey,
+          minPow: editMinPow,
+          privateKey, signer,
+        })
+      } else {
+        const unsignedEvent = buildHubEvent(hubEventParams)
+        let enteredMining = false
+        signedEvent = await mineAndSign(unsignedEvent, editMinPow, pubkey, signer, privateKey, (phase) => {
+          if (phase === 'mining') {
+            enteredMining = true
+            setPublishStep('Processing')
+          } else {
+            if (enteredMining) markStepDone('Processing')
+            setPublishStep('Signing hub event')
+          }
+        })
+      }
       markStepDone('Signing hub event')
 
       await markStep('Publishing to relays')
-      await publishToSpecificRelays(getPublishRelays([...editRelays]), signedEvent)
+      {
+        // Zero relays accepted → fail loudly before advancing local state (publishToSpecificRelays returns
+        // [] rather than throwing on total failure; a silent advance would split-brain the hub).
+        const accepted = await publishToSpecificRelays(getPublishRelays([...editRelays], { hubOnly: isV2(hub) }), signedEvent)
+        if (accepted.length === 0) throw new Error('The hub update was not accepted by any relay — please try again.')
+      }
       markStepDone('Publishing to relays')
 
       // Update local store
@@ -1507,10 +1571,19 @@ function GeneralPage({
     try {
       const buffer = await file.arrayBuffer()
       const data = new Uint8Array(buffer)
+      // v2: the hub event is authored by the owner pseudonym O, so the referenced blob's
+      // 24242 upload auth must be signed by O too — never R_owner (CARDINAL RULE).
+      let ownerAuth: ((e: import('nostr-tools').UnsignedEvent) => Promise<import('nostr-tools').Event>) | undefined
+      if (isV2(hub)) {
+        const { makeSubkeySigner } = await import('@/lib/nostr/v2send')
+        const { ChatContext } = await import('@/lib/crypto/skd')
+        ownerAuth = makeSubkeySigner(ChatContext.owner(hub.dTag), { privateKey, signer }).signEvent
+      }
       const { hash } = await uploadToBlossomServers(
         data, signer, privateKey, undefined, file.type,
         (p) => setProgress({ ...p }),
         () => { const c = new AbortController(); abortRef.current = c; return c.signal },
+        ownerAuth,
       )
       const serverUrl = blossomServerManager.getServers()[0]
       setUrl(`${serverUrl}/${hash}`)
@@ -2625,7 +2698,7 @@ function RolesPage({ hub, editRoles, setEditRoles, editChannels, editCategories,
   /** Compute usage stats for a role to display in the delete warning */
   const getRoleUsageStats = (roleId: string) => {
     const affectedMembers = hubMembers.filter(m => {
-      if (m.pubkey === hub.creatorPubkey) return false
+      if (isHubOwner(hub, m.pubkey)) return false
       const roles = (m.roles || 'everyone').split('|').map(s => s.trim())
       return roles.includes(roleId)
     })
@@ -3043,11 +3116,113 @@ function SecurityPage({ hub }: { hub: HubData }) {
     setFixStep(null)
     setFixSteps([])
 
+    // Single-flight: serialize with every other membership mutation for this hub on this device so a
+    // concurrent kick/role-save/unban can't clobber this rotation (or vice versa). Released in finally.
+    const { acquireHubMutationLock, casCheckIndex } = await import('@/lib/hub/hubMutationGuard')
+    const releaseHubLock = await acquireHubMutationLock(hub.dTag)
     try {
+      // ── v2 hubs: full re-derive keyed on pseudonym P + fresh roster segments, signed as O. ──
+      // The v1 rebuild below keys leaves on the real key R and would corrupt a v2 hub.
+      const { isV2 } = await import('@/lib/hub/version')
+      if (isV2(hub)) {
+        const oldSecretHexV2 = hubSecrets[hub.dTag]
+        if (!oldSecretHexV2) throw new Error('Hub secret not available')
+        const storeMembersV2 = useHubStore.getState().hubMembers[hub.dTag] || []
+        // Refuse to rebuild from an EMPTY roster while the hub has leaf pages: if the roster failed to
+        // hydrate (a transient page-fetch error leaves hubMembers empty but loadHubSecret still returns
+        // success), rebuilding here would produce an OWNER-ONLY tree and durably REMOVE every member. An
+        // empty roster with pages present means "not loaded yet", not "no members" — fail closed, retryable.
+        if (storeMembersV2.length === 0 && (useHubStore.getState().hubPageCounts[hub.dTag] || 0) > 0) {
+          throw new Error('Member roster not loaded yet — reopen the hub and try again before fixing encryption.')
+        }
+        const { fromHex: fromHexV2 } = await import('@/lib/crypto/lkh')
+        const { rebuildTreeV2 } = await import('@/lib/hub/v2kick')
+        const { makeSubkeySigner } = await import('@/lib/nostr/v2send')
+        const { ChatContext, deriveMemberPseudonymForOwner } = await import('@/lib/crypto/skd')
+
+        const membersV2 = storeMembersV2.map(m => {
+          // Local owner: re-derive P from R when a member's pseudonym isn't cached.
+          let p = m.p
+          if (!p && privateKey) p = deriveMemberPseudonymForOwner(privateKey, hub.dTag, m.pubkey)
+          if (!p) throw new Error('Some members are missing their pseudonym — reload the hub and try again')
+          return { p, r: m.pubkey, roles: m.roles || 'everyone' }
+        })
+        // Ensure the owner is in the set (their own leaf may not be in hubMembers).
+        if (!membersV2.some(m => m.r === pubkey)) {
+          const ownerP = await makeSubkeySigner(
+            ChatContext.member(hub.dTag), { privateKey, signer, peerPub: hub.creatorPubkey },
+          ).getPublicKey()
+          membersV2.push({ p: ownerP, r: pubkey!, roles: 'everyone' })
+        }
+
+        let prevStep: string | null = null
+        const onStep = (s: string) => { if (prevStep) markDone(prevStep); void markStep(s); prevStep = s }
+
+        // Rebuild every group tree under a fresh secret (P-keyed), qualifying members + owner.
+        const groupRebuildsFix: Array<{ groupId: string; members: Array<{ p: string; r: string }> }> = []
+        if (hub.groupedRoles && hub.groupedRoles.length > 0) {
+          const { memberQualifiesForGroup } = await import('@/lib/hub/groupEncryption')
+          for (const group of hub.groupedRoles) {
+            const gm = membersV2
+              .filter(m => m.r === pubkey || memberQualifiesForGroup(m.roles, group.roleIds))
+              .map(m => ({ p: m.p, r: m.r }))
+            groupRebuildsFix.push({ groupId: group.groupId, members: gm })
+          }
+        }
+
+        // Re-download the CURRENT ban list FRESH (fail-closed) rather than the store — a partial load could
+        // leave hubBanLists truncated, and re-encrypting that truncated set under the new secret here would
+        // durably ERASE prior bans. downloadBanListV2 throws on any unreadable page, so we block instead.
+        let fixBanEntries: Array<{ pubkey: string; reason: string }> = []
+        if (hub.indexFileHash && hub.blossomServers.length > 0) {
+          try {
+            const { downloadTextFromBlossom, parseIndexFile, downloadBanListV2 } = await import('@/lib/blossom')
+            const idxFix = parseIndexFile(await downloadTextFromBlossom(hub.indexFileHash, hub.blossomServers))
+            if (idxFix.banPages.length > 0) {
+              fixBanEntries = (await downloadBanListV2(idxFix.banPages, fromHexV2(oldSecretHexV2), hub.blossomServers)).map(e => ({ pubkey: e.pubkey, reason: '' }))
+            }
+          } catch {
+            throw new Error('Could not load the current ban list — reopen the hub and try again before fixing encryption.')
+          }
+        }
+
+        const result = await rebuildTreeV2({
+          hub, members: membersV2, oldSecret: fromHexV2(oldSecretHexV2),
+          // Re-encrypt the ban list under the new secret so it stays readable post-rotation.
+          banEntries: fixBanEntries,
+          groupRebuilds: groupRebuildsFix.length > 0 ? groupRebuildsFix : undefined,
+          privateKey, signer, onStep,
+        })
+        if (prevStep) markDone(prevStep)
+
+        useHubStore.getState().setHubSecret(hub.dTag, result.newSecretHex)
+        useHubStore.getState().setEpochSecrets(hub.dTag, result.epochMap)
+        for (const [gid, secretHex] of Object.entries(result.groupSecrets)) {
+          // Preserve the old group secret at its old epoch so old group messages stay readable.
+          const oldEpoch = hub.groupedRoles?.find(g => g.groupId === gid)?.epoch ?? 1
+          const newGEpoch = result.groupedRoles?.find(g => g.groupId === gid)?.epoch ?? (oldEpoch + 1)
+          const oldGSecret = useHubStore.getState().groupSecrets?.[hub.dTag]?.[gid]
+          const gmap: Record<number, string> = { ...(useHubStore.getState().groupEpochSecrets?.[hub.dTag]?.[gid] || {}) }
+          if (oldGSecret) gmap[oldEpoch] = oldGSecret
+          gmap[newGEpoch] = secretHex
+          useHubStore.getState().setGroupEpochSecrets(hub.dTag, gid, gmap)
+          useHubStore.getState().setGroupSecret(hub.dTag, gid, secretHex)
+        }
+        setHubData(hub.dTag, {
+          ...hub, indexFileHash: result.newIndexHash, epoch: result.newEpoch,
+          groupedRoles: result.groupedRoles ?? hub.groupedRoles,
+          eventCreatedAt: result.eventCreatedAt ?? hub.eventCreatedAt,
+        })
+        setFixSuccess(true)
+        setShowConfirm(false)
+        setFixing(false)
+        return
+      }
+
       await markStep('Downloading current tree')
       const { downloadTextFromBlossom, parseIndexFile, uploadToBlossomServers } = await import('@/lib/blossom')
       const { aesEncrypt, aesDecrypt } = await import('@/lib/crypto/aes')
-      const { createPaginatedIndexFile } = await import('@/lib/blossom/members')
+      const { createPaginatedIndexFile, banPageToken } = await import('@/lib/blossom/members')
 
       const oldSecretHex = hubSecrets[hub.dTag]
       const oldSecret = oldSecretHex ? fromHex(oldSecretHex) : null
@@ -3065,7 +3240,7 @@ function SecurityPage({ hub }: { hub: HubData }) {
           const index = parseIndexFile(indexContent)
           oldSpineHash = index.spineHash
           oldHistoryHash = index.historyHash
-          oldBanPageHashes = index.banPages.map(bp => bp.hash)
+          oldBanPageHashes = index.banPages.map(banPageToken) // preserve: keep the epoch stamp
           oldGroupTreeRefs = [...index.groupTrees]
           oldLeafPageHashes = index.leafPages.map(lp => lp.hash)
 
@@ -3303,11 +3478,18 @@ function SecurityPage({ hub }: { hub: HubData }) {
         nsfw: hub.nsfw || undefined,
         discoverable: hub.discoverable,
         groupedRoles: updatedGroupedRoles,
+        messageExpiration: hub.messageExpiration || undefined, // carry the disappearing-messages timer forward
         publishedAt: hub.publishedAt,
         eventCreatedAt: hub.eventCreatedAt,
       })
       const signedEvent = await mineAndSign(unsignedEvent, hub.minPow, pubkey, signer, privateKey)
-      await publishToSpecificRelays(getPublishRelays([...hub.generalRelays]), signedEvent)
+      await casCheckIndex(hub.dTag, hub.creatorPubkey, hub.indexFileHash) // abort if another writer moved the index
+      {
+        // v1 fix-encryption: fail loudly if no relay accepted, before the store advance + old-blob cleanup
+        // below (a zero-relay publish would otherwise brick the hub by deleting a still-referenced index).
+        const accepted = await publishToSpecificRelays(getPublishRelays([...hub.generalRelays]), signedEvent)
+        if (accepted.length === 0) throw new Error('The hub update was not accepted by any relay — please try again.')
+      }
       markDone('Publishing hub event')
 
       // 10. Update local store
@@ -3373,6 +3555,7 @@ function SecurityPage({ hub }: { hub: HubData }) {
       console.error('Fix encryption failed:', err)
       setFixError(err?.message || 'Failed to fix hub encryption')
     } finally {
+      releaseHubLock()
       setFixing(false)
     }
   }
@@ -3579,16 +3762,35 @@ function DangerousPage({ hub, onClose, setHubStatus }: DangerousPageProps) {
 
       // Mine the tombstone (a kind-36942 publish) to the hub's message PoW so PoW-enforcing
       // relays accept the deletion overwrite. The kind-5 request below stays PoW-free.
-      const signedDeletedHub = await mineAndSign(deletedHubEvent, hub.minPow, hub.creatorPubkey, signer, privateKey)
-      await publishToSpecificRelays(getDeletePublishRelays([...hub.generalRelays]), signedDeletedHub)
+      // v2: the hub is authored by the owner pseudonym O, so the tombstone must be signed as O
+      // to actually replace it (a root-signed event is a different addressable event).
+      let signedDeletedHub
+      const { isV2: isV2Del } = await import('@/lib/hub/version')
+      const v2Delete = isV2Del(hub)
+      let ownerSigner: any = null
+      if (v2Delete) {
+        const { makeSubkeySigner, mineAndSignAsSubkey } = await import('@/lib/nostr/v2send')
+        const { ChatContext } = await import('@/lib/crypto/skd')
+        ownerSigner = makeSubkeySigner(ChatContext.owner(hub.dTag), { privateKey, signer })
+        signedDeletedHub = await mineAndSignAsSubkey(deletedHubEvent, hub.minPow, ownerSigner)
+      } else {
+        signedDeletedHub = await mineAndSign(deletedHubEvent, hub.minPow, hub.creatorPubkey, signer, privateKey)
+      }
+      await publishToSpecificRelays(getDeletePublishRelays([...hub.generalRelays], { hubOnly: v2Delete }), signedDeletedHub)
 
-      // 2. NIP-09 Kind 5 deletion request as fallback
+      // 2. NIP-09 Kind 5 deletion request as fallback. On v2 it MUST be signed as O — the hub event's
+      // author — not R_owner: (a) NIP-09 relays only honor a deletion signed by the target's author, and
+      // the target 36942:O:dTag is authored by O; (b) an R_owner-signed kind-5 referencing the hub
+      // coordinate would publicly link R_owner → O → this private hub, deanonymizing the owner. v1 signs
+      // as R (which IS the hub author there).
       const deleteEvent = createUnsignedEvent(5, 'Hub deletion requested', [
         ['a', `36942:${hub.creatorPubkey}:${hub.dTag}`],
       ] as [string, ...string[]][])
 
-      const signedDelete = await signWithSigner(deleteEvent, signer, privateKey)
-      await publishToSpecificRelays(getDeletePublishRelays([...hub.generalRelays]), signedDelete)
+      const signedDelete = v2Delete && ownerSigner
+        ? await ownerSigner.signEvent(deleteEvent)
+        : await signWithSigner(deleteEvent, signer, privateKey)
+      await publishToSpecificRelays(getDeletePublishRelays([...hub.generalRelays], { hubOnly: v2Delete }), signedDelete)
 
       // Update local state
       setHubStatus(hub.dTag, 'deleted')
@@ -3747,13 +3949,33 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
     }
     const markDone = (step: string) => setUnbanSteps(prev => [...prev, step])
 
+    // Single-flight: serialize with other membership mutations for this hub on this device.
+    const { acquireHubMutationLock, casCheckIndex } = await import('@/lib/hub/hubMutationGuard')
+    const releaseHubLock = await acquireHubMutationLock(hub.dTag)
     try {
-      // Build updated ban list (applied to store AFTER publish succeeds)
-      const remaining = bannedPubkeys.filter(pk => !selected.has(pk))
+      // Build updated ban list (applied to store AFTER publish succeeds). Re-derived from a FRESH
+      // fail-closed ban download below for v2 so a truncated store can't silently drop bans.
+      let remaining = bannedPubkeys.filter(pk => !selected.has(pk))
 
       await markStep('Downloading current index')
       // Re-upload ban page + index to Blossom
-      const { uploadBanPages, createPaginatedIndexFile, parseIndexFile, downloadTextFromBlossom } = await import('@/lib/blossom')
+      const { uploadBanPages, uploadBanPagesV2, createPaginatedIndexFile, parseIndexFile, downloadTextFromBlossom } = await import('@/lib/blossom')
+
+      // v2: ban pages must be encrypted (real keys R never in plaintext) and every Blossom
+      // auth must be signed by the owner pseudonym O (never R_owner).
+      const { isV2: isV2Unban } = await import('@/lib/hub/version')
+      const v2 = isV2Unban(hub)
+      let ownerAuth: ((e: import('nostr-tools').UnsignedEvent) => Promise<import('nostr-tools').Event>) | undefined
+      let hubSecretUnban: Uint8Array | null = null
+      if (v2) {
+        const { makeSubkeySigner } = await import('@/lib/nostr/v2send')
+        const { ChatContext } = await import('@/lib/crypto/skd')
+        const secretHex = useHubStore.getState().hubSecrets[hub.dTag]
+        if (!secretHex) throw new Error('Hub secret not available')
+        hubSecretUnban = fromHex(secretHex)
+        const ownerSigner = makeSubkeySigner(ChatContext.owner(hub.dTag), { privateKey, signer })
+        ownerAuth = (e) => ownerSigner.signEvent(e)
+      }
 
       // Download current index to preserve spine/history hashes
       let spineHash = ''
@@ -3774,29 +3996,44 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
       }
       markDone('Downloading current index')
 
+      // Re-derive `remaining` from the CURRENT on-Blossom ban list (fail-closed) so a truncated store can't
+      // drop bans: keep every current ban except the ones the owner chose to unban.
+      if (v2 && hub.indexFileHash && hub.blossomServers.length > 0 && hubSecretUnban) {
+        try {
+          const { downloadBanListV2 } = await import('@/lib/blossom')
+          const idxBans = parseIndexFile(await downloadTextFromBlossom(hub.indexFileHash, hub.blossomServers))
+          const freshBans = idxBans.banPages.length > 0
+            ? (await downloadBanListV2(idxBans.banPages, hubSecretUnban, hub.blossomServers)).map(e => e.pubkey)
+            : []
+          remaining = freshBans.filter(pk => !selected.has(pk))
+        } catch {
+          throw new Error('Could not load the current ban list — reopen the hub and try again.')
+        }
+      }
+
       // Upload new ban pages (or empty if no bans remain)
       await markStep('Uploading ban pages')
-      const banPageHashes = remaining.length > 0
-        ? await uploadBanPages(
-          remaining.map(pk => ({ pubkey: pk, reason: '' })),
-          signer, privateKey, hub.blossomServers,
-        )
-        : []
+      const banEntries = remaining.map(pk => ({ pubkey: pk, reason: '' }))
+      const banPageHashes = remaining.length === 0
+        ? []
+        : v2
+          ? await uploadBanPagesV2(banEntries, hubSecretUnban!, hub.epoch, signer, privateKey, hub.blossomServers, ownerAuth)
+          : await uploadBanPages(banEntries, signer, privateKey, hub.blossomServers)
 
       // Build and upload new index file
       const { uploadToBlossomServers } = await import('@/lib/blossom')
       const indexContent = createPaginatedIndexFile(spineHash, leafPages, banPageHashes, historyHash || undefined, groupTrees.length > 0 ? groupTrees : undefined)
       const indexBytes = new TextEncoder().encode(indexContent)
       const { hash: newIndexHash } = await uploadToBlossomServers(
-        indexBytes, signer, privateKey, hub.blossomServers, 'text/plain',
+        indexBytes, signer, privateKey, hub.blossomServers, 'text/plain', undefined, undefined, ownerAuth,
       )
       markDone('Uploading ban pages')
 
       // Re-publish hub event with new index hash
       await markStep('Publishing hub event')
-      const { mineAndSign } = await import('@/lib/nostr/events')
+      const { signHubEventForPublish } = await import('@/lib/hub/buildHubEvent')
       const { publishToSpecificRelays: pubToRelays } = await import('@/lib/nostr/relay-pool')
-      const unsignedEvent = buildHubEvent({
+      const signedEvent = await signHubEventForPublish(hub, {
         dTag: hub.dTag,
         name: hub.name,
         description: hub.description || undefined,
@@ -3815,11 +4052,16 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
         nsfw: hub.nsfw || undefined,
         discoverable: hub.discoverable,
         groupedRoles: hub.groupedRoles,
+        messageExpiration: hub.messageExpiration || undefined, // carry the disappearing-messages timer forward
         publishedAt: hub.publishedAt,
         eventCreatedAt: hub.eventCreatedAt,
-      })
-      const signedEvent = await mineAndSign(unsignedEvent, hub.minPow, pubkey, signer, privateKey)
-      await pubToRelays(getPublishRelays([...hub.generalRelays]), signedEvent)
+      }, { pubkey: pubkey!, privateKey, signer, minPow: hub.minPow })
+      await casCheckIndex(hub.dTag, hub.creatorPubkey, hub.indexFileHash) // abort if another writer moved the index
+      {
+        // Fail loudly if no relay accepted, before the store advance + old-blob cleanup below.
+        const accepted = await pubToRelays(getPublishRelays([...hub.generalRelays], { hubOnly: isV2(hub) }), signedEvent)
+        if (accepted.length === 0) throw new Error('The hub update was not accepted by any relay — please try again.')
+      }
       markDone('Publishing hub event')
 
       // Update local store — only after publish succeeds for consistency
@@ -3832,6 +4074,7 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
       console.error('Unban failed:', err)
       setUnbanError(err?.message || 'Failed to unban')
     } finally {
+      releaseHubLock()
       setUnbanning(false)
     }
   }
@@ -3851,23 +4094,58 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
     }
     const markDone = (step: string) => setUnbanSteps(prev => [...prev, step])
 
+    // Single-flight: serialize with other membership mutations for this hub on this device.
+    const { acquireHubMutationLock, casCheckIndex } = await import('@/lib/hub/hubMutationGuard')
+    const releaseHubLock = await acquireHubMutationLock(hub.dTag)
     try {
-      const remaining = bannedPubkeys.filter(pk => !selected.has(pk))
+      let remaining = bannedPubkeys.filter(pk => !selected.has(pk)) // re-derived fresh (fail-closed) for v2 below
       const toReadd = [...selected]
       // Ban list + member list updates deferred until after publish succeeds
       let deferredNewMembers: string[] = []
 
       await markStep('Downloading current index')
       const {
-        uploadBanPages, createPaginatedIndexFile, parseIndexFile,
+        uploadBanPages, uploadBanPagesV2, createPaginatedIndexFile, parseIndexFile,
         downloadTextFromBlossom, uploadToBlossomServers,
-        rehydratePageKeys, addMemberToPage, findPageForPubkey,
+        rehydratePageKeys, addMemberToPage,
+        rehydratePageKeysV2, addMemberToPageV2, findPageForPubkey,
       } = await import('@/lib/blossom')
       const {
         fromHex, deserializeSpine, recoverPageRootKeys,
         buildSpine, serializeLeafPage, serializeSpine,
         getPageMembers,
       } = await import('@/lib/crypto/lkh')
+
+      // v2: encrypted ban pages, O-signed Blossom auth, P-keyed page ops. Re-adding a
+      // previously-banned member needs their pseudonym P re-derived from their real key R
+      // (owner-side ECDH) — a local key op, so v2 re-add requires a local key.
+      const { isV2: isV2Readd } = await import('@/lib/hub/version')
+      const v2 = isV2Readd(hub)
+      let ownerAuth: ((e: import('nostr-tools').UnsignedEvent) => Promise<import('nostr-tools').Event>) | undefined
+      let ownerSignerV2: import('@/lib/nostr/v2send').SubkeySigner | null = null
+      if (v2) {
+        const { makeSubkeySigner } = await import('@/lib/nostr/v2send')
+        const { ChatContext } = await import('@/lib/crypto/skd')
+        ownerSignerV2 = makeSubkeySigner(ChatContext.owner(hub.dTag), { privateKey, signer })
+        ownerAuth = (e) => ownerSignerV2!.signEvent(e)
+      }
+
+      // Re-derive `remaining` from the CURRENT on-Blossom ban list (fail-closed) so a truncated store can't
+      // silently drop bans when the new ban page is written below.
+      if (v2 && hub.indexFileHash && hub.blossomServers.length > 0) {
+        const secretHexReadd = useHubStore.getState().hubSecrets[hub.dTag]
+        if (!secretHexReadd) throw new Error('Hub secret not available')
+        try {
+          const { downloadBanListV2 } = await import('@/lib/blossom')
+          const idxBans = parseIndexFile(await downloadTextFromBlossom(hub.indexFileHash, hub.blossomServers))
+          const freshBans = idxBans.banPages.length > 0
+            ? (await downloadBanListV2(idxBans.banPages, fromHex(secretHexReadd), hub.blossomServers)).map(e => e.pubkey)
+            : []
+          remaining = freshBans.filter(pk => !selected.has(pk))
+        } catch {
+          throw new Error('Could not load the current ban list — reopen the hub and try again.')
+        }
+      }
 
       // Download current index
       let spineHash = ''
@@ -3900,16 +4178,31 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
           const spine = deserializeSpine(spineContent)
           const pageRootKeys = await recoverPageRootKeys(spine, hubSecret)
 
-          // Group members by target page
-          const pageMods = new Map<number, { pageRef: typeof leafPages[0]; newMembers: string[] }>()
+          // v2: re-derive each banned member's pseudonym P from their real key R (owner-side
+          // ECDH — local key). Roster segments are stamped per-epoch → resolver from history.
+          const resolveEpochSecret = (epoch: number): Uint8Array | undefined => {
+            const map = useHubStore.getState().epochSecrets[hub.dTag] || {}
+            return map[epoch] ? fromHex(map[epoch]) : (epoch === hub.epoch ? hubSecret : undefined)
+          }
+          let deriveP: ((r: string) => string) | null = null
+          if (v2) {
+            if (!privateKey) throw new Error('Re-adding a member to a v2 hub requires a local key')
+            const { deriveMemberPseudonymForOwner } = await import('@/lib/crypto/skd')
+            deriveP = (r) => deriveMemberPseudonymForOwner(privateKey, hub.dTag, r)
+          }
+
+          // Group members by target page. Carry {p (leaf id), r (real key)} — v1: p === r.
+          const pageMods = new Map<number, { pageRef: typeof leafPages[0]; newMembers: Array<{ p: string; r: string }> }>()
           const index = { spineHash, leafPages, pageSize: leafPages.length > 0 ? 10000 : 0 } as any
 
           for (const pk of toReadd) {
-            const pageRef = findPageForPubkey(index, pk)
+            const leafId = v2 ? deriveP!(pk) : pk
+            const pageRef = findPageForPubkey(index, leafId)
             if (!pageRef) continue
+            const entry = { p: leafId, r: pk }
             const existing = pageMods.get(pageRef.pageIndex)
-            if (existing) existing.newMembers.push(pk)
-            else pageMods.set(pageRef.pageIndex, { pageRef, newMembers: [pk] })
+            if (existing) existing.newMembers.push(entry)
+            else pageMods.set(pageRef.pageIndex, { pageRef, newMembers: [entry] })
           }
 
           const updatedPages: Array<{ pageIndex: number; content: string; firstPubkey: string; hash: string }> = []
@@ -3918,23 +4211,27 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
 
           for (const [pageIndex, mod] of pageMods) {
             const pageContent = await downloadTextFromBlossom(mod.pageRef.hash, hub.blossomServers)
-            let rehydrated = await rehydratePageKeys(pageContent, signer, privateKey)
+            let rehydrated = v2
+              ? await rehydratePageKeysV2(pageContent, ownerSignerV2!, resolveEpochSecret)
+              : await rehydratePageKeys(pageContent, signer, privateKey)
 
-            for (const pk of mod.newMembers) {
-              if (rehydrated.leaves.some(l => l.pubkey === pk)) continue
+            for (const nm of mod.newMembers) {
+              if (rehydrated.leaves.some(l => l.pubkey === nm.p)) continue
               try {
-                const result = await addMemberToPage(rehydrated, pk, 'everyone', signer, privateKey)
+                const result = v2
+                  ? await addMemberToPageV2(rehydrated, nm.p, nm.r, 'everyone', hubSecret, hub.epoch, ownerSignerV2!)
+                  : await addMemberToPage(rehydrated, nm.p, 'everyone', signer, privateKey)
                 rehydrated = result.pages[0]
-                allNewMembers.push(pk)
+                allNewMembers.push(nm.r)
               } catch (err) {
-                console.error(`Failed to re-add ${pk}:`, err)
+                console.error(`Failed to re-add ${nm.r}:`, err)
               }
             }
 
             const serialized = serializeLeafPage(rehydrated)
             const pageBytes = new TextEncoder().encode(serialized)
             const { hash } = await uploadToBlossomServers(
-              pageBytes, signer, privateKey, hub.blossomServers, 'text/plain',
+              pageBytes, signer, privateKey, hub.blossomServers, 'text/plain', undefined, undefined, ownerAuth,
             )
             updatedPages.push({ pageIndex, content: serialized, firstPubkey: rehydrated.leaves[0].pubkey, hash })
             updatedPageRoots.set(pageIndex, { nodeId: rehydrated.pageRoot.nodeId, rawKey: rehydrated.pageRoot.rawKey! })
@@ -3949,7 +4246,7 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
           const newSpineContent = serializeSpine(newSpine)
           const spineBytes = new TextEncoder().encode(newSpineContent)
           const { hash: sHash } = await uploadToBlossomServers(
-            spineBytes, signer, privateKey, hub.blossomServers, 'text/plain',
+            spineBytes, signer, privateKey, hub.blossomServers, 'text/plain', undefined, undefined, ownerAuth,
           )
           newSpineHash = sHash
 
@@ -3965,27 +4262,27 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
       }
       markDone('Re-adding to member tree')
 
-      // Upload new ban pages
+      // Upload new ban pages (v2: encrypted, real keys R never in plaintext)
       await markStep('Uploading ban pages')
-      const banPageHashes = remaining.length > 0
-        ? await uploadBanPages(
-          remaining.map(pk => ({ pubkey: pk, reason: '' })),
-          signer, privateKey, hub.blossomServers,
-        )
-        : []
+      const banEntries = remaining.map(pk => ({ pubkey: pk, reason: '' }))
+      const banPageHashes = remaining.length === 0
+        ? []
+        : v2
+          ? await uploadBanPagesV2(banEntries, fromHex(useHubStore.getState().hubSecrets[hub.dTag]!), hub.epoch, signer, privateKey, hub.blossomServers, ownerAuth)
+          : await uploadBanPages(banEntries, signer, privateKey, hub.blossomServers)
 
       const indexContent = createPaginatedIndexFile(newSpineHash, leafPages, banPageHashes, historyHash || undefined, groupTrees.length > 0 ? groupTrees : undefined)
       const indexBytes = new TextEncoder().encode(indexContent)
       const { hash: newIndexHash } = await uploadToBlossomServers(
-        indexBytes, signer, privateKey, hub.blossomServers, 'text/plain',
+        indexBytes, signer, privateKey, hub.blossomServers, 'text/plain', undefined, undefined, ownerAuth,
       )
       markDone('Uploading ban pages')
 
       // Publish hub event
       await markStep('Publishing hub event')
-      const { mineAndSign } = await import('@/lib/nostr/events')
+      const { signHubEventForPublish } = await import('@/lib/hub/buildHubEvent')
       const { publishToSpecificRelays: pubToRelays } = await import('@/lib/nostr/relay-pool')
-      const unsignedEvent = buildHubEvent({
+      const signedEvent = await signHubEventForPublish(hub, {
         dTag: hub.dTag,
         name: hub.name,
         description: hub.description || undefined,
@@ -4004,21 +4301,26 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
         nsfw: hub.nsfw || undefined,
         discoverable: hub.discoverable,
         groupedRoles: hub.groupedRoles,
+        messageExpiration: hub.messageExpiration || undefined, // carry the disappearing-messages timer forward
         publishedAt: hub.publishedAt,
         eventCreatedAt: hub.eventCreatedAt,
-      })
-      const signedEvent = await mineAndSign(unsignedEvent, hub.minPow, pubkey, signer, privateKey)
-      await pubToRelays(getPublishRelays([...hub.generalRelays]), signedEvent)
+      }, { pubkey: pubkey!, privateKey, signer, minPow: hub.minPow })
+      await casCheckIndex(hub.dTag, hub.creatorPubkey, hub.indexFileHash) // abort if another writer moved the index
+      {
+        // Fail loudly if no relay accepted, before the store advance + old-blob cleanup below.
+        const accepted = await pubToRelays(getPublishRelays([...hub.generalRelays], { hubOnly: isV2(hub) }), signedEvent)
+        if (accepted.length === 0) throw new Error('The hub update was not accepted by any relay — please try again.')
+      }
       markDone('Publishing hub event')
 
       // Cleanup old files (best-effort)
       try {
         const { deleteFromBlossom } = await import('@/lib/blossom/client')
         if (spineHash && spineHash !== newSpineHash) {
-          deleteFromBlossom(spineHash, signer, privateKey, hub.blossomServers).catch(() => { })
+          deleteFromBlossom(spineHash, signer, privateKey, hub.blossomServers, ownerAuth).catch(() => { })
         }
         if (hub.indexFileHash && hub.indexFileHash !== newIndexHash) {
-          deleteFromBlossom(hub.indexFileHash, signer, privateKey, hub.blossomServers).catch(() => { })
+          deleteFromBlossom(hub.indexFileHash, signer, privateKey, hub.blossomServers, ownerAuth).catch(() => { })
         }
       } catch { /* best-effort */ }
 
@@ -4039,6 +4341,7 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
       console.error('Unban & re-add failed:', err)
       setUnbanError(err?.message || 'Failed to unban & re-add')
     } finally {
+      releaseHubLock()
       setUnbanning(false)
     }
   }
@@ -4176,7 +4479,7 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
       {/* ── Mod Bans Review ── */}
       {(() => {
         const mods = members.filter(m => {
-          if (m.pubkey === hub.creatorPubkey) return false
+          if (isHubOwner(hub, m.pubkey)) return false
           const perms = getPermissionsForUser(hub, m.pubkey, members)
           return perms.ban_members === true
         })
@@ -4259,7 +4562,7 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
                                    // Add 'w' flag to member
                                   try {
                                     const { downloadTextFromBlossom, uploadToBlossomServers: uploadFn } = await import('@/lib/blossom/client')
-                                    const { parseIndexFile, createPaginatedIndexFile, findPageForPubkey } = await import('@/lib/blossom/members')
+                                    const { parseIndexFile, createPaginatedIndexFile, findPageForPubkey, banPageToken } = await import('@/lib/blossom/members')
                                     const {
                                       deserializeLeafPage, serializeLeafPage,
                                       deserializeSpine, recoverPageRootKeys, buildSpine, serializeSpine,
@@ -4307,7 +4610,7 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
                                           )
                                           const newIdxContent = createPaginatedIndexFile(
                                             newSpineHash, updatedPages,
-                                            idx.banPages.map(bp => bp.hash),
+                                            idx.banPages.map(banPageToken), // preserve: keep the epoch stamp
                                             idx.historyHash || undefined,
                                             idx.groupTrees.length > 0 ? idx.groupTrees : undefined,
                                           )
@@ -4317,9 +4620,9 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
                                           )
 
                                           // Publish hub event
-                                          const { mineAndSign: signFn } = await import('@/lib/nostr/events')
+                                          const { signHubEventForPublish } = await import('@/lib/hub/buildHubEvent')
                                           const { publishToSpecificRelays: pubRelays } = await import('@/lib/nostr/relay-pool')
-                                          const evt = buildHubEvent({
+                                          const signed = await signHubEventForPublish(hub, {
                                             dTag: hub.dTag, name: hub.name, description: hub.description || undefined,
                                             epoch: hub.epoch, icon: hub.icon, banner: hub.banner, tags: hub.tags,
                                             relays: [...hub.generalRelays],
@@ -4327,11 +4630,14 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
                                             channels: hub.channels, categories: hub.categories, roles: hub.roles,
                                             minPow: hub.minPow || undefined, joinMinPow: hub.joinMinPow || undefined, nsfw: hub.nsfw || undefined,
                                             discoverable: hub.discoverable, groupedRoles: hub.groupedRoles,
+                                            messageExpiration: hub.messageExpiration || undefined,
                                             publishedAt: hub.publishedAt,
                                             eventCreatedAt: hub.eventCreatedAt,
-                                          })
-                                          const signed = await signFn(evt, hub.minPow, pubkey, signer, privateKey)
-                                          await pubRelays(getPublishRelays([...hub.generalRelays]), signed)
+                                          }, { pubkey: pubkey!, privateKey, signer, minPow: hub.minPow })
+                                          {
+                                            const accepted = await pubRelays(getPublishRelays([...hub.generalRelays], { hubOnly: isV2(hub) }), signed)
+                                            if (accepted.length === 0) throw new Error('The hub update was not accepted by any relay — please try again.')
+                                          }
                                           useHubStore.getState().setHubData(hub.dTag, { ...hub, indexFileHash: newIdxHash, eventCreatedAt: signed.created_at })
                                         }
 
@@ -4563,7 +4869,6 @@ function NetworkPage({ hub, editRelays, setEditRelays, editBlossoms, setEditBlos
             editRelays.map((url) => (
               <div key={url} className="flex items-center gap-2.5 px-3 py-2 rounded-lg bg-secondary/30 border border-border">
                 <span className="text-sm text-foreground font-mono truncate flex-1">{url}</span>
-                <span className="h-6 flex items-center text-[10px] rounded border border-border bg-background px-1.5 text-muted-foreground select-none">general</span>
                 <button
                   onClick={() => removeRelay(url)}
                   className="text-muted-foreground hover:text-destructive transition-colors cursor-pointer"
@@ -4896,10 +5201,19 @@ function HiddenMessagesPage({ hub, onClose }: { hub: HubData; onClose: () => voi
   // Build authorized moderator pubkeys (all members with hide_messages perm, excluding creator)
   const modPubkeys = useMemo(() => {
     const mods: string[] = []
+    // v2: moderation is pseudonymous — hides are authored/queried by the moderator's
+    // pseudonym P (m.p), never their real key R (m.pubkey). Querying by R alongside the
+    // hub '#h' filter would link R to the hub (CARDINAL RULE). v1 keeps real keys.
+    const v2 = isV2(hub)
     for (const m of hubMembers) {
-      if (m.pubkey === hub.creatorPubkey) continue
+      if (isHubOwner(hub, m.pubkey)) continue
       const perms = getPermissionsForUser(hub, m.pubkey, hubMembers)
-      if (perms.hide_messages) mods.push(m.pubkey)
+      if (!perms.hide_messages) continue
+      if (v2) {
+        if (m.p) mods.push(m.p)
+      } else {
+        mods.push(m.pubkey)
+      }
     }
     return mods
   }, [hub, hubMembers])
@@ -5585,6 +5899,7 @@ function ReportCard({ report, getProfile, hub, onClose }: { report: HubReport; g
           open={!!profilePubkey}
           onClose={() => setProfilePubkey(null)}
           targetPubkey={profilePubkey}
+          hubContext={{ dTag: hub.dTag, creatorPubkey: hub.creatorPubkey, ownerRealPubkey: hub.ownerRealPubkey }}
         />,
         document.body
       )}
@@ -5638,9 +5953,10 @@ function MembersPage({ hub, onFooterState }: { hub: HubData; onFooterState: (sta
   // role they created (for display/grouping; their permissions are owner-level
   // regardless). Synthesize an entry if they aren't in the loaded member set.
   const membersWithCreator = useMemo(() => {
-    if (hubMembers.some(m => m.pubkey === hub.creatorPubkey)) return hubMembers
-    return [{ pubkey: hub.creatorPubkey, roles: 'everyone' } as HubMember, ...hubMembers]
-  }, [hubMembers, hub.creatorPubkey])
+    if (hubMembers.some(m => isHubOwner(hub, m.pubkey))) return hubMembers
+    // v2: the owner appears in the roster under their real key R (ownerRealPubkey); v1 under creatorPubkey.
+    return [{ pubkey: hub.ownerRealPubkey || hub.creatorPubkey, roles: 'everyone' } as HubMember, ...hubMembers]
+  }, [hubMembers, hub])
 
   const filteredMembers = useMemo(() => {
     if (!search.trim()) return membersWithCreator
@@ -5696,10 +6012,14 @@ function MembersPage({ hub, onFooterState }: { hub: HubData; onFooterState: (sta
     }
     const markStepDone = (step: string) => setSaveStepsCompleted(prev => [...prev, step])
 
+    // Single-flight: serialize this index write with every other membership mutation for this hub on
+    // this device (role changes write the same index a kick/ban/unban does).
+    const { acquireHubMutationLock, casCheckIndex } = await import('@/lib/hub/hubMutationGuard')
+    const releaseHubLock = await acquireHubMutationLock(hub.dTag)
     try {
       await markStep('Fetching member tree')
       const { downloadTextFromBlossom, uploadToBlossomServers } = await import('@/lib/blossom/client')
-      const { parseIndexFile, updateMemberRolesInPage, createPaginatedIndexFile } = await import('@/lib/blossom/members')
+      const { parseIndexFile, updateMemberRolesInPage, createPaginatedIndexFile, banPageToken } = await import('@/lib/blossom/members')
       const {
         deserializeLeafPage, serializeLeafPage,
         deserializeSpine, recoverPageRootKeys, buildSpine, serializeSpine,
@@ -5717,6 +6037,25 @@ function MembersPage({ hub, onFooterState }: { hub: HubData; onFooterState: (sta
       if (!hubSecretHex) throw new Error('No hub secret')
       const hubSecret = fromHex(hubSecretHex)
       const pageRootKeys = await recoverPageRootKeys(spine, hubSecret)
+
+      // v2: leaves are keyed by pseudonym P, but stagedChanges is keyed by real key R.
+      // Map P→R via the roster so role edits actually match, and sign every Blossom auth as O.
+      const { isV2: isV2Save } = await import('@/lib/hub/version')
+      const v2Save = isV2Save(hub)
+      const rByP = new Map<string, string>()
+      if (v2Save) for (const m of hubMembers) if (m.p) rByP.set(m.p, m.pubkey)
+      let saveAuth: ((e: import('nostr-tools').UnsignedEvent) => Promise<import('nostr-tools').Event>) | undefined
+      if (v2Save) {
+        const { makeSubkeySigner } = await import('@/lib/nostr/v2send')
+        const { ChatContext } = await import('@/lib/crypto/skd')
+        const saveOwnerSigner = makeSubkeySigner(ChatContext.owner(hub.dTag), { privateKey, signer })
+        saveAuth = (e) => saveOwnerSigner.signEvent(e)
+      }
+      // Resolve a leaf's staged-change key: R directly (v1) or via the P→R roster (v2).
+      const stagedFor = (leafPubkey: string): string | undefined => {
+        const key = v2Save ? rByP.get(leafPubkey) : leafPubkey
+        return key ? stagedChanges[key] : undefined
+      }
       markStepDone('Fetching member tree')
 
       await markStep('Updating member roles')
@@ -5731,8 +6070,9 @@ function MembersPage({ hub, onFooterState }: { hub: HubData; onFooterState: (sta
 
         let pageChanged = false
         for (const leaf of page.leaves) {
-          if (stagedChanges[leaf.pubkey]) {
-            leaf.roles = stagedChanges[leaf.pubkey]
+          const newRoles = stagedFor(leaf.pubkey)
+          if (newRoles) {
+            leaf.roles = newRoles
             pageChanged = true
           }
         }
@@ -5753,7 +6093,7 @@ function MembersPage({ hub, onFooterState }: { hub: HubData; onFooterState: (sta
       for (const [pageIndex, pageData] of updatedPages) {
         const pageBytes = new TextEncoder().encode(pageData.content)
         const { hash } = await uploadToBlossomServers(
-          pageBytes, signer, privateKey, hub.blossomServers, 'text/plain',
+          pageBytes, signer, privateKey, hub.blossomServers, 'text/plain', undefined, undefined, saveAuth,
         )
         const idx = newLeafPages.findIndex(p => p.pageIndex === pageIndex)
         if (idx >= 0) newLeafPages[idx] = { ...newLeafPages[idx], firstPubkey: pageData.firstPubkey, hash }
@@ -5764,12 +6104,12 @@ function MembersPage({ hub, onFooterState }: { hub: HubData; onFooterState: (sta
       const newSpineContent = serializeSpine(newSpine)
       const spineBytes = new TextEncoder().encode(newSpineContent)
       const { hash: newSpineHash } = await uploadToBlossomServers(
-        spineBytes, signer, privateKey, hub.blossomServers, 'text/plain',
+        spineBytes, signer, privateKey, hub.blossomServers, 'text/plain', undefined, undefined, saveAuth,
       )
 
       // Create new index
       const groupedRoles = hub.groupedRoles || []
-      const banPageHashes = index.banPages.map(bp => bp.hash)
+      const banPageHashes = index.banPages.map(banPageToken) // preserve: keep the epoch stamp
       const groupTrees = index.groupTrees.length > 0 ? index.groupTrees : undefined
       const skipPublish = groupedRoles.length > 0
       const newIndexContent = createPaginatedIndexFile(
@@ -5778,14 +6118,15 @@ function MembersPage({ hub, onFooterState }: { hub: HubData; onFooterState: (sta
       )
       const indexBytes = new TextEncoder().encode(newIndexContent)
       const { hash: newIndexHash } = await uploadToBlossomServers(
-        indexBytes, signer, privateKey, hub.blossomServers, 'text/plain',
+        indexBytes, signer, privateKey, hub.blossomServers, 'text/plain', undefined, undefined, saveAuth,
       )
       const result = { newIndexHash }
       let lastPublishedCreatedAt: number | undefined
 
       // Publish hub event if no group trees to rotate
       if (!skipPublish) {
-        const unsignedEvent = buildHubEvent({
+        const { signHubEventForPublish } = await import('@/lib/hub/buildHubEvent')
+        const signedEvent = await signHubEventForPublish(hub, {
           dTag: hub.dTag,
           name: hub.name,
           description: hub.description || undefined,
@@ -5804,11 +6145,15 @@ function MembersPage({ hub, onFooterState }: { hub: HubData; onFooterState: (sta
           nsfw: hub.nsfw || undefined,
           discoverable: hub.discoverable,
           groupedRoles: hub.groupedRoles,
+          messageExpiration: hub.messageExpiration || undefined, // carry the disappearing-messages timer forward
           publishedAt: hub.publishedAt,
           eventCreatedAt: hub.eventCreatedAt,
-        })
-        const signedEvent = await mineAndSign(unsignedEvent, hub.minPow, hub.creatorPubkey, signer, privateKey)
-        await publishToSpecificRelays(getPublishRelays([...hub.generalRelays]), signedEvent)
+        }, { pubkey: useUserStore.getState().pubkey!, privateKey, signer, minPow: hub.minPow })
+        await casCheckIndex(hub.dTag, hub.creatorPubkey, hub.indexFileHash) // abort if another writer moved the index
+        {
+          const accepted = await publishToSpecificRelays(getPublishRelays([...hub.generalRelays], { hubOnly: isV2(hub) }), signedEvent)
+          if (accepted.length === 0) throw new Error('The hub update was not accepted by any relay — please try again.')
+        }
         lastPublishedCreatedAt = signedEvent.created_at
       }
       markStepDone('Uploading member tree')
@@ -5816,12 +6161,15 @@ function MembersPage({ hub, onFooterState }: { hub: HubData; onFooterState: (sta
       // ── Auto-rotate group trees for affected groups ──
       let finalIndexHash = result.newIndexHash
       let updatedGroupedRoles = [...groupedRoles]
+      // Old blobs superseded by this save — deleted only AFTER the new hub event publishes (deleting them
+      // before would strip blobs the still-live event references → brick if the publish then fails).
+      const blobsToDeleteAfterPublish: string[] = []
 
       if (groupedRoles.length > 0) {
         try {
           await markStep('Checking group access')
           const { memberQualifiesForGroup } = await import('@/lib/hub/groupEncryption')
-          const { rehydrateTreeKeys, removeMemberFromGroupTree, addMemberToGroupTree, createPaginatedIndexFile: createIdx } = await import('@/lib/blossom/members')
+          const { rehydrateTreeKeys, removeMemberFromGroupTree, addMemberToGroupTree, createPaginatedIndexFile: createIdx, banPageToken } = await import('@/lib/blossom/members')
           const { downloadTextFromBlossom, uploadToBlossomServers: uploadFn } = await import('@/lib/blossom/client')
 
           // Re-parse the index (it was just updated by the paginated tree update above)
@@ -5830,11 +6178,134 @@ function MembersPage({ hub, onFooterState }: { hub: HubData; onFooterState: (sta
 
           let updatedGroupTrees = [...updatedIndex.groupTrees]
           let groupsChanged = false
+          // Groups whose add-side change couldn't be applied because we lacked the current secret (a
+          // demotion IS still force-rotated below; this only tracks the promote-can't-complete case).
+          const groupsNotRotated: string[] = []
           // Track old group secrets for history updates
           const groupHistoryEntries: Array<{ groupId: string; epoch: number; secretHex: string }> = []
           // Collect new group secrets — deferred until after publish
           const deferredGroupSecrets = new Map<string, string>()
           markStepDone('Checking group access')
+
+          if (v2Save) {
+            // v2 group rebuild — mirror v2kick.buildV2GroupTrees / createAndUploadGroupTreeV2:
+            // P-keyed trees with leaf keys wrapped O→R. A removal rotates the group secret
+            // (forward secrecy) + bumps the epoch; pure additions reuse the current secret.
+            // Members come from the post-edit roster {p,r}; the owner is always included.
+            // v2 group re-key on role change — INCREMENTAL (O↔P trees): patch each affected group's
+            // existing tree by removing demoted members' P and adding promoted members' P, so members
+            // on OTHER roster pages are preserved (the tree, not the partial in-memory roster, is the
+            // source of membership). A removal rotates the secret + bumps the epoch; a pure add reuses
+            // the current secret. If a group has no existing tree/secret yet, fall back to a fresh build.
+            const { createAndUploadGroupTreeV2, addMemberToGroupTreeV2, removeMemberFromGroupTreeV2 } = await import('@/lib/blossom/members')
+            const { downloadTextFromBlossom, uploadToBlossomServers } = await import('@/lib/blossom')
+            const { makeSubkeySigner } = await import('@/lib/nostr/v2send')
+            const { ChatContext } = await import('@/lib/crypto/skd')
+            const ownerR = useUserStore.getState().pubkey!
+            const ownerSigner = makeSubkeySigner(ChatContext.member(hub.dTag), { privateKey, signer, peerPub: hub.creatorPubkey })
+            const ownerP = await ownerSigner.getPublicKey()
+            const ownerAuth = makeSubkeySigner(ChatContext.owner(hub.dTag), { privateKey, signer }).signEvent
+            const postMembers = hubMembers.map(m => stagedChanges[m.pubkey] ? { ...m, roles: stagedChanges[m.pubkey] } : m)
+
+            for (let gi = 0; gi < updatedGroupedRoles.length; gi++) {
+              const group = updatedGroupedRoles[gi]
+              const removeP: string[] = []
+              const addP: string[] = []
+              for (const [memberPubkey, newRoles] of Object.entries(stagedChanges)) {
+                const orig = hubMembers.find(m => m.pubkey === memberPubkey)
+                if (!orig?.p) continue
+                const was = memberQualifiesForGroup(orig.roles, group.roleIds)
+                const is = memberQualifiesForGroup(newRoles, group.roleIds)
+                if (was && !is) removeP.push(orig.p)
+                else if (!was && is) addP.push(orig.p)
+              }
+              if (removeP.length === 0 && addP.length === 0) continue
+
+              const removed = removeP.length > 0
+              await markStep(removed ? 'Rotating group encryption' : 'Adding to group tree')
+              try {
+                const groupSecretHex = useHubStore.getState().groupSecrets[hub.dTag]?.[group.groupId]
+                const oldHash = updatedGroupTrees.find(gt => gt.groupId === group.groupId)?.hash
+
+                let newHash: string
+                let rotated = false
+                let finalSecretHex = groupSecretHex
+                if (oldHash && groupSecretHex) {
+                  // Incremental patch of the existing tree.
+                  let treeContent = await downloadTextFromBlossom(oldHash, hub.blossomServers)
+                  let secretBytes = fromHex(groupSecretHex)
+                  for (const p of removeP) {
+                    const r = await removeMemberFromGroupTreeV2(treeContent, p, secretBytes, hub.dTag, privateKey, signer)
+                    if (r) { treeContent = r.newTreeContent; secretBytes = r.newGroupSecret; rotated = true }
+                  }
+                  for (const p of addP) {
+                    treeContent = await addMemberToGroupTreeV2(treeContent, p, secretBytes, hub.dTag, privateKey, signer)
+                  }
+                  const up = await uploadToBlossomServers(new TextEncoder().encode(treeContent), signer, privateKey, hub.blossomServers, 'text/plain', undefined, undefined, ownerAuth)
+                  newHash = up.hash
+                  finalSecretHex = toHex(secretBytes)
+                } else if (!oldHash) {
+                  // Genuinely new group (no tree yet) — build fresh from the roster + owner. A group
+                  // with no tree has no existing members to preserve, so the (possibly partial) roster
+                  // is the only source.
+                  const membersV2 = postMembers.filter(m => m.p && memberQualifiesForGroup(m.roles, group.roleIds)).map(m => ({ p: m.p!, r: m.pubkey }))
+                  if (!membersV2.some(m => m.r === ownerR)) membersV2.push({ p: ownerP, r: ownerR })
+                  if (membersV2.length === 0) continue
+                  const secretBytes = crypto.getRandomValues(new Uint8Array(32))
+                  newHash = await createAndUploadGroupTreeV2(membersV2, secretBytes, hub.dTag, privateKey, signer, hub.blossomServers)
+                  finalSecretHex = toHex(secretBytes)
+                  rotated = true
+                } else if (removeP.length > 0) {
+                  // Tree EXISTS, we're REMOVING member(s), but we don't hold the current secret. Do NOT
+                  // skip — that would leave the demoted member holding the old group secret with continued
+                  // read access (a silent forward-secrecy hole). Like the kick path, removeMemberFromGroupTreeV2
+                  // recovers every leaf key via O↔P nip44 (NOT the group secret) and rebuilds under a FRESH
+                  // secret, so a random placeholder still yields a real revocation that preserves the other
+                  // members already in the tree. Any add-side change can't be applied without the real secret.
+                  let treeContent = await downloadTextFromBlossom(oldHash, hub.blossomServers)
+                  // Route the random placeholder through fromHex so its type matches r.newGroupSecret (and
+                  // the incremental branch above); removeMemberFromGroupTreeV2 discards this and mints a fresh
+                  // secret anyway — it only recovers leaf keys via O↔P.
+                  let secretBytes = fromHex(toHex(crypto.getRandomValues(new Uint8Array(32))))
+                  for (const p of removeP) {
+                    const r = await removeMemberFromGroupTreeV2(treeContent, p, secretBytes, hub.dTag, privateKey, signer)
+                    if (r) { treeContent = r.newTreeContent; secretBytes = r.newGroupSecret; rotated = true }
+                  }
+                  if (addP.length > 0) groupsNotRotated.push(group.groupId) // promote couldn't complete
+                  const up = await uploadToBlossomServers(new TextEncoder().encode(treeContent), signer, privateKey, hub.blossomServers, 'text/plain', undefined, undefined, ownerAuth)
+                  newHash = up.hash
+                  finalSecretHex = toHex(secretBytes)
+                } else {
+                  // Tree exists, we lack its secret, and this is an ADD-only change — we can't patch it
+                  // without the current secret (rebuilding from the partial roster would drop off-page
+                  // members). Skip, but SURFACE it so the owner knows the promotion didn't take effect.
+                  console.warn(`[GroupRotation:v2] Skipping add-only group ${group.groupId.slice(0, 8)}: current secret not loaded`)
+                  groupsNotRotated.push(group.groupId)
+                  continue
+                }
+
+                if (rotated && groupSecretHex) {
+                  groupHistoryEntries.push({ groupId: group.groupId, epoch: group.epoch, secretHex: groupSecretHex })
+                }
+                // Replace the group's hash if present, else append (a freshly-created group tree).
+                updatedGroupTrees = updatedGroupTrees.some(gt => gt.groupId === group.groupId)
+                  ? updatedGroupTrees.map(gt => gt.groupId === group.groupId ? { ...gt, hash: newHash } : gt)
+                  : [...updatedGroupTrees, { groupId: group.groupId, hash: newHash }]
+                if (rotated) {
+                  updatedGroupedRoles[gi] = { ...group, epoch: group.epoch + 1 }
+                  groupHistoryEntries.push({ groupId: group.groupId, epoch: group.epoch + 1, secretHex: finalSecretHex! })
+                  deferredGroupSecrets.set(group.groupId, finalSecretHex!)
+                }
+                groupsChanged = true
+                markStepDone(removed ? 'Rotating group encryption' : 'Adding to group tree')
+              } catch (err) {
+                console.warn(`[GroupRotation:v2] Failed to re-key group tree ${group.groupId.slice(0, 8)}:`, err)
+              }
+            }
+            if (groupsNotRotated.length > 0) {
+              setSaveError(`Roles saved, but ${groupsNotRotated.length} group channel(s) couldn’t be fully updated because their key wasn’t loaded — a promotion may not have taken effect. Reopen the hub and save again.`)
+            }
+          } else {
 
           for (const [memberPubkey, newRoles] of Object.entries(stagedChanges)) {
             const originalMember = hubMembers.find(m => m.pubkey === memberPubkey)
@@ -5965,6 +6436,7 @@ function MembersPage({ hub, onFooterState }: { hub: HubData; onFooterState: (sta
               }
             }
           }
+          } // end v1 group-rotation branch
 
           // Re-upload index if group trees changed (with updated history blob)
           if (groupsChanged) {
@@ -6004,7 +6476,7 @@ function MembersPage({ hub, onFooterState }: { hub: HubData; onFooterState: (sta
                 const updatedBlob = await aesEncrypt(hubSecret, lines.join('\n'))
                 const historyBytes = new TextEncoder().encode(updatedBlob)
                 const { hash: newHistoryHash } = await uploadFn(
-                  historyBytes, signer, privateKey, hub.blossomServers, 'text/plain',
+                  historyBytes, signer, privateKey, hub.blossomServers, 'text/plain', undefined, undefined, saveAuth,
                 )
                 historyHash = newHistoryHash
               }
@@ -6013,36 +6485,28 @@ function MembersPage({ hub, onFooterState }: { hub: HubData; onFooterState: (sta
             const newIndexContent = createIdx(
               updatedIndex.spineHash,
               updatedIndex.leafPages,
-              updatedIndex.banPages.map(bp => bp.hash),
+              updatedIndex.banPages.map(banPageToken), // preserve: keep the epoch stamp
               historyHash || undefined,
               updatedGroupTrees.length > 0 ? updatedGroupTrees : undefined,
             )
             const indexBytes = new TextEncoder().encode(newIndexContent)
             const { hash: newIdxHash } = await uploadFn(
-              indexBytes, signer, privateKey, hub.blossomServers, 'text/plain',
+              indexBytes, signer, privateKey, hub.blossomServers, 'text/plain', undefined, undefined, saveAuth,
             )
             finalIndexHash = newIdxHash
             markStepDone('Uploading encryption index')
-
-            // Best-effort cleanup of old Blossom files
-            try {
-              const { deleteFromBlossom } = await import('@/lib/blossom/client')
-              // Old group tree files
-              for (const oldGt of updatedIndex.groupTrees) {
-                const newGt = updatedGroupTrees.find(g => g.groupId === oldGt.groupId)
-                if (newGt && newGt.hash !== oldGt.hash) {
-                  deleteFromBlossom(oldGt.hash, signer, privateKey, hub.blossomServers).catch(() => { })
-                }
-              }
-              // Old history file
-              if (updatedIndex.historyHash && historyHash && updatedIndex.historyHash !== historyHash) {
-                deleteFromBlossom(updatedIndex.historyHash, signer, privateKey, hub.blossomServers).catch(() => { })
-              }
-              // Old index file (the one from before paginated update + group rotation)
-              if (hub.indexFileHash && hub.indexFileHash !== finalIndexHash) {
-                deleteFromBlossom(hub.indexFileHash, signer, privateKey, hub.blossomServers).catch(() => { })
-              }
-            } catch { /* cleanup is best-effort */ }
+            // Record the OLD blobs to delete AFTER the publish (not now — the live event still points at
+            // hub.indexFileHash; deleting early bricks the hub if the publish fails).
+            for (const oldGt of updatedIndex.groupTrees) {
+              const newGt = updatedGroupTrees.find(g => g.groupId === oldGt.groupId)
+              if (newGt && newGt.hash !== oldGt.hash) blobsToDeleteAfterPublish.push(oldGt.hash)
+            }
+            if (updatedIndex.historyHash && historyHash && updatedIndex.historyHash !== historyHash) {
+              blobsToDeleteAfterPublish.push(updatedIndex.historyHash)
+            }
+            if (hub.indexFileHash && hub.indexFileHash !== finalIndexHash) {
+              blobsToDeleteAfterPublish.push(hub.indexFileHash)
+            }
           }
 
           // Always publish a final hub event when grouped roles exist.
@@ -6050,7 +6514,8 @@ function MembersPage({ hub, onFooterState }: { hub: HubData; onFooterState: (sta
           // and the non-rotated case (same index from tree update, original epochs).
           // We skipped publishing earlier to avoid a stale intermediate event.
           await markStep('Publishing hub update')
-          const unsignedEvent = buildHubEvent({
+          const { signHubEventForPublish } = await import('@/lib/hub/buildHubEvent')
+          const signedEvent = await signHubEventForPublish(hub, {
             dTag: hub.dTag,
             name: hub.name,
             description: hub.description || undefined,
@@ -6069,19 +6534,38 @@ function MembersPage({ hub, onFooterState }: { hub: HubData; onFooterState: (sta
             nsfw: hub.nsfw || undefined,
             discoverable: hub.discoverable,
             groupedRoles: updatedGroupedRoles,
+            messageExpiration: hub.messageExpiration || undefined, // carry the disappearing-messages timer forward
             publishedAt: hub.publishedAt,
             eventCreatedAt: hub.eventCreatedAt,
-          })
-          const signedEvent = await mineAndSign(unsignedEvent, hub.minPow, hub.creatorPubkey, signer, privateKey)
-          await publishToSpecificRelays(getPublishRelays([...hub.generalRelays]), signedEvent)
+          }, { pubkey: useUserStore.getState().pubkey!, privateKey, signer, minPow: hub.minPow })
+          await casCheckIndex(hub.dTag, hub.creatorPubkey, hub.indexFileHash) // abort if another writer moved the index
+          {
+            // Fail loudly if no relay accepted, BEFORE flushing group secrets + deleting old blobs below
+            // (a zero-relay publish would otherwise brick the hub by dangling the live index pointer).
+            const accepted = await publishToSpecificRelays(getPublishRelays([...hub.generalRelays], { hubOnly: isV2(hub) }), signedEvent)
+            if (accepted.length === 0) throw new Error('The hub update was not accepted by any relay — please try again.')
+          }
           lastPublishedCreatedAt = signedEvent.created_at
           markStepDone('Publishing hub update')
+
+          // Now that the new hub event is live, delete the superseded blobs (deferred above).
+          if (blobsToDeleteAfterPublish.length > 0) {
+            const { deleteFromBlossom } = await import('@/lib/blossom/client')
+            for (const h of blobsToDeleteAfterPublish) {
+              deleteFromBlossom(h, signer, privateKey, hub.blossomServers, saveAuth).catch(() => { })
+            }
+          }
 
           // Flush deferred group secrets to store — only after publish succeeds
           for (const [groupId, secretHex] of deferredGroupSecrets) {
             useHubStore.getState().setGroupSecret(hub.dTag, groupId, secretHex)
           }
-        } catch (err) {
+        } catch (err: any) {
+          // A concurrency abort (another writer moved the index while we were saving) MUST propagate to
+          // the outer catch — swallowing it here would fall through to the unconditional store-bump +
+          // setSaveSuccess(true) below, reporting a false success and diverging the local store from the
+          // (unpublished) hub. Only tolerate genuine group-tree BUILD hiccups as a warning.
+          if (err?.name === 'HubConcurrencyError') throw err
           console.warn('Group tree rotation during role save failed:', err)
         }
       }
@@ -6105,6 +6589,7 @@ function MembersPage({ hub, onFooterState }: { hub: HubData; onFooterState: (sta
       console.error('Failed to save member roles:', err)
       setSaveError(err?.message || 'Failed to save')
     } finally {
+      releaseHubLock()
       setSaving(false)
       setSaveStep(null)
     }
@@ -6146,20 +6631,24 @@ function MembersPage({ hub, onFooterState }: { hub: HubData; onFooterState: (sta
             <div key={member.pubkey} className={cn('rounded-lg border transition-colors', isChanged ? 'border-primary/30 bg-primary/5' : 'border-transparent hover:bg-secondary/30')}>
               <button onClick={() => setExpandedPubkey(isExpanded ? null : member.pubkey)}
                 className="flex items-center gap-3 w-full px-3 py-2.5 text-left cursor-pointer">
-                <span
-                  onClick={(e) => { e.stopPropagation(); setProfilePubkey(member.pubkey) }}
-                  className="shrink-0 rounded-full cursor-pointer transition-all hover:ring-2 hover:ring-primary/40"
-                  title="View profile"
-                >
-                  <Avatar className="h-8 w-8">
-                    {profile?.picture && <AvatarImage src={profile.picture} />}
-                    <AvatarFallback className="text-xs bg-primary/20 text-primary">{name.slice(0, 2).toUpperCase()}</AvatarFallback>
-                  </Avatar>
-                </span>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span
+                      onClick={(e) => { e.stopPropagation(); setProfilePubkey(member.pubkey) }}
+                      className="shrink-0 rounded-full cursor-pointer transition-all hover:ring-2 hover:ring-primary/40"
+                    >
+                      <Avatar className="h-8 w-8">
+                        {profile?.picture && <AvatarImage src={profile.picture} />}
+                        <AvatarFallback className="text-xs bg-primary/20 text-primary">{name.slice(0, 2).toUpperCase()}</AvatarFallback>
+                      </Avatar>
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="text-xs">View profile</TooltipContent>
+                </Tooltip>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-foreground truncate flex items-center gap-1.5">
                     {name}
-                    {member.pubkey === hub.creatorPubkey && (
+                    {isHubOwner(hub, member.pubkey) && (
                       <span className="shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-500/15 text-amber-500">Creator</span>
                     )}
                   </p>
@@ -6179,7 +6668,7 @@ function MembersPage({ hub, onFooterState }: { hub: HubData; onFooterState: (sta
                 <ChevronRight size={14} className={cn('text-muted-foreground transition-transform shrink-0', isExpanded && 'rotate-90')} />
               </button>
               {isExpanded && (
-                <div className="border-t border-border/30 mx-3 mb-3 ml-14">
+                <div className="border-t border-border/30 mx-3 py-3 ml-14 flex flex-col gap-3">
                   {hub.roles.map((role, i) => {
                     const hasRole = role.name === 'everyone' || roleIds.includes(role.roleId)
                     const isEveryone = role.name === 'everyone'
@@ -6187,7 +6676,7 @@ function MembersPage({ hub, onFooterState }: { hub: HubData; onFooterState: (sta
                       <div
                         key={role.roleId}
                         className={cn(
-                          'flex items-center justify-between py-2 px-1',
+                          'flex items-center justify-between',
                           i > 0 && 'border-t border-border/20',
                         )}
                       >
@@ -6226,6 +6715,7 @@ function MembersPage({ hub, onFooterState }: { hub: HubData; onFooterState: (sta
           open={!!profilePubkey}
           onClose={() => setProfilePubkey(null)}
           targetPubkey={profilePubkey}
+          hubContext={{ dTag: hub.dTag, creatorPubkey: hub.creatorPubkey, ownerRealPubkey: hub.ownerRealPubkey }}
         />,
         document.body
       )}

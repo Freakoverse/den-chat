@@ -82,7 +82,10 @@ export function CalendarEventDetailModal({
   const { getProfile } = useProfileCache()
   const fetchRsvps = useCalendarStore((s) => s.fetchRsvps)
 
-  const isMine = event.pubkey === pubkey
+  // Event author's real key `R` — identity-tag-verified in useCalendar (unforgeable even by the owner),
+  // with a roster/wire fallback. Drives own-event controls + the author profile on v2.
+  const eventAuthorReal = event.realPubkey
+  const isMine = eventAuthorReal === pubkey
   const eventARef = `${KINDS.CALENDAR_TIME_EVENT}:${event.pubkey}:${event.dTag}`
 
   const [rsvps, setRsvps] = useState<DecryptedRsvp[]>([])
@@ -116,9 +119,9 @@ export function CalendarEventDetailModal({
     decryptRsvps(eventARef).then(setRsvps)
   }, [rawRsvps, eventARef, decryptRsvps])
 
-  // My RSVP
+  // My RSVP — RSVP authors are stored as `P` on v2, so resolve `P` → `R` before matching.
   const myRsvp = useMemo(
-    () => rsvps.find((r) => r.pubkey === pubkey),
+    () => rsvps.find((r) => r.realPubkey === pubkey),
     [rsvps, pubkey]
   )
 
@@ -181,9 +184,9 @@ export function CalendarEventDetailModal({
   )
 
   // Creator profile
-  const creatorProfile = getProfile(event.pubkey)
+  const creatorProfile = getProfile(eventAuthorReal)
   const creatorName =
-    creatorProfile?.display_name || creatorProfile?.name || truncateNpub(event.pubkey)
+    creatorProfile?.display_name || creatorProfile?.name || truncateNpub(eventAuthorReal)
 
   const isPast = event.endTimestamp
     ? event.endTimestamp < Math.floor(Date.now() / 1000)
@@ -425,11 +428,12 @@ export function CalendarEventDetailModal({
                         return (
                           <div className="space-y-0.5">
                             {items.map((r) => {
-                              const profile = getProfile(r.pubkey)
+                              const attendeeReal = r.realPubkey
+                              const profile = getProfile(attendeeReal)
                               const name =
                                 profile?.display_name ||
                                 profile?.name ||
-                                truncateNpub(r.pubkey)
+                                truncateNpub(attendeeReal)
                               return (
                                 <div
                                   key={r.pubkey}

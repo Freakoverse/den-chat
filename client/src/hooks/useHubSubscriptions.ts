@@ -19,9 +19,11 @@ import { KINDS, STANDARD_KINDS } from '@/lib/crypto/constants'
 import {
   loadCachedMessagesForHub,
   loadRemainingCachedMessagesProgressive,
-  cacheMessageWithDedup,
   pruneAll,
 } from '@/lib/cache/messageCache'
+// cacheMessageIfVerified / filterCacheable gate the durable cache write on stage-2 identity verification
+// (v2), so an outsider's junk (garbage identity tag that passes the cheap presence check) never hits IndexedDB.
+import { cacheMessageIfVerified, filterCacheable, channelKeyFromStore } from '@/lib/hub/verifyMessageForCache'
 import { countLeadingZeroBits } from '@/lib/pow/pow'
 import { usePollStore, parsePollEvent, parseVoteEvent } from '@/stores/pollStore'
 import { useCalendarStore, parseCalendarEvent, parseCalendarRsvp } from '@/stores/calendarStore'
@@ -31,6 +33,8 @@ import { useUserStore } from '@/stores/userStore'
 import { canReceiveChannelNotification } from '@/lib/hub/permissions'
 import { aesDecrypt } from '@/lib/crypto/aes'
 import { deriveChannelKey } from '@/lib/crypto/hkdf'
+import { isV2 } from '@/lib/hub/version'
+import { resolveMemberPubkey } from '@/lib/hub/resolveMemberPubkey'
 import { nip19 } from 'nostr-tools'
 import { playSoundEffect } from '@/lib/voice/soundEffects'
 
@@ -112,6 +116,15 @@ function parseMessage(event: Event): ChatMessage | null {
   // caller (live, history, edit-hint, context) already skips a null result.
   if (expiration && expiration <= Math.floor(Date.now() / 1000)) return null
 
+  // v2 identity drop rule — stage 1 (cheap plaintext presence, NIP-CHAT §0.1).
+  // In a v2 hub an event without an `identity` tag is not a valid member event
+  // (anonymous spam, or a legacy v1 message from an old client) — drop it before
+  // store/cache. Stage 2 (verifying sig_R over the event) runs in the async
+  // display path, which holds the channel key. Guarded on the hub being loaded so
+  // pre-hub-load ingest isn't blocked (such events are re-filtered on display).
+  const hubForDrop = useHubStore.getState().hubs[hubDTag]
+  if (hubForDrop && isV2(hubForDrop) && !event.tags.some((t) => t[0] === 'identity')) return null
+
   return {
     id: event.id,
     dTag,
@@ -176,7 +189,7 @@ export function fetchOlderMessages(
         if (minPow > 0 && countLeadingZeroBits(event.id) < minPow) return
 
         addMessage(msg)
-        cacheMessageWithDedup(msg).catch(() => {})
+        cacheMessageIfVerified(msg).catch(() => {})
         count++
       },
       () => {
@@ -235,7 +248,7 @@ export function fetchChannelLatest(
         if (minPow > 0 && countLeadingZeroBits(event.id) < minPow) return
 
         addMessage(msg)
-        cacheMessageWithDedup(msg).catch(() => {})
+        cacheMessageIfVerified(msg).catch(() => {})
         count++
       },
       () => {
@@ -281,19 +294,23 @@ export function fetchMentionsCatchUp(
 
   let count = 0
   const handleEvent = (event: Event) => {
-    // Skip own messages
-    if (event.pubkey === myPubkey) return
+    // Skip own messages (resolve wire P → R on v2; see isOwnHubEvent)
+    if (isOwnHubEvent(event.pubkey, hubDTag, myPubkey)) return
     const msg = parseMessage(event)
     if (!msg) return
     if (minPow > 0 && countLeadingZeroBits(event.id) < minPow) return
     addMessage(msg)
-    cacheMessageWithDedup(msg).catch(() => {})
+    cacheMessageIfVerified(msg).catch(() => {})
     count++
   }
 
   // Build two one-shot subscriptions:
-  // 1. Direct mentions: messages with p tag matching our pubkey
-  const directPromise = new Promise<void>((resolve) => {
+  // 1. Direct mentions: messages with a p tag matching our pubkey.
+  //    v2: SKIP — a `{#h, #p:[R]}` filter would tell the relay our real key `R` is tied to this
+  //    private hub (a leak), and v2 messages carry no plaintext `p:R` mention tags anyway (personal
+  //    mentions are detected from decrypted content). The hub-wide subscription still delivers them.
+  const hubIsV2 = isV2(useHubStore.getState().hubs[hubDTag])
+  const directPromise = hubIsV2 ? Promise.resolve() : new Promise<void>((resolve) => {
     const sub = subscribeToRelays(
       relays,
       {
@@ -372,7 +389,7 @@ export function fetchNewerMessages(
         if (minPow > 0 && countLeadingZeroBits(event.id) < minPow) return
 
         addMessage(msg)
-        cacheMessageWithDedup(msg).catch(() => {})
+        cacheMessageIfVerified(msg).catch(() => {})
         count++
       },
       () => {
@@ -430,7 +447,7 @@ export function fetchSingleMessage(
           found = msg
           // Also add to store so it's available for context
           useMessageStore.getState().addMessage(msg)
-          cacheMessageWithDedup(msg).catch(() => {})
+          cacheMessageIfVerified(msg).catch(() => {})
         }
       },
       () => {
@@ -477,7 +494,7 @@ export function fetchMessageContext(
           if (!msg) return
           if (minPow > 0 && countLeadingZeroBits(event.id) < minPow) return
           addMessage(msg)
-          cacheMessageWithDedup(msg).catch(() => {})
+          cacheMessageIfVerified(msg).catch(() => {})
           count++
         },
         () => {
@@ -544,13 +561,18 @@ function processReactionEvent(event: Event) {
 
   // Store raw encrypted content — decryption happens at render time
   const emojiTag = event.tags.find((t) => t[0] === 'emoji' && t[1] && t[2])
+  const identityTag = event.tags.find((t) => t[0] === 'identity')?.[1] // v2: reactor's real key, decoded lazily
+  const reactionEpoch = parseInt(event.tags.find((t) => t[0] === 'epoch')?.[1] || '1', 10)
   store.addReaction(hubDTag, targetEventId, {
     emoji: event.content, // encrypted — will be decrypted at render
     pubkey: event.pubkey,
     eventId: event.id,
     createdAt: event.created_at,
+    epoch: reactionEpoch, // the epoch this reaction was encrypted under (may predate the current one)
     rawContent: event.content,
     rawEmojiTag: emojiTag ? [emojiTag[1], emojiTag[2]] : undefined,
+    identityTag,
+    rawEvent: JSON.stringify(event),
     decrypted: false,
   })
 }
@@ -573,9 +595,11 @@ function handleEditHint(event: Event) {
   const myPubkey = useUserStore.getState().pubkey
   if (event.pubkey === myPubkey) return
 
-  // Verify sender is a hub member (prevents amplification from non-members)
+  // Verify sender is a hub member (prevents amplification from non-members). The event author is the
+  // on-wire key — real key R in v1 (= m.pubkey), pseudonym P in v2 (= m.p) — so match EITHER field,
+  // else every v2 member's edit/delete hint is dropped and other clients never refresh on edit.
   const members = useHubStore.getState().hubMembers[hubDTag]
-  if (members && members.length > 0 && !members.some((m) => m.pubkey === event.pubkey)) return
+  if (members && members.length > 0 && !members.some((m) => m.pubkey === event.pubkey || m.p === event.pubkey)) return
 
   // Check if we already have a newer version locally
   const channelId = event.tags.find((t) => t[0] === 'c')?.[1]
@@ -620,7 +644,7 @@ function handleEditHint(event: Event) {
         const msg = parseMessage(fetchedEvent)
         if (msg) {
           useMessageStore.getState().addMessage(msg)
-          cacheMessageWithDedup(msg).catch(() => {})
+          cacheMessageIfVerified(msg).catch(() => {})
           console.log(`[EditHint] Updated message dTag=${messageDTag.slice(0, 12)}… (new created_at=${fetchedEvent.created_at})`)
         }
       }
@@ -647,6 +671,21 @@ function handleEditHint(event: Event) {
 type MentionKind = 'personal' | 'everyone' | 'here' | 'role'
 
 /**
+ * Whether a hub event's WIRE author is the current user. On v2 the wire key is our per-hub pseudonym
+ * `P` (never our real key `R`), so a naive `event.pubkey === myPubkey` never matches and our own v2
+ * messages wrongly drive self-notifications (phantom unread badges + sound, and — on offline catch-up —
+ * our own @everyone/@here/@role counted as a mention). Resolve the wire key to `R` via the roster
+ * (`m.p === P → m.pubkey`) and compare. `resolveMemberPubkey` is a no-op on v1 (wire key already IS R),
+ * so this is correct for both. Best-effort: if the roster isn't loaded yet the resolve falls back to the
+ * wire key and suppression re-tightens once it loads.
+ */
+function isOwnHubEvent(wirePubkey: string, hubDTag: string, myPubkey: string | null): boolean {
+  if (!myPubkey) return false
+  if (wirePubkey === myPubkey) return true
+  return resolveMemberPubkey(wirePubkey, useHubStore.getState().hubMembers[hubDTag]) === myPubkey
+}
+
+/**
  * Try to decrypt a message and classify its mention type. Returns whether we could
  * actually read it — `decrypted: false` means we lack the key (restricted channel,
  * epoch not synced yet, secret still loading), so it isn't shown in chat and must NOT
@@ -659,19 +698,20 @@ async function detectMentionType(
   encryptedContent: string,
   senderPubkey: string
 ): Promise<{ decrypted: boolean; mentionType?: MentionKind }> {
-  // Don't scan our own messages
+  // Don't scan our own messages (resolve wire P → R on v2; see isOwnHubEvent)
   const myPubkey = useUserStore.getState().pubkey
-  if (!myPubkey || senderPubkey === myPubkey) return { decrypted: false }
+  if (!myPubkey || isOwnHubEvent(senderPubkey, hubDTag, myPubkey)) return { decrypted: false }
 
-  // Get hub secret
-  const secretHex = useHubStore.getState().hubSecrets[hubDTag]
-  if (!secretHex) return { decrypted: false } // key not loaded yet — can't decrypt
-
-  // Derive channel key and decrypt
+  // Resolve the channel key the SAME way the display path does — via channelKeyFromStore, which handles
+  // GROUP-encrypted channels (group secret, not the hub-wide secret) AND epoch-history (a message from a
+  // pre-rotation epoch). Deriving from `hubSecrets` alone (as this used to) produced the WRONG key for any
+  // group channel or historical epoch → aesDecrypt threw → the message was silently treated as unreadable,
+  // suppressing its unread badge / sound / @mention (on v2, personal mentions live only in the decrypted
+  // content, so they were lost entirely).
+  const channelKey = channelKeyFromStore(hubDTag, channelId, epoch)
+  if (!channelKey) return { decrypted: false } // key not loaded / no access — can't decrypt
   let plaintext: string
   try {
-    const secretBytes = new Uint8Array(secretHex.match(/.{2}/g)!.map((b: string) => parseInt(b, 16)))
-    const channelKey = deriveChannelKey(secretBytes, channelId, epoch)
     plaintext = await aesDecrypt(channelKey, encryptedContent)
   } catch {
     return { decrypted: false } // wrong/absent key, restricted channel, epoch mismatch
@@ -705,6 +745,8 @@ export function useHubSubscriptions() {
   const hubListLoaded = useHubStore((s) => s.hubListLoaded)
   const activeHubId = useHubStore((s) => s.activeHubId)
   const activeChannelId = useHubStore((s) => s.activeChannelId)
+  // Bumps when any hub/group/epoch secret loads — drives the cold-start unread backfill below.
+  const secretsVersion = useHubStore((s) => s._secretsVersion ?? 0)
   const addMessage = useMessageStore((s) => s.addMessage)
   const incrementUnread = useMessageStore((s) => s.incrementUnread)
 
@@ -738,6 +780,48 @@ export function useHubSubscriptions() {
 
   // Whether cache has been loaded
   const cacheLoadedRef = useRef(false)
+
+  // ── Cold-start unread backfill ──
+  // The live handler only increments unread for a DECRYPTABLE message (canReceiveChannelNotification +
+  // detectMentionType both need the hub secret). On startup the secret loads asynchronously, so a backlog
+  // received while offline is processed BEFORE the secret lands → skipped, and (already in processedMsgIds)
+  // never re-counted → no badge / no channel dot. When a secret becomes available (secretsVersion bumps),
+  // recompute each accessible channel's unread from the already-loaded store messages and RAISE the count
+  // (a member can read everything in an accessible channel, so anything newer than lastRead and not our own
+  // is unread). RAISE (max) is race-free vs the live handler; mentions stay owned by the reclassifier.
+  useEffect(() => {
+    const myPubkey = useUserStore.getState().pubkey
+    if (!myPubkey) return
+    const { hubs: allHubs, hubSecrets } = useHubStore.getState()
+    const messagesByHub = useMessageStore.getState().messages
+    const notif = useNotificationStore.getState()
+    const activeHub = activeHubIdRef.current
+    const activeChannel = activeChannelIdRef.current
+    for (const hubDTag of Object.keys(allHubs)) {
+      if (!hubSecrets[hubDTag]) continue // secret not loaded yet → nothing to backfill (re-runs on next bump)
+      const channels = messagesByHub[hubDTag]
+      if (!channels) continue
+      const hub = allHubs[hubDTag]
+      const perChannel: Record<string, number> = {}
+      for (const [channelId, msgs] of Object.entries(channels)) {
+        if (hubDTag === activeHub && channelId === activeChannel) continue // currently viewing → don't badge
+        if (!canReceiveChannelNotification(hubDTag, channelId, myPubkey)) continue
+        const lastRead = notif.hubUnreads[hubDTag]?.[channelId]?.lastRead ?? 0
+        const targetChannel = hub?.channels?.find((c) => c.channelId === channelId)
+        const isForum = targetChannel?.type === 'forum'
+        let count = 0
+        for (const m of msgs) {
+          if (m.deleted) continue
+          if (m.createdAt <= lastRead) continue
+          if (isForum && !m.isForum) continue // forum: only top-level posts count as unread
+          if (isOwnHubEvent(m.pubkey, hubDTag, myPubkey)) continue
+          count++
+        }
+        if (count > 0) perChannel[channelId] = count
+      }
+      if (Object.keys(perChannel).length > 0) notif.raiseHubUnreadCounts(hubDTag, perChannel)
+    }
+  }, [secretsVersion])
 
   // Load cached messages from IndexedDB on startup (progressive: active hub first)
   useEffect(() => {
@@ -884,7 +968,15 @@ export function useHubSubscriptions() {
       // Route poll events to pollStore
       if (event.kind === KINDS.POLL) {
         const poll = parsePollEvent(event)
-        if (poll) usePollStore.getState().addPoll(poll)
+        if (poll) {
+          // On v2, every legit poll carries an identity attestation (signHubMemberEvent). Drop a tagless
+          // one at ingest — it's unattributable and could be a forged poll from an unauthorized member
+          // under a throwaway key (the create_polls timeline gate resolves the wire key P, which for a
+          // throwaway falls open to the `everyone` role). Mirrors the message/reaction drop-rule.
+          const pollHub = useHubStore.getState().hubs[poll.hubDTag]
+          if (pollHub && isV2(pollHub) && !event.tags.some((t) => t[0] === 'identity')) return
+          usePollStore.getState().addPoll(poll)
+        }
         return
       }
 
@@ -952,7 +1044,7 @@ export function useHubSubscriptions() {
       if (buffer) {
         buffer.push(msg)
       } else {
-        cacheMessageWithDedup(msg).catch(() => {})
+        cacheMessageIfVerified(msg).catch(() => {})
       }
 
       // Skip unread increment if we already processed this event
@@ -969,9 +1061,9 @@ export function useHubSubscriptions() {
       // Increment unread for inactive hubs/channels
       // Fire-and-forget async mention detection — the unread increment
       // still happens immediately; the mention type enriches the badge
-      // Skip own messages — they should never count as "unread"
+      // Skip own messages — they should never count as "unread" (resolve wire P → R on v2)
       const myPubkey = useUserStore.getState().pubkey
-      if (event.pubkey === myPubkey) return
+      if (isOwnHubEvent(event.pubkey, msg.hubDTag, myPubkey)) return
       if (isReplacement) {
         // Edit/deletion — not a new message: no sound, no unread bump. If it landed in
         // the channel currently being viewed, still advance the read watermark (as the
@@ -1030,10 +1122,12 @@ export function useHubSubscriptions() {
         () => {
           // EOSE: initial history is loaded, close this subscription
           initialSub.close()
-          // Flush buffered messages to IndexedDB in a single bulk transaction
+          // Flush buffered messages to IndexedDB in a single bulk transaction — but first drop any that
+          // aren't cacheable (unverified v2 junk), so an outsider's events don't reach the durable cache.
           if (initialBuffer.length > 0) {
-            import('@/lib/cache/messageCache').then(({ cacheMessagesWithDedup }) => {
-              cacheMessagesWithDedup(initialBuffer).catch(() => {})
+            import('@/lib/cache/messageCache').then(async ({ cacheMessagesWithDedup }) => {
+              const verified = await filterCacheable(initialBuffer)
+              if (verified.length > 0) cacheMessagesWithDedup(verified).catch(() => {})
             })
           }
 
@@ -1080,29 +1174,54 @@ export function useHubSubscriptions() {
 
                 return fetchMentionsCatchUp(hubDTag, myPubkey, roleIds, sinceTs)
                   .then((mentionCount) => {
-                    if (mentionCount > 0) {
+                    // v2: fetchMentionsCatchUp can only count GROUP (#M) mentions — personal mentions
+                    // carry no `#p:[R]` tag to query, so mentionCount misses them. Always run the local
+                    // reclassifier scan on v2 (it reads already-fetched store messages and detects
+                    // personal mentions by decrypted content below), so pure-personal offline mentions
+                    // still surface as unreads.
+                    const isV2Hub = isV2(useHubStore.getState().hubs[hubDTag])
+                    if (mentionCount > 0 || isV2Hub) {
                       import('@/lib/cache/messageCache').then(async () => {
                         const messages = useMessageStore.getState().messages[hubDTag]
                         if (!messages) return
+                        // v2 personal mentions carry NO plaintext `p` tag (it's suppressed for privacy);
+                        // the mention lives in the DECRYPTED content as `@npub(myR)`. The store holds
+                        // ciphertext (decryption happens in useMessages, never written back), so a raw
+                        // `msg.content` scan matches nothing on either version — hub content is always
+                        // AES-encrypted. Decrypt via detectMentionType (the exact live `isMentioned` path)
+                        // so offline catch-up reclassifies v2 personal mentions too. The structured `#M`
+                        // group-mention tag and the v1 `#p` tag need no decryption and are read directly.
                         for (const [channelId, channelMsgs] of Object.entries(messages)) {
                           for (const msg of channelMsgs) {
                             if (msg.createdAt <= sinceTs) continue
-                            if (msg.pubkey === myPubkey) continue
+                            if (isOwnHubEvent(msg.pubkey, hubDTag, myPubkey)) continue // wire P → R on v2
                             if (!msg.rawEvent) continue
                             try {
                               const raw = JSON.parse(msg.rawEvent)
-                              const hasPTag = raw.tags?.some((t: string[]) => t[0] === 'p' && t[1] === myPubkey)
                               const hasMTag = raw.tags?.some((t: string[]) => {
                                 if (t[0] !== 'M') return false
                                 if (t[1] === 'all' || t[1] === 'here') return true
                                 return roleIds.some(rid => t[1] === `role:${rid}`)
                               })
-                              if (hasPTag || hasMTag) {
+                              // v1 carries the personal mention as a plaintext `p` tag. v2 suppresses it →
+                              // decrypt the content and look for @npub(myR), matching the live path.
+                              let hasPersonal = raw.tags?.some((t: string[]) => t[0] === 'p' && t[1] === myPubkey)
+                              if (!hasPersonal) {
+                                const det = await detectMentionType(hubDTag, channelId, msg.epoch, msg.content, msg.pubkey)
+                                if (det.mentionType === 'personal') hasPersonal = true
+                              }
+                              if (hasPersonal || hasMTag) {
                                 // Same permission/membership gate as the live path: never
                                 // surface mentions for hubs the user hasn't joined or
                                 // channels they can't access.
                                 if (!canReceiveChannelNotification(hubDTag, channelId, myPubkey)) continue
-                                const mentionType = hasPTag ? 'personal'
+                                // Coordinate with the live handler's dedup set so a mention isn't counted
+                                // TWICE — once here and once by the initial-fetch subscription. Whichever
+                                // reaches the event first records its id; the other skips the increment.
+                                // (The set only gates the unread increment, not store/cache insertion.)
+                                if (processedMsgIdsRef.current.has(msg.id)) continue
+                                processedMsgIdsRef.current.add(msg.id)
+                                const mentionType = hasPersonal ? 'personal'
                                   : raw.tags?.some((t: string[]) => t[0] === 'M' && t[1] === 'all') ? 'everyone'
                                   : raw.tags?.some((t: string[]) => t[0] === 'M' && t[1] === 'here') ? 'here'
                                   : 'role'

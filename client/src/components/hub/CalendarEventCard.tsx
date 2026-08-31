@@ -48,13 +48,17 @@ function formatShortDate(ts: number): string {
 export function CalendarEventCard({ event, onClick, onEdit }: CalendarEventCardProps) {
   const pubkey = useUserStore((s) => s.pubkey)
   const { getProfile } = useProfileCache()
-  const isMine = event.pubkey === pubkey
+  // v2: the wire author is the member pseudonym `P`. `realPubkey` is the identity-tag-verified real
+  // key `R` (resolved in useCalendar, unforgeable even by the owner) — drives own-event controls +
+  // the author profile. Equals the wire key on v1.
+  const authorReal = event.realPubkey
+  const isMine = authorReal === pubkey
 
-  const creatorProfile = getProfile(event.pubkey)
+  const creatorProfile = getProfile(authorReal)
   const creatorName =
     creatorProfile?.display_name ||
     creatorProfile?.name ||
-    truncateNpub(event.pubkey)
+    truncateNpub(authorReal)
 
   const isPast = event.endTimestamp
     ? event.endTimestamp < Math.floor(Date.now() / 1000)

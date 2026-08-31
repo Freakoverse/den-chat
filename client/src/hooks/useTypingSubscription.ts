@@ -22,19 +22,42 @@ function isStopSignal(event: Event): boolean {
   return event.tags.some((t) => t[0] === 'typing' && t[1] === 'stop')
 }
 
-function handleHubTyping(event: Event) {
-  if (event.pubkey === useUserStore.getState().pubkey) return // ignore own
+async function handleHubTyping(event: Event) {
   const h = event.tags.find((t) => t[0] === 'h')?.[1]
   const c = event.tags.find((t) => t[0] === 'c')?.[1]
   if (!h || !c) return
-  // Only honor signals from hub members (mirrors the edit-hint check).
-  const members = useHubStore.getState().hubMembers[h]
-  if (members && members.length > 0 && !members.some((m) => m.pubkey === event.pubkey)) return
+
+  const hub = useHubStore.getState().hubs[h]
+  const { isV2 } = await import('@/lib/hub/version')
+  const v2 = !!hub && isV2(hub)
+
+  // v1: the author IS the real key R. v2: the author is a pseudonym P; the real typer R is
+  // enc(hubKey, R) in the content — decrypting it also PROVES membership (AES-GCM auth tag
+  // only verifies with the hub key), so no separate roster check is needed (which wouldn't
+  // work cross-page anyway).
+  let whoR = event.pubkey
+  if (v2) {
+    const secretHex = useHubStore.getState().hubSecrets[h]
+    if (!secretHex || !event.content) return
+    try {
+      const { deriveHubContentKey } = await import('@/lib/hub/hubContent')
+      const { aesDecrypt } = await import('@/lib/crypto/aes')
+      const { fromHex } = await import('@/lib/crypto/lkh')
+      whoR = await aesDecrypt(deriveHubContentKey(fromHex(secretHex), hub!.epoch), event.content)
+    } catch { return } // wrong key/epoch or forged → drop
+  }
+
+  if (whoR === useUserStore.getState().pubkey) return // ignore own
+  if (!v2) {
+    // v1 membership check (mirrors the edit-hint check).
+    const members = useHubStore.getState().hubMembers[h]
+    if (members && members.length > 0 && !members.some((m) => m.pubkey === whoR)) return
+  }
 
   const key = hubTypingKey(h, c)
   const store = useTypingStore.getState()
-  if (isStopSignal(event)) store.clearTyping(key, event.pubkey)
-  else store.markTyping(key, event.pubkey)
+  if (isStopSignal(event)) store.clearTyping(key, whoR)
+  else store.markTyping(key, whoR)
 }
 
 function handleDM04Typing(event: Event, myPubkey: string) {

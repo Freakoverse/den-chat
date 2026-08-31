@@ -14,6 +14,9 @@ import { useHubStore } from '@/stores/hubStore'
 import { useUserStore } from '@/stores/userStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { useCalendar, isEventLive, type DecryptedCalendarEvent } from '@/hooks/useCalendar'
+import { resolveMemberPubkey } from '@/lib/hub/resolveMemberPubkey'
+import { isV2 } from '@/lib/hub/version'
+import { verifyEventIdentity } from '@/lib/nostr/identity'
 import { CalendarEventDetailModal } from '@/components/hub/CalendarEventDetailModal'
 import { CreateCalendarEventModal } from '@/components/hub/CreateCalendarEventModal'
 import { fetchEvents, subscribeToRelays } from '@/lib/nostr/relay-pool'
@@ -58,6 +61,7 @@ export function CalendarTimeEventCard({ identifier, pubkey, relays }: CalendarTi
   const hubEntries = useHubStore((s) => s.hubEntries)
   const hubSecrets = useHubStore((s) => s.hubSecrets)
   const activeHubId = useHubStore((s) => s.activeHubId)
+  const hubMembersByHub = useHubStore((s) => s.hubMembers)
   const { getProfile } = useProfileCache()
 
   const [fetchedEvent, setFetchedEvent] = useState<FetchedEvent | null>(null)
@@ -204,9 +208,30 @@ export function CalendarTimeEventCard({ identifier, pubkey, relays }: CalendarTi
         const startTimestamp = startStr ? parseInt(startStr, 10) : 0
         const endTimestamp = endStr ? parseInt(endStr, 10) : undefined
 
+        // v2: resolve the author's real key `R` from the `identity` tag (unforgeable even by the owner).
+        // A present-but-INVALID tag is a forgery signal → do NOT roster-resolve `P→R` (that would frame
+        // the victim); return the wire `P`. Roster fallback only for the genuinely tag-LESS legacy case.
+        let realPubkey = fetchedEvent.pubkey
+        if (hub && isV2(hub)) {
+          let parsed: Parameters<typeof verifyEventIdentity>[0] | null = null
+          try { parsed = JSON.parse(fetchedEvent.rawEvent) } catch { parsed = null }
+          const hasIdentityTag = !!parsed?.tags?.some((t: string[]) => t[0] === 'identity')
+          if (hasIdentityTag) {
+            let resolved: string | undefined
+            try {
+              const res = await verifyEventIdentity(parsed!, key)
+              if (res.ok && res.rPub) resolved = res.rPub
+            } catch { /* invalid → forgery, keep wire P */ }
+            realPubkey = resolved ?? fetchedEvent.pubkey
+          } else {
+            realPubkey = resolveMemberPubkey(fetchedEvent.pubkey, hubMembersByHub[fetchedEvent.hubDTag!])
+          }
+        }
+
         setDecrypted({
           id: fetchedEvent.id,
           pubkey: fetchedEvent.pubkey,
+          realPubkey,
           dTag: fetchedEvent.dTag,
           createdAt: fetchedEvent.createdAt,
           title,
@@ -226,7 +251,7 @@ export function CalendarTimeEventCard({ identifier, pubkey, relays }: CalendarTi
     }
 
     tryDecrypt()
-  }, [fetchedEvent, hubSecrets, hubs])
+  }, [fetchedEvent, hubSecrets, hubs, hubMembersByHub])
 
   // Hub membership check
   const isMember = fetchedEvent?.hubDTag
@@ -257,8 +282,15 @@ export function CalendarTimeEventCard({ identifier, pubkey, relays }: CalendarTi
     )
   }
 
-  const profile = getProfile(fetchedEvent.pubkey)
-  const authorName = profile?.display_name || profile?.name || truncateNpub(nip19.npubEncode(fetchedEvent.pubkey))
+  // v2: the wire author is the member pseudonym `P`. Prefer the identity-tag-verified real key `R`
+  // computed during decryption (unforgeable even by the owner); before decryption completes / for a
+  // public event, fall back to the roster `P→R` (which falls back to `P` for non-members — no crash).
+  const authorReal = decrypted?.realPubkey ?? resolveMemberPubkey(
+    fetchedEvent.pubkey,
+    fetchedEvent.hubDTag ? hubMembersByHub[fetchedEvent.hubDTag] : undefined
+  )
+  const profile = getProfile(authorReal)
+  const authorName = profile?.display_name || profile?.name || truncateNpub(nip19.npubEncode(authorReal))
   const hubName = fetchedEvent.hubDTag
     ? (hubs[fetchedEvent.hubDTag]?.name || fetchedEvent.hubDTag.slice(0, 12) + '…')
     : null

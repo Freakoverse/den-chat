@@ -19,6 +19,7 @@ import { createHubTypingEvent, createDM04TypingEvent, signWithSigner } from '@/l
 import { publishToSpecificRelays } from '@/lib/nostr/relay-pool'
 import { useUserStore } from '@/stores/userStore'
 import { useTypingStore, TYPING_HEARTBEAT_MS } from '@/stores/typingStore'
+import { useHubStore } from '@/stores/hubStore'
 
 type TypingTarget =
   | { scope: 'hub'; hubDTag: string; channelId: string; recipientPubkey?: undefined }
@@ -54,7 +55,32 @@ export function useTypingHeartbeat(target: TypingTarget & { relays: string[] }):
 
     inFlightRef.current = true
     try {
-      const signed = await signWithSigner(unsigned, signer, privateKey)
+      let signed
+      // v2 hubs: author the typing ping as the member pseudonym P, and stash enc(hubKey, R) in
+      // the (otherwise empty) content — so any member can resolve who's typing WITHOUT the
+      // per-page roster (the hub content key is universal, unlike the paginated roster).
+      const hub = t.scope === 'hub' && t.hubDTag ? useHubStore.getState().hubs[t.hubDTag] : null
+      let hubIsV2 = false
+      if (hub && t.hubDTag) {
+        const { isV2 } = await import('@/lib/hub/version')
+        hubIsV2 = isV2(hub)
+        const secretHex = useHubStore.getState().hubSecrets[t.hubDTag]
+        if (hubIsV2 && secretHex) {
+          const { makeSubkeySigner, mineAndSignAsSubkey } = await import('@/lib/nostr/v2send')
+          const { ChatContext } = await import('@/lib/crypto/skd')
+          const { deriveHubContentKey } = await import('@/lib/hub/hubContent')
+          const { aesEncrypt } = await import('@/lib/crypto/aes')
+          const { fromHex } = await import('@/lib/crypto/lkh')
+          const key = deriveHubContentKey(fromHex(secretHex), hub.epoch)
+          const encR = await aesEncrypt(key, pubkey) // no signature — typing is low-stakes
+          const pSigner = makeSubkeySigner(ChatContext.member(t.hubDTag), { privateKey, signer, peerPub: hub.creatorPubkey })
+          signed = await mineAndSignAsSubkey({ ...unsigned, content: encR, pubkey } as typeof unsigned, 0, pSigner)
+        }
+      }
+      // On a v2 hub, NEVER fall back to authoring the (hub-scoped) typing ping under the real key R —
+      // if we couldn't sign as P (secret not loaded yet), just skip this heartbeat.
+      if (!signed && hubIsV2) return
+      if (!signed) signed = await signWithSigner(unsigned, signer, privateKey)
       await publishToSpecificRelays(t.relays, signed)
     } catch { /* best-effort, never disrupts typing */ }
     finally { inFlightRef.current = false }

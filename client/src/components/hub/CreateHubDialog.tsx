@@ -25,7 +25,10 @@ import { publishToSpecificRelays, getRelayList } from '@/lib/nostr/relay-pool'
 import { getPublishRelays } from '@/stores/postingBehaviourStore'
 import { getRelays } from '@/lib/nostr/relay-pool'
 import { KINDS } from '@/lib/crypto/constants'
-import { createAndUploadMemberFiles, blossomServers as blossomServerManager, uploadToBlossomServers } from '@/lib/blossom'
+import { createAndUploadMemberFiles, createAndUploadMemberFilesV2, blossomServers as blossomServerManager, uploadToBlossomServers } from '@/lib/blossom'
+import { makeSubkeySigner, mineAndSignAsSubkey } from '@/lib/nostr/v2send'
+import { ChatContext, canUseV2 } from '@/lib/crypto/skd'
+import { deriveHubContentKey, encryptHubContent, buildOwnerAttestation } from '@/lib/hub/hubContent'
 import { DEFAULT_EVERYONE_PERMISSIONS } from '@/lib/hub/permissions'
 import type { UploadProgress } from '@/lib/blossom'
 
@@ -145,6 +148,12 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
   const [showAdvanced, setShowAdvanced] = useState(false)
   // Proof-of-work difficulty (message + join), default 15
   const [createMinPow, setCreateMinPow] = useState(15)
+  /** Create a **v2 (privacy)** hub — requires a local key or a NIP-SKD signer. */
+  const [createV2, setCreateV2] = useState(false)
+  // Stable hub dTag chosen up front so the icon/banner uploads (which happen BEFORE the hub event is
+  // built) can sign their Blossom auth as the owner pseudonym O on v2 — not R_owner.
+  const hubDTagRef = useRef(crypto.randomUUID())
+  const v2Capable = canUseV2({ privateKey, signer })
   const [createJoinPow, setCreateJoinPow] = useState(15)
   const userRelays = useUserListsStore((s) => s.userRelays)
   const userBlossoms = useUserListsStore((s) => s.userBlossoms)
@@ -225,6 +234,20 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
       setCreationStep(null)
       setCompletedSteps(new Set())
       setMemberFileProgress(null)
+      // The dialog never unmounts (it only `return null`s when closed), so per-hub state must be
+      // cleared here or it bleeds into the NEXT hub. Beyond the confusing pre-filled name/icon, on
+      // v2 a reused icon/banner blob (uploaded + Blossom-auth-signed under the FIRST hub's owner `O`)
+      // would be referenced by the second hub (a different `O`) — linking the two owners' pseudonyms.
+      setName('')
+      setDescription('')
+      setNsfw(false)
+      setError(null)
+      setIconPreview(null); setIconHash(null); setIconStatus('idle'); setIconProgress(null); setIconSuccessCount(0)
+      setBannerPreview(null); setBannerHash(null); setBannerStatus('idle'); setBannerProgress(null); setBannerSuccessCount(0)
+      setIconEditFile(null); setBannerEditFile(null) // else the crop editor re-pops on reopen
+      // Fresh dTag for the NEXT hub — same reason: same dTag → same owner `O` → the new hub event
+      // replaces the previous one on relays.
+      hubDTagRef.current = crypto.randomUUID()
     }
   }, [open])
 
@@ -285,6 +308,13 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
       const buffer = await file.arrayBuffer()
       const data = new Uint8Array(buffer)
 
+      // v2: sign the Blossom auth as the owner pseudonym O (derived from the up-front dTag), so the
+      // icon/banner blob the O-authored hub event references isn't auth-linked to R_owner.
+      let ownerAuthSigner: ((e: import('nostr-tools').UnsignedEvent) => Promise<import('nostr-tools').Event>) | undefined
+      if (createV2 && canUseV2({ privateKey, signer })) {
+        const { ChatContext } = await import('@/lib/crypto/skd')
+        ownerAuthSigner = makeSubkeySigner(ChatContext.owner(hubDTagRef.current), { privateKey, signer }).signEvent
+      }
       // Upload to 3 random Blossom servers sequentially
       const { hash, successCount } = await uploadToBlossomServers(
         data,
@@ -299,6 +329,7 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
           abortRef.current = controller
           return controller.signal
         },
+        ownerAuthSigner,
       )
       setHash(hash)
       setSuccessCount(successCount)
@@ -424,6 +455,14 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
       setError('Must be logged in to create hubs')
       return
     }
+    // Never silently downgrade a requested v2 hub to a public v1 hub. If the signer's NIP-SKD
+    // support isn't available at this moment (e.g. a remote signer that needs to approve the
+    // capability check, or dropped its connection), abort with a clear message instead of
+    // publishing a public hub authored by the real key R — which is exactly NOT what "private" means.
+    if (createV2 && !canUseV2({ privateKey, signer })) {
+      setError('Your signer can’t confirm private-hub (v2) support right now. Reconnect it (and, for a remote signer, allow the request) then try again — not creating a public hub in its place.')
+      return
+    }
 
     setLoading(true)
     setError(null)
@@ -433,7 +472,7 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
     const markDone = (step: CreationStep) => setCompletedSteps(prev => new Set(prev).add(step))
 
     try {
-      const dTag = crypto.randomUUID()
+      const dTag = hubDTagRef.current
       const epoch = 1
 
       // Generate hub secret (32 random bytes)
@@ -485,21 +524,28 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
       const selectedRelays = getSelectedRelays()
       const relays = selectedRelays.length > 0 ? selectedRelays : getRelays()
 
-      // Upload member files to Blossom
+      // Upload member files to Blossom. v2 hubs use P-keyed leaves authored under the
+      // owner pseudonym O (requires a local key or a NIP-SKD signer).
+      const wantV2 = createV2 && canUseV2({ privateKey, signer })
       setCreationStep('uploading-member-files')
       let indexHash = ''
+      let ownerPub = pubkey! // v1: creator's real key; v2: the derived owner pseudonym O
       if (pubkey) {
         try {
-           const result = await createAndUploadMemberFiles(
-            pubkey,
-            dTag,
-            hubSecret,
-            privateKey,
-            signer,
-            blossomServerList,
-            (info) => setMemberFileProgress(info),
-          )
-          indexHash = result.indexHash
+          if (wantV2) {
+            const result = await createAndUploadMemberFilesV2(
+              pubkey, dTag, hubSecret, privateKey, signer, blossomServerList,
+              (info) => setMemberFileProgress(info),
+            )
+            indexHash = result.indexHash
+            ownerPub = result.ownerPub
+          } else {
+            const result = await createAndUploadMemberFiles(
+              pubkey, dTag, hubSecret, privateKey, signer, blossomServerList,
+              (info) => setMemberFileProgress(info),
+            )
+            indexHash = result.indexHash
+          }
         } catch (err) {
           console.warn('Blossom upload failed, hub created without member files:', err)
         }
@@ -539,35 +585,70 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
       if (addClientTag) {
         tags.push(['client', 'DEN Chat'])
       }
+      // v2 (privacy): mark version + NIP-SKD scheme, and surface the public face as
+      // plaintext tags (the structural content is encrypted below).
+      if (wantV2) {
+        tags.push(['version', '2'])
+        tags.push(['signer_scheme', 'skd', '1'])
+        if (iconUrl) tags.push(['picture', iconUrl])
+        if (bannerUrl) tags.push(['banner', bannerUrl])
+        if (description.trim()) tags.push(['about', description.trim()])
+      }
 
       markDone('building-event')
 
       // Create and sign hub event with JSON content
       setCreationStep('signing-event')
-      const unsigned = createUnsignedEvent(KINDS.HUB_EVENT, JSON.stringify(contentObj), tags)
+      // v2: encrypt the structural content with hub_content_key + embed the owner
+      // attestation (R signs the coordinate), and author the hub under the pseudonym O.
+      let eventContent = JSON.stringify(contentObj)
+      if (wantV2) {
+        const coord = `${KINDS.HUB_EVENT}:${ownerPub}:${dTag}`
+        const ownerAtt = await buildOwnerAttestation(coord, pubkey!, signer, privateKey)
+        const contentKey = deriveHubContentKey(hubSecret, epoch)
+        eventContent = await encryptHubContent(contentKey, { ...contentObj, owner_attestation: ownerAtt })
+      }
+      const unsigned = createUnsignedEvent(KINDS.HUB_EVENT, eventContent, tags)
       // Set published_at to match created_at on first creation (per NIP-CHAT spec §6.1)
       unsigned.tags = [...unsigned.tags, ['published_at', unsigned.created_at.toString()]]
       // Mine the message-PoW nonce (difficulty = the 'w' tag we just set) before signing
       // so the hub event itself satisfies the difficulty it advertises.
       let enteredMining = false
-      const signed = await mineAndSign(unsigned, createMinPow, pubkey, signer, privateKey, (phase) => {
-        if (phase === 'mining') {
-          enteredMining = true
-          setCreationStep('mining-event')
-        } else {
-          if (enteredMining) markDone('mining-event')
-          setCreationStep('signing-event')
-        }
-      })
+      let signed
+      if (wantV2) {
+        if (createMinPow > 0) { setCreationStep('mining-event'); enteredMining = true }
+        signed = await mineAndSignAsSubkey(unsigned, createMinPow, makeSubkeySigner(ChatContext.owner(dTag), { privateKey, signer }))
+        if (enteredMining) markDone('mining-event')
+      } else {
+        signed = await mineAndSign(unsigned, createMinPow, pubkey, signer, privateKey, (phase) => {
+          if (phase === 'mining') {
+            enteredMining = true
+            setCreationStep('mining-event')
+          } else {
+            if (enteredMining) markDone('mining-event')
+            setCreationStep('signing-event')
+          }
+        })
+      }
       markDone('signing-event')
 
-      // Publish to relays
+      // Publish to relays. On v2, hubOnly:true keeps the O-authored event OFF the creator's personal
+      // NIP-65 relays — publishing it there would let an observer correlate O with the creator's real key
+      // R purely from the relay footprint (the same P→R leak the edit paths already guard). Also route
+      // through the hub's own relays so members actually receive this first event.
       setCreationStep('publishing-hub')
-      const accepted = await publishToSpecificRelays(getPublishRelays(), signed)
+      const accepted = await publishToSpecificRelays(getPublishRelays([...relays], { hubOnly: wantV2 }), signed)
       if (accepted.length === 0) {
-        console.warn('No relays accepted the hub event yet')
+        // No relay stored the hub event → the hub does not exist anywhere durable. Abort loudly
+        // (this runs BEFORE the hub is written to the local store) instead of leaving a "ghost hub"
+        // that shows this session and then vanishes on reload. Dead/unreachable relays land here.
+        throw new Error('No relay accepted the hub event — your relays may be offline or unreachable. Check Settings → Network → Relays (some in your list are returning 502/503 / bad TLS) and try again.')
       }
       markDone('publishing-hub')
+
+      // Cache the signed hub event locally so the raw-event view / backup / version work without a
+      // relay round-trip (and survive a slow or rejected publish — the store already has the hub).
+      import('@/lib/cache/hubEventCache').then(m => m.putHubEvent(signed)).catch(() => {})
 
       // Set hub data in store BEFORE updating hub entries — prevents the hub loader
       // from racing with the signer to decrypt the secret (which causes extension drops)
@@ -575,12 +656,16 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
       const secretHexStr = Array.from(hubSecret).map(b => b.toString(16).padStart(2, '0')).join('')
       setHubData(dTag, {
         dTag,
-        creatorPubkey: pubkey!,
+        creatorPubkey: wantV2 ? ownerPub : pubkey!,
+        // v2: the hub is authored by the owner pseudonym O (creatorPubkey), so record the creator's
+        // real key R separately — the owner recognizes themselves by R (posting gate, mod checks).
+        ownerRealPubkey: wantV2 ? pubkey! : undefined,
         name: name.trim(),
         icon: iconUrl,
         banner: bannerUrl,
         description: description.trim(),
         epoch,
+        eventCreatedAt: signed.created_at,
         generalRelays: relays,
         blossomServers: blossomServerList,
         indexFileHash: indexHash,
@@ -604,6 +689,8 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
         joinMinPow: createJoinPow,
         nsfw,
         discoverable,
+        version: wantV2 ? 2 : undefined,
+        signerScheme: wantV2 ? 'skd:1' : undefined,
       })
       setHubSecret(dTag, secretHexStr)
       setHubStatus(dTag, 'loaded')
@@ -619,12 +706,19 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
       const newEntries = [...hubEntries, newEntry]
       setHubEntries(newEntries, folders)
 
-      const hubListEvent = createHubListEvent(
+      const { buildHubListEvent, publishHubList } = await import('@/lib/hub/hubListPrivacy')
+      const hubListEvent = await buildHubListEvent(
         newEntries.map(e => ({ dTag: e.dTag, relayHint: e.relayHint, position: e.position, folderId: e.folderId })),
         folders
       )
       const signedHubList = await signWithSigner(hubListEvent, signer, privateKey)
-      await publishToSpecificRelays(getPublishRelays(), signedHubList)
+      // Failover publish: seeds the normal pick, then routes around dead relays across the full
+      // client + NIP-65 set so a bad 3-pick can't strand the list (which would drop the hub from the
+      // sidebar on reload). 0 accepts here means EVERY one of the user's relays is unreachable.
+      const listAccepted = await publishHubList(signedHubList)
+      if (listAccepted.length === 0) {
+        throw new Error('Your hub was created, but saving it to your hub list failed — none of your relays were reachable. Add a working relay in Settings → Network → Relays, then reopen the hub from Discover to add it to your list.')
+      }
       markDone('updating-hub-list')
       markDone('finalizing')
 
@@ -646,15 +740,17 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
     <div className="fixed inset-0 z-50 flex items-center justify-center px-2">
       <div className="absolute inset-0 bg-black/80" onClick={onClose} />
 
-      <div className="relative z-10 w-full max-w-md rounded-lg border border-border bg-background p-6 shadow-lg animate-in fade-in-0 zoom-in-95 max-h-[85vh] overflow-y-auto">
-        <div className="flex items-center justify-between mb-4">
+      <div className="relative z-10 w-full max-w-md rounded-lg border border-border bg-background shadow-lg animate-in fade-in-0 zoom-in-95 max-h-[85vh] flex flex-col">
+        {/* Fixed header — stays put while the body scrolls */}
+        <div className="flex items-center justify-between px-6 pt-6 pb-4 shrink-0">
           <h2 className="text-lg font-semibold text-foreground">Create Hub</h2>
           <button onClick={onClose} className="text-muted-foreground hover:text-foreground cursor-pointer">
             <X size={18} />
           </button>
         </div>
 
-        <div className="flex flex-col gap-4">
+        {/* Scrollable body */}
+        <div className="flex flex-col gap-4 px-6 pb-2 overflow-y-auto flex-1">
           {/* Hub Icon & Banner */}
           <div className="flex flex-col gap-3">
             <label className="text-sm font-medium text-foreground">Hub Images <span className="text-muted-foreground font-normal">(optional)</span></label>
@@ -840,6 +936,41 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
               <div className={cn(
                 'absolute top-[3px] w-4 h-4 rounded-full bg-white shadow transition-transform',
                 discoverable ? 'translate-x-[22px]' : 'translate-x-[3px]'
+              )} />
+            </button>
+          </div>
+
+          {/* Private hub (v2) Toggle */}
+          <div className="flex items-start justify-between">
+            <div>
+              <div className="flex items-center gap-2">
+                <label className="text-sm font-medium text-foreground">Private hub (v2)</label>
+                <span className="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-500 select-none">Experimental</span>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                A more private hub: it hides who created it, who its members are, and who is messaging it
+                from the public, unlike a normal (v1) hub. The trade-off: you (and everyone else) can only
+                create or chat in it while signed in from an installed DEN Chat, or with a supported signer
+                (currently one remote signer). A different login can’t open it.
+                {!v2Capable && (
+                  <span className="block mt-1 text-amber-500">
+                    Your current signer can’t do this. Sign in with a local key or a supported signer to create a private hub.
+                  </span>
+                )}
+              </p>
+            </div>
+            <button
+              onClick={() => v2Capable && setCreateV2(!createV2)}
+              disabled={!v2Capable}
+              className={cn(
+                'relative w-10 h-[22px] rounded-full transition-colors cursor-pointer shrink-0',
+                createV2 && v2Capable ? 'bg-primary' : 'bg-muted-foreground/30',
+                !v2Capable && 'opacity-40 cursor-not-allowed'
+              )}
+            >
+              <div className={cn(
+                'absolute top-[3px] w-4 h-4 rounded-full bg-white shadow transition-transform',
+                createV2 && v2Capable ? 'translate-x-[22px]' : 'translate-x-[3px]'
               )} />
             </button>
           </div>
@@ -1215,15 +1346,16 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
           {error && (
             <p className="text-sm text-destructive">{error}</p>
           )}
+        </div>
 
-          <div className="flex gap-2 mt-2">
-            <Button variant="outline" onClick={onClose} className="flex-1" disabled={loading}>
-              Cancel
-            </Button>
-            <Button onClick={handleCreate} className="flex-1" disabled={loading || name.length > HUB_NAME_MAX || description.length > HUB_DESCRIPTION_MAX || hubEntries.length >= MAX_HUB_LIST_ENTRIES}>
-              {loading ? <Loader2 size={16} className="animate-spin" /> : 'Create Hub'}
-            </Button>
-          </div>
+        {/* Fixed footer — always visible, not part of the scroll */}
+        <div className="flex gap-2 px-6 py-4 border-t border-border shrink-0">
+          <Button variant="outline" onClick={onClose} className="flex-1" disabled={loading}>
+            Cancel
+          </Button>
+          <Button onClick={handleCreate} className="flex-1" disabled={loading || name.length > HUB_NAME_MAX || description.length > HUB_DESCRIPTION_MAX || hubEntries.length >= MAX_HUB_LIST_ENTRIES}>
+            {loading ? <Loader2 size={16} className="animate-spin" /> : 'Create Hub'}
+          </Button>
         </div>
       </div>
 

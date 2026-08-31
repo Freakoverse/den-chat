@@ -13,6 +13,9 @@ import { useUserStore } from '@/stores/userStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { aesDecrypt } from '@/lib/crypto/aes'
 import { deriveChannelKey } from '@/lib/crypto/hkdf'
+import { verifyEventIdentity } from '@/lib/nostr/identity'
+import { isV2 } from '@/lib/hub/version'
+import type { Event } from 'nostr-tools'
 import { X, Plus, Trash2, Info, Vote, Clock, Check, Circle, Eye, EyeOff } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { Button } from '@/components/ui/button'
@@ -39,7 +42,10 @@ export interface DecryptedPoll {
 }
 
 export interface DecryptedVote {
+  /** Wire author of the vote event (pseudonym `P` in v2, real key `R` in v1). */
   pubkey: string
+  /** Resolved real key `R` (from the v2 identity tag; equals `pubkey` in v1 or if unresolved). */
+  realPubkey: string
   response: string[]
   createdAt: number
 }
@@ -390,7 +396,10 @@ export function PollCard({ poll, hubDTag, channelId, onOpenProfile, onReply, onT
   const [showMenu, setShowMenu] = useState(false)
   const rowRef = useRef<HTMLDivElement>(null)
   const emojiButtonRef = useRef<HTMLButtonElement>(null)
-  const isMine = poll.pubkey === pubkey
+  // v2: the poll is authored by the pseudonym `P`; its true author is `realPubkey`
+  // (resolved from the identity tag). v1: `pubkey` IS `R`, so this stays `poll.pubkey`.
+  const [pollRealPubkey, setPollRealPubkey] = useState(poll.pubkey)
+  const isMine = pollRealPubkey === pubkey
   const [hiddenPreviewRevealed, setHiddenPreviewRevealed] = useState(false)
 
   const popoverOpen = showEmoji || showMenu
@@ -414,20 +423,38 @@ export function PollCard({ poll, hubDTag, channelId, onOpenProfile, onReply, onT
     setShowActions(false)
   }
 
-  // Derive channel key — epoch-aware for historical polls
+  // Derive channel key — epoch-aware for historical polls, and GROUP-aware (a group/private channel
+  // is keyed by its group secret, not the hub-wide secret — else any hub member could read it).
   const epochSecrets = useHubStore((s) => s.epochSecrets)
+  const groupSecrets = useHubStore((s) => s.groupSecrets)
+  const groupEpochSecrets = useHubStore((s) => s.groupEpochSecrets)
   const getChannelKey = useCallback((epoch?: number): Uint8Array | null => {
     if (!hubDTag || !channelId) return null
     const hub = hubs[hubDTag]
-    const currentEpoch = hub?.epoch || 1
-    const targetEpoch = epoch ?? currentEpoch
+    if (!hub) return null
+
+    const channel = hub.channels?.find((c) => c.channelId === channelId)
+    let groupId: string | undefined
+    if (channel?.encryption) groupId = channel.encryption
+    else if (channel?.synced && channel.categoryId) {
+      const cat = hub.categories?.find((c) => c.categoryId === channel.categoryId)
+      if (cat?.encryption) groupId = cat.encryption
+    }
 
     let secretHex: string | undefined
-    if (targetEpoch === currentEpoch) {
-      secretHex = hubSecrets[hubDTag]
+    let targetEpoch: number
+    if (groupId) {
+      const currentGroupEpoch = hub.groupedRoles?.find((g) => g.groupId === groupId)?.epoch || 1
+      targetEpoch = epoch ?? currentGroupEpoch
+      secretHex = targetEpoch === currentGroupEpoch
+        ? groupSecrets[hubDTag]?.[groupId]
+        : (groupEpochSecrets[hubDTag]?.[groupId]?.[targetEpoch] ?? groupSecrets[hubDTag]?.[groupId])
     } else {
-      secretHex = epochSecrets[hubDTag]?.[targetEpoch]
-      if (!secretHex) secretHex = hubSecrets[hubDTag] // fallback
+      const currentEpoch = hub.epoch || 1
+      targetEpoch = epoch ?? currentEpoch
+      secretHex = targetEpoch === currentEpoch
+        ? hubSecrets[hubDTag]
+        : (epochSecrets[hubDTag]?.[targetEpoch] ?? hubSecrets[hubDTag])
     }
     if (!secretHex) return null
 
@@ -436,14 +463,35 @@ export function PollCard({ poll, hubDTag, channelId, onOpenProfile, onReply, onT
       secret[i / 2] = parseInt(secretHex.substring(i, i + 2), 16)
     }
     return deriveChannelKey(secret, channelId, targetEpoch)
-  }, [hubDTag, channelId, hubSecrets, epochSecrets, hubs])
+  }, [hubDTag, channelId, hubSecrets, epochSecrets, groupSecrets, groupEpochSecrets, hubs])
 
   // Decrypt poll content
   useEffect(() => {
     const key = getChannelKey(poll.epoch)
     if (!key || !poll.content) return
 
-    aesDecrypt(key, poll.content).then((plaintext) => {
+    let cancelled = false
+    ;(async () => {
+      // v2: the poll's `identity` tag is the author's unforgeable R attestation. If it's PRESENT but
+      // INVALID, the poll is a forgery (an owner can author as a victim's P but can't sign as their R)
+      // → DROP it (don't render), consistent with the vote drop-rule below and the calendar path. A
+      // valid tag yields the real author R. Tag-less legacy polls (rare on v2) still render.
+      const hub = hubs[hubDTag]
+      if (hub && isV2(hub)) {
+        let idEvent: Event | null = null
+        try { idEvent = poll.rawEvent ? (JSON.parse(poll.rawEvent) as Event) : null } catch { idEvent = null }
+        const hasIdentityTag = !!idEvent?.tags?.some((t) => t[0] === 'identity')
+        if (hasIdentityTag) {
+          let ok = false, rPub: string | undefined
+          try { const res = await verifyEventIdentity(idEvent!, key); ok = res.ok; rPub = res.rPub } catch { ok = false }
+          if (cancelled) return
+          if (!ok) return // present-but-invalid identity ⇒ forged poll, drop it
+          if (rPub) setPollRealPubkey(rPub)
+        }
+      }
+
+      const plaintext = await aesDecrypt(key, poll.content).catch(() => null)
+      if (cancelled || plaintext == null) return
       try {
         const parsed = JSON.parse(plaintext)
         setDecrypted({
@@ -461,8 +509,9 @@ export function PollCard({ poll, hubDTag, channelId, onOpenProfile, onReply, onT
       } catch {
         // Failed to parse
       }
-    }).catch(() => { })
-  }, [poll, getChannelKey])
+    })()
+    return () => { cancelled = true }
+  }, [poll, getChannelKey, hubs, hubDTag])
 
   // Fetch votes on mount
   useEffect(() => {
@@ -476,12 +525,28 @@ export function PollCard({ poll, hubDTag, channelId, onOpenProfile, onReply, onT
     const key = getChannelKey(poll.epoch)
     if (!key || votes.length === 0) return
 
+    const hub = hubs[hubDTag]
+    const v2 = hub ? isV2(hub) : false
+
     Promise.all(
       votes.map(async (v) => {
         try {
           const plaintext = await aesDecrypt(key, v.content)
           const parsed = JSON.parse(plaintext)
-          return { pubkey: v.pubkey, response: parsed.response || [], createdAt: v.createdAt } as DecryptedVote
+          // v2: the vote MUST carry a verifiable identity tag (every legit vote is authored via
+          // signHubMemberEvent, which attaches one). Resolve the voter's real key R from it (P → R)
+          // for own-vote detection + display, and DROP votes whose identity doesn't verify — otherwise
+          // an event authored under an arbitrary P with a missing/forged identity tag would be tallied.
+          let realPubkey = v.pubkey
+          if (v2) {
+            if (!v.rawEvent) return null
+            try {
+              const res = await verifyEventIdentity(JSON.parse(v.rawEvent) as Event, key)
+              if (!res.ok || !res.rPub) return null
+              realPubkey = res.rPub
+            } catch { return null }
+          }
+          return { pubkey: v.pubkey, realPubkey, response: parsed.response || [], createdAt: v.createdAt } as DecryptedVote
         } catch {
           return null
         }
@@ -489,7 +554,7 @@ export function PollCard({ poll, hubDTag, channelId, onOpenProfile, onReply, onT
     ).then((results) => {
       setDecryptedVotes(results.filter(Boolean) as DecryptedVote[])
     })
-  }, [votes, getChannelKey])
+  }, [votes, getChannelKey, hubs, hubDTag])
 
   // Filter votes to only those within the valid time window
   const validVotes = useMemo(() => {
@@ -505,7 +570,7 @@ export function PollCard({ poll, hubDTag, channelId, onOpenProfile, onReply, onT
 
   // Computed state
   const isExpired = decrypted?.endsAt ? decrypted.endsAt < Math.floor(Date.now() / 1000) : false
-  const myVote = validVotes.find((v) => v.pubkey === pubkey)
+  const myVote = validVotes.find((v) => v.realPubkey === pubkey)
   const hasVoted = !!myVote
   const totalVotes = validVotes.length
 
@@ -536,7 +601,7 @@ export function PollCard({ poll, hubDTag, channelId, onOpenProfile, onReply, onT
 
   // Get voters for a specific option
   const getVotersForOption = useCallback((optionId: string) => {
-    return validVotes.filter((v) => v.response.includes(optionId)).map((v) => ({ pubkey: v.pubkey }))
+    return validVotes.filter((v) => v.response.includes(optionId)).map((v) => ({ pubkey: v.realPubkey }))
   }, [validVotes])
 
   // Handle option select
@@ -586,9 +651,9 @@ export function PollCard({ poll, hubDTag, channelId, onOpenProfile, onReply, onT
     return `${Math.ceil(diff / 86400)}d left`
   }, [decrypted?.endsAt])
 
-  // Creator profile
-  const creatorProfile = getProfile(poll.pubkey)
-  const creatorName = creatorProfile?.display_name || creatorProfile?.name || truncateNpub(poll.pubkey)
+  // Creator profile — resolve the real member R (v2 authors under pseudonym P)
+  const creatorProfile = getProfile(pollRealPubkey)
+  const creatorName = creatorProfile?.display_name || creatorProfile?.name || truncateNpub(pollRealPubkey)
 
   // Hidden poll placeholder — non-privileged users see a minimal placeholder
   // Check before decryption so we don't show a loading skeleton for hidden polls
@@ -650,7 +715,7 @@ export function PollCard({ poll, hubDTag, channelId, onOpenProfile, onReply, onT
       onMouseLeave={handleMouseLeave}
     >
       {/* Avatar */}
-      <button onClick={() => onOpenProfile(poll.pubkey)} className="shrink-0 cursor-pointer">
+      <button onClick={() => onOpenProfile(pollRealPubkey)} className="shrink-0 cursor-pointer">
         <Avatar className="h-10 w-10 mt-0.5">
           {creatorProfile?.picture && <AvatarImage src={creatorProfile.picture} alt={creatorName} />}
           <AvatarFallback className="text-xs bg-primary/20 text-primary">
@@ -663,7 +728,7 @@ export function PollCard({ poll, hubDTag, channelId, onOpenProfile, onReply, onT
         {/* Name + timestamp header */}
         <div className="flex items-center gap-2">
           <button
-            onClick={() => onOpenProfile(poll.pubkey)}
+            onClick={() => onOpenProfile(pollRealPubkey)}
             className="text-sm font-semibold cursor-pointer hover:underline text-foreground"
           >
             {creatorName}

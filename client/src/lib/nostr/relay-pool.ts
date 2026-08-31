@@ -16,19 +16,21 @@ const DEFAULT_RELAYS = [
   'wss://relay.primal.net',
   'wss://nos.lol',
   'wss://relay.nostr.band',
-  'wss://relay.snort.social',
   'wss://relay.wellorder.net',
   'wss://nostr.mom',
   'wss://nostr.novacisko.cz',
   'wss://nostrcheck.me',
   'wss://relay.cxplay.org',
-  'wss://relay.layer.systems',
   'wss://relay.nostr.moe',
   'wss://relay.poster.place',
   'wss://wheat.happytavern.co',
   // Removed: relay.nostr.info (defunct), pyramid.fiatjaf.com (web-of-trust —
   // rejects writes from non-trusted keys), relay.noswhere.com & search.nos.today
-  // (search-only NIP-50 relays — don't serve general REQ or accept these writes).
+  // (search-only NIP-50 relays — don't serve general REQ or accept these writes),
+  // relay.snort.social (persistent 5xx / handshake failures) and relay.layer.systems
+  // (expired TLS cert — ERR_CERT_DATE_INVALID) — both dead as of 2026-08.
+  // Critical events (hub list, relay list) publish via publishWithFailover, so a dead relay in the
+  // deterministic pick can't strand them regardless — this list just avoids wasting attempts on them.
 ]
 
 /** In-memory cache — null means "not loaded yet" */
@@ -234,6 +236,47 @@ export async function publishToSpecificRelays(relays: string[], event: Event): P
   })
 
   return accepted
+}
+
+/**
+ * Publish a critical event with FAILOVER. Tries `seedRelays` first; if fewer than `target` relays
+ * accept, keeps trying more relays from `opts.pool` (a batch at a time, with a small over-provision)
+ * until `target` accept or the candidate list is exhausted. Returns every relay that accepted.
+ *
+ * Unlike publishToSpecificRelays (fire-once to a fixed set), a dead / write-rejecting relay in the
+ * seed set can no longer strand a publish — it routes around to healthy relays, so as long as ANY
+ * reachable relay in the candidate list accepts writes, the event lands.
+ *
+ * PRIVACY: `opts.pool` is supplied EXPLICITLY by the caller and is NOT defaulted to the user's
+ * personal relays. This is deliberate — a privacy-scoped event (a v2 hub event/message authored by a
+ * pseudonym) must fail over ONLY within the hub's own relays; expanding it onto the user's personal
+ * (R-advertised) relays would link the pseudonym to R. Callers pass the pool that matches the event's
+ * privacy boundary: client+NIP-65 relays for the user's own events, hub relays only for hub events.
+ */
+export async function publishWithFailover(
+  event: Event,
+  seedRelays: string[],
+  opts: { pool?: string[]; target?: number } = {},
+): Promise<string[]> {
+  const target = opts.target ?? 3
+  const norm = (u: string) => u.replace(/\/+$/, '')
+  // Ordered, deduped candidate list: seed relays first (the event's natural home), then the pool.
+  const candidates: string[] = []
+  const seen = new Set<string>()
+  for (const u of [...seedRelays, ...(opts.pool ?? [])]) {
+    const n = norm(u)
+    if (n && !seen.has(n)) { seen.add(n); candidates.push(u) }
+  }
+  const accepted = new Set<string>()
+  let i = 0
+  while (accepted.size < target && i < candidates.length) {
+    const need = target - accepted.size
+    const batch = candidates.slice(i, i + need + 2) // small over-provision so one round usually suffices
+    i += batch.length
+    const got = await publishToSpecificRelays(batch, event)
+    for (const r of got) accepted.add(norm(r))
+  }
+  return Array.from(accepted)
 }
 
 /**

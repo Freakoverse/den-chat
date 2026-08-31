@@ -17,6 +17,7 @@ import { useUserStore } from '@/stores/userStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { fetchEvents } from '@/lib/nostr/relay-pool'
 import { KINDS } from '@/lib/crypto/constants'
+import { isV2 } from '@/lib/hub/version'
 import { countLeadingZeroBits } from '@/lib/pow/pow'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { truncateNpub, cn } from '@/lib/utils'
@@ -34,10 +35,13 @@ interface JoinRequestsModalProps {
 }
 
 interface JoinRequest {
+  /** Identity we display + dedup on: the joiner's real key `R` (v2) or the author (v1). */
   pubkey: string
   createdAt: number
   powBits: number
   eventId: string
+  /** v2 only: the member pseudonym `P` (leaf identifier in the tree). */
+  pPub?: string
 }
 
 /** Time filter options */
@@ -50,6 +54,9 @@ const TIME_FILTERS = [
   { label: 'Last year', seconds: 365 * 24 * 3600 },
   { label: 'All time', seconds: 0 },
 ] as const
+
+/** localStorage key for the creator's preferred join-request lookback range (persists across sessions). */
+const TIME_FILTER_KEY = 'den_join_requests_time_filter'
 
 const EMPTY_MEMBERS: HubMember[] = []
 
@@ -82,7 +89,21 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
   const [loading, setLoading] = useState(false)
   const [search, setSearch] = useState('')
   const [profilePubkey, setProfilePubkey] = useState<string | null>(null)
-  const [timeFilterIdx, setTimeFilterIdx] = useState(1) // Default: 48h
+  const [timeFilterIdx, setTimeFilterIdx] = useState(() => {
+    // Restore the creator's last-chosen lookback range; default to 48h (index 1).
+    try {
+      const raw = localStorage.getItem(TIME_FILTER_KEY)
+      if (raw !== null) {
+        const n = parseInt(raw, 10)
+        if (Number.isInteger(n) && n >= 0 && n < TIME_FILTERS.length) return n
+      }
+    } catch { /* ignore */ }
+    return 1
+  })
+  // Persist the chosen range so reopening the modal shows the same window (and its entries).
+  useEffect(() => {
+    try { localStorage.setItem(TIME_FILTER_KEY, String(timeFilterIdx)) } catch { /* ignore */ }
+  }, [timeFilterIdx])
   const [showTimeDropdown, setShowTimeDropdown] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [adding, setAdding] = useState(false)
@@ -112,35 +133,64 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
         ? Math.floor(Date.now() / 1000) - TIME_FILTERS[timeFilterIdx].seconds
         : undefined
 
+      const v2 = isV2(hub)
+      const coord = `${KINDS.HUB_EVENT}:${hub.creatorPubkey}:${hub.dTag}`
       const filter: any = {
         kinds: [KINDS.JOIN_REQUEST],
-        '#d': [hub.dTag],
+        // v2 joins are sealed-sender and indexed by the hub coordinate; v1 by the d-tag.
+        ...(v2 ? { '#a': [coord] } : { '#d': [hub.dTag] }),
         limit: 500,
       }
       if (since) filter.since = since
 
       const events = await fetchEvents(filter)
 
-      // Deduplicate: one per pubkey, keep latest
-      // Skip events that carry the ["deleted", "true"] marker (rescinded requests)
+      // Deduplicate: one per identity, keep latest.
+      // Skip events that carry the ["deleted", "true"] marker (rescinded requests).
       const byPubkey = new Map<string, JoinRequest>()
-      for (const e of events) {
-        // Filter out deleted/rescinded join requests
-        const isDeleted = e.tags?.some((t: string[]) => t[0] === 'deleted' && t[1] === 'true')
-        if (isDeleted) continue
-
-        const existing = byPubkey.get(e.pubkey)
-        if (existing && existing.createdAt > e.created_at) continue
-
-        // Calculate PoW bits from event id
-        const pow = countLeadingZeroBits(e.id)
-
-        byPubkey.set(e.pubkey, {
-          pubkey: e.pubkey,
-          createdAt: e.created_at,
-          powBits: pow,
-          eventId: e.id,
-        })
+      if (v2) {
+        // Sealed-sender: the author is a throwaway addr key; decrypt (as owner O) to recover
+        // the joiner's real key R + pseudonym P. parseV2JoinRequest returns null if it can't.
+        const { parseV2JoinRequest } = await import('@/lib/hub/v2join')
+        for (const e of events) {
+          if (e.tags?.some((t: string[]) => t[0] === 'deleted' && t[1] === 'true')) continue
+          // Enforce the hub's join PoW BEFORE the expensive ECDH+nip44 decrypt. joinMinPow exists to price
+          // join spam; without this gate an outsider floods zero-PoW junk 36944 events under `#a:[coord]`
+          // and the owner burns an asymmetric-crypto decrypt on each one (a cheap-event → expensive-owner
+          // amplification). PoW is on the event id, so it's checkable without decrypting.
+          if (hub.joinMinPow > 0 && countLeadingZeroBits(e.id) < hub.joinMinPow) continue
+          const payload = await parseV2JoinRequest(e, hub.dTag, privateKey, signer)
+          if (!payload) continue
+          // SECURITY (proof-of-control): a local-key owner re-derives P from the claimed R inside
+          // parseV2JoinRequest (`verified`). Producing a request with verified===true requires the
+          // applicant's R private key, so it proves they control R. Drop requests that FAIL the check
+          // — otherwise anyone could seal a request claiming a VICTIM's R (with a bogus P) and get the
+          // owner to insert that third party into the private hub's roster without consent (roster
+          // pollution + non-consensual membership disclosure). verified===undefined = remote-signer
+          // owner that couldn't re-derive locally (documented tradeoff → trust); only false is rejected.
+          if (payload.verified === false) continue
+          const existing = byPubkey.get(payload.rPub)
+          if (existing && existing.createdAt > e.created_at) continue
+          byPubkey.set(payload.rPub, {
+            pubkey: payload.rPub,
+            createdAt: e.created_at,
+            powBits: countLeadingZeroBits(e.id),
+            eventId: e.id,
+            pPub: payload.pPub,
+          })
+        }
+      } else {
+        for (const e of events) {
+          if (e.tags?.some((t: string[]) => t[0] === 'deleted' && t[1] === 'true')) continue
+          const existing = byPubkey.get(e.pubkey)
+          if (existing && existing.createdAt > e.created_at) continue
+          byPubkey.set(e.pubkey, {
+            pubkey: e.pubkey,
+            createdAt: e.created_at,
+            powBits: countLeadingZeroBits(e.id),
+            eventId: e.id,
+          })
+        }
       }
 
       // Filter out hub creator, existing members, and banned users
@@ -164,7 +214,7 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
     } finally {
       setLoading(false)
     }
-  }, [hub.dTag, hub.generalRelays, hub.creatorPubkey, hub.minPow, hubMembers.length, hubBanList, timeFilterIdx])
+  }, [hub, hub.dTag, hub.generalRelays, hub.creatorPubkey, hub.minPow, hubMembers.length, hubBanList, timeFilterIdx, privateKey, signer])
 
   // Reset transient UI state ONLY when the modal opens — not when loadRequests'
   // identity changes (e.g. hubMembers.length bumps after an approval), which
@@ -214,8 +264,258 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
   }
   const markDone = (step: string) => setAddSteps(prev => [...prev, step])
 
+  // v2 admit — mirrors handleAddMembers but keys leaves on the pseudonym `P`, wraps each
+  // new leaf key to the member's real key `R` via the owner `O`, and re-publishes the hub
+  // event as `O` (encrypted content preserved) instead of the v1 root-key path.
+  const handleAddMembersV2 = async () => {
+    if (selected.size === 0 || !pubkey || adding) return
+    setAdding(true)
+    setAddError(null)
+    setAddedCount(0)
+    setPublishDetails(null)
+    setShowPublishDetails(false)
+    setAddStep(null)
+    setAddSteps([])
+
+    const abort = new AbortController()
+    addAbortRef.current = abort
+    if (addTimeoutRef.current) clearTimeout(addTimeoutRef.current)
+    addTimeoutRef.current = setTimeout(() => {
+      if (!abort.signal.aborted) {
+        abort.abort()
+        setAddError('Operation timed out after 2 minutes')
+        setAdding(false)
+      }
+    }, 120_000)
+
+    // Single-flight: serialize this approval with other membership mutations for this hub on this device
+    // so concurrent approvals/kicks/role-changes don't clobber each other's index write (the CAS in
+    // republishV2 is the cross-device backstop).
+    const { acquireHubMutationLock } = await import('@/lib/hub/hubMutationGuard')
+    const releaseHubLock = await acquireHubMutationLock(hub.dTag)
+    try {
+      // Build on the CURRENT index, not the stale render-time closure: re-read the hub from the store
+      // AFTER acquiring the lock, so a prior op on this device that just advanced the index is respected
+      // (else the single-flight only orders the ops, it doesn't prevent the lost update).
+      const freshHub = useHubStore.getState().hubs[hub.dTag] ?? hub
+      await markStep('Downloading index file')
+      const {
+        findPageForPubkey, parseIndexFile,
+        rehydratePageKeysV2, addMemberToPageV2,
+      } = await import('@/lib/blossom/members')
+      const { downloadTextFromBlossom } = await import('@/lib/blossom')
+      const {
+        fromHex, deserializeSpine, recoverPageRootKeys,
+        buildSpine, serializeLeafPage, serializeSpine,
+      } = await import('@/lib/crypto/lkh')
+      const { makeSubkeySigner } = await import('@/lib/nostr/v2send')
+      const { ChatContext } = await import('@/lib/crypto/skd')
+
+      // Read secret + epoch from the FRESH post-lock snapshot too — a concurrent kick that the lock
+      // serialized before this op rotates BOTH, and stamping a new leaf with the old epoch or encrypting
+      // the spine with the old secret would mis-key it against the freshly-downloaded index.
+      const secretHex = useHubStore.getState().hubSecrets[hub.dTag]
+      if (!secretHex) throw new Error('Hub secret not available')
+      const hubSecret = fromHex(secretHex)
+
+      // Owner sub-signer (O) — wraps each new leaf key to the member's real key R.
+      const ownerSigner = makeSubkeySigner(ChatContext.owner(hub.dTag), { privateKey, signer })
+
+      // Resolve a page's roster-segment epoch → secret (history, else current).
+      const epochMap = useHubStore.getState().epochSecrets[hub.dTag] || {}
+      const resolveEpochSecret = (epoch: number): Uint8Array | undefined =>
+        epochMap[epoch] ? fromHex(epochMap[epoch]) : (epoch === freshHub.epoch ? hubSecret : undefined)
+
+      // Resolve the selected requests → { P (leaf id), R (real key) }.
+      const selectedReqs = requests.filter(r => selected.has(r.pubkey) && r.pPub)
+      if (selectedReqs.length === 0) throw new Error('No valid v2 join requests selected')
+
+      const indexContent = await downloadTextFromBlossom(freshHub.indexFileHash, freshHub.blossomServers)
+      const index = parseIndexFile(indexContent)
+      if (!index.spineHash || index.leafPages.length === 0) {
+        throw new Error('Hub does not use paginated format')
+      }
+      markDone('Downloading index file')
+
+      // BAN RE-CHECK (fail-closed): verify no selected user is banned, against a FRESH ban-list fetch —
+      // the store's ban list can be empty from a failed cold-start load, which would let a banned user
+      // be re-approved. downloadBanListV2 now throws if any ban page can't be read, so we block rather
+      // than admit on an unverifiable list. (No ban pages → empty → nothing to check.)
+      if (index.banPages.length > 0) {
+        let bannedSet: Set<string>
+        try {
+          const { downloadBanListV2 } = await import('@/lib/blossom')
+          bannedSet = new Set((await downloadBanListV2(index.banPages, hubSecret, freshHub.blossomServers)).map(e => e.pubkey))
+        } catch {
+          throw new Error('Could not load the hub’s ban list — can’t safely approve members right now. Please try again.')
+        }
+        const bannedSelected = selectedReqs.filter(r => bannedSet.has(r.pubkey))
+        if (bannedSelected.length > 0) throw new Error(`Can’t approve ${bannedSelected.length} selected request(s): that user is banned.`)
+      }
+
+      await markStep('Downloading spine tree')
+      const spineContent = await downloadTextFromBlossom(index.spineHash, hub.blossomServers)
+      const spine = deserializeSpine(spineContent)
+      markDone('Downloading spine tree')
+
+      await markStep('Recovering page keys')
+      const pageRootKeys = await recoverPageRootKeys(spine, hubSecret)
+      markDone('Recovering page keys')
+
+      // Group members by their target page (binary search by P).
+      await markStep('Downloading leaf pages')
+      const pageMods = new Map<number, { pageEntry: typeof index.leafPages[0]; members: Array<{ p: string; r: string }> }>()
+      for (const req of selectedReqs) {
+        const P = req.pPub!
+        const pageEntry = findPageForPubkey(index, P)
+        if (!pageEntry) { console.warn(`No page for P ${P.slice(0, 8)}…`); continue }
+        const existing = pageMods.get(pageEntry.pageIndex)
+        if (existing) existing.members.push({ p: P, r: req.pubkey })
+        else pageMods.set(pageEntry.pageIndex, { pageEntry, members: [{ p: P, r: req.pubkey }] })
+      }
+
+      const updatedPages: Array<{ pageIndex: number; content: string; firstPubkey: string }> = []
+      const newPages: Array<{ content: string; firstPubkey: string }> = []
+      const updatedPageRoots = new Map<string, { nodeId: string; rawKey: Uint8Array }>()
+      let count = 0
+
+      // Download + rehydrate (v2) all affected pages.
+      const rehydratedPages = new Map<number, Awaited<ReturnType<typeof rehydratePageKeysV2>>>()
+      for (const [pageIndex, mod] of pageMods) {
+        const pageContent = await downloadTextFromBlossom(mod.pageEntry.hash, hub.blossomServers)
+        const rehydrated = await rehydratePageKeysV2(pageContent, ownerSigner, resolveEpochSecret)
+        rehydratedPages.set(pageIndex, rehydrated)
+      }
+      markDone('Downloading leaf pages')
+
+      await markStep('Encrypting keys for members')
+      for (const [pageIndex, mod] of pageMods) {
+        let rehydrated = rehydratedPages.get(pageIndex)!
+        for (const m of mod.members) {
+          try {
+            const result = await addMemberToPageV2(rehydrated, m.p, m.r, 'everyone', hubSecret, freshHub.epoch, ownerSigner)
+            if (result.split) {
+              updatedPages.push({
+                pageIndex,
+                content: serializeLeafPage(result.pages[0]),
+                firstPubkey: result.pages[0].leaves[0].pubkey,
+              })
+              updatedPageRoots.set(
+                result.pages[0].pageRoot.nodeId,
+                { nodeId: result.pages[0].pageRoot.nodeId, rawKey: result.pages[0].pageRoot.rawKey! },
+              )
+              newPages.push({
+                content: serializeLeafPage(result.pages[1]),
+                firstPubkey: result.pages[1].leaves[0].pubkey,
+              })
+              rehydrated = result.pages[0]
+            } else {
+              rehydrated = result.pages[0]
+            }
+            count++
+          } catch (err) {
+            console.error(`Failed to add member P=${m.p}:`, err)
+          }
+        }
+        if (!updatedPages.some(p => p.pageIndex === pageIndex)) {
+          updatedPages.push({
+            pageIndex,
+            content: serializeLeafPage(rehydrated),
+            firstPubkey: rehydrated.leaves[0].pubkey,
+          })
+          updatedPageRoots.set(
+            pageRootKeys.find((_pr, i) => index.leafPages[i]?.pageIndex === pageIndex)?.nodeId || rehydrated.pageRoot.nodeId,
+            { nodeId: rehydrated.pageRoot.nodeId, rawKey: rehydrated.pageRoot.rawKey! },
+          )
+        }
+      }
+      if (count === 0) throw new Error('Failed to add any members')
+      markDone('Encrypting keys for members')
+
+      // Rebuild spine with updated page-root keys.
+      const allPageRoots = pageRootKeys.map((prk) => updatedPageRoots.get(prk.nodeId) || prk)
+      for (const np of newPages) {
+        const rehydratedNew = await rehydratePageKeysV2(np.content, ownerSigner, resolveEpochSecret)
+        allPageRoots.push({ nodeId: rehydratedNew.pageRoot.nodeId, rawKey: rehydratedNew.pageRoot.rawKey! })
+      }
+      const newSpine = await buildSpine(allPageRoots, hubSecret)
+      const newSpineContent = serializeSpine(newSpine)
+
+      const { safePaginatedTreeUpdate } = await import('@/lib/blossom/treeUpdater')
+      const result = await safePaginatedTreeUpdate({
+        hub, signer, privateKey,
+        updatedPages,
+        newPages: newPages.length > 0 ? newPages : undefined,
+        newSpineContent,
+        existingIndexData: {
+          spineHash: index.spineHash,
+          historyHash: index.historyHash,
+          groupTrees: index.groupTrees,
+          leafPages: index.leafPages,
+        },
+        skipPublish: true, // v2: re-publish as O below (root-key path would break the hub)
+        authSigner: (e) => ownerSigner.signEvent(e), // Blossom auth as O, not R_owner
+        onStep: (step) => {
+          if (addStepRef.current) markDone(addStepRef.current)
+          markStep(step)
+        },
+      })
+      if (addStepRef.current) markDone(addStepRef.current)
+
+      // Re-publish the v2 hub event as O with the new index hash (encrypted content unchanged).
+      await markStep('Signing hub event')
+      const { republishV2HubIndex } = await import('@/lib/hub/republishV2')
+      const pub = await republishV2HubIndex({
+        hub: freshHub, ownerPub: freshHub.creatorPubkey, newIndexHash: result.newIndexHash, privateKey, signer,
+      })
+      markDone('Signing hub event')
+      await markStep('Publishing to relays')
+      markDone('Publishing to relays')
+
+      // Update local store — the v2 roster keys members by their real key R. Base the new list on the
+      // FRESH store snapshot (a concurrent kick may have changed it), not the render-time closure.
+      const newMembers: HubMember[] = [
+        ...(useHubStore.getState().hubMembers[hub.dTag] || []),
+        ...selectedReqs.map(r => ({ pubkey: r.pubkey, roles: 'everyone' })),
+      ]
+      setHubMembers(hub.dTag, newMembers)
+      setHubData(hub.dTag, { ...freshHub, indexFileHash: result.newIndexHash, eventCreatedAt: pub.eventCreatedAt ?? freshHub.eventCreatedAt })
+
+      // Delete the superseded blobs ONLY now that the new hub event is published — safePaginatedTreeUpdate
+      // deferred them (skipPublish) so the live event never pointed at a deleted index/spine/page.
+      if (result.deferredCleanupHashes?.length) {
+        const { deleteFromBlossom } = await import('@/lib/blossom/client')
+        for (const h of result.deferredCleanupHashes) {
+          deleteFromBlossom(h, signer, privateKey, freshHub.blossomServers, (e) => ownerSigner.signEvent(e)).catch(() => {})
+        }
+      }
+
+      setAddedCount(count)
+      setPublishDetails({
+        uploadedServers: result.uploadedServers ?? [],
+        targetedServers: result.targetedServers ?? hub.blossomServers,
+        publishedRelays: pub.publishedRelays ?? [],
+        targetedRelays: pub.targetedRelays ?? [],
+      })
+      setRequests(prev => prev.filter(r => !selected.has(r.pubkey)))
+      setSelected(new Set())
+      await markStep('Done')
+    } catch (err: any) {
+      if (!abort.signal.aborted) {
+        console.error('Failed to add members (v2):', err)
+        setAddError(err?.message || 'Failed to add members')
+      }
+    } finally {
+      releaseHubLock()
+      setAdding(false)
+      addAbortRef.current = null
+      if (addTimeoutRef.current) { clearTimeout(addTimeoutRef.current); addTimeoutRef.current = null }
+    }
+  }
+
   const handleAddMembers = async () => {
     if (selected.size === 0 || !pubkey || adding) return
+    if (isV2(hub)) { void handleAddMembersV2(); return }
     setAdding(true)
     setAddError(null)
     setAddedCount(0)
@@ -238,7 +538,13 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
       }
     }, 120_000)
 
+    // Single-flight: v1 approvals must serialize with kicks/bans/role-changes too (same lost-update bug
+    // as v2). safePaginatedTreeUpdate below carries the cross-device CAS.
+    const { acquireHubMutationLock } = await import('@/lib/hub/hubMutationGuard')
+    const releaseHubLock = await acquireHubMutationLock(hub.dTag)
     try {
+      // Re-read the current hub AFTER acquiring the lock so we build on the latest index (see the v2 path).
+      const freshHub = useHubStore.getState().hubs[hub.dTag] ?? hub
       await markStep('Downloading index file')
       const {
         rehydratePageKeys, addMemberToPage, findPageForPubkey,
@@ -255,7 +561,7 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
       const hubSecret = fromHex(secretHex)
 
       // Download current index + spine
-      const indexContent = await downloadTextFromBlossom(hub.indexFileHash, hub.blossomServers)
+      const indexContent = await downloadTextFromBlossom(freshHub.indexFileHash, freshHub.blossomServers)
       const index = parseIndexFile(indexContent)
 
       if (!index.spineHash || index.leafPages.length === 0) {
@@ -385,7 +691,7 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
 
       const { safePaginatedTreeUpdate } = await import('@/lib/blossom/treeUpdater')
       const result = await safePaginatedTreeUpdate({
-        hub,
+        hub: freshHub,
         signer,
         privateKey,
         updatedPages,
@@ -414,7 +720,7 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
         ...pubkeysToAdd.map(pk => ({ pubkey: pk, roles: 'everyone' })),
       ]
       setHubMembers(hub.dTag, newMembers)
-      setHubData(hub.dTag, { ...hub, indexFileHash: result.newIndexHash, eventCreatedAt: result.eventCreatedAt ?? hub.eventCreatedAt })
+      setHubData(hub.dTag, { ...freshHub, indexFileHash: result.newIndexHash, eventCreatedAt: result.eventCreatedAt ?? freshHub.eventCreatedAt })
 
       setAddedCount(count)
       setPublishDetails({
@@ -433,6 +739,7 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
         setAddError(err?.message || 'Failed to add members')
       }
     } finally {
+      releaseHubLock()
       setAdding(false)
       addAbortRef.current = null
       if (addTimeoutRef.current) { clearTimeout(addTimeoutRef.current); addTimeoutRef.current = null }

@@ -1,4 +1,5 @@
 import { HubSidebar } from '@/components/hub/HubSidebar'
+import { SetFacilitatorModal } from '@/components/hub/SetFacilitatorModal'
 import { ChannelList } from '@/components/hub/ChannelList'
 import { ChannelView } from '@/components/hub/ChannelView'
 import { ForumView } from '@/components/hub/ForumView'
@@ -27,7 +28,13 @@ import { useBlockStore } from '@/stores/blockStore'
 import { useWotStore } from '@/stores/wotStore'
 import { useMobile } from '@/hooks/useMobile'
 import { useMemo, useEffect, useState } from 'react'
-import { ShieldAlert, LogOut, Plus, MessageSquare, MessagesSquare, AtSign, Compass, Settings, Home, X, Wallet, Loader2, MoreHorizontal } from 'lucide-react'
+import { ShieldAlert, LogOut, Plus, MessageSquare, MessagesSquare, AtSign, Compass, Settings, Home, X, Wallet, Loader2, MoreHorizontal, UserMinus, UserCheck, Copy, Check, Lock } from 'lucide-react'
+import { nip19 } from 'nostr-tools'
+import { UserProfileModal } from '@/components/hub/UserProfileModal'
+import { useProfileCache } from '@/hooks/useProfileCache'
+import { getPermissionsForUser, isAuthorizedFacilitator } from '@/lib/hub/permissions'
+import { isV2 } from '@/lib/hub/version'
+import { canUseV2 } from '@/lib/crypto/skd'
 import { cn } from '@/lib/utils'
 import { OfflineBanner } from '@/components/ui/OfflineBanner'
 import { createHubListEvent, signWithSigner } from '@/lib/nostr/events'
@@ -128,17 +135,41 @@ export function AppLayout() {
   const activeHubSecret = useHubStore((s) => (activeHubId ? s.hubSecrets[activeHubId] : undefined))
   const activeSecretsResolved = useHubStore((s) => (activeHubId ? s.hubSecretsResolved[activeHubId] : undefined))
   const activeSecretFail = useHubStore((s) => (activeHubId ? s.hubSecretFailReason[activeHubId] : undefined))
+  const activeFacilitator = useHubStore((s) => (activeHubId ? s.hubPrefs[activeHubId]?.facilitator : undefined))
+  const mySigner = useUserStore((s) => s.signer)
+  const myPrivateKey = useUserStore((s) => s.privateKey)
+  // A v2 (private) hub the CURRENT signer can't derive pseudonyms for (canUseV2 false) can't be decrypted,
+  // so it would otherwise render as a confusing empty hub. Detect it to show an explicit guard instead.
+  const v2NeedsSkdSigner = useMemo(() => {
+    if (!activeHubData || activeHubStatus !== 'loaded') return false
+    if (!isV2(activeHubData)) return false
+    return !canUseV2({ privateKey: myPrivateKey, signer: mySigner })
+  }, [activeHubData, activeHubStatus, myPrivateKey, mySigner])
   const awaitingApproval = useMemo(() => {
     if (!activeHubId || !myPubkey || !activeHubData) return false
     if (activeHubStatus !== 'loaded') return false          // only a fully-loaded hub
     if (!activeSecretsResolved) return false                // still resolving — don't flash the overlay
     if (!activeHubData.indexFileHash) return false          // no member tree → not a gated hub
-    if (activeHubData.creatorPubkey === myPubkey) return false   // creator is never awaiting
+    if (activeHubData.creatorPubkey === myPubkey || activeHubData.ownerRealPubkey === myPubkey) return false   // creator is never awaiting
     if (hubMembers?.some((m) => m.pubkey === myPubkey)) return false // approved member
-    if (activeHubSecret) return false                       // has the secret (creator OR facilitator)
+    if (activeHubSecret) {
+      // We hold a secret — but if it came from a facilitator, their vouch is only valid while they
+      // remain a member WITH the `facilitate` permission. If the owner revoked it (or the facilitator
+      // left), gate the user even though the key still lingers locally (no rotation happened, so it's
+      // still cryptographically valid — this is a permission decision, mirroring the message gating).
+      if (activeFacilitator) {
+        // Only gate when we can POSITIVELY see the facilitator (by P or R) is a member who LOST the
+        // permission. A v2 facilitated user is a non-member with no roster, so it usually can't see
+        // the facilitator at all — failing closed would wrongly gate a validly-unlocked user. The
+        // secret came through the facilitator's tree, which is proof enough.
+        const facInRoster = hubMembers?.some((m) => m.pubkey === activeFacilitator || m.p === activeFacilitator)
+        if (facInRoster && !isAuthorizedFacilitator(activeHubData, activeFacilitator, hubMembers)) return true
+      }
+      return false                                          // has the secret (creator OR valid facilitator)
+    }
     if (activeSecretFail === 'signer-issue') return false   // approved but signer declined — transient
     return true
-  }, [activeHubId, myPubkey, activeHubData, activeHubStatus, activeSecretsResolved, activeHubSecret, activeSecretFail, hubMembers])
+  }, [activeHubId, myPubkey, activeHubData, activeHubStatus, activeSecretsResolved, activeHubSecret, activeSecretFail, hubMembers, activeFacilitator])
 
   // When navigating to a non-hub page on mobile, reset to home view
   useEffect(() => {
@@ -167,7 +198,7 @@ export function AppLayout() {
             <PublicChatPage />
           ) : activePage === 'wallet' ? (
             <WalletPage />
-          ) : activePage === 'hubs' && mobileView === 'chat' && activeHubId && activeChannelId && !awaitingApproval ? (
+          ) : activePage === 'hubs' && mobileView === 'chat' && activeHubId && activeChannelId && !awaitingApproval && !v2NeedsSkdSigner ? (
             /* Full-screen chat view — px-2 replaces the desktop side-panel gutters
                that don't exist here, so channel content isn't flush to the edges */
             <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden px-2">
@@ -180,7 +211,9 @@ export function AppLayout() {
             <div className="flex flex-1 min-h-0 overflow-hidden">
               <HubSidebar activePage={activePage} onNavigate={setActivePage} compact />
               {activeHubId ? (
-                awaitingApproval && !isBanned ? (
+                v2NeedsSkdSigner && !isBanned ? (
+                  <V2SignerRequiredOverlay />
+                ) : awaitingApproval && !isBanned ? (
                   <AwaitingApprovalOverlay dTag={activeHubId} />
                 ) : (
                   <ChannelList isModBanned={isBanned} isMobile />
@@ -234,6 +267,8 @@ export function AppLayout() {
         <PublicChatPage />
       ) : activePage === 'dms' ? (
         <DMPage />
+      ) : v2NeedsSkdSigner && !isBanned ? (
+        <V2SignerRequiredOverlay />
       ) : awaitingApproval && !isBanned ? (
         <AwaitingApprovalOverlay dTag={activeHubId} />
       ) : (
@@ -380,12 +415,65 @@ function EmptyState({ hasHub }: { hasHub: boolean }) {
   )
 }
 
+/** Shown for a v2 (private) hub when the current signer can't derive its pseudonyms (canUseV2 false),
+ *  so the hub can't be decrypted — instead of a silent empty hub, explain the local-key requirement. */
+function V2SignerRequiredOverlay() {
+  return (
+    <div className="flex-1 flex items-center justify-center bg-background relative overflow-hidden">
+      <DoodleBackground />
+      <div className="text-center flex flex-col items-center gap-4 relative z-10 max-w-sm px-6">
+        <Lock size={56} className="text-muted-foreground" />
+        <h2 className="text-xl font-semibold text-foreground">This is a private hub</h2>
+        <p className="text-sm text-muted-foreground leading-relaxed">
+          Private (v2) hubs hide their creator, members, and who’s messaging from the public. To open one,
+          you must be signed in from an installed DEN Chat or a supported signer (currently one remote
+          signer). Your current login can’t derive this hub’s keys, so its messages stay encrypted.
+        </p>
+        <p className="text-xs text-muted-foreground">
+          Sign in with a local key or a supported signer to access it.
+        </p>
+      </div>
+    </div>
+  )
+}
+
 function AwaitingApprovalOverlay({ dTag }: { dTag: string | null }) {
   const hub = useHubStore((s) => (dTag ? s.hubs[dTag] : null))
   const pubkey = useUserStore((s) => s.pubkey)
   const setActiveHub = useHubStore((s) => s.setActiveHub)
+  const facilitator = useHubStore((s) => (dTag ? s.hubPrefs[dTag]?.facilitator : undefined))
+  const setHubPref = useHubStore((s) => s.setHubPref)
+  const setHubSecret = useHubStore((s) => s.setHubSecret)
+  const { getProfile } = useProfileCache()
   const [showConfirm, setShowConfirm] = useState(false)
   const [withdrawing, setWithdrawing] = useState(false)
+  const [showFacilitator, setShowFacilitator] = useState(false)
+  const [showFacProfile, setShowFacProfile] = useState(false)
+  const [copiedNpub, setCopiedNpub] = useState(false)
+
+  // A saved facilitator that hasn't unlocked the hub means one of: they haven't rebuilt their list
+  // for the hub's current epoch, they lost the `facilitate` permission, or they removed us. We show
+  // the saved facilitator with that explanation and let the user drop them to try a different one.
+  const facilitatorNpub = facilitator
+    ? (() => { try { return nip19.npubEncode(facilitator) } catch { return facilitator } })()
+    : null
+  const facProfile = facilitator ? getProfile(facilitator) : undefined
+  const facName = facProfile?.display_name || facProfile?.name || (facilitatorNpub ? `${facilitatorNpub.slice(0, 10)}…${facilitatorNpub.slice(-4)}` : '')
+
+  const handleRemoveFacilitator = () => {
+    if (!dTag) return
+    setHubPref(dTag, 'facilitator', undefined)
+    setHubPref(dTag, 'facilitatorSecret', undefined)
+    setHubSecret(dTag, '')
+  }
+
+  const handleCopyNpub = () => {
+    if (!facilitatorNpub) return
+    navigator.clipboard.writeText(facilitatorNpub).then(() => {
+      setCopiedNpub(true)
+      setTimeout(() => setCopiedNpub(false), 1500)
+    }).catch(() => {})
+  }
 
   const handleWithdraw = async () => {
     if (!hub || !pubkey || withdrawing) return
@@ -427,7 +515,83 @@ function AwaitingApprovalOverlay({ dTag }: { dTag: string | null }) {
           <LogOut size={14} />
           Withdraw request
         </button>
+        {facilitatorNpub ? (
+          <div className="mx-auto max-w-xs rounded-lg border border-border/50 bg-secondary/30 px-3 py-3 space-y-2.5 text-left">
+            <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              <UserCheck size={12} /> Facilitator set
+            </div>
+
+            {/* Clickable identity → opens their profile modal */}
+            <button
+              onClick={() => facilitator && setShowFacProfile(true)}
+              className="w-full flex items-center gap-2.5 rounded-md p-1 -m-1 mb-3 hover:bg-secondary/60 transition-colors cursor-pointer text-left"
+              title="View profile"
+            >
+              <div className="w-9 h-9 shrink-0 rounded-full overflow-hidden bg-secondary border border-border flex items-center justify-center">
+                {facProfile?.picture ? (
+                  <BlossomImage src={facProfile.picture} alt={facName} className="w-full h-full" imgClassName="object-cover" />
+                ) : (
+                  <UserCheck size={16} className="text-muted-foreground" />
+                )}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-medium text-foreground truncate">{facName}</div>
+                <div className="flex items-center gap-1 text-[11px] font-mono text-muted-foreground">
+                  <span className="truncate">{facilitatorNpub.slice(0, 12)}…{facilitatorNpub.slice(-6)}</span>
+                  <span
+                    role="button"
+                    onClick={(e) => { e.stopPropagation(); handleCopyNpub() }}
+                    className="shrink-0 p-0.5 rounded hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                    title="Copy npub"
+                  >
+                    {copiedNpub ? <Check size={11} className="text-emerald-500" /> : <Copy size={11} />}
+                  </span>
+                </div>
+              </div>
+            </button>
+
+            <p className="text-[11px] text-muted-foreground leading-relaxed">
+              They haven’t let you in yet. Likely their facilitation list isn’t updated to the hub’s
+              current epoch — or their permission to facilitate was removed. Ask them to update their
+              list, or remove them and set a different facilitator.
+            </p>
+            <div className="flex items-center gap-2 pt-0.5">
+              <button
+                onClick={handleRemoveFacilitator}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-secondary/60 border border-border/50 text-[11px] text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors cursor-pointer"
+              >
+                <UserMinus size={12} /> Remove
+              </button>
+              <button
+                onClick={() => setShowFacilitator(true)}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-secondary/60 border border-border/50 text-[11px] text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors cursor-pointer"
+              >
+                <UserCheck size={12} /> Change
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button
+            onClick={() => setShowFacilitator(true)}
+            className="block mx-auto text-xs text-muted-foreground/70 hover:text-foreground underline underline-offset-2 transition-colors cursor-pointer"
+          >
+            Have a facilitator?
+          </button>
+        )}
       </div>
+
+      {showFacProfile && facilitator && (
+        <UserProfileModal
+          open={showFacProfile}
+          onClose={() => setShowFacProfile(false)}
+          targetPubkey={facilitator}
+          hubContext={hub ? { dTag: hub.dTag, creatorPubkey: hub.creatorPubkey, ownerRealPubkey: hub.ownerRealPubkey } : null}
+        />
+      )}
+
+      {showFacilitator && hub && (
+        <SetFacilitatorModal hub={hub} onClose={() => setShowFacilitator(false)} />
+      )}
 
       {/* Confirm: withdraw + remove from list */}
       {showConfirm && (
@@ -513,12 +677,13 @@ function HardBanOverlay({ dTag }: { dTag: string | null }) {
     // Persist the updated hub list (kind 16942) — best-effort.
     try {
       const remaining = hubEntries.filter((e) => e.dTag !== dTag)
-      const ev = createHubListEvent(
+      const { buildHubListEvent, publishHubList } = await import('@/lib/hub/hubListPrivacy')
+      const ev = await buildHubListEvent(
         remaining.map((e) => ({ dTag: e.dTag, relayHint: e.relayHint, position: e.position, folderId: e.folderId })),
         folders,
       )
       const signed = await signWithSigner(ev, signer, privateKey)
-      await publishToSpecificRelays(getPublishRelays(), signed)
+      await publishHubList(signed) // failover across all the user's relays (see hubListPrivacy)
     } catch (err) {
       console.error('Failed to publish updated hub list:', err)
     }

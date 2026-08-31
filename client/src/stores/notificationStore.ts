@@ -119,6 +119,9 @@ export interface NotificationState {
   advanceChannelRead: (hubDTag: string, channelId: string, messageTimestamp: number) => void
   markHubRead: (hubDTag: string) => void
   incrementChannelUnread: (hubDTag: string, channelId: string, messageTimestamp: number, mentionType?: 'personal' | 'everyone' | 'here' | 'role') => void
+  /** Cold-start backfill: RAISE per-channel unread counts to a value computed from already-loaded
+   *  messages once the hub secret is available (never lowers a live count). Keyed channelId → count. */
+  raiseHubUnreadCounts: (hubDTag: string, perChannel: Record<string, number>) => void
   setHubMuteSettings: (hubDTag: string, settings: HubMuteSettings) => void
   pruneHubs: (activeHubDTags: Set<string>, channelsByHub: Record<string, Set<string>>) => void
 
@@ -521,9 +524,12 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
     set((state) => {
       const hubChannels = { ...(state.hubUnreads[hubDTag] || {}) }
       const existing = hubChannels[channelId] || { lastRead: 0, count: 0, hasMention: false }
-      // Advance to the newest of: current watermark, this message's time, or now
-      // (max() keeps it clock-skew-safe against future-dated events).
-      const ts = Math.max(existing.lastRead, messageTimestamp, Math.floor(Date.now() / 1000))
+      // Advance the read watermark to this message's time, but CLAMP it to now first: created_at is
+      // attacker-controlled, and a spoofed far-future message in the active channel would otherwise push
+      // lastRead into the future, marking every real later message as already-read (unread/mention
+      // suppression). Clamp-then-max never lets an untrusted timestamp move the watermark past now.
+      const now = Math.floor(Date.now() / 1000)
+      const ts = Math.max(existing.lastRead, Math.min(messageTimestamp, now))
       if (ts === existing.lastRead && existing.count === 0 && !existing.hasMention) return {}
       hubChannels[channelId] = { lastRead: ts, count: 0, hasMention: false }
       const hubUnreads = { ...state.hubUnreads, [hubDTag]: hubChannels }
@@ -569,6 +575,23 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
       const hubUnreads = { ...state.hubUnreads, [hubDTag]: hubChannels }
       return { hubUnreads, ...recomputeTotals({ ...state, hubUnreads }) }
     })
+  },
+
+  raiseHubUnreadCounts: (hubDTag, perChannel) => {
+    let changed = false
+    set((state) => {
+      const hubChannels = { ...(state.hubUnreads[hubDTag] || {}) }
+      for (const [channelId, count] of Object.entries(perChannel)) {
+        const existing = hubChannels[channelId] || { lastRead: 0, count: 0, hasMention: false }
+        // RAISE only — never lower a count the live handler already set (they count the same messages, so
+        // max reconciles them race-free). Mentions/hasMention are left to the live handler + reclassifier.
+        if (count > existing.count) { hubChannels[channelId] = { ...existing, count }; changed = true }
+      }
+      if (!changed) return {}
+      const hubUnreads = { ...state.hubUnreads, [hubDTag]: hubChannels }
+      return { hubUnreads, ...recomputeTotals({ ...state, hubUnreads }) }
+    })
+    if (changed) _saveHubToLocalStorage(get)
   },
 
   setHubMuteSettings: (hubDTag, settings) => {
@@ -658,13 +681,13 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
     const hubState = buildHubReadStateFromStore(state.hubUnreads, state.hubMuteSettings)
     const content = JSON.stringify(hubState)
 
-    let encryptedContent = content
+    let encryptedContent: string | null = null
     if (signer) {
       try {
         const pubkey = await signer.getPublicKey()
         encryptedContent = await guardedEncrypt(content, pubkey, signer, null, 'nip44')
       } catch (err) {
-        console.warn('[notif] Failed to NIP-44 encrypt hub read-state (signer), using plaintext:', err)
+        console.warn('[notif] Failed to NIP-44 encrypt hub read-state (signer):', err)
       }
     } else if (privateKey) {
       try {
@@ -674,10 +697,17 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
         const convKey = nip44.v2.utils.getConversationKey(privKeyBytes, pubkey)
         encryptedContent = nip44.v2.encrypt(content, convKey)
       } catch (err) {
-        console.warn('[notif] Failed to NIP-44 encrypt hub read-state (privateKey), using plaintext:', err)
+        console.warn('[notif] Failed to NIP-44 encrypt hub read-state (privateKey):', err)
       }
     }
 
+    // NEVER publish plaintext: the content lists EVERY hub's d-tag (including private v2 hubs) on an
+    // `R`-authored event — a plaintext publish would leak the user's private-hub membership to relays.
+    // On an encryption failure (or no key), skip this publish; read-state re-publishes on the next change.
+    if (!encryptedContent) {
+      console.warn('[notif] Skipping hub read-state publish — could not encrypt (would leak hub membership)')
+      return false
+    }
     const event = buildHubReadStateEvent(hubState, encryptedContent)
     return signAndPublishReadState('hub', event, signer, privateKey)
   },
@@ -687,13 +717,13 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
     const dmState = buildDmReadStateFromStore(state.dm17Unreads, state.dm04Unreads)
     const content = JSON.stringify(dmState)
 
-    let encryptedContent = content
+    let encryptedContent: string | null = null
     if (signer) {
       try {
         const pubkey = await signer.getPublicKey()
         encryptedContent = await guardedEncrypt(content, pubkey, signer, null, 'nip44')
       } catch (err) {
-        console.warn('[notif] Failed to NIP-44 encrypt DM read-state (signer), using plaintext:', err)
+        console.warn('[notif] Failed to NIP-44 encrypt DM read-state (signer):', err)
       }
     } else if (privateKey) {
       try {
@@ -703,10 +733,16 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
         const convKey = nip44.v2.utils.getConversationKey(privKeyBytes, pubkey)
         encryptedContent = nip44.v2.encrypt(content, convKey)
       } catch (err) {
-        console.warn('[notif] Failed to NIP-44 encrypt DM read-state (privateKey), using plaintext:', err)
+        console.warn('[notif] Failed to NIP-44 encrypt DM read-state (privateKey):', err)
       }
     }
 
+    // NEVER publish plaintext — the content lists the user's DM conversation partners on an R-authored
+    // event. Skip the publish on an encryption failure (re-publishes on the next change).
+    if (!encryptedContent) {
+      console.warn('[notif] Skipping DM read-state publish — could not encrypt')
+      return false
+    }
     const event = buildDmReadStateEvent(dmState, encryptedContent)
     return signAndPublishReadState('dm', event, signer, privateKey)
   },

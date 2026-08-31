@@ -114,7 +114,7 @@ function pickForPubkey<T>(arr: T[], count: number, seed: string): T[] {
  * @param hubRelays Optional hub-specific relay list (from hub event)
  * @returns Deduplicated array of relay URLs to publish to
  */
-export function getPublishRelays(hubRelays?: string[]): string[] {
+export function getPublishRelays(hubRelays?: string[], opts?: { hubOnly?: boolean }): string[] {
   const state = usePostingBehaviourStore.getState()
   const result = new Set<string>()
 
@@ -127,6 +127,19 @@ export function getPublishRelays(hubRelays?: string[]): string[] {
   const disabledRelays = new Set(
     getRelayList().filter((r) => !r.enabled).map((r) => r.url.replace(/\/+$/, ''))
   )
+
+  // hubOnly: a PRIVACY-CRITICAL v2 hub event (authored under a pseudonym P/Pf/O) must publish ONLY to
+  // the hub's own relays — NEVER the user's personal NIP-65 or client relays. Those are advertised by
+  // the user's REAL key R (kind 10002), so blasting a P-authored event onto that same personal relay
+  // set lets an observer link P → R purely from the relay footprint. Hub-only keeps P on the hub relays.
+  if (opts?.hubOnly) {
+    if (hubRelays && hubRelays.length > 0) {
+      const limit = state.limitHubRelays ? 3 : Infinity
+      const filtered = hubRelays.filter((r) => !disabledRelays.has(r.replace(/\/+$/, '')))
+      pickForPubkey(filtered, limit, me).forEach((r) => result.add(r))
+    }
+    return Array.from(result)
+  }
 
   // Client relays (from relay-pool, which reads localStorage — already filtered to enabled)
   if (state.postToClientRelays) {
@@ -166,8 +179,10 @@ export function getPublishRelays(hubRelays?: string[]): string[] {
  *
  * @param hubRelays Optional hub-specific relay list (from the hub event)
  */
-export function getDeletePublishRelays(hubRelays?: string[]): string[] {
+export function getDeletePublishRelays(hubRelays?: string[], opts?: { hubOnly?: boolean }): string[] {
   const state = usePostingBehaviourStore.getState()
+  // v2 hub event: keep deletes on the hub relays only (same P→R relay-footprint reason as getPublishRelays).
+  if (opts?.hubOnly) return getPublishRelays(hubRelays, { hubOnly: true })
   if (!state.bypassDeleteRelayLimits) return getPublishRelays(hubRelays)
 
   const result = new Set<string>()
@@ -197,7 +212,7 @@ export function getDeletePublishRelays(hubRelays?: string[]): string[] {
  * @param hubBlossoms Optional hub-specific blossom servers (from hub event)
  * @returns Deduplicated array of blossom server URLs
  */
-export function getUploadBlossoms(hubBlossoms?: string[]): string[] {
+export function getUploadBlossoms(hubBlossoms?: string[], opts?: { hubOnly?: boolean }): string[] {
   const state = usePostingBehaviourStore.getState()
   const result = new Set<string>()
 
@@ -211,6 +226,18 @@ export function getUploadBlossoms(hubBlossoms?: string[]): string[] {
   const disabledBlossoms = new Set(
     blossomServers.getList().filter((s) => !s.enabled).map((s) => s.url.replace(/\/+$/, ''))
   )
+
+  // hubOnly: a v2 hub media upload must go ONLY to the hub's blossom servers — not the user's personal
+  // (R-advertised, kind 10063) servers — so the blob's server footprint can't link the P-message that
+  // references it back to R. (The 24242 auth is already signed as P via hubBlossomAuthSigner.)
+  if (opts?.hubOnly) {
+    if (hubBlossoms && hubBlossoms.length > 0) {
+      const limit = state.limitHubBlossoms ? 3 : Infinity
+      const filtered = hubBlossoms.filter((s) => !disabledBlossoms.has(s.replace(/\/+$/, '')))
+      pickForPubkey(filtered, limit, me).forEach((s) => result.add(s))
+    }
+    return Array.from(result)
+  }
 
   // Client blossom servers — respects the same toggle as client relays (already filtered to enabled)
   if (state.postToClientRelays) {

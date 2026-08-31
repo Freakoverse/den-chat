@@ -63,6 +63,11 @@ export function HubInfoModal({ open, onClose, hub, blurMedia, onCreatorClick }: 
   const [versionCopied, setVersionCopied] = useState(false)
   const [fetchingLatest, setFetchingLatest] = useState(false)
 
+  // v2: the hub is authored by the owner pseudonym O (creatorPubkey), but members legitimately know
+  // the real owner (from the owner attestation / roster), so the creator CARD shows that real
+  // identity. Everything wire-level (raw event, backup, naddr) still uses creatorPubkey = O.
+  const creatorDisplayPubkey = hub.ownerRealPubkey || hub.creatorPubkey
+
   const copyVersion = () => {
     if (liveVersion == null) return
     navigator.clipboard.writeText(String(liveVersion))
@@ -147,10 +152,10 @@ export function HubInfoModal({ open, onClose, hub, blurMedia, onCreatorClick }: 
     if (!open || !hub.creatorPubkey) return
     let cancelled = false
 
-    const npub = nip19.npubEncode(hub.creatorPubkey)
+    const npub = nip19.npubEncode(creatorDisplayPubkey)
 
-    // Fetch kind:0 metadata for the creator
-    fetchEvents({ kinds: [0], authors: [hub.creatorPubkey], limit: 1 })
+    // Fetch kind:0 metadata for the creator (real owner in v2)
+    fetchEvents({ kinds: [0], authors: [creatorDisplayPubkey], limit: 1 })
       .then((events) => {
         if (cancelled) return
         if (events.length > 0) {
@@ -174,7 +179,7 @@ export function HubInfoModal({ open, onClose, hub, blurMedia, onCreatorClick }: 
       })
 
     return () => { cancelled = true }
-  }, [open, hub.creatorPubkey])
+  }, [open, creatorDisplayPubkey])
 
   const copyNpub = () => {
     if (!creator) return
@@ -300,8 +305,8 @@ export function HubInfoModal({ open, onClose, hub, blurMedia, onCreatorClick }: 
             {creator ? (
               <div className="flex items-center gap-3 p-3 rounded-lg bg-secondary/50 border border-border/50">
                 {/* Clickable avatar */}
-                {onCreatorClick && hub.creatorPubkey ? (
-                  <button onClick={() => onCreatorClick(hub.creatorPubkey)} className="cursor-pointer shrink-0">
+                {onCreatorClick && creatorDisplayPubkey ? (
+                  <button onClick={() => onCreatorClick(creatorDisplayPubkey)} className="cursor-pointer shrink-0">
                     <Avatar className="h-10 w-10">
                       {creator.picture && <AvatarImage src={creator.picture} />}
                       <AvatarFallback className="text-xs bg-primary text-primary-foreground">
@@ -318,9 +323,9 @@ export function HubInfoModal({ open, onClose, hub, blurMedia, onCreatorClick }: 
                   </Avatar>
                 )}
                 <div className="flex-1 min-w-0">
-                  {onCreatorClick && hub.creatorPubkey ? (
+                  {onCreatorClick && creatorDisplayPubkey ? (
                     <button
-                      onClick={() => onCreatorClick(hub.creatorPubkey)}
+                      onClick={() => onCreatorClick(creatorDisplayPubkey)}
                       className="text-sm font-medium text-foreground truncate hover:underline cursor-pointer text-left block max-w-full"
                     >
                       {creator.name || 'Unknown'}

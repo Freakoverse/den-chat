@@ -14,6 +14,14 @@ import { useEffect, useRef } from 'react'
 import { useHubStore } from '@/stores/hubStore'
 import { useUserStore } from '@/stores/userStore'
 import { useVoiceStore } from '@/stores/voiceStore'
+import { getChannelGroupId } from '@/lib/hub/permissions'
+
+// Baseline key-state per connected hub, MODULE-level so it survives this hook unmounting — the hook is
+// mounted from ChannelList, which unmounts when the user navigates away from the hub view (to Settings,
+// DMs, another page) while still in the call. A component-local ref would be destroyed on that unmount and
+// re-adopt the post-rotation key-state as a fresh baseline on remount, silently skipping the re-key. A
+// module map keyed by hubDTag persists across those mount/unmount cycles.
+const _lastVoiceKeyState = new Map<string, string>()
 
 export function useVoicePresence() {
   const activeHubId = useHubStore((s) => s.activeHubId)
@@ -126,5 +134,38 @@ export function useVoicePresence() {
     // Broadcast/keepalive lifecycle is owned by joinChannel/leaveChannel,
     // not by UI component mount/unmount.
   }, [connectionState, currentChannelId, currentHubDTag, currentSessionId])
+
+  // ── Re-key E2EE when a kick/ban rotates the connected channel's secret mid-call ──
+  // A kick bumps the hub (or group) epoch AND rotates the secret. Remaining participants must
+  // re-derive the frame key from the NEW secret so the kicked member — who only holds the old
+  // secret — can no longer decrypt or inject audio. We key this on the connected channel's secret
+  // VALUE (and epoch): watching the value (not just the epoch) avoids the race where the epoch bumps
+  // in the store a beat before the freshly-decrypted secret lands. If the secret is gone (we were the
+  // one kicked), `rekeyE2EEForRotation` self-disconnects us from the call.
+  const rekeyE2EEForRotation = useVoiceStore((s) => s.rekeyE2EEForRotation)
+  const connectedKeyState = useHubStore((s) => {
+    if (!currentHubDTag || !currentChannelId) return ''
+    const ch = s.hubs[currentHubDTag]
+    if (!ch) return ''
+    const gid = getChannelGroupId(ch, currentChannelId)
+    if (gid) {
+      const ep = ch.groupedRoles?.find((g) => g.groupId === gid)?.epoch ?? ch.epoch ?? 0
+      return `${gid}:${ep}:${s.groupSecrets?.[currentHubDTag]?.[gid] ?? ''}`
+    }
+    return `hub:${ch.epoch ?? 0}:${s.hubSecrets?.[currentHubDTag] ?? ''}`
+  })
+  useEffect(() => {
+    if (connectionState !== 'connected' || !currentHubDTag || !connectedKeyState) return
+    // First observation for this hub: record baseline, don't re-key. On a real change (rotation) re-key.
+    // The baseline is module-level, so a rotation that lands while this hook was unmounted is still caught
+    // on remount (the stored pre-rotation state won't match the new one).
+    const prev = _lastVoiceKeyState.get(currentHubDTag)
+    if (prev !== undefined && prev !== connectedKeyState) {
+      const hub = useHubStore.getState().hubs[currentHubDTag]
+      const relays = hub ? [...new Set(hub.generalRelays)].filter(Boolean) : []
+      rekeyE2EEForRotation(currentHubDTag, relays, signer, privateKey)
+    }
+    _lastVoiceKeyState.set(currentHubDTag, connectedKeyState)
+  }, [connectedKeyState, connectionState, currentHubDTag])
 }
 

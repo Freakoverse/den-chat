@@ -2,13 +2,15 @@
  * ReactionListModal — Shows who reacted on a post and with what emoji
  */
 
-import { useMemo } from 'react'
-import { X, Smile } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { X, Smile, Code, MoreVertical } from 'lucide-react'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { truncateNpub } from '@/lib/utils'
 import { nip19 } from 'nostr-tools'
 import { getEmojiMap } from '@/stores/emojiStore'
+import { RawEventModal } from '@/components/social/SocialPost'
 
 export interface ReactionInfo {
   eventId: string
@@ -16,6 +18,8 @@ export interface ReactionInfo {
   emoji: string        // the raw emoji content (could be ':shortcode:' or unicode or '+')
   emojiUrl?: string    // resolved URL for custom emojis
   createdAt: number
+  /** Full raw Nostr event JSON — powers the per-reaction "View raw event". */
+  rawEvent?: string
 }
 
 interface ReactionListModalProps {
@@ -29,6 +33,9 @@ interface ReactionListModalProps {
 
 export function ReactionListModal({ open, onClose, reactions, onOpenProfile, disableCustomEmojis }: ReactionListModalProps) {
   const { getProfile } = useProfileCache()
+  // Menu is portaled to <body> with fixed positioning so the list's overflow-y-auto can't clip it.
+  const [menu, setMenu] = useState<{ rawEvent: string; x: number; y: number } | null>(null)
+  const [rawEventJson, setRawEventJson] = useState<string | null>(null)
 
   const sorted = useMemo(
     () => [...reactions].sort((a, b) => b.createdAt - a.createdAt),
@@ -48,6 +55,24 @@ export function ReactionListModal({ open, onClose, reactions, onOpenProfile, dis
   if (!open) return null
 
   return (
+    <>
+    {menu && createPortal(
+      <>
+        <div className="fixed inset-0 z-[60]" onClick={() => setMenu(null)} />
+        <div
+          className="fixed z-[61] min-w-[150px] -translate-x-full rounded-lg border border-border bg-popover shadow-xl py-1"
+          style={{ top: menu.y + 4, left: menu.x }}
+        >
+          <button
+            onClick={() => { setRawEventJson(menu.rawEvent); setMenu(null) }}
+            className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-foreground hover:bg-accent/60 transition-colors cursor-pointer"
+          >
+            <Code size={12} /> View raw event
+          </button>
+        </div>
+      </>,
+      document.body,
+    )}
     <div className="fixed inset-0 z-50 flex items-center justify-center px-2" onClick={onClose}>
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
       <div
@@ -98,7 +123,7 @@ export function ReactionListModal({ open, onClose, reactions, onOpenProfile, dis
               return (
                 <div
                   key={reaction.eventId}
-                  className="flex items-center gap-3 px-5 py-2.5 border-b border-border/50 last:border-b-0 hover:bg-accent/20 transition-colors cursor-pointer"
+                  className="relative flex items-center gap-3 px-5 py-2.5 border-b border-border/50 last:border-b-0 hover:bg-accent/20 transition-colors cursor-pointer"
                   onClick={() => onOpenProfile?.(reaction.pubkey)}
                 >
                   {/* Emoji */}
@@ -123,6 +148,22 @@ export function ReactionListModal({ open, onClose, reactions, onOpenProfile, dis
                   <span className="text-[10px] text-muted-foreground shrink-0">
                     {formatTimestamp(reaction.createdAt)}
                   </span>
+
+                  {/* Per-reaction menu (View raw event) — opens a body-portaled dropdown */}
+                  {reaction.rawEvent && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        if (menu) { setMenu(null); return }
+                        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+                        setMenu({ rawEvent: reaction.rawEvent!, x: rect.right, y: rect.bottom })
+                      }}
+                      className="shrink-0 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors cursor-pointer"
+                      aria-label="Reaction options"
+                    >
+                      <MoreVertical size={14} />
+                    </button>
+                  )}
                 </div>
               )
             })
@@ -130,6 +171,8 @@ export function ReactionListModal({ open, onClose, reactions, onOpenProfile, dis
         </div>
       </div>
     </div>
+    {rawEventJson && <RawEventModal rawJson={rawEventJson} onClose={() => setRawEventJson(null)} />}
+    </>
   )
 }
 

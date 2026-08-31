@@ -204,6 +204,28 @@ export async function decryptFrame(
 // Track all active Workers so we can terminate them on disconnect
 const activeWorkers: Worker[] = []
 
+// Legacy (createEncodedStreams) transforms run inline on the main thread and close over
+// their key. We hand them a MUTABLE holder instead of the raw key so a mid-call re-key can
+// swap it in place (createEncodedStreams can only be called once per sender/receiver, so the
+// transform can't be re-attached — the key must be swappable). Tracked for rekeyActiveTransforms.
+const activeInlineKeys: { current: CryptoKey }[] = []
+
+/**
+ * Re-key every live transform in place after a rotation (kick/ban bumps the epoch → a fresh
+ * frame secret). Worker transforms get a postMessage to re-import; legacy inline transforms
+ * have their mutable key holder swapped. Called by a provider's setEncryptionKey when a key
+ * was already set (i.e. this is a rotation, not the initial attach).
+ */
+export function rekeyActiveTransforms(key: CryptoKey, rawKeyBytes?: Uint8Array): void {
+  for (const holder of activeInlineKeys) holder.current = key
+  if (rawKeyBytes && rawKeyBytes.length > 0) {
+    const keyBytes = Array.from(rawKeyBytes)
+    for (const worker of activeWorkers) {
+      try { worker.postMessage({ type: 'rekey', keyBytes }) } catch { /* worker gone — ignore */ }
+    }
+  }
+}
+
 /**
  * Create a new dedicated Worker for a single RTCRtpScriptTransform.
  * Each transform gets its own Worker to avoid shared-state issues.
@@ -227,6 +249,7 @@ export function cleanupE2EEWorkers(): void {
     worker.terminate()
   }
   activeWorkers.length = 0
+  activeInlineKeys.length = 0
   console.log('[E2EE] All Workers terminated')
 }
 
@@ -246,7 +269,11 @@ export function attachSenderEncryption(
   const support = getE2EESupport()
 
   if (support === 'scriptTransform' && rawKeyBytes) {
-    // Modern standard path — key passed directly through constructor options
+    // Modern standard path — key passed directly through constructor options.
+    // INVARIANT (keep synchronous): createE2EEWorker() and the `.transform =` assignment must stay in the
+    // same synchronous tick — no `await` between them. That ordering guarantees the worker's `rtctransform`
+    // (initial key) is enqueued before any later `rekeyActiveTransforms` postMessage, so a mid-call rotation
+    // never gets clobbered by a late-arriving initial key. Inserting an await here reopens that race.
     try {
       const worker = createE2EEWorker()
       sender.transform = new RTCRtpScriptTransform(worker, {
@@ -262,9 +289,11 @@ export function attachSenderEncryption(
     try {
       // @ts-expect-error — createEncodedStreams is a Chromium extension
       const senderStreams = sender.createEncodedStreams()
+      const holder = { current: key }
+      activeInlineKeys.push(holder)
       const transformStream = new TransformStream({
         transform: (frame: RTCEncodedAudioFrame | RTCEncodedVideoFrame, controller: TransformStreamDefaultController) => {
-          return encryptFrame(key, frame, controller)
+          return encryptFrame(holder.current, frame, controller)
         },
       })
       senderStreams.readable
@@ -307,9 +336,11 @@ export function attachReceiverDecryption(
     try {
       // @ts-expect-error — createEncodedStreams is a Chromium extension
       const receiverStreams = receiver.createEncodedStreams()
+      const holder = { current: key }
+      activeInlineKeys.push(holder)
       const transformStream = new TransformStream({
         transform: (frame: RTCEncodedAudioFrame | RTCEncodedVideoFrame, controller: TransformStreamDefaultController) => {
-          return decryptFrame(key, frame, controller)
+          return decryptFrame(holder.current, frame, controller)
         },
       })
       receiverStreams.readable

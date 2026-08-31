@@ -58,6 +58,10 @@ export interface VoicePresence {
   cone: number                         // hearing cone percent (0=full circle, 100=tight cone)
   tracks: string[]                     // track names published (e.g. ['pubkey:audio'])
   createdAt: number                    // used for 60s timeout check
+  /** v2 only: enc(hub_content_key, R) — decrypt to recover the real author `R` for display. */
+  ir?: string
+  /** v2 only: the epoch whose hub-content key encrypts `ir`. */
+  irEpoch?: number
 }
 
 // ─── Media Track Types ─────────────────────────────────────────

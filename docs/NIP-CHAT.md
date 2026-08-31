@@ -553,7 +553,7 @@ Referenced via the `m` field in the `grouped_roles` entry in the hub event conte
 
 ### 5.6 Mesh Lists (Facilitation)
 
-Any member can maintain their OWN Blossom LKH tree file for the hub, enabling them to act as a **facilitator** — granting non-members access to encrypted hub messages.
+Any member **whose role grants the `facilitate` permission** (off by default for all roles; see "Permission Gating" below) can maintain their OWN Blossom LKH tree file for the hub, enabling them to act as a **facilitator** — granting non-members access to encrypted hub messages.
 
 - They build their own tree with their own members as leaves
 - Leaf keys are NIP-04 encrypted using THEIR keypair (not the creator's)
@@ -579,6 +579,52 @@ When a non-member obtains the hub secret via a facilitator's mesh list, their me
 - Clients SHOULD additionally verify that the **message author** appears as a leaf in the facilitator's own LKH tree. A valid facilitator tag alone is insufficient — the facilitator must have explicitly added the posting user to their tree.
 - If either verification fails (facilitator not in creator list, or author not in facilitator tree), the client SHOULD treat the message as an unauthorized non-member post and apply the non-member message hiding policy (see §9.8).
 - The hub secret epoch in a facilitated message will match an existing epoch in the creator's history file, so members can decrypt without fetching the facilitator's tree
+
+#### Permission Gating, Revocation & Epoch Rotation
+
+Facilitation is governed by a per-role **`facilitate`** permission that is **off by default** for
+every role (the creator always holds it). Only a member whose role grants it may build or maintain a
+facilitation list; clients MUST hide the facilitation UI otherwise. The permission is also the
+**revocation lever**:
+
+- **Display:** a facilitated message is shown only while its named facilitator is a member who
+  **currently holds `facilitate`** (in addition to the tree checks above). Revoking the role/permission
+  therefore hides every message from everyone that facilitator vouched — no rotation required. This
+  check is evaluated live against the hub's current roles, so a stale cached member list can never
+  re-expose a revoked facilitator's messages.
+- **Access:** a non-member relying on a facilitator whose permission was revoked (or who left the
+  hub) is re-gated behind the awaiting-approval overlay even though the hub secret still sits in their
+  local store — the lingering key is cryptographically valid (nothing rotated) but their authorization
+  is gone. Removing a permission is a permission decision, not a key-rotation event.
+
+**Epoch rotation.** A facilitated user's ONLY source of the hub secret is the facilitator's tree, so
+that tree MUST track the current epoch:
+
+- The facilitator's index carries a **`history:<hash>`** entry pointing at an epoch-history blob in
+  the **byte-identical** owner-tree format (`AES(currentSecret, "hub:<epoch>:<hex>…")`), so a vouched
+  user can decrypt every past epoch, not just the latest.
+- After a rotation the facilitator MUST **rebuild** their tree under the new secret + refreshed
+  history and republish the `list` join request. Clients SHOULD expose this as an explicit action
+  ("Update list to current epoch"). An automatic rebuild is unreliable — it can only fire if the
+  facilitator's client is online at the instant the rotation event arrives; a facilitator who logs in
+  afterward observes no epoch transition to react to.
+- **Forward-secrecy invariant:** a facilitated user's live hub secret MUST be the current epoch's
+  secret, or empty — never a stale one. If the facilitator has not yet rebuilt for the current epoch,
+  the client keeps the epoch history (old messages stay readable) but **clears the current secret**,
+  so the user can neither read nor **send** at the new epoch (a stale-secret send under a new-epoch
+  tag would be undecryptable for everyone and would leak plaintext to a just-kicked member). This
+  invariant is enforced at every site that installs a facilitator-derived secret: initial load, live
+  rotation (cleared synchronously before the async re-fetch), and manual unlock.
+
+**Persistence & fetch resilience (client guidance).**
+
+- A facilitated user's chosen facilitator (npub) SHOULD be persisted locally so they need not re-enter
+  it each session; the derived secret MUST NOT be persisted (it is re-obtained from the tree on load).
+- A member validating facilitated messages must fetch each cited facilitator's tree. A transient
+  relay miss returns an empty list that is indistinguishable from "no list"; clients SHOULD **retry
+  with backoff** rather than treating the first empty result as final (otherwise a facilitator's
+  vouched messages are hidden until an app restart). Fetched member lists SHOULD be cached locally so
+  they validate instantly across restarts, with a background revalidation to pick up add/remove.
 
 ### 5.7 Tree Balance Management
 

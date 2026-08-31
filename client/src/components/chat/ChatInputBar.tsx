@@ -19,7 +19,7 @@ import {
   Send, Smile, Sticker, Bold, Italic, Strikethrough,
   Heading1, Heading2, Heading3, Heading4, Heading5, Heading6,
   List, ListOrdered, Link, Code, CodeSquare, ALargeSmall, Eye,
-  Plus, Upload, Loader2, FileIcon, X, AlertTriangle, ImagePlay, ShieldOff,
+  Plus, Upload, Loader2, FileIcon, X, AlertTriangle, ImagePlay,
   Clock, Mic, Lock, LockOpen, Scissors, ClipboardPaste, Copy, Type,
 } from 'lucide-react'
 import { EmojiPickerPopover } from '@/components/chat/EmojiPickerPopover'
@@ -113,6 +113,11 @@ interface ChatInputBarProps {
   privateKey?: string | null
   /** Hub-specific blossom servers to merge into posting behaviour (optional) */
   hubBlossomServers?: string[]
+  /**
+   * Optional: resolve a Blossom auth signer for uploads. v2 (private) hubs pass one that
+   * signs the 24242 auth as the member pseudonym `P`, so the Blossom server never sees `R`.
+   */
+  getUploadAuthSigner?: () => Promise<import('@/lib/blossom/client').BlossomAuthSigner | undefined>
   /** Ref to the container element for drag-drop scope (must have position: relative) */
   dragContainerRef?: React.RefObject<HTMLElement | null>
   /** Callback when user selects a sticker from the picker */
@@ -181,6 +186,7 @@ export function ChatInputBar({
   signer,
   privateKey,
   hubBlossomServers,
+  getUploadAuthSigner,
   dragContainerRef,
   onStickerSelect,
   onGifSelect,
@@ -465,12 +471,14 @@ export function ChatInputBar({
         // Resolve blossom servers at upload time from posting behaviour settings
         const servers = getUploadBlossoms(hubBlossomServers)
 
+        const uploadAuthSigner = getUploadAuthSigner ? await getUploadAuthSigner() : undefined
         const { hash, serverUrls } = await uploadToBlossomServers(
           data, signer || null, privateKey || null, servers, contentType,
           (progress) => {
             setPendingFiles((prev) => prev.map((f) => f.id === pf.id ? { ...f, progress: { ...progress } } : f))
           },
           () => { const c = new AbortController(); uploadAbortRef.current = c; return c.signal },
+          uploadAuthSigner,
         )
         setPendingFiles((prev) => prev.map((f) => f.id === pf.id ? { ...f, status: 'success' as const, hash, serverUrls, progress: undefined, encryption: encMeta } : f))
       } catch {
@@ -1002,6 +1010,37 @@ export function ChatInputBar({
             </div>
             {/* Upload button + status — always visible below scroll */}
             <div className="flex items-center gap-2">
+            {/* Encryption toggle — sits to the LEFT of the Upload button; the full privacy explanation
+                is the tooltip on the toggle box itself. */}
+            {!hideUploadWarning && pendingFiles.some((f) => f.status === 'pending' || f.status === 'failed') && !isUploading && (
+              <TooltipProvider delayDuration={200}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={toggleEncryptUploads}
+                      disabled={forceEncrypt}
+                      className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer disabled:cursor-default select-none"
+                      style={{ background: encryptUploads ? 'rgba(16,185,129,0.06)' : 'rgba(245,158,11,0.06)', border: `1px solid ${encryptUploads ? 'rgba(16,185,129,0.15)' : 'rgba(245,158,11,0.15)'}` }}
+                    >
+                      {forceEncrypt ? (
+                        <Lock size={12} className="text-emerald-500 shrink-0" />
+                      ) : (
+                        <div className={`relative w-8 h-4 rounded-full shrink-0 transition-colors ${encryptUploads ? 'bg-emerald-500' : 'bg-muted-foreground/30'}`}>
+                          <div className={`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow transition-transform ${encryptUploads ? 'translate-x-[18px]' : 'translate-x-0.5'}`} />
+                        </div>
+                      )}
+                      <span className={encryptUploads ? 'text-emerald-500/90' : 'text-amber-500/90'}>{encryptUploads ? 'Encrypted' : 'Not encrypted'}</span>
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="text-xs max-w-[260px] leading-snug">
+                    {encryptUploads
+                      ? 'Files will be encrypted before upload — only chat participants can view them, but images/video/audio must fully download before displaying.'
+                      : 'Media uploads are not encrypted — blossom server operators can view uploaded files, but images/video/audio are streamed immediately.'}
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            )}
             {pendingFiles.some((f) => f.status === 'pending' || f.status === 'failed') && !isUploading && (
               <button
                 onClick={handleUploadFiles}
@@ -1018,31 +1057,6 @@ export function ChatInputBar({
               </div>
             )}
             </div>
-            {/* Encrypt uploads toggle + privacy notice */}
-            {!hideUploadWarning && (
-              <div className="flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer select-none transition-colors"
-                style={{ background: encryptUploads ? 'rgba(16,185,129,0.06)' : 'rgba(245,158,11,0.06)', border: `1px solid ${encryptUploads ? 'rgba(16,185,129,0.15)' : 'rgba(245,158,11,0.15)'}` }}
-                onClick={toggleEncryptUploads}
-              >
-                {/* Toggle switch */}
-                {!forceEncrypt && (
-                  <div className={`relative w-8 h-4 rounded-full shrink-0 transition-colors ${encryptUploads ? 'bg-emerald-500' : 'bg-muted-foreground/30'}`}>
-                    <div className={`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow transition-transform ${encryptUploads ? 'translate-x-[18px]' : 'translate-x-0.5'}`} />
-                  </div>
-                )}
-                {encryptUploads ? (
-                  <>
-                    <Lock size={12} className="text-emerald-500 shrink-0" />
-                    <span className="text-sm text-emerald-500/80 leading-tight">Files will be encrypted before upload — only chat participants can view them, but images/video/audio must fully download before displaying.</span>
-                  </>
-                ) : (
-                  <>
-                    <ShieldOff size={12} className="text-amber-500 shrink-0" />
-                    <span className="text-sm text-amber-500/80 leading-tight">Media uploads are not encrypted — blossom server operators can view uploaded files, but images/video/audio are streamed immediately.</span>
-                  </>
-                )}
-              </div>
-            )}
           </div>
         )}
 

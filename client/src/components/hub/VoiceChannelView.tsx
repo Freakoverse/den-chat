@@ -15,7 +15,9 @@
 import { useHubStore } from '@/stores/hubStore'
 import { useUserStore } from '@/stores/userStore'
 import { useVoiceStore } from '@/stores/voiceStore'
+import { resolveMemberPubkey } from '@/lib/hub/resolveMemberPubkey'
 import { useProfileCache } from '@/hooks/useProfileCache'
+import { useVoiceDisplayPubkey } from '@/hooks/useVoiceDisplayPubkey'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
 import { Button } from '@/components/ui/button'
@@ -395,7 +397,7 @@ export function VoiceChannelView() {
     return () => unsubscribePins(activeHubId)
   }, [activeHubId, hub?.generalRelays?.join(',')])
 
-  const isCreator = !!(pubkey && hub.creatorPubkey === pubkey)
+  const isCreator = !!(pubkey && (hub.creatorPubkey === pubkey || hub.ownerRealPubkey === pubkey))
 
   // Map each present pubkey → its host, so the call tiles stay strictly to our own
   // host. Anyone known (via presence) to be on a different host must never render as
@@ -878,9 +880,14 @@ export function VoiceChannelView() {
                         // Look for own pubkey in ANY hub's presence with 'joined' status
                         const allPresence = useVoiceStore.getState().presenceByHub
                         for (const [hTag, entries] of Object.entries(allPresence)) {
+                          // v2: my presence in a hub is authored under that hub's pseudonym P, not R —
+                          // resolve each entry's wire P→R via that hub's roster before the self-compare,
+                          // else the cross-device "already in voice" warning never fires on a v2 hub.
+                          const members = useHubStore.getState().hubMembers[hTag]
                           const selfEntry = entries.find(
-                            (p) => p.pubkey === pubkey && p.status === 'joined' &&
-                              (Date.now() / 1000 - p.createdAt) < 60
+                            (p) => p.status === 'joined' &&
+                              (Date.now() / 1000 - p.createdAt) < 60 &&
+                              (p.pubkey === pubkey || resolveMemberPubkey(p.pubkey, members) === pubkey)
                           )
                           if (selfEntry) {
                             setCrossDeviceWarning(true)
@@ -1201,8 +1208,9 @@ export function VoiceChannelView() {
 
 /* ─── OtherHostGroup — people in this channel on a different SFU host ─── */
 
-function OtherHostAvatar({ pubkey }: { pubkey: string }) {
+function OtherHostAvatar({ pubkey: wirePubkey }: { pubkey: string }) {
   const { getProfile } = useProfileCache()
+  const pubkey = useVoiceDisplayPubkey(wirePubkey) // v2: pseudonym P → real key R
   const isHex = /^[0-9a-f]{64}$/i.test(pubkey)
   const profile = isHex ? getProfile(pubkey) : null
   const name = profile?.display_name || profile?.name || npubShort(pubkey)
@@ -1216,9 +1224,10 @@ function OtherHostAvatar({ pubkey }: { pubkey: string }) {
 
 function OtherHostGroup({ hostPubkey, members, onJoin }: { hostPubkey: string; members: { pubkey: string }[]; onJoin: () => void }) {
   const { getProfile } = useProfileCache()
-  const isHex = /^[0-9a-f]{64}$/i.test(hostPubkey)
-  const hostProfile = isHex ? getProfile(hostPubkey) : null
-  const hostName = hostProfile?.display_name || hostProfile?.name || (hostPubkey ? npubShort(hostPubkey) : 'another host')
+  const displayHost = useVoiceDisplayPubkey(hostPubkey) // v2: pseudonym P → real key R
+  const isHex = /^[0-9a-f]{64}$/i.test(displayHost)
+  const hostProfile = isHex ? getProfile(displayHost) : null
+  const hostName = hostProfile?.display_name || hostProfile?.name || (displayHost ? npubShort(displayHost) : 'another host')
   return (
     <div className="flex items-center gap-3 rounded-xl border border-border/40 bg-secondary/20 px-3 py-2 opacity-75">
       <Globe size={14} className="text-muted-foreground shrink-0" />
@@ -1305,8 +1314,9 @@ function VideoTile({
 
 /* ─── ScreenShareLabel — show who's sharing ─── */
 
-function ScreenShareLabel({ pubkey, isSelf, compact = false }: { pubkey: string; isSelf: boolean; compact?: boolean }) {
+function ScreenShareLabel({ pubkey: wirePubkey, isSelf, compact = false }: { pubkey: string; isSelf: boolean; compact?: boolean }) {
   const { getProfile } = useProfileCache()
+  const pubkey = useVoiceDisplayPubkey(wirePubkey) // v2: resolve pseudonym P → real key R
   const isHex = /^[0-9a-f]{64}$/i.test(pubkey)
   const profile = isHex ? getProfile(pubkey) : null
   const npub = isHex ? nip19.npubEncode(pubkey) : ''
@@ -1325,8 +1335,9 @@ function ScreenShareLabel({ pubkey, isSelf, compact = false }: { pubkey: string;
 
 /* ─── CameraTileLabel — show whose camera ─── */
 
-function CameraTileLabel({ pubkey, isSelf }: { pubkey: string; isSelf: boolean }) {
+function CameraTileLabel({ pubkey: wirePubkey, isSelf }: { pubkey: string; isSelf: boolean }) {
   const { getProfile } = useProfileCache()
+  const pubkey = useVoiceDisplayPubkey(wirePubkey) // v2: resolve pseudonym P → real key R
   const isHex = /^[0-9a-f]{64}$/i.test(pubkey)
   const profile = isHex ? getProfile(pubkey) : null
   const npub = isHex ? nip19.npubEncode(pubkey) : ''
@@ -1342,7 +1353,7 @@ function CameraTileLabel({ pubkey, isSelf }: { pubkey: string; isSelf: boolean }
 /* ─── ParticipantTile — avatar only (no embedded video) ─── */
 
 function ParticipantTile({
-  pubkey,
+  pubkey: wirePubkey,
   isMuted,
   isDeafened,
   isSpeaking,
@@ -1365,6 +1376,7 @@ function ParticipantTile({
   onShowCamera?: () => void
 }) {
   const { getProfile } = useProfileCache()
+  const pubkey = useVoiceDisplayPubkey(wirePubkey) // v2: resolve pseudonym P → real key R
   const isHexPubkey = /^[0-9a-f]{64}$/i.test(pubkey)
   const profile = isHexPubkey ? getProfile(pubkey) : null
   const npub = isHexPubkey ? nip19.npubEncode(pubkey) : ''
@@ -1490,19 +1502,23 @@ function ParticipantTile({
   )
 }
 
-function PresenceAvatar({ pubkey, hostPubkey, availableHosts }: {
+function PresenceAvatar({ pubkey: wirePubkey, hostPubkey, availableHosts }: {
   pubkey: string
   hostPubkey?: string
   availableHosts?: ReturnType<typeof useVoiceStore.getState>['hostsByHub'][string]
 }) {
   const { getProfile } = useProfileCache()
+  // v2: the wire pubkeys are pseudonyms P — resolve to R for the face/name, but keep the
+  // wire host pubkey for the host-pool lookup (hosts are keyed by their P on the wire).
+  const pubkey = useVoiceDisplayPubkey(wirePubkey)
+  const displayHost = useVoiceDisplayPubkey(hostPubkey)
   const profile = getProfile(pubkey)
   const npub = pubkey ? nip19.npubEncode(pubkey) : ''
   const name = profile?.display_name || profile?.name || truncateNpub(npub)
 
   // Find what host this person is on and get the host type badge
   const hostInfo = availableHosts?.find((h) => h.pubkey === hostPubkey)
-  const hostProfile = hostPubkey ? getProfile(hostPubkey) : null
+  const hostProfile = hostPubkey ? getProfile(displayHost) : null
   const hostName = hostProfile?.display_name || hostProfile?.name || ''
   const hostBadge = hostInfo
     ? ` · ${hostInfo.providerType === 'cloudflare' ? 'CF' : 'LK'}${hostName ? ` (${hostName})` : ''}`
@@ -1542,8 +1558,9 @@ function HostItem({
   onClick: () => void
 }) {
   const { getProfile } = useProfileCache()
-  const profile = getProfile(host.pubkey)
-  const npub = host.pubkey ? nip19.npubEncode(host.pubkey) : ''
+  const displayPubkey = useVoiceDisplayPubkey(host.pubkey) // v2: pseudonym P → real key R
+  const profile = getProfile(displayPubkey)
+  const npub = displayPubkey ? nip19.npubEncode(displayPubkey) : ''
   const name = profile?.display_name || profile?.name || truncateNpub(npub)
 
   // Epoch mismatch detection

@@ -29,6 +29,10 @@ function GlobalProfileModalListener() {
   if (!pubkey) return null
   return (
     <UserProfileModal
+      // Key by target: 'open-profile-modal' can switch the target A→B without `open` going false,
+      // and the modal fetches once (guarded by `loaded`). Without the key the card would keep showing
+      // user A while the action buttons (Block/Follow/DM) target user B — a click hits the wrong user.
+      key={pubkey}
       open={true}
       onClose={() => setPubkey(null)}
       targetPubkey={pubkey}

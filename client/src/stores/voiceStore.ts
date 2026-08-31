@@ -44,7 +44,7 @@ import {
   PRESENCE_CONSTANTS,
 } from '@/lib/voice/types'
 import type { DataChannelMessage } from '@/lib/voice/types'
-import type { Event, Filter } from 'nostr-tools'
+import type { Event, Filter, UnsignedEvent } from 'nostr-tools'
 import { getCameraDeviceId, getScreenShareQuality } from '@/components/settings/SettingsPage'
 
 /* ─── Types ─── */
@@ -57,6 +57,9 @@ interface VoiceStoreState {
   currentSessionId: string | null
   currentHostPubkey: string | null
   provider: VoiceProvider | null
+  /** The wire identity we connected with: the member pseudonym `P` on a v2 hub, the
+   *  real key `R` on v1. Used for self-recognition against pseudonymous presence. */
+  currentVoiceIdentity: string | null
 
   // Local media
   isMuted: boolean
@@ -149,6 +152,14 @@ interface VoiceStoreState {
     signer: any,
     privateKey: string | null,
   ) => Promise<void>
+
+  /**
+   * Re-derive the E2EE frame key from the CURRENT hub/group secret + epoch and push it to the provider.
+   * Call when a kick/ban rotation bumps the epoch mid-call: remaining participants move to the new key so
+   * a just-kicked member (who only holds the OLD secret) can no longer decrypt or inject audio. If THIS
+   * client can no longer derive the new key (i.e. WE were the one kicked), it self-disconnects from the call.
+   */
+  rekeyE2EEForRotation: (hubDTag: string, relays: string[], signer: any, privateKey: string | null) => Promise<void>
 
   /** Toggle mute (works before joining a call too) */
   toggleMute: () => void
@@ -264,6 +275,84 @@ interface VoiceStoreState {
   hideCamera: (pubkey: string) => void
 }
 
+/* ─── v2 voice identity helpers (NIP-CHAT Hub Privacy v2) ─── */
+//
+// Voice identity for a v2 hub is the member pseudonym `P` for EVERY user (owner
+// included). The SAME `P` is used as the presence/host event author, the SFU/room
+// identity, and the DataChannel label — so host + presence + room + DC labels stay
+// self-consistent — and `P` resolves back to the real key `R` for display. v1 hubs
+// keep using the real `pubkey` (R) exactly as before.
+
+/**
+ * Resolve the current user's v2 voice identity for a hub: the member pseudonym `P`
+ * and a signer that authors events as `P`. Returns null for v1 hubs, and also for
+ * v2 hubs whose signer can't do NIP-SKD (voice just won't work for them, same as
+ * messages — we must never fall back to authoring as `R`, which would leak it).
+ */
+async function resolveVoiceIdentity(
+  hubDTag: string,
+): Promise<{ pPub: string; signEvent: (u: UnsignedEvent) => Promise<Event> } | null> {
+  const { useHubStore } = await import('@/stores/hubStore')
+  const hub = useHubStore.getState().hubs[hubDTag]
+  if (!hub) return null
+  const { isV2 } = await import('@/lib/hub/version')
+  if (!isV2(hub)) return null
+  const { privateKey, signer } = useUserStore.getState()
+  const { canUseV2, ChatContext } = await import('@/lib/crypto/skd')
+  if (!canUseV2({ privateKey, signer })) return null
+  const { makeSubkeySigner } = await import('@/lib/nostr/v2send')
+  const pSigner = makeSubkeySigner(ChatContext.member(hub.dTag), { privateKey, signer, peerPub: hub.creatorPubkey })
+  const pPub = await pSigner.getPublicKey()
+  return { pPub, signEvent: (u: UnsignedEvent) => pSigner.signEvent(u) }
+}
+
+/**
+ * Build the identity-reveal tag `["ir", enc(hub_content_key, R), epoch]` for a v2
+ * presence event: any member decrypts it (with the epoch's hub-content key) to
+ * recover the real author `R` for a face + name — exactly like the typing indicator
+ * (`useTypingHeartbeat`). Returns null when we lack the hub secret.
+ */
+async function buildVoiceIrTag(hubDTag: string): Promise<[string, string, string] | null> {
+  const { useHubStore } = await import('@/stores/hubStore')
+  const hub = useHubStore.getState().hubs[hubDTag]
+  const secretHex = useHubStore.getState().hubSecrets[hubDTag]
+  const realPubkey = useUserStore.getState().pubkey
+  if (!hub || !secretHex || !realPubkey) return null
+  const { deriveHubContentKey } = await import('@/lib/hub/hubContent')
+  const { aesEncrypt } = await import('@/lib/crypto/aes')
+  const { fromHex } = await import('@/lib/crypto/lkh')
+  const epoch = hub.epoch || 0
+  const enc = await aesEncrypt(deriveHubContentKey(fromHex(secretHex), epoch), realPubkey)
+  return ['ir', enc, epoch.toString()]
+}
+
+/**
+ * Sign a voice-presence (kind 36947) event the right way for the hub's format:
+ *   v1 → author as the real key `R` (unchanged).
+ *   v2 → author as the member pseudonym `P` and attach the `ir` reveal tag.
+ * Returns null when the hub is v2 but the signer can't do NIP-SKD — the caller must
+ * then skip publishing rather than leak `R`.
+ */
+async function signVoicePresence(
+  hubDTag: string,
+  tags: [string, ...string[]][],
+  signer: any,
+  privateKey: string | null,
+): Promise<Event | null> {
+  const { useHubStore } = await import('@/stores/hubStore')
+  const hub = useHubStore.getState().hubs[hubDTag]
+  const { isV2 } = await import('@/lib/hub/version')
+  if (hub && isV2(hub)) {
+    const id = await resolveVoiceIdentity(hubDTag)
+    if (!id) return null // v2 hub, non-SKD signer — never author presence as R
+    const ir = await buildVoiceIrTag(hubDTag)
+    const finalTags: [string, ...string[]][] = ir ? [...tags, ir] : tags
+    const unsigned = createUnsignedEvent(KINDS.VOICE_PRESENCE, '', finalTags)
+    return id.signEvent({ ...unsigned, pubkey: id.pPub })
+  }
+  return signWithSigner(createUnsignedEvent(KINDS.VOICE_PRESENCE, '', tags), signer, privateKey)
+}
+
 /* ─── Helpers ─── */
 
 function parseVoiceHost(event: Event, decryptContent?: (content: string) => Promise<string>): VoiceHost | null {
@@ -334,6 +423,9 @@ function parseVoicePresence(event: Event): VoicePresence | null {
     const headingTag = event.tags.find((t) => t[0] === 'heading')
     const elevationTag = event.tags.find((t) => t[0] === 'elevation')
     const pitchTag = event.tags.find((t) => t[0] === 'pitch')
+    // v2 identity-reveal tag: ["ir", enc(hub_content_key, R), epoch]. Retained so the
+    // UI can decrypt P→R for display. Absent on v1 (author already IS R).
+    const irTag = event.tags.find((t) => t[0] === 'ir')
 
     return {
       pubkey: event.pubkey,
@@ -342,6 +434,8 @@ function parseVoicePresence(event: Event): VoicePresence | null {
       status,
       hostPubkey,
       sessionId,
+      ir: irTag ? irTag[1] : undefined,
+      irEpoch: irTag && irTag[2] ? parseInt(irTag[2], 10) : undefined,
       position: {
         x: posTag ? parseFloat(posTag[1]) || 0 : 0,
         y: posTag ? parseFloat(posTag[2]) || 0 : 0,
@@ -374,6 +468,7 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
   currentSessionId: null,
   currentHostPubkey: null,
   provider: null,
+  currentVoiceIdentity: null,
 
   isMuted: false,
   isDeafened: false,
@@ -452,20 +547,21 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
               ['host', ''],
               ['session', ''],
             ]
-            const unsigned = createUnsignedEvent(KINDS.VOICE_PRESENCE, '', leftTags)
-            const signed = await signWithSigner(unsigned, effectiveSigner, effectivePrivateKey)
-            // Determine relays for the old hub
-            const hubStore = (await import('@/stores/hubStore')).useHubStore.getState()
-            const oldHubData = hubStore.hubs[oldHub]
-            const oldRelays = oldHubData
-              ? [...new Set(oldHubData.generalRelays)].filter(Boolean)
-              : []
-            if (oldRelays.length > 0) {
-              await publishToSpecificRelays(getPublishRelays(oldRelays), signed)
-            } else {
-              await publishToSpecificRelays(getPublishRelays(), signed)
+            // v2: author the "left" as our pseudonym P (matches the "joined" entry's P so
+            // the sidebar flips it to left); v1: author as R. Null ⇒ v2 non-SKD ⇒ skip.
+            const signed = await signVoicePresence(oldHub, leftTags, effectiveSigner, effectivePrivateKey)
+            if (signed) {
+              // Determine relays for the old hub
+              const hubStore = (await import('@/stores/hubStore')).useHubStore.getState()
+              const oldHubData = hubStore.hubs[oldHub]
+              const oldRelays = oldHubData
+                ? [...new Set(oldHubData.generalRelays)].filter(Boolean)
+                : []
+              // v2: hub relays ONLY (P/O-authored "left" presence — keep it off R's personal relays).
+              const { isV2: isV2Old } = await import('@/lib/hub/version')
+              await publishToSpecificRelays(getPublishRelays(oldRelays, { hubOnly: !!oldHubData && isV2Old(oldHubData) }), signed)
+              console.log('[VoiceStore] Published "left" for old channel before switching')
             }
-            console.log('[VoiceStore] Published "left" for old channel before switching')
           } catch (err) {
             console.warn('[VoiceStore] Failed to publish leave for old channel:', err)
           }
@@ -500,14 +596,35 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
       // Terminate old E2EE Workers
       cleanupE2EEWorkers()
 
-      // Purge own presence from old hub (same fix as leaveChannel)
+      // Purge own presence from old hub (same fix as leaveChannel). On v2 our wire
+      // identity is our pseudonym P (currentVoiceIdentity), not R — filter by both.
       const myPubkey = useUserStore.getState().pubkey
-      if (myPubkey && oldHub) {
+      const myOldVoiceId = get().currentVoiceIdentity
+      if ((myPubkey || myOldVoiceId) && oldHub) {
         set((s) => {
           const entries = s.presenceByHub[oldHub] || []
-          const filtered = entries.filter((p) => p.pubkey !== myPubkey)
+          const filtered = entries.filter((p) => p.pubkey !== myPubkey && p.pubkey !== myOldVoiceId)
           return { presenceByHub: { ...s.presenceByHub, [oldHub]: filtered } }
         })
+      }
+    }
+
+    // ── v2 identity: connect to the SFU as our member pseudonym P (never R) ──
+    // The SAME P is used as the room identity AND the DataChannel label, keeping them
+    // consistent with the P-authored presence/host events. v1 hubs use `identity` (R).
+    const v2Id = await resolveVoiceIdentity(hubDTag)
+    let effectiveIdentity = identity
+    if (v2Id) {
+      effectiveIdentity = v2Id.pPub
+    } else {
+      // A v2 hub whose signer can't do NIP-SKD would otherwise leak R to the SFU and
+      // to peers — refuse to join rather than connect in the clear (same as messages).
+      const { useHubStore } = await import('@/stores/hubStore')
+      const hubData = useHubStore.getState().hubs[hubDTag]
+      const { isV2 } = await import('@/lib/hub/version')
+      if (hubData && isV2(hubData)) {
+        set({ connectionState: 'disconnected', _joinInProgress: false })
+        throw new Error('This hub is private (v2) — use the DEN client or a NIP-SKD signer to join voice.')
       }
     }
 
@@ -519,6 +636,7 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
       currentChannelId: channelId,
       currentHubDTag: hubDTag,
       currentHostPubkey: hostPubkey,
+      currentVoiceIdentity: effectiveIdentity,
       participants: {},
       remoteTracks: {},
       activeSpeakers: [],
@@ -545,23 +663,46 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
       }
     } catch { }
 
-    // ── E2EE: derive key from hub secret and set on provider ──
+    // ── E2EE: derive the frame-encryption key and set it on the provider ──
+    // A group-scoped voice channel must E2EE media with that GROUP's secret + epoch
+    // (an access-control boundary), NOT the hub-wide secret — otherwise any hub member
+    // could decrypt a private group's call. Hub-wide channels keep the hub secret.
+    // This is version-independent: it applies to both v1 and v2 group channels.
     let e2eeEnabled = false
-    if (hubSecret && supportsE2EE()) {
+    let e2eeSecretHex: string | undefined = hubSecret
+    let e2eeEpoch = 0
+    let e2eeGroupId: string | null = null
+    {
+      const { useHubStore } = await import('@/stores/hubStore')
+      const hub = useHubStore.getState().hubs[hubDTag]
+      const { getChannelGroupId } = await import('@/lib/hub/permissions')
+      e2eeGroupId = hub ? getChannelGroupId(hub, channelId) : null
+      if (e2eeGroupId) {
+        e2eeSecretHex = useHubStore.getState().groupSecrets[hubDTag]?.[e2eeGroupId]
+        e2eeEpoch = hub?.groupedRoles?.find((g) => g.groupId === e2eeGroupId)?.epoch ?? hub?.epoch ?? 0
+      } else {
+        e2eeEpoch = hub?.epoch || 0
+      }
+    }
+    if (e2eeSecretHex && supportsE2EE()) {
       try {
-        const hubStore = await import('@/stores/hubStore')
-        const hub = hubStore.useHubStore.getState().hubs[hubDTag]
-        const epoch = hub?.epoch || 0
-        const secretBytes = new Uint8Array(hubSecret.match(/.{2}/g)!.map((b: string) => parseInt(b, 16)))
-        const { cryptoKey, rawKeyBytes } = await deriveE2EEKey(secretBytes, epoch)
+        const secretBytes = new Uint8Array(e2eeSecretHex.match(/.{2}/g)!.map((b: string) => parseInt(b, 16)))
+        const { cryptoKey, rawKeyBytes } = await deriveE2EEKey(secretBytes, e2eeEpoch)
         provider.setEncryptionKey(cryptoKey, rawKeyBytes)
         e2eeEnabled = true
-        console.log(`[VoiceStore] E2EE enabled — epoch ${epoch}`)
+        console.log(`[VoiceStore] E2EE enabled — epoch ${e2eeEpoch}${e2eeGroupId ? ' (group)' : ''}`)
       } catch (err) {
         console.warn('[VoiceStore] Failed to derive E2EE key:', err)
       }
     } else if (!supportsE2EE()) {
       console.log('[VoiceStore] E2EE not supported by this browser')
+    }
+
+    // A group-scoped channel whose group key we don't hold must NOT fall back to sending media in
+    // the clear (that's exactly the boundary we're protecting). Refuse rather than leak the call.
+    if (e2eeGroupId && !e2eeSecretHex && supportsE2EE()) {
+      set({ connectionState: 'disconnected', _joinInProgress: false })
+      throw new Error('You do not have this channel’s group key — cannot join its voice call.')
     }
 
     // Wire up callbacks
@@ -679,8 +820,9 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
         const senderPubkey = dcMap[senderIdentity] || senderIdentity
 
         // Never treat our own (possibly ghost/duplicate) session as a remote
-        // participant — that is what produced runaway self-cards on rejoin.
-        if (senderPubkey === useUserStore.getState().pubkey) return
+        // participant — that is what produced runaway self-cards on rejoin. On v2 our
+        // wire identity is our pseudonym P (currentVoiceIdentity), so check both.
+        if (senderPubkey === useUserStore.getState().pubkey || senderPubkey === get().currentVoiceIdentity) return
 
         if (data.type === 'state') {
           // Update heartbeat timestamp for this participant
@@ -861,10 +1003,10 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
       },
     })
 
-    // Connect
+    // Connect (as P on v2, R on v1 — see effectiveIdentity above)
     const roomName = `${hubDTag}:${channelId}`
     try {
-      await provider.connect(roomName, identity)
+      await provider.connect(roomName, effectiveIdentity)
     } catch (err) {
       console.error('[VoiceStore] Provider connect failed:', err)
       cleanupE2EEWorkers()
@@ -874,6 +1016,7 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
         currentChannelId: null,
         currentHubDTag: null,
         currentHostPubkey: null,
+        currentVoiceIdentity: null,
         isE2EE: false,
         _joinInProgress: false,
       })
@@ -1239,9 +1382,10 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
     // Play join sound for local user
     playSoundEffect('join')
 
-    // Create our publishing DataChannel
+    // Create our publishing DataChannel — labeled with our wire identity (P on v2, R
+    // on v1) so peers subscribe via `state-${P}` consistently with presence.
     try {
-      await provider.createDataChannel(`state-${identity}`)
+      await provider.createDataChannel(`state-${effectiveIdentity}`)
       console.log('[VoiceStore] DataChannel created for state broadcasting')
     } catch (err) {
       console.warn('[VoiceStore] Failed to create DataChannel:', err)
@@ -1324,6 +1468,41 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
     }
   },
 
+  rekeyE2EEForRotation: async (hubDTag, relays, signer, privateKey) => {
+    const s = get()
+    if (s.connectionState !== 'connected' || !s.provider || s.currentHubDTag !== hubDTag || !s.currentChannelId) return
+    const { useHubStore } = await import('@/stores/hubStore')
+    const hub = useHubStore.getState().hubs[hubDTag]
+    if (!hub) return
+    const { getChannelGroupId } = await import('@/lib/hub/permissions')
+    const groupId = getChannelGroupId(hub, s.currentChannelId)
+    let secretHex: string | undefined
+    let epoch = 0
+    if (groupId) {
+      secretHex = useHubStore.getState().groupSecrets[hubDTag]?.[groupId]
+      epoch = hub.groupedRoles?.find((g) => g.groupId === groupId)?.epoch ?? hub.epoch ?? 0
+    } else {
+      secretHex = useHubStore.getState().hubSecrets[hubDTag]
+      epoch = hub.epoch || 0
+    }
+    if (!secretHex) {
+      // We can't derive the new epoch's key → WE were kicked/lost access. Self-disconnect from the call
+      // (the frame key has rotated; we couldn't decrypt new audio anyway).
+      console.warn('[VoiceStore] Lost access after rotation — leaving the call')
+      await get().leaveChannel(relays, signer, privateKey)
+      return
+    }
+    if (!supportsE2EE()) return
+    try {
+      const secretBytes = new Uint8Array(secretHex.match(/.{2}/g)!.map((b: string) => parseInt(b, 16)))
+      const { cryptoKey, rawKeyBytes } = await deriveE2EEKey(secretBytes, epoch)
+      s.provider.setEncryptionKey(cryptoKey, rawKeyBytes)
+      console.log(`[VoiceStore] E2EE re-keyed to epoch ${epoch}${groupId ? ' (group)' : ''} after a kick/rotation`)
+    } catch (err) {
+      console.warn('[VoiceStore] Failed to re-key E2EE after rotation:', err)
+    }
+  },
+
   leaveChannel: async (relays, signer, privateKey) => {
     // Play leave sound for local user
     playSoundEffect('leave')
@@ -1392,24 +1571,29 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
         ['host', ''],
         ['session', ''],
       ]
-      // Background sign + publish — don't block disconnect
-      signWithSigner(createUnsignedEvent(KINDS.VOICE_PRESENCE, '', tags), effectiveSigner, effectivePrivateKey)
-        .then((signed) => {
-          const publishRelays = effectiveRelays.length > 0
-            ? getPublishRelays(effectiveRelays)
-            : getPublishRelays()
+      // Background sign + publish — don't block disconnect. v2 authors the "left" as our
+      // pseudonym P (with an ir tag); v1 authors as R. Null ⇒ v2 non-SKD ⇒ nothing to publish.
+      signVoicePresence(currentHubDTag, tags, effectiveSigner, effectivePrivateKey)
+        .then(async (signed) => {
+          if (!signed) return
+          // v2: hub relays ONLY (P/O-authored "left" presence — keep it off R's personal relays).
+          const { isV2: isV2Lv } = await import('@/lib/hub/version')
+          const lvHub = (await import('@/stores/hubStore')).useHubStore.getState().hubs[currentHubDTag]
+          const publishRelays = getPublishRelays(effectiveRelays, { hubOnly: !!lvHub && isV2Lv(lvHub) })
           return publishToSpecificRelays(publishRelays, signed)
         })
         .catch((err) => console.warn('[VoiceStore] Failed to publish leave:', err))
     }
 
     // Immediately purge our own presence from presenceByHub so the sidebar
-    // and cross-device check don't see a stale 'joined' entry.
+    // and cross-device check don't see a stale 'joined' entry. On v2 our wire identity
+    // is our pseudonym P (currentVoiceIdentity), not R — filter by both.
     const myPubkey = useUserStore.getState().pubkey
-    if (myPubkey && currentHubDTag) {
+    const myVoiceId = get().currentVoiceIdentity
+    if ((myPubkey || myVoiceId) && currentHubDTag) {
       set((s) => {
         const entries = s.presenceByHub[currentHubDTag] || []
-        const filtered = entries.filter((p) => p.pubkey !== myPubkey)
+        const filtered = entries.filter((p) => p.pubkey !== myPubkey && p.pubkey !== myVoiceId)
         return { presenceByHub: { ...s.presenceByHub, [currentHubDTag]: filtered } }
       })
     }
@@ -1420,6 +1604,7 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
       currentHubDTag: null,
       currentSessionId: null,
       currentHostPubkey: null,
+      currentVoiceIdentity: null,
       connectionState: 'disconnected',
       participants: {},
       remoteTracks: {},
@@ -2146,13 +2331,25 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
     if (groupId) tags.push(['group', groupId])
 
     const unsigned = createUnsignedEvent(KINDS.VOICE_HOST, encryptedContent, tags)
-    const signed = await signWithSigner(unsigned, signer, privateKey)
-
-    if (relays.length > 0) {
-      await publishToSpecificRelays(getPublishRelays(relays), signed)
+    // v2: author the host event under our member pseudonym P (EVERY user, owner included),
+    // so it's consistent with the P we connect + publish presence as, and never leaks R.
+    // v1: author as the real key R (unchanged).
+    const { useHubStore } = await import('@/stores/hubStore')
+    const hub = useHubStore.getState().hubs[hubDTag]
+    const { isV2 } = await import('@/lib/hub/version')
+    let signed: Event
+    if (hub && isV2(hub)) {
+      const id = await resolveVoiceIdentity(hubDTag)
+      if (!id) return // v2 hub, non-SKD signer — never author the host event as R
+      signed = await id.signEvent({ ...unsigned, pubkey: id.pPub })
     } else {
-      await publishToSpecificRelays(getPublishRelays(), signed)
+      signed = await signWithSigner(unsigned, signer, privateKey)
     }
+
+    // v2: hub relays ONLY — the host event is authored under P/O; publishing it to the user's personal
+    // relays would tie that pseudonym to R by relay footprint. (Empty relays + hubOnly ⇒ nothing published,
+    // which is correct — there's nowhere hub-scoped to send it.)
+    await publishToSpecificRelays(getPublishRelays(relays, { hubOnly: !!hub && isV2(hub) }), signed)
   },
 
   // ── DataChannel state broadcast (replaces heartbeat) ──
@@ -2251,12 +2448,14 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
 
       try {
         const { provider } = get()
-        // Collect active track names for the Nostr event (still needed for initial discovery)
+        // Collect active track names for the Nostr event (still needed for initial discovery).
+        // Track names are prefixed with our SFU identity — our pseudonym P on v2, R on v1
+        // (currentVoiceIdentity) — so the SFU track name `${P}:${kind}` matches what peers pull.
+        const myVoiceId = get().currentVoiceIdentity || useUserStore.getState().pubkey
         const publishedTracks: string[] = []
         if (provider) {
-          const pubkey = useUserStore.getState().pubkey
           for (const kind of provider.getPublishedTrackKinds()) {
-            publishedTracks.push(`${pubkey}:${kind}`)
+            publishedTracks.push(`${myVoiceId}:${kind}`)
           }
         }
 
@@ -2273,13 +2472,14 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
           ['pitch', myPitch.toString()],
           ['sphere', mySphereRadius.toString()],
         ]
-        const unsigned = createUnsignedEvent(KINDS.VOICE_PRESENCE, '', tags)
-        const signed = await signWithSigner(unsigned, signer, privateKey)
-        if (relays.length > 0) {
-          await publishToSpecificRelays(getPublishRelays(relays), signed)
-        } else {
-          await publishToSpecificRelays(getPublishRelays(), signed)
-        }
+        // v2: author the heartbeat as our pseudonym P + attach the ir reveal tag; v1: as R.
+        // Null ⇒ v2 hub with a non-SKD signer ⇒ nothing to publish (voice won't work for them).
+        const signed = await signVoicePresence(hubDTag, tags, signer, privateKey)
+        if (!signed) return
+        // v2: hub relays ONLY (P/O-authored presence keepalive — keep it off R's personal relays).
+        const { isV2: isV2Ka } = await import('@/lib/hub/version')
+        const kaHub = (await import('@/stores/hubStore')).useHubStore.getState().hubs[hubDTag]
+        await publishToSpecificRelays(getPublishRelays(relays, { hubOnly: !!kaHub && isV2Ka(kaHub) }), signed)
       } catch (err) {
         console.warn('[VoiceStore] Keepalive publish failed:', err)
       }

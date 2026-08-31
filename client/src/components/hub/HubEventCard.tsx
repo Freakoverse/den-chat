@@ -20,6 +20,7 @@ import { HubInfoModal } from '@/components/hub/HubInfoModal'
 import {
   Info, UserPlus, Zap, AlertTriangle, Loader2, Check, Hash, X,
 } from 'lucide-react'
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { HubJoinWarningModal, isJoinWarningDismissed } from '@/components/hub/HubJoinWarningModal'
 import { MAX_HUB_LIST_ENTRIES } from '@/lib/hub/hubLimits'
 
@@ -142,6 +143,7 @@ export function HubEventCard({ identifier, pubkey, relays }: HubEventCardProps) 
           minPow,
           joinMinPow: wjTagVal ? parseInt(wjTagVal, 10) : 0,
           nsfw,
+          version: (() => { const v = latest.tags.find(t => t[0] === 'version')?.[1]; return v ? (parseInt(v, 10) || undefined) : undefined })(),
         }
 
         setLocalHubData(parsed)
@@ -184,14 +186,24 @@ export function HubEventCard({ identifier, pubkey, relays }: HubEventCardProps) 
       const { getPublishRelays } = await import('@/stores/postingBehaviourStore')
       const hubRelays = [...(hubData.generalRelays || [])]
 
-      // Create join request event
-      let unsigned = createUnsignedEvent(KINDS.JOIN_REQUEST, '', [
-        ['d', hubData.dTag],
-      ])
-
-      // Mine join PoW + sign (with automatic retry if signer invalidates PoW)
-      const signed = await mineAndSign(unsigned, hubData.joinMinPow, myPubkey, signer, privateKey)
-      await publishToSpecificRelays(getPublishRelays(hubRelays), signed)
+      // Create join request event — v2 hubs use a sealed-sender join (§6.3).
+      const { isV2 } = await import('@/lib/hub/version')
+      let signed
+      if (isV2(hubData)) {
+        const { buildV2JoinRequest } = await import('@/lib/hub/v2join')
+        const { canUseV2 } = await import('@/lib/crypto/skd')
+        if (!canUseV2({ privateKey, signer })) {
+          throw new Error('This hub is private (v2) — use the DEN client or a NIP-SKD signer to join.')
+        }
+        const coord = `${KINDS.HUB_EVENT}:${hubData.creatorPubkey}:${hubData.dTag}`
+        signed = await buildV2JoinRequest({ hubDTag: hubData.dTag, ownerPub: hubData.creatorPubkey, coord, joinPow: hubData.joinMinPow || 0, rPub: myPubkey, privateKey, signer })
+      } else {
+        const unsigned = createUnsignedEvent(KINDS.JOIN_REQUEST, '', [['d', hubData.dTag]])
+        signed = await mineAndSign(unsigned, hubData.joinMinPow, myPubkey, signer, privateKey)
+      }
+      // v2: hub relays ONLY (mirrors DiscoverPage) — the sealed join request carries the hub coordinate;
+      // fanning it out to the applicant's personal NIP-65 relays lets an observer correlate the addr key → R.
+      await publishToSpecificRelays(getPublishRelays(hubRelays, { hubOnly: isV2(hubData) }), signed)
 
       // Add to user's hub list
       if (!isAlreadyInList) {
@@ -209,8 +221,9 @@ export function HubEventCard({ identifier, pubkey, relays }: HubEventCardProps) 
         const newEntries = [...hubEntries, newEntry]
         setHubEntries(newEntries, folders)
 
-        // Publish updated hub list
-        const hubListEvent = createHubListEvent(
+        // Publish updated hub list (failover across all the user's relays — see hubListPrivacy)
+        const { buildHubListEvent, publishHubList } = await import('@/lib/hub/hubListPrivacy')
+        const hubListEvent = await buildHubListEvent(
           newEntries.map(e => ({
             dTag: e.dTag,
             relayHint: e.relayHint,
@@ -220,7 +233,7 @@ export function HubEventCard({ identifier, pubkey, relays }: HubEventCardProps) 
           folders,
         )
         const signedList = await signWithSigner(hubListEvent, signer, privateKey)
-        await publishToSpecificRelays(getPublishRelays(), signedList)
+        await publishHubList(signedList)
       }
 
       setJoined(true)
@@ -289,6 +302,18 @@ export function HubEventCard({ identifier, pubkey, relays }: HubEventCardProps) 
             <p className="text-[10px] text-muted-foreground">by {creatorName}</p>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className={`px-1.5 py-0.5 rounded text-[9px] font-medium cursor-help ${hubData.version === 2 ? 'bg-violet-500/15 text-violet-400' : 'bg-sky-500/15 text-sky-400'}`}>
+                  {hubData.version === 2 ? 'Private' : 'Public'}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="text-xs max-w-[240px]">
+                {hubData.version === 2
+                  ? "Messages are encrypted, activity is hidden behind mask addresses, and a hub's structure is hidden."
+                  : "Messages are encrypted/hidden, but all other activity and a hub's structure are public."}
+              </TooltipContent>
+            </Tooltip>
             {hubData.nsfw && (
               <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-red-500/20 text-red-400">NSFW</span>
             )}

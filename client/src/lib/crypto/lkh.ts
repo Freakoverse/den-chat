@@ -278,6 +278,29 @@ export async function removeLeaves(
 // ─── Serialization ───
 
 /**
+ * Serialize a leaf to its `leaf:` line: `leaf:nodeId:pubkey:roles:encKey[:flags]`.
+ * (v2 leaves are keyed on the pseudonym P via `pubkey`; the P→R map lives in the
+ * page-level roster segment, not on the leaf — see {@link LeafPage}.)
+ */
+function serializeLeafLine(leaf: LkhLeaf): string {
+  const parts = ['leaf', leaf.nodeId, leaf.pubkey, leaf.roles, leaf.encryptedLeafKey]
+  if (leaf.flags) parts.push(leaf.flags)
+  return parts.join(':')
+}
+
+/** Parse the fields after the `leaf:` prefix into an {@link LkhLeaf}. */
+function parseLeafLine(parts: string[]): LkhLeaf {
+  return {
+    type: 'leaf',
+    nodeId: parts[0],
+    pubkey: parts[1],
+    roles: parts[2],
+    encryptedLeafKey: parts[3],
+    flags: parts[4] || undefined,
+  }
+}
+
+/**
  * Serialize an LKH tree to the line-based format specified in NIP-CHAT §5.2.
  */
 export function serializeTree(tree: LkhTree): string {
@@ -285,9 +308,7 @@ export function serializeTree(tree: LkhTree): string {
 
   // Leaves
   for (const leaf of tree.leaves) {
-    const parts = ['leaf', leaf.nodeId, leaf.pubkey, leaf.roles, leaf.encryptedLeafKey]
-    if (leaf.flags) parts.push(leaf.flags)
-    lines.push(parts.join(':'))
+    lines.push(serializeLeafLine(leaf))
   }
 
   // Internal nodes
@@ -318,14 +339,7 @@ export function deserializeTree(text: string): LkhTree {
     if (trimmed.startsWith('leaf:')) {
       const parts = trimmed.slice(5).split(':')
       if (parts.length < 4) throw new Error(`Invalid leaf line: ${trimmed}`)
-      leaves.push({
-        type: 'leaf',
-        nodeId: parts[0],
-        pubkey: parts[1],
-        roles: parts[2],
-        encryptedLeafKey: parts[3],
-        flags: parts[4] || undefined,
-      })
+      leaves.push(parseLeafLine(parts))
     } else if (trimmed.startsWith('node:')) {
       const parts = trimmed.slice(5).split(':')
       if (parts.length < 5) throw new Error(`Invalid node line: ${trimmed}`)
@@ -393,7 +407,15 @@ export async function walkTreeToSecret(
   let currentId = leaf.nodeId
   let currentKey = decryptedLeafKey
 
+  // Cycle guard: the tree author controls every node's encrypted keys, so a MALICIOUS author (a hostile
+  // owner, or a facilitator whose mesh tree a vouched user parses) can craft a cycle in which every
+  // aesDecrypt legitimately succeeds and no root is ever reached — an infinite loop that hangs the tab.
+  // A legit walk visits each node at most once, so a revisit ⇒ malformed tree. (An iteration count also
+  // can't exceed the node count.)
+  const visited = new Set<string>()
   while (true) {
+    if (visited.has(currentId)) throw new Error('Cycle detected walking tree to secret — malformed tree')
+    visited.add(currentId)
     const parent = parentMap.get(currentId)
     if (!parent) throw new Error(`No parent found for node: ${currentId}`)
 
@@ -456,6 +478,12 @@ export interface LeafPage {
     encRight: string
     rawKey?: Uint8Array
   }
+  /** v2 roster segment (NIP-CHAT §5.2.1): the epoch whose secret encrypts `rosterBlob`. */
+  rosterEpoch?: number
+  /** v2 roster segment: group-encrypted { P: R } map for this page's members. */
+  rosterBlob?: string
+  /** In-memory decrypted { P: R } map (owner-side; not serialized, like rawKey). */
+  roster?: Record<string, string>
 }
 
 export interface SpineTree {
@@ -708,9 +736,7 @@ export function serializeLeafPage(page: LeafPage): string {
   const lines: string[] = []
 
   for (const leaf of page.leaves) {
-    const parts = ['leaf', leaf.nodeId, leaf.pubkey, leaf.roles, leaf.encryptedLeafKey]
-    if (leaf.flags) parts.push(leaf.flags)
-    lines.push(parts.join(':'))
+    lines.push(serializeLeafLine(leaf))
   }
 
   for (const node of page.nodes) {
@@ -719,6 +745,11 @@ export function serializeLeafPage(page: LeafPage): string {
 
   const pr = page.pageRoot
   lines.push(['page-root', pr.nodeId, pr.leftChildId, pr.rightChildId, pr.encLeft, pr.encRight].join(':'))
+
+  // v2 roster segment (group-encrypted P→R map + its epoch stamp). AES output has no ':'.
+  if (page.rosterBlob) {
+    lines.push(['roster', String(page.rosterEpoch ?? 0), page.rosterBlob].join(':'))
+  }
 
   return lines.join('\n')
 }
@@ -731,6 +762,8 @@ export function deserializeLeafPage(text: string): LeafPage {
   const leaves: LkhLeaf[] = []
   const nodes: LkhNode[] = []
   let pageRoot: LeafPage['pageRoot'] | null = null
+  let rosterEpoch: number | undefined
+  let rosterBlob: string | undefined
 
   for (const line of text.split('\n')) {
     const trimmed = line.trim()
@@ -739,14 +772,10 @@ export function deserializeLeafPage(text: string): LeafPage {
     if (trimmed.startsWith('leaf:')) {
       const parts = trimmed.slice(5).split(':')
       if (parts.length < 4) throw new Error(`Invalid leaf line: ${trimmed}`)
-      leaves.push({
-        type: 'leaf',
-        nodeId: parts[0],
-        pubkey: parts[1],
-        roles: parts[2],
-        encryptedLeafKey: parts[3],
-        flags: parts[4] || undefined,
-      })
+      leaves.push(parseLeafLine(parts))
+    } else if (trimmed.startsWith('roster:')) {
+      const parts = trimmed.slice(7).split(':')
+      if (parts.length >= 2) { rosterEpoch = parseInt(parts[0], 10) || 0; rosterBlob = parts[1] }
     } else if (trimmed.startsWith('page-root:')) {
       const parts = trimmed.slice(10).split(':')
       if (parts.length < 5) throw new Error(`Invalid page-root line: ${trimmed}`)
@@ -774,7 +803,7 @@ export function deserializeLeafPage(text: string): LeafPage {
 
   if (!pageRoot) throw new Error('No page-root found in leaf page')
 
-  return { leaves, nodes, pageRoot }
+  return { leaves, nodes, pageRoot, rosterEpoch, rosterBlob }
 }
 
 // ─── Spine Serialization ───
@@ -882,7 +911,11 @@ export async function walkPageToPageRoot(
   let currentId = leaf.nodeId
   let currentKey = decryptedLeafKey
 
+  // Cycle guard — a malicious page author can craft a cycle that decrypts forever (see walkTreeToSecret).
+  const visited = new Set<string>()
   while (true) {
+    if (visited.has(currentId)) throw new Error('Cycle detected walking page to page-root — malformed page')
+    visited.add(currentId)
     const parent = parentMap.get(currentId)
     if (!parent) throw new Error(`No parent found for node: ${currentId}`)
 
@@ -927,7 +960,11 @@ export async function walkSpineToSecret(
   let currentId = pageRootId
   let currentKey = pageRootKey
 
+  // Cycle guard — a malicious spine author can craft a cycle that decrypts forever (see walkTreeToSecret).
+  const visited = new Set<string>()
   while (true) {
+    if (visited.has(currentId)) throw new Error('Cycle detected walking spine to secret — malformed spine')
+    visited.add(currentId)
     const parent = parentMap.get(currentId)
     if (!parent) throw new Error(`No parent found for node in spine: ${currentId}`)
 

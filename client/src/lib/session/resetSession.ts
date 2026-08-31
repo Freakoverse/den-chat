@@ -18,6 +18,7 @@
  * posting behaviour, UI preferences, app-update state, and DNN node discovery.
  */
 
+import { useUserStore } from '@/stores/userStore'
 import { useDMStore } from '@/stores/dmStore'
 import { useDM04Store } from '@/stores/dm04Store'
 import { useHubStore } from '@/stores/hubStore'
@@ -37,6 +38,14 @@ import { useReportStore } from '@/stores/reportStore'
 import { useZapStore } from '@/stores/zapStore'
 import { useVoiceStore } from '@/stores/voiceStore'
 import { usePublicChatStore } from '@/stores/publicChatStore'
+import { useCalendarStore } from '@/stores/calendarStore'
+import { usePollStore } from '@/stores/pollStore'
+import { clearPKeyCache } from '@/lib/hub/hubMemberSign'
+import { clearFacListDedup } from '@/hooks/useMessages'
+import { clearVoiceDisplayCache } from '@/hooks/useVoiceDisplayPubkey'
+import { clearVirtualAvatarCache } from '@/lib/voice/virtualAvatar'
+import { clearAllCachedMessages } from '@/lib/cache/messageCache'
+import { clearCachedEvent } from '@/lib/notifications/readState'
 
 /** Any Zustand v5 store — reset it to its created (empty) state, actions included. */
 type AnyStore = { getInitialState: () => unknown; setState: (state: never, replace: true) => void }
@@ -95,7 +104,41 @@ export function resetSession(): void {
     useSocialStore, useFollowStore, useBlockStore,
     usePinStore, useForumStore, useEmojiStore, useStickerStore, useGifStore,
     useUserListsStore, useWotStore, useReportStore, useZapStore, usePublicChatStore,
+    // v2: these hold hub-scoped events whose author is the pseudonym P/Pf — a stale copy would
+    // let the next account see the prior account's cached calendar/poll data for its hubs.
+    useCalendarStore, usePollStore,
   ] as unknown as AnyStore[]
 
   for (const store of stores) hardReset(store)
+
+  // 4) Clear module-level (non-store) caches keyed by hub but NOT by account — otherwise they
+  //    return the previous account's derived pseudonyms / suppress its fetches under the new one.
+  try { clearPKeyCache() } catch { /* ignore */ }
+  try { clearVoiceDisplayCache() } catch { /* ignore */ }
+  try { clearVirtualAvatarCache() } catch { /* ignore */ }
+  // DECRYPTED message content persists in a global (non-account) IndexedDB store — wipe it so the next
+  // account on this device can't read the previous account's private-hub messages. Fire-and-forget; it
+  // repopulates from relays on the next subscription.
+  void clearAllCachedMessages().catch(() => { /* non-fatal */ })
+  // Read-state localStorage lists every hub's d-tag (incl. private v2 hubs) + last-read times in
+  // plaintext under the OUTGOING account's key — clear it so the prior account's private-hub membership
+  // doesn't linger on disk after a switch/logout (it re-syncs from the encrypted relay copy on re-login).
+  try { clearCachedEvent('hub'); clearCachedEvent('dm') } catch { /* ignore */ }
+  try { clearFacListDedup() } catch { /* ignore */ }
+  // A facilitator's `den_fac_vouched:<account>` list holds the REAL keys (R_f) of everyone they vouched
+  // into a private v2 hub — the same private-hub-membership-in-plaintext class we wipe above for hub
+  // read-state. It's account-namespaced (no cross-account leak) but still lingers on disk after logout.
+  // Clear ONLY the outgoing account's key (resetSession runs before userStore swaps pubkey, so getState()
+  // still holds the previous account) — never a blanket wipe: this list has no relay backup, so nuking
+  // another account's copy would be permanent data loss. The facilitator re-adds vouched people (by npub)
+  // if needed; the mesh tree + their access are unaffected (keyed on Pf, which persists on Blossom).
+  try {
+    const outgoing = useUserStore.getState().pubkey
+    if (outgoing) localStorage.removeItem(`den_fac_vouched:${outgoing}`)
+  } catch { /* ignore */ }
+  // `den_last_active_hub` is a plaintext, non-account-scoped startup hint holding the last hub's d-tag —
+  // if that was a private v2 hub, it's a "this device was last in private hub X" footprint that outlives
+  // logout, the same class as the read-state d-tags cleared above. Trivially recoverable (re-set on the
+  // next setActiveHub), so clear it outright rather than namespacing.
+  try { localStorage.removeItem('den_last_active_hub') } catch { /* ignore */ }
 }

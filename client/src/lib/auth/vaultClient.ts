@@ -11,6 +11,7 @@
  */
 
 import type { ISigner } from '@/stores/userStore'
+import type { SkdSigner } from '@/lib/crypto/skd'
 import type { BackupPayloadV1 } from '@/lib/auth/backupCrypto'
 
 /**
@@ -149,13 +150,13 @@ class VaultClient {
   markActive(pubkey: string) { this.activePubkey = pubkey }
   lock() { return this.call('lock') }
   removeAccount(pubkey: string, pin: string) { return this.call<{ ok: boolean }>('removeAccount', { pubkey, pin }) }
-  exportBackup(pubkey: string, pin: string) { return this.call<{ payload: BackupPayloadV1 }>('exportBackup', { pubkey, pin }) }
   renameSeed(seedId: string, name: string) { return this.call<{ ok: boolean }>('renameSeed', { seedId, name }) }
   renameAccount(pubkey: string, name: string) { return this.call<{ ok: boolean }>('renameAccount', { pubkey, name }) }
   changePin(pubkey: string, currentPin: string, newPin: string, newHint?: string) { return this.call<{ ok: boolean }>('changePin', { pubkey, currentPin, newPin, newHint }) }
   // ── Interactive (PIN/secret entered in the vault overlay) ──
   deriveInteractive(seedId: string) { return this.call<{ pubkey: string }>('deriveInteractive', { seedId }, 5 * 60_000) }
   removeInteractive(pubkey: string) { return this.call<{ ok: boolean }>('removeInteractive', { pubkey }, 5 * 60_000) }
+  verifyPinInteractive(pubkey: string) { return this.call<{ ok: boolean }>('verifyPinInteractive', { pubkey }, 5 * 60_000) }
   exportRevealInteractive(pubkey: string) { return this.call<{ ok: boolean }>('exportRevealInteractive', { pubkey }, 10 * 60_000) }
   changePinInteractive(pubkey: string) { return this.call<{ ok: boolean }>('changePinInteractive', { pubkey }, 5 * 60_000) }
   /** Build + sign a blockchain transaction from structured params (the vault derives the sighash + confirms with PIN). */
@@ -168,6 +169,12 @@ class VaultClient {
   nip04Decrypt(pubkey: string, ciphertext: string) { return this.callWithRelock<string>('nip04Decrypt', { pubkey, ciphertext }) }
   nip44Encrypt(pubkey: string, plaintext: string) { return this.callWithRelock<string>('nip44Encrypt', { pubkey, plaintext }) }
   nip44Decrypt(pubkey: string, ciphertext: string) { return this.callWithRelock<string>('nip44Decrypt', { pubkey, ciphertext }) }
+
+  // ── NIP-SKD sub-key operations (v2 hubs) — the private material stays in the vault ──
+  skdGetSubkeyPubkey(context: string, peerPub?: string) { return this.callWithRelock<string>('skdGetSubkeyPubkey', { context, peerPub }) }
+  skdSignAsSubkey(context: string, event: unknown, peerPub?: string) { return this.callWithRelock<Record<string, unknown>>('skdSignAsSubkey', { context, event, peerPub }) }
+  skdNip44EncryptAsSubkey(context: string, recipientPub: string, plaintext: string, peerPub?: string) { return this.callWithRelock<string>('skdNip44EncryptAsSubkey', { context, recipientPub, plaintext, peerPub }) }
+  skdNip44DecryptAsSubkey(context: string, senderPub: string, ciphertext: string, peerPub?: string) { return this.callWithRelock<string>('skdNip44DecryptAsSubkey', { context, senderPub, ciphertext, peerPub }) }
 }
 
 let singleton: VaultClient | null = null
@@ -176,8 +183,9 @@ export function getVaultClient(): VaultClient {
   return singleton
 }
 
-/** Adapter so the rest of the app can use the vault as a standard ISigner. */
-export function vaultSigner(): ISigner {
+/** Adapter so the rest of the app can use the vault as a standard ISigner.
+ *  Exposes the NIP-SKD surface too, so the vault can be used for v2 hubs (canUseV2 feature-detects `.skd`). */
+export function vaultSigner(): ISigner & SkdSigner {
   const v = getVaultClient()
   return {
     getPublicKey: () => v.getPublicKey(),
@@ -189,6 +197,13 @@ export function vaultSigner(): ISigner {
     nip44: {
       encrypt: (pubkey, plaintext) => v.nip44Encrypt(pubkey, plaintext),
       decrypt: (pubkey, ciphertext) => v.nip44Decrypt(pubkey, ciphertext),
+    },
+    // NIP-SKD: derive + act as v2 hub pseudonyms (O/P/Pf + join addr) without the sub-key ever leaving the vault.
+    skd: {
+      getSubkeyPubkey: (context, peerPub) => v.skdGetSubkeyPubkey(context, peerPub),
+      signAsSubkey: (context, event, peerPub) => v.skdSignAsSubkey(context, event, peerPub),
+      nip44EncryptAsSubkey: (context, recipientPub, plaintext, peerPub) => v.skdNip44EncryptAsSubkey(context, recipientPub, plaintext, peerPub),
+      nip44DecryptAsSubkey: (context, senderPub, ciphertext, peerPub) => v.skdNip44DecryptAsSubkey(context, senderPub, ciphertext, peerPub),
     },
   }
 }

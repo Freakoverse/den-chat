@@ -13,8 +13,15 @@
  * privateKey (nsec/seed) paths bypass the guard entirely (local crypto).
  */
 
-import { nip04 } from 'nostr-tools'
+import { nip04, nip44 } from 'nostr-tools'
 import type { ISigner } from '@/stores/userStore'
+
+/** hex → bytes (for nip44 conversation-key derivation from a local private key). */
+function hexToBytes(hex: string): Uint8Array {
+  const out = new Uint8Array(hex.length / 2)
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16)
+  return out
+}
 
 /* ─── Constants ─── */
 
@@ -237,12 +244,13 @@ export async function guardedDecrypt(
   privateKey: string | null,
   protocol: 'nip04' | 'nip44',
 ): Promise<string> {
-  // Fast path: local key — no guard
+  // Fast path: local key — no guard (local crypto, no signer round-trip).
   if (privateKey) {
     if (protocol === 'nip04') {
       return nip04.decrypt(privateKey, pubkey, ciphertext)
     }
-    throw new Error('NIP-44 local decrypt should be handled by nip17.ts directly')
+    // Local NIP-44 decrypt (v2 hub leaf-key unwraps, group secrets, etc.).
+    return nip44.v2.decrypt(ciphertext, nip44.v2.utils.getConversationKey(hexToBytes(privateKey), pubkey))
   }
 
   if (!signer) {
@@ -291,12 +299,13 @@ export async function guardedEncrypt(
   privateKey: string | null,
   protocol: 'nip04' | 'nip44',
 ): Promise<string> {
-  // Fast path: local key
+  // Fast path: local key (local crypto, no signer round-trip).
   if (privateKey) {
     if (protocol === 'nip04') {
       return nip04.encrypt(privateKey, pubkey, plaintext)
     }
-    throw new Error('NIP-44 local encrypt should be handled by nip17.ts directly')
+    // Local NIP-44 encrypt (v2 hub leaf-key wraps, group secrets, etc.).
+    return nip44.v2.encrypt(plaintext, nip44.v2.utils.getConversationKey(hexToBytes(privateKey), pubkey))
   }
 
   if (!signer) {

@@ -14,11 +14,12 @@ import { useHubStore, type HubData, type HubMember, type HubPrefs, type HideEntr
 import { useMessageStore } from '@/stores/messageStore'
 import { useUserStore } from '@/stores/userStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
+import { useMyVoicePubkey } from '@/hooks/useVoiceDisplayPubkey'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { truncateNpub, cn } from '@/lib/utils'
 import { nip19 } from 'nostr-tools'
 import {
-  X, Search, Loader2, Check, AlertTriangle, SlidersHorizontal, UserCheck, Shield, ShieldOff, ShieldBan, Lock, LockOpen,
+  X, Search, Loader2, Check, Copy, AlertTriangle, SlidersHorizontal, UserCheck, Shield, ShieldOff, ShieldBan, Lock, LockOpen,
   Users, Plus, Trash2, Volume2, Globe, Server, Wifi, WifiOff, Flag, MessagesSquare, Undo2, EyeOff, RefreshCw, Bell,
   BellOff, AtSign, UsersRound, Radio, Tag, ChevronLeft, ChevronRight, BookOpen,
 } from 'lucide-react'
@@ -33,6 +34,7 @@ import type { HubMuteSettings } from '@/lib/notifications/readState'
 import { useReportStore, type HubReport } from '@/stores/reportStore'
 import type { VoiceProviderType, CloudflareConfig, LiveKitConfig } from '@/lib/voice/types'
 import { getPermissionsForUser } from '@/lib/hub/permissions'
+import { isV2 } from '@/lib/hub/version'
 import { Pagination } from '@/components/ui/Pagination'
 import { CustomSelect } from '@/components/ui/custom-select'
 
@@ -53,6 +55,29 @@ const DEFAULT_PREFS: HubPrefs = {
 }
 
 type UserHubTab = 'messages' | 'notifications' | 'voice' | 'reports' | 'moderation' | 'hidden'
+
+// Persist a v2 facilitator's own vouched-R list per hub. A v2 mesh tree is keyed on opaque `Pf`s the
+// facilitator can't reverse to `R`, so we remember who we vouched (by real npub) locally — for the
+// list display (real profiles) and for removal (we re-derive their `Pf` from the stored `R`).
+//
+// SECURITY: this list contains real member keys `R`, so it MUST be namespaced by the logged-in account.
+// The legacy un-namespaced key leaked one account's vouched-R list to any OTHER account on the same
+// device (and was never cleared on switch); we delete it on access. No migration — mis-assigning the
+// old shared blob to whichever account loads first would itself be a cross-account R leak; a facilitator
+// simply re-derives their list as they vouch. (Pf pseudonyms in the mesh tree are the durable record.)
+const FAC_VOUCHED_LEGACY_KEY = 'den_fac_vouched'
+function vouchedKey(account: string): string { return `den_fac_vouched:${account}` }
+function loadVouchedRs(dTag: string, account: string | null): string[] {
+  if (!account) return []
+  try {
+    if (localStorage.getItem(FAC_VOUCHED_LEGACY_KEY)) localStorage.removeItem(FAC_VOUCHED_LEGACY_KEY)
+    const m = JSON.parse(localStorage.getItem(vouchedKey(account)) || '{}'); return Array.isArray(m[dTag]) ? m[dTag] : []
+  } catch { return [] }
+}
+function saveVouchedRs(dTag: string, rs: string[], account: string | null): void {
+  if (!account) return
+  try { const m = JSON.parse(localStorage.getItem(vouchedKey(account)) || '{}'); m[dTag] = rs; localStorage.setItem(vouchedKey(account), JSON.stringify(m)) } catch { /* non-fatal */ }
+}
 
 export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHubSettingsModalProps) {
   const pubkey = useUserStore((s) => s.pubkey)
@@ -87,6 +112,9 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
   const [meshBusy, setMeshBusy] = useState(false)
   const [addNpub, setAddNpub] = useState('')
   const [meshCreated, setMeshCreated] = useState(false)
+  const [meshUpdatedEpoch, setMeshUpdatedEpoch] = useState<number | null>(null)
+  const [myFacHandle, setMyFacHandle] = useState<string | null>(null) // v2: our P_fac npub, to share with vouched people
+  const [copiedFacHandle, setCopiedFacHandle] = useState(false)
 
   // ── Moderation state ──
   const [myBanList, setMyBanList] = useState<string[]>([])
@@ -123,6 +151,9 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
   const [voiceSaved, setVoiceSaved] = useState(false)
   const publishHostAvailability = useVoiceStore((s) => s.publishHostAvailability)
   const hostsByHub = useVoiceStore((s) => s.hostsByHub)
+  // v2: our voice host/presence are authored under our member pseudonym P, not R — recognize
+  // "our own host" by this (falls back to R on v1 / while P resolves).
+  const myVoicePubkey = useMyVoicePubkey(hub.dTag)
 
   // ── Voice scope state ──
   // null = hub-wide, string = groupId
@@ -165,9 +196,10 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
 
       setVoiceHostStatus(saved.status)
     } else {
-      // Check if there's an existing published host event for this scope
+      // Check if there's an existing published host event for this scope. v2: our host is authored
+      // under our member pseudonym P (myVoicePubkey), not R, so recognize it by that.
       const hosts = hostsByHub[hub.dTag] || []
-      const myHost = hosts.find((h) => h.pubkey === pubkey && (newScope ? h.groupId === newScope : !h.groupId))
+      const myHost = hosts.find((h) => h.pubkey === myVoicePubkey && (newScope ? h.groupId === newScope : !h.groupId))
       if (myHost?.config) {
         const cfg = myHost.config as any
         // Check if the config has actual credentials (not just the stub { provider: '...' })
@@ -263,7 +295,7 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
     setVoiceScope(newScope)
     setVoiceError(null)
     setVoiceSaved(false)
-  }, [voiceScope, voiceProviderType, cfAppId, cfApiToken, cfTurnKeyId, cfTurnToken, lkUrl, lkApiKey, lkApiSecret, voiceHostStatus, voiceScopeConfigs, hostsByHub, hub.dTag, pubkey, groupSecrets, hubSecrets])
+  }, [voiceScope, voiceProviderType, cfAppId, cfApiToken, cfTurnKeyId, cfTurnToken, lkUrl, lkApiKey, lkApiSecret, voiceHostStatus, voiceScopeConfigs, hostsByHub, hub.dTag, pubkey, myVoicePubkey, groupSecrets, hubSecrets])
 
   // Is current user a direct member (in the creator's tree)?
   const isMember = useMemo(() => {
@@ -324,9 +356,25 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
         try {
           const { fetchEvents: fetchEvt } = await import('@/lib/nostr/relay-pool')
           const { KINDS } = await import('@/lib/crypto/constants')
-          const { downloadTextFromBlossom, parseIndexFile, downloadBanList } = await import('@/lib/blossom')
+          const { downloadTextFromBlossom, parseIndexFile, downloadBanList, downloadBanListV2 } = await import('@/lib/blossom')
 
-          const jrs = await fetchEvt({ kinds: [KINDS.JOIN_REQUEST], authors: [pubkey], '#d': [hub.dTag], limit: 1 })
+          // v2: our own ban-list JR is authored under our member pseudonym P (not R), and the ban
+          // pages are encrypted under the hub secret — query by P and decrypt with that secret, so
+          // neither our real key R nor the banned members' real keys leak.
+          let authorPk = pubkey
+          let hubSecretBytesV2: Uint8Array | null = null
+          if (isV2(hub)) {
+            const { hubMemberIdentity } = await import('@/lib/hub/hubMemberSign')
+            const identity = await hubMemberIdentity(hub, { privateKey, signer })
+            if (!identity) { setModBanLoading(false); return }
+            authorPk = identity.authKey
+            const secretHex = useHubStore.getState().hubSecrets[hub.dTag]
+            if (!secretHex) { setModBanLoading(false); return }
+            const { fromHex } = await import('@/lib/crypto/lkh')
+            hubSecretBytesV2 = fromHex(secretHex)
+          }
+
+          const jrs = await fetchEvt({ kinds: [KINDS.JOIN_REQUEST], authors: [authorPk], '#d': [hub.dTag], limit: 1 })
           if (cancelled) return
           if (jrs.length === 0) { setModBanLoading(false); return }
 
@@ -336,7 +384,9 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
           const indexContent = await downloadTextFromBlossom(listTag[1], hub.blossomServers)
           const index = parseIndexFile(indexContent)
           if (index.banPages.length > 0) {
-            const entries = await downloadBanList(index.banPages, hub.blossomServers)
+            const entries = hubSecretBytesV2
+              ? await downloadBanListV2(index.banPages, hubSecretBytesV2, hub.blossomServers)
+              : await downloadBanList(index.banPages, hub.blossomServers)
             if (!cancelled) {
               const pks = entries.map(e => e.pubkey)
               setMyBanList(pks)
@@ -360,7 +410,7 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
     if (!open || !pubkey) return
     const hosts = hostsByHub[hub.dTag] || []
     // Initial scope is hub-wide (voiceScope = null), so only load hub-wide host (no groupId)
-    const myHost = hosts.find((h) => h.pubkey === pubkey && !h.groupId)
+    const myHost = hosts.find((h) => h.pubkey === myVoicePubkey && !h.groupId)
     if (!myHost) return
 
     setVoiceProviderType(myHost.providerType)
@@ -419,7 +469,7 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
       } catch { /* decryption failed — user can republish */ }
     })()
     return () => { cancelled = true }
-  }, [open, pubkey, hostsByHub, hub.dTag, hubSecrets])
+  }, [open, pubkey, myVoicePubkey, hostsByHub, hub.dTag, hubSecrets])
 
   // Load own mesh list on open (members only)
   useEffect(() => {
@@ -431,6 +481,26 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
         try {
           const { fetchEvents } = await import('@/lib/nostr/relay-pool')
           const { KINDS } = await import('@/lib/crypto/constants')
+          const { isV2 } = await import('@/lib/hub/version')
+
+          if (isV2(hub)) {
+            // v2: our list JR is authored by our member pseudonym P_fac (not R). The tree's leaves are
+            // opaque Pf's we can't reverse — so we display the vouched-R list we persisted locally.
+            const { makeSubkeySigner } = await import('@/lib/nostr/v2send')
+            const { ChatContext } = await import('@/lib/crypto/skd')
+            const facSigner = makeSubkeySigner(ChatContext.member(hub.dTag), { privateKey, signer, peerPub: hub.creatorPubkey })
+            const facP = await facSigner.getPublicKey()
+            if (!cancelled) { try { setMyFacHandle(nip19.npubEncode(facP)) } catch { setMyFacHandle(facP) } }
+            const jrs = await fetchEvents({ kinds: [KINDS.JOIN_REQUEST], authors: [facP], '#d': [hub.dTag], limit: 1 })
+            if (cancelled) return
+            const lt = jrs[0]?.tags.find((t: string[]) => t[0] === 'list')
+            if (!lt?.[1]) { setMeshMembers([]); setMeshListHash(null); setMeshCreated(false); setMeshLoading(false); return }
+            setMeshListHash(lt[1])
+            setMeshCreated(true)
+            setMeshMembers(loadVouchedRs(hub.dTag, pubkey))
+            setMeshLoading(false)
+            return
+          }
           const { downloadTextFromBlossom, parseIndexFile } = await import('@/lib/blossom')
           const { deserializeTree, getMembers } = await import('@/lib/crypto/lkh')
 
@@ -493,6 +563,35 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
     setFacilitatorError(null)
 
     try {
+      const { isV2 } = await import('@/lib/hub/version')
+      if (isV2(hub)) {
+        // v2: the facilitator's list is authored by, and keyed on, pseudonyms P. Resolve the
+        // facilitator's P (from our roster, same-page) and check whether OUR P is in their tree.
+        const { makeSubkeySigner } = await import('@/lib/nostr/v2send')
+        const { ChatContext } = await import('@/lib/crypto/skd')
+        const { downloadTextFromBlossom, parseIndexFile } = await import('@/lib/blossom')
+        const { deserializeTree } = await import('@/lib/crypto/lkh')
+        const { fetchEvents } = await import('@/lib/nostr/relay-pool')
+        const { KINDS } = await import('@/lib/crypto/constants')
+        const members = useHubStore.getState().hubMembers[hub.dTag] || []
+        const facRow = members.find(m => m.pubkey === selectedFacilitator || m.p === selectedFacilitator)
+        const facP = facRow?.p || (/^[0-9a-f]{64}$/i.test(selectedFacilitator) ? selectedFacilitator : '')
+        if (!facP) { setCheckResult('not-found'); setFacilitatorError('Could not resolve the facilitator\'s hub pseudonym (they may be on another page).'); setCheckingStatus(false); return }
+        // Derive OUR facilitated pseudonym `Pf` (peer = the facilitator's `P_fac`) and check their tree.
+        const myPfSigner = makeSubkeySigner(ChatContext.facilitated(hub.dTag), { privateKey, signer, peerPub: facP })
+        const myPf = await myPfSigner.getPublicKey()
+        const jrs = await fetchEvents({ kinds: [KINDS.JOIN_REQUEST], authors: [facP], '#d': [hub.dTag], limit: 1 })
+        if (jrs.length === 0) { setCheckResult('not-found'); setFacilitatorError('This member has no facilitation list for this hub.'); setCheckingStatus(false); return }
+        const lt = jrs[0].tags.find((t: string[]) => t[0] === 'list')
+        if (!lt?.[1]) { setCheckResult('not-found'); setFacilitatorError('This member does not maintain a facilitation list for this hub.'); setCheckingStatus(false); return }
+        const idx = parseIndexFile(await downloadTextFromBlossom(lt[1], hub.blossomServers))
+        if (!idx.treeHash) { setCheckResult('not-found'); setFacilitatorError('No tree hash in facilitator\'s index file.'); setCheckingStatus(false); return }
+        const tree = deserializeTree(await downloadTextFromBlossom(idx.treeHash, hub.blossomServers))
+        if (tree.leaves.some((l: any) => l.pubkey === myPf)) setCheckResult('found')
+        else { setCheckResult('not-found'); setFacilitatorError('You are not in this member\'s list — ask them to add your npub.') }
+        setCheckingStatus(false)
+        return
+      }
       const { downloadTextFromBlossom, parseIndexFile } = await import('@/lib/blossom')
       const { deserializeTree } = await import('@/lib/crypto/lkh')
       const { fetchEvents } = await import('@/lib/nostr/relay-pool')
@@ -550,7 +649,7 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
     } finally {
       setCheckingStatus(false)
     }
-  }, [selectedFacilitator, pubkey, hub.dTag, hub.blossomServers])
+  }, [selectedFacilitator, pubkey, hub, privateKey, signer])
 
   /** Set the selected member as facilitator and decrypt secret from their tree */
   const handleSetFacilitator = useCallback(async () => {
@@ -559,6 +658,24 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
     setFacilitatorError(null)
 
     try {
+      const { isV2 } = await import('@/lib/hub/version')
+      if (isV2(hub)) {
+        // v2: resolve the facilitator's member pseudonym `P_fac`, then delegate to loadFacilitatorSecret
+        // — it derives our own `Pf` (peer = P_fac), unwraps our leaf, and parses the epoch history.
+        const members = useHubStore.getState().hubMembers[hub.dTag] || []
+        const facRow = members.find(m => m.pubkey === selectedFacilitator || m.p === selectedFacilitator)
+        const facP = facRow?.p || (/^[0-9a-f]{64}$/i.test(selectedFacilitator) ? selectedFacilitator : '')
+        if (!facP) throw new Error('Could not resolve the facilitator\'s hub pseudonym (they may be on another page).')
+        const { loadFacilitatorSecret } = await import('@/hooks/useHubLoader')
+        const result = await loadFacilitatorSecret(hub, facP, pubkey, privateKey, signer)
+        if (!result?.secretHex) throw new Error('Could not decrypt hub secret — the facilitator may not have added your npub')
+        if (result.epochSecrets && Object.keys(result.epochSecrets).length > 0) useHubStore.getState().setEpochSecrets(hub.dTag, result.epochSecrets)
+        setHubSecret(hub.dTag, result.secretHex)
+        // Store the facilitator's pseudonym P (not R) so the loader can re-fetch on reload.
+        setHubPref(hub.dTag, 'facilitator', facP)
+        setHubPref(hub.dTag, 'facilitatorSecret', result.secretHex)
+        return
+      }
       const { downloadTextFromBlossom, parseIndexFile } = await import('@/lib/blossom')
       const { decryptHubSecret } = await import('@/lib/blossom/members')
       const { toHex } = await import('@/lib/crypto/lkh')
@@ -625,7 +742,20 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
     setMeshError(null)
 
     try {
-      const { createAndUploadMemberFiles } = await import('@/lib/blossom/members')
+      const { isV2 } = await import('@/lib/hub/version')
+      if (isV2(hub)) {
+        // v2: a facilitator tree holds ONLY vouched users' `Pf` leaves — there's no self-leaf, so we
+        // can't build an empty tree. Defer: just mark the list "created" locally; the first "Add" (by
+        // npub) builds the tree keyed on that person's `Pf` and publishes the `P_fac`-authored list JR.
+        if (!privateKey) throw new Error('Facilitating a private (v2) hub requires a local key')
+        const currentSecret = hubSecrets[hub.dTag]
+        if (!currentSecret) throw new Error('You do not have the hub secret yet')
+        setMeshListHash(null)
+        setMeshCreated(true)
+        setMeshMembers([])
+        return
+      }
+      const { createAndUploadFacilitatorTreeV1 } = await import('@/lib/blossom/members')
       const { createJoinRequest } = await import('@/lib/nostr/events')
       const { signWithSigner } = await import('@/lib/nostr/events')
       const { publishToSpecificRelays } = await import('@/lib/nostr/relay-pool')
@@ -638,14 +768,23 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
       // Convert hex secret to Uint8Array
       const secretBytes = new Uint8Array(currentSecret.match(/.{2}/g)!.map((b: string) => parseInt(b, 16)))
 
-      // Create + upload tree to same blossom servers as the hub
-      const { indexHash } = await createAndUploadMemberFiles(
-        pubkey,
-        hub.dTag,
+      // Create + upload a MONOLITHIC tree + index (not the paginated createAndUploadMemberFiles) —
+      // the facilitator consume paths read `index.treeHash`, which a paginated index lacks. Thread
+      // the current epoch + full epoch history (from the store, which we hold as a member — including
+      // the current epoch's secret) so the tree carries the owner-style history blob and a facilitated
+      // user can tell which secret is current across rotations.
+      const epochHistory: Record<number, string> = {
+        ...(useHubStore.getState().epochSecrets[hub.dTag] || {}),
+        [hub.epoch]: currentSecret,
+      }
+      const { indexHash } = await createAndUploadFacilitatorTreeV1(
+        [pubkey],
         secretBytes,
-        privateKey,
         signer,
+        privateKey,
         hub.blossomServers,
+        hub.epoch,
+        epochHistory,
       )
 
       // Publish/update join request with `list` tag
@@ -678,6 +817,85 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
     setMeshError(null)
 
     try {
+      const { isV2 } = await import('@/lib/hub/version')
+      if (isV2(hub)) {
+        // v2: add by the person's real npub `R_f` (just like v1's UX). We derive their facilitated
+        // pseudonym `Pf = ECDH(P_fac, R_f)` and key the leaf on that — `R_f` never enters the tree.
+        // Builds the tree on the first add (create was deferred). List JR is authored under `P_fac`.
+        if (!privateKey) throw new Error('Facilitating a private (v2) hub requires a local key')
+        const t = addNpub.trim()
+        let memberR: string
+        if (t.startsWith('npub1')) { const d = nip19.decode(t); if (d.type !== 'npub') throw new Error('Invalid npub'); memberR = d.data as string }
+        else if (/^[0-9a-f]{64}$/i.test(t)) memberR = t.toLowerCase()
+        else throw new Error('Enter the person’s npub')
+        if (memberR === pubkey) throw new Error('You can’t facilitate yourself')
+        if (meshMembers.includes(memberR)) throw new Error('This person is already in your list')
+        const { createAndUploadFacilitatorTreeV2, addMemberToFacilitatorTreeV2, createIndexFile, downloadBanListV2 } = await import('@/lib/blossom/members')
+        const { makeSubkeySigner } = await import('@/lib/nostr/v2send')
+        const { ChatContext } = await import('@/lib/crypto/skd')
+        const { downloadTextFromBlossom, parseIndexFile, uploadToBlossomServers } = await import('@/lib/blossom')
+        const { fromHex } = await import('@/lib/crypto/lkh')
+        const { createJoinRequest } = await import('@/lib/nostr/events')
+        const { publishToSpecificRelays } = await import('@/lib/nostr/relay-pool')
+        const { getPublishRelays } = await import('@/stores/postingBehaviourStore')
+        const { deleteFromBlossom } = await import('@/lib/blossom/client')
+        const currentSecret = hubSecrets[hub.dTag]
+        if (!currentSecret) throw new Error('Hub secret not available')
+        const secretBytes = fromHex(currentSecret)
+        // BAN-EVASION GUARD (fail-CLOSED): a facilitator's mesh tree is separate from the owner's tree, so
+        // vouching a BANNED user (whose real key `R` is in the hub ban list) would let them recover the
+        // current hub secret and re-enter — a channel the owner's ban can't reach. Check against a FRESH
+        // download of the hub ban list, not the store: the store copy may be unloaded (facilitator never
+        // triggered a load) or left stale by a transient ban-page fetch (banListUnresolved), either of
+        // which would silently let a banned member through. downloadBanListV2 throws on any page failure,
+        // so a ban list we can't fully read aborts the vouch rather than assuming "nobody is banned".
+        {
+          const hubIndex = parseIndexFile(await downloadTextFromBlossom(hub.indexFileHash, hub.blossomServers))
+          if (hubIndex.banPages.length > 0) {
+            const freshBans = (await downloadBanListV2(hubIndex.banPages, secretBytes, hub.blossomServers)).map(e => e.pubkey)
+            if (freshBans.includes(memberR)) {
+              throw new Error('This person is banned from the hub — you can’t facilitate a banned member.')
+            }
+          }
+        }
+        const epochHistory: Record<number, string> = {
+          ...(useHubStore.getState().epochSecrets[hub.dTag] || {}),
+          [hub.epoch]: currentSecret,
+        }
+        const facSigner = makeSubkeySigner(ChatContext.member(hub.dTag), { privateKey, signer, peerPub: hub.creatorPubkey })
+        const facP = await facSigner.getPublicKey()
+        const facAuth = (e: any) => facSigner.signEvent(e)
+        const encoder = new TextEncoder()
+        let newIndexHash: string
+        if (!meshListHash) {
+          // First member — build the tree keyed on their Pf, with the epoch-history blob.
+          const { indexHash } = await createAndUploadFacilitatorTreeV2(
+            [memberR], secretBytes, hub.dTag, hub.creatorPubkey, hub.epoch, epochHistory, privateKey, signer, hub.blossomServers,
+          )
+          newIndexHash = indexHash
+        } else {
+          const idx = parseIndexFile(await downloadTextFromBlossom(meshListHash, hub.blossomServers))
+          if (!idx.treeHash) throw new Error('No tree hash')
+          const treeContent = await downloadTextFromBlossom(idx.treeHash, hub.blossomServers)
+          const newTreeContent = await addMemberToFacilitatorTreeV2(treeContent, memberR, secretBytes, hub.dTag, hub.creatorPubkey, privateKey, signer)
+          const { hash: newTreeHash } = await uploadToBlossomServers(encoder.encode(newTreeContent), signer, privateKey, hub.blossomServers, 'text/plain', undefined, undefined, facAuth)
+          const { hash: idxHash } = await uploadToBlossomServers(encoder.encode(createIndexFile(newTreeHash, [], idx.historyHash || undefined)), signer, privateKey, hub.blossomServers, 'text/plain', undefined, undefined, facAuth)
+          newIndexHash = idxHash
+          if (idx.treeHash && idx.treeHash !== newTreeHash) deleteFromBlossom(idx.treeHash, signer, privateKey, hub.blossomServers, facAuth).catch(() => {})
+          if (meshListHash !== newIndexHash) deleteFromBlossom(meshListHash, signer, privateKey, hub.blossomServers, facAuth).catch(() => {})
+        }
+        const unsignedEvent = createJoinRequest(hub.dTag, hub.creatorPubkey, newIndexHash)
+        const signedEvent = await facSigner.signEvent({ ...unsignedEvent, pubkey: facP })
+        // hub relays ONLY: this list JR is authored under the facilitator's pseudonym P_fac; publishing it
+        // to their personal NIP-65 relays would correlate P_fac → R_fac by relay footprint.
+        await publishToSpecificRelays(getPublishRelays([...hub.generalRelays], { hubOnly: true }), signedEvent)
+        setMeshListHash(newIndexHash)
+        const nextVouched = [...meshMembers, memberR]
+        setMeshMembers(nextVouched)
+        saveVouchedRs(hub.dTag, nextVouched, pubkey) // remember by R for display + removal (tree holds only Pf)
+        setAddNpub('')
+        return
+      }
       // Parse input as npub or hex pubkey
       let targetPubkey: string
       const trimmed = addNpub.trim()
@@ -771,6 +989,55 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
     setMeshError(null)
 
     try {
+      const { isV2 } = await import('@/lib/hub/version')
+      if (isV2(hub)) {
+        // v2: rebuild the mesh tree without the target's pseudonym P, re-derived under the SAME hub
+        // secret (a facilitator can't rotate it; the removed member already holds it either way).
+        const { makeSubkeySigner } = await import('@/lib/nostr/v2send')
+        const { ChatContext } = await import('@/lib/crypto/skd')
+        const { downloadTextFromBlossom, parseIndexFile, uploadToBlossomServers } = await import('@/lib/blossom')
+        const { createIndexFile } = await import('@/lib/blossom/members')
+        const { deserializeTree, serializeTree, buildTree, fromHex } = await import('@/lib/crypto/lkh')
+        const { createJoinRequest } = await import('@/lib/nostr/events')
+        const { publishToSpecificRelays } = await import('@/lib/nostr/relay-pool')
+        const { getPublishRelays } = await import('@/stores/postingBehaviourStore')
+        const { deleteFromBlossom } = await import('@/lib/blossom/client')
+        const currentSecret = hubSecrets[hub.dTag]
+        if (!currentSecret) throw new Error('Hub secret not available')
+        const secretBytes = fromHex(currentSecret)
+        if (!meshListHash) throw new Error('No mesh list index hash')
+        const idx = parseIndexFile(await downloadTextFromBlossom(meshListHash, hub.blossomServers))
+        if (!idx.treeHash) throw new Error('No tree hash')
+        const tree = deserializeTree(await downloadTextFromBlossom(idx.treeHash, hub.blossomServers))
+        // meshMembers holds real keys R; the tree is keyed on Pf — derive the target's Pf to find it.
+        // Explicit fail-closed guard (mirrors the other facilitator handlers): deriving Pf needs a LOCAL
+        // key. Without this, `privateKey!` would throw inside the derive anyway, but guard up front.
+        if (!privateKey) throw new Error('Facilitating a private (v2) hub requires a local key')
+        const { deriveFacilitatedPseudonymForFacilitator } = await import('@/lib/crypto/skd')
+        const targetPf = /^[0-9a-f]{64}$/i.test(targetPubkey)
+          ? deriveFacilitatedPseudonymForFacilitator(privateKey, hub.creatorPubkey, hub.dTag, targetPubkey)
+          : targetPubkey
+        const remaining = tree.leaves.filter((l: any) => l.pubkey !== targetPf)
+        if (remaining.length === tree.leaves.length) throw new Error('User not found in tree')
+        const facSigner = makeSubkeySigner(ChatContext.member(hub.dTag), { privateKey, signer, peerPub: hub.creatorPubkey })
+        const facP = await facSigner.getPublicKey()
+        const facAuth = (e: any) => facSigner.signEvent(e)
+        for (const leaf of remaining) leaf.rawKey = fromHex(await facSigner.nip44Decrypt(leaf.pubkey, leaf.encryptedLeafKey))
+        const newTree = await buildTree(remaining, secretBytes)
+        const encoder = new TextEncoder()
+        const { hash: newTreeHash } = await uploadToBlossomServers(encoder.encode(serializeTree(newTree)), signer, privateKey, hub.blossomServers, 'text/plain', undefined, undefined, facAuth)
+        const { hash: newIndexHash } = await uploadToBlossomServers(encoder.encode(createIndexFile(newTreeHash, [], idx.historyHash || undefined)), signer, privateKey, hub.blossomServers, 'text/plain', undefined, undefined, facAuth)
+        const signedEvent = await facSigner.signEvent({ ...createJoinRequest(hub.dTag, hub.creatorPubkey, newIndexHash), pubkey: facP })
+        // hub relays ONLY (P_fac-authored list JR — keep it off the facilitator's personal relays).
+        await publishToSpecificRelays(getPublishRelays([...hub.generalRelays], { hubOnly: true }), signedEvent)
+        setMeshListHash(newIndexHash)
+        const remainingVouched = meshMembers.filter(pk => pk !== targetPubkey)
+        setMeshMembers(remainingVouched)
+        saveVouchedRs(hub.dTag, remainingVouched, pubkey)
+        if (idx.treeHash && idx.treeHash !== newTreeHash) deleteFromBlossom(idx.treeHash, signer, privateKey, hub.blossomServers, facAuth).catch(() => {})
+        if (meshListHash && meshListHash !== newIndexHash) deleteFromBlossom(meshListHash, signer, privateKey, hub.blossomServers, facAuth).catch(() => {})
+        return
+      }
       const { downloadTextFromBlossom, parseIndexFile, uploadToBlossomServers } = await import('@/lib/blossom')
       const { removeMemberFromTree, rehydrateTreeKeys, createIndexFile } = await import('@/lib/blossom/members')
       const { deserializeTree, fromHex, serializeTree } = await import('@/lib/crypto/lkh')
@@ -841,6 +1108,119 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
     }
   }, [pubkey, meshBusy, meshListHash, hub, signer, privateKey, hubSecrets])
 
+  /**
+   * Update the facilitation list to the hub's CURRENT epoch (v1). Rebuilds our tree + epoch-history
+   * blob under the current hub secret and republishes the `list` join request, so everyone we vouched
+   * can decrypt the latest epoch. Needed because the automatic rebuild only fires if our client is
+   * open at the exact moment a rotation lands — a facilitator who logs in *after* a rotation must
+   * refresh manually. (The people we vouched still re-fetch on their side, e.g. via "Set facilitator".)
+   */
+  const handleUpdateMeshList = useCallback(async () => {
+    if (!pubkey || meshBusy) return
+    setMeshBusy(true)
+    setMeshError(null)
+    try {
+      const { downloadTextFromBlossom, parseIndexFile } = await import('@/lib/blossom')
+      const { rebuildFacilitatorTreeV1 } = await import('@/lib/blossom/members')
+      const { fromHex } = await import('@/lib/crypto/lkh')
+      const { createJoinRequest, signWithSigner } = await import('@/lib/nostr/events')
+      const { publishToSpecificRelays } = await import('@/lib/nostr/relay-pool')
+      const { getPublishRelays } = await import('@/stores/postingBehaviourStore')
+      const { deleteFromBlossom } = await import('@/lib/blossom/client')
+
+      const { isV2 } = await import('@/lib/hub/version')
+      // We're a member, so our store secret IS the current epoch's secret.
+      const currentSecret = useHubStore.getState().hubSecrets[hub.dTag]
+      if (!currentSecret) throw new Error('Your hub secret isn’t loaded yet — reopen the hub and try again.')
+      if (!meshListHash) throw new Error('No facilitation list to update')
+
+      const oldIndex = parseIndexFile(await downloadTextFromBlossom(meshListHash, hub.blossomServers))
+      if (!oldIndex.treeHash) throw new Error('No tree hash in current list')
+      const oldTreeContent = await downloadTextFromBlossom(oldIndex.treeHash, hub.blossomServers)
+
+      const epochHistory: Record<number, string> = {
+        ...(useHubStore.getState().epochSecrets[hub.dTag] || {}),
+        [hub.epoch]: currentSecret,
+      }
+      let newIndexHash: string
+      if (isV2(hub)) {
+        // v2: rebuild the Pf-keyed tree under the new secret (leaves/wraps preserved) + refresh history,
+        // republish the P_fac-authored list JR.
+        const { rebuildFacilitatorTreeV2 } = await import('@/lib/blossom/members')
+        const { makeSubkeySigner } = await import('@/lib/nostr/v2send')
+        const { ChatContext, deriveFacilitatedPseudonymForFacilitator } = await import('@/lib/crypto/skd')
+
+        // Ban re-check: a member banned from the hub AFTER we vouched them must NOT be re-keyed into the
+        // new epoch (that would defeat the owner's kick/ban). Use a FRESH fail-closed download of the hub
+        // ban list (mirrors handleAddToMesh) — NOT the store's hubBanLists, which is left stale/truncated
+        // when ban pages fail to load, so trusting it could silently re-admit a banned member across the
+        // rotation. downloadBanListV2 throws on any unreadable page → the update aborts rather than re-key.
+        const { downloadBanListV2 } = await import('@/lib/blossom/members')
+        const hubIndex = parseIndexFile(await downloadTextFromBlossom(hub.indexFileHash, hub.blossomServers))
+        const bannedSet = new Set(
+          hubIndex.banPages.length > 0
+            ? (await downloadBanListV2(hubIndex.banPages, fromHex(currentSecret), hub.blossomServers)).map(e => e.pubkey)
+            : []
+        )
+        const bannedVouched = meshMembers.filter(r => bannedSet.has(r))
+        let excludePfs: Set<string> | undefined
+        let remainingVouched: string[] | undefined
+        if (bannedVouched.length > 0 && privateKey) {
+          excludePfs = new Set(bannedVouched.map(r => deriveFacilitatedPseudonymForFacilitator(privateKey, hub.creatorPubkey, hub.dTag, r)))
+          remainingVouched = meshMembers.filter(r => !bannedSet.has(r))
+        }
+        const r = await rebuildFacilitatorTreeV2(
+          oldTreeContent, fromHex(currentSecret), hub.dTag, hub.creatorPubkey, hub.epoch, epochHistory, privateKey, signer, hub.blossomServers, excludePfs,
+        )
+        newIndexHash = r.indexHash
+        const facSigner = makeSubkeySigner(ChatContext.member(hub.dTag), { privateKey, signer, peerPub: hub.creatorPubkey })
+        const facP = await facSigner.getPublicKey()
+        const unsigned = createJoinRequest(hub.dTag, hub.creatorPubkey, newIndexHash)
+        const signed = await facSigner.signEvent({ ...unsigned, pubkey: facP })
+        await publishToSpecificRelays(getPublishRelays([...hub.generalRelays], { hubOnly: true }), signed)
+        // Persist the ban-exclusion ONLY after the rebuild + publish succeed. Doing it earlier means a
+        // failed attempt drops the banned R from meshMembers, so a RETRY sees no banned members, passes
+        // excludePfs=undefined, and re-keys the banned member's leaf back in under the new secret (ban
+        // evasion). The old list JR stays live until this publish lands, so late persistence is safe.
+        if (remainingVouched) {
+          setMeshMembers(remainingVouched)
+          saveVouchedRs(hub.dTag, remainingVouched, pubkey)
+        }
+      } else {
+        const { rebuildFacilitatorTreeV1 } = await import('@/lib/blossom/members')
+        const r = await rebuildFacilitatorTreeV1(
+          oldTreeContent, fromHex(currentSecret), hub.epoch, epochHistory, signer, privateKey, hub.blossomServers,
+        )
+        newIndexHash = r.indexHash
+        const unsigned = createJoinRequest(hub.dTag, hub.creatorPubkey, newIndexHash)
+        const signed = await signWithSigner(unsigned, signer, privateKey)
+        await publishToSpecificRelays(getPublishRelays([...hub.generalRelays]), signed)
+      }
+
+      // Best-effort cleanup of the superseded blobs. v2: these blobs were uploaded by our
+      // facilitator pseudonym P_fac, so the DELETE auth must be signed as P_fac too — otherwise
+      // it signs as R (a leak). Build the P_fac auth signer once and thread it through.
+      let facAuth: ((e: any) => Promise<any>) | undefined
+      if (isV2(hub)) {
+        const { makeSubkeySigner } = await import('@/lib/nostr/v2send')
+        const { ChatContext } = await import('@/lib/crypto/skd')
+        const facSigner = makeSubkeySigner(ChatContext.member(hub.dTag), { privateKey, signer, peerPub: hub.creatorPubkey })
+        facAuth = (e: any) => facSigner.signEvent(e)
+      }
+      if (oldIndex.treeHash) deleteFromBlossom(oldIndex.treeHash, signer, privateKey, hub.blossomServers, facAuth).catch(() => {})
+      if (oldIndex.historyHash) deleteFromBlossom(oldIndex.historyHash, signer, privateKey, hub.blossomServers, facAuth).catch(() => {})
+      if (meshListHash !== newIndexHash) deleteFromBlossom(meshListHash, signer, privateKey, hub.blossomServers, facAuth).catch(() => {})
+
+      setMeshListHash(newIndexHash)
+      setMeshUpdatedEpoch(hub.epoch)
+    } catch (err: any) {
+      console.error('Update mesh list failed:', err)
+      setMeshError(err?.message || 'Failed to update facilitation list')
+    } finally {
+      setMeshBusy(false)
+    }
+  }, [pubkey, meshBusy, meshListHash, hub, signer, privateKey])
+
   if (!open) return null
 
   const currentFacilitator = hubPrefs.facilitator
@@ -852,14 +1232,18 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
     if (!pubkey) return { ban_members: false }
     return getPermissionsForUser(hub, pubkey, hubMembers)
   })()
-  const canModerate = myPerms.ban_members === true && hub.creatorPubkey !== pubkey
+  const canModerate = myPerms.ban_members === true && hub.creatorPubkey !== pubkey && hub.ownerRealPubkey !== pubkey
 
   // Check if current user has hide_messages permission
   const canHideMessages = (() => {
     if (!pubkey) return false
-    if (hub.creatorPubkey === pubkey) return false // creators use HubSettingsModal
+    if (hub.creatorPubkey === pubkey || hub.ownerRealPubkey === pubkey) return false // creators use HubSettingsModal
     return getPermissionsForUser(hub, pubkey, hubMembers).hide_messages === true
   })()
+
+  // Facilitation is gated by the `facilitate` permission (default off; creator always has it via
+  // FULL_PERMISSIONS). Only members whose role grants it may build/maintain a facilitation list.
+  const canFacilitate = !!pubkey && getPermissionsForUser(hub, pubkey, hubMembers).facilitate === true
 
   const USER_PAGES = [
     { id: 'messages' as UserHubTab, label: 'Messages', icon: MessagesSquare },
@@ -1210,8 +1594,8 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
                   </section>
                 )}
 
-                {/* Section 3: My Facilitation List (members only) */}
-                {isMember && hub.creatorPubkey !== pubkey && (
+                {/* Section 3: My Facilitation List (members with the `facilitate` permission only) */}
+                {isMember && hub.creatorPubkey !== pubkey && hub.ownerRealPubkey !== pubkey && canFacilitate && (
                   <section>
                     <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-1.5">
                       <Users size={12} />
@@ -1246,6 +1630,25 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
                         <p className="text-xs text-muted-foreground">
                           Facilitating <strong>{meshMembers.length}</strong> user{meshMembers.length !== 1 ? 's' : ''}
                         </p>
+
+                        {/* v2: the people you vouch need YOUR facilitator handle (P_fac) to unlock the
+                            hub — it's your in-hub pseudonym, safe to share. */}
+                        {isV2(hub) && myFacHandle && (
+                          <div className="rounded-lg border border-border/50 bg-secondary/30 px-3 py-2 space-y-1">
+                            <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Your facilitator handle</div>
+                            <div className="flex items-center gap-1.5">
+                              <span className="flex-1 text-xs font-mono text-foreground/80 truncate">{myFacHandle.slice(0, 16)}…{myFacHandle.slice(-6)}</span>
+                              <button
+                                onClick={() => { navigator.clipboard.writeText(myFacHandle).then(() => { setCopiedFacHandle(true); setTimeout(() => setCopiedFacHandle(false), 1500) }).catch(() => {}) }}
+                                className="shrink-0 p-1 rounded hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                                title="Copy your facilitator handle"
+                              >
+                                {copiedFacHandle ? <Check size={12} className="text-emerald-500" /> : <Copy size={12} />}
+                              </button>
+                            </div>
+                            <p className="text-[10px] text-muted-foreground leading-relaxed">Give this to people you add so they can unlock the hub.</p>
+                          </div>
+                        )}
 
                         {/* Current facilitated members */}
                         {meshMembers.length > 0 && (
@@ -1303,6 +1706,26 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
                             <AlertTriangle size={12} /> {meshError}
                           </div>
                         )}
+
+                        {meshUpdatedEpoch != null && (
+                          <div className="flex items-center gap-2 text-xs text-emerald-500">
+                            <RefreshCw size={12} /> List updated to epoch {meshUpdatedEpoch}. People you vouched can now unlock the latest messages (they may need to re-open the hub).
+                          </div>
+                        )}
+
+                        {/* Refresh the list to the hub's current epoch after a rotation. There's no
+                            reliable auto-rebuild (it would only fire if we're online the instant a
+                            rotation lands), so this manual refresh is the dependable path. v1 + v2. */}
+                        {meshListHash && (
+                          <button
+                            onClick={handleUpdateMeshList}
+                            disabled={meshBusy}
+                            className="w-full flex items-center justify-center gap-1.5 py-2 mt-1 rounded-lg text-xs font-medium text-primary border border-primary/30 hover:bg-primary/10 transition-colors cursor-pointer disabled:opacity-40"
+                          >
+                            {meshBusy ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />} Update list to current epoch
+                          </button>
+                        )}
+
                       </div>
                     )}
                   </section>
@@ -1336,7 +1759,7 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
                     {/* Epoch mismatch warning — checks both hub and group epochs */}
                     {(() => {
                       const hosts = hostsByHub[hub.dTag] || []
-                      const myHost = hosts.find((h) => h.pubkey === pubkey && (voiceScope ? h.groupId === voiceScope : !h.groupId))
+                      const myHost = hosts.find((h) => h.pubkey === myVoicePubkey && (voiceScope ? h.groupId === voiceScope : !h.groupId))
                       if (!myHost || myHost.epoch === 0) return null
 
                       // Determine expected epoch based on scope
@@ -1439,7 +1862,7 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
                     {/* Per-scope epoch mismatch summary */}
                     {(() => {
                       const hosts = hostsByHub[hub.dTag] || []
-                      const myHosts = hosts.filter((h) => h.pubkey === pubkey)
+                      const myHosts = hosts.filter((h) => h.pubkey === myVoicePubkey)
                       const staleScopes: { label: string; scopeKey: string | null }[] = []
                       for (const h of myHosts) {
                         if (h.epoch === 0) continue
@@ -1640,7 +2063,7 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
                         if (!allFilled) return true
                         // Check if values differ from what's already published
                         const hosts = hostsByHub[hub.dTag] || []
-                        const myHost = hosts.find((h) => h.pubkey === pubkey && (voiceScope ? h.groupId === voiceScope : !h.groupId))
+                        const myHost = hosts.find((h) => h.pubkey === myVoicePubkey && (voiceScope ? h.groupId === voiceScope : !h.groupId))
                         if (!myHost) return false // no prior event — always allow
                         // Epoch mismatch — needs re-publish
                         const expectedEpoch = voiceScope
@@ -1742,6 +2165,68 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
                             }
                             if (targetPubkey === pubkey) throw new Error('Cannot ban yourself')
                             if (myBanList.includes(targetPubkey)) throw new Error('Already in your ban list')
+
+                            // v2: author the list JR under our pseudonym P, encrypt the ban page under
+                            // the hub secret, and auth every Blossom write as P — so neither R_mod nor
+                            // the banned members' real keys R ever appear on the wire.
+                            if (isV2(hub)) {
+                              await markStep('Fetching join request')
+                              const { hubMemberIdentity } = await import('@/lib/hub/hubMemberSign')
+                              const identity = await hubMemberIdentity(hub, { privateKey, signer })
+                              if (!identity) throw new Error('This hub is private (v2) — a local key or NIP-SKD signer is required to moderate here.')
+                              const { authKey: modP, authSigner } = identity
+                              const secretHexV2 = useHubStore.getState().hubSecrets[hub.dTag]
+                              if (!secretHexV2) throw new Error('Hub secret not available')
+                              const { fromHex: fromHexV2 } = await import('@/lib/crypto/lkh')
+                              const hubSecretV2 = fromHexV2(secretHexV2)
+                              const { downloadTextFromBlossom, parseIndexFile, uploadToBlossomServers, uploadBanPagesV2, createIndexFile } = await import('@/lib/blossom')
+                              const { createJoinRequest } = await import('@/lib/nostr/events')
+                              const { publishToSpecificRelays: pubToRelays, fetchEvents: fetchEvt } = await import('@/lib/nostr/relay-pool')
+                              const { getPublishRelays: getRelays } = await import('@/stores/postingBehaviourStore')
+                              const { KINDS } = await import('@/lib/crypto/constants')
+
+                              const jrs = await fetchEvt({ kinds: [KINDS.JOIN_REQUEST], authors: [modP], '#d': [hub.dTag], limit: 1 })
+                              let existingTreeHash = ''
+                              let existingHistoryHash = ''
+                              if (jrs.length > 0) {
+                                const listTag = jrs[0].tags.find((t: string[]) => t[0] === 'list')
+                                if (listTag?.[1]) {
+                                  try {
+                                    const index = parseIndexFile(await downloadTextFromBlossom(listTag[1], hub.blossomServers))
+                                    existingTreeHash = index.treeHash
+                                    existingHistoryHash = index.historyHash
+                                  } catch { /* fresh */ }
+                                }
+                              }
+                              markDone('Fetching join request')
+
+                              await markStep('Uploading ban page')
+                              const allBans = [...myBanList, targetPubkey]
+                              const banPageHashes = await uploadBanPagesV2(
+                                allBans.map(pk => ({ pubkey: pk, reason: '' })),
+                                hubSecretV2, hub.epoch, signer, privateKey, hub.blossomServers, authSigner,
+                              )
+                              markDone('Uploading ban page')
+
+                              await markStep('Uploading index file')
+                              const newIndexContent = createIndexFile(existingTreeHash, banPageHashes, existingHistoryHash || undefined)
+                              const indexBytes = new TextEncoder().encode(newIndexContent)
+                              const { hash: newIndexHash } = await uploadToBlossomServers(indexBytes, signer, privateKey, hub.blossomServers, 'text/plain', undefined, undefined, authSigner)
+                              markDone('Uploading index file')
+
+                              await markStep('Publishing join request')
+                              const unsignedEvent = createJoinRequest(hub.dTag, hub.creatorPubkey, newIndexHash)
+                              const signedEvent = await authSigner({ ...unsignedEvent, pubkey: modP })
+                              await pubToRelays(getRelays([...hub.generalRelays]), signedEvent)
+                              markDone('Publishing join request')
+
+                              useHubStore.getState().setModBanList(hub.dTag, pubkey, allBans)
+                              setMyBanList(allBans)
+                              setBanNpub('')
+
+                              await markStep('Done')
+                              return
+                            }
 
                             await markStep('Fetching join request')
                             const { downloadTextFromBlossom, parseIndexFile, uploadToBlossomServers, uploadBanPages, createIndexFile } = await import('@/lib/blossom')
@@ -1847,6 +2332,70 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
                                         const markDone = (step: string) => setModBanSteps(prev => [...prev, step])
 
                                         try {
+                                          // v2: mirror the ban path — author the list JR under our
+                                          // pseudonym P, encrypt any remaining ban page under the hub
+                                          // secret, and auth every Blossom write as P, so neither R_mod
+                                          // nor the still-banned members' real keys R leak.
+                                          if (isV2(hub)) {
+                                            await markStep('Fetching join request')
+                                            const { hubMemberIdentity } = await import('@/lib/hub/hubMemberSign')
+                                            const identity = await hubMemberIdentity(hub, { privateKey, signer })
+                                            if (!identity) throw new Error('This hub is private (v2) — a local key or NIP-SKD signer is required to moderate here.')
+                                            const { authKey: modP, authSigner } = identity
+                                            const { downloadTextFromBlossom, parseIndexFile, uploadToBlossomServers, uploadBanPagesV2, createIndexFile } = await import('@/lib/blossom')
+                                            const { createJoinRequest } = await import('@/lib/nostr/events')
+                                            const { publishToSpecificRelays: pubToRelays, fetchEvents: fetchEvt } = await import('@/lib/nostr/relay-pool')
+                                            const { getPublishRelays: getRelays } = await import('@/stores/postingBehaviourStore')
+                                            const { KINDS } = await import('@/lib/crypto/constants')
+
+                                            const jrs = await fetchEvt({ kinds: [KINDS.JOIN_REQUEST], authors: [modP], '#d': [hub.dTag], limit: 1 })
+                                            let existingTreeHash = ''
+                                            let existingHistoryHash = ''
+                                            if (jrs.length > 0) {
+                                              const listTag = jrs[0].tags.find((t: string[]) => t[0] === 'list')
+                                              if (listTag?.[1]) {
+                                                try {
+                                                  const index = parseIndexFile(await downloadTextFromBlossom(listTag[1], hub.blossomServers))
+                                                  existingTreeHash = index.treeHash
+                                                  existingHistoryHash = index.historyHash
+                                                } catch { /* ok */ }
+                                              }
+                                            }
+                                            markDone('Fetching join request')
+
+                                            await markStep('Uploading ban page')
+                                            const newBans = myBanList.filter(p => p !== pk)
+                                            let banPageHashes: string[] = []
+                                            if (newBans.length > 0) {
+                                              const secretHexV2 = useHubStore.getState().hubSecrets[hub.dTag]
+                                              if (!secretHexV2) throw new Error('Hub secret not available')
+                                              const { fromHex: fromHexV2 } = await import('@/lib/crypto/lkh')
+                                              banPageHashes = await uploadBanPagesV2(
+                                                newBans.map(p => ({ pubkey: p, reason: '' })),
+                                                fromHexV2(secretHexV2), hub.epoch, signer, privateKey, hub.blossomServers, authSigner,
+                                              )
+                                            }
+                                            markDone('Uploading ban page')
+
+                                            await markStep('Uploading index file')
+                                            const newIndexContent = createIndexFile(existingTreeHash, banPageHashes, existingHistoryHash || undefined)
+                                            const indexBytes = new TextEncoder().encode(newIndexContent)
+                                            const { hash: newIndexHash } = await uploadToBlossomServers(indexBytes, signer, privateKey, hub.blossomServers, 'text/plain', undefined, undefined, authSigner)
+                                            markDone('Uploading index file')
+
+                                            await markStep('Publishing join request')
+                                            const unsignedEvent = createJoinRequest(hub.dTag, hub.creatorPubkey, newIndexHash)
+                                            const signedEvent = await authSigner({ ...unsignedEvent, pubkey: modP })
+                                            await pubToRelays(getRelays([...hub.generalRelays]), signedEvent)
+                                            markDone('Publishing join request')
+
+                                            useHubStore.getState().setModBanList(hub.dTag, pubkey, newBans)
+                                            setMyBanList(newBans)
+
+                                            await markStep('Done')
+                                            return
+                                          }
+
                                           await markStep('Fetching join request')
                                           const { downloadTextFromBlossom, parseIndexFile, uploadToBlossomServers, uploadBanPages, createIndexFile } = await import('@/lib/blossom')
                                           const { createJoinRequest, signWithSigner: signFn } = await import('@/lib/nostr/events')
@@ -1952,23 +2501,41 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
                                 if (modPk && modBanLists[modPk]) {
                                   setOtherModBanList(modBanLists[modPk])
                                 } else if (modPk) {
-                                  // Try fetching from Blossom
+                                  // Try fetching from Blossom. modPk is the mod's real key R (the
+                                  // dropdown/store key). On v2 their ban-list JR is authored under
+                                  // their pseudonym P and pages are encrypted, so query by P (never
+                                  // R + hub scope) and decrypt with the hub secret.
                                   setOtherModLoading(true)
                                   try {
-                                    const { downloadTextFromBlossom, parseIndexFile, downloadBanList: dlBans } = await import('@/lib/blossom')
+                                    const { downloadTextFromBlossom, parseIndexFile, downloadBanList: dlBans, downloadBanListV2 } = await import('@/lib/blossom')
                                     const { fetchEvents: fetchEvt } = await import('@/lib/nostr/relay-pool')
                                     const { KINDS } = await import('@/lib/crypto/constants')
-                                    const jrs = await fetchEvt({ kinds: [KINDS.JOIN_REQUEST], authors: [modPk], '#d': [hub.dTag], limit: 1 })
-                                    if (jrs.length > 0) {
-                                      const listTag = jrs[0].tags.find((t: string[]) => t[0] === 'list')
-                                      if (listTag?.[1]) {
-                                        const ic = await downloadTextFromBlossom(listTag[1], hub.blossomServers)
-                                        const idx = parseIndexFile(ic)
-                                        if (idx.banPages.length > 0) {
-                                          const entries = await dlBans(idx.banPages, hub.blossomServers)
-                                          const pks = entries.map(e => e.pubkey)
-                                          setOtherModBanList(pks)
-                                          useHubStore.getState().setModBanList(hub.dTag, modPk, pks)
+                                    const v2 = isV2(hub)
+                                    const queryAuthor = v2 ? hubMembers.find(m => m.pubkey === modPk)?.p : modPk
+                                    if (queryAuthor) {
+                                      const jrs = await fetchEvt({ kinds: [KINDS.JOIN_REQUEST], authors: [queryAuthor], '#d': [hub.dTag], limit: 1 })
+                                      if (jrs.length > 0) {
+                                        const listTag = jrs[0].tags.find((t: string[]) => t[0] === 'list')
+                                        if (listTag?.[1]) {
+                                          const ic = await downloadTextFromBlossom(listTag[1], hub.blossomServers)
+                                          const idx = parseIndexFile(ic)
+                                          if (idx.banPages.length > 0) {
+                                            let entries: Array<{ pubkey: string }> | null
+                                            if (v2) {
+                                              const secretHex = useHubStore.getState().hubSecrets[hub.dTag]
+                                              // Secret not loaded yet → DON'T cache an empty list (it would
+                                              // poison the store: a later reselect sees the empty array as
+                                              // "loaded" and never refetches). Bail so a retry works.
+                                              entries = secretHex ? await downloadBanListV2(idx.banPages, (await import('@/lib/crypto/lkh')).fromHex(secretHex), hub.blossomServers) : null
+                                            } else {
+                                              entries = await dlBans(idx.banPages, hub.blossomServers)
+                                            }
+                                            if (entries) {
+                                              const pks = entries.map(e => e.pubkey)
+                                              setOtherModBanList(pks)
+                                              useHubStore.getState().setModBanList(hub.dTag, modPk, pks)
+                                            }
+                                          }
                                         }
                                       }
                                     }
@@ -2152,7 +2719,7 @@ function MyReportsPage({ hub, onClose }: { hub: HubData; onClose: () => void }) 
   useEffect(() => {
     if (!secret || !pubkey) return
     const relays = [...new Set(hub.generalRelays)].filter(Boolean)
-    fetchMyReports(hub.dTag, hub.creatorPubkey, secret, pubkey, relays)
+    fetchMyReports(hub.dTag, hub.creatorPubkey, secret, pubkey, relays, signer, privateKey)
   }, [secret, pubkey, hub.dTag])
 
   const handleRetract = useCallback(async (report: HubReport) => {
@@ -2425,13 +2992,17 @@ function ModHiddenMessagesTab({ hub, onClose }: { hub: HubData; onClose: () => v
   const hubMembers = useHubStore((s) => s.hubMembers[hub.dTag]) || []
   const pubkey = useUserStore((s) => s.pubkey)
 
-  // Build list of all authorized hiders (creator + mods)
+  // Build list of all authorized hiders (creator + mods). On v2 hide events are authored under the
+  // owner O (= creatorPubkey) and each mod's pseudonym P — querying by a mod's real key R here would
+  // leak R + the hub scope to the relay (and miss the P-authored events). Mirror useHideMessages.
   const authorizedPubkeys = useMemo(() => {
+    const v2 = isV2(hub)
     const pks: string[] = [hub.creatorPubkey]
     for (const m of hubMembers) {
       if (m.pubkey === hub.creatorPubkey) continue
       const perms = getPermissionsForUser(hub, m.pubkey, hubMembers)
-      if (perms.hide_messages) pks.push(m.pubkey)
+      if (!perms.hide_messages) continue
+      if (v2) { if (m.p) pks.push(m.p) } else pks.push(m.pubkey)
     }
     return pks
   }, [hub, hubMembers])

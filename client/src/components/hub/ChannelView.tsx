@@ -41,6 +41,7 @@ import type { Channel, HubData, HubMember } from '@/stores/hubStore'
 import { uploadToBlossomServers, computeHash } from '@/lib/blossom'
 import type { UploadProgress } from '@/lib/blossom'
 import { getUploadBlossoms } from '@/stores/postingBehaviourStore'
+import { isV2 } from '@/lib/hub/version'
 import { ImageGallery } from '@/components/social/RichContent'
 import { extractContentMediaGroups, ContentMediaGroups, ContentMediaImage, type ContentMediaGroup } from '@/components/chat/ContentMediaGrouping'
 import { MessageContent } from '@/components/chat/MessageContent'
@@ -72,7 +73,7 @@ import { ZapTotalBadge } from '@/components/hub/ZapTotalBadge'
 import { formatSats, type ZapInfo } from '@/lib/nostr/zap'
 import { ReactionListModal, type ReactionInfo } from '@/components/social/ReactionListModal'
 import { ReportModal } from '@/components/hub/ReportModal'
-import { usePermissions, getPermissionsForUser, getChannelGroupId } from '@/lib/hub/permissions'
+import { usePermissions, getPermissionsForUser, getChannelGroupId, isAuthorizedFacilitator } from '@/lib/hub/permissions'
 import { useMentionAutocomplete } from './useMentionAutocomplete'
 import { MentionSuggestionsDropdown } from './MentionSuggestionsDropdown'
 import { useNotificationStore } from '@/stores/notificationStore'
@@ -144,11 +145,18 @@ export function useDecryptedReactions(hubDTag: string, getChannelKey: (epoch?: n
 
   // Lazy-decrypt raw reactions when channel key becomes available
   useEffect(() => {
-    const key = getChannelKey()
-    if (!key) return
+    // The channel-key decrypt path is version-AGNOSTIC (v1 private hubs also encrypt reactions). Only v2
+    // reactions carry an identity attestation, so the "no identity tag → drop" rule below must apply to v2
+    // ONLY — otherwise every (legitimately tag-less) v1 encrypted-hub reaction would be wrongly dropped.
+    const isV2Hub = isV2(useHubStore.getState().hubs[hubDTag] || { version: undefined })
     for (const [, stored] of Object.entries(storeReactions)) {
       for (const r of stored) {
         if (r.decrypted === false && r.rawContent) {
+          // Use the reaction's OWN epoch key, not the hub's current one — a reaction made before a
+          // rotation is encrypted under the epoch it carries, so getChannelKey(r.epoch) is what decrypts
+          // it (falls back to current when the tag is absent). Skip if that epoch's key isn't loaded.
+          const key = getChannelKey(r.epoch)
+          if (!key) continue
           ; (async () => {
             try {
               const { aesDecrypt } = await import('@/lib/crypto/aes')
@@ -163,6 +171,26 @@ export function useDecryptedReactions(hubDTag: string, getChannelKey: (epoch?: n
                   if (r.rawEmojiTag[1]?.startsWith('http')) customUrl = r.rawEmojiTag[1]
                 }
               }
+              // v2: resolve the reactor's real key R from the identity tag — but VERIFY the per-
+              // reaction R-signature, not just decrypt it. Any member holds the channel key, so a
+              // decrypt-only path would let anyone forge an `identity` tag naming another member's R
+              // and have the reaction attributed (and ban/permission-checked) as that member. If the
+              // attestation fails to verify, drop the reaction rather than trust a forged R.
+              let realPubkey: string | undefined
+              let identityForged = false
+              if (r.identityTag) {
+                try {
+                  const { verifyEventIdentity } = await import('@/lib/nostr/identity')
+                  const res = r.rawEvent ? await verifyEventIdentity(JSON.parse(r.rawEvent), key) : { ok: false }
+                  if (res.ok) realPubkey = res.rPub
+                  else identityForged = true
+                } catch { identityForged = true }
+              } else if (isV2Hub) {
+                // v2 reaction with NO identity attestation — unattributable, could be injected under any
+                // wire P. Drop it, consistent with the message/poll-vote drop-rule. (v1 reactions carry no
+                // identity tag by design — pubkey IS R — so they are NOT dropped here.)
+                identityForged = true
+              }
               const store = useMessageStore.getState()
               const hubReactions = store.reactions[hubDTag]
               if (!hubReactions) return
@@ -170,7 +198,8 @@ export function useDecryptedReactions(hubDTag: string, getChannelKey: (epoch?: n
                 const idx = arr.findIndex((x) => x.eventId === r.eventId)
                 if (idx >= 0) {
                   const updated = [...arr]
-                  updated[idx] = { ...updated[idx], emoji, customUrl, decrypted: true }
+                  if (identityForged) updated.splice(idx, 1) // forged identity attestation → drop
+                  else updated[idx] = { ...updated[idx], emoji, customUrl, decrypted: true, realPubkey }
                   store.reactions[hubDTag] = { ...hubReactions, [msgId]: updated }
                   useMessageStore.setState({ reactions: { ...store.reactions } })
                   break
@@ -206,22 +235,24 @@ export function useDecryptedReactions(hubDTag: string, getChannelKey: (epoch?: n
       const grouped = new Map<string, { count: number; reacted: boolean; customUrl?: string; pubkeys: string[] }>()
       for (const r of stored) {
         if (r.decrypted === false) continue
+        // v2: the reactor's true key is realPubkey (decoded from the identity tag); in v1 pubkey IS R.
+        const rKey = r.realPubkey ?? r.pubkey
         // Filter out reactions from banned users
-        if (bannedSet.has(r.pubkey)) continue
+        if (bannedSet.has(rKey)) continue
         // Enforce add_reactions permission — suppress reactions from users
         // whose role lacks add_reactions (even if published via modified client)
-        if (hub && r.pubkey !== hub.creatorPubkey) {
-          const reactorPerms = getPermissionsForUser(hub, r.pubkey, hubMembers, channelId)
+        if (hub && rKey !== hub.creatorPubkey) {
+          const reactorPerms = getPermissionsForUser(hub, rKey, hubMembers, channelId)
           if (!reactorPerms.add_reactions) continue
         }
         const key = r.emoji
         if (grouped.has(key)) {
           const g = grouped.get(key)!
           g.count++
-          if (!g.pubkeys.includes(r.pubkey)) g.pubkeys.push(r.pubkey)
-          if (r.pubkey === myPubkey) g.reacted = true
+          if (!g.pubkeys.includes(rKey)) g.pubkeys.push(rKey)
+          if (rKey === myPubkey) g.reacted = true
         } else {
-          grouped.set(key, { count: 1, reacted: r.pubkey === myPubkey, customUrl: r.customUrl, pubkeys: [r.pubkey] })
+          grouped.set(key, { count: 1, reacted: rKey === myPubkey, customUrl: r.customUrl, pubkeys: [rKey] })
         }
       }
       const arr = Array.from(grouped.entries()).map(([emoji, data]) => ({
@@ -247,6 +278,7 @@ export function ChannelView({ hideHeader = false }: { hideHeader?: boolean } = {
   const hubMembers = useHubStore((s) => activeHubId ? s.hubMembers[activeHubId] : undefined)
   const hubPrefs = useHubStore((s) => activeHubId ? s.hubPrefs[activeHubId] : undefined)
   const groupSecrets = useHubStore((s) => activeHubId ? s.groupSecrets[activeHubId] : undefined)
+  const activeHubSecret = useHubStore((s) => activeHubId ? s.hubSecrets[activeHubId] : undefined)
 
   const [optimisticMessages, setOptimisticMessages] = useState<OptimisticMessage[]>([])
   const [replyContext, setReplyContext] = useState<ReplyContext | null>(null)
@@ -257,7 +289,9 @@ export function ChannelView({ hideHeader = false }: { hideHeader?: boolean } = {
   // The creator is always an owner/member — hubMembers isn't populated at creation
   // time (only after the member tree is loaded from Blossom), so gate on it directly
   // to avoid a spurious "you must be a member" on a freshly created hub.
-  const isCreator = !!(pubkey && hub && hub.creatorPubkey === pubkey)
+  // v2: the owner authors as O (creatorPubkey) but recognizes themselves by their real key R
+  // (ownerRealPubkey). Members carry R in `m.pubkey` (resolved from the roster).
+  const isCreator = !!(pubkey && hub && (hub.creatorPubkey === pubkey || hub.ownerRealPubkey === pubkey))
   const isMember = isCreator || !!(pubkey && hubMembers?.some((m) => m.pubkey === pubkey))
   const hubFacilitatorMembers = useHubStore((s) => activeHubId ? s.hubFacilitatorMembers[activeHubId] : undefined)
 
@@ -281,10 +315,16 @@ export function ChannelView({ hideHeader = false }: { hideHeader?: boolean } = {
   )
 
   const facilitatorPk = hubPrefs?.facilitator
-  const isFacilitated = !isMember
-    && !!facilitatorPk
-    && !!hubMembers?.some((m) => m.pubkey === facilitatorPk) // facilitator is a creator-list member
-    && !!(hubFacilitatorMembers?.[facilitatorPk]?.includes(pubkey!)) // user is in facilitator's tree
+  // We're facilitated if: not a direct member, we have a saved facilitator, and we hold the hub
+  // secret (proof we're actually in their tree — couldn't decrypt otherwise). We DON'T require the
+  // facilitator to be in our local roster: a v2 facilitated user is a non-member with no roster, so
+  // that would wrongly deny them. We only DROP facilitation if we can positively see the facilitator
+  // lost the permission (they're in our roster but their role no longer grants `facilitate`).
+  // Only DROP facilitation if we can positively see the facilitator (by P or R) is a member whose
+  // role no longer grants `facilitate`. Unknown (no roster, the usual v2 case) → keep it.
+  const facInRoster = !!facilitatorPk && !!hubMembers?.some((m) => m.pubkey === facilitatorPk || m.p === facilitatorPk)
+  const facLostPerm = facInRoster && !!hub && !isAuthorizedFacilitator(hub, facilitatorPk!, hubMembers)
+  const isFacilitated = !isMember && !!facilitatorPk && !!activeHubSecret && !facLostPerm
 
   const canPublish = (isMember || isFacilitated) && perms.send_messages
   const isAnnouncement = channel.type === 'announcement'
@@ -500,7 +540,8 @@ export function ChannelDescriptionModal({ channelId, channelName, description, i
           : ch
       )
 
-      const unsignedEvent = buildHubEvent({
+      const { signHubEventForPublish } = await import('@/lib/hub/buildHubEvent')
+      const signedEvent = await signHubEventForPublish(hub, {
         dTag: hub.dTag,
         name: hub.name,
         description: hub.description || undefined,
@@ -519,15 +560,14 @@ export function ChannelDescriptionModal({ channelId, channelName, description, i
         // its NSFW flag) whenever a channel description was edited.
         minPow: hub.minPow > 0 ? hub.minPow : undefined,
         joinMinPow: hub.joinMinPow > 0 ? hub.joinMinPow : undefined,
+        messageExpiration: hub.messageExpiration || undefined, // preserve the disappearing-messages timer
         nsfw: hub.nsfw || undefined,
         discoverable: hub.discoverable,
         groupedRoles: hub.groupedRoles,
         publishedAt: hub.publishedAt,
         eventCreatedAt: hub.eventCreatedAt,
-      })
-
-      const signedEvent = await mineAndSign(unsignedEvent, hub.minPow, hub.creatorPubkey, signer, privateKey)
-      await publishToSpecificRelays(getPublishRelays([...hub.generalRelays]), signedEvent)
+      }, { pubkey: useUserStore.getState().pubkey!, privateKey, signer, minPow: hub.minPow })
+      await publishToSpecificRelays(getPublishRelays([...hub.generalRelays], { hubOnly: isV2(hub) }), signedEvent)
 
       // Update local store
       setHubData(activeHubId, {
@@ -658,7 +698,7 @@ function MessageList({ hubDTag, channelId, channelName, optimisticMessages, setO
   // messages drop out of the render even in an idle channel (the render maps below
   // read `expiryNow`). No timer → no interval.
   const hubExpirationTimer = useHubStore((s) => (hubDTag ? s.hubs[hubDTag]?.messageExpiration || 0 : 0))
-  const [, setExpiryTick] = useState(0)
+  const [expiryTick, setExpiryTick] = useState(0)
   useEffect(() => {
     if (hubExpirationTimer <= 0) return
     const id = setInterval(() => setExpiryTick((t) => t + 1), 30000)
@@ -714,10 +754,23 @@ function MessageList({ hubDTag, channelId, channelName, optimisticMessages, setO
   // Report state
   const [reportModal, setReportModal] = useState<{ pubkey: string; messageATag?: string; messagePreview?: string } | null>(null)
 
-  // Hidden messages state
-  const hiddenMessages = useHubStore((s) => s.hiddenMessages[hubDTag]) ?? EMPTY_HIDDEN
+  // Hidden messages state. A channel-scoped hide (entry.channelId set) only applies in THAT channel, so
+  // a mod authorized only in another channel can't hide here by mis-tagging the `c` value. Legacy/hub-wide
+  // hides (no channelId) apply everywhere.
+  const rawHiddenMessages = useHubStore((s) => s.hiddenMessages[hubDTag]) ?? EMPTY_HIDDEN
+  const hiddenMessages = useMemo(() => {
+    let scoped: Record<string, typeof rawHiddenMessages[string]> | null = null
+    for (const ref in rawHiddenMessages) {
+      const e = rawHiddenMessages[ref]
+      if (e.channelId && e.channelId !== channelId) {
+        if (!scoped) scoped = { ...rawHiddenMessages }
+        delete scoped[ref]
+      }
+    }
+    return scoped ?? rawHiddenMessages
+  }, [rawHiddenMessages, channelId])
   const permsForHide = usePermissions(hubDTag, channelId)
-  const isCreator = !!(hub && myPubkey && hub.creatorPubkey === myPubkey)
+  const isCreator = !!(hub && myPubkey && (hub.creatorPubkey === myPubkey || hub.ownerRealPubkey === myPubkey))
   const canHide = isCreator || permsForHide.hide_messages
 
   // ── New-messages divider ──
@@ -741,14 +794,16 @@ function MessageList({ hubDTag, channelId, channelName, optimisticMessages, setO
       const { publishToSpecificRelays } = await import('@/lib/nostr/relay-pool')
       const { getPublishRelays } = await import('@/stores/postingBehaviourStore')
       const { signer, privateKey } = useUserStore.getState()
-      const unsigned = createHideMessageEvent(hubDTag, targetRef, targetPubkey, targetKind, isAddressable)
-      const signed = await signFn(unsigned, signer, privateKey)
+      const unsigned = createHideMessageEvent(hubDTag, targetRef, targetPubkey, targetKind, isAddressable, channelId)
+      // v2: owner authors the hide as O (global), a mod as their pseudonym P (same-page).
+      const { signHubModEvent } = await import('@/lib/hub/hubMemberSign')
+      const signed = hub ? await signHubModEvent({ hub, unsigned, pubkey: myPubkey!, privateKey, signer }) : await signFn(unsigned, signer, privateKey)
       const relays = hub ? [...hub.generalRelays] : []
-      await publishToSpecificRelays(getPublishRelays(relays), signed)
+      await publishToSpecificRelays(getPublishRelays(relays, { hubOnly: !!hub && isV2(hub) }), signed)
       // Optimistic update
       useHubStore.getState().addHiddenMessage(hubDTag, {
         ref: targetRef,
-        hiderPubkey: myPubkey!,
+        hiderPubkey: signed.pubkey,
         kind: targetKind,
         targetPubkey,
         createdAt: Math.floor(Date.now() / 1000),
@@ -767,22 +822,23 @@ function MessageList({ hubDTag, channelId, channelName, optimisticMessages, setO
       const { KINDS } = await import('@/lib/crypto/constants')
       const { signer, privateKey } = useUserStore.getState()
       const relays = hub ? [...hub.generalRelays] : []
-      const publishRelays = getDeletePublishRelays(relays)
+      const publishRelays = getDeletePublishRelays(relays, { hubOnly: !!hub && isV2(hub) })
 
       // Look up original hide event timestamp for created_at + 1 ordering
       const hideEntry = useHubStore.getState().hiddenMessages[hubDTag]?.[targetRef]
       const originalCreatedAt = hideEntry?.createdAt
 
-      // Phase 1: Re-publish with deleted tag
+      // Phase 1: Re-publish with deleted tag (authored by O/owner or P/mod in v2)
+      const { signHubModEvent } = await import('@/lib/hub/hubMemberSign')
       const deletedHide = createDeletedHideEvent(hubDTag, targetRef, originalCreatedAt)
-      const signedDeleted = await signFn(deletedHide, signer, privateKey)
+      const signedDeleted = hub ? await signHubModEvent({ hub, unsigned: deletedHide, pubkey: myPubkey!, privateKey, signer }) : await signFn(deletedHide, signer, privateKey)
       await publishToSpecificRelays(publishRelays, signedDeleted)
 
-      // Phase 2: NIP-09 deletion request
+      // Phase 2: NIP-09 deletion request — the hide's coordinate is HIDE_MESSAGE:<O|P>:dTag in v2.
       const dTag = `${hubDTag}:${targetRef}`
-      const aRef = `${KINDS.HIDE_MESSAGE}:${myPubkey}:${dTag}`
+      const aRef = `${KINDS.HIDE_MESSAGE}:${signedDeleted.pubkey}:${dTag}`
       const deletionReq = createDeletionEvent([], [aRef], 'unhide')
-      const signedDeletion = await signFn(deletionReq, signer, privateKey)
+      const signedDeletion = hub ? await signHubModEvent({ hub, unsigned: deletionReq, pubkey: myPubkey!, privateKey, signer }) : await signFn(deletionReq, signer, privateKey)
       await publishToSpecificRelays(publishRelays, signedDeletion)
 
       // Optimistic update
@@ -810,8 +866,14 @@ function MessageList({ hubDTag, channelId, channelName, optimisticMessages, setO
   // under the parent, even nested replies to other messages within the thread.
   const threadRepliesMap = useMemo(() => {
     const map: Record<string, ChatMessage[]> = {}
+    // Disappearing messages: exclude EXPIRED replies here so every consumer of this map — the thread-reply
+    // previews AND the ThreadModal (which reads threadRepliesMap[parentRef]) — hides them mid-session, not
+    // just on reload. The main message list filters expired at render; these secondary surfaces read this
+    // map, so filtering at the source covers them all. Recomputes on the 30s expiryTick (in deps).
+    const now = Math.floor(Date.now() / 1000)
     for (const msg of messages) {
       if (msg.isThread && msg.rootRef && !msg.deleted) {
+        if (msg.expiration && msg.expiration <= now) continue
         if (!map[msg.rootRef]) map[msg.rootRef] = []
         map[msg.rootRef].push(msg)
       }
@@ -821,7 +883,7 @@ function MessageList({ hubDTag, channelId, channelName, optimisticMessages, setO
       map[key].sort((a, b) => a.timestamp - b.timestamp)
     }
     return map
-  }, [messages])
+  }, [messages, expiryTick])
 
   const [loadingHistory, setLoadingHistory] = useState(false)
   const [hasMore, setHasMore] = useState(true)
@@ -898,7 +960,9 @@ function MessageList({ hubDTag, channelId, channelName, optimisticMessages, setO
     if (optimisticMessages.length === 0 || messages.length === 0) return
     const toRemove: string[] = []
     for (const opt of optimisticMessages) {
-      const hasReal = messages.some((m) => m.pubkey === myPubkey && m.content === opt.content)
+      // v2: the real message is authored by the pseudonym P; its true author is `realPubkey`
+      // (identity tag → R). Match on that so the optimistic bubble reconciles in v2 hubs too.
+      const hasReal = messages.some((m) => (m.realPubkey ?? m.pubkey) === myPubkey && m.content === opt.content)
       if (hasReal) toRemove.push(opt.tempId)
     }
     if (toRemove.length > 0) {
@@ -1218,7 +1282,8 @@ function MessageList({ hubDTag, channelId, channelName, optimisticMessages, setO
   useEffect(() => {
     if (optimisticMessages.length === 0 || messages.length === 0) return
     const toRemove = optimisticMessages.filter((opt) =>
-      opt.sentDTag && opt.status === 'published' && messages.some((m) => m.dTag === opt.sentDTag && m.pubkey === myPubkey)
+      // v2 authors as P; reconcile on the real author (realPubkey = identity → R, else pubkey).
+      opt.sentDTag && opt.status === 'published' && messages.some((m) => m.dTag === opt.sentDTag && (m.realPubkey ?? m.pubkey) === myPubkey)
     )
     if (toRemove.length > 0) {
       // Small delay so the ✓ check is visible briefly before the optimistic
@@ -1303,7 +1368,7 @@ function MessageList({ hubDTag, channelId, channelName, optimisticMessages, setO
 
     // Check if already reacted with this emoji — toggle (unreact)
     const existing = storeReactions[messageId] || []
-    const myExisting = existing.find((r) => r.emoji === emoji && r.pubkey === myPubkey)
+    const myExisting = existing.find((r) => r.emoji === emoji && (r.realPubkey ?? r.pubkey) === myPubkey)
     if (myExisting) {
       // Show confirmation dialog instead of immediately unreacting
       setPendingUnreact({ messageId, emoji, eventId: myExisting.eventId })
@@ -1537,7 +1602,7 @@ function MessageList({ hubDTag, channelId, channelName, optimisticMessages, setO
                         onAddReaction={(messageId, emoji, customUrl) => {
                           // Unreact check
                           const existing = storeReactions[messageId] || []
-                          const myExisting = existing.find((r) => r.emoji === emoji && r.pubkey === myPubkey)
+                          const myExisting = existing.find((r) => r.emoji === emoji && (r.realPubkey ?? r.pubkey) === myPubkey)
                           if (myExisting) {
                             setPendingUnreact({ messageId, emoji, eventId: myExisting.eventId })
                             return
@@ -1646,10 +1711,15 @@ function MessageList({ hubDTag, channelId, channelName, optimisticMessages, setO
                   (msg.rootRef && parentRefs.has(msg.rootRef))
                 )) return null
 
-                // Enforce send_messages permission — suppress messages from users
-                // whose role lacks send_messages (even if published via modified client)
-                if (hub && msg.pubkey !== hub.creatorPubkey) {
-                  const authorPerms = getPermissionsForUser(hub, msg.pubkey, hubMembers, channelId)
+                // Enforce send_messages permission — suppress messages from users whose role lacks
+                // send_messages (even if published via a modified client). Resolve against the IDENTITY-
+                // VERIFIED real key (realPubkey), NOT the wire pseudonym: on v2 a restricted member could
+                // author under a throwaway P' (with a valid identity tag naming their real R) — P' is in
+                // neither m.pubkey nor m.p, so it would fall through to the permissive `everyone` role and
+                // bypass a per-channel/role restriction. realPubkey resolves to their true roster role.
+                const sendAuthorKey = msg.realPubkey ?? msg.pubkey
+                if (hub && sendAuthorKey !== hub.creatorPubkey) {
+                  const authorPerms = getPermissionsForUser(hub, sendAuthorKey, hubMembers, channelId)
                   if (!authorPerms.send_messages) return null
                 }
                 // Track for next iteration
@@ -1657,7 +1727,10 @@ function MessageList({ hubDTag, channelId, channelName, optimisticMessages, setO
 
                 // Determine reply state for the preview
                 const repliedMsg = msg.replyTo ? getMessageByRef(msg.replyTo) : undefined
-                const replyDeleted = repliedMsg?.deleted
+                // Disappearing messages: treat an EXPIRED replied-to message as gone so the reply-quote
+                // preview doesn't keep showing its content mid-session (the quote holds its own copy, which
+                // the main-list expiry filter above doesn't reach).
+                const replyDeleted = repliedMsg?.deleted || (!!repliedMsg?.expiration && repliedMsg.expiration <= expiryNow)
                 const replyNotFound = msg.replyTo && !repliedMsg
 
                 // Check if the new-messages divider should be inserted before this message
@@ -1672,7 +1745,7 @@ function MessageList({ hubDTag, channelId, channelName, optimisticMessages, setO
                       msg={msg}
                       hubDTag={hubDTag}
                       isGrouped={!!isGrouped}
-                      isMine={msg.pubkey === myPubkey}
+                      isMine={(msg.realPubkey ?? msg.pubkey) === myPubkey}
                       onOpenProfile={setProfileModalPubkey}
                       onEdit={startEdit}
                       onReply={isAnnouncement ? () => { } : handleReply}
@@ -1748,7 +1821,7 @@ function MessageList({ hubDTag, channelId, channelName, optimisticMessages, setO
             })()}
 
             {/* Optimistic messages (scoped to this channel, excluding those already reconciled with real messages) */}
-            {optimisticMessages.filter((o) => o.channelId === channelId && !(o.sentDTag && messages.some((m) => m.dTag === o.sentDTag && m.pubkey === myPubkey))).map((optMsg) => (
+            {optimisticMessages.filter((o) => o.channelId === channelId && !(o.sentDTag && messages.some((m) => m.dTag === o.sentDTag && (m.realPubkey ?? m.pubkey) === myPubkey))).map((optMsg) => (
               <div
                 key={optMsg.tempId}
                 className={`flex gap-3 mt-4 py-1 px-2 rounded-md -mx-2 transition-opacity ${optMsg.status === 'published' ? 'opacity-70' : 'opacity-50'
@@ -1872,7 +1945,7 @@ function MessageList({ hubDTag, channelId, channelName, optimisticMessages, setO
           targetPubkey={profileModalPubkey}
           hubContext={(() => {
             const hub = useHubStore.getState().hubs[hubDTag]
-            return hub ? { dTag: hubDTag, creatorPubkey: hub.creatorPubkey } : null
+            return hub ? { dTag: hubDTag, creatorPubkey: hub.creatorPubkey, ownerRealPubkey: hub.ownerRealPubkey } : null
           })()}
           onDM={(pubkey) => {
             useDM04Store.getState().setActiveConversation(pubkey)
@@ -2790,8 +2863,8 @@ function GifStarOverlay({ att, ext, url, imgIdx, matchingGTag, allServers, setGa
         alt={att.name}
         wrapperClassName={inGrid ? "relative w-full h-full" : undefined}
         className={inGrid
-          ? "w-full h-full object-cover cursor-pointer hover:brightness-110 transition-all"
-          : "max-w-[400px] max-h-[300px] rounded-lg border border-transparent hover:border-border object-contain cursor-pointer hover:brightness-110 transition-all"
+          ? "w-full h-full object-cover cursor-pointer transition-all"
+          : "max-w-[400px] max-h-[300px] rounded-lg border border-transparent hover:border-border object-contain cursor-pointer transition-all"
         }
         onClick={() => setGalleryIndex(imgIdx >= 0 ? imgIdx : 0)}
       />
@@ -2941,7 +3014,7 @@ function AttachmentRenderer({ attachments, hubDTag, gifTags }: { attachments: At
                 ext={ext}
                 type={att.type}
                 alt={att.name}
-                className="max-w-[400px] max-h-[300px] rounded-lg border border-transparent hover:border-border object-contain cursor-pointer hover:brightness-110 transition-all"
+                className="max-w-[400px] max-h-[300px] rounded-lg border border-transparent hover:border-border object-contain cursor-pointer transition-all"
                 onClick={() => setGalleryIndex(imgIdx >= 0 ? imgIdx : 0)}
                 encryption={att.encryption}
               />
@@ -2978,7 +3051,7 @@ function AttachmentRenderer({ attachments, hubDTag, gifTags }: { attachments: At
                       type={att.type}
                       alt={att.name}
                       wrapperClassName="relative w-full h-full"
-                      className="w-full h-full object-cover cursor-pointer hover:brightness-110 transition-all"
+                      className="w-full h-full object-cover cursor-pointer transition-all"
                       onClick={() => setGalleryIndex(imgIdx >= 0 ? imgIdx : 0)}
                       encryption={att.encryption}
                     />
@@ -3077,17 +3150,19 @@ function ReplyPreview({ repliedMessage, getProfile, onScrollTo }: {
   const profile = getProfile(repliedMessage.pubkey)
   const name = profile?.display_name || profile?.name || truncateNpub(nip19.npubEncode(repliedMessage.pubkey))
   const avatarUrl = profile?.picture
+  const isMobile = useMobile()
 
   return (
     <button
       onClick={() => onScrollTo(repliedMessage.id)}
-      className="flex gap-3 px-2 -mx-2 items-end cursor-pointer hover:opacity-80 transition-opacity w-full text-left"
+      className={`flex ${isMobile ? 'gap-2' : 'gap-3'} px-2 -mx-2 items-end cursor-pointer hover:opacity-80 transition-opacity w-full text-left`}
     >
-      {/* Same w-10 column as avatar -- connector anchored to center */}
-      <div className="w-10 shrink-0 flex">
+      {/* Connector column matches the AVATAR width so the preview lines up with the message author name:
+          w-10 for the desktop 40px avatar, w-6 for the mobile 24px inline avatar. */}
+      <div className={`${isMobile ? 'w-6' : 'w-10'} shrink-0 flex`}>
         <div
           className="ml-auto border-l-2 border-t-2 border-muted-foreground/30 rounded-tl-md"
-          style={{ width: 20, height: 10 }}
+          style={{ width: isMobile ? 12 : 20, height: 10 }}
         />
       </div>
       {/* Preview content -- aligns with message content column */}
@@ -3130,10 +3205,11 @@ export function ReactionBar({ reactions, messageId, onAddReaction, rawReactions,
       .filter((r) => r.decrypted !== false)
       .map((r) => ({
         eventId: r.eventId,
-        pubkey: r.pubkey,
+        pubkey: r.realPubkey ?? r.pubkey, // v2: display the real reactor R (wire author is P)
         emoji: r.emoji,
         emojiUrl: r.customUrl,
         createdAt: r.createdAt || 0,
+        rawEvent: r.rawEvent,
       }))
   }, [rawReactions])
 
@@ -3303,6 +3379,13 @@ export function ChatMessageRow({
   highlighted, onScrollToMessage, onTimeTravel, onRequestDelete, onViewRaw, hideThreadReply, hideReply, hidePin, canPublish, channelId, onReport,
   onHideMessage, onUnhideMessage, isHidden, canHide, hiddenBy,
 }: ChatMessageRowProps) {
+  const isMobile = useMobile()
+  // Mobile grouped (secondary) messages have no left time slot, so the timestamp trails the message text
+  // (added to MessageContent's suffix). Null for the full-header message (its time is in the header row)
+  // and on desktop — so it's safe to drop into every suffix.
+  const mobileGroupedTime = isMobile && isGrouped
+    ? <span className="text-[10px] text-muted-foreground/50 ml-1.5 select-none align-baseline">{formatShortTime(msg.timestamp)}</span>
+    : null
   const [showActions, setShowActions] = useState(false)
   const [showEmoji, setShowEmoji] = useState(false)
   const [showMenu, setShowMenu] = useState(false)
@@ -3316,8 +3399,13 @@ export function ChatMessageRow({
   const shouldBlurMsg = msg.nsfw && !showNsfwPref && !nsfwRevealed
   const [hiddenPreviewRevealed, setHiddenPreviewRevealed] = useState(false)
 
+  // v2: the real author R. msg.pubkey is the on-wire pseudonym P — kept for event
+  // coordinates/refs (zaps, replies, reports); everything identity-facing uses R.
+  // For v1, realPubkey is undefined so authorKey === msg.pubkey (no-op).
+  const authorKey = msg.realPubkey ?? msg.pubkey
+
   // Blocked user check (hooks must be called before any early return)
-  const isBlockedUser = useBlockStore((s) => s.isBlocked)(msg.pubkey)
+  const isBlockedUser = useBlockStore((s) => s.isBlocked)(authorKey)
   const hideBlockedCompletely = useBlockStore((s) => s.hideBlockedCompletely)
   const mutedWords = useBlockStore((s) => s.mutedWords)
 
@@ -3348,10 +3436,10 @@ export function ChatMessageRow({
   const rowHub = useHubStore((s) => s.hubs[hubDTag])
   const rowHubMembers = useHubStore((s) => s.hubMembers[hubDTag])
   const { authorCanAttach, authorCanEmbed, authorCanInvite } = useMemo(() => {
-    if (!rowHub || msg.pubkey === rowHub.creatorPubkey) return { authorCanAttach: true, authorCanEmbed: true, authorCanInvite: true }
-    const authorPerms = getPermissionsForUser(rowHub, msg.pubkey, rowHubMembers, channelId)
+    if (!rowHub || authorKey === rowHub.creatorPubkey) return { authorCanAttach: true, authorCanEmbed: true, authorCanInvite: true }
+    const authorPerms = getPermissionsForUser(rowHub, authorKey, rowHubMembers, channelId)
     return { authorCanAttach: authorPerms.attach_files, authorCanEmbed: authorPerms.embed_links, authorCanInvite: authorPerms.create_invite }
-  }, [rowHub, rowHubMembers, msg.pubkey, channelId])
+  }, [rowHub, rowHubMembers, authorKey, channelId])
 
   // Derive hub role names for mention rendering in MessageContent
   const hubRoleNames = useMemo(() => rowHub?.roles?.map((r: any) => r.name).filter(Boolean) || [], [rowHub])
@@ -3414,8 +3502,8 @@ export function ChatMessageRow({
     setShowActions(false)
   }
 
-  const profile = getProfile(msg.pubkey)
-  const displayName = profile?.display_name || profile?.name || truncateNpub(nip19.npubEncode(msg.pubkey))
+  const profile = getProfile(authorKey)
+  const displayName = profile?.display_name || profile?.name || truncateNpub(nip19.npubEncode(authorKey))
   const avatarUrl = profile?.picture
   const isEditing = editingId === msg.id
   const editUnchanged = editText === msg.content && removedAttachmentHashes.size === 0
@@ -3426,7 +3514,7 @@ export function ChatMessageRow({
   if (isBlockedUser && hideBlockedCompletely) return null
 
   // WoT filter — hide if score below threshold
-  const wotHidden = useWotStore.getState().shouldHide(msg.pubkey, 'hubChat')
+  const wotHidden = useWotStore.getState().shouldHide(authorKey, 'hubChat')
   if (wotHidden) return null
 
   // Hidden message placeholder — non-privileged users see a minimal placeholder
@@ -3472,19 +3560,22 @@ export function ChatMessageRow({
         onMouseEnter={() => setShowActions(true)}
         onMouseLeave={handleMouseLeave}
       >
-        {/* Time on hover in avatar slot */}
-        <div className="w-11 shrink-0 flex items-center justify-center">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span className="text-[10px] text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity select-none cursor-default">
-                {formatShortTime(msg.timestamp)}
-              </span>
-            </TooltipTrigger>
-            <TooltipContent side="left" className="text-xs">
-              {formatFullDate(msg.timestamp)}
-            </TooltipContent>
-          </Tooltip>
-        </div>
+        {/* Time-on-hover in the left avatar slot — DESKTOP only. On mobile the left gutter is dropped so the
+            body runs full-width, and the timestamp trails the message text instead (see the suffix below). */}
+        {!isMobile && (
+          <div className="w-11 shrink-0 flex items-center justify-center">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="text-[10px] text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity select-none cursor-default">
+                  {formatShortTime(msg.timestamp)}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="left" className="text-xs">
+                {formatFullDate(msg.timestamp)}
+              </TooltipContent>
+            </Tooltip>
+          </div>
+        )}
 
         <div className="min-w-0 flex-1">
           <ScrollableContent>
@@ -3520,6 +3611,7 @@ export function ChatMessageRow({
                 <MessageContent content={contentForRender} onProfileClick={onOpenProfile} emojiTags={msg.emojiTags} mutedWords={mutedWords} disableLinkPreviews={!authorCanEmbed} disableHubInviteCards={!authorCanInvite} hubRoleNames={hubRoleNames} hubChannels={hubChannels} suffix={
                   <>
                     {msg.edited && <span className="text-[10px] text-muted-foreground ml-1"> (edited)</span>}
+                    {mobileGroupedTime}
                     <RelayProgressIndicator eventId={msg.id} />
                   </>
                 } />
@@ -3713,40 +3805,55 @@ export function ChatMessageRow({
       {replyStatus === 'not-found' && (
         <button
           onClick={() => msg.replyTo && onTimeTravel?.(msg.replyTo)}
-          className="flex gap-3 px-2 -mx-2 items-end w-full text-left hover:opacity-70 transition-opacity cursor-pointer"
+          className={`flex ${isMobile ? 'gap-2' : 'gap-3'} px-2 -mx-2 items-end w-full text-left hover:opacity-70 transition-opacity cursor-pointer`}
         >
-          <div className="w-10 shrink-0 flex"><div className="ml-auto border-l-2 border-t-2 border-muted-foreground/20 rounded-tl-md" style={{ width: 20, height: 10 }} /></div>
+          <div className={`${isMobile ? 'w-6' : 'w-10'} shrink-0 flex`}><div className="ml-auto border-l-2 border-t-2 border-muted-foreground/20 rounded-tl-md" style={{ width: isMobile ? 12 : 20, height: 10 }} /></div>
           <span className="text-xs text-primary/60 italic pb-0.5 hover:text-primary transition-colors">Click to view original message</span>
         </button>
       )}
       {replyStatus === 'deleted' && (
-        <div className="flex gap-3 px-2 -mx-2 items-end">
-          <div className="w-10 shrink-0 flex"><div className="ml-auto border-l-2 border-t-2 border-muted-foreground/20 rounded-tl-md" style={{ width: 20, height: 10 }} /></div>
+        <div className={`flex ${isMobile ? 'gap-2' : 'gap-3'} px-2 -mx-2 items-end`}>
+          <div className={`${isMobile ? 'w-6' : 'w-10'} shrink-0 flex`}><div className="ml-auto border-l-2 border-t-2 border-muted-foreground/20 rounded-tl-md" style={{ width: isMobile ? 12 : 20, height: 10 }} /></div>
           <span className="text-xs text-muted-foreground/50 italic pb-0.5">Original message was request-deleted</span>
         </div>
       )}
       <div
-        className={`flex items-start gap-4 py-1 px-2 rounded-md -mx-2 group hover:bg-accent/30 relative transition-colors duration-100 ${highlighted ? 'bg-primary/10' : ''} ${isHidden && canHide ? 'border border-amber-500/30 bg-amber-500/5' : ''} ${isMentioned && !highlighted ? 'bg-amber-500/[0.08]' : ''}`}
+        className={`flex items-start ${isMobile ? 'gap-0' : 'gap-4'} py-1 px-2 rounded-md -mx-2 group hover:bg-accent/30 relative transition-colors duration-100 ${highlighted ? 'bg-primary/10' : ''} ${isHidden && canHide ? 'border border-amber-500/30 bg-amber-500/5' : ''} ${isMentioned && !highlighted ? 'bg-amber-500/[0.08]' : ''}`}
         onMouseEnter={() => setShowActions(true)}
         onMouseLeave={handleMouseLeave}
       >
-        <button onClick={() => onOpenProfile(msg.pubkey)} className="shrink-0 cursor-pointer">
-          <Avatar className="h-10 w-10 mt-0.5">
-            {avatarUrl && <AvatarImage src={avatarUrl} alt={displayName} />}
-            <AvatarFallback className="text-xs bg-primary/20 text-primary">
-              {displayName.slice(0, 2).toUpperCase()}
-            </AvatarFallback>
-          </Avatar>
-        </button>
+        {/* Desktop: avatar sits in a left gutter spanning the whole message. On mobile the gutter is
+            dropped (gap-0, no left avatar) so the message body below runs full-width; a compact avatar is
+            rendered inline in the header row instead (see below). */}
+        {!isMobile && (
+          <button onClick={() => onOpenProfile(authorKey)} className="shrink-0 cursor-pointer">
+            <Avatar className="h-10 w-10 mt-0.5">
+              {avatarUrl && <AvatarImage src={avatarUrl} alt={displayName} />}
+              <AvatarFallback className="text-xs bg-primary/20 text-primary">
+                {displayName.slice(0, 2).toUpperCase()}
+              </AvatarFallback>
+            </Avatar>
+          </button>
+        )}
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-x-2 gap-y-0.5 mb-1 flex-wrap">
+            {isMobile && (
+              <button onClick={() => onOpenProfile(authorKey)} className="shrink-0 cursor-pointer">
+                <Avatar className="h-6 w-6">
+                  {avatarUrl && <AvatarImage src={avatarUrl} alt={displayName} />}
+                  <AvatarFallback className="text-[9px] bg-primary/20 text-primary">
+                    {displayName.slice(0, 2).toUpperCase()}
+                  </AvatarFallback>
+                </Avatar>
+              </button>
+            )}
             <button
-              onClick={() => onOpenProfile(msg.pubkey)}
+              onClick={() => onOpenProfile(authorKey)}
               className="text-base font-semibold cursor-pointer hover:underline text-foreground"
             >
               {displayName}
             </button>
-            <DnnBadge pubkey={msg.pubkey} />
+            <DnnBadge pubkey={authorKey} />
             {msg.facilitator && (
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -3823,6 +3930,7 @@ export function ChatMessageRow({
                 <MessageContent content={contentForRender} onProfileClick={onOpenProfile} emojiTags={msg.emojiTags} mutedWords={mutedWords} disableLinkPreviews={!authorCanEmbed} disableHubInviteCards={!authorCanInvite} hubRoleNames={hubRoleNames} hubChannels={hubChannels} suffix={
                   <>
                     {msg.edited && <span className="text-[10px] text-muted-foreground ml-1"> (edited)</span>}
+                    {mobileGroupedTime}
                     <RelayProgressIndicator eventId={msg.id} />
                   </>
                 } />
@@ -4042,8 +4150,25 @@ export function MessageActionBar({ isMine, msgId, msgDTag, msgPubkey, emojiButto
   const signer = useUserStore((s) => s.signer)
   const privateKey = useUserStore((s) => s.privateKey)
   const hub = useHubStore((s) => hubDTag ? s.hubs[hubDTag] : null)
+  // v2: pin lists must be authored + keyed by the member pseudonym P (never R, which would
+  // reveal hub membership). Resolve P (cached) for the active hub; v1 uses the real key.
+  const [pinKey, setPinKey] = useState<string | null>(myPubkey)
+  const [pinAuthSigner, setPinAuthSigner] = useState<((u: any) => Promise<any>) | undefined>(undefined)
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      if (hub && myPubkey) {
+        const { hubMemberIdentity } = await import('@/lib/hub/hubMemberSign')
+        const id = await hubMemberIdentity(hub, { privateKey, signer })
+        if (cancelled) return
+        setPinKey(id ? id.authKey : myPubkey)
+        setPinAuthSigner(() => id?.authSigner)
+      } else { setPinKey(myPubkey); setPinAuthSigner(undefined) }
+    })()
+    return () => { cancelled = true }
+  }, [hub, myPubkey, privateKey, signer])
   const aRef = msgDTag ? `36943:${msgPubkey}:${msgDTag}` : msgId
-  const isPinned = usePinStore((s) => myPubkey ? s.isMessagePinned(hubDTag, channelId, aRef, myPubkey) : false)
+  const isPinned = usePinStore((s) => pinKey ? s.isMessagePinned(hubDTag, channelId, aRef, pinKey) : false)
   const pinMessage = usePinStore((s) => s.pinMessage)
   const unpinMessage = usePinStore((s) => s.unpinMessage)
 
@@ -4055,9 +4180,9 @@ export function MessageActionBar({ isMine, msgId, msgDTag, msgPubkey, emojiButto
     if (!myPubkey) return
     const relays = hub ? [...hub.generalRelays] : []
     if (isPinned) {
-      await unpinMessage(hubDTag, channelId, aRef, myPubkey, relays, signer, privateKey)
+      await unpinMessage(hubDTag, channelId, aRef, pinKey ?? myPubkey, relays, signer, privateKey, pinAuthSigner)
     } else {
-      await pinMessage(hubDTag, channelId, aRef, myPubkey, relays, signer, privateKey)
+      await pinMessage(hubDTag, channelId, aRef, pinKey ?? myPubkey, relays, signer, privateKey, pinAuthSigner)
     }
     setShowMenu(false)
   }
@@ -4578,7 +4703,7 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
   // ── Typing indicator heartbeat (NIP-CHAT §6.14) — main channel composer only ──
   const _hubForTyping = useHubStore((s) => s.hubs[hubDTag])
   const _typingRelays = useMemo(
-    () => getPublishRelays(_hubForTyping ? [..._hubForTyping.generalRelays] : []),
+    () => getPublishRelays(_hubForTyping ? [..._hubForTyping.generalRelays] : [], { hubOnly: !!_hubForTyping && isV2(_hubForTyping) }),
     [hubDTag, _hubForTyping?.generalRelays],
   )
   const typing = useTypingHeartbeat({ scope: 'hub', hubDTag, channelId, relays: _typingRelays })
@@ -5023,7 +5148,7 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
     if (toUpload.length === 0) return
     setIsUploading(true)
 
-    const servers = getUploadBlossoms(hub?.blossomServers)
+    const servers = getUploadBlossoms(hub?.blossomServers, { hubOnly: !!hub && isV2(hub) })
 
     for (const pf of toUpload) {
       setPendingFiles((prev) => prev.map((f) => f.id === pf.id ? { ...f, status: encryptUploads ? 'encrypting' as const : 'uploading' as const, progress: undefined } : f))
@@ -5047,12 +5172,15 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
           setPendingFiles((prev) => prev.map((f) => f.id === pf.id ? { ...f, status: 'uploading' as const } : f))
         }
 
+        // v2: sign the Blossom upload auth as the member pseudonym P (no R leak to the server).
+        const uploadAuthSigner = hub ? await (await import('@/lib/hub/hubMemberSign')).hubBlossomAuthSigner(hub, { privateKey, signer }) : undefined
         const { hash } = await uploadToBlossomServers(
           data, signer, privateKey, servers, encryptUploads ? 'application/octet-stream' : pf.file.type,
           (progress) => {
             setPendingFiles((prev) => prev.map((f) => f.id === pf.id ? { ...f, progress: { ...progress } } : f))
           },
           () => { const c = new AbortController(); uploadAbortRef.current = c; return c.signal },
+          uploadAuthSigner,
         )
         setPendingFiles((prev) => prev.map((f) => f.id === pf.id ? { ...f, status: 'success' as const, hash, progress: undefined, encryption: encMeta } : f))
       } catch {
@@ -5522,7 +5650,9 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
     // Determine reason for read-only
     const _hubMembers = useHubStore.getState().hubMembers[hubDTag]
     const _pubkey = useUserStore.getState().pubkey
-    const _isMemberOrFacilitated = _pubkey && (_hubMembers?.some(m => m.pubkey === _pubkey) || false)
+    const _hub = useHubStore.getState().hubs[hubDTag]
+    const _isOwner = !!(_pubkey && _hub && (_hub.creatorPubkey === _pubkey || _hub.ownerRealPubkey === _pubkey))
+    const _isMemberOrFacilitated = _isOwner || (_pubkey && (_hubMembers?.some(m => m.pubkey === _pubkey) || false))
     const reason = _isMemberOrFacilitated
       ? 'You do not have permission to send messages in this channel.'
       : 'You must be a member to send messages in this hub.'
@@ -5726,6 +5856,32 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
             </div>
             {/* Upload button + status — always visible below scroll */}
             <div className="flex items-center gap-2">
+              {/* Encryption toggle — sits to the LEFT of the Upload button; the full privacy explanation
+                  is the tooltip on the toggle box itself. */}
+              {pendingFiles.some((f) => f.status === 'pending' || f.status === 'failed') && !isUploading && (
+                <TooltipProvider delayDuration={200}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={toggleEncryptUploads}
+                        className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer select-none"
+                        style={{ background: encryptUploads ? 'rgba(16,185,129,0.06)' : 'rgba(245,158,11,0.06)', border: `1px solid ${encryptUploads ? 'rgba(16,185,129,0.15)' : 'rgba(245,158,11,0.15)'}` }}
+                      >
+                        <div className={`relative w-8 h-4 rounded-full shrink-0 transition-colors ${encryptUploads ? 'bg-emerald-500' : 'bg-muted-foreground/30'}`}>
+                          <div className={`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow transition-transform ${encryptUploads ? 'translate-x-[18px]' : 'translate-x-0.5'}`} />
+                        </div>
+                        <span className={encryptUploads ? 'text-emerald-500/90' : 'text-amber-500/90'}>{encryptUploads ? 'Encrypted' : 'Not encrypted'}</span>
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" className="text-xs max-w-[260px] leading-snug">
+                      {encryptUploads
+                        ? 'Files will be encrypted before upload — only chat participants can view them, but images/video/audio must fully download before displaying.'
+                        : 'Media uploads are not encrypted — blossom server operators can view uploaded files, but images/video/audio are streamed immediately.'}
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              )}
               {pendingFiles.some((f) => f.status === 'pending' || f.status === 'failed') && !isUploading && (
                 <button
                   onClick={handleUploadFiles}
@@ -5740,27 +5896,6 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
                   <Loader2 size={14} className="animate-spin" />
                   Uploading...
                 </div>
-              )}
-            </div>
-            {/* Encrypt uploads toggle + privacy notice */}
-            <div className="flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer select-none transition-colors"
-              style={{ background: encryptUploads ? 'rgba(16,185,129,0.06)' : 'rgba(245,158,11,0.06)', border: `1px solid ${encryptUploads ? 'rgba(16,185,129,0.15)' : 'rgba(245,158,11,0.15)'}` }}
-              onClick={toggleEncryptUploads}
-            >
-              {/* Toggle switch */}
-              <div className={`relative w-8 h-4 rounded-full shrink-0 transition-colors ${encryptUploads ? 'bg-emerald-500' : 'bg-muted-foreground/30'}`}>
-                <div className={`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow transition-transform ${encryptUploads ? 'translate-x-[18px]' : 'translate-x-0.5'}`} />
-              </div>
-              {encryptUploads ? (
-                <>
-                  <Lock size={12} className="text-emerald-500 shrink-0" />
-                  <span className="text-sm text-emerald-500/80 leading-tight">Files will be encrypted before upload — only chat participants can view them, but images/video/audio must fully download before displaying.</span>
-                </>
-              ) : (
-                <>
-                  <ShieldOff size={12} className="text-amber-500 shrink-0" />
-                  <span className="text-sm text-amber-500/80 leading-tight">Media uploads are not encrypted — blossom server operators can view uploaded files, but images/video/audio are streamed immediately.</span>
-                </>
               )}
             </div>
           </div>
@@ -6752,6 +6887,16 @@ function EncryptedMessageCard({ hubDTag }: { hubDTag?: string }) {
         try {
           const { fetchEvents } = await import('@/lib/nostr/relay-pool')
           const { KINDS } = await import('@/lib/crypto/constants')
+          const { isV2 } = await import('@/lib/hub/version')
+          // v2: the join request is authored under a throwaway join-addr sub-key,
+          // never under R. An authors:[R] probe would both leak R+hub to relays and
+          // always return nothing, so skip it entirely on v2 (no pending badge).
+          const hubForVersion = useHubStore.getState().hubs[hubDTag]
+          if (hubForVersion && isV2(hubForVersion)) {
+            joinRequestCache.set(cacheKey, 'none')
+            setStatus('none')
+            return
+          }
           const events = await fetchEvents({
             kinds: [KINDS.JOIN_REQUEST],
             authors: [myPubkey],
@@ -6918,7 +7063,7 @@ function ThreadModal({ parentMsg, threadReplies, hubDTag, channelId, getProfile,
     if (!targetMsg) return
 
     const existing = storeReactions[messageId] || []
-    const myExisting = existing.find((r) => r.emoji === emoji && r.pubkey === myPubkey)
+    const myExisting = existing.find((r) => r.emoji === emoji && (r.realPubkey ?? r.pubkey) === myPubkey)
     if (myExisting) {
       setPendingUnreact({ messageId, emoji, eventId: myExisting.eventId })
       return
@@ -7098,7 +7243,7 @@ function ThreadModal({ parentMsg, threadReplies, hubDTag, channelId, getProfile,
                   msg={parentMsg}
                   hubDTag={hubDTag}
                   isGrouped={false}
-                  isMine={parentMsg.pubkey === myPubkey}
+                  isMine={(parentMsg.realPubkey ?? parentMsg.pubkey) === myPubkey}
                   onOpenProfile={setProfileModalPubkey}
                   onEdit={startEdit}
                   onReply={handleReplyInThread}
@@ -7141,12 +7286,16 @@ function ThreadModal({ parentMsg, threadReplies, hubDTag, channelId, getProfile,
                 && (reply.timestamp - prev.timestamp) <= GROUP_WINDOW
 
               if (reply.deleted) return null
+              // Disappearing messages: hide a reply that expires while the modal is open (threadReplies is
+              // already expiry-filtered at its source, but the open modal may not re-fetch it).
+              const nowSec = Math.floor(Date.now() / 1000)
+              if (reply.expiration && reply.expiration <= nowSec) return null
 
               // Find the replied-to message for preview (within thread)
               // Don't show reply preview if replying to the thread parent — it's already visible above
               const isReplyToParent = reply.replyTo === parentARef || (isPollParent && reply.replyTo === parentMsg.id)
               const repliedMsg = (reply.replyTo && !isReplyToParent) ? getThreadMsgByRef(reply.replyTo) : undefined
-              const replyDeleted = repliedMsg?.deleted
+              const replyDeleted = repliedMsg?.deleted || (!!repliedMsg?.expiration && repliedMsg.expiration <= nowSec)
               const replyNotFound = (reply.replyTo && !isReplyToParent) && !repliedMsg
 
               return (
@@ -7155,7 +7304,7 @@ function ThreadModal({ parentMsg, threadReplies, hubDTag, channelId, getProfile,
                     msg={reply}
                     hubDTag={hubDTag}
                     isGrouped={!!isGrouped}
-                    isMine={reply.pubkey === myPubkey}
+                    isMine={(reply.realPubkey ?? reply.pubkey) === myPubkey}
                     onOpenProfile={setProfileModalPubkey}
                     onEdit={startEdit}
                     onReply={handleReplyInThread}
@@ -7311,7 +7460,7 @@ function ThreadModal({ parentMsg, threadReplies, hubDTag, channelId, getProfile,
           targetPubkey={profileModalPubkey}
           hubContext={(() => {
             const hub = useHubStore.getState().hubs[hubDTag]
-            return hub ? { dTag: hubDTag, creatorPubkey: hub.creatorPubkey } : null
+            return hub ? { dTag: hubDTag, creatorPubkey: hub.creatorPubkey, ownerRealPubkey: hub.ownerRealPubkey } : null
           })()}
           onDM={(pubkey) => {
             useDM04Store.getState().setActiveConversation(pubkey)

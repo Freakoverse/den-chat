@@ -6,7 +6,7 @@
  * each in a collapsible accordion section grouped by pinner.
  */
 
-import { useState, useMemo, useCallback } from 'react'
+import { useState, useMemo, useCallback, useEffect } from 'react'
 import { X, Pin, ChevronDown, ChevronRight, ArrowRight, PinOff } from 'lucide-react'
 import { usePinStore } from '@/stores/pinStore'
 import { useHubStore } from '@/stores/hubStore'
@@ -51,6 +51,23 @@ export function PinModal({ hubDTag, channelId, onClose, onJumpToMessage }: PinMo
   const hubPins = usePinStore((s) => s.pinsByHub[hubDTag])
   const unpinMessage = usePinStore((s) => s.unpinMessage)
 
+  // v2: my pins are authored + keyed by the member pseudonym P, not R.
+  const [pinKey, setPinKey] = useState<string | null>(myPubkey)
+  const [pinAuthSigner, setPinAuthSigner] = useState<((u: any) => Promise<any>) | undefined>(undefined)
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      if (hub && myPubkey) {
+        const { hubMemberIdentity } = await import('@/lib/hub/hubMemberSign')
+        const id = await hubMemberIdentity(hub, { privateKey, signer })
+        if (cancelled) return
+        setPinKey(id ? id.authKey : myPubkey)
+        setPinAuthSigner(() => id?.authSigner)
+      } else { setPinKey(myPubkey); setPinAuthSigner(undefined) }
+    })()
+    return () => { cancelled = true }
+  }, [hub, myPubkey, privateKey, signer])
+
   const [showOthers, setShowOthers] = useState(false)
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set())
 
@@ -79,9 +96,13 @@ export function PinModal({ hubDTag, channelId, onClose, onJumpToMessage }: PinMo
       pins: pe.pins.filter((p) => p.channelId === channelId),
     })).filter((pe) => pe.pins.length > 0)
 
+    const members = useHubStore.getState().hubMembers[hubDTag]
     for (const pe of channelPins) {
-      const profile = getProfile(pe.pubkey)
-      const displayName = profile?.display_name || profile?.name || truncateNpub(nip19.npubEncode(pe.pubkey))
+      // v2: the pin list is authored under the pinner's pseudonym P — resolve P→R via the roster so
+      // their real name/avatar shows (falls back to pe.pubkey for v1 / unresolvable facilitated pins).
+      const displayKey = members?.find((m) => m.p === pe.pubkey)?.pubkey ?? pe.pubkey
+      const profile = getProfile(displayKey)
+      const displayName = profile?.display_name || profile?.name || truncateNpub(nip19.npubEncode(displayKey))
       const avatar = profile?.picture
 
       const section: PinSection = {
@@ -94,9 +115,12 @@ export function PinModal({ hubDTag, channelId, onClose, onJumpToMessage }: PinMo
         })),
       }
 
-      if (pe.pubkey === creatorPubkey) {
+      // v2: the owner pins under their member pseudonym `P_owner` (≠ `O` = creatorPubkey), so a raw
+      // `pe.pubkey === creatorPubkey` match misses it and the owner's pins get demoted to the collapsed
+      // "others" area. `displayKey` is the resolved real key, so compare it to the owner's real key too.
+      if (pe.pubkey === creatorPubkey || (!!hub?.ownerRealPubkey && displayKey === hub.ownerRealPubkey)) {
         creatorSection = section
-      } else if (pe.pubkey === myPubkey) {
+      } else if (pe.pubkey === (pinKey ?? myPubkey)) {
         mySection = section
       } else {
         otherSections.push(section)
@@ -105,12 +129,12 @@ export function PinModal({ hubDTag, channelId, onClose, onJumpToMessage }: PinMo
     }
 
     // Add my pins to total if not creator
-    if (mySection && myPubkey !== creatorPubkey) {
+    if (mySection && (pinKey ?? myPubkey) !== creatorPubkey) {
       totalOtherPins += mySection.pins.length
     }
 
     return { creatorSection, mySection, otherSections, totalOtherPins }
-  }, [hubPins, channelId, msgByRef, creatorPubkey, myPubkey, getProfile])
+  }, [hubPins, channelId, msgByRef, creatorPubkey, myPubkey, pinKey, getProfile])
 
   const toggleSection = (pubkey: string) => {
     setExpandedSections((prev) => {
@@ -124,8 +148,8 @@ export function PinModal({ hubDTag, channelId, onClose, onJumpToMessage }: PinMo
   const handleUnpin = useCallback(async (aRef: string) => {
     if (!myPubkey) return
     const relays = hub ? [...hub.generalRelays] : []
-    await unpinMessage(hubDTag, channelId, aRef, myPubkey, relays, signer, privateKey)
-  }, [myPubkey, hub, hubDTag, channelId, signer, privateKey, unpinMessage])
+    await unpinMessage(hubDTag, channelId, aRef, pinKey ?? myPubkey, relays, signer, privateKey, pinAuthSigner)
+  }, [myPubkey, pinKey, pinAuthSigner, hub, hubDTag, channelId, signer, privateKey, unpinMessage])
 
   const totalPins = (creatorSection?.pins.length || 0) + totalOtherPins
 

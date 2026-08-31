@@ -129,6 +129,9 @@ export const blossomServers = {
 
 // ─── Auth Header (BUD-01) ───
 
+/** Signs the kind-24242 Blossom auth event. v2 hubs pass a `P` sub-signer to avoid revealing `R`. */
+export type BlossomAuthSigner = (unsigned: import('nostr-tools').UnsignedEvent) => Promise<import('nostr-tools').Event>
+
 /**
  * Create a Nostr kind 24242 auth event for Blossom requests.
  * Per BUD-01: the event authorizes a specific action on a specific file.
@@ -138,6 +141,7 @@ async function createAuthHeader(
   fileHash: string,
   signer: ISigner | null,
   privateKey: string | null,
+  authSigner?: BlossomAuthSigner,
 ): Promise<string> {
   const expiration = Math.floor(Date.now() / 1000) + 600 // 10 min
 
@@ -148,7 +152,10 @@ async function createAuthHeader(
   ]
 
   const unsigned = createUnsignedEvent(24242, `Authorize ${action}`, tags)
-  const signed = await signWithSigner(unsigned, signer, privateKey)
+  // v2 hub uploads pass an authSigner so the 24242 auth is signed by the member pseudonym P
+  // (never the real key R) — otherwise the Blossom server sees R and could link P-messages
+  // (which reference the blob) back to the real uploader.
+  const signed = authSigner ? await authSigner(unsigned) : await signWithSigner(unsigned, signer, privateKey)
   const encoded = btoa(JSON.stringify(signed))
   return `Nostr ${encoded}`
 }
@@ -342,6 +349,7 @@ export async function uploadToBlossomServers(
   contentType: string = 'application/octet-stream',
   onProgress?: (progress: UploadProgress) => void,
   getAbortSignal?: () => AbortSignal | undefined,
+  authSigner?: BlossomAuthSigner,
 ): Promise<{ hash: string; successCount: number; serverUrls: string[] }> {
   const allServers = servers || blossomServers.getServers()
   // When the caller passes an explicit list, it's already in a deterministic,
@@ -357,7 +365,7 @@ export async function uploadToBlossomServers(
   // Only the default-pool fallback keeps the "3 copies is enough" heuristic.
   const targetCount = servers && servers.length > 0 ? ordered.length : 3
   const hash = computeHash(data)
-  const authHeader = await createAuthHeader('upload', hash, signer, privateKey)
+  const authHeader = await createAuthHeader('upload', hash, signer, privateKey, authSigner)
 
   // ── Parallel mode (no progress callback) — fire all servers at once ──
   // Used by tree/index metadata uploads where files are tiny and we just
@@ -543,9 +551,38 @@ export interface DownloadProgress {
  * @param servers - Optional list of servers to try
  * @returns File contents as Uint8Array
  */
+/**
+ * Read a response body into bytes, aborting if it exceeds `maxBytes`. Defends against a hostile/oversized
+ * blob OOMing the tab before the post-download hash check runs (Content-Length can be absent or lie, so we
+ * enforce during the read). Throws when the cap is exceeded — the caller then skips that server.
+ */
+async function readBodyWithCap(res: Response, maxBytes: number): Promise<Uint8Array> {
+  const cl = Number(res.headers.get('content-length'))
+  if (Number.isFinite(cl) && cl > maxBytes) throw new Error(`Blob exceeds ${maxBytes} bytes (declared ${cl})`)
+  if (!res.body) return new Uint8Array(await res.arrayBuffer())
+  const reader = res.body.getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    if (value) {
+      total += value.byteLength
+      if (total > maxBytes) { reader.cancel().catch(() => {}); throw new Error(`Blob exceeds ${maxBytes} bytes`) }
+      chunks.push(value)
+    }
+  }
+  const out = new Uint8Array(total)
+  let off = 0
+  for (const c of chunks) { out.set(c, off); off += c.byteLength }
+  return out
+}
+
 export async function downloadFromBlossom(
   hash: string,
   servers?: string[],
+  /** Optional hard byte cap (used for small hub-metadata blobs to prevent an OOM DoS from a hostile server). */
+  maxBytes?: number,
 ): Promise<Uint8Array> {
   const targetServers = servers || blossomServers.getServers()
 
@@ -562,7 +599,7 @@ export async function downloadFromBlossom(
       const res = await fetch(url, { signal: AbortSignal.timeout(30_000) })
       if (!res.ok) continue
 
-      const data = new Uint8Array(await res.arrayBuffer())
+      const data = maxBytes ? await readBodyWithCap(res, maxBytes) : new Uint8Array(await res.arrayBuffer())
 
       // Verify hash
       const actualHash = computeHash(data)
@@ -694,11 +731,15 @@ function _downloadWithXHR(
 /**
  * Download and parse a text file from Blossom.
  */
+/** Hub-metadata blobs (index/spine/leaf-page/group-tree/ban/history) are text and small; cap the download
+ * to prevent a hostile server from OOMing the tab with a giant response for one of these hashes. */
+const TEXT_BLOB_MAX_BYTES = 32 * 1024 * 1024
+
 export async function downloadTextFromBlossom(
   hash: string,
   servers?: string[],
 ): Promise<string> {
-  const data = await downloadFromBlossom(hash, servers)
+  const data = await downloadFromBlossom(hash, servers, TEXT_BLOB_MAX_BYTES)
   return new TextDecoder().decode(data)
 }
 
@@ -726,9 +767,10 @@ export async function deleteFromBlossom(
   signer: ISigner | null,
   privateKey: string | null,
   servers?: string[],
+  authSigner?: BlossomAuthSigner,
 ): Promise<{ deleted: number; failed: number }> {
   const targetServers = servers || blossomServers.getServers()
-  const authHeader = await createAuthHeader('delete', hash, signer, privateKey)
+  const authHeader = await createAuthHeader('delete', hash, signer, privateKey, authSigner)
 
   // Fire all DELETE requests in parallel — each server is independent
   const results = await Promise.allSettled(

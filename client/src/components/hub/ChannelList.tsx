@@ -14,6 +14,7 @@ import { CustomSelect } from '@/components/ui/custom-select'
 
 import { useVoiceStore } from '@/stores/voiceStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
+import { useVoiceDisplayPubkey, useMyVoicePubkey } from '@/hooks/useVoiceDisplayPubkey'
 import { useCachedImageUrl } from '@/lib/imageCache'
 import { UserProfileModal } from '@/components/hub/UserProfileModal'
 import { HubSettingsModal } from '@/components/hub/HubSettingsModal'
@@ -46,6 +47,7 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
   const setActiveChannel = useHubStore((s) => s.setActiveChannel)
   const setMobileView = useNavigationStore((s) => s.setMobileView)
   const pubkey = useUserStore((s) => s.pubkey)
+  const myVoicePubkey = useMyVoicePubkey(hub?.dTag) // v2: our voice host is authored under P, not R
   const groupSecrets = useHubStore((s) => activeHubId ? s.groupSecrets[activeHubId] : undefined)
   const hubMembers = useHubStore((s) => activeHubId ? s.hubMembers[activeHubId] : undefined)
   const channelScrollRef = useRef<HTMLDivElement>(null)
@@ -59,6 +61,13 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
   const [rescinding, setRescinding] = useState(false)
   const [rescindDone, setRescindDone] = useState(false)
   const [showRescindConfirm, setShowRescindConfirm] = useState(false)
+  // "Hub Menu" accordion — collapsed by default; remembers the creator's last choice across sessions.
+  const [hubMenuOpen, setHubMenuOpen] = useState(() => {
+    try { return localStorage.getItem('den_hub_menu_open') === '1' } catch { return false }
+  })
+  useEffect(() => {
+    try { localStorage.setItem('den_hub_menu_open', hubMenuOpen ? '1' : '0') } catch { /* ignore */ }
+  }, [hubMenuOpen])
   const [userSettingsInitialTab, setUserSettingsInitialTab] = useState<'messages' | 'notifications' | 'voice' | undefined>(undefined)
 
   // ── Creator-only channel/category reordering (drag & drop, desktop) ──
@@ -108,7 +117,7 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
 
   const markChannelRead = useNotificationStore((s) => s.markChannelRead)
 
-  const isCreator = !!(hub && pubkey && hub.creatorPubkey === pubkey)
+  const isCreator = !!(hub && pubkey && (hub.creatorPubkey === pubkey || hub.ownerRealPubkey === pubkey))
   const isMember = !!(pubkey && hubMembers?.some((m) => m.pubkey === pubkey))
   const secretsResolved = useHubStore((s) => activeHubId ? !!s.hubSecretsResolved[activeHubId] : false)
   // Show rescind button when: not creator, not a direct member, and secrets are resolved
@@ -186,7 +195,7 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
   const hasVoiceEpochMismatch = useMemo(() => {
     if (!hub || !pubkey) return false
     const hosts = hostsByHub[hub.dTag] || []
-    const myHosts = hosts.filter((h) => h.pubkey === pubkey)
+    const myHosts = hosts.filter((h) => h.pubkey === myVoicePubkey)
     if (myHosts.length > 0) {
       console.log(`[EpochCheck] myHosts for ${hub.dTag.slice(0, 8)}:`, myHosts.map(h => ({
         groupId: h.groupId?.slice(0, 8) || 'hub-wide',
@@ -204,7 +213,7 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
       // Hub-wide: compare with hub epoch
       return h.epoch !== hub.epoch
     })
-  }, [hub, pubkey, hostsByHub])
+  }, [hub, pubkey, myVoicePubkey, hostsByHub])
 
   // Join request count (creator only)
   const joinRequestCount = useJoinRequestCount(hub, hubMembers, isCreator)
@@ -344,24 +353,26 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
     if (!layoutDraft || publishingLayout) return
     setPublishingLayout(true); setLayoutError(null); setLayoutStep('signing')
     try {
-      const { buildHubEvent } = await import('@/lib/hub/buildHubEvent')
-      const { mineAndSign } = await import('@/lib/nostr/events')
+      const { signHubEventForPublish } = await import('@/lib/hub/buildHubEvent')
       const { publishToSpecificRelays } = await import('@/lib/nostr/relay-pool')
       const { getPublishRelays } = await import('@/stores/postingBehaviourStore')
-      const unsigned = buildHubEvent({
+      const { isV2 } = await import('@/lib/hub/version')
+      const signed = await signHubEventForPublish(hub, {
         dTag: hub.dTag, name: hub.name, description: hub.description || undefined,
         epoch: hub.epoch, icon: hub.icon || undefined, banner: hub.banner || undefined,
         tags: hub.tags && hub.tags.length ? hub.tags : undefined,
         relays: [...hub.generalRelays],
         blossomServers: hub.blossomServers, indexFileHash: hub.indexFileHash,
         channels: layoutDraft.channels, categories: layoutDraft.categories, roles: hub.roles,
-        minPow: hub.minPow > 0 ? hub.minPow : undefined, joinMinPow: hub.joinMinPow > 0 ? hub.joinMinPow : undefined, nsfw: hub.nsfw || undefined,
+        minPow: hub.minPow > 0 ? hub.minPow : undefined, joinMinPow: hub.joinMinPow > 0 ? hub.joinMinPow : undefined, nsfw: hub.nsfw || undefined, messageExpiration: hub.messageExpiration || undefined,
         discoverable: hub.discoverable, groupedRoles: hub.groupedRoles && hub.groupedRoles.length ? hub.groupedRoles : undefined,
         publishedAt: hub.publishedAt, eventCreatedAt: hub.eventCreatedAt,
-      })
-      const signed = await mineAndSign(unsigned, hub.minPow, pubkey, signer, privateKey)
+      }, { pubkey: pubkey!, privateKey, signer, minPow: hub.minPow })
       setLayoutStep('publishing')
-      await publishToSpecificRelays(getPublishRelays([...hub.generalRelays]), signed)
+      // v2: hub relays ONLY — this republish is authored under the owner pseudonym O; sending it to the
+      // owner's personal NIP-65 relays would correlate O → R_owner by relay footprint (the single v2 publish
+      // site that was missing this).
+      await publishToSpecificRelays(getPublishRelays([...hub.generalRelays], { hubOnly: isV2(hub) }), signed)
       setHubData(hub.dTag, { ...hub, channels: layoutDraft.channels, categories: layoutDraft.categories, eventCreatedAt: signed.created_at })
       setLayoutDraft(null)
       setLayoutStep('done')
@@ -517,9 +528,31 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
         </button>
       )}
 
-      {/* Action items */}
+      {/* Action items — collapsible "Hub Menu" */}
       {!isModBanned && (
-        <div className="flex flex-wrap gap-1 p-1.5 bg-secondary/50">
+        <div className="p-1.5 bg-secondary/50">
+          <button
+            onClick={() => setHubMenuOpen((v) => !v)}
+            className="w-full flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-semibold text-muted-foreground hover:text-foreground hover:bg-accent transition-colors cursor-pointer"
+          >
+            <span>Hub Menu</span>
+            <span className="ml-auto flex items-center gap-1.5">
+              {/* When collapsed, surface anything inside that needs attention so it isn't hidden away. */}
+              {!hubMenuOpen && (joinRequestCount > 0 || hasVoiceEpochMismatch) && (
+                <span className="flex items-center gap-1">
+                  {joinRequestCount > 0 && (
+                    <span className="min-w-[18px] h-[18px] flex items-center justify-center rounded-full text-[10px] font-bold px-1 bg-blue-500 text-white">
+                      {joinRequestCount > 99 ? '99+' : joinRequestCount}
+                    </span>
+                  )}
+                  {hasVoiceEpochMismatch && <AlertTriangle size={13} className="text-amber-400" />}
+                </span>
+              )}
+              <ChevronRight size={13} className={cn('transition-transform', hubMenuOpen && 'rotate-90')} />
+            </span>
+          </button>
+          {hubMenuOpen && (
+          <div className="flex flex-wrap gap-1 mt-1">
           {(() => {
             const canInvite = isCreator || (pubkey && hub ? getPermissionsForUser(hub, pubkey, hubMembers).create_invite : false)
             return canInvite ? (
@@ -597,6 +630,8 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
               <Undo2 size={16} />
               <span>Rescind Join Request</span>
             </button>
+          )}
+          </div>
           )}
         </div>
       )}
@@ -834,13 +869,18 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
         />
       )}
 
-      {/* User Hub Settings modal */}
-      <UserHubSettingsModal
-        open={showUserSettings}
-        onClose={() => { setShowUserSettings(false); setUserSettingsInitialTab(undefined) }}
-        hub={hub}
-        initialTab={userSettingsInitialTab}
-      />
+      {/* User Hub Settings modal. Mount only while open AND key by hub, so it UNMOUNTS on close and
+          REMOUNTS per hub — otherwise (it `return null`s but never unmounts) per-hub state bleeds
+          across hubs: voice SFU credentials, the mod ban list, voice-scope configs. */}
+      {showUserSettings && (
+        <UserHubSettingsModal
+          key={hub.dTag}
+          open
+          onClose={() => { setShowUserSettings(false); setUserSettingsInitialTab(undefined) }}
+          hub={hub}
+          initialTab={userSettingsInitialTab}
+        />
+      )}
 
       {/* Calendar Events modal */}
       {activeHubId && showEvents && (
@@ -1152,6 +1192,7 @@ function ChannelItem({ channel, position, positionDigits, isActive, onClick, isL
   const getChannelPresence = useVoiceStore((s) => s.getChannelPresence)
   const currentChannelId = useVoiceStore((s) => s.currentChannelId)
   const currentHostPubkey = useVoiceStore((s) => s.currentHostPubkey)
+  const currentVoiceIdentity = useVoiceStore((s) => s.currentVoiceIdentity)
   const switchHost = useVoiceStore((s) => s.switchHost)
   const connectionState = useVoiceStore((s) => s.connectionState)
   const participants = useVoiceStore((s) => s.participants)
@@ -1166,6 +1207,9 @@ function ChannelItem({ channel, position, positionDigits, isActive, onClick, isL
   const activeHubId = useHubStore((s) => s.activeHubId)
   const hub = useHubStore((s) => (activeHubId ? s.hubs[activeHubId] : null))
   const myPubkey = useUserStore((s) => s.pubkey)
+  // Our voice wire identity: pseudonym P on a v2 hub (once connected), else our real key R.
+  // Presence entries are keyed by the wire identity, so self-recognition must use this.
+  const myVoiceId = currentVoiceIdentity || myPubkey
   const voiceChatMode = useVoiceStore((s) => s.voiceChatMode)
   const toggleVoiceChatMode = useVoiceStore((s) => s.toggleVoiceChatMode)
   const setVoiceChatMode = useVoiceStore((s) => s.setVoiceChatMode)
@@ -1190,7 +1234,7 @@ function ChannelItem({ channel, position, positionDigits, isActive, onClick, isL
   const chatActiveForThis = isThisChannelActive && voiceChatMode
 
   // Show self in the slab immediately while connecting or just connected but not yet in presence
-  const selfAlreadyInPresence = voicePresence.some((p) => p.pubkey === myPubkey)
+  const selfAlreadyInPresence = voicePresence.some((p) => p.pubkey === myVoiceId)
   const showPendingSelf = (isConnecting || (isInVoice && !selfAlreadyInPresence)) && !!myPubkey
 
   return (
@@ -1325,14 +1369,14 @@ function ChannelItem({ channel, position, positionDigits, isActive, onClick, isL
                 <VoicePresenceUser
                   key={p.pubkey}
                   pubkey={p.pubkey}
-                  isSelf={p.pubkey === myPubkey}
-                  isSpeaking={p.pubkey === myPubkey ? selfSpeaking : (part?.isSpeaking ?? activeSpeakers.includes(p.pubkey))}
-                  isMuted={p.pubkey === myPubkey ? myIsMuted : (part?.isMuted ?? false)}
-                  isDeafened={p.pubkey === myPubkey ? myIsDeafened : (part?.isDeafened ?? false)}
-                  hasVideo={p.pubkey === myPubkey ? myIsVideoEnabled : (part?.hasVideo ?? false)}
-                  hasScreenShare={p.pubkey === myPubkey ? myIsScreenSharing : (part?.hasScreenShare ?? false)}
-                  hasSpatial={p.pubkey === myPubkey ? myIsSpatial : (part?.hasSpatial ?? false)}
-                  hasVspace={p.pubkey === myPubkey ? myIsVspace : (part?.hasVspace ?? false)}
+                  isSelf={p.pubkey === myVoiceId}
+                  isSpeaking={p.pubkey === myVoiceId ? selfSpeaking : (part?.isSpeaking ?? activeSpeakers.includes(p.pubkey))}
+                  isMuted={p.pubkey === myVoiceId ? myIsMuted : (part?.isMuted ?? false)}
+                  isDeafened={p.pubkey === myVoiceId ? myIsDeafened : (part?.isDeafened ?? false)}
+                  hasVideo={p.pubkey === myVoiceId ? myIsVideoEnabled : (part?.hasVideo ?? false)}
+                  hasScreenShare={p.pubkey === myVoiceId ? myIsScreenSharing : (part?.hasScreenShare ?? false)}
+                  hasSpatial={p.pubkey === myVoiceId ? myIsSpatial : (part?.hasSpatial ?? false)}
+                  hasVspace={p.pubkey === myVoiceId ? myIsVspace : (part?.hasVspace ?? false)}
                 />
               )
             }
@@ -1387,9 +1431,10 @@ function VoiceHostGroupHeader({
   onJoin: () => void
 }) {
   const { getProfile } = useProfileCache()
-  const isHex = /^[0-9a-f]{64}$/i.test(hostPubkey)
-  const profile = isHex ? getProfile(hostPubkey) : null
-  const name = profile?.display_name || profile?.name || (hostPubkey ? npubShort(hostPubkey) : 'Unknown host')
+  const displayHost = useVoiceDisplayPubkey(hostPubkey) // v2: pseudonym P → real key R
+  const isHex = /^[0-9a-f]{64}$/i.test(displayHost)
+  const profile = isHex ? getProfile(displayHost) : null
+  const name = profile?.display_name || profile?.name || (displayHost ? npubShort(displayHost) : 'Unknown host')
   return (
     <div className="flex items-center gap-1.5 px-2 py-0.5 mt-0.5">
       <span className={cn('w-1 h-1 rounded-full shrink-0', isMine ? 'bg-emerald-400' : 'bg-muted-foreground/40')} />
@@ -1456,9 +1501,12 @@ function VoicePresenceUser({
   isConnecting?: boolean
 }) {
   const { getProfile } = useProfileCache()
-  const isHex = /^[0-9a-f]{64}$/i.test(pubkey)
-  const profile = isHex ? getProfile(pubkey) : null
-  const name = profile?.display_name || profile?.name || npubShort(pubkey)
+  // v2: `pubkey` is the wire pseudonym P (used for SFU volume ops below). Resolve it to the
+  // real key R for the face/name and the profile modal; on v1 it's already R (no-op).
+  const displayPubkey = useVoiceDisplayPubkey(pubkey)
+  const isHex = /^[0-9a-f]{64}$/i.test(displayPubkey)
+  const profile = isHex ? getProfile(displayPubkey) : null
+  const name = profile?.display_name || profile?.name || npubShort(displayPubkey)
   const cachedPicture = useCachedImageUrl(profile?.picture)
   const [showModal, setShowModal] = useState(false)
   const [showProfileModal, setShowProfileModal] = useState(false)
@@ -1548,7 +1596,7 @@ function VoicePresenceUser({
         <UserProfileModal
           open={showProfileModal}
           onClose={() => setShowProfileModal(false)}
-          targetPubkey={pubkey}
+          targetPubkey={displayPubkey}
         />
       )}
     </>

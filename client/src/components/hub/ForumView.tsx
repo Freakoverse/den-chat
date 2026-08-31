@@ -20,6 +20,7 @@ import { useProfileCache } from '@/hooks/useProfileCache'
 import { uploadToBlossomServers, computeHash, blossomServers as blossomServerManager } from '@/lib/blossom'
 import type { UploadProgress } from '@/lib/blossom'
 import { getUploadBlossoms } from '@/stores/postingBehaviourStore'
+import { isV2 } from '@/lib/hub/version'
 import { ChatInputBar, type FileAttachment } from '@/components/chat/ChatInputBar'
 import { MessageContent } from '@/components/chat/MessageContent'
 import { BlossomImage } from '@/components/ui/BlossomImage'
@@ -90,14 +91,26 @@ export function ForumView() {
   // member list has resolved from Blossom. Without this, the very first time you
   // open a forum channel in a hub you just created, canPublish is false (members
   // not loaded yet) so "Create Post" is hidden until a refresh loads the members.
-  const isCreator = !!(pubkey && hub?.creatorPubkey === pubkey)
+  const isCreator = !!(pubkey && (hub?.creatorPubkey === pubkey || hub?.ownerRealPubkey === pubkey))
 
   // Role-based permission resolution
   const perms = usePermissions(activeHubId || undefined, activeChannelId || undefined)
   const canPublish = (isMember || isFacilitated || isCreator) && perms.send_messages
 
-  // Hidden messages state
-  const hiddenMessages = useHubStore((s) => (activeHubId ? s.hiddenMessages[activeHubId] : undefined) ?? EMPTY_HIDDEN)
+  // Hidden messages state. A channel-scoped hide (entry.channelId set) only applies in that channel, so a
+  // mod authorized only elsewhere can't hide here by mis-tagging `c`. Legacy/hub-wide hides apply always.
+  const rawHiddenMessages = useHubStore((s) => (activeHubId ? s.hiddenMessages[activeHubId] : undefined) ?? EMPTY_HIDDEN)
+  const hiddenMessages = useMemo(() => {
+    let scoped: Record<string, typeof rawHiddenMessages[string]> | null = null
+    for (const ref in rawHiddenMessages) {
+      const e = rawHiddenMessages[ref]
+      if (e.channelId && e.channelId !== activeChannelId) {
+        if (!scoped) scoped = { ...rawHiddenMessages }
+        delete scoped[ref]
+      }
+    }
+    return scoped ?? rawHiddenMessages
+  }, [rawHiddenMessages, activeChannelId])
   const canHide = isCreator || perms.hide_messages
 
   // ── Per-channel initial fetch ──
@@ -442,8 +455,11 @@ export function ForumView() {
 
 function ForumPostCard({ post, onClick, isHidden }: { post: ForumPost; onClick: () => void; isHidden?: boolean }) {
   const { getProfile } = useProfileCache()
-  const profile = getProfile(post.pubkey)
-  const displayName = profile?.display_name || profile?.name || truncateNpub(nip19.npubEncode(post.pubkey))
+  // Identity-facing resolution: on v2 the wire author is the pseudonym P; the profile/name/avatar belong
+  // to the real key R (post.realPubkey). Mirror ChannelView. The hide ref, report target, naddr coordinate
+  // and message-matching below deliberately keep the wire key P (they address the P-authored event).
+  const profile = getProfile(post.realPubkey ?? post.pubkey)
+  const displayName = profile?.display_name || profile?.name || truncateNpub(nip19.npubEncode(post.realPubkey ?? post.pubkey))
 
   return (
     <button
@@ -520,8 +536,11 @@ function ForumPostCard({ post, onClick, isHidden }: { post: ForumPost; onClick: 
 
 function ForumPostRow({ post, onClick, isHidden }: { post: ForumPost; onClick: () => void; isHidden?: boolean }) {
   const { getProfile } = useProfileCache()
-  const profile = getProfile(post.pubkey)
-  const displayName = profile?.display_name || profile?.name || truncateNpub(nip19.npubEncode(post.pubkey))
+  // Identity-facing resolution: on v2 the wire author is the pseudonym P; the profile/name/avatar belong
+  // to the real key R (post.realPubkey). Mirror ChannelView. The hide ref, report target, naddr coordinate
+  // and message-matching below deliberately keep the wire key P (they address the P-authored event).
+  const profile = getProfile(post.realPubkey ?? post.pubkey)
+  const displayName = profile?.display_name || profile?.name || truncateNpub(nip19.npubEncode(post.realPubkey ?? post.pubkey))
 
   return (
     <button
@@ -601,14 +620,29 @@ function ForumPostDetail({
   hubDTag, channelId, publishReaction, unreactReaction, getChannelKey,
 }: ForumPostDetailProps) {
   const { getProfile } = useProfileCache()
-  const profile = getProfile(post.pubkey)
-  const displayName = profile?.display_name || profile?.name || truncateNpub(nip19.npubEncode(post.pubkey))
+  // Identity-facing resolution: on v2 the wire author is the pseudonym P; the profile/name/avatar belong
+  // to the real key R (post.realPubkey). Mirror ChannelView. The hide ref, report target, naddr coordinate
+  // and message-matching below deliberately keep the wire key P (they address the P-authored event).
+  const profile = getProfile(post.realPubkey ?? post.pubkey)
+  const displayName = profile?.display_name || profile?.name || truncateNpub(nip19.npubEncode(post.realPubkey ?? post.pubkey))
   const avatarUrl = profile?.picture
-  const isOwnPost = post.pubkey === pubkey
+  const isOwnPost = (post.realPubkey ?? post.pubkey) === pubkey
   const containerRef = useRef<HTMLDivElement>(null)
 
-  // Hidden messages
-  const hiddenMessages = useHubStore((s) => s.hiddenMessages[hubDTag] ?? EMPTY_HIDDEN)
+  // Hidden messages — channel-scoped (see ForumView list): a channel-scoped hide only applies in its own
+  // channel, so a mod authorized only elsewhere can't hide this post/its replies by mis-tagging `c`.
+  const rawHiddenMessages = useHubStore((s) => s.hiddenMessages[hubDTag] ?? EMPTY_HIDDEN)
+  const hiddenMessages = useMemo(() => {
+    let scoped: Record<string, typeof rawHiddenMessages[string]> | null = null
+    for (const ref in rawHiddenMessages) {
+      const e = rawHiddenMessages[ref]
+      if (e.channelId && e.channelId !== channelId) {
+        if (!scoped) scoped = { ...rawHiddenMessages }
+        delete scoped[ref]
+      }
+    }
+    return scoped ?? rawHiddenMessages
+  }, [rawHiddenMessages, channelId])
   const permsForHide = usePermissions(hubDTag, channelId)
   const canHide = isCreator || permsForHide.hide_messages
   const postRef = `36943:${post.pubkey}:${post.dTag}`
@@ -624,13 +658,15 @@ function ForumPostDetail({
       const { publishToSpecificRelays } = await import('@/lib/nostr/relay-pool')
       const { getPublishRelays } = await import('@/stores/postingBehaviourStore')
       const { signer: s, privateKey: pk } = useUserStore.getState()
-      const unsigned = createHideMessageEvent(hubDTag, postRef, post.pubkey, 36943, true)
-      const signed = await signFn(unsigned, s, pk)
+      const unsigned = createHideMessageEvent(hubDTag, postRef, post.pubkey, 36943, true, channelId)
+      // v2: author the hide as the moderator's pseudonym P (verified by P-set from the roster).
+      const { signHubModEvent } = await import('@/lib/hub/hubMemberSign')
+      const signed = hub ? await signHubModEvent({ hub, unsigned, pubkey: pubkey!, privateKey: pk, signer: s }) : await signFn(unsigned, s, pk)
       const relays = hub ? [...hub.generalRelays] : []
-      await publishToSpecificRelays(getPublishRelays(relays), signed)
+      await publishToSpecificRelays(getPublishRelays(relays, { hubOnly: !!hub && isV2(hub) }), signed)
       useHubStore.getState().addHiddenMessage(hubDTag, {
         ref: postRef,
-        hiderPubkey: pubkey,
+        hiderPubkey: signed.pubkey,
         kind: 36943,
         targetPubkey: post.pubkey,
         createdAt: Math.floor(Date.now() / 1000),
@@ -652,15 +688,17 @@ function ForumPostDetail({
       const { KINDS } = await import('@/lib/crypto/constants')
       const { signer: s, privateKey: pk } = useUserStore.getState()
       const relays = hub ? [...hub.generalRelays] : []
-      const publishRelays = getDeletePublishRelays(relays)
+      const publishRelays = getDeletePublishRelays(relays, { hubOnly: !!hub && isV2(hub) })
       const hideEntry = useHubStore.getState().hiddenMessages[hubDTag]?.[postRef]
+      const { signHubModEvent } = await import('@/lib/hub/hubMemberSign')
       const deletedHide = createDeletedHideEvent(hubDTag, postRef, hideEntry?.createdAt)
-      const signedDeleted = await signFn(deletedHide, s, pk)
+      const signedDeleted = hub ? await signHubModEvent({ hub, unsigned: deletedHide, pubkey: pubkey!, privateKey: pk, signer: s }) : await signFn(deletedHide, s, pk)
       await publishToSpecificRelays(publishRelays, signedDeleted)
       const dTag = `${hubDTag}:${postRef}`
-      const aRef = `${KINDS.HIDE_MESSAGE}:${pubkey}:${dTag}`
+      // The original hide was authored by P in v2 → its coordinate is HIDE_MESSAGE:P:dTag.
+      const aRef = `${KINDS.HIDE_MESSAGE}:${signedDeleted.pubkey}:${dTag}`
       const deletionReq = createDeletionEvent([], [aRef], 'unhide')
-      const signedDeletion = await signFn(deletionReq, s, pk)
+      const signedDeletion = hub ? await signHubModEvent({ hub, unsigned: deletionReq, pubkey: pubkey!, privateKey: pk, signer: s }) : await signFn(deletionReq, s, pk)
       await publishToSpecificRelays(publishRelays, signedDeletion)
       useHubStore.getState().removeHiddenMessage(hubDTag, postRef)
     } catch (err) {
@@ -706,7 +744,7 @@ function ForumPostDetail({
     if (!targetMsg) return
 
     const existing = storeReactions[messageId] || []
-    const myExisting = existing.find((r) => r.emoji === emoji && r.pubkey === myPubkey)
+    const myExisting = existing.find((r) => r.emoji === emoji && (r.realPubkey ?? r.pubkey) === myPubkey)
     if (myExisting) {
       setPendingUnreact({ messageId, emoji, eventId: myExisting.eventId })
       return
@@ -749,7 +787,7 @@ function ForumPostDetail({
     if (optimisticMessages.length === 0 || replies.length === 0) return
     const toRemove: string[] = []
     for (const opt of optimisticMessages) {
-      if (replies.some((r) => r.pubkey === myPubkey && r.content === opt.content)) toRemove.push(opt.tempId)
+      if (replies.some((r) => (r.realPubkey ?? r.pubkey) === myPubkey && r.content === opt.content)) toRemove.push(opt.tempId)
     }
     if (toRemove.length > 0) setOptimisticMessages((prev) => prev.filter((m) => !toRemove.includes(m.tempId)))
   }, [replies, optimisticMessages, myPubkey])
@@ -892,7 +930,7 @@ function ForumPostDetail({
             {/* Author + date + menu */}
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-3">
-                <button onClick={() => setProfileModalPubkey(post.pubkey)} className="shrink-0 cursor-pointer">
+                <button onClick={() => setProfileModalPubkey(post.realPubkey ?? post.pubkey)} className="shrink-0 cursor-pointer">
                   <Avatar className="h-10 w-10">
                     {avatarUrl && <AvatarImage src={avatarUrl} alt={displayName} />}
                     <AvatarFallback className="text-xs bg-primary/20 text-primary">
@@ -903,12 +941,12 @@ function ForumPostDetail({
                 <div className="flex flex-col">
                   <div className="flex items-center gap-2">
                     <button
-                      onClick={() => setProfileModalPubkey(post.pubkey)}
+                      onClick={() => setProfileModalPubkey(post.realPubkey ?? post.pubkey)}
                       className="text-base font-semibold cursor-pointer hover:underline text-foreground"
                     >
                       {displayName}
                     </button>
-                    <DnnBadge pubkey={post.pubkey} />
+                    <DnnBadge pubkey={post.realPubkey ?? post.pubkey} />
                     {post.facilitator && (
                       <Tooltip>
                         <TooltipTrigger asChild>
@@ -1099,7 +1137,7 @@ function ForumPostDetail({
                         msg={reply}
                         hubDTag={hubDTag}
                         isGrouped={!!isGrouped}
-                        isMine={reply.pubkey === myPubkey}
+                        isMine={(reply.realPubkey ?? reply.pubkey) === myPubkey}
                         onOpenProfile={setProfileModalPubkey}
                         onEdit={startEdit}
                         onReply={handleReplyInThread}
@@ -1132,35 +1170,40 @@ function ForumPostDetail({
                         onHideMessage={canHide ? async () => {
                           const { createHideMessageEvent } = await import('@/lib/nostr/events')
                           const { signWithSigner: signFn } = await import('@/lib/nostr')
+                          const { signHubModEvent } = await import('@/lib/hub/hubMemberSign')
                           const { publishToSpecificRelays } = await import('@/lib/nostr/relay-pool')
                           const { getPublishRelays } = await import('@/stores/postingBehaviourStore')
                           const { signer: s, privateKey: pk } = useUserStore.getState()
-                          const unsigned = createHideMessageEvent(hubDTag, replyRef, reply.pubkey, 36943, true)
-                          const signed = await signFn(unsigned, s, pk)
+                          const unsigned = createHideMessageEvent(hubDTag, replyRef, reply.pubkey, 36943, true, channelId)
+                          // v2: author the hide as the moderator's pseudonym P (mirrors the post-level
+                          // handler above) — otherwise this leaks the mod's real key R onto the wire.
+                          const signed = hub ? await signHubModEvent({ hub, unsigned, pubkey: pubkey!, privateKey: pk, signer: s }) : await signFn(unsigned, s, pk)
                           const relays = hub ? [...hub.generalRelays] : []
-                          await publishToSpecificRelays(getPublishRelays(relays), signed)
+                          await publishToSpecificRelays(getPublishRelays(relays, { hubOnly: !!hub && isV2(hub) }), signed)
                           useHubStore.getState().addHiddenMessage(hubDTag, {
-                            ref: replyRef, hiderPubkey: pubkey, kind: 36943, targetPubkey: reply.pubkey,
+                            ref: replyRef, hiderPubkey: signed.pubkey, kind: 36943, targetPubkey: reply.pubkey,
                             createdAt: Math.floor(Date.now() / 1000),
                           })
                         } : undefined}
                         onUnhideMessage={canHide ? async () => {
                           const { createDeletedHideEvent, createDeletionEvent } = await import('@/lib/nostr/events')
                           const { signWithSigner: signFn } = await import('@/lib/nostr')
+                          const { signHubModEvent } = await import('@/lib/hub/hubMemberSign')
                           const { publishToSpecificRelays } = await import('@/lib/nostr/relay-pool')
                           const { getDeletePublishRelays } = await import('@/stores/postingBehaviourStore')
                           const { KINDS } = await import('@/lib/crypto/constants')
                           const { signer: s, privateKey: pk } = useUserStore.getState()
                           const relays = hub ? [...hub.generalRelays] : []
-                          const publishRelays = getDeletePublishRelays(relays)
+                          const publishRelays = getDeletePublishRelays(relays, { hubOnly: !!hub && isV2(hub) })
                           const replyHideEntry = useHubStore.getState().hiddenMessages[hubDTag]?.[replyRef]
                           const deletedHide = createDeletedHideEvent(hubDTag, replyRef, replyHideEntry?.createdAt)
-                          const signedDeleted = await signFn(deletedHide, s, pk)
+                          const signedDeleted = hub ? await signHubModEvent({ hub, unsigned: deletedHide, pubkey: pubkey!, privateKey: pk, signer: s }) : await signFn(deletedHide, s, pk)
                           await publishToSpecificRelays(publishRelays, signedDeleted)
                           const dTagVal = `${hubDTag}:${replyRef}`
-                          const aRefVal = `${KINDS.HIDE_MESSAGE}:${pubkey}:${dTagVal}`
+                          // The original hide was authored by P in v2 → its coordinate is HIDE_MESSAGE:P:dTag.
+                          const aRefVal = `${KINDS.HIDE_MESSAGE}:${signedDeleted.pubkey}:${dTagVal}`
                           const deletionReq = createDeletionEvent([], [aRefVal], 'unhide')
-                          const signedDeletion = await signFn(deletionReq, s, pk)
+                          const signedDeletion = hub ? await signHubModEvent({ hub, unsigned: deletionReq, pubkey: pubkey!, privateKey: pk, signer: s }) : await signFn(deletionReq, s, pk)
                           await publishToSpecificRelays(publishRelays, signedDeletion)
                           useHubStore.getState().removeHiddenMessage(hubDTag, replyRef)
                         } : undefined}
@@ -1263,7 +1306,7 @@ function ForumPostDetail({
         open={!!profileModalPubkey}
         onClose={() => setProfileModalPubkey(null)}
         targetPubkey={profileModalPubkey}
-        hubContext={hub ? { dTag: hubDTag, creatorPubkey: hub.creatorPubkey } : null}
+        hubContext={hub ? { dTag: hubDTag, creatorPubkey: hub.creatorPubkey, ownerRealPubkey: hub.ownerRealPubkey } : null}
         onDM={(pk) => {
           useDM04Store.getState().setActiveConversation(pk)
           useDMStore.getState().setActiveConversation(pk)
@@ -1357,13 +1400,14 @@ function CreateForumPostModal({ onClose, sendMessage, canPublish, signer, privat
     setFeaturedUploading(true)
     setFeaturedProgress(null)
     try {
-      const servers = getUploadBlossoms(hub?.blossomServers)
+      const servers = getUploadBlossoms(hub?.blossomServers, { hubOnly: !!hub && isV2(hub) })
       const buffer = await featuredFile.arrayBuffer()
       const data = new Uint8Array(buffer)
       const { hash } = await uploadToBlossomServers(
         data, signer, privateKey, servers, featuredFile.type,
         (progress) => setFeaturedProgress({ ...progress }),
         () => { const c = new AbortController(); featuredAbortRef.current = c; return c.signal },
+        hub ? await (await import('@/lib/hub/hubMemberSign')).hubBlossomAuthSigner(hub, { privateKey, signer }) : undefined,
       )
       const serverUrl = (servers[0] || '').replace(/\/+$/, '')
       setFeaturedImage(`${serverUrl}/${hash}`)
@@ -1490,6 +1534,7 @@ function CreateForumPostModal({ onClose, sendMessage, canPublish, signer, privat
             setPendingFiles((prev) => prev.map((f) => f.id === pf.id ? { ...f, progress: { ...progress } } : f))
           },
           () => { const c = new AbortController(); uploadAbortRef.current = c; return c.signal },
+          hub ? await (await import('@/lib/hub/hubMemberSign')).hubBlossomAuthSigner(hub, { privateKey, signer }) : undefined,
         )
         setPendingFiles((prev) => prev.map((f) => f.id === pf.id ? { ...f, status: 'success' as const, hash, progress: undefined } : f))
 
@@ -1986,13 +2031,14 @@ function EditForumPostModal({ post, onClose, editMessage, signer, privateKey, hu
     setFeaturedUploading(true)
     setFeaturedProgress(null)
     try {
-      const servers = getUploadBlossoms(hub?.blossomServers)
+      const servers = getUploadBlossoms(hub?.blossomServers, { hubOnly: !!hub && isV2(hub) })
       const buffer = await featuredFile.arrayBuffer()
       const data = new Uint8Array(buffer)
       const { hash } = await uploadToBlossomServers(
         data, signer, privateKey, servers, featuredFile.type,
         (progress) => setFeaturedProgress({ ...progress }),
         () => { const c = new AbortController(); featuredAbortRef.current = c; return c.signal },
+        hub ? await (await import('@/lib/hub/hubMemberSign')).hubBlossomAuthSigner(hub, { privateKey, signer }) : undefined,
       )
       const serverUrl = (servers[0] || '').replace(/\/+$/, '')
       setFeaturedImage(`${serverUrl}/${hash}`)
@@ -2076,6 +2122,7 @@ function EditForumPostModal({ post, onClose, editMessage, signer, privateKey, hu
           data, signer, privateKey, servers, pf.file.type,
           (progress) => { setPendingFiles((prev) => prev.map((f) => f.id === pf.id ? { ...f, progress: { ...progress } } : f)) },
           () => { const c = new AbortController(); uploadAbortRef.current = c; return c.signal },
+          hub ? await (await import('@/lib/hub/hubMemberSign')).hubBlossomAuthSigner(hub, { privateKey, signer }) : undefined,
         )
         setPendingFiles((prev) => prev.map((f) => f.id === pf.id ? { ...f, status: 'success' as const, hash, progress: undefined } : f))
         const serverUrl = (servers[0] || '').replace(/\/+$/, '')
