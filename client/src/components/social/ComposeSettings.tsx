@@ -3,7 +3,7 @@ import { useUserStore } from '@/stores/userStore'
 import { StorageKey } from '@/lib/constants'
 import { STANDARD_KINDS } from '@/lib/crypto/constants'
 import { getRelays, fetchReplaceable, publishToSpecificRelays, assertPublished } from '@/lib/nostr/relay-pool'
-import { getPublishRelays } from '@/stores/postingBehaviourStore'
+import { publishPersonal } from '@/stores/postingBehaviourStore'
 import { benchmarkHashRate, estimateSolveTime } from '@/lib/pow/pow'
 import { mineAndSign } from '@/lib/nostr/events'
 import { Settings, Minus, Plus, RotateCcw } from 'lucide-react'
@@ -37,10 +37,9 @@ export function useComposeSettings(initialPow = 15): ComposeSettings {
     // Mine PoW + sign (with automatic retry if signer invalidates PoW)
     const signed = await mineAndSign(unsigned, powDifficulty, pubkey, signer, privateKey)
 
-    // Publish to relays from posting behaviour store
-    const relays = getPublishRelays()
-    const accepted = await publishToSpecificRelays(relays, signed)
-    assertPublished(accepted)   // dead-relay → throw so the composer can show an error
+    // Publish with failover across the user's own relays (see postingBehaviourStore)
+    const accepted = await publishPersonal(signed)
+    assertPublished(accepted)   // every relay dead → throw so the composer can show an error
 
     return signed as Event
   }, [powDifficulty, pubkey, signer, privateKey])

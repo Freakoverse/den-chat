@@ -12,7 +12,7 @@ import type { Event } from 'nostr-tools'
 import { fetchEvents, fetchReplaceable, fetchEventById, publishEvent, publishToSpecificRelays, assertPublished } from '@/lib/nostr/relay-pool'
 import { signWithSigner, mineAndSign } from '@/lib/nostr'
 import { createDeletionEvent } from '@/lib/nostr/events'
-import { getDeletePublishRelays } from '@/stores/postingBehaviourStore'
+import { getDeletePublishRelays, publishPersonal } from '@/stores/postingBehaviourStore'
 import { useUserStore } from '@/stores/userStore'
 import { useFollowStore } from '@/stores/followStore'
 import { KINDS } from '@/lib/crypto/constants'
@@ -346,7 +346,7 @@ export const useForumStore = create<ForumState>((set, get) => ({
     if (!signer && !privateKey) return
     const norm = normalizeWord(word)
     const signed = await signWithSigner(createWordProfile(norm, p), signer, privateKey)
-    await publishEvent(signed)
+    await publishPersonal(signed)
     const mine = parseWordProfile(signed)
     set({
       myWordProfile: { ...get().myWordProfile, [norm]: mine },
@@ -358,7 +358,7 @@ export const useForumStore = create<ForumState>((set, get) => ({
     if (!signer && !privateKey) return
     const norm = normalizeWord(word)
     const signed = await signWithSigner(createWordDelegation(norm, delegate), signer, privateKey)
-    await publishEvent(signed)
+    await publishPersonal(signed)
     const mine = parseWordProfile(signed)
     let resolved: WordProfile | null = null
     try {
@@ -544,7 +544,7 @@ export const useForumStore = create<ForumState>((set, get) => ({
     const dTag = slug || `c-${Date.now().toString(36)}`
     const unsigned = createCommunityDefinition({ dTag, name, description, image, banner, nsfw, moderators })
     const signed = await signWithSigner(unsigned, signer, privateKey)
-    await publishEvent(signed)
+    await publishPersonal(signed)
     const def = parseCommunityDefinition(signed)
     if (def) {
       set({ communitiesByAddress: { ...get().communitiesByAddress, [def.address]: def } })
@@ -569,7 +569,7 @@ export const useForumStore = create<ForumState>((set, get) => ({
       relays: def.relays,
     })
     const signed = await signWithSigner(unsigned, signer, privateKey)
-    await publishEvent(signed)
+    await publishPersonal(signed)
     const updated = parseCommunityDefinition(signed)
     if (updated) set({ communitiesByAddress: { ...get().communitiesByAddress, [updated.address]: updated } })
     return updated
@@ -580,7 +580,7 @@ export const useForumStore = create<ForumState>((set, get) => ({
     if ((!signer && !privateKey) || !title.trim()) return null
     const unsigned = createCommunityPost({ address: community.address, pubkey: community.pubkey }, title, body, opts)
     const signed = await mineAndSign(unsigned, get().publishPow, pubkey, signer, privateKey)
-    assertPublished(await publishEvent(signed))
+    assertPublished(await publishPersonal(signed))
     const post = parseCommunityPost(signed)
     if (post) {
       const addr = community.address
@@ -599,7 +599,7 @@ export const useForumStore = create<ForumState>((set, get) => ({
       if (!raw) return
       const unsigned = createCommunityApproval(community.address, raw)
       const signed = await signWithSigner(unsigned, signer, privateKey)
-      await publishEvent(signed)
+      await publishPersonal(signed)
       const addr = community.address
       const cur = get().approvedByCommunity[addr] || []
       if (!cur.includes(post.id)) {
@@ -733,7 +733,7 @@ export const useForumStore = create<ForumState>((set, get) => ({
     if ((!signer && !privateKey) || !title.trim() || !word.trim()) return null
     const unsigned = createForumWordPost(word, title, body, opts)
     const signed = await mineAndSign(unsigned, get().publishPow, pubkey, signer, privateKey)
-    assertPublished(await publishEvent(signed))
+    assertPublished(await publishPersonal(signed))
     const post = parseForumWordPost(signed)
     if (post) {
       // post.word is optional on the shared ForumPost type (community posts have none),
@@ -749,7 +749,7 @@ export const useForumStore = create<ForumState>((set, get) => ({
     if ((!signer && !privateKey) || !body.trim()) return null
     const unsigned = createForumComment({ root, parent, body })
     const signed = await mineAndSign(unsigned, get().publishPow, pubkey, signer, privateKey)
-    assertPublished(await publishEvent(signed))
+    assertPublished(await publishPersonal(signed))
     const comment = parseForumComment(signed)
     if (comment) {
       set({ commentsByPost: { ...get().commentsByPost, [root.id]: [...(get().commentsByPost[root.id] || []), comment] } })
@@ -783,7 +783,7 @@ export const useForumStore = create<ForumState>((set, get) => ({
       // 2. Publish the new reaction unless we're just toggling off.
       if (!togglingOff) {
         const signed = await signWithSigner(createForumReaction(target.id, target.pubkey, content), signer, privateKey)
-        await publishEvent(signed)
+        await publishPersonal(signed)
         set({ sentimentByTarget: { ...get().sentimentByTarget, [target.id]: { ...optimistic, mineId: signed.id } } })
       }
     } catch {
@@ -842,7 +842,7 @@ async function publishCommunityList(addresses: string[]) {
   if (!signer && !privateKey) return
   try {
     const signed = await signWithSigner(createCommunityListEvent(addresses), signer, privateKey)
-    await publishEvent(signed)
+    await publishPersonal(signed)
   } catch (err) {
     console.error('[forum] failed to publish community list:', err)
   }
@@ -855,7 +855,7 @@ async function publishWordList(words: string[]) {
   try {
     const unsigned = createForumWordList(words)
     const signed = await signWithSigner(unsigned, signer, privateKey)
-    await publishEvent(signed)
+    await publishPersonal(signed)
   } catch (err) {
     console.error('[forum] failed to publish word list:', err)
   }

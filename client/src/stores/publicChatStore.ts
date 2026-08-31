@@ -27,7 +27,7 @@ import {
   publishToSpecificRelays,
   getRelays,
 } from '@/lib/nostr/relay-pool'
-import { getDeletePublishRelays } from '@/stores/postingBehaviourStore'
+import { getDeletePublishRelays, publishPersonal } from '@/stores/postingBehaviourStore'
 import { parseZapReceipt, type ZapInfo } from '@/lib/nostr/zap'
 import type { ISigner } from '@/stores/userStore'
 import type { Event } from 'nostr-tools'
@@ -349,7 +349,7 @@ export const usePublicChatStore = create<PublicChatState>((set, get) => ({
     try {
       const unsigned = createPublicChatList(newTopics)
       const signed = await signWithSigner(unsigned, signer, privateKey)
-      await publishEvent(signed)
+      await publishPersonal(signed)
     } catch (err) {
       console.error('[PublicChat] Failed to publish topic list:', err)
     }
@@ -374,7 +374,7 @@ export const usePublicChatStore = create<PublicChatState>((set, get) => ({
     try {
       const unsigned = createPublicChatList(newTopics)
       const signed = await signWithSigner(unsigned, signer, privateKey)
-      await publishEvent(signed)
+      await publishPersonal(signed)
     } catch (err) {
       console.error('[PublicChat] Failed to publish topic list:', err)
     }
@@ -805,7 +805,7 @@ export const usePublicChatStore = create<PublicChatState>((set, get) => ({
     // Mark as processed to avoid dedup with subscription
     get().markReactionProcessed(signed.id)
 
-    await publishEvent(signed)
+    await publishPersonal(signed)
   },
 
   unreactReaction: async ({ reactionEventId, signer, privateKey }) => {
