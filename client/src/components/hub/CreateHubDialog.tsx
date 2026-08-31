@@ -174,18 +174,25 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
 
   const [relaysInitialized, setRelaysInitialized] = useState(false)
 
-  // Initialize relay + blossom lists on first open — pick up to 3 random from each
+  // Initialize relay + blossom lists on first open — pick up to 3 per list, DETERMINISTICALLY seeded by
+  // the author's pubkey (same ring-pick as getPublishRelays' pickForPubkey), not random: every one of
+  // the author's devices picks the same subset, and it's stable per author instead of a fresh shuffle
+  // each open. (Delivery health is still handled at publish time by publishWithFailover, which routes
+  // around any dead relay in the pick — so this default just needs to be consistent, not pre-probed.)
   useEffect(() => {
     if (!open || relaysInitialized) return
 
-    const pickRandom = (urls: string[], max: number): Set<string> => {
-      const shuffled = [...urls].sort(() => Math.random() - 0.5)
-      return new Set(shuffled.slice(0, max))
+    // Deterministic ring pick seeded by `pubkey`: sort, start at hash(seed) mod len, take `max`.
+    const pickForAuthor = (urls: string[], max: number): Set<string> => {
+      if (urls.length <= max) return new Set(urls)
+      const sorted = [...urls].sort()
+      const start = pubkey ? parseInt(pubkey.slice(0, 8), 16) % sorted.length : 0
+      return new Set(Array.from({ length: max }, (_, i) => sorted[(start + i) % sorted.length]))
     }
 
     // Client relays
     const clientList = getRelayList().filter(r => r.enabled)
-    const clientPicked = pickRandom(clientList.map(r => r.url), 3)
+    const clientPicked = pickForAuthor(clientList.map(r => r.url), 3)
     setClientRelayEntries(clientList.map(r => ({
       url: r.url,
       enabled: clientPicked.has(r.url),
@@ -195,7 +202,7 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
     // User NIP-65 relays (dedup against client)
     const clientUrls = new Set(clientList.map(r => r.url))
     const uniqueUserRelays = userRelays.filter(u => !clientUrls.has(u))
-    const userPicked = pickRandom(uniqueUserRelays, 3)
+    const userPicked = pickForAuthor(uniqueUserRelays, 3)
     setUserRelayEntries(uniqueUserRelays.map(url => ({
       url,
       enabled: userPicked.has(url),
@@ -204,7 +211,7 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
 
     // Client blossom servers
     const clientBlossomList = blossomServerManager.getList().filter(s => s.enabled)
-    const blossomPicked = pickRandom(clientBlossomList.map(s => s.url), 3)
+    const blossomPicked = pickForAuthor(clientBlossomList.map(s => s.url), 3)
     setClientBlossomEntries(clientBlossomList.map(s => ({
       url: s.url,
       enabled: blossomPicked.has(s.url),
@@ -213,7 +220,7 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
     // User blossom server list (dedup against client)
     const clientBlossomUrls = new Set(clientBlossomList.map(s => s.url))
     const uniqueUserBlossoms = userBlossoms.filter(u => !clientBlossomUrls.has(u))
-    const userBlossomPicked = pickRandom(uniqueUserBlossoms, 3)
+    const userBlossomPicked = pickForAuthor(uniqueUserBlossoms, 3)
     setUserBlossomEntries(uniqueUserBlossoms.map(url => ({
       url,
       enabled: userBlossomPicked.has(url),
@@ -632,17 +639,17 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
       }
       markDone('signing-event')
 
-      // Publish to relays. On v2, hubOnly:true keeps the O-authored event OFF the creator's personal
-      // NIP-65 relays — publishing it there would let an observer correlate O with the creator's real key
-      // R purely from the relay footprint (the same P→R leak the edit paths already guard). Also route
-      // through the hub's own relays so members actually receive this first event.
+      // Publish the hub event. v2 uses the SAME relay flow as v1 (NOT hubOnly): the O-authored event
+      // goes to the hub's own relays + the creator's client + NIP-65 relays. This is a deliberate choice
+      // for discoverability/reliability — the plausible deniability holds (a hub event on your relays only
+      // shows you RELAYED it, not that you authored it; anyone can publish anyone's hub event). Failover
+      // routes around any dead/write-rejecting relay in the pick so a bad pick can't strand the hub.
       setCreationStep('publishing-hub')
-      // Fail over so a dead/write-rejecting relay in the pick can't strand the hub event (v1 masks this
-      // by also hitting client+user relays; v2's hubOnly pick is narrow, so without failover a bad pick
-      // makes the whole hub un-findable). v2 fails over ONLY across the hub's own relays — never the
-      // creator's personal/NIP-65 relays — so the O-authored event can't be correlated to R by footprint.
-      const hubEventPool = wantV2 ? [...relays] : [...relays, ...getRelays()]
-      const accepted = await publishWithFailover(signed, getPublishRelays([...relays], { hubOnly: wantV2 }), { pool: hubEventPool, target: 3 })
+      const accepted = await publishWithFailover(
+        signed,
+        getPublishRelays([...relays], { hubOnly: false }),
+        { pool: [...relays, ...getRelays(), ...userRelays], target: 3 },
+      )
       if (accepted.length === 0) {
         // No relay stored the hub event → the hub does not exist anywhere durable. Abort loudly
         // (this runs BEFORE the hub is written to the local store) instead of leaving a "ghost hub"

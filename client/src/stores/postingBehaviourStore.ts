@@ -129,18 +129,13 @@ export function getPublishRelays(hubRelays?: string[], opts?: { hubOnly?: boolea
     getRelayList().filter((r) => !r.enabled).map((r) => r.url.replace(/\/+$/, ''))
   )
 
-  // hubOnly: a PRIVACY-CRITICAL v2 hub event (authored under a pseudonym P/Pf/O) must publish ONLY to
-  // the hub's own relays — NEVER the user's personal NIP-65 or client relays. Those are advertised by
-  // the user's REAL key R (kind 10002), so blasting a P-authored event onto that same personal relay
-  // set lets an observer link P → R purely from the relay footprint. Hub-only keeps P on the hub relays.
-  if (opts?.hubOnly) {
-    if (hubRelays && hubRelays.length > 0) {
-      const limit = state.limitHubRelays ? 3 : Infinity
-      const filtered = hubRelays.filter((r) => !disabledRelays.has(r.replace(/\/+$/, '')))
-      pickForPubkey(filtered, limit, me).forEach((r) => result.add(r))
-    }
-    return Array.from(result)
-  }
+  // `hubOnly` is now INERT — v2 (pseudonym-authored) events publish over the SAME relay set as v1
+  // (hub + client + NIP-65), by explicit product decision. The plausible deniability holds: the client
+  // relays are shared app defaults (not advertised as anyone's), and even a user's NIP-65 relays only
+  // prove they *relayed* the event, not that they authored it (anyone may publish anyone's event). The
+  // param is kept in the signature so the ~40 call sites still compile; it simply no longer restricts.
+  // (Was: hubOnly kept a P/O-authored event on the hub's relays only, to avoid a P→R footprint link.)
+  void opts
 
   // Client relays (from relay-pool, which reads localStorage — already filtered to enabled)
   if (state.postToClientRelays) {
@@ -200,8 +195,8 @@ export async function publishPersonal(event: Event, target = 3): Promise<string[
  */
 export function getDeletePublishRelays(hubRelays?: string[], opts?: { hubOnly?: boolean }): string[] {
   const state = usePostingBehaviourStore.getState()
-  // v2 hub event: keep deletes on the hub relays only (same P→R relay-footprint reason as getPublishRelays).
-  if (opts?.hubOnly) return getPublishRelays(hubRelays, { hubOnly: true })
+  // `hubOnly` is inert here too (see getPublishRelays) — v2 deletes reach the same relays as v1.
+  void opts
   if (!state.bypassDeleteRelayLimits) return getPublishRelays(hubRelays)
 
   const result = new Set<string>()
