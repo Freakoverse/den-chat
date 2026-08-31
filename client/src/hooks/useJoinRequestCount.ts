@@ -12,8 +12,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { fetchEventsFromRelays } from '@/lib/nostr/relay-pool'
-import { subscribeToRelays } from '@/lib/nostr/relay-pool'
+import { fetchEventsFromRelays, subscribeToRelays, getRelays } from '@/lib/nostr/relay-pool'
 import { KINDS } from '@/lib/crypto/constants'
 import { countLeadingZeroBits } from '@/lib/pow/pow'
 import { isV2 } from '@/lib/hub/version'
@@ -51,7 +50,12 @@ export function useJoinRequestCount(
   const [count, setCount] = useState(0)
   // Track known pubkeys to avoid double-counting from initial fetch + subscription overlap
   const knownPubkeysRef = useRef<Map<string, number>>(new Map())
-  const hubRelays = hub ? [...hub.generalRelays] : []
+  // Watch the hub's own relays PLUS the client relays. A join request publishes to getPublishRelays
+  // (hub + client + NIP-65), so if the applicant's hub-relay pick was dead/narrow the request may only
+  // have landed on the shared client relays. Subscribing to hub relays ALONE (as before) silently
+  // missed those, so the creator's badge read 0 even though the request went through (the modal, which
+  // queries client relays via fetchEvents, still showed it). Broadening here fixes the badge for v1+v2.
+  const hubRelays = hub ? [...new Set([...hub.generalRelays, ...getRelays()])] : []
 
   // Initial fetch to populate count
   const fetchInitial = useCallback(async () => {
