@@ -22,7 +22,7 @@ import { StorageKey, ADMIN_NPUB, ADMIN_PUBKEY, PREV_ADMIN_NPUB, PREV_ADMIN_PUBKE
 import { STANDARD_KINDS, KINDS } from '@/lib/crypto/constants'
 import { blossomServers, uploadToBlossomServers, downloadFromBlossomWithProgress } from '@/lib/blossom'
 import type { DownloadProgress } from '@/lib/blossom'
-import { getRelayList, getDefaultRelays, setRelays, publishToSpecificRelays, fetchReplaceable, fetchEvents } from '@/lib/nostr/relay-pool'
+import { getRelayList, getDefaultRelays, setRelays, publishToSpecificRelays, publishWithFailover, getRelays, fetchReplaceable, fetchEvents } from '@/lib/nostr/relay-pool'
 import { checkEventAvailability } from '@/lib/nostr/eventRedundancy'
 import { parseHubBackup } from '@/lib/hub/hubBackup'
 import { Button } from '@/components/ui/button'
@@ -5673,10 +5673,13 @@ function RebroadcastHubTool() {
           } catch { /* try the rest; report the shortfall below */ }
         }
       }
-      // 2. Rebroadcast the hub event itself.
+      // 2. Rebroadcast the hub event itself — WITH FAILOVER. This is the recovery path when a
+      //    membership change's pointer update never reached relays (the hub shows a local-only "new
+      //    version"), so it must route around the very dead/rejecting relays that stranded it in the
+      //    first place; a fixed fire-once would reproduce the original failure.
       setProgress('Publishing the hub event to your relays…')
       const targets = getPublishRelays()
-      const accepted = await publishToSpecificRelays(targets, event)
+      const accepted = await publishWithFailover(event, targets, { pool: [...targets, ...getRelays()] })
 
       const parts: string[] = []
       if (blobs && blobs.size > 0) {
