@@ -93,6 +93,14 @@ const EMPTY_PROFILE: ProfileData = {
   lud16: '',
 }
 
+// Ban/remove progress step labels — MUST match the labels the running flow actually emits, or the
+// unmatched rows never light up (they'd sit greyed while the flow reports "completed"). There are three
+// flows: the v1 creator ban (inline, below), the v2 member kick/ban (lib/hub/v2kick), and the v2
+// non-member ban (ban-page rewrite only). Each emits a different set of step labels.
+const V1_CREATOR_BAN_STEPS = ['Downloading index & tree', 'Removing member & rotating secret', 'Rotating group encryption', 'Uploading ban page & index', 'Publishing hub event']
+const V2_MEMBER_BAN_STEPS = ['Downloading index & tree', 'Removing member & rotating secret', 'Uploading page & spine', 'Building index', 'Publishing hub event']
+const V2_NONMEMBER_BAN_STEPS = ['Downloading index & tree', 'Uploading ban pages', 'Publishing hub event']
+
 export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPosts, onDM, startEditing: startEditingProp, hubContext }: UserProfileModalProps) {
   const myPubkey = useUserStore((s) => s.pubkey)
   const signer = useUserStore((s) => s.signer)
@@ -487,6 +495,9 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
   const [banning, setBanning] = useState(false)
   const [banStep, setBanStep] = useState<string | null>(null)
   const [banSteps, setBanSteps] = useState<string[]>([])
+  // Which step-label list to render — set per-flow at the start of handleRemoveOrBan (see the constants
+  // above). Defaults to the v1 list; the v2 branches override it before emitting steps.
+  const [banStepLabels, setBanStepLabels] = useState<string[]>(V1_CREATOR_BAN_STEPS)
   const [banError, setBanError] = useState<string | null>(null)
   const [modBanning, setModBanning] = useState(false)
   const [modBanStep, setModBanStep] = useState<string | null>(null)
@@ -527,14 +538,13 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
     return (modBanListsForHub?.[myPubkey] || []).includes(displayPubkey)
   })()
 
-  const CREATOR_BAN_STEPS = ['Downloading index & tree', 'Removing member & rotating secret', 'Rotating group encryption', 'Uploading ban page & index', 'Publishing hub event']
-
   const handleRemoveOrBan = async (mode: 'ban' | 'remove') => {
     if (!displayPubkey || !hubContext || !myPubkey || banning) return
     setShowDropdown(false)
     setBanning(true)
     setBanError(null)
     setBanSteps([])
+    setBanStepLabels(V1_CREATOR_BAN_STEPS) // default (v1 inline path); v2 branches override before emitting
 
     const markStep = async (step: string) => {
       setBanStep(step)
@@ -605,6 +615,7 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
       const { isV2 } = await import('@/lib/hub/version')
       if (isV2(hub)) {
         if (!isInTree) {
+          setBanStepLabels(V2_NONMEMBER_BAN_STEPS) // ban-page rewrite only — no tree surgery/rotation
           // Not in the member tree, but a v2 ban must still be PERSISTED to the encrypted ban page and
           // republished — otherwise it's local-only: invisible to other moderators/devices and lost on
           // reload (the ban list is re-derived from Blossom). This mirrors the v1 non-member ban and the
@@ -650,6 +661,7 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
           await markStep('Done')
           return
         }
+        setBanStepLabels(V2_MEMBER_BAN_STEPS) // kickMemberV2 emits these labels via onStep
         let memberP = members.find(m => m.pubkey === displayPubkey)?.p
         if (!memberP && privateKey) {
           // Local owner: re-derive P from R (ECDH symmetry) when it isn't cached.
@@ -2182,7 +2194,7 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
 
             {/* Step list */}
             <div className="space-y-1.5">
-              {CREATOR_BAN_STEPS.map((step) => {
+              {banStepLabels.map((step) => {
                 const isDone = banSteps.includes(step)
                 const isCurrent = banStep === step
                 return (
