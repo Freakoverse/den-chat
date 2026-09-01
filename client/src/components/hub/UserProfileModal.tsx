@@ -7,6 +7,7 @@
  */
 
 import { useState, useEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { useBlossomMedia } from '@/hooks/useBlossomMedia'
 import { useUserStore } from '@/stores/userStore'
 import { useBlockStore } from '@/stores/blockStore'
@@ -129,6 +130,9 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
   const [followLoading, setFollowLoading] = useState(false)
   const [showDropdown, setShowDropdown] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
+  const dropdownMenuRef = useRef<HTMLDivElement>(null)
+  // Fixed-viewport coords for the portaled dropdown menu (so the modal's overflow can't clip it).
+  const [dropdownPos, setDropdownPos] = useState<{ top?: number; bottom?: number; right: number } | null>(null)
 
   // Links modal state
   const [showLinksViewer, setShowLinksViewer] = useState(false)
@@ -248,9 +252,10 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
   useEffect(() => {
     if (!showDropdown) return
     const handler = (e: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-        setShowDropdown(false)
-      }
+      const t = e.target as Node
+      // The menu is portaled to <body>, so a click inside it is NOT inside dropdownRef — check both.
+      if (dropdownRef.current?.contains(t) || dropdownMenuRef.current?.contains(t)) return
+      setShowDropdown(false)
     }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
@@ -1643,13 +1648,30 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => setShowDropdown(!showDropdown)}
+                      onClick={() => {
+                        if (!showDropdown) {
+                          const r = dropdownRef.current?.getBoundingClientRect()
+                          if (r) {
+                            const right = Math.max(8, window.innerWidth - r.right)
+                            const spaceBelow = window.innerHeight - r.bottom
+                            // Open upward when there isn't room below and there's more room above — so a
+                            // long menu is never clipped by the modal/viewport bottom.
+                            setDropdownPos(spaceBelow < 320 && r.top > spaceBelow
+                              ? { bottom: window.innerHeight - r.top + 4, right }
+                              : { top: r.bottom + 4, right })
+                          }
+                        }
+                        setShowDropdown(!showDropdown)
+                      }}
                       className="h-8 w-8 p-0 rounded-full"
                     >
                       <MoreVertical size={14} />
                     </Button>
-                    {showDropdown && (
-                      <div className="absolute right-0 top-full mt-1 w-52 rounded-xl border border-border bg-popover/95 backdrop-blur-md shadow-xl z-50 p-1 flex flex-col gap-1 animate-in fade-in-0 zoom-in-95">
+                    {showDropdown && dropdownPos && createPortal(
+                      <div
+                        ref={dropdownMenuRef}
+                        style={{ position: 'fixed', right: dropdownPos.right, ...(dropdownPos.top != null ? { top: dropdownPos.top } : { bottom: dropdownPos.bottom }) }}
+                        className="w-52 max-h-[70vh] overflow-y-auto rounded-xl border border-border bg-popover/95 backdrop-blur-md shadow-xl z-[100] p-1 flex flex-col gap-1 animate-in fade-in-0 zoom-in-95">
                         {displayPubkey && (
                           <button
                             onClick={() => {
@@ -1723,7 +1745,8 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
                             Report User
                           </button>
                         )}
-                      </div>
+                      </div>,
+                      document.body,
                     )}
                   </div>
                 </>
