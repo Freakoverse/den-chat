@@ -16,6 +16,7 @@ import { getAllHubEvents } from '@/lib/cache/hubEventCache'
 import { KINDS } from '@/lib/crypto/constants'
 import { getTrustedCreator } from '@/lib/hub/hubCreatorGuard'
 import { downloadTextFromBlossom, parseIndexFile, decryptHubSecret, decryptGroupSecret, downloadBanList } from '@/lib/blossom'
+import { cacheHubBlob, getCachedHubText } from '@/lib/blossom/hubBlobStore'
 import { aesDecrypt } from '@/lib/crypto/aes'
 import type { BanEntry } from '@/lib/blossom'
 import { deserializeTree, getMembers } from '@/lib/crypto/lkh'
@@ -278,6 +279,31 @@ export function parseHubEvent(event: Event, contentOverride?: string): (HubData 
  * Auto-detects monolithic vs paginated index format.
  * Also downloads ban pages from the index file.
  */
+/**
+ * Download a hub tree blob (index/page/spine/history) resiliently:
+ *   1. try the hub's Blossom servers, retaining a local copy on success so THIS device can
+ *      heal the hub later if the servers GC the blob;
+ *   2. if it's gone from every server, fall back to our local retention store — the source
+ *      of truth that keeps a v2 hub (whose blobs live under the throwaway pseudonym O on
+ *      GC-happy public servers) loadable. The cooperative mirror (ensureBlossomRedundancy,
+ *      run on load) then re-uploads it from local bytes.
+ * Throws only when the blob is on no server AND we hold no local copy.
+ */
+async function loadHubText(hash: string, servers: string[], dTag: string): Promise<string> {
+  try {
+    const text = await downloadTextFromBlossom(hash, servers)
+    cacheHubBlob(hash, new TextEncoder().encode(text), dTag).catch(() => {})
+    return text
+  } catch (err) {
+    const local = await getCachedHubText(hash)
+    if (local !== null) {
+      console.warn(`[useHubLoader] ${dTag}: blob ${hash} gone from all servers — loaded from local retention (will re-mirror)`)
+      return local
+    }
+    throw err
+  }
+}
+
 export async function loadHubSecret(
   hubData: HubData & { creatorPubkey: string },
   memberPubkey: string,
@@ -289,8 +315,8 @@ export async function loadHubSecret(
   }
 
   try {
-    // 1. Download and parse index file
-    const indexContent = await downloadTextFromBlossom(hubData.indexFileHash, hubData.blossomServers)
+    // 1. Download and parse index file (resilient: local-retention fallback if GC'd)
+    const indexContent = await loadHubText(hubData.indexFileHash, hubData.blossomServers, hubData.dTag)
     const index = parseIndexFile(indexContent)
 
     // 2. Download ban pages (non-blocking). v1 ban pages are plaintext; v2 ban pages are
@@ -351,10 +377,10 @@ export async function loadHubSecret(
         return { secretHex: '', members: [], bannedPubkeys, banListUnresolved, historyHash: index.historyHash, pageCount: index.leafPages.length }
       }
 
-      // Download our page + spine
+      // Download our page + spine (resilient: local-retention fallback if GC'd from servers)
       const [pageContent, spineContent] = await Promise.all([
-        downloadTextFromBlossom(pageEntry.hash, hubData.blossomServers),
-        downloadTextFromBlossom(index.spineHash, hubData.blossomServers),
+        loadHubText(pageEntry.hash, hubData.blossomServers, hubData.dTag),
+        loadHubText(index.spineHash, hubData.blossomServers, hubData.dTag),
       ])
 
       // Decrypt hub secret via page + spine

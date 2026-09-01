@@ -382,6 +382,15 @@ export async function safePaginatedTreeUpdate(params: SafePaginatedTreeUpdatePar
   const { mineAndSign } = await import('@/lib/nostr/events')
   const { publishToSpecificRelays } = await import('@/lib/nostr/relay-pool')
   const { getPublishRelays } = await import('@/stores/postingBehaviourStore')
+  const { cacheHubBlob } = await import('./hubBlobStore')
+  const { isV2 } = await import('@/lib/hub/version')
+  // v2 tree blobs are uploaded under the throwaway owner pseudonym O (authSigner present),
+  // which has no standing on public Blossom servers, so they get GC'd. We therefore RETAIN
+  // every blob locally (a source of truth to re-upload from) and NEVER delete the prior
+  // tree — keeping old pages/spine/index around is cheap redundancy and the only thing that
+  // stops an accept from bricking the hub when the new blobs are dropped before they
+  // replicate. See hubBlobStore / blossomRedundancy.
+  const v2Hub = isV2(hub)
 
   // ── Collect old hashes for cleanup ──
   const oldHashes: string[] = []
@@ -429,6 +438,7 @@ export async function safePaginatedTreeUpdate(params: SafePaginatedTreeUpdatePar
       const { hash } = await uploadToBlossomServers(
         pageBytes, signer, privateKey, hub.blossomServers, 'text/plain', undefined, undefined, authSigner,
       )
+      await cacheHubBlob(hash, pageBytes, hub.dTag) // local source of truth (see top of fn)
       await verifyFileExists(hash, hub.blossomServers)
       updatedPageHashes.set(page.pageIndex, { firstPubkey: page.firstPubkey, hash })
     })())
@@ -442,6 +452,7 @@ export async function safePaginatedTreeUpdate(params: SafePaginatedTreeUpdatePar
       const { hash } = await uploadToBlossomServers(
         pageBytes, signer, privateKey, hub.blossomServers, 'text/plain', undefined, undefined, authSigner,
       )
+      await cacheHubBlob(hash, pageBytes, hub.dTag)
       await verifyFileExists(hash, hub.blossomServers)
       newPageEntries.push({
         pageIndex: nextPageIndex + idx,
@@ -457,6 +468,7 @@ export async function safePaginatedTreeUpdate(params: SafePaginatedTreeUpdatePar
     const { hash } = await uploadToBlossomServers(
       spineBytes, signer, privateKey, hub.blossomServers, 'text/plain', undefined, undefined, authSigner,
     )
+    await cacheHubBlob(hash, spineBytes, hub.dTag)
     await verifyFileExists(hash, hub.blossomServers)
     newSpineHash = hash
   })())
@@ -494,6 +506,7 @@ export async function safePaginatedTreeUpdate(params: SafePaginatedTreeUpdatePar
     const { hash: hHash } = await uploadToBlossomServers(
       historyBytes, signer, privateKey, hub.blossomServers, 'text/plain', undefined, undefined, authSigner,
     )
+    await cacheHubBlob(hHash, historyBytes, hub.dTag)
     newHistoryHash = hHash
   }
 
@@ -527,6 +540,7 @@ export async function safePaginatedTreeUpdate(params: SafePaginatedTreeUpdatePar
   const { hash: newIndexHash, serverUrls: indexServerUrls } = await uploadToBlossomServers(
     indexBytes, signer, privateKey, hub.blossomServers, 'text/plain', undefined, undefined, authSigner,
   )
+  await cacheHubBlob(newIndexHash, indexBytes, hub.dTag)
 
   // ── Step 8: Verify index ──
   onStep?.('Verifying uploads')
@@ -537,6 +551,22 @@ export async function safePaginatedTreeUpdate(params: SafePaginatedTreeUpdatePar
       `safePaginatedTreeUpdate: index verification failed — expected spine ${newSpineHash}, got ${verifyIndex.spineHash}`
     )
   }
+  // Durability push (best-effort, background): fan the new index+spine+pages out toward a
+  // safe copy-count across ALL candidate servers (hub → client → user lists), re-uploading
+  // from the local retention store if a server already dropped one. Signed as O for v2 so
+  // it stays pseudonymous. Not awaited — the local copies above already guarantee the tree
+  // can be healed on next load; this just front-runs that healing.
+  try {
+    const durabilityTargets = [
+      { hash: newIndexHash, label: `${hub.dTag} index` },
+      { hash: newSpineHash, label: `${hub.dTag} spine` },
+      ...Array.from(updatedPageHashes.values()).map(e => ({ hash: e.hash, label: `${hub.dTag} page` })),
+      ...newPageEntries.map(e => ({ hash: e.hash, label: `${hub.dTag} page` })),
+    ]
+    void import('./blossomRedundancy').then(({ ensureHubBlobsDurable }) =>
+      ensureHubBlobsDurable(hub, durabilityTargets, { authSigner }),
+    ).catch(() => {})
+  } catch { /* durability is best-effort */ }
 
   // ── Step 9: Re-publish hub event ──
   let publishedCreatedAt: number | undefined
@@ -544,8 +574,7 @@ export async function safePaginatedTreeUpdate(params: SafePaginatedTreeUpdatePar
   let publishedRelays: string[] = []
   if (!skipPublish) {
     // Fail-closed (see safeTreeUpdate): v2 must republish as O with encrypted content, never here under R.
-    const { isV2 } = await import('@/lib/hub/version')
-    if (isV2(hub)) throw new Error('safePaginatedTreeUpdate: refusing to publish a v2 hub event under the root key — pass skipPublish and republish as O')
+    if (v2Hub) throw new Error('safePaginatedTreeUpdate: refusing to publish a v2 hub event under the root key — pass skipPublish and republish as O')
     onStep?.('Signing hub event')
     const unsignedEvent = buildHubEvent({
       dTag: hub.dTag,
@@ -613,12 +642,18 @@ export async function safePaginatedTreeUpdate(params: SafePaginatedTreeUpdatePar
   // would remove them while the LIVE hub event still points at the old index → any reader loading during
   // the caller's publish window (or if that publish fails) can't fetch the tree. Defer: hand the hashes
   // back for the caller to delete only after its own publish succeeds.
+  //
+  // For v2, go further and DON'T delete the prior tree at all (return no deferred hashes): those blobs are
+  // stored under the throwaway owner pseudonym O on public servers that GC them, and the new blobs can be
+  // dropped before they replicate. Keeping the old pages/spine/index is cheap redundancy and, together with
+  // local retention, is what stops a membership change from bricking the hub. Public servers GC the orphans
+  // on their own; we just stop racing them.
   if (skipPublish) {
     return {
       newIndexHash,
       newEpoch: epoch,
       cleanedUpHashes,
-      deferredCleanupHashes: oldHashes,
+      deferredCleanupHashes: v2Hub ? [] : oldHashes,
       eventCreatedAt: publishedCreatedAt,
       uploadedServers: indexServerUrls,
       targetedServers: hub.blossomServers,

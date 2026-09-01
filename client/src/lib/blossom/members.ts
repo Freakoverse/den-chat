@@ -385,6 +385,8 @@ export async function createAndUploadMemberFilesV2(
 ): Promise<{ indexHash: string; blossomServers: string[]; ownerPub: string; memberP: string }> {
   const totalFiles = 4
 
+  const { cacheHubBlob } = await import('./hubBlobStore')
+
   // Derive the owner pseudonym O (self) and the creator's member pseudonym P (ECDH with O).
   const ownerSigner = makeSubkeySigner(ChatContext.owner(hubDTag), { privateKey, signer })
   const ownerPub = await ownerSigner.getPublicKey()
@@ -409,18 +411,23 @@ export async function createAndUploadMemberFilesV2(
   onFileProgress?.({ fileIndex: 0, totalFiles, label: 'Leaf page' })
   const pageBytes = new TextEncoder().encode(serializeLeafPage(page))
   const { hash: pageHash } = await uploadToBlossomServers(pageBytes, signer, privateKey, blossomServerUrls, 'text/plain', undefined, undefined, ownerAuth)
+  // Retain every tree blob locally — the source of truth that lets us re-upload after a public
+  // Blossom server GCs a blob uploaded under the throwaway owner pseudonym O. See hubBlobStore.
+  await cacheHubBlob(pageHash, pageBytes, hubDTag)
 
   // 5-6. Spine (encrypts the hub secret at the root) + upload
   const spine = await buildSpine([{ nodeId: page.pageRoot.nodeId, rawKey: page.pageRoot.rawKey! }], hubSecret)
   onFileProgress?.({ fileIndex: 1, totalFiles, label: 'Spine tree' })
   const spineBytes = new TextEncoder().encode(serializeSpine(spine))
   const { hash: spineHash } = await uploadToBlossomServers(spineBytes, signer, privateKey, blossomServerUrls, 'text/plain', undefined, undefined, ownerAuth)
+  await cacheHubBlob(spineHash, spineBytes, hubDTag)
 
   // 7. Epoch history (unchanged — encrypted with the hub secret)
   onFileProgress?.({ fileIndex: 2, totalFiles, label: 'Epoch history' })
   const historyBlob = await aesEncrypt(hubSecret, `hub:1:${toHex(hubSecret)}`)
   const historyBytes = new TextEncoder().encode(historyBlob)
   const { hash: historyHash } = await uploadToBlossomServers(historyBytes, signer, privateKey, blossomServerUrls, 'text/plain', undefined, undefined, ownerAuth)
+  await cacheHubBlob(historyHash, historyBytes, hubDTag)
 
   // 8. Paginated index — first_pubkey is P
   onFileProgress?.({ fileIndex: 3, totalFiles, label: 'Index file' })
@@ -432,6 +439,7 @@ export async function createAndUploadMemberFilesV2(
   )
   const indexBytes = new TextEncoder().encode(indexContent)
   const { hash: indexHash } = await uploadToBlossomServers(indexBytes, signer, privateKey, blossomServerUrls, 'text/plain', undefined, undefined, ownerAuth)
+  await cacheHubBlob(indexHash, indexBytes, hubDTag)
 
   return { indexHash, blossomServers: blossomServerUrls, ownerPub, memberP }
 }

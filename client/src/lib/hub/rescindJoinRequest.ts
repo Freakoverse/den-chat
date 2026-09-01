@@ -93,6 +93,8 @@ export async function rescindJoinRequest(hub: HubData, pubkey: string): Promise<
   const currentFolders = hubStore.folders
   hubStore.removeHubEntry(hub.dTag)
   useMessageStore.getState().clearHubData(hub.dTag)
+  // Drop any locally-retained tree blobs for this hub — we're no longer keeping it alive.
+  void import('@/lib/blossom/hubBlobStore').then((m) => m.dropHubBlobs(hub.dTag)).catch(() => {})
   const { buildHubListEvent, publishHubList } = await import('@/lib/hub/hubListPrivacy')
   const hubListEv = await buildHubListEvent(
     remainingEntries.map((e) => ({ dTag: e.dTag, relayHint: e.relayHint, position: e.position, folderId: e.folderId })),
