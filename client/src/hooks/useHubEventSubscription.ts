@@ -232,6 +232,17 @@ export function useHubEventSubscription() {
                   if (facResult.facilitatorMembers.length > 0) store.setHubFacilitatorMembers(dTag, facilitator, facResult.facilitatorMembers)
                 }
               } catch (err) { console.warn(`[HubEventSub] v2 facilitated re-fetch failed for ${dTag}:`, err) }
+            } else if (secretHex) {
+              // KICK/BAN: the secret rotated, we did NOT re-derive a member secret (a still-member would
+              // have, above), and we have no facilitator to fall back on → we've been removed. Fail closed:
+              // drop the stale pre-rotation secret + our own membership entry so the not-a-member guard
+              // reappears, instead of leaving us with lingering access to the hub. Re-attempt once via the
+              // retry nonce so a merely-transient load failure (rare, given local blob retention) self-heals
+              // — if we're genuinely still a member the loader re-derives and the guard clears again.
+              console.log(`[HubEventSub] ${dTag}: rotation without a refreshed member secret and no facilitator — treating as removed, clearing access`)
+              store.setHubSecret(dTag, ''); secretHex = ''
+              store.setHubMembers(dTag, (store.hubMembers[dTag] || []).filter((m) => m.pubkey !== pubkey))
+              store.bumpHubSecretRetry?.()
             }
           }
 
