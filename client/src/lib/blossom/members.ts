@@ -644,9 +644,12 @@ export async function getPageMembersV2(
     return []
   }
   const out: Array<{ pubkey: string; roles: string; flags?: string; p: string }> = []
+  const seenR = new Set<string>()
   for (const leaf of page.leaves) {
     const rPub = roster[leaf.pubkey]
     if (!rPub) continue // no roster entry for this P
+    if (seenR.has(rPub)) continue // two leaves for one real key (e.g. a stray re-request) → list once
+    seenR.add(rPub)
     out.push({ pubkey: rPub, roles: leaf.roles, flags: leaf.flags, p: leaf.pubkey })
   }
   return out

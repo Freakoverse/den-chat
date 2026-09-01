@@ -404,7 +404,14 @@ export const useHubStore = create<HubState>((set) => ({
   },
 
   setHubMembers: (dTag, members) =>
-    set((state) => ({ hubMembers: { ...state.hubMembers, [dTag]: members } })),
+    set((state) => {
+      // Dedup by real pubkey (R). The accept flow appends optimistically and a live roster update can
+      // carry the same member again (and, historically, a re-request could mint a second leaf for one R),
+      // any of which would list the same person twice in the members UI. Keep the first occurrence.
+      const seen = new Set<string>()
+      const deduped = members.filter((m) => (seen.has(m.pubkey) ? false : (seen.add(m.pubkey), true)))
+      return { hubMembers: { ...state.hubMembers, [dTag]: deduped } }
+    }),
 
   setPreviewHub: (dTag) => set({ previewHubId: dTag }),
 
