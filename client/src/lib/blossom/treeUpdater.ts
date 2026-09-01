@@ -103,7 +103,7 @@ export async function safeTreeUpdate(params: SafeTreeUpdateParams): Promise<Safe
   const { parseIndexFile, createIndexFile, uploadBanPages } = await import('./members')
   const { buildHubEvent } = await import('@/lib/hub/buildHubEvent')
   const { mineAndSign } = await import('@/lib/nostr/events')
-  const { publishToSpecificRelays } = await import('@/lib/nostr/relay-pool')
+  const { publishWithFailover, getRelays } = await import('@/lib/nostr/relay-pool')
   const { getPublishRelays } = await import('@/stores/postingBehaviourStore')
 
   // ── Collect old hashes for cleanup ──
@@ -245,9 +245,12 @@ export async function safeTreeUpdate(params: SafeTreeUpdateParams): Promise<Safe
     // can't be confirmed) — see casCheckIndex.
     const { casCheckIndex } = await import('@/lib/hub/hubMutationGuard')
     await casCheckIndex(hub.dTag, hub.creatorPubkey, hub.indexFileHash)
-    const pub = await publishToSpecificRelays(
-      getPublishRelays([...hub.generalRelays]),
+    // Publish with FAILOVER (v1 hub event under R) — a fixed fire-once at hub.generalRelays would strand the
+    // membership change on the old index when those relays are down (the same bug fixed for v2 republishV2).
+    const pub = await publishWithFailover(
       signedEvent,
+      getPublishRelays([...hub.generalRelays]),
+      { pool: [...hub.generalRelays, ...getRelays()] },
     )
     // Zero relays accepted → don't delete the old blobs the still-live event points at (see paginated path).
     if (pub.length === 0) throw new Error('safeTreeUpdate: hub event not accepted by any relay')
@@ -380,7 +383,7 @@ export async function safePaginatedTreeUpdate(params: SafePaginatedTreeUpdatePar
   const { parseIndexFile, createPaginatedIndexFile, uploadBanPages } = await import('./members')
   const { buildHubEvent } = await import('@/lib/hub/buildHubEvent')
   const { mineAndSign } = await import('@/lib/nostr/events')
-  const { publishToSpecificRelays } = await import('@/lib/nostr/relay-pool')
+  const { publishWithFailover, getRelays } = await import('@/lib/nostr/relay-pool')
   const { getPublishRelays } = await import('@/stores/postingBehaviourStore')
   const { cacheHubBlob } = await import('./hubBlobStore')
   const { isV2 } = await import('@/lib/hub/version')
@@ -607,10 +610,12 @@ export async function safePaginatedTreeUpdate(params: SafePaginatedTreeUpdatePar
     const { casCheckIndex } = await import('@/lib/hub/hubMutationGuard')
     await casCheckIndex(hub.dTag, hub.creatorPubkey, hub.indexFileHash)
     targetedRelays = getPublishRelays([...hub.generalRelays])
-    publishedRelays = await publishToSpecificRelays(targetedRelays, signedEvent)
-    // publishToSpecificRelays returns [] (not a throw) when every relay rejected. If the new hub event
-    // landed nowhere, the cleanup below would delete the OLD index/spine/pages the still-live event points
-    // at → brick. Fail loudly instead so cleanup is skipped and the caller doesn't advance local state.
+    // Publish with FAILOVER (v1 hub event under R) — route around dead relays so the membership change's
+    // pointer update lands, instead of stranding it on the old index when hub.generalRelays are down.
+    publishedRelays = await publishWithFailover(signedEvent, targetedRelays, { pool: [...hub.generalRelays, ...getRelays()] })
+    // Zero relays accepted after failover → every reachable relay refused. If the new hub event landed
+    // nowhere, the cleanup below would delete the OLD index/spine/pages the still-live event points at →
+    // brick. Fail loudly instead so cleanup is skipped and the caller doesn't advance local state.
     if (publishedRelays.length === 0) throw new Error('safePaginatedTreeUpdate: hub event not accepted by any relay')
   }
 
