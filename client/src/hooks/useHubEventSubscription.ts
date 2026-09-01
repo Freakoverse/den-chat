@@ -266,7 +266,11 @@ export function useHubEventSubscription() {
           }
 
           if (full) {
-            store.setHubData(dTag, { ...full, ownerRealPubkey })
+            // Never WIPE a previously-verified ownerRealPubkey: if this update's attestation didn't
+            // re-verify (undefined — e.g. an event whose content was rebuilt without the attestation, or a
+            // transient hiccup), keep the value we already trust. Otherwise a single such update would drop
+            // the owner's real key and the member list would show the owner twice again (faceless O + R).
+            store.setHubData(dTag, { ...full, ownerRealPubkey: ownerRealPubkey ?? currentHub.ownerRealPubkey })
           } else if (indexChanged || hubData.epoch !== currentHub.epoch || (hubData.messageExpiration || 0) !== (currentHub.messageExpiration || 0) || hubData.deleted) {
             // Couldn't decrypt content (e.g. we were kicked) — update metadata only, keep channels.
             store.setHubData(dTag, {
