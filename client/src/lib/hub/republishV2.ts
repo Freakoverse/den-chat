@@ -35,7 +35,7 @@ export async function republishV2HubIndex(opts: {
 }): Promise<{ eventCreatedAt: number; publishedRelays: string[]; targetedRelays: string[] }> {
   const { hub, ownerPub, newIndexHash, privateKey, signer } = opts
 
-  const { fetchEvents, publishToSpecificRelays } = await import('@/lib/nostr/relay-pool')
+  const { fetchEvents, publishWithFailover, getRelays } = await import('@/lib/nostr/relay-pool')
   const { getPublishRelays } = await import('@/stores/postingBehaviourStore')
 
   // Fetch the current (latest) hub event authored by O.
@@ -73,13 +73,19 @@ export async function republishV2HubIndex(opts: {
   const ownerSigner = makeSubkeySigner(ChatContext.owner(hub.dTag), { privateKey, signer })
   const signed = await mineAndSignAsSubkey(unsigned, hub.minPow > 0 ? hub.minPow : 0, ownerSigner)
 
-  const targetedRelays = getPublishRelays([...hub.generalRelays], { hubOnly: true }) // v2: hub relays only (no R-linkable personal relay footprint for the O-authored hub event)
-  const publishedRelays = await publishToSpecificRelays(targetedRelays, signed)
-  // publishToSpecificRelays returns an EMPTY array (it does NOT throw) when every relay rejected/timed out.
-  // The caller advances the local store and deletes the OLD index blob AFTER we return — so if the new event
-  // landed nowhere, that would create an epoch/secret split-brain (owner sends under an index no one has) or
-  // BRICK the hub (delete an index the still-live old event points at). Fail loudly instead so nothing after
-  // us runs and the op can be retried cleanly.
+  // Publish with FAILOVER — the same way hub creation does. republishV2 used to fire once at a fixed
+  // relay set (publishToSpecificRelays) with no failover, so when the hub's own relays were down/rejecting
+  // (very common — half of any relay set is flaky at a given moment) the membership change uploaded its
+  // blobs to Blossom but its POINTER update (the hub event) landed on ZERO relays: the live event stayed on
+  // the OLD index and the mutation silently didn't take (the owner saw a local-only "new version" that no
+  // relay had). Seed the hub's normal publish relays, then route around dead ones via the client relay pool
+  // until enough accept. (`hubOnly` is inert now — v2 publishes over the same relay set as v1 by product
+  // decision, so this no longer restricts to hub relays.)
+  const targetedRelays = getPublishRelays([...hub.generalRelays])
+  const pool = [...hub.generalRelays, ...getRelays()]
+  const publishedRelays = await publishWithFailover(signed, targetedRelays, { pool })
+  // Zero acceptances after failover ⇒ genuinely no reachable relay took it. Fail loudly: the caller advances
+  // the local store only AFTER we return, so a silent zero-relay publish would leave a local-only pointer.
   if (publishedRelays.length === 0) throw new Error('republishV2HubIndex: the new hub event was not accepted by any relay')
   return { eventCreatedAt: signed.created_at, publishedRelays, targetedRelays }
 }
@@ -108,7 +114,7 @@ export async function republishV2HubRotate(opts: {
 }): Promise<{ eventCreatedAt: number; publishedRelays: string[]; targetedRelays: string[] }> {
   const { hub, ownerPub, newIndexHash, newEpoch, oldHubSecret, newHubSecret, groupedRolesOverride, privateKey, signer } = opts
 
-  const { fetchEvents, publishToSpecificRelays } = await import('@/lib/nostr/relay-pool')
+  const { fetchEvents, publishWithFailover, getRelays } = await import('@/lib/nostr/relay-pool')
   const { getPublishRelays } = await import('@/stores/postingBehaviourStore')
 
   const events = await fetchEvents({
@@ -157,10 +163,12 @@ export async function republishV2HubRotate(opts: {
   const ownerSigner = makeSubkeySigner(ChatContext.owner(hub.dTag), { privateKey, signer })
   const signed = await mineAndSignAsSubkey(unsigned, hub.minPow > 0 ? hub.minPow : 0, ownerSigner)
 
-  const targetedRelays = getPublishRelays([...hub.generalRelays], { hubOnly: true }) // v2: hub relays only (no R-linkable personal relay footprint for the O-authored hub event)
-  const publishedRelays = await publishToSpecificRelays(targetedRelays, signed)
-  // See republishV2HubIndex: a zero-relay publish must fail loudly, not silently — a rotation that lands
-  // nowhere while the store advances would leave the owner encrypting under a secret no member has.
+  // Publish with FAILOVER (see republishV2HubIndex) — route around dead relays so a rotation's pointer
+  // update actually lands. A rotation that reached zero relays while the store advanced would be even worse
+  // than a plain admit: the owner would encrypt under a new secret no member's relay copy points at.
+  const targetedRelays = getPublishRelays([...hub.generalRelays])
+  const pool = [...hub.generalRelays, ...getRelays()]
+  const publishedRelays = await publishWithFailover(signed, targetedRelays, { pool })
   if (publishedRelays.length === 0) throw new Error('republishV2HubRotate: the rotated hub event was not accepted by any relay')
   return { eventCreatedAt: signed.created_at, publishedRelays, targetedRelays }
 }
