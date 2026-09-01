@@ -1671,7 +1671,7 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
                       <div
                         ref={dropdownMenuRef}
                         style={{ position: 'fixed', right: dropdownPos.right, ...(dropdownPos.top != null ? { top: dropdownPos.top } : { bottom: dropdownPos.bottom }) }}
-                        className="w-52 max-h-[70vh] overflow-y-auto rounded-xl border border-border bg-popover/95 backdrop-blur-md shadow-xl z-[100] p-1 flex flex-col gap-1 animate-in fade-in-0 zoom-in-95">
+                        className="w-52 max-h-[70vh] overflow-y-auto rounded-xl border border-border bg-popover/95 backdrop-blur-md shadow-xl z-[210] p-1 flex flex-col gap-1 animate-in fade-in-0 zoom-in-95">
                         {displayPubkey && (
                           <button
                             onClick={() => {
