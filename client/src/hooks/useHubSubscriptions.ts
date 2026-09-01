@@ -13,7 +13,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useHubStore } from '@/stores/hubStore'
 import { useMessageStore, type ChatMessage } from '@/stores/messageStore'
-import { subscribeToRelays } from '@/lib/nostr/relay-pool'
+import { subscribeToRelays, getRelays } from '@/lib/nostr/relay-pool'
 import { buildRelayIndex } from '@/lib/nostr/buildRelayIndex'
 import { KINDS, STANDARD_KINDS } from '@/lib/crypto/constants'
 import {
@@ -943,8 +943,12 @@ export function useHubSubscriptions() {
     }
     subsRef.current = []
 
-    // Build relay → hubDTags index (chunked at 50)
-    const batches = buildRelayIndex(hubs)
+    // Build relay → hubDTags index (chunked at 50). Include the CLIENT relays for every hub, not just each
+    // hub's own generalRelays: messages publish to getPublishRelays (hub + client + NIP-65), so when a hub's
+    // relays are dead/flaky a message lands on healthy CLIENT relays — and subscribing only to generalRelays
+    // (which for this hub are the dead ones) means neither member ever receives the other's messages. Mirrors
+    // the hub-event subscription + join-badge fixes.
+    const batches = buildRelayIndex(hubs, getRelays())
 
     if (batches.length === 0) return
 
