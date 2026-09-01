@@ -541,7 +541,7 @@ async function parseFacilitatorHistory(
  * would otherwise make every client show the hub as created by the victim AND grant that key owner
  * permissions via `isHubOwner`. Fail closed: an absent or invalid attestation yields undefined.
  */
-function verifiedOwnerRealPubkey(
+export function verifiedOwnerRealPubkey(
   decrypted: unknown,
   creatorPubkey: string,
   dTag: string,

@@ -248,18 +248,25 @@ export function useHubEventSubscription() {
 
           // Decrypt structural content with the (current or newly-bootstrapped) secret.
           let full: (typeof hubData) | null = null
+          let ownerRealPubkey: string | undefined
           if (secretHex) {
             try {
               const { fromHex } = await import('@/lib/crypto/lkh')
-              const { deriveHubContentKey, decryptHubContent } = await import('@/lib/hub/hubContent')
+              const { deriveHubContentKey, decryptHubContent, verifyOwnerAttestation } = await import('@/lib/hub/hubContent')
               const key = deriveHubContentKey(fromHex(secretHex), hubData.epoch)
               const decrypted = await decryptHubContent(key, event.content)
               full = parseHubEvent(event, JSON.stringify(decrypted))
+              // Re-extract + verify the owner's real key R from the attestation on EVERY update — parseHubEvent
+              // doesn't (it can't verify), and the store's merge only preserves a PRIOR ownerRealPubkey. Without
+              // this, a member whose initial load raced/missed the extraction never learns the owner's R, so the
+              // member list shows the owner twice (faceless O with the crown + their real identity from the roster).
+              const { verifiedOwnerRealPubkey } = await import('./useHubLoader')
+              ownerRealPubkey = verifiedOwnerRealPubkey(decrypted, hubData.creatorPubkey, dTag, verifyOwnerAttestation)
             } catch { /* couldn't decrypt — preserve existing structure below */ }
           }
 
           if (full) {
-            store.setHubData(dTag, full)
+            store.setHubData(dTag, { ...full, ownerRealPubkey })
           } else if (indexChanged || hubData.epoch !== currentHub.epoch || (hubData.messageExpiration || 0) !== (currentHub.messageExpiration || 0) || hubData.deleted) {
             // Couldn't decrypt content (e.g. we were kicked) — update metadata only, keep channels.
             store.setHubData(dTag, {
