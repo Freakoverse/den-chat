@@ -376,6 +376,11 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
 
       const updatedPages: Array<{ pageIndex: number; content: string; firstPubkey: string }> = []
       const newPages: Array<{ content: string; firstPubkey: string }> = []
+      // Split-created page roots, pushed index-aligned with `newPages` (same loop iteration). We carry the
+      // REAL page-root from the split result rather than re-deriving it: re-rehydrating a page runs
+      // buildLeafPage, which mints fresh random node keys, so the re-derived root would NOT match the
+      // page file we uploaded → the spine would point at a key no reader can reach → hub bricked.
+      const newPageRoots: Array<{ nodeId: string; rawKey: Uint8Array }> = []
       const updatedPageRoots = new Map<string, { nodeId: string; rawKey: Uint8Array }>()
       let count = 0
 
@@ -400,14 +405,22 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
                 content: serializeLeafPage(result.pages[0]),
                 firstPubkey: result.pages[0].leaves[0].pubkey,
               })
+              // Key the KEPT half by its OLD (pre-split) page-root nodeId — that's the id `recoverPageRootKeys`
+              // produced and the id the `allPageRoots` map lookup (below) keys on. Keying it by the NEW nodeId
+              // would miss that lookup, the `|| prk` fallback would fire, and the spine would be rebuilt with
+              // the STALE page-root key while the uploaded page file carries the fresh one → readers on the
+              // kept page (including the owner, on a first split) can no longer walk page → spine.
               updatedPageRoots.set(
-                result.pages[0].pageRoot.nodeId,
+                pageRootKeys.find((_pr, i) => index.leafPages[i]?.pageIndex === pageIndex)?.nodeId
+                  || result.pages[0].pageRoot.nodeId,
                 { nodeId: result.pages[0].pageRoot.nodeId, rawKey: result.pages[0].pageRoot.rawKey! },
               )
               newPages.push({
                 content: serializeLeafPage(result.pages[1]),
                 firstPubkey: result.pages[1].leaves[0].pubkey,
               })
+              // Carry the split page's ACTUAL root (index-aligned with the newPages push above).
+              newPageRoots.push({ nodeId: result.pages[1].pageRoot.nodeId, rawKey: result.pages[1].pageRoot.rawKey! })
               rehydrated = result.pages[0]
             } else {
               rehydrated = result.pages[0]
@@ -434,10 +447,10 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
 
       // Rebuild spine with updated page-root keys.
       const allPageRoots = pageRootKeys.map((prk) => updatedPageRoots.get(prk.nodeId) || prk)
-      for (const np of newPages) {
-        const rehydratedNew = await rehydratePageKeysV2(np.content, ownerSigner, resolveEpochSecret)
-        allPageRoots.push({ nodeId: rehydratedNew.pageRoot.nodeId, rawKey: rehydratedNew.pageRoot.rawKey! })
-      }
+      // Append the split-created pages' REAL roots (captured above). Do NOT re-rehydrate the new page content
+      // to recover a root — buildLeafPage inside rehydration mints fresh random keys that wouldn't match the
+      // uploaded page file, severing that page's subtree from the spine.
+      for (const pr of newPageRoots) allPageRoots.push(pr)
       const newSpine = await buildSpine(allPageRoots, hubSecret)
       const newSpineContent = serializeSpine(newSpine)
 
