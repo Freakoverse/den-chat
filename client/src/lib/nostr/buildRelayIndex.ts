@@ -21,14 +21,20 @@ export interface RelayBatch {
  * Returns an array of RelayBatch — one per relay per chunk of ≤50 dTags.
  *
  * If a relay is used by 120 hubs, it produces 3 batches (50, 50, 20).
+ *
+ * `extraRelays` are added to EVERY hub's relay set. Pass the client relay list here for the
+ * hub-event subscription: a membership change's hub event is published with failover to a broad
+ * pool (hub relays → client relays), so when a hub's own relays are down the new event lands on
+ * client relays — and a subscription watching only `generalRelays` would miss it live (e.g. an
+ * accepted member keeps seeing the awaiting-approval guard until a manual refresh).
  */
-export function buildRelayIndex(hubs: Record<string, HubData>): RelayBatch[] {
+export function buildRelayIndex(hubs: Record<string, HubData>, extraRelays: string[] = []): RelayBatch[] {
   // Step 1: Build relay → Set<hubDTag>
   const relayMap = new Map<string, Set<string>>()
 
   for (const [dTag, hub] of Object.entries(hubs)) {
-    // The hub's relays (deduplicated per hub)
-    const allRelays = new Set(hub.generalRelays)
+    // The hub's relays plus any shared extras (deduplicated per hub)
+    const allRelays = new Set([...hub.generalRelays, ...extraRelays])
 
     for (const relay of allRelays) {
       if (!relay) continue

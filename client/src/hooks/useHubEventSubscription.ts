@@ -14,7 +14,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useHubStore } from '@/stores/hubStore'
 import { useUserStore } from '@/stores/userStore'
-import { subscribeToRelays } from '@/lib/nostr/relay-pool'
+import { subscribeToRelays, getRelays } from '@/lib/nostr/relay-pool'
 import { KINDS } from '@/lib/crypto/constants'
 import { putHubEvent } from '@/lib/cache/hubEventCache'
 import { isV2 } from '@/lib/hub/version'
@@ -79,8 +79,12 @@ export function useHubEventSubscription() {
     for (const t of Object.values(pendingRef.current)) clearTimeout(t)
     pendingRef.current = {}
 
-    // Build relay batches (same as useHubSubscriptions)
-    const batches = buildRelayIndex(hubs)
+    // Build relay batches. Include the CLIENT relays for every hub (not just each hub's own
+    // generalRelays): membership-change hub events publish with failover to a broad pool
+    // (hub relays → client relays), so when a hub's relays are down the new event lands on client
+    // relays. Watching only generalRelays would miss it live — an accepted member would keep seeing
+    // the awaiting-approval guard until a manual refresh. Mirrors the join-request badge fix.
+    const batches = buildRelayIndex(hubs, getRelays())
     if (batches.length === 0) return
 
     // Seed each hub's last-seen timestamp to the version we already hold, NOT wall-clock.
