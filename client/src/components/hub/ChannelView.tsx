@@ -2039,12 +2039,17 @@ function RelayProgressIndicator({ eventId }: { eventId: string }) {
   const progress = useMessageStore((s) => s.relayProgress[eventId])
   const [showPopover, setShowPopover] = useState(false)
   const popRef = useRef<HTMLDivElement>(null)
+  const btnRef = useRef<HTMLButtonElement>(null)
+  // Fixed-viewport coordinates for the portaled popover (anchored above the button).
+  const [pos, setPos] = useState<{ left: number; bottom: number } | null>(null)
 
-  // Close popover on click outside
+  // Close popover on click outside (button + portaled popover both count as "inside").
   useEffect(() => {
     if (!showPopover) return
     const handler = (e: MouseEvent) => {
-      if (popRef.current && !popRef.current.contains(e.target as Node)) setShowPopover(false)
+      const t = e.target as Node
+      if (popRef.current?.contains(t) || btnRef.current?.contains(t)) return
+      setShowPopover(false)
     }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
@@ -2052,23 +2057,44 @@ function RelayProgressIndicator({ eventId }: { eventId: string }) {
 
   if (!progress) return null
   const done = progress.confirmed >= progress.total
+
+  const toggle = () => {
+    if (showPopover) { setShowPopover(false); return }
+    const rect = btnRef.current?.getBoundingClientRect()
+    if (rect) {
+      const POP_W = 300
+      // Clamp within the viewport so it never renders off-screen; anchor its bottom just above the button.
+      const left = Math.max(8, Math.min(rect.left, window.innerWidth - POP_W - 8))
+      setPos({ left, bottom: window.innerHeight - rect.top + 4 })
+    }
+    setShowPopover(true)
+  }
+
   return (
-    <span className="relative inline-flex items-center">
+    <span className="inline-flex items-center">
       <button
-        onClick={(e) => { e.stopPropagation(); setShowPopover(!showPopover) }}
+        ref={btnRef}
+        onClick={(e) => { e.stopPropagation(); toggle() }}
         className={`text-[10px] inline-flex items-center gap-1 ml-1 cursor-pointer hover:text-muted-foreground transition-colors ${done ? 'text-muted-foreground/40' : 'text-muted-foreground/70'}`}
       >
         {!done && <Loader2 size={9} className="animate-spin" />}
         {progress.confirmed}/{progress.total}
       </button>
-      {showPopover && (
-        <div ref={popRef} className="absolute bottom-full left-0 mb-1 z-50 bg-popover border border-border rounded-lg shadow-xl p-2.5 min-w-[200px]" onClick={(e) => e.stopPropagation()}>
+      {showPopover && pos && createPortal(
+        // Portaled to <body> with fixed positioning so the chat scroll container's overflow can't clip it,
+        // and relay URLs wrap in full (break-all, no truncation) so they're never cut off mid-URL.
+        <div
+          ref={popRef}
+          style={{ position: 'fixed', left: pos.left, bottom: pos.bottom, width: 300 }}
+          className="z-[100] bg-popover border border-border rounded-lg shadow-xl p-2.5 max-h-[50vh] overflow-y-auto"
+          onClick={(e) => e.stopPropagation()}
+        >
           <p className="text-[10px] font-medium text-foreground mb-1.5">Relay Status</p>
           <div className="space-y-1">
             {progress.acceptedRelays.map((url) => (
-              <div key={url} className="flex items-center gap-2">
-                <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
-                <span className="text-[10px] text-muted-foreground font-mono truncate">{url.replace('wss://', '')}</span>
+              <div key={url} className="flex items-start gap-2">
+                <div className="w-1.5 h-1.5 mt-1 rounded-full bg-emerald-400 shrink-0" />
+                <span className="text-[10px] text-muted-foreground font-mono break-all">{url.replace('wss://', '')}</span>
               </div>
             ))}
             {progress.confirmed < progress.total && (
@@ -2078,7 +2104,8 @@ function RelayProgressIndicator({ eventId }: { eventId: string }) {
               </div>
             )}
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </span>
   )
