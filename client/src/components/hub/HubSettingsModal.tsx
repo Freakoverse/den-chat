@@ -3561,13 +3561,18 @@ function SecurityPage({ hub }: { hub: HubData }) {
   }
 
   // ── Progress overlay steps ──
-  const allFixStepLabels = [
-    'Downloading current tree',
-    'Rebuilding member tree',
-    ...(groupedRoles.length > 0 ? ['Rebuilding group encryption'] : []),
-    'Uploading tree & index',
-    'Publishing hub event',
-  ]
+  // Must match the labels the running flow actually emits, or the unmatched rows sit greyed while the flow
+  // reports success. v2 fix-encryption runs rebuildTreeV2, which emits exactly these 3 (no separate
+  // upload/group step); v1 rebuilds inline and emits the fuller list.
+  const allFixStepLabels = hub.version === 2
+    ? ['Downloading current tree', 'Rebuilding member tree', 'Publishing hub event']
+    : [
+        'Downloading current tree',
+        'Rebuilding member tree',
+        ...(groupedRoles.length > 0 ? ['Rebuilding group encryption'] : []),
+        'Uploading tree & index',
+        'Publishing hub event',
+      ]
 
   // ── Time estimate for confirmation dialog ──
   const timeEstimate = computeEstimate()
@@ -3721,7 +3726,7 @@ function SecurityPage({ hub }: { hub: HubData }) {
         <div className="rounded-md border border-emerald-500/30 bg-emerald-500/5 px-3 py-2">
           <p className="text-sm text-emerald-400 flex items-center gap-2">
             <ShieldCheck size={14} />
-            Encryption fixed successfully! The hub now uses a fresh encryption tree with epoch {hub.epoch + 1}.
+            Encryption fixed successfully! The hub now uses a fresh encryption tree with epoch {hub.epoch}.
             {groupedRoles.length > 0 && ` ${groupedRoles.length} group tree${groupedRoles.length !== 1 ? 's were' : ' was'} also rebuilt.`}
           </p>
         </div>
