@@ -240,6 +240,25 @@ export function publishEventProgressive(
 }
 
 /**
+ * Publish a HUB-CRITICAL event (hub event, join request, facilitator/mod list) with relay FAILOVER —
+ * the write-side companion to getPublishRelays. Seeds the relay set the caller already computed (usually
+ * `getPublishRelays([...hub.generalRelays])`), then falls over to the hub + client relay pool until enough
+ * accept, so a membership/settings/facilitator change can't be stranded on a fixed dead relay set (the bug
+ * we fixed for v2 `republishV2*`). Returns the accepted relays ([] if none — callers should throw on that).
+ *
+ * `poolExtra` is the hub's own relays (the event's natural home); the client relay pool is always appended
+ * for reach. For a v2 PSEUDONYM-authored event the client relays are already part of the caller's seed, so
+ * this adds no new personal-relay footprint beyond what the seed already targets.
+ */
+export async function publishCriticalWithFailover(
+  event: Event,
+  seedRelays: string[],
+  poolExtra: string[] = [],
+): Promise<string[]> {
+  return publishWithFailover(event, seedRelays, { pool: [...poolExtra, ...getRelays()] })
+}
+
+/**
  * Throw a user-facing error if no relay accepted the event. Pass the `accepted`
  * array returned by publishEvent / publishToSpecificRelays / publishEventProgressive.
  * Used by user-facing writes so a dead-relay publish fails loudly instead of
