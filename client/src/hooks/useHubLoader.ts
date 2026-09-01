@@ -1162,6 +1162,19 @@ export function useHubLoader() {
           recordVersionSeen(dTag, hubData.version)
           recordEpochSeen(dTag, hubData.epoch)
         }
+        // Load the encrypted ban list too — a facilitated user re-derives the secret via their facilitator
+        // (whose mesh still lists them), so this is the ONLY way a BANNED facilitated user learns they're
+        // banned on load and the HardBan gate (my key ∈ hubBanList) triggers. Regular members get this from
+        // loadHubSecret; the facilitator path skipped it.
+        try {
+          const { fromHex } = await import('@/lib/crypto/lkh')
+          const { downloadTextFromBlossom, parseIndexFile, downloadBanListV2 } = await import('@/lib/blossom')
+          const idx = parseIndexFile(await downloadTextFromBlossom(hubData.indexFileHash, hubData.blossomServers))
+          if (idx.banPages.length > 0) {
+            const bans = await downloadBanListV2(idx.banPages, fromHex(facResult.secretHex), hubData.blossomServers)
+            setHubBanList(dTag, bans.map((e) => e.pubkey))
+          }
+        } catch (err) { console.warn(`Hub ${dTag}: facilitated ban-list load failed:`, err) }
       } else {
         // Facilitator is behind (hasn't rebuilt for the current epoch). Keep the epoch history
         // (old messages readable) but CLEAR any stale current secret so we never read/send at the

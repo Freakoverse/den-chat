@@ -246,6 +246,26 @@ export function useHubEventSubscription() {
             }
           }
 
+          // v2: refresh the encrypted ban list from the (new) index whenever we hold the secret. A regular
+          // member gets this via loadHubSecret above, but a FACILITATED user's loadHubSecret returns
+          // not-a-member (no leaf in the owner tree) — they re-derive the secret via their facilitator, whose
+          // mesh still lists them, so without this they never learn they were banned and the HardBan gate
+          // (isHardBanned = my key ∈ hubBanList) never triggers in-session. Load it here so a banned
+          // facilitated user is gated live, and other members hide them.
+          if (secretHex && indexChanged) {
+            try {
+              const { fromHex } = await import('@/lib/crypto/lkh')
+              const { downloadTextFromBlossom, parseIndexFile, downloadBanListV2 } = await import('@/lib/blossom')
+              const idx = parseIndexFile(await downloadTextFromBlossom(hubData.indexFileHash, hubData.blossomServers))
+              if (idx.banPages.length > 0) {
+                const bans = await downloadBanListV2(idx.banPages, fromHex(secretHex), hubData.blossomServers)
+                store.setHubBanList(dTag, bans.map((e) => e.pubkey))
+              } else {
+                store.setHubBanList(dTag, [])
+              }
+            } catch (err) { console.warn(`[HubEventSub] v2 ban-list refresh failed for ${dTag}:`, err) }
+          }
+
           // Decrypt structural content with the (current or newly-bootstrapped) secret.
           let full: (typeof hubData) | null = null
           let ownerRealPubkey: string | undefined
