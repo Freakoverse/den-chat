@@ -15,23 +15,60 @@ const FETCH_MAX_WAIT_MS = 4000
 const DEFAULT_RELAYS = [
   'wss://relay.primal.net',
   'wss://nos.lol',
-  'wss://relay.nostr.band',
   'wss://relay.wellorder.net',
   'wss://nostr.mom',
-  'wss://nostr.novacisko.cz',
   'wss://nostrcheck.me',
+  'wss://wheat.happytavern.co',
+  'wss://relay.0xchat.com',
+  'wss://relay.snort.social',
+  'wss://nostr.bitcoiner.social',
+  // Curated 2026-09-01 against a per-relay write test (publish a kind 1 to each): kept only relays that
+  // actually accepted the write. REMOVED as dead (rejected the write / unreachable): relay.nostr.band,
+  // nostr.novacisko.cz, relay.cxplay.org, relay.nostr.moe, relay.poster.place, relay.layer.systems
+  // (expired TLS cert). (relay.snort.social flaps — a 5xx earlier, accepted the write on re-test — kept.)
+  // Also long-defunct: relay.nostr.info, pyramid.fiatjaf.com (WoT write-gated), relay.noswhere.com &
+  // search.nos.today (search-only). The dead former-defaults are also stripped from existing users' SAVED
+  // lists once — see RETIRED_DEFAULT_RELAYS / purgeRetiredRelaysOnce (mergeMissingDefaults only ADDS).
+  // Critical events publish via publishWithFailover, so a transiently-dead relay can't strand them.
+]
+
+/**
+ * Former default relays confirmed dead (reject writes / unreachable). Because mergeMissingDefaults only
+ * ADDS missing defaults and never removes, a user who was auto-seeded these before they were retired keeps
+ * them in localStorage forever — wasting every publish/subscribe attempt on them and skewing the "N/M
+ * relays" indicators. purgeRetiredRelaysOnce() strips exactly these URLs from the saved list a single time
+ * (guarded by a flag), so a user who deliberately re-adds one later is respected.
+ */
+const RETIRED_DEFAULT_RELAYS = [
+  'wss://relay.layer.systems',
+  'wss://relay.nostr.band',
+  'wss://nostr.novacisko.cz',
   'wss://relay.cxplay.org',
   'wss://relay.nostr.moe',
   'wss://relay.poster.place',
-  'wss://wheat.happytavern.co',
-  // Removed: relay.nostr.info (defunct), pyramid.fiatjaf.com (web-of-trust —
-  // rejects writes from non-trusted keys), relay.noswhere.com & search.nos.today
-  // (search-only NIP-50 relays — don't serve general REQ or accept these writes),
-  // relay.snort.social (persistent 5xx / handshake failures) and relay.layer.systems
-  // (expired TLS cert — ERR_CERT_DATE_INVALID) — both dead as of 2026-08.
-  // Critical events (hub list, relay list) publish via publishWithFailover, so a dead relay in the
-  // deterministic pick can't strand them regardless — this list just avoids wasting attempts on them.
-]
+].map((u) => u.replace(/\/+$/, ''))
+
+const RETIRED_PURGE_FLAG = 'den-relays-retired-purge-v1'
+
+/** One-time (ever) removal of confirmed-dead former-default relays from the saved client relay list. */
+function purgeRetiredRelaysOnce(): void {
+  try {
+    if (localStorage.getItem(RETIRED_PURGE_FLAG)) return
+    const raw = localStorage.getItem(StorageKey.CLIENT_RELAYS)
+    if (raw) {
+      const parsed = JSON.parse(raw)
+      if (Array.isArray(parsed)) {
+        const retired = new Set(RETIRED_DEFAULT_RELAYS)
+        const norm = (u: string) => u.replace(/\/+$/, '')
+        const cleaned = parsed.filter((r) => r && typeof r.url === 'string' && !retired.has(norm(r.url)))
+        if (cleaned.length !== parsed.length) {
+          localStorage.setItem(StorageKey.CLIENT_RELAYS, JSON.stringify(cleaned))
+        }
+      }
+    }
+    localStorage.setItem(RETIRED_PURGE_FLAG, '1')
+  } catch { /* ignore — best-effort cleanup */ }
+}
 
 /** In-memory cache — null means "not loaded yet" */
 let activeRelaysCache: string[] | null = null
@@ -59,6 +96,7 @@ function mergeMissingDefaults(
  */
 function loadRelays(): string[] {
   try {
+    purgeRetiredRelaysOnce()
     const stored = localStorage.getItem(StorageKey.CLIENT_RELAYS)
     if (stored) {
       const parsed = JSON.parse(stored) as { url: string; enabled: boolean }[]
@@ -105,6 +143,7 @@ export function reloadRelays() {
  */
 export function getRelayList(): { url: string; enabled: boolean }[] {
   try {
+    purgeRetiredRelaysOnce()
     const stored = localStorage.getItem(StorageKey.CLIENT_RELAYS)
     if (stored) {
       const parsed = JSON.parse(stored)
