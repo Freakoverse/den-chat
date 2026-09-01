@@ -182,7 +182,7 @@ export function HubEventCard({ identifier, pubkey, relays }: HubEventCardProps) 
 
     try {
       const { createUnsignedEvent, signWithSigner, mineAndSign, createHubListEvent } = await import('@/lib/nostr')
-      const { publishToSpecificRelays } = await import('@/lib/nostr/relay-pool')
+      const { publishCriticalWithFailover } = await import('@/lib/nostr/relay-pool')
       const { getPublishRelays } = await import('@/stores/postingBehaviourStore')
       const hubRelays = [...(hubData.generalRelays || [])]
 
@@ -203,7 +203,7 @@ export function HubEventCard({ identifier, pubkey, relays }: HubEventCardProps) 
       }
       // v2: hub relays ONLY (mirrors DiscoverPage) — the sealed join request carries the hub coordinate;
       // fanning it out to the applicant's personal NIP-65 relays lets an observer correlate the addr key → R.
-      await publishToSpecificRelays(getPublishRelays(hubRelays, { hubOnly: isV2(hubData) }), signed)
+      await publishCriticalWithFailover(signed, getPublishRelays(hubRelays, { hubOnly: isV2(hubData) }), hubRelays)
 
       // Add to user's hub list
       if (!isAlreadyInList) {

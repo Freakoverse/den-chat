@@ -758,7 +758,7 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
       const { createAndUploadFacilitatorTreeV1 } = await import('@/lib/blossom/members')
       const { createJoinRequest } = await import('@/lib/nostr/events')
       const { signWithSigner } = await import('@/lib/nostr/events')
-      const { publishToSpecificRelays } = await import('@/lib/nostr/relay-pool')
+      const { publishToSpecificRelays, publishCriticalWithFailover } = await import('@/lib/nostr/relay-pool')
       const { getPublishRelays } = await import('@/stores/postingBehaviourStore')
 
       // Get or generate the hub secret that we obtained from the creator's tree
@@ -792,7 +792,7 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
       const creatorPubkey = hubData?.creatorPubkey || ''
       const unsignedEvent = createJoinRequest(hub.dTag, creatorPubkey, indexHash)
       const signedEvent = await signWithSigner(unsignedEvent, signer, privateKey)
-      await publishToSpecificRelays(getPublishRelays([...hub.generalRelays]), signedEvent)
+      await publishCriticalWithFailover(signedEvent, getPublishRelays([...hub.generalRelays]), [...hub.generalRelays])
 
       console.log('Facilitation list created with index:', indexHash)
 
@@ -836,7 +836,7 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
         const { downloadTextFromBlossom, parseIndexFile, uploadToBlossomServers } = await import('@/lib/blossom')
         const { fromHex } = await import('@/lib/crypto/lkh')
         const { createJoinRequest } = await import('@/lib/nostr/events')
-        const { publishToSpecificRelays } = await import('@/lib/nostr/relay-pool')
+        const { publishToSpecificRelays, publishCriticalWithFailover } = await import('@/lib/nostr/relay-pool')
         const { getPublishRelays } = await import('@/stores/postingBehaviourStore')
         const { deleteFromBlossom } = await import('@/lib/blossom/client')
         const currentSecret = hubSecrets[hub.dTag]
@@ -888,7 +888,7 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
         const signedEvent = await facSigner.signEvent({ ...unsignedEvent, pubkey: facP })
         // hub relays ONLY: this list JR is authored under the facilitator's pseudonym P_fac; publishing it
         // to their personal NIP-65 relays would correlate P_fac → R_fac by relay footprint.
-        await publishToSpecificRelays(getPublishRelays([...hub.generalRelays], { hubOnly: true }), signedEvent)
+        await publishCriticalWithFailover(signedEvent, getPublishRelays([...hub.generalRelays], { hubOnly: true }), [...hub.generalRelays])
         setMeshListHash(newIndexHash)
         const nextVouched = [...meshMembers, memberR]
         setMeshMembers(nextVouched)
@@ -917,7 +917,7 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
       const { addMemberToTree, rehydrateTreeKeys, createIndexFile } = await import('@/lib/blossom/members')
       const { deserializeTree, fromHex } = await import('@/lib/crypto/lkh')
       const { createJoinRequest, signWithSigner } = await import('@/lib/nostr/events')
-      const { publishToSpecificRelays } = await import('@/lib/nostr/relay-pool')
+      const { publishToSpecificRelays, publishCriticalWithFailover } = await import('@/lib/nostr/relay-pool')
       const { getPublishRelays } = await import('@/stores/postingBehaviourStore')
 
       // Get current hub secret
@@ -956,7 +956,7 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
       const creatorPubkey = hubData?.creatorPubkey || ''
       const unsignedEvent = createJoinRequest(hub.dTag, creatorPubkey, newIndexHash)
       const signedEvent = await signWithSigner(unsignedEvent, signer, privateKey)
-      await publishToSpecificRelays(getPublishRelays([...hub.generalRelays]), signedEvent)
+      await publishCriticalWithFailover(signedEvent, getPublishRelays([...hub.generalRelays]), [...hub.generalRelays])
 
       setMeshListHash(newIndexHash)
       setMeshMembers(prev => [...prev, targetPubkey])
@@ -999,7 +999,7 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
         const { createIndexFile } = await import('@/lib/blossom/members')
         const { deserializeTree, serializeTree, buildTree, fromHex } = await import('@/lib/crypto/lkh')
         const { createJoinRequest } = await import('@/lib/nostr/events')
-        const { publishToSpecificRelays } = await import('@/lib/nostr/relay-pool')
+        const { publishToSpecificRelays, publishCriticalWithFailover } = await import('@/lib/nostr/relay-pool')
         const { getPublishRelays } = await import('@/stores/postingBehaviourStore')
         const { deleteFromBlossom } = await import('@/lib/blossom/client')
         const currentSecret = hubSecrets[hub.dTag]
@@ -1029,7 +1029,7 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
         const { hash: newIndexHash } = await uploadToBlossomServers(encoder.encode(createIndexFile(newTreeHash, [], idx.historyHash || undefined)), signer, privateKey, hub.blossomServers, 'text/plain', undefined, undefined, facAuth)
         const signedEvent = await facSigner.signEvent({ ...createJoinRequest(hub.dTag, hub.creatorPubkey, newIndexHash), pubkey: facP })
         // hub relays ONLY (P_fac-authored list JR — keep it off the facilitator's personal relays).
-        await publishToSpecificRelays(getPublishRelays([...hub.generalRelays], { hubOnly: true }), signedEvent)
+        await publishCriticalWithFailover(signedEvent, getPublishRelays([...hub.generalRelays], { hubOnly: true }), [...hub.generalRelays])
         setMeshListHash(newIndexHash)
         const remainingVouched = meshMembers.filter(pk => pk !== targetPubkey)
         setMeshMembers(remainingVouched)
@@ -1042,7 +1042,7 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
       const { removeMemberFromTree, rehydrateTreeKeys, createIndexFile } = await import('@/lib/blossom/members')
       const { deserializeTree, fromHex, serializeTree } = await import('@/lib/crypto/lkh')
       const { createJoinRequest, signWithSigner } = await import('@/lib/nostr/events')
-      const { publishToSpecificRelays } = await import('@/lib/nostr/relay-pool')
+      const { publishToSpecificRelays, publishCriticalWithFailover } = await import('@/lib/nostr/relay-pool')
       const { getPublishRelays } = await import('@/stores/postingBehaviourStore')
 
       const currentSecret = hubSecrets[hub.dTag]
@@ -1086,7 +1086,7 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
       const creatorPubkey = hubData?.creatorPubkey || ''
       const unsignedEvent = createJoinRequest(hub.dTag, creatorPubkey, newIndexHash)
       const signedEvent = await signWithSigner(unsignedEvent, signer, privateKey)
-      await publishToSpecificRelays(getPublishRelays([...hub.generalRelays]), signedEvent)
+      await publishCriticalWithFailover(signedEvent, getPublishRelays([...hub.generalRelays]), [...hub.generalRelays])
 
       setMeshListHash(newIndexHash)
       setMeshMembers(prev => prev.filter(pk => pk !== targetPubkey))
@@ -1124,7 +1124,7 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
       const { rebuildFacilitatorTreeV1 } = await import('@/lib/blossom/members')
       const { fromHex } = await import('@/lib/crypto/lkh')
       const { createJoinRequest, signWithSigner } = await import('@/lib/nostr/events')
-      const { publishToSpecificRelays } = await import('@/lib/nostr/relay-pool')
+      const { publishToSpecificRelays, publishCriticalWithFailover } = await import('@/lib/nostr/relay-pool')
       const { getPublishRelays } = await import('@/stores/postingBehaviourStore')
       const { deleteFromBlossom } = await import('@/lib/blossom/client')
 
@@ -1177,7 +1177,7 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
         const facP = await facSigner.getPublicKey()
         const unsigned = createJoinRequest(hub.dTag, hub.creatorPubkey, newIndexHash)
         const signed = await facSigner.signEvent({ ...unsigned, pubkey: facP })
-        await publishToSpecificRelays(getPublishRelays([...hub.generalRelays], { hubOnly: true }), signed)
+        await publishCriticalWithFailover(signed, getPublishRelays([...hub.generalRelays], { hubOnly: true }), [...hub.generalRelays])
         // Persist the ban-exclusion ONLY after the rebuild + publish succeed. Doing it earlier means a
         // failed attempt drops the banned R from meshMembers, so a RETRY sees no banned members, passes
         // excludePfs=undefined, and re-keys the banned member's leaf back in under the new secret (ban
@@ -1194,7 +1194,7 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
         newIndexHash = r.indexHash
         const unsigned = createJoinRequest(hub.dTag, hub.creatorPubkey, newIndexHash)
         const signed = await signWithSigner(unsigned, signer, privateKey)
-        await publishToSpecificRelays(getPublishRelays([...hub.generalRelays]), signed)
+        await publishCriticalWithFailover(signed, getPublishRelays([...hub.generalRelays]), [...hub.generalRelays])
       }
 
       // Best-effort cleanup of the superseded blobs. v2: these blobs were uploaded by our
@@ -2181,7 +2181,7 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
                               const hubSecretV2 = fromHexV2(secretHexV2)
                               const { downloadTextFromBlossom, parseIndexFile, uploadToBlossomServers, uploadBanPagesV2, createIndexFile } = await import('@/lib/blossom')
                               const { createJoinRequest } = await import('@/lib/nostr/events')
-                              const { publishToSpecificRelays: pubToRelays, fetchEvents: fetchEvt } = await import('@/lib/nostr/relay-pool')
+                              const { publishCriticalWithFailover, fetchEvents: fetchEvt } = await import('@/lib/nostr/relay-pool')
                               const { getPublishRelays: getRelays } = await import('@/stores/postingBehaviourStore')
                               const { KINDS } = await import('@/lib/crypto/constants')
 
@@ -2217,7 +2217,7 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
                               await markStep('Publishing join request')
                               const unsignedEvent = createJoinRequest(hub.dTag, hub.creatorPubkey, newIndexHash)
                               const signedEvent = await authSigner({ ...unsignedEvent, pubkey: modP })
-                              await pubToRelays(getRelays([...hub.generalRelays]), signedEvent)
+                              await publishCriticalWithFailover(signedEvent, getRelays([...hub.generalRelays]), [...hub.generalRelays])
                               markDone('Publishing join request')
 
                               useHubStore.getState().setModBanList(hub.dTag, pubkey, allBans)
@@ -2231,7 +2231,7 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
                             await markStep('Fetching join request')
                             const { downloadTextFromBlossom, parseIndexFile, uploadToBlossomServers, uploadBanPages, createIndexFile } = await import('@/lib/blossom')
                             const { createJoinRequest, signWithSigner: signFn } = await import('@/lib/nostr/events')
-                            const { publishToSpecificRelays: pubToRelays, fetchEvents: fetchEvt } = await import('@/lib/nostr/relay-pool')
+                            const { publishCriticalWithFailover, fetchEvents: fetchEvt } = await import('@/lib/nostr/relay-pool')
                             const { getPublishRelays: getRelays } = await import('@/stores/postingBehaviourStore')
                             const { KINDS } = await import('@/lib/crypto/constants')
 
@@ -2268,7 +2268,7 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
                             await markStep('Publishing join request')
                             const unsignedEvent = createJoinRequest(hub.dTag, hub.creatorPubkey, newIndexHash)
                             const signedEvent = await signFn(unsignedEvent, signer, privateKey)
-                            await pubToRelays(getRelays([...hub.generalRelays]), signedEvent)
+                            await publishCriticalWithFailover(signedEvent, getRelays([...hub.generalRelays]), [...hub.generalRelays])
                             markDone('Publishing join request')
 
                             useHubStore.getState().setModBanList(hub.dTag, pubkey, allBans)
@@ -2344,7 +2344,7 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
                                             const { authKey: modP, authSigner } = identity
                                             const { downloadTextFromBlossom, parseIndexFile, uploadToBlossomServers, uploadBanPagesV2, createIndexFile } = await import('@/lib/blossom')
                                             const { createJoinRequest } = await import('@/lib/nostr/events')
-                                            const { publishToSpecificRelays: pubToRelays, fetchEvents: fetchEvt } = await import('@/lib/nostr/relay-pool')
+                                            const { publishCriticalWithFailover, fetchEvents: fetchEvt } = await import('@/lib/nostr/relay-pool')
                                             const { getPublishRelays: getRelays } = await import('@/stores/postingBehaviourStore')
                                             const { KINDS } = await import('@/lib/crypto/constants')
 
@@ -2386,7 +2386,7 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
                                             await markStep('Publishing join request')
                                             const unsignedEvent = createJoinRequest(hub.dTag, hub.creatorPubkey, newIndexHash)
                                             const signedEvent = await authSigner({ ...unsignedEvent, pubkey: modP })
-                                            await pubToRelays(getRelays([...hub.generalRelays]), signedEvent)
+                                            await publishCriticalWithFailover(signedEvent, getRelays([...hub.generalRelays]), [...hub.generalRelays])
                                             markDone('Publishing join request')
 
                                             useHubStore.getState().setModBanList(hub.dTag, pubkey, newBans)
@@ -2399,7 +2399,7 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
                                           await markStep('Fetching join request')
                                           const { downloadTextFromBlossom, parseIndexFile, uploadToBlossomServers, uploadBanPages, createIndexFile } = await import('@/lib/blossom')
                                           const { createJoinRequest, signWithSigner: signFn } = await import('@/lib/nostr/events')
-                                          const { publishToSpecificRelays: pubToRelays, fetchEvents: fetchEvt } = await import('@/lib/nostr/relay-pool')
+                                          const { publishCriticalWithFailover, fetchEvents: fetchEvt } = await import('@/lib/nostr/relay-pool')
                                           const { getPublishRelays: getRelays } = await import('@/stores/postingBehaviourStore')
                                           const { KINDS } = await import('@/lib/crypto/constants')
 
@@ -2439,7 +2439,7 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
                                           await markStep('Publishing join request')
                                           const unsignedEvent = createJoinRequest(hub.dTag, hub.creatorPubkey, newIndexHash)
                                           const signedEvent = await signFn(unsignedEvent, signer, privateKey)
-                                          await pubToRelays(getRelays([...hub.generalRelays]), signedEvent)
+                                          await publishCriticalWithFailover(signedEvent, getRelays([...hub.generalRelays]), [...hub.generalRelays])
                                           markDone('Publishing join request')
 
                                           useHubStore.getState().setModBanList(hub.dTag, pubkey, newBans)
@@ -3059,7 +3059,7 @@ function ModHiddenMessagesTab({ hub, onClose }: { hub: HubData; onClose: () => v
     try {
       const { createDeletedHideEvent, createDeletionEvent } = await import('@/lib/nostr/events')
       const { signWithSigner: signFn } = await import('@/lib/nostr')
-      const { publishToSpecificRelays } = await import('@/lib/nostr/relay-pool')
+      const { publishToSpecificRelays, publishCriticalWithFailover } = await import('@/lib/nostr/relay-pool')
       const { getDeletePublishRelays } = await import('@/stores/postingBehaviourStore')
       const { KINDS } = await import('@/lib/crypto/constants')
       const { signer, privateKey } = useUserStore.getState()

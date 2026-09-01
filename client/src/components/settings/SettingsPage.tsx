@@ -22,7 +22,7 @@ import { StorageKey, ADMIN_NPUB, ADMIN_PUBKEY, PREV_ADMIN_NPUB, PREV_ADMIN_PUBKE
 import { STANDARD_KINDS, KINDS } from '@/lib/crypto/constants'
 import { blossomServers, uploadToBlossomServers, downloadFromBlossomWithProgress } from '@/lib/blossom'
 import type { DownloadProgress } from '@/lib/blossom'
-import { getRelayList, getDefaultRelays, setRelays, publishToSpecificRelays, publishWithFailover, getRelays, fetchReplaceable, fetchEvents } from '@/lib/nostr/relay-pool'
+import { getRelayList, getDefaultRelays, setRelays, publishToSpecificRelays, publishWithFailover, publishCriticalWithFailover, getRelays, fetchReplaceable, fetchEvents } from '@/lib/nostr/relay-pool'
 import { checkEventAvailability } from '@/lib/nostr/eventRedundancy'
 import { parseHubBackup } from '@/lib/hub/hubBackup'
 import { Button } from '@/components/ui/button'
@@ -5009,7 +5009,7 @@ function MyHubsTab() {
         ['a', `36942:${hub.creatorPubkey}:${hub.dTag}`],
       ] as [string, ...string[]][])
       const signedDelete = await signWithSigner(deleteEvent, signer, privateKey)
-      await publishToSpecificRelays(getDeletePublishRelays(), signedDelete)
+      await publishCriticalWithFailover(signedDelete, getDeletePublishRelays(), [...hub.generalRelays])
 
       const deleteCreatedAt = hub.eventCreatedAt ? hub.eventCreatedAt + 1 : undefined
       const deletedHubEvent = createUnsignedEvent(KINDS.HUB_EVENT, '', [
@@ -5021,7 +5021,7 @@ function MyHubsTab() {
       // Mine the tombstone (a kind-36942 publish) to the hub's message PoW so PoW-enforcing
       // relays accept the deletion overwrite. The kind-5 request above stays PoW-free.
       const signedDeletedHub = await mineAndSign(deletedHubEvent, hub.minPow, hub.creatorPubkey, signer, privateKey)
-      await publishToSpecificRelays(getDeletePublishRelays(), signedDeletedHub)
+      await publishCriticalWithFailover(signedDeletedHub, getDeletePublishRelays(), [...hub.generalRelays])
 
       setHubStatus(dTag, 'deleted')
     } catch (err) {

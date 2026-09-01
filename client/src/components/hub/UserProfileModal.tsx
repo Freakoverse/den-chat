@@ -35,7 +35,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { truncateNpub } from '@/lib/utils'
-import { fetchEvents, publishToSpecificRelays } from '@/lib/nostr/relay-pool'
+import { fetchEvents, publishToSpecificRelays, publishCriticalWithFailover } from '@/lib/nostr/relay-pool'
 import { publishPersonal, getPublishRelays } from '@/stores/postingBehaviourStore'
 import { signWithSigner } from '@/lib/nostr/events'
 import { nip19 } from 'nostr-tools'
@@ -1155,7 +1155,7 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
         eventCreatedAt: hub.eventCreatedAt,
       })
       const signedEvent = await signFn(unsignedEvent, hub.minPow, myPubkey, signer, privateKey)
-      await pubToRelays(getPublishRelays([...hub.generalRelays]), signedEvent)
+      await publishCriticalWithFailover(signedEvent, getPublishRelays([...hub.generalRelays]), [...hub.generalRelays])
       markDone('Publishing hub event')
 
       // Update local store
@@ -1305,7 +1305,7 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
         await markStep('Publishing join request')
         const unsignedEventV2 = createJoinRequest(dTag, hubContext.creatorPubkey, newIndexHashV2)
         const signedEventV2 = await authSigner({ ...unsignedEventV2, pubkey: modP })
-        await pubToRelays(getRelays([...hub.generalRelays], { hubOnly: true }), signedEventV2)
+        await publishCriticalWithFailover(signedEventV2, getRelays([...hub.generalRelays], { hubOnly: true }), [...hub.generalRelays])
         markDone('Publishing join request')
 
         useHubStore.getState().setModBanList(dTag, myPubkey, allBanPubkeysV2)
@@ -1373,7 +1373,7 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
       await markStep('Publishing join request')
       const unsignedEvent = createJoinRequest(dTag, hubContext.creatorPubkey, newIndexHash)
       const signedEvent = await signFn(unsignedEvent, signer, privateKey)
-      await pubToRelays(getRelays([...hub.generalRelays]), signedEvent)
+      await publishCriticalWithFailover(signedEvent, getRelays([...hub.generalRelays]), [...hub.generalRelays])
       markDone('Publishing join request')
 
       useHubStore.getState().setModBanList(dTag, myPubkey, allBanPubkeys)
@@ -1479,7 +1479,7 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
         await markStep('Publishing join request')
         const unsignedEventV2 = createJoinRequest(dTag, hubContext.creatorPubkey, newIndexHashV2)
         const signedEventV2 = await authSigner({ ...unsignedEventV2, pubkey: modP })
-        await pubToRelays(getRelays([...hub.generalRelays], { hubOnly: true }), signedEventV2)
+        await publishCriticalWithFailover(signedEventV2, getRelays([...hub.generalRelays], { hubOnly: true }), [...hub.generalRelays])
         markDone('Publishing join request')
 
         useHubStore.getState().setModBanList(dTag, myPubkey, remaining)
@@ -1547,7 +1547,7 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
       await markStep('Publishing join request')
       const unsignedEvent = createJoinRequest(dTag, hubContext.creatorPubkey, newIndexHash)
       const signedEvent = await signFn(unsignedEvent, signer, privateKey)
-      await pubToRelays(getRelays([...hub.generalRelays]), signedEvent)
+      await publishCriticalWithFailover(signedEvent, getRelays([...hub.generalRelays]), [...hub.generalRelays])
       markDone('Publishing join request')
 
       useHubStore.getState().setModBanList(dTag, myPubkey, remaining)

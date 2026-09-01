@@ -785,7 +785,7 @@ function DiscoverHubCard({ hub }: { hub: DiscoveredHub }) {
     setJoinError(null)
     try {
       const { createUnsignedEvent, signWithSigner, mineAndSign, createHubListEvent } = await import('@/lib/nostr')
-      const { publishToSpecificRelays } = await import('@/lib/nostr/relay-pool')
+      const { publishCriticalWithFailover } = await import('@/lib/nostr/relay-pool')
       const { getPublishRelays } = await import('@/stores/postingBehaviourStore')
       const hubRelays = [...(hub.generalRelays || [])]
 
@@ -806,7 +806,7 @@ function DiscoverHubCard({ hub }: { hub: DiscoveredHub }) {
       // v2: hub relays ONLY. The join request is authored by a throwaway `addr` key (R is sealed to O
       // inside), but it carries the hub coordinate; publishing it to the applicant's personal NIP-65 relays
       // would let an observer correlate that addr key → R by relay footprint ("R is joining private hub X").
-      await publishToSpecificRelays(getPublishRelays(hubRelays, { hubOnly: isV2(hub) }), signed)
+      await publishCriticalWithFailover(signed, getPublishRelays(hubRelays, { hubOnly: isV2(hub) }), hubRelays)
 
       if (!isAlreadyInList) {
         // Only stub the hub data if we don't ALREADY hold it loaded. Re-adding after a withdraw must not

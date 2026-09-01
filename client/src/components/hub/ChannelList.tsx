@@ -367,7 +367,7 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
     setPublishingLayout(true); setLayoutError(null); setLayoutStep('signing')
     try {
       const { signHubEventForPublish } = await import('@/lib/hub/buildHubEvent')
-      const { publishToSpecificRelays } = await import('@/lib/nostr/relay-pool')
+      const { publishCriticalWithFailover } = await import('@/lib/nostr/relay-pool')
       const { getPublishRelays } = await import('@/stores/postingBehaviourStore')
       const { isV2 } = await import('@/lib/hub/version')
       const signed = await signHubEventForPublish(hub, {
@@ -385,7 +385,7 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
       // v2: hub relays ONLY — this republish is authored under the owner pseudonym O; sending it to the
       // owner's personal NIP-65 relays would correlate O → R_owner by relay footprint (the single v2 publish
       // site that was missing this).
-      await publishToSpecificRelays(getPublishRelays([...hub.generalRelays], { hubOnly: isV2(hub) }), signed)
+      await publishCriticalWithFailover(signed, getPublishRelays([...hub.generalRelays], { hubOnly: isV2(hub) }), [...hub.generalRelays])
       setHubData(hub.dTag, { ...hub, channels: layoutDraft.channels, categories: layoutDraft.categories, eventCreatedAt: signed.created_at })
       setLayoutDraft(null)
       setLayoutStep('done')

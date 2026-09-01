@@ -31,7 +31,7 @@ import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { buildHubEvent } from '@/lib/hub/buildHubEvent'
 import { signWithSigner, mineAndSign } from '@/lib/nostr'
-import { publishToSpecificRelays, fetchEvents, fetchEventsFromRelays, getRelays } from '@/lib/nostr/relay-pool'
+import { publishToSpecificRelays, publishCriticalWithFailover, fetchEvents, fetchEventsFromRelays, getRelays } from '@/lib/nostr/relay-pool'
 import { getPublishRelays } from '@/stores/postingBehaviourStore'
 import { useTypingHeartbeat } from '@/hooks/useTypingHeartbeat'
 import { TypingIndicator } from '@/components/chat/TypingIndicator'
@@ -567,7 +567,7 @@ export function ChannelDescriptionModal({ channelId, channelName, description, i
         publishedAt: hub.publishedAt,
         eventCreatedAt: hub.eventCreatedAt,
       }, { pubkey: useUserStore.getState().pubkey!, privateKey, signer, minPow: hub.minPow })
-      await publishToSpecificRelays(getPublishRelays([...hub.generalRelays], { hubOnly: isV2(hub) }), signedEvent)
+      await publishCriticalWithFailover(signedEvent, getPublishRelays([...hub.generalRelays], { hubOnly: isV2(hub) }), [...hub.generalRelays])
 
       // Update local store
       setHubData(activeHubId, {

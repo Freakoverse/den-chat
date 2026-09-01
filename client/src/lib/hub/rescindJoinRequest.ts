@@ -11,7 +11,7 @@ import type { HubData } from '@/stores/hubStore'
  * awaiting-approval overlay so both do exactly the same thing.
  */
 export async function rescindJoinRequest(hub: HubData, pubkey: string): Promise<void> {
-  const { fetchEvents, publishToSpecificRelays } = await import('@/lib/nostr/relay-pool')
+  const { fetchEvents, publishCriticalWithFailover } = await import('@/lib/nostr/relay-pool')
   const { getPublishRelays, getDeletePublishRelays } = await import('@/stores/postingBehaviourStore')
   const { createDeletedJoinRequest, createDeletionEvent, createHubListEvent } = await import('@/lib/nostr/events')
   const { signWithSigner } = await import('@/lib/nostr')
@@ -60,12 +60,12 @@ export async function rescindJoinRequest(hub: HubData, pubkey: string): Promise<
     //    join-request badge watches for it; without it the badge never learns the request was withdrawn.
     const hubCoord = `${KINDS.HUB_EVENT}:${hub.creatorPubkey}:${hub.dTag}`
     const deleted = createDeletedJoinRequest(addrPub, hub.creatorPubkey, originalCreatedAt, hubCoord)
-    await publishToSpecificRelays(publishRelays, await mineAndSignAsSubkey(deleted, 0, addrSigner))
+    await publishCriticalWithFailover(await mineAndSignAsSubkey(deleted, 0, addrSigner), publishRelays, relays)
 
     // 2. NIP-09 deletion for that same addressable coordinate, authored by addrPub.
     const aRef = `${KINDS.JOIN_REQUEST}:${addrPub}:${addrPub}`
     const deletionReq = createDeletionEvent([], [aRef], 'rescind join request')
-    await publishToSpecificRelays(publishRelays, await mineAndSignAsSubkey(deletionReq, 0, addrSigner))
+    await publishCriticalWithFailover(await mineAndSignAsSubkey(deletionReq, 0, addrSigner), publishRelays, relays)
   } else {
     // Fetch the existing join request to preserve its created_at.
     const existing = await fetchEvents({
@@ -78,12 +78,12 @@ export async function rescindJoinRequest(hub: HubData, pubkey: string): Promise<
 
     // 1. Re-publish the join request with a deleted marker (created_at + 1).
     const deleted = createDeletedJoinRequest(hub.dTag, hub.creatorPubkey, originalCreatedAt)
-    await publishToSpecificRelays(publishRelays, await signWithSigner(deleted, signer, privateKey))
+    await publishCriticalWithFailover(await signWithSigner(deleted, signer, privateKey), publishRelays, relays)
 
     // 2. NIP-09 deletion request for the addressable join-request coordinate.
     const aRef = `${KINDS.JOIN_REQUEST}:${pubkey}:${hub.dTag}`
     const deletionReq = createDeletionEvent([], [aRef], 'rescind join request')
-    await publishToSpecificRelays(publishRelays, await signWithSigner(deletionReq, signer, privateKey))
+    await publishCriticalWithFailover(await signWithSigner(deletionReq, signer, privateKey), publishRelays, relays)
   }
 
   // 3. Remove the hub from the user's list + clear cached messages, then publish
