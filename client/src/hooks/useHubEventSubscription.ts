@@ -125,9 +125,19 @@ export function useHubEventSubscription() {
       // epoch-rollback guards below still reject actually-older/forged events, so this can't be abused to
       // replay stale state.
       const prevTs = latestTsRef.current[dTag] || 0
-      const curEpoch = useHubStore.getState().hubs[dTag]?.epoch ?? -1
+      const cur = useHubStore.getState().hubs[dTag]
+      const curEpoch = cur?.epoch ?? -1
+      const appliedTs = cur?.eventCreatedAt ?? 0
+      // Newer STATE than we currently hold overrides the (unreliable, kept-low) created_at dedup:
+      //  • a ROTATION bumps the epoch (ban/kick/fix-encryption) — process regardless of created_at, so a
+      //    banned/removed member is gated live; and
+      //  • a role/settings/channel change moves the INDEX pointer WITHOUT touching the epoch — process it so
+      //    e.g. a newly-role-assigned member loads the group secret and can open the channel live (not only
+      //    after a reload). For the index case require created_at >= what we've already APPLIED, so a lagging
+      //    relay replaying a SUPERSEDED version can't revert us.
       const isEpochBump = hubData.epoch > curEpoch
-      if (event.created_at <= prevTs && !isEpochBump) return
+      const isNewerIndex = !!hubData.indexFileHash && hubData.indexFileHash !== cur?.indexFileHash && event.created_at >= appliedTs
+      if (event.created_at <= prevTs && !isEpochBump && !isNewerIndex) return
       latestTsRef.current[dTag] = Math.max(prevTs, event.created_at)
 
       // Debounce to avoid hammering Blossom on rapid updates
