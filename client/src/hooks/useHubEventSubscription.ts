@@ -285,6 +285,21 @@ export function useHubEventSubscription() {
             } catch { /* couldn't decrypt — preserve existing structure below */ }
           }
 
+          // If we HELD a secret but it can't decrypt THIS event's content while the epoch has MOVED, it's
+          // stale — we couldn't follow the rotation (kicked, or facilitator behind), so we no longer have
+          // access. Clear it so the no-access guard shows IN-SESSION, not only after a reload. (The
+          // facilitated/kick branch above tries to do this, but only when its epoch condition holds; a race
+          // that already advanced currentHub.epoch, or a facilitated re-fetch that left a stale secret, can
+          // slip past it — this is the fail-closed backstop.) Gated on an ACTUAL epoch change so a transient
+          // or corrupt-content blip on the SAME epoch never nukes a still-valid secret; a genuinely-still
+          // member re-derived their secret above (full is set) and never reaches here.
+          if (secretHex && !full && hubData.epoch !== currentHub.epoch) {
+            console.log(`[HubEventSub] ${dTag}: held secret can't decrypt epoch ${hubData.epoch} content (was ${currentHub.epoch}) — stale, clearing so the no-access guard shows`)
+            store.setHubSecret(dTag, '')
+            secretHex = ''
+            store.bumpHubSecretRetry?.() // if we're genuinely still a member (transient miss), the loader re-derives and the guard clears
+          }
+
           if (full) {
             // Never WIPE a previously-verified ownerRealPubkey: if this update's attestation didn't
             // re-verify (undefined — e.g. an event whose content was rebuilt without the attestation, or a
