@@ -266,35 +266,46 @@ export function useHubEventSubscription() {
             } catch (err) { console.warn(`[HubEventSub] v2 ban-list refresh failed for ${dTag}:`, err) }
           }
 
-          // Decrypt structural content with the (current or newly-bootstrapped) secret.
+          // Decrypt structural content with the (current or newly-bootstrapped) secret. Isolate the DECRYPT
+          // (a local AES op over the event's own content — no network) from the post-decrypt parse/verify, so
+          // a decrypt failure is a RELIABLE "our secret is wrong for this event's epoch" signal, distinct from
+          // a harmless parse hiccup.
           let full: (typeof hubData) | null = null
           let ownerRealPubkey: string | undefined
+          let secretDecryptFailed = false
           if (secretHex) {
+            let decrypted: unknown
             try {
               const { fromHex } = await import('@/lib/crypto/lkh')
-              const { deriveHubContentKey, decryptHubContent, verifyOwnerAttestation } = await import('@/lib/hub/hubContent')
+              const { deriveHubContentKey, decryptHubContent } = await import('@/lib/hub/hubContent')
               const key = deriveHubContentKey(fromHex(secretHex), hubData.epoch)
-              const decrypted = await decryptHubContent(key, event.content)
-              full = parseHubEvent(event, JSON.stringify(decrypted))
-              // Re-extract + verify the owner's real key R from the attestation on EVERY update — parseHubEvent
-              // doesn't (it can't verify), and the store's merge only preserves a PRIOR ownerRealPubkey. Without
-              // this, a member whose initial load raced/missed the extraction never learns the owner's R, so the
-              // member list shows the owner twice (faceless O with the crown + their real identity from the roster).
-              const { verifiedOwnerRealPubkey } = await import('./useHubLoader')
-              ownerRealPubkey = verifiedOwnerRealPubkey(decrypted, hubData.creatorPubkey, dTag, verifyOwnerAttestation)
-            } catch { /* couldn't decrypt — preserve existing structure below */ }
+              decrypted = await decryptHubContent(key, event.content)
+            } catch {
+              secretDecryptFailed = true // stale secret — couldn't decrypt this epoch's content
+            }
+            if (decrypted !== undefined) {
+              try {
+                const { verifyOwnerAttestation } = await import('@/lib/hub/hubContent')
+                full = parseHubEvent(event, JSON.stringify(decrypted))
+                // Re-extract + verify the owner's real key R from the attestation on EVERY update — parseHubEvent
+                // doesn't (it can't verify), and the store's merge only preserves a PRIOR ownerRealPubkey. Without
+                // this, a member whose initial load raced/missed the extraction never learns the owner's R, so the
+                // member list shows the owner twice (faceless O with the crown + their real identity from the roster).
+                const { verifiedOwnerRealPubkey } = await import('./useHubLoader')
+                ownerRealPubkey = verifiedOwnerRealPubkey(decrypted, hubData.creatorPubkey, dTag, verifyOwnerAttestation)
+              } catch { /* post-decrypt parse/verify hiccup — keep existing structure, NOT a lost-access signal */ }
+            }
           }
 
-          // If we HELD a secret but it can't decrypt THIS event's content while the epoch has MOVED, it's
-          // stale — we couldn't follow the rotation (kicked, or facilitator behind), so we no longer have
-          // access. Clear it so the no-access guard shows IN-SESSION, not only after a reload. (The
-          // facilitated/kick branch above tries to do this, but only when its epoch condition holds; a race
-          // that already advanced currentHub.epoch, or a facilitated re-fetch that left a stale secret, can
-          // slip past it — this is the fail-closed backstop.) Gated on an ACTUAL epoch change so a transient
-          // or corrupt-content blip on the SAME epoch never nukes a still-valid secret; a genuinely-still
-          // member re-derived their secret above (full is set) and never reaches here.
-          if (secretHex && !full && hubData.epoch !== currentHub.epoch) {
-            console.log(`[HubEventSub] ${dTag}: held secret can't decrypt epoch ${hubData.epoch} content (was ${currentHub.epoch}) — stale, clearing so the no-access guard shows`)
+          // FAIL-CLOSED: if we held a secret but it can't decrypt THIS event's content, it's stale — we
+          // couldn't follow a rotation (kicked/banned, or facilitator behind) → we've lost access. Clear it so
+          // the no-access guard shows IN-SESSION, not only after a reload. Keyed on the decrypt failure itself
+          // (reliable, no epoch comparison — a race can advance currentHub.epoch and slip past the kick/
+          // facilitated branch above; the decrypt can't lie). Bump the retry so a genuinely-still member who
+          // only hit a transient loader miss re-derives their (valid) secret and un-guards. A still-member who
+          // refreshed decrypts fine (secretDecryptFailed stays false) and never reaches here.
+          if (secretDecryptFailed) {
+            console.log(`[HubEventSub] ${dTag}: held secret can't decrypt epoch ${hubData.epoch} content — stale, clearing so the no-access guard shows`)
             store.setHubSecret(dTag, '')
             secretHex = ''
             store.bumpHubSecretRetry?.() // if we're genuinely still a member (transient miss), the loader re-derives and the guard clears
