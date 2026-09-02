@@ -32,7 +32,7 @@ import { ShieldAlert, LogOut, Plus, MessageSquare, MessagesSquare, AtSign, Compa
 import { nip19 } from 'nostr-tools'
 import { UserProfileModal } from '@/components/hub/UserProfileModal'
 import { useProfileCache } from '@/hooks/useProfileCache'
-import { getPermissionsForUser, isAuthorizedFacilitator } from '@/lib/hub/permissions'
+import { getPermissionsForUser, isAuthorizedFacilitator, isHubOwner } from '@/lib/hub/permissions'
 import { isV2 } from '@/lib/hub/version'
 import { canUseV2 } from '@/lib/crypto/skd'
 import { cn } from '@/lib/utils'
@@ -106,6 +106,9 @@ export function AppLayout() {
   const hubMembers = useHubStore((s) => activeHubId ? s.hubMembers[activeHubId] : undefined)
   const isModBanned = useMemo(() => {
     if (!myPubkey || !modBanLists || !hubMembers) return false
+    // The hub OWNER can never be banned from their own hub — even by a moderator (a rogue mod with
+    // ban_members must not be able to lock the creator out), nor by a stray self-entry in a ban list.
+    if (hub && isHubOwner(hub, myPubkey)) return false
     // Whitelisted members (w flag) are immune to mod bans
     const myMember = hubMembers.find(m => m.pubkey === myPubkey)
     if (myMember?.flags?.includes('w')) return false
@@ -113,14 +116,17 @@ export function AppLayout() {
       if (bannedPks.includes(myPubkey)) return true
     }
     return false
-  }, [myPubkey, modBanLists, hubMembers])
+  }, [myPubkey, modBanLists, hubMembers, hub])
 
   // ── Hard-ban detection (creator ban list) ──
   const hubBanList = useHubStore((s) => activeHubId ? s.hubBanLists[activeHubId] : undefined)
   const isHardBanned = useMemo(() => {
     if (!myPubkey || !hubBanList) return false
+    // The owner is never hard-banned from their own hub (see isModBanned) — guards the self-ban soft-lock
+    // and a ban list that somehow names the creator.
+    if (hub && isHubOwner(hub, myPubkey)) return false
     return hubBanList.includes(myPubkey)
-  }, [myPubkey, hubBanList])
+  }, [myPubkey, hubBanList, hub])
 
   // Combined ban check — either type blocks access
   const isBanned = isModBanned || isHardBanned
