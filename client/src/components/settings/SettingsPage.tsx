@@ -22,7 +22,7 @@ import { StorageKey, ADMIN_NPUB, ADMIN_PUBKEY, PREV_ADMIN_NPUB, PREV_ADMIN_PUBKE
 import { STANDARD_KINDS, KINDS } from '@/lib/crypto/constants'
 import { blossomServers, uploadToBlossomServers, downloadFromBlossomWithProgress } from '@/lib/blossom'
 import type { DownloadProgress } from '@/lib/blossom'
-import { getRelayList, getDefaultRelays, setRelays, publishToSpecificRelays, publishWithFailover, publishCriticalWithFailover, getRelays, fetchReplaceable, fetchEvents } from '@/lib/nostr/relay-pool'
+import { getRelayList, getDefaultRelays, setRelays, publishToSpecificRelays, publishWithFailover, getRelays, fetchReplaceable, fetchEvents } from '@/lib/nostr/relay-pool'
 import { checkEventAvailability } from '@/lib/nostr/eventRedundancy'
 import { parseHubBackup } from '@/lib/hub/hubBackup'
 import { Button } from '@/components/ui/button'
@@ -5005,12 +5005,17 @@ function MyHubsTab() {
     if (!hub) return
     setReDeleting(dTag)
     try {
-      const deleteEvent = createUnsignedEvent(5, 'Hub deletion requested', [
-        ['a', `36942:${hub.creatorPubkey}:${hub.dTag}`],
-      ] as [string, ...string[]][])
-      const signedDelete = await signWithSigner(deleteEvent, signer, privateKey)
-      await publishCriticalWithFailover(signedDelete, getDeletePublishRelays(), [...hub.generalRelays])
+      const { isV2 } = await import('@/lib/hub/version')
+      const v2Delete = isV2(hub)
+      // getDeletePublishRelays returns EVERY delete relay (client + NIP-65 + the hub's own relays) when the
+      // bypass toggle is on. The hub's generalRelays MUST be included — that's where the original event most
+      // likely lives, so an omitted hub relay would keep serving the hub after "deletion".
+      const deleteRelays = getDeletePublishRelays([...hub.generalRelays])
 
+      // 1. Tombstone: re-publish the hub event flagged deleted (addressable overwrite), mined to the hub's
+      //    message PoW so PoW-enforcing relays accept it. On v2 the hub is authored by the owner pseudonym O
+      //    (the created-hubs tab lists v2 hubs via ownerRealPubkey), so the tombstone MUST be signed as O —
+      //    an R-signed event is a different addressable event and never replaces the real hub.
       const deleteCreatedAt = hub.eventCreatedAt ? hub.eventCreatedAt + 1 : undefined
       const deletedHubEvent = createUnsignedEvent(KINDS.HUB_EVENT, '', [
         ['d', hub.dTag],
@@ -5018,10 +5023,31 @@ function MyHubsTab() {
         ['epoch', hub.epoch.toString()],
         ['deleted', 'true'],
       ] as [string, ...string[]][], deleteCreatedAt)
-      // Mine the tombstone (a kind-36942 publish) to the hub's message PoW so PoW-enforcing
-      // relays accept the deletion overwrite. The kind-5 request above stays PoW-free.
-      const signedDeletedHub = await mineAndSign(deletedHubEvent, hub.minPow, hub.creatorPubkey, signer, privateKey)
-      await publishCriticalWithFailover(signedDeletedHub, getDeletePublishRelays(), [...hub.generalRelays])
+
+      let signedDeletedHub
+      let ownerSigner: any = null
+      if (v2Delete) {
+        const { makeSubkeySigner, mineAndSignAsSubkey } = await import('@/lib/nostr/v2send')
+        const { ChatContext, canUseV2 } = await import('@/lib/crypto/skd')
+        if (!canUseV2({ privateKey, signer })) throw new Error('This private (v2) hub needs a NIP-SKD signer to delete.')
+        ownerSigner = makeSubkeySigner(ChatContext.owner(hub.dTag), { privateKey, signer })
+        signedDeletedHub = await mineAndSignAsSubkey(deletedHubEvent, hub.minPow, ownerSigner)
+      } else {
+        signedDeletedHub = await mineAndSign(deletedHubEvent, hub.minPow, hub.creatorPubkey, signer, privateKey)
+      }
+      // Fire-once to EVERY delete relay (not failover, which stops at `target` accepted — that would leave
+      // the tombstone off any relay past the first few, so one still holding the original keeps serving it).
+      await publishToSpecificRelays(deleteRelays, signedDeletedHub)
+
+      // 2. NIP-09 kind-5 deletion request (fallback). Signed as O on v2 (the hub coordinate's author) so
+      //    NIP-09 relays honor it and R is never linked to the private hub.
+      const deleteEvent = createUnsignedEvent(5, 'Hub deletion requested', [
+        ['a', `36942:${hub.creatorPubkey}:${hub.dTag}`],
+      ] as [string, ...string[]][])
+      const signedDelete = v2Delete && ownerSigner
+        ? await ownerSigner.signEvent(deleteEvent)
+        : await signWithSigner(deleteEvent, signer, privateKey)
+      await publishToSpecificRelays(deleteRelays, signedDelete)
 
       setHubStatus(dTag, 'deleted')
     } catch (err) {

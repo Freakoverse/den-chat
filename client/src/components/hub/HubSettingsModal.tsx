@@ -3781,7 +3781,11 @@ function DangerousPage({ hub, onClose, setHubStatus }: DangerousPageProps) {
       } else {
         signedDeletedHub = await mineAndSign(deletedHubEvent, hub.minPow, hub.creatorPubkey, signer, privateKey)
       }
-      await publishCriticalWithFailover(signedDeletedHub, getDeletePublishRelays([...hub.generalRelays], { hubOnly: v2Delete }), [...hub.generalRelays])
+      // Deletions publish fire-once to EVERY delete relay (getDeletePublishRelays already returns all of
+      // them), NOT via failover — failover stops at `target` (3) accepted, which would leave the tombstone
+      // off any relay past the first few, so a relay still holding the original keeps serving the hub. A
+      // delete only takes effect on a relay that actually receives it, so it must reach them all.
+      await publishToSpecificRelays(getDeletePublishRelays([...hub.generalRelays]), signedDeletedHub)
 
       // 2. NIP-09 Kind 5 deletion request as fallback. On v2 it MUST be signed as O — the hub event's
       // author — not R_owner: (a) NIP-09 relays only honor a deletion signed by the target's author, and
@@ -3795,7 +3799,7 @@ function DangerousPage({ hub, onClose, setHubStatus }: DangerousPageProps) {
       const signedDelete = v2Delete && ownerSigner
         ? await ownerSigner.signEvent(deleteEvent)
         : await signWithSigner(deleteEvent, signer, privateKey)
-      await publishCriticalWithFailover(signedDelete, getDeletePublishRelays([...hub.generalRelays], { hubOnly: v2Delete }), [...hub.generalRelays])
+      await publishToSpecificRelays(getDeletePublishRelays([...hub.generalRelays]), signedDelete)
 
       // Update local state
       setHubStatus(hub.dTag, 'deleted')
