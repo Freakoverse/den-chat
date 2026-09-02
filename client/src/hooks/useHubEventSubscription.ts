@@ -116,10 +116,19 @@ export function useHubEventSubscription() {
         return
       }
 
-      // Skip if we've already processed a newer event for this hub
+      // Skip if we've already processed a newer event for this hub — BUT the created_at dedup is fragile for
+      // hub events: republishes keep created_at deliberately low (original+1), so with flaky relays a
+      // genuinely-newer ROTATION (ban/kick/fix-encryption all BUMP the epoch) can arrive with created_at <=
+      // what we last saw and get wrongly dropped here — which is exactly why a ban didn't gate a member
+      // IN-SESSION (only after a reload, whose loader uses a different path). A higher epoch than the one we
+      // currently hold is an unconditional "newer state" signal, so let it through; the forged-event +
+      // epoch-rollback guards below still reject actually-older/forged events, so this can't be abused to
+      // replay stale state.
       const prevTs = latestTsRef.current[dTag] || 0
-      if (event.created_at <= prevTs) return
-      latestTsRef.current[dTag] = event.created_at
+      const curEpoch = useHubStore.getState().hubs[dTag]?.epoch ?? -1
+      const isEpochBump = hubData.epoch > curEpoch
+      if (event.created_at <= prevTs && !isEpochBump) return
+      latestTsRef.current[dTag] = Math.max(prevTs, event.created_at)
 
       // Debounce to avoid hammering Blossom on rapid updates
       if (pendingRef.current[dTag]) {
