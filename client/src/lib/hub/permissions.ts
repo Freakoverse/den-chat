@@ -116,10 +116,12 @@ export const PERMISSION_LABELS: Record<keyof ResolvedPermissions, string> = {
   use_spatial: 'Spatial Audio',
 }
 
-/** Short descriptions for permission tooltips */
+/** Short descriptions for permission tooltips. These describe a ROLE's hub-wide default (Hub Settings →
+ * Roles). The per-channel/category override editor (Hub Settings → Channels) has its own channel-scoped
+ * wording (BASE_PERM_KEYS / VOICE_PERM_KEYS in HubSettingsModal), so keep these GENERAL, not per-channel. */
 export const PERMISSION_DESCRIPTIONS: Record<keyof ResolvedPermissions, string> = {
-  view_channel: 'Can see this channel in the sidebar',
-  read_messages: 'Can decrypt and read messages — denying makes the channel private',
+  view_channel: 'Can see channels in the sidebar by default (refine per channel under Channels)',
+  read_messages: 'Can decrypt and read messages by default — deny to make channels private',
   send_messages: 'Can send messages in hub channels',
   add_reactions: 'Can add reactions to messages in this hub',
   create_invite: 'Can copy and share the hub address with others',
