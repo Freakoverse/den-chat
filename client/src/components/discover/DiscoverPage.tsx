@@ -33,7 +33,7 @@ import { useNavigationStore } from '@/stores/navigationStore'
 import {
   Compass, Search, Loader2, Hash, Info, UserPlus, Check, AlertTriangle,
   X, ShieldAlert, SlidersHorizontal, ChevronLeft, ChevronRight, Plus,
-  Gamepad2, Package, Globe, Monitor, ChevronDown, Trash2,
+  Gamepad2, Package, Globe, Monitor, ChevronDown,
 } from 'lucide-react'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import type { Event } from 'nostr-tools'
@@ -743,11 +743,6 @@ function DiscoverHubCard({ hub }: { hub: DiscoveredHub }) {
   const [showCreatorProfile, setShowCreatorProfile] = useState(false)
   const [showJoinWarning, setShowJoinWarning] = useState(false)
   const [showHubLimitModal, setShowHubLimitModal] = useState(false)
-  // Temporary Discover delete button (owner-only, re-publishes a deletion for orphan hubs)
-  const [deleting, setDeleting] = useState(false)
-  const [confirmDelete, setConfirmDelete] = useState(false)
-  const [deleteError, setDeleteError] = useState<string | null>(null)
-  const [deletedLocal, setDeletedLocal] = useState(false)
 
   const isAlreadyInList = hubEntries.some(e => e.dTag === hub.dTag)
   // "Actually in the hub" — not merely listed: we hold the secret (decrypted from the
@@ -861,83 +856,6 @@ function DiscoverHubCard({ hub }: { hub: DiscoveredHub }) {
     } finally {
       setJoining(false)
     }
-  }
-
-  // ── Temporary owner-only delete (Discover) ──
-  // Re-publishes a deletion for an orphan/unrecoverable hub straight from Discover. The tombstone
-  // and NIP-09 request are authored by the hub's own key (R for v1, the owner pseudonym O for v2)
-  // and pushed with relay failover, so a deletion that never propagated the first time (low
-  // created_at + flaky relays) actually lands this time. Discover hides `deleted:true` hubs on parse.
-  const handleDelete = async () => {
-    if (deleting) return
-    if (!confirmDelete) { setConfirmDelete(true); return }
-    setDeleting(true)
-    setDeleteError(null)
-    try {
-      const { createUnsignedEvent, signWithSigner, mineAndSign } = await import('@/lib/nostr')
-      const { publishCriticalWithFailover } = await import('@/lib/nostr/relay-pool')
-      const { getDeletePublishRelays } = await import('@/stores/postingBehaviourStore')
-      const { isV2 } = await import('@/lib/hub/version')
-      const v2Delete = isV2(hub)
-      const hubRelays = [...(hub.generalRelays || [])]
-
-      // Carry the discovered event's epoch + created_at so the overwrite doesn't jump in the timeline.
-      const epochTag = hub.event.tags.find(t => t[0] === 'epoch')?.[1] || hub.event.tags.find(t => t[0] === 'e')?.[1] || '0'
-      const deleteCreatedAt = hub.event.created_at ? hub.event.created_at + 1 : undefined
-
-      // 1. Addressable overwrite: re-publish the hub event flagged deleted (mined to the hub's message PoW
-      //    so PoW-enforcing relays accept it). On v2 the tombstone MUST be signed as O — the hub's author —
-      //    or it becomes a different addressable event and never replaces the real one.
-      const deletedHubEvent = createUnsignedEvent(KINDS.HUB_EVENT, '', [
-        ['d', hub.dTag],
-        ['n', hub.name],
-        ['epoch', epochTag],
-        ['deleted', 'true'],
-      ] as [string, ...string[]][], deleteCreatedAt)
-
-      let signedDeletedHub
-      let ownerSigner: any = null
-      if (v2Delete) {
-        const { makeSubkeySigner, mineAndSignAsSubkey } = await import('@/lib/nostr/v2send')
-        const { ChatContext, canUseV2 } = await import('@/lib/crypto/skd')
-        if (!canUseV2({ privateKey, signer })) throw new Error('This private (v2) hub needs a NIP-SKD signer to delete.')
-        ownerSigner = makeSubkeySigner(ChatContext.owner(hub.dTag), { privateKey, signer })
-        // Authorship guard: only the owner pseudonym O can validly overwrite the hub event.
-        const ownerPub = await ownerSigner.getPublicKey()
-        if (ownerPub !== hub.creatorPubkey) throw new Error("You're not the owner of this hub.")
-        signedDeletedHub = await mineAndSignAsSubkey(deletedHubEvent, hub.minPow, ownerSigner)
-      } else {
-        if (myPubkey !== hub.creatorPubkey) throw new Error("You're not the owner of this hub.")
-        signedDeletedHub = await mineAndSign(deletedHubEvent, hub.minPow, hub.creatorPubkey, signer, privateKey)
-      }
-      await publishCriticalWithFailover(signedDeletedHub, getDeletePublishRelays(hubRelays, { hubOnly: v2Delete }), hubRelays)
-
-      // 2. NIP-09 kind-5 deletion request (fallback). Signed as O on v2 (the hub coordinate's author) so
-      //    NIP-09 relays honor it and R is never linked to this private hub.
-      const deleteEvent = createUnsignedEvent(5, 'Hub deletion requested', [
-        ['a', `36942:${hub.creatorPubkey}:${hub.dTag}`],
-      ] as [string, ...string[]][])
-      const signedDelete = v2Delete && ownerSigner
-        ? await ownerSigner.signEvent(deleteEvent)
-        : await signWithSigner(deleteEvent, signer, privateKey)
-      await publishCriticalWithFailover(signedDelete, getDeletePublishRelays(hubRelays, { hubOnly: v2Delete }), hubRelays)
-
-      setDeletedLocal(true)
-    } catch (err: any) {
-      console.error('Failed to delete hub:', err)
-      setDeleteError(err?.message || 'Failed to delete hub')
-    } finally {
-      setDeleting(false)
-      setConfirmDelete(false)
-    }
-  }
-
-  if (deletedLocal) {
-    return (
-      <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4 flex items-center justify-center gap-2 text-xs text-emerald-400">
-        <Check size={14} /> Deletion published for “{hub.name}”
-      </div>
-    )
   }
 
   return (
@@ -1058,32 +976,11 @@ function DiscoverHubCard({ hub }: { hub: DiscoveredHub }) {
               )}
             </button>
           )}
-          {/* Temporary owner-only delete — re-publishes a deletion for an orphan/unrecoverable hub */}
-          <button
-            onClick={handleDelete}
-            onBlur={() => setConfirmDelete(false)}
-            disabled={deleting}
-            title={confirmDelete ? 'Click again to confirm deletion' : 'Delete this hub (owner only)'}
-            className={cn(
-              'flex items-center justify-center gap-1 py-1.5 rounded-lg text-xs font-medium border transition-colors cursor-pointer disabled:opacity-50 shrink-0',
-              confirmDelete
-                ? 'px-2 bg-destructive text-white border-destructive hover:bg-destructive/90'
-                : 'px-2 bg-secondary border-border text-muted-foreground hover:text-destructive hover:border-destructive/40',
-            )}
-          >
-            {deleting ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
-            {confirmDelete && !deleting && 'Confirm'}
-          </button>
         </div>
 
         {joinError && (
           <p className="text-[10px] text-destructive flex items-center gap-1">
             <AlertTriangle size={10} /> {joinError}
-          </p>
-        )}
-        {deleteError && (
-          <p className="text-[10px] text-destructive flex items-center gap-1">
-            <AlertTriangle size={10} /> {deleteError}
           </p>
         )}
       </div>
