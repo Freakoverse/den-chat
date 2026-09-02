@@ -646,19 +646,16 @@ export async function safePaginatedTreeUpdate(params: SafePaginatedTreeUpdatePar
   // When skipPublish, the CALLER publishes the new hub event AFTER we return. Deleting the old blobs now
   // would remove them while the LIVE hub event still points at the old index → any reader loading during
   // the caller's publish window (or if that publish fails) can't fetch the tree. Defer: hand the hashes
-  // back for the caller to delete only after its own publish succeeds.
-  //
-  // For v2, go further and DON'T delete the prior tree at all (return no deferred hashes): those blobs are
-  // stored under the throwaway owner pseudonym O on public servers that GC them, and the new blobs can be
-  // dropped before they replicate. Keeping the old pages/spine/index is cheap redundancy and, together with
-  // local retention, is what stops a membership change from bricking the hub. Public servers GC the orphans
-  // on their own; we just stop racing them.
+  // back for the caller to delete only after its own publish succeeds — same as v1 cleans up its superseded
+  // blobs after its own publish below. (We KEEP a local copy of the current tree in hubBlobStore for
+  // self-heal, but the superseded old blobs are cleaned from the servers, matching v1: an O-authored upload
+  // replicates on public Blossom servers fine — the real propagation failures were relay-side, not GC of O.)
   if (skipPublish) {
     return {
       newIndexHash,
       newEpoch: epoch,
       cleanedUpHashes,
-      deferredCleanupHashes: v2Hub ? [] : oldHashes,
+      deferredCleanupHashes: oldHashes,
       eventCreatedAt: publishedCreatedAt,
       uploadedServers: indexServerUrls,
       targetedServers: hub.blossomServers,
