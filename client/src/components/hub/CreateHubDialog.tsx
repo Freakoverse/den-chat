@@ -121,12 +121,17 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
   const [iconStatus, setIconStatus] = useState<UploadStatus>('idle')
   const [iconProgress, setIconProgress] = useState<UploadProgress | null>(null)
   const [iconSuccessCount, setIconSuccessCount] = useState(0)
+  // Whether the uploaded image's Blossom auth was signed by the owner pseudonym O (v2) rather than the
+  // real key R. Captured at upload time, so flipping the Private toggle afterwards can't retroactively
+  // change it — it drives the "uploaded under your real key" warning below.
+  const [iconAuthedAsO, setIconAuthedAsO] = useState(false)
 
   const [bannerPreview, setBannerPreview] = useState<string | null>(null)
   const [bannerHash, setBannerHash] = useState<string | null>(null)
   const [bannerStatus, setBannerStatus] = useState<UploadStatus>('idle')
   const [bannerProgress, setBannerProgress] = useState<UploadProgress | null>(null)
   const [bannerSuccessCount, setBannerSuccessCount] = useState(0)
+  const [bannerAuthedAsO, setBannerAuthedAsO] = useState(false)
 
   // Crop-editor targets — a freshly picked file opens the editor before uploading
   const [iconEditFile, setIconEditFile] = useState<File | null>(null)
@@ -249,8 +254,8 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
       setDescription('')
       setNsfw(false)
       setError(null)
-      setIconPreview(null); setIconHash(null); setIconStatus('idle'); setIconProgress(null); setIconSuccessCount(0)
-      setBannerPreview(null); setBannerHash(null); setBannerStatus('idle'); setBannerProgress(null); setBannerSuccessCount(0)
+      setIconPreview(null); setIconHash(null); setIconStatus('idle'); setIconProgress(null); setIconSuccessCount(0); setIconAuthedAsO(false)
+      setBannerPreview(null); setBannerHash(null); setBannerStatus('idle'); setBannerProgress(null); setBannerSuccessCount(0); setBannerAuthedAsO(false)
       setIconEditFile(null); setBannerEditFile(null) // else the crop editor re-pops on reopen
       // Fresh dTag for the NEXT hub — same reason: same dTag → same owner `O` → the new hub event
       // replaces the previous one on relays.
@@ -296,6 +301,7 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
     setProgress: (p: UploadProgress | null) => void,
     setSuccessCount: (n: number) => void,
     abortRef: React.MutableRefObject<AbortController | null>,
+    setAuthedAsO: (v: boolean) => void,
   ) => {
     // Enforce upload size limit from settings
     const limitMb = Number(localStorage.getItem('den-chat-upload-limit-mb')) || 10
@@ -340,6 +346,8 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
       )
       setHash(hash)
       setSuccessCount(successCount)
+      // Record the auth identity this blob was uploaded under (O when ownerAuthSigner was used, else R).
+      setAuthedAsO(!!ownerAuthSigner)
       setStatus('success')
     } catch (err) {
       console.error('Image upload failed:', err)
@@ -365,8 +373,8 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
     if (f.size > limitMb * 1024 * 1024) { setFileSizeWarning({ name: f.name, limitMb }); return }
     set(f)
   }
-  const uploadIcon = (f: File) => handleImageUpload(f, setIconPreview, setIconHash, setIconStatus, setIconProgress, setIconSuccessCount, iconAbortRef)
-  const uploadBanner = (f: File) => handleImageUpload(f, setBannerPreview, setBannerHash, setBannerStatus, setBannerProgress, setBannerSuccessCount, bannerAbortRef)
+  const uploadIcon = (f: File) => handleImageUpload(f, setIconPreview, setIconHash, setIconStatus, setIconProgress, setIconSuccessCount, iconAbortRef, setIconAuthedAsO)
+  const uploadBanner = (f: File) => handleImageUpload(f, setBannerPreview, setBannerHash, setBannerStatus, setBannerProgress, setBannerSuccessCount, bannerAbortRef, setBannerAuthedAsO)
 
   const removeImage = (
     setPreview: (v: null) => void,
@@ -763,6 +771,28 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
 
         {/* Scrollable body */}
         <div className="flex flex-col gap-4 px-6 pb-2 overflow-y-auto flex-1">
+          {/* Private-mode media warning: an image uploaded BEFORE Private was turned on carries the real
+              key's Blossom upload auth, which would tie that real key to this private hub. Self-clears when
+              the image is re-uploaded (now under O) or Private is turned back off. */}
+          {(() => {
+            const iconIsR = !!iconHash && !iconAuthedAsO
+            const bannerIsR = !!bannerHash && !bannerAuthedAsO
+            if (!createV2 || (!iconIsR && !bannerIsR)) return null
+            const both = iconIsR && bannerIsR
+            const subject = both ? 'icon and banner were' : iconIsR ? 'icon was' : 'banner was'
+            const they = both ? 'they’re' : 'it’s'
+            const them = both ? 'them' : 'it'
+            return (
+              <div className="flex items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5">
+                <AlertTriangle size={16} className="text-amber-500 shrink-0 mt-0.5" />
+                <p className="text-xs text-amber-600 dark:text-amber-400 leading-relaxed">
+                  Your {subject} uploaded before you turned on Private mode, so {they} tied to your real
+                  identity — not the hub’s private one. Re-upload {them} now to keep this hub fully private.
+                </p>
+              </div>
+            )
+          })()}
+
           {/* Hub Icon & Banner */}
           <div className="flex flex-col gap-3">
             <label className="text-sm font-medium text-foreground">Hub Images <span className="text-muted-foreground font-normal">(optional)</span></label>
