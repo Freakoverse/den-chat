@@ -12,6 +12,7 @@
 
 import type { ISigner } from '@/stores/userStore'
 import type { SkdSigner } from '@/lib/crypto/skd'
+import { SUPPORTED_SIGNER_SCHEMES } from '@/lib/crypto/skd'
 import type { BackupPayloadV1 } from '@/lib/auth/backupCrypto'
 
 /**
@@ -45,12 +46,32 @@ class VaultClient {
   private seq = 0
   /** Last-unlocked account — used to re-unlock after the vault auto-locks on idle. */
   private activePubkey: string | null = null
+  /**
+   * Capabilities the DEPLOYED vault advertised in its ready handshake (e.g. 'skd:1'). `null` until the
+   * handshake lands. This is how the app learns what the LIVE vault backend can actually do — not what the
+   * client-side adapter merely knows how to ask for. An old vault build sends no capabilities → this stays
+   * an empty list → v2 (NIP-SKD) is gated off, exactly like an extension that doesn't implement it.
+   */
+  private capabilities: string[] | null = null
   /** App-provided handler that prompts the user for their PIN and unlocks. */
   private unlockHandler: ((pubkey: string) => Promise<void>) | null = null
 
   /** Register the re-unlock prompt (called by VaultLockGate). */
   setUnlockHandler(fn: ((pubkey: string) => Promise<void>) | null) { this.unlockHandler = fn }
   getActivePubkey() { return this.activePubkey }
+
+  /**
+   * Whether the DEPLOYED vault advertised a NIP-SKD scheme this client supports (needed for v2 hubs).
+   * Returns false until the ready handshake lands, and for any older vault that doesn't advertise it — so
+   * the v2 toggle stays off rather than enabling an operation the live vault would reject mid-flight.
+   */
+  supportsSkd(): boolean {
+    const caps = this.capabilities ?? []
+    return caps.some((c) => (SUPPORTED_SIGNER_SCHEMES as readonly string[]).includes(c))
+  }
+
+  /** Kick off the iframe handshake early (fire-and-forget) so `capabilities` is populated before it's read. */
+  warmUp(): void { void this.ensure() }
 
   /** Lazily create the iframe + message listener and wait for the vault handshake. */
   private ensure(): Promise<void> {
@@ -79,7 +100,12 @@ class VaultClient {
   private onMessage = (e: MessageEvent) => {
     if (e.origin !== VAULT_ORIGIN) return // only trust the vault origin
     const msg = e.data
-    if (msg?.type === 'vault-ready') { this.readyResolve?.(); return }
+    if (msg?.type === 'vault-ready') {
+      // Record what the live vault says it supports. Missing/!array ⇒ an old build ⇒ no extra capabilities.
+      this.capabilities = Array.isArray(msg.capabilities) ? msg.capabilities.filter((c: unknown): c is string => typeof c === 'string') : []
+      this.readyResolve?.()
+      return
+    }
     if (msg?.type === 'vault-overlay') { this.setOverlay(!!msg.show); return }
     if (typeof msg?.id !== 'string') return
     const p = this.pending.get(msg.id)
@@ -184,9 +210,13 @@ export function getVaultClient(): VaultClient {
 }
 
 /** Adapter so the rest of the app can use the vault as a standard ISigner.
- *  Exposes the NIP-SKD surface too, so the vault can be used for v2 hubs (canUseV2 feature-detects `.skd`). */
+ *  The NIP-SKD surface (`.skd`, used for v2 hubs and feature-detected by canUseV2) is exposed ONLY when the
+ *  DEPLOYED vault advertised SKD support in its ready handshake — an old vault build that can't actually do
+ *  the skd* ops presents no `.skd`, so the v2 toggle stays off instead of failing mid-creation. Modelled as
+ *  a getter so it reflects the live capability even if the signer object was built before the handshake. */
 export function vaultSigner(): ISigner & SkdSigner {
   const v = getVaultClient()
+  v.warmUp() // start the handshake now so `.skd` resolves correctly by the time the v2 toggle renders
   return {
     getPublicKey: () => v.getPublicKey(),
     signEvent: (draft) => v.signEvent(draft),
@@ -198,12 +228,17 @@ export function vaultSigner(): ISigner & SkdSigner {
       encrypt: (pubkey, plaintext) => v.nip44Encrypt(pubkey, plaintext),
       decrypt: (pubkey, ciphertext) => v.nip44Decrypt(pubkey, ciphertext),
     },
-    // NIP-SKD: derive + act as v2 hub pseudonyms (O/P/Pf + join addr) without the sub-key ever leaving the vault.
-    skd: {
-      getSubkeyPubkey: (context, peerPub) => v.skdGetSubkeyPubkey(context, peerPub),
-      signAsSubkey: (context, event, peerPub) => v.skdSignAsSubkey(context, event, peerPub),
-      nip44EncryptAsSubkey: (context, recipientPub, plaintext, peerPub) => v.skdNip44EncryptAsSubkey(context, recipientPub, plaintext, peerPub),
-      nip44DecryptAsSubkey: (context, senderPub, ciphertext, peerPub) => v.skdNip44DecryptAsSubkey(context, senderPub, ciphertext, peerPub),
+    // NIP-SKD: derive + act as v2 hub pseudonyms (O/P/Pf + join addr) without the sub-key ever leaving the
+    // vault. Present only when the live vault supports it (see above) — otherwise `undefined`, so
+    // signerSupportsSkd() is false and v2 is gated off, exactly as for an extension without skd.
+    get skd(): SkdSigner['skd'] {
+      if (!v.supportsSkd()) return undefined
+      return {
+        getSubkeyPubkey: (context, peerPub) => v.skdGetSubkeyPubkey(context, peerPub),
+        signAsSubkey: (context, event, peerPub) => v.skdSignAsSubkey(context, event, peerPub),
+        nip44EncryptAsSubkey: (context, recipientPub, plaintext, peerPub) => v.skdNip44EncryptAsSubkey(context, recipientPub, plaintext, peerPub),
+        nip44DecryptAsSubkey: (context, senderPub, ciphertext, peerPub) => v.skdNip44DecryptAsSubkey(context, senderPub, ciphertext, peerPub),
+      }
     },
   }
 }
