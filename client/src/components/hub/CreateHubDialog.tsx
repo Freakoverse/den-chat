@@ -91,6 +91,15 @@ interface CreateHubDialogProps {
   onClose: () => void
 }
 
+/**
+ * Feature flag: allow creating v2 (private) hubs from this modal. Temporarily OFF while the v2 pseudonym
+ * derivation is being reworked (additive/tweak scheme so the owner can verify R↔P without holding P's
+ * private key). Safe to gate now because no v2 hub exists yet — nothing to migrate. Flip back to true when
+ * the new scheme ships across client + vault + DENOS. Joining/opening existing v2 hubs is unaffected;
+ * this only blocks CREATION.
+ */
+const V2_CREATION_ENABLED = false
+
 export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
   const pubkey = useUserStore((s) => s.pubkey)
   const privateKey = useUserStore((s) => s.privateKey)
@@ -541,7 +550,9 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
 
       // Upload member files to Blossom. v2 hubs use P-keyed leaves authored under the
       // owner pseudonym O (requires a local key or a NIP-SKD signer).
-      const wantV2 = createV2 && canUseV2({ privateKey, signer })
+      // V2_CREATION_ENABLED is the authoritative chokepoint: even if createV2 were somehow set, this
+      // guarantees a v1 hub is created while v2 creation is gated off.
+      const wantV2 = createV2 && canUseV2({ privateKey, signer }) && V2_CREATION_ENABLED
       setCreationStep('uploading-member-files')
       let indexHash = ''
       let ownerPub = pubkey! // v1: creator's real key; v2: the derived owner pseudonym O
@@ -994,7 +1005,12 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
                 from the public, unlike a normal (v1) hub. The trade-off: you (and everyone else) can only
                 create or chat in it while signed in from an installed DEN Chat, or with a supported signer
                 (currently one remote signer). A different login can’t open it.
-                {!v2Capable && (
+                {!V2_CREATION_ENABLED ? (
+                  <span className="block mt-1 text-amber-500">
+                    Private hubs are temporarily unavailable while we finish an upgrade. This only affects
+                    creating new ones — joining and opening existing hubs is unaffected.
+                  </span>
+                ) : !v2Capable && (
                   <span className="block mt-1 text-amber-500">
                     Your current signer can’t do this. Sign in with a local key or a supported signer to create a private hub.
                   </span>
@@ -1002,17 +1018,17 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
               </p>
             </div>
             <button
-              onClick={() => v2Capable && setCreateV2(!createV2)}
-              disabled={!v2Capable}
+              onClick={() => v2Capable && V2_CREATION_ENABLED && setCreateV2(!createV2)}
+              disabled={!v2Capable || !V2_CREATION_ENABLED}
               className={cn(
                 'relative w-10 h-[22px] rounded-full transition-colors cursor-pointer shrink-0',
-                createV2 && v2Capable ? 'bg-primary' : 'bg-muted-foreground/30',
-                !v2Capable && 'opacity-40 cursor-not-allowed'
+                createV2 && v2Capable && V2_CREATION_ENABLED ? 'bg-primary' : 'bg-muted-foreground/30',
+                (!v2Capable || !V2_CREATION_ENABLED) && 'opacity-40 cursor-not-allowed'
               )}
             >
               <div className={cn(
                 'absolute top-[3px] w-4 h-4 rounded-full bg-white shadow transition-transform',
-                createV2 && v2Capable ? 'translate-x-[22px]' : 'translate-x-[3px]'
+                createV2 && v2Capable && V2_CREATION_ENABLED ? 'translate-x-[22px]' : 'translate-x-[3px]'
               )} />
             </button>
           </div>
