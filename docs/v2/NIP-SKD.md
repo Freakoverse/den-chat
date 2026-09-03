@@ -222,6 +222,27 @@ specification (for NIP-UPV2, the params are a named JSON object rather than a po
 The derivation itself (§5) and the test vectors (§8) are transport-independent, so a pseudonym
 derived over any transport is byte-identical.
 
+**Capability discovery when the probe is unavailable.** The two discovery mechanisms above — the §6
+method-presence check and the §7 attempt-`skd_get_subkey_pubkey` probe — both assume the *client* can
+tell whether the *signer* implements NIP-SKD by inspecting or calling the signer directly. Some
+transports break that assumption:
+
+- An **in-process adapter** (e.g. a same-page iframe vault reached over `postMessage`) defines the
+  method wrappers on the client side unconditionally, so method-presence is always true regardless of
+  what the backend supports — the §6 check gives a false positive.
+- A signer that **cannot answer the probe non-interactively** — e.g. a vault that is locked by default
+  and needs `sessionPriv` before it can derive — would reject or stall the §7 probe while locked,
+  giving a false negative.
+
+Such a transport SHOULD advertise support **out-of-band in its own handshake** (a static capability
+of the deployed build, independent of lock state) rather than relying on method-presence or a live
+probe, and the client SHOULD treat the absence of that advertisement as "no NIP-SKD" — gating v2 off,
+the same outcome as a failed §7 probe. This keeps feature-detection accurate for a backend that is
+outdated or locked, instead of enabling operations it would later reject. The advertised value names
+the derivation scheme (§5), e.g. `skd:1`. This is a discovery mechanism only; the methods, parameters,
+and derivation remain exactly as specified above. (DEN Chat's iframe vault does this: its ready
+handshake carries `capabilities: ["skd:1"]`.)
+
 ## 8. Test vectors
 
 Generated from the reference implementation (`client/src/lib/crypto/skd.ts`) and verified,
