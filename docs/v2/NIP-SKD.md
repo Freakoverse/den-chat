@@ -244,6 +244,17 @@ A signer implementing NIP-SKD **MUST NEVER** expose to the client:
   a linear offset of the root key — exposing it would reveal `root_priv` to anyone who also knows `t`,
   e.g. the ECDH peer).
 
+**Derived private keys are as sensitive as the root key.** Every derived private key — self, shared,
+or blinded — **MUST** be generated, held, used, and destroyed at the **same security level** an
+implementation applies to `root_priv`: the same memory hygiene, the same non-exportability, the same
+access controls and lifetime. A derived key is **never** a "lower-value" credential that may be cached
+to disk, written to logs, handed to a less-trusted component, kept alive longer, or otherwise handled
+more loosely than the root. A self or shared key fully controls its pseudonym; a **blinded** key is
+strictly **root-equivalent**, since `root_priv = blinded_priv − t` and the tweak `t` is computable by
+the ECDH peer (§1) — so leaking a blinded private key is *exactly* as damaging as leaking `root_priv`
+itself. A signer or local-key client **MUST NOT** store, transmit, or expose any derived private key
+anywhere it would not store, transmit, or expose `root_priv`.
+
 Internal derivation and internal use are unrestricted, provided every purpose uses a **distinct,
 non-empty, domain-separated `context`**, and every form uses its **distinct form tag** in `info` (§1).
 The `context` rule is a *key-separation* rule (it stops different features from colliding); the
