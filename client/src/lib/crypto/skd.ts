@@ -6,19 +6,20 @@
  *
  * This is the LOCAL-KEY path and the **reference implementation**: a remote
  * NIP-SKD signer (e.g. DENOS) MUST produce byte-identical results, verified by
- * the shared test vectors (NIP-SKD §8). Two derivation forms:
+ * the shared test vectors (NIP-SKD §8). Three derivation forms, each with a
+ * form-tagged HKDF `info` = "nip-skd:" ‖ form ‖ 0x1F ‖ context (NIP-SKD §1):
  *
- *   - self   : HKDF( root_priv,               salt="nip-skd-v1", info=context )
- *   - shared : HKDF( ECDH_x(root_priv, peer), salt="nip-skd-v1", info=context )
+ *   - self    : HKDF( root_priv,               … ) → seed·G                     (independent key)
+ *   - shared  : HKDF( ECDH_x(root_priv, peer),  … ) → seed·G                     (both parties derive it)
+ *   - blinded : HKDF( ECDH_x(root_priv, peer),  … ) → root_pub + seed·G          (peer verifies, can't sign)
  *
- * A 48-byte HKDF output is reduced mod n to a secp256k1 private key; its x-only
- * public key is the sub-key identifier. The 48-byte (384-bit) width is the
- * RFC 9380 §5 wide-reduction size for a 256-bit order with a 128-bit security
- * margin (L = ceil((256 + 128) / 8)), so the reduction is unbiased BY
- * CONSTRUCTION (statistical distance from uniform ≈ 2^-256).
+ * A 48-byte HKDF output is reduced mod n (wide reduction, 0→1 pin); for self/shared it IS the sub-key
+ * private scalar, for blinded it is the tweak `t` added to the (even-y-normalized) root key. The 48-byte
+ * (384-bit) width is the RFC 9380 §5 wide-reduction size for a 256-bit order with a 128-bit security
+ * margin (L = ceil((256 + 128) / 8)), so the reduction is unbiased BY CONSTRUCTION (≈ 2^-256).
  *
- * NIP-CHAT v2 uses this for the owner pseudonym `O` (self) and the member
- * pseudonym `P` (shared with the owner `O_pub`). See NIP-CHAT §0.1, §4.5, §6.3.
+ * NIP-CHAT v2 uses the owner pseudonym `O` (self) and the member/facilitated/join pseudonyms
+ * (blinded toward `O`/`P_fac`); it does not use the shared form. See NIP-CHAT §0.1, §4.5, §6.3.
  *
  * SECURITY: this module derives real private keys, so it is used ONLY when the
  * client legitimately holds `root_priv` (local key). On a remote signer, never
@@ -26,7 +27,7 @@
  * the private material never leaves it (see {@link resolveSubkeyPubkey}).
  */
 
-import { getSharedSecret, getPublicKey } from '@noble/secp256k1'
+import { getSharedSecret, getPublicKey, Point } from '@noble/secp256k1'
 import { hexToBytes, bytesToHex } from '@noble/hashes/utils'
 import { hkdfWithSalt } from './hkdf'
 
@@ -50,6 +51,28 @@ function bytesToBigIntBE(b: Uint8Array): bigint {
 
 function scalarToBytes(d: bigint): Uint8Array {
   return hexToBytes(d.toString(16).padStart(64, '0'))
+}
+
+/** NIP-SKD unit separator between the form tag and the context in the HKDF `info` (NIP-SKD §1). */
+const SKD_FORM_SEP = '\x1f'
+
+/**
+ * HKDF `info` = form-tagged context (NIP-SKD §1). The form tag guarantees no two forms share a `seed`
+ * on the same `(IKM, context)` — critical for shared vs blinded, which otherwise would (same ECDH IKM),
+ * and `blinded_pub − shared_pub` would then leak `root_pub`.
+ */
+function skdInfo(form: 'self' | 'shared' | 'blinded', context: string): string {
+  return `nip-skd:${form}${SKD_FORM_SEP}${context}`
+}
+
+/** Reconstruct the even-`y` point from an x-only key (BIP-340) — the base for a blinded derivation. */
+function liftEvenY(xonlyHex: string) {
+  return Point.fromHex('02' + xonlyHex)
+}
+
+/** x-only (32-byte hex) of a curve point. */
+function pointToXonly(p: { x: bigint }): string {
+  return p.x.toString(16).padStart(64, '0')
 }
 
 /**
@@ -93,14 +116,50 @@ export interface SubKey {
  */
 export function deriveSubKeyLocal(rootPrivHex: string, context: string, peerPubHex?: string): SubKey {
   if (!context) throw new Error('NIP-SKD: context must be non-empty')
+  const form = peerPubHex ? 'shared' : 'self'
   const ikm = peerPubHex ? ecdhX(rootPrivHex, peerPubHex) : hexToBytes(rootPrivHex)
-  // 48-byte wide reduction (RFC 9380 §5): unbiased mod-n by construction. NB: the HKDF length, salt, and
-  // reduction fully determine every pseudonym — a remote NIP-SKD signer (e.g. DENOS) MUST match this
-  // byte-for-byte (verified against the NIP-SKD §8 test vectors) or members derive mismatched pseudonyms.
-  const seed = hkdfWithSalt(ikm, SKD_SALT, context, 48)
+  // 48-byte wide reduction (RFC 9380 §5): unbiased mod-n by construction. NB: the HKDF length, salt,
+  // form-tagged info, and reduction fully determine every pseudonym — a remote NIP-SKD signer (e.g.
+  // DENOS) MUST match this byte-for-byte (NIP-SKD §8 vectors) or members derive mismatched pseudonyms.
+  const seed = hkdfWithSalt(ikm, SKD_SALT, skdInfo(form, context), 48)
   const privBytes = seedToPrivKey(seed)
   const pubHex = bytesToHex(getPublicKey(privBytes, true).slice(1)) // x-only (drop 02/03 prefix)
   return { privHex: bytesToHex(privBytes), pubHex }
+}
+
+/**
+ * Blinded derivation (NIP-SKD §1) — the caller's OWN blinded key, base = the caller's root, blinded
+ * toward `peerPub`: `blinded_priv = root_priv_evenY + t`, `blinded_pub = xonly(lift_even_y(root_pub) +
+ * t·G)`, where `t = reduce(HKDF(ECDH(root, peer), "blinded"‖context))`. The counterparty (holding the
+ * other ECDH key) can re-derive `blinded_pub` via {@link deriveBlindedPubForPeer} but **never**
+ * `blinded_priv` — that needs `root_priv`. Local-key path only.
+ */
+export function deriveBlindedLocal(rootPrivHex: string, context: string, peerPubHex: string): SubKey {
+  if (!context) throw new Error('NIP-SKD: context must be non-empty')
+  const seed = hkdfWithSalt(ecdhX(rootPrivHex, peerPubHex), SKD_SALT, skdInfo('blinded', context), 48)
+  const t = bytesToBigIntBE(seedToPrivKey(seed)) // reduce(seed): 48-byte wide reduction with the 0→1 pin
+  const rootPubComp = getPublicKey(hexToBytes(rootPrivHex), true) // 33-byte compressed (02/03 ‖ x)
+  const dRaw = bytesToBigIntBE(hexToBytes(rootPrivHex))
+  // Normalize to the even-y representative so holder and verifier agree (BIP-340/Taproot tweak rule).
+  const dEven = (rootPubComp[0] & 1) === 1 ? SECP256K1_N - dRaw : dRaw
+  let priv = (dEven + t) % SECP256K1_N
+  if (priv === 0n) priv = 1n // ~2^-256 invalid-key edge (t ≡ -root_priv)
+  const rootXonly = bytesToHex(rootPubComp.slice(1))
+  const pubHex = pointToXonly(liftEvenY(rootXonly).add(Point.BASE.multiply(t)))
+  return { privHex: bytesToHex(scalarToBytes(priv)), pubHex }
+}
+
+/**
+ * Verifier-side blinded derivation (NIP-SKD §1, `getPeerBlindedPubkey`) — a PEER's blinded key toward
+ * the caller: base = `peerBaseXonly`, blinded with `ECDH(caller_root, peer)`. Returns the **public key
+ * only** — there is no private key on this side (that is the "verify but can't impersonate" property).
+ * The owner uses it to re-derive a member's `P_pub` from `R_pub`; the facilitator, a vouched `Pf_pub`.
+ */
+export function deriveBlindedPubForPeer(rootPrivHex: string, context: string, peerBaseXonlyHex: string): string {
+  if (!context) throw new Error('NIP-SKD: context must be non-empty')
+  const seed = hkdfWithSalt(ecdhX(rootPrivHex, peerBaseXonlyHex), SKD_SALT, skdInfo('blinded', context), 48)
+  const t = bytesToBigIntBE(seedToPrivKey(seed))
+  return pointToXonly(liftEvenY(peerBaseXonlyHex).add(Point.BASE.multiply(t)))
 }
 
 // ── NIP-CHAT v2 context builders (see NIP-CHAT §0.1) ─────────────────────────
@@ -108,13 +167,13 @@ export function deriveSubKeyLocal(rootPrivHex: string, context: string, peerPubH
 export const ChatContext = {
   /** Owner pseudonym `O` — self derivation. */
   owner: (dTag: string) => `nip-chat:v2:owner-pseudonym:${dTag}`,
-  /** Member pseudonym `P` — shared derivation with the owner `O_pub`. */
+  /** Member pseudonym `P` — blinded derivation of `R` toward the owner `O_pub`. */
   member: (dTag: string) => `nip-chat:v2:member-pseudonym:${dTag}`,
-  /** Sealed-join throwaway address — shared derivation with the owner `O_pub`. */
+  /** Sealed-join throwaway address — blinded derivation of `R` toward the owner `O_pub`. */
   joinAddr: (dTag: string) => `nip-chat:v2:join-addr:${dTag}`,
   /**
-   * Facilitated pseudonym `Pf` — a non-member's per-facilitator identity, shared derivation with
-   * the **facilitator's member pseudonym `P_fac`** (NOT the owner). It mirrors the member pseudonym
+   * Facilitated pseudonym `Pf` — a non-member's per-facilitator identity, blinded derivation of `R_f`
+   * toward the **facilitator's member pseudonym `P_fac`** (NOT the owner). It mirrors the member pseudonym
    * exactly, with the facilitator playing the owner's role: the facilitated user posts under `Pf`
    * and appears as a leaf in the facilitator's mesh tree. See NIP-CHAT §5.6 / v2 §4.7.
    */
@@ -130,34 +189,36 @@ export function deriveOwnerPseudonym(rootPrivHex: string, dTag: string): SubKey 
 }
 
 /**
- * Member pseudonym `P` (shared with the owner pseudonym `O_pub`). The owner
- * re-derives the same `P` from `ECDH(O_priv, R_pub)` — owner-verification and
- * squat-resistance (NIP-CHAT §6.3).
+ * Member pseudonym `P` — a **blinded** derivation of the member's `R` toward the owner `O_pub`
+ * (NIP-SKD blinded form). The owner re-derives the same `P_pub` via
+ * {@link deriveMemberPseudonymForOwner} (owner-verification + squat-resistance, NIP-CHAT §6.3) but
+ * cannot obtain `P_priv`, so cannot sign or decrypt as the member.
  */
 export function deriveMemberPseudonym(rootPrivHex: string, ownerPubHex: string, dTag: string): SubKey {
-  return deriveSubKeyLocal(rootPrivHex, ChatContext.member(dTag), ownerPubHex)
+  return deriveBlindedLocal(rootPrivHex, ChatContext.member(dTag), ownerPubHex)
 }
 
 /**
- * The **owner** re-derives a member's pseudonym `P` from their real key `R` (local key only).
- * By ECDH symmetry `ECDH(O_priv, R) == ECDH(R_priv, O)`, so this equals the member's own
- * `deriveMemberPseudonym(R_priv, O_pub, dTag)`. Used to locate a member's leaf when `P` isn't
- * already cached (e.g. kicking). Returns the pseudonym pubkey `P_pub`.
+ * The **owner** re-derives a member's pseudonym `P_pub` from their real key `R` (local key only), via
+ * the blinded verifier op: base = `R_pub`, ECDH with the owner pseudonym `O`. By ECDH symmetry this
+ * equals the member's own `deriveMemberPseudonym(R_priv, O_pub, dTag)` public key. Used to verify at
+ * admission and to locate a member's leaf. Returns `P_pub` only — the owner never obtains `P_priv`.
  */
 export function deriveMemberPseudonymForOwner(ownerRootPrivHex: string, dTag: string, memberRPub: string): string {
   const oPriv = deriveOwnerPseudonym(ownerRootPrivHex, dTag).privHex
-  return deriveSubKeyLocal(oPriv, ChatContext.member(dTag), memberRPub).pubHex
+  return deriveBlindedPubForPeer(oPriv, ChatContext.member(dTag), memberRPub)
 }
 
 /**
- * Facilitated pseudonym `Pf` (shared with the facilitator's member pseudonym `P_fac`). The
- * facilitated user derives it from `ECDH(R_f_priv, P_fac_pub)`; the facilitator re-derives the same
- * `Pf` from `ECDH(P_fac_priv, R_f_pub)` (see {@link deriveFacilitatedPseudonymForFacilitator}) — the
- * same owner↔member symmetry, one level down. Local-key path; a NIP-SKD remote signer produces the
- * identical `Pf` via shared mode with `context = ChatContext.facilitated(dTag)`, `peer = P_fac`.
+ * Facilitated pseudonym `Pf` — a **blinded** derivation of the vouched user's `R_f` toward the
+ * facilitator's member pseudonym `P_fac` (the owner↔member scheme one level down). The facilitated user
+ * derives it from `R_f_priv` + `P_fac_pub`; the facilitator re-derives the same `Pf_pub` via
+ * {@link deriveFacilitatedPseudonymForFacilitator} but cannot obtain `Pf_priv`. Local-key path; a
+ * NIP-SKD remote signer produces the identical `Pf` via blinded mode with
+ * `context = ChatContext.facilitated(dTag)`, `peer = P_fac`.
  */
 export function deriveFacilitatedPseudonym(rootPrivHex: string, facilitatorPPubHex: string, dTag: string): SubKey {
-  return deriveSubKeyLocal(rootPrivHex, ChatContext.facilitated(dTag), facilitatorPPubHex)
+  return deriveBlindedLocal(rootPrivHex, ChatContext.facilitated(dTag), facilitatorPPubHex)
 }
 
 /**
@@ -178,7 +239,7 @@ export function deriveFacilitatedPseudonymForFacilitator(
   memberRPub: string,
 ): string {
   const pFacPriv = deriveMemberPseudonym(facilitatorRootPrivHex, ownerPubHex, dTag).privHex
-  return deriveSubKeyLocal(pFacPriv, ChatContext.facilitated(dTag), memberRPub).pubHex
+  return deriveBlindedPubForPeer(pFacPriv, ChatContext.facilitated(dTag), memberRPub)
 }
 
 // ── Remote-signer routing (NIP-SKD-capable signer) ───────────────────────────
