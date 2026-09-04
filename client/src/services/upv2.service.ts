@@ -39,6 +39,11 @@ type UPV2Action =
   | 'skd_sign_as_subkey'
   | 'skd_nip44_encrypt_as_subkey'
   | 'skd_nip44_decrypt_as_subkey'
+  | 'skd_get_blinded_pubkey'
+  | 'skd_get_peer_blinded_pubkey'
+  | 'skd_sign_as_blinded'
+  | 'skd_nip44_encrypt_as_blinded'
+  | 'skd_nip44_decrypt_as_blinded'
   | 'error'
 
 export interface UPV2Session {
@@ -548,11 +553,67 @@ class UPV2Service {
     throw new Error('skd_nip44_decrypt_as_subkey failed: no result from signer')
   }
 
-  /** One-shot capability probe (§7), capped so a non-SKD signer doesn't slow login. */
+  // ── blinded form (NIP-SKD §1) — UPV2 uses named-object params; `peer` is required ──
+  async skdGetBlindedPubkey(context: string, peerPub: string): Promise<string> {
+    const s = this.currentSession
+    if (!s) throw new Error('Not logged in via UPV2')
+    const nonce = bytesToHex(crypto.getRandomValues(new Uint8Array(16)))
+    const requestTime = Math.floor(Date.now() / 1000)
+    await this.sendUPV2Event(s.relays, s.loginPk, s.loginSk, s.signerPubkey, 'skd_get_blinded_pubkey', s.sessionId, { context, peerPub, nonce })
+    const response = await this.pollForResponse(s.relays, s.loginPk, s.loginSk, 'skd_get_blinded_pubkey', 30000, s.sessionId, requestTime, nonce)
+    if (response?.result) return response.result as string
+    throw new Error('skd_get_blinded_pubkey failed: no result from signer')
+  }
+  async skdGetPeerBlindedPubkey(context: string, peerPub: string): Promise<string> {
+    const s = this.currentSession
+    if (!s) throw new Error('Not logged in via UPV2')
+    const nonce = bytesToHex(crypto.getRandomValues(new Uint8Array(16)))
+    const requestTime = Math.floor(Date.now() / 1000)
+    await this.sendUPV2Event(s.relays, s.loginPk, s.loginSk, s.signerPubkey, 'skd_get_peer_blinded_pubkey', s.sessionId, { context, peerPub, nonce })
+    const response = await this.pollForResponse(s.relays, s.loginPk, s.loginSk, 'skd_get_peer_blinded_pubkey', 30000, s.sessionId, requestTime, nonce)
+    if (response?.result) return response.result as string
+    throw new Error('skd_get_peer_blinded_pubkey failed: no result from signer')
+  }
+  async skdSignAsBlinded(context: string, event: unknown, peerPub: string): Promise<Record<string, unknown>> {
+    const s = this.currentSession
+    if (!s) throw new Error('Not logged in via UPV2')
+    const nonce = bytesToHex(crypto.getRandomValues(new Uint8Array(16)))
+    const requestTime = Math.floor(Date.now() / 1000)
+    await this.sendUPV2Event(s.relays, s.loginPk, s.loginSk, s.signerPubkey, 'skd_sign_as_blinded', s.sessionId, { context, peerPub, nonce, event })
+    const response = await this.pollForResponse(s.relays, s.loginPk, s.loginSk, 'signed_event', 30000, s.sessionId, requestTime, nonce)
+    if (response?.event) return response.event as Record<string, unknown>
+    throw new Error('skd_sign_as_blinded failed: no signed event from signer')
+  }
+  async skdNip44EncryptAsBlinded(context: string, recipientPub: string, plaintext: string, peerPub: string): Promise<string> {
+    const s = this.currentSession
+    if (!s) throw new Error('Not logged in via UPV2')
+    const nonce = bytesToHex(crypto.getRandomValues(new Uint8Array(16)))
+    const requestTime = Math.floor(Date.now() / 1000)
+    await this.sendUPV2Event(s.relays, s.loginPk, s.loginSk, s.signerPubkey, 'skd_nip44_encrypt_as_blinded', s.sessionId, { context, peerPub, nonce, recipientPub, plaintext })
+    const response = await this.pollForResponse(s.relays, s.loginPk, s.loginSk, 'skd_nip44_encrypt_as_blinded', 30000, s.sessionId, requestTime, nonce)
+    if (response?.result) return response.result as string
+    throw new Error('skd_nip44_encrypt_as_blinded failed: no result from signer')
+  }
+  async skdNip44DecryptAsBlinded(context: string, senderPub: string, ciphertext: string, peerPub: string): Promise<string> {
+    const s = this.currentSession
+    if (!s) throw new Error('Not logged in via UPV2')
+    const nonce = bytesToHex(crypto.getRandomValues(new Uint8Array(16)))
+    const requestTime = Math.floor(Date.now() / 1000)
+    await this.sendUPV2Event(s.relays, s.loginPk, s.loginSk, s.signerPubkey, 'skd_nip44_decrypt_as_blinded', s.sessionId, { context, peerPub, nonce, senderPub, ciphertext })
+    const response = await this.pollForResponse(s.relays, s.loginPk, s.loginSk, 'skd_nip44_decrypt_as_blinded', 30000, s.sessionId, requestTime, nonce)
+    if (response?.result) return response.result as string
+    throw new Error('skd_nip44_decrypt_as_blinded failed: no result from signer')
+  }
+
+  /**
+   * One-shot capability probe (§7), capped so a non-SKD signer doesn't slow login. Probes the
+   * **blinded** op — NIP-CHAT v2 authors members under the blinded form, so a signer with only the
+   * older self/shared surface must be treated as unsupported (v2 gated off).
+   */
   private async probeSkd(): Promise<boolean> {
     try {
       const pub = await Promise.race([
-        this.skdGetSubkeyPubkey('nip-skd:capability-probe'),
+        this.skdGetBlindedPubkey('nip-skd:capability-probe', this.currentSession!.loginPk),
         new Promise<string>((_, reject) => setTimeout(() => reject(new Error('probe timeout')), 8000)),
       ])
       return /^[0-9a-f]{64}$/i.test(pub)
@@ -569,6 +630,11 @@ class UPV2Service {
       signAsSubkey: (context: string, event: unknown, peerPub?: string) => this.skdSignAsSubkey(context, event, peerPub),
       nip44EncryptAsSubkey: (context: string, recipientPub: string, plaintext: string, peerPub?: string) => this.skdNip44EncryptAsSubkey(context, recipientPub, plaintext, peerPub),
       nip44DecryptAsSubkey: (context: string, senderPub: string, ciphertext: string, peerPub?: string) => this.skdNip44DecryptAsSubkey(context, senderPub, ciphertext, peerPub),
+      getBlindedPubkey: (context: string, peerPub: string) => this.skdGetBlindedPubkey(context, peerPub),
+      getPeerBlindedPubkey: (context: string, peerPub: string) => this.skdGetPeerBlindedPubkey(context, peerPub),
+      signAsBlinded: (context: string, event: unknown, peerPub: string) => this.skdSignAsBlinded(context, event, peerPub),
+      nip44EncryptAsBlinded: (context: string, recipientPub: string, plaintext: string, peerPub: string) => this.skdNip44EncryptAsBlinded(context, recipientPub, plaintext, peerPub),
+      nip44DecryptAsBlinded: (context: string, senderPub: string, ciphertext: string, peerPub: string) => this.skdNip44DecryptAsBlinded(context, senderPub, ciphertext, peerPub),
     }
   }
 

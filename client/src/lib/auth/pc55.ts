@@ -238,10 +238,34 @@ export class PC55Signer {
     return this.sendRequest('skd_nip44_decrypt_as_subkey', peerPub ? [context, senderPub, ciphertext, peerPub] : [context, senderPub, ciphertext])
   }
 
-  /** One-shot capability probe: a supported signer returns a 64-hex pubkey; anything else → no SKD. */
+  // ── blinded form (NIP-SKD §1) — `peer` is a required positional param; the blinded private scalar
+  //    (root_priv + t) never leaves the signer (DENOS). ──
+  async skdGetBlindedPubkey(context: string, peerPub: string): Promise<string> {
+    return this.sendRequest('skd_get_blinded_pubkey', [context, peerPub])
+  }
+  async skdGetPeerBlindedPubkey(context: string, peerPub: string): Promise<string> {
+    return this.sendRequest('skd_get_peer_blinded_pubkey', [context, peerPub])
+  }
+  async skdSignAsBlinded(context: string, event: unknown, peerPub: string): Promise<Record<string, unknown>> {
+    const eventJson = JSON.stringify(event)
+    const resultJson = await this.sendRequest('skd_sign_as_blinded', [context, eventJson, peerPub])
+    return JSON.parse(resultJson)
+  }
+  async skdNip44EncryptAsBlinded(context: string, recipientPub: string, plaintext: string, peerPub: string): Promise<string> {
+    return this.sendRequest('skd_nip44_encrypt_as_blinded', [context, recipientPub, plaintext, peerPub])
+  }
+  async skdNip44DecryptAsBlinded(context: string, senderPub: string, ciphertext: string, peerPub: string): Promise<string> {
+    return this.sendRequest('skd_nip44_decrypt_as_blinded', [context, senderPub, ciphertext, peerPub])
+  }
+
+  /**
+   * One-shot capability probe: a supported signer returns a 64-hex pubkey; anything else → no SKD.
+   * Probes the **blinded** op (not self) because NIP-CHAT v2 authors members under the blinded form —
+   * an older signer with only the self/shared surface must be treated as unsupported (v2 gated off).
+   */
   private async probeSkd(): Promise<boolean> {
     try {
-      const pub = await this.skdGetSubkeyPubkey('nip-skd:capability-probe')
+      const pub = await this.skdGetBlindedPubkey('nip-skd:capability-probe', this.clientPublicKey)
       return /^[0-9a-f]{64}$/i.test(pub)
     } catch {
       return false
@@ -260,6 +284,11 @@ export class PC55Signer {
       signAsSubkey: (context: string, event: unknown, peerPub?: string) => this.skdSignAsSubkey(context, event, peerPub),
       nip44EncryptAsSubkey: (context: string, recipientPub: string, plaintext: string, peerPub?: string) => this.skdNip44EncryptAsSubkey(context, recipientPub, plaintext, peerPub),
       nip44DecryptAsSubkey: (context: string, senderPub: string, ciphertext: string, peerPub?: string) => this.skdNip44DecryptAsSubkey(context, senderPub, ciphertext, peerPub),
+      getBlindedPubkey: (context: string, peerPub: string) => this.skdGetBlindedPubkey(context, peerPub),
+      getPeerBlindedPubkey: (context: string, peerPub: string) => this.skdGetPeerBlindedPubkey(context, peerPub),
+      signAsBlinded: (context: string, event: unknown, peerPub: string) => this.skdSignAsBlinded(context, event, peerPub),
+      nip44EncryptAsBlinded: (context: string, recipientPub: string, plaintext: string, peerPub: string) => this.skdNip44EncryptAsBlinded(context, recipientPub, plaintext, peerPub),
+      nip44DecryptAsBlinded: (context: string, senderPub: string, ciphertext: string, peerPub: string) => this.skdNip44DecryptAsBlinded(context, senderPub, ciphertext, peerPub),
     }
   }
 
