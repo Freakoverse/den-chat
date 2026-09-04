@@ -201,6 +201,12 @@ class VaultClient {
   skdSignAsSubkey(context: string, event: unknown, peerPub?: string) { return this.callWithRelock<Record<string, unknown>>('skdSignAsSubkey', { context, event, peerPub }) }
   skdNip44EncryptAsSubkey(context: string, recipientPub: string, plaintext: string, peerPub?: string) { return this.callWithRelock<string>('skdNip44EncryptAsSubkey', { context, recipientPub, plaintext, peerPub }) }
   skdNip44DecryptAsSubkey(context: string, senderPub: string, ciphertext: string, peerPub?: string) { return this.callWithRelock<string>('skdNip44DecryptAsSubkey', { context, senderPub, ciphertext, peerPub }) }
+  // ── blinded form (NIP-SKD §1) — the blinded private scalar (root_priv + t) never leaves the vault ──
+  skdGetBlindedPubkey(context: string, peerPub: string) { return this.callWithRelock<string>('skdGetBlindedPubkey', { context, peerPub }) }
+  skdGetPeerBlindedPubkey(context: string, peerPub: string) { return this.callWithRelock<string>('skdGetPeerBlindedPubkey', { context, peerPub }) }
+  skdSignAsBlinded(context: string, event: unknown, peerPub: string) { return this.callWithRelock<Record<string, unknown>>('skdSignAsBlinded', { context, event, peerPub }) }
+  skdNip44EncryptAsBlinded(context: string, recipientPub: string, plaintext: string, peerPub: string) { return this.callWithRelock<string>('skdNip44EncryptAsBlinded', { context, recipientPub, plaintext, peerPub }) }
+  skdNip44DecryptAsBlinded(context: string, senderPub: string, ciphertext: string, peerPub: string) { return this.callWithRelock<string>('skdNip44DecryptAsBlinded', { context, senderPub, ciphertext, peerPub }) }
 }
 
 let singleton: VaultClient | null = null
@@ -238,6 +244,11 @@ export function vaultSigner(): ISigner & SkdSigner {
         signAsSubkey: (context, event, peerPub) => v.skdSignAsSubkey(context, event, peerPub),
         nip44EncryptAsSubkey: (context, recipientPub, plaintext, peerPub) => v.skdNip44EncryptAsSubkey(context, recipientPub, plaintext, peerPub),
         nip44DecryptAsSubkey: (context, senderPub, ciphertext, peerPub) => v.skdNip44DecryptAsSubkey(context, senderPub, ciphertext, peerPub),
+        getBlindedPubkey: (context, peerPub) => v.skdGetBlindedPubkey(context, peerPub),
+        getPeerBlindedPubkey: (context, peerPub) => v.skdGetPeerBlindedPubkey(context, peerPub),
+        signAsBlinded: (context, event, peerPub) => v.skdSignAsBlinded(context, event, peerPub),
+        nip44EncryptAsBlinded: (context, recipientPub, plaintext, peerPub) => v.skdNip44EncryptAsBlinded(context, recipientPub, plaintext, peerPub),
+        nip44DecryptAsBlinded: (context, senderPub, ciphertext, peerPub) => v.skdNip44DecryptAsBlinded(context, senderPub, ciphertext, peerPub),
       }
     },
   }

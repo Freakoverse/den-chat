@@ -18,7 +18,7 @@ import { generateSecretKey, getPublicKey, nip44, type Event } from 'nostr-tools'
 import { createUnsignedEvent } from '@/lib/nostr'
 import { KINDS } from '@/lib/crypto/constants'
 import { makeSubkeySigner, mineAndSignAsSubkey } from '@/lib/nostr/v2send'
-import { ChatContext, deriveSubKeyLocal } from '@/lib/crypto/skd'
+import { ChatContext, deriveMemberPseudonymForOwner } from '@/lib/crypto/skd'
 import type { ISigner } from '@/stores/userStore'
 
 export interface V2JoinPayload {
@@ -86,11 +86,10 @@ export async function parseV2JoinRequest(
     const parsed = JSON.parse(plaintext) as { r?: string; p?: string; note?: string }
     if (!parsed.r || !parsed.p) return null
 
-    // Squat check (local owner only): re-derive P from R and compare.
+    // Squat check (local owner only): re-derive P_pub from R (blinded verifier) and compare.
     let verified: boolean | undefined
     if (ownerRootPrivateKey) {
-      const oPriv = deriveSubKeyLocal(ownerRootPrivateKey, ChatContext.owner(hubDTag)).privHex
-      const reP = deriveSubKeyLocal(oPriv, ChatContext.member(hubDTag), parsed.r).pubHex
+      const reP = deriveMemberPseudonymForOwner(ownerRootPrivateKey, hubDTag, parsed.r)
       verified = reP === parsed.p
     }
     return { rPub: parsed.r, pPub: parsed.p, note: parsed.note, verified }

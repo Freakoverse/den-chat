@@ -164,20 +164,30 @@ export function deriveBlindedPubForPeer(rootPrivHex: string, context: string, pe
 
 // ── NIP-CHAT v2 context builders (see NIP-CHAT §0.1) ─────────────────────────
 
+/** NIP-SKD derivation form (NIP-SKD §1). NIP-CHAT uses `self` (owner) and `blinded` (member/Pf/join). */
+export type SkdForm = 'self' | 'shared' | 'blinded'
+
+/**
+ * A NIP-CHAT pseudonym context bound to its derivation **form** — the single source of truth for the
+ * role→form mapping (NIP-CHAT §0.5/§9). Pass it to {@link makeSubkeySigner}; use `.context` where a raw
+ * NIP-SKD context string is needed.
+ */
+export interface ChatCtx { readonly context: string; readonly form: SkdForm }
+
 export const ChatContext = {
   /** Owner pseudonym `O` — self derivation. */
-  owner: (dTag: string) => `nip-chat:v2:owner-pseudonym:${dTag}`,
+  owner: (dTag: string): ChatCtx => ({ context: `nip-chat:v2:owner-pseudonym:${dTag}`, form: 'self' }),
   /** Member pseudonym `P` — blinded derivation of `R` toward the owner `O_pub`. */
-  member: (dTag: string) => `nip-chat:v2:member-pseudonym:${dTag}`,
+  member: (dTag: string): ChatCtx => ({ context: `nip-chat:v2:member-pseudonym:${dTag}`, form: 'blinded' }),
   /** Sealed-join throwaway address — blinded derivation of `R` toward the owner `O_pub`. */
-  joinAddr: (dTag: string) => `nip-chat:v2:join-addr:${dTag}`,
+  joinAddr: (dTag: string): ChatCtx => ({ context: `nip-chat:v2:join-addr:${dTag}`, form: 'blinded' }),
   /**
    * Facilitated pseudonym `Pf` — a non-member's per-facilitator identity, blinded derivation of `R_f`
    * toward the **facilitator's member pseudonym `P_fac`** (NOT the owner). It mirrors the member pseudonym
    * exactly, with the facilitator playing the owner's role: the facilitated user posts under `Pf`
    * and appears as a leaf in the facilitator's mesh tree. See NIP-CHAT §5.6 / v2 §4.7.
    */
-  facilitated: (dTag: string) => `nip-chat:v2:facilitated-pseudonym:${dTag}`,
+  facilitated: (dTag: string): ChatCtx => ({ context: `nip-chat:v2:facilitated-pseudonym:${dTag}`, form: 'blinded' }),
 } as const
 
 /**
@@ -185,7 +195,7 @@ export const ChatContext = {
  * signer derives the identical `O` via NIP-SKD self mode.
  */
 export function deriveOwnerPseudonym(rootPrivHex: string, dTag: string): SubKey {
-  return deriveSubKeyLocal(rootPrivHex, ChatContext.owner(dTag))
+  return deriveSubKeyLocal(rootPrivHex, ChatContext.owner(dTag).context)
 }
 
 /**
@@ -195,7 +205,7 @@ export function deriveOwnerPseudonym(rootPrivHex: string, dTag: string): SubKey 
  * cannot obtain `P_priv`, so cannot sign or decrypt as the member.
  */
 export function deriveMemberPseudonym(rootPrivHex: string, ownerPubHex: string, dTag: string): SubKey {
-  return deriveBlindedLocal(rootPrivHex, ChatContext.member(dTag), ownerPubHex)
+  return deriveBlindedLocal(rootPrivHex, ChatContext.member(dTag).context, ownerPubHex)
 }
 
 /**
@@ -206,7 +216,7 @@ export function deriveMemberPseudonym(rootPrivHex: string, ownerPubHex: string, 
  */
 export function deriveMemberPseudonymForOwner(ownerRootPrivHex: string, dTag: string, memberRPub: string): string {
   const oPriv = deriveOwnerPseudonym(ownerRootPrivHex, dTag).privHex
-  return deriveBlindedPubForPeer(oPriv, ChatContext.member(dTag), memberRPub)
+  return deriveBlindedPubForPeer(oPriv, ChatContext.member(dTag).context, memberRPub)
 }
 
 /**
@@ -218,7 +228,7 @@ export function deriveMemberPseudonymForOwner(ownerRootPrivHex: string, dTag: st
  * `context = ChatContext.facilitated(dTag)`, `peer = P_fac`.
  */
 export function deriveFacilitatedPseudonym(rootPrivHex: string, facilitatorPPubHex: string, dTag: string): SubKey {
-  return deriveBlindedLocal(rootPrivHex, ChatContext.facilitated(dTag), facilitatorPPubHex)
+  return deriveBlindedLocal(rootPrivHex, ChatContext.facilitated(dTag).context, facilitatorPPubHex)
 }
 
 /**
@@ -239,7 +249,7 @@ export function deriveFacilitatedPseudonymForFacilitator(
   memberRPub: string,
 ): string {
   const pFacPriv = deriveMemberPseudonym(facilitatorRootPrivHex, ownerPubHex, dTag).privHex
-  return deriveBlindedPubForPeer(pFacPriv, ChatContext.facilitated(dTag), memberRPub)
+  return deriveBlindedPubForPeer(pFacPriv, ChatContext.facilitated(dTag).context, memberRPub)
 }
 
 // ── Remote-signer routing (NIP-SKD-capable signer) ───────────────────────────
@@ -247,6 +257,7 @@ export function deriveFacilitatedPseudonymForFacilitator(
 /** Optional NIP-SKD surface a signer may expose (NIP-07 shape, `docs/NIP-SKD.md` §6). */
 export interface SkdSigner {
   skd?: {
+    // ── self (no peer) / shared (peer) forms ──
     getSubkeyPubkey(context: string, peerPub?: string): Promise<string>
     signAsSubkey(context: string, event: unknown, peerPub?: string): Promise<unknown>
     /** nip44-encrypt FROM the sub-key TO `recipientPub` — e.g. an owner (`O`) wrapping a
@@ -254,6 +265,15 @@ export interface SkdSigner {
     nip44EncryptAsSubkey(context: string, recipientPub: string, plaintext: string, peerPub?: string): Promise<string>
     /** nip44-decrypt a ciphertext addressed to the sub-key from `senderPub`. */
     nip44DecryptAsSubkey(context: string, senderPub: string, ciphertext: string, peerPub?: string): Promise<string>
+
+    // ── blinded form (NIP-SKD §1) — the caller's own key is `root + t·G`; a peer can verify but not sign ──
+    /** The caller's OWN blinded pubkey (base = caller's root, blinded toward `peerPub`). */
+    getBlindedPubkey(context: string, peerPub: string): Promise<string>
+    /** A PEER's blinded pubkey toward the caller (base = `peerPub`) — verifier side, pubkey only. */
+    getPeerBlindedPubkey(context: string, peerPub: string): Promise<string>
+    signAsBlinded(context: string, event: unknown, peerPub: string): Promise<unknown>
+    nip44EncryptAsBlinded(context: string, recipientPub: string, plaintext: string, peerPub: string): Promise<string>
+    nip44DecryptAsBlinded(context: string, senderPub: string, ciphertext: string, peerPub: string): Promise<string>
   }
 }
 
@@ -265,9 +285,14 @@ export class SkdUnsupportedError extends Error {
   }
 }
 
-/** Whether a signer advertises NIP-SKD support (feature-detect). */
+/**
+ * Whether a signer advertises NIP-SKD support (feature-detect). Requires the **blinded** op too:
+ * NIP-CHAT v2 authors members under the blinded form, so a signer that only has the older
+ * self/shared surface can't participate and MUST be treated as unsupported (v2 gated off).
+ */
 export function signerSupportsSkd(signer: unknown): signer is Required<SkdSigner> {
-  return typeof (signer as SkdSigner | null)?.skd?.getSubkeyPubkey === 'function'
+  const skd = (signer as SkdSigner | null)?.skd
+  return typeof skd?.getSubkeyPubkey === 'function' && typeof skd?.getBlindedPubkey === 'function'
 }
 
 /**

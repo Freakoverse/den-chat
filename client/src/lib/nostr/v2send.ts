@@ -19,7 +19,7 @@
 
 import { finalizeEvent, nip44, type UnsignedEvent, type Event } from 'nostr-tools'
 import { hexToBytes } from '@noble/hashes/utils'
-import { deriveSubKeyLocal, signerSupportsSkd, SkdUnsupportedError, type SkdSigner } from '@/lib/crypto/skd'
+import { deriveSubKeyLocal, deriveBlindedLocal, signerSupportsSkd, SkdUnsupportedError, type SkdSigner, type ChatCtx } from '@/lib/crypto/skd'
 import type { ISigner } from '@/stores/userStore'
 
 /** A minimal signer bound to a derived sub-key. */
@@ -33,17 +33,24 @@ export interface SubkeySigner {
 }
 
 /**
- * Build a signer that authors events as the NIP-SKD sub-key for `context`.
- * `peerPub` present → shared/member form; omitted → self/owner form.
+ * Build a signer that authors events as the NIP-SKD sub-key for `ctx`. The derivation **form** comes
+ * from the {@link ChatCtx} descriptor (a NIP-CHAT role→form single source of truth): `self` (owner, no
+ * peer), or `blinded` (member/`Pf`/join, `peerPub` required — the owner can verify but not sign as it).
  *
  * @throws {@link SkdUnsupportedError} when neither a local key nor a NIP-SKD signer is available.
  */
 export function makeSubkeySigner(
-  context: string,
+  ctx: ChatCtx,
   opts: { privateKey?: string | null; signer?: ISigner | null; peerPub?: string },
 ): SubkeySigner {
+  const { context, form } = ctx
+  if (form === 'blinded' && !opts.peerPub) {
+    throw new Error('NIP-SKD: blinded derivation requires a peer public key')
+  }
   if (opts.privateKey) {
-    const sub = deriveSubKeyLocal(opts.privateKey, context, opts.peerPub)
+    const sub = form === 'blinded'
+      ? deriveBlindedLocal(opts.privateKey, context, opts.peerPub!)
+      : deriveSubKeyLocal(opts.privateKey, context, opts.peerPub)
     const privBytes = hexToBytes(sub.privHex)
     return {
       getPublicKey: async () => sub.pubHex,
@@ -58,6 +65,15 @@ export function makeSubkeySigner(
   const s = opts.signer
   if (signerSupportsSkd(s)) {
     const skd = (s as Required<SkdSigner>).skd
+    if (form === 'blinded') {
+      const peer = opts.peerPub!
+      return {
+        getPublicKey: () => skd.getBlindedPubkey(context, peer),
+        signEvent: (event) => skd.signAsBlinded(context, event, peer) as Promise<Event>,
+        nip44Encrypt: (recipientPub, plaintext) => skd.nip44EncryptAsBlinded(context, recipientPub, plaintext, peer),
+        nip44Decrypt: (senderPub, ciphertext) => skd.nip44DecryptAsBlinded(context, senderPub, ciphertext, peer),
+      }
+    }
     return {
       getPublicKey: () => skd.getSubkeyPubkey(context, opts.peerPub),
       signEvent: (event) => skd.signAsSubkey(context, event, opts.peerPub) as Promise<Event>,
