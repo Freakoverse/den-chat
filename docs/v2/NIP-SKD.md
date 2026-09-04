@@ -386,17 +386,12 @@ iframe vault does this: its ready handshake carries `capabilities: ["skd:1"]`.)
 
 ## 8. Test vectors
 
-> **⚠️ Regeneration required.** The vectors below must be **regenerated from the reference
-> implementation** (`client/src/lib/crypto/skd.ts`) after it implements this revision. Two changes
-> invalidate every prior value: (1) `info` now carries the `"nip-skd:" ‖ form ‖ 0x1F` domain tag, so
-> even the `self` and `shared` outputs change; (2) the `blinded` form is new. The `=> …` result lines
-> are placeholders until then. Each conforming signer (client, vault, DENOS) MUST reproduce the
-> regenerated values byte-for-byte. Include at least one **blinded** case whose `root_pub` has **odd
-> y**, to pin the even-`y` normalization.
-
-`ecdh_x` is the **raw** x-coordinate of the shared point (the x-only peer reconstructed as even-y
-`02||x`); `xonly(·)` drops the parity byte; `reduce(·)` maps the **48-byte** seed to a secp256k1 scalar
-(wide reduction, `0 → 1`; see §1); `lift_even_y(·)` reconstructs the even-`y` point from an x-only key.
+Generated and verified by the reference implementation (`client/src/lib/crypto/skd.ts`); every
+conforming signer (client, vault, DENOS) MUST reproduce these values **byte-for-byte**. `ecdh_x` is
+the **raw** x-coordinate of the shared point (the x-only peer reconstructed as even-y `02||x`);
+`xonly(·)` drops the parity byte; `reduce(·)` maps the **48-byte** seed to a secp256k1 scalar (wide
+reduction, `0 → 1`; see §1); `lift_even_y(·)` reconstructs the even-`y` point from an x-only key; `info`
+carries the form tag `"nip-skd:" ‖ form ‖ 0x1F` before the context (§1).
 
 ```
 # ── self derivation (NIP-CHAT owner pseudonym O) ──
@@ -405,37 +400,42 @@ context   = "nip-chat:v2:owner-pseudonym:abc-123"
 info      = "nip-skd:self" ‖ 0x1F ‖ context
 seed      = HKDF-SHA256(IKM=root_priv, salt="nip-skd-v1", info=info, L=48)
 sub_pub   = xonly(reduce(seed)·G)
-         => <regenerate>     # = O_pub
+         => 94576ae28a4583c68e5641b10befe9a90c92680271dc839052937a8552fc0ae5     # = O_pub
 
 # ── shared derivation (independent key both parties derive; NOT used by NIP-CHAT v2) ──
 root_priv = 2222222222222222222222222222222222222222222222222222222222222222
-peer_pub  = <O_pub above>
+peer_pub  = 94576ae28a4583c68e5641b10befe9a90c92680271dc839052937a8552fc0ae5     # O_pub above
 context   = "nip-skd:example:shared:abc-123"
 info      = "nip-skd:shared" ‖ 0x1F ‖ context
 seed      = HKDF-SHA256(IKM=ecdh_x(root_priv, peer_pub), salt="nip-skd-v1", info=info, L=48)
 sub_pub   = xonly(reduce(seed)·G)
-         => <regenerate>
+         => 96a9e601a6baa6acca538fad90d72ae3ed6906c5e057f6100e4a20b903611692
 
 # ── blinded derivation (NIP-CHAT member pseudonym P) ──
 root_priv = 2222222222222222222222222222222222222222222222222222222222222222     # member R
-peer_pub  = <O_pub above>                                                          # owner O_pub
+root_pub  = 466d7fcae563e5cb09a0d1870bb580344804617879a14949cf22285f1bae3f27     # = R_pub
+peer_pub  = 94576ae28a4583c68e5641b10befe9a90c92680271dc839052937a8552fc0ae5     # owner O_pub
 context   = "nip-chat:v2:member-pseudonym:abc-123"
 info      = "nip-skd:blinded" ‖ 0x1F ‖ context
 seed      = HKDF-SHA256(IKM=ecdh_x(root_priv, peer_pub), salt="nip-skd-v1", info=info, L=48)
 t         = reduce(seed)
-P_pub     = xonly( lift_even_y(root_pub) + t·G )      # root_pub = R_pub
-         => <regenerate>     # = P_pub
+P_pub     = xonly( lift_even_y(root_pub) + t·G )
+         => 059510a63a230047ffe6e978ade8ad31e4bfb59d414331d5b17b6d50038c51a1     # = P_pub
 
 # ── blinded symmetry (owner re-derives the same P → owner-verification) ──
-# member R_pub (of root_priv 2222…) = <regenerate>
-# owner computes getPeerBlindedPubkey(context, peer=R_pub) with IKM=ecdh_x(O_priv, R_pub) and
-# base = lift_even_y(R_pub); by ECDH symmetry the seed (hence t) is identical, so
-#   xonly(lift_even_y(R_pub) + t·G)  ==  P_pub above     ✓  (owner never learns P_priv = R_priv + t)
+# owner computes getPeerBlindedPubkey(context, peer = R_pub) — base = lift_even_y(R_pub), IKM =
+# ecdh_x(O_priv, R_pub). By ECDH symmetry the seed (hence t) is identical, so it reproduces P_pub:
+#   => 059510a63a230047ffe6e978ade8ad31e4bfb59d414331d5b17b6d50038c51a1     ✓  (owner never learns P_priv = R_priv + t)
 
 # ── blinded, odd-y base (pins even-y normalization) ──
-# choose a root_priv whose root_pub has odd y; verify the holder (using root_priv_evenY = n - root_priv)
-# and the verifier (using lift_even_y(root_pub)) both produce the same blinded_pub.
-#   => <regenerate>
+# root_priv whose root_pub has ODD y — the holder must tweak root_priv_evenY = n - root_priv,
+# and both holder and verifier lift the even-y base, so both land on the same blinded_pub:
+root_priv = 0000000000000000000000000000000000000000000000000000000000000006     # root_pub has odd y
+root_pub  = fff97bd5755eeea420453a14355235d382f6472f8568a18b2f057a1460297556
+peer_pub  = 94576ae28a4583c68e5641b10befe9a90c92680271dc839052937a8552fc0ae5     # O_pub
+context   = "nip-chat:v2:member-pseudonym:abc-123"
+blinded_pub (holder, root_priv_evenY = n - root_priv)  => 75a5ff6d888b7065181e9f2108f2ebd7e3000236cd409d19cf4f56ac0224a919
+blinded_pub (verifier, lift_even_y(root_pub))          => 75a5ff6d888b7065181e9f2108f2ebd7e3000236cd409d19cf4f56ac0224a919   ✓
 ```
 
 The shared and blinded forms feed the **raw** ECDH x-coordinate into HKDF (as NIP-44 does), **not**
