@@ -1394,51 +1394,63 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
     // Start DataChannel state broadcast (100ms interval)
     get()._startStateBroadcast()
 
-    // Pull tracks from participants who are already in the channel
-    // (their Nostr presence arrived before we joined)
-    const mySessionId = provider.getSessionId()
-    const existingPresence = (get().presenceByHub[hubDTag] || []).filter(
-      (p) =>
-        p.channelId === channelId &&
-        // Only people on the host we just joined — a different host is a separate
-        // SFU we can't pull from (they're shown via the dimmed other-host group).
-        (!p.hostPubkey || p.hostPubkey === hostPubkey) &&
-        p.status === 'joined' &&
-        p.sessionId &&
-        p.sessionId !== mySessionId &&
-        p.tracks.length > 0 &&
-        !isPresenceStale(p),
-    )
-    for (const p of existingPresence) {
-      // Filter tracks: skip screenshare (opt-in) and hidden cameras (opt-out)
-      const filteredTracks = p.tracks.filter((t: string) => {
-        if (t.endsWith(':screenshare')) return get()._screenWatching.has(p.pubkey)
-        if (t.endsWith(':video')) return !get()._cameraHidden.has(p.pubkey)
-        return true // always pull audio
-      })
-      if (filteredTracks.length > 0) {
-        console.log(`[VoiceStore] Pulling existing participant ${p.pubkey.slice(0, 8)}... tracks:`, filteredTracks)
-        provider.pullRemoteTracks(p.sessionId, filteredTracks).catch((err) => {
-          console.warn('[VoiceStore] Failed to pull existing tracks:', err)
+    // Pull tracks from participants who are already in the channel. Their Nostr presence may still be
+    // in flight when we connect — the presence subscription's initial fetch races this step — so a
+    // single synchronous pull here can find an empty list and leave the joiner blind to everyone who
+    // was already present (they, meanwhile, see the joiner via the joiner's fresh join presence). Run
+    // it a few times just after connect (like the keepalive's early fires); it's idempotent (skips
+    // anyone already pulled). The live presence handler is the other recovery path (isPresenceStale-gated).
+    const pullExisting = () => {
+      const prov = get().provider
+      if (!prov || get().connectionState !== 'connected') return
+      const mySessionId = prov.getSessionId()
+      const existingPresence = (get().presenceByHub[hubDTag] || []).filter(
+        (p) =>
+          p.channelId === channelId &&
+          // Only people on the host we just joined — a different host is a separate
+          // SFU we can't pull from (they're shown via the dimmed other-host group).
+          (!p.hostPubkey || p.hostPubkey === hostPubkey) &&
+          p.status === 'joined' &&
+          p.sessionId &&
+          p.sessionId !== mySessionId &&
+          p.tracks.length > 0 &&
+          !isPresenceStale(p) &&
+          !get().participants[p.pubkey], // idempotent: skip anyone we've already pulled
+      )
+      for (const p of existingPresence) {
+        // Filter tracks: skip screenshare (opt-in) and hidden cameras (opt-out)
+        const filteredTracks = p.tracks.filter((t: string) => {
+          if (t.endsWith(':screenshare')) return get()._screenWatching.has(p.pubkey)
+          if (t.endsWith(':video')) return !get()._cameraHidden.has(p.pubkey)
+          return true // always pull audio
         })
-      }
-      // Also subscribe to their DataChannel
-      get()._subscribeParticipantDC(p.pubkey, p.sessionId)
-      set((s) => ({
-        participants: {
-          ...s.participants,
-          [p.pubkey]: {
-            id: p.pubkey,
-            pubkey: p.pubkey,
-            isMuted: false,
-            isDeafened: false,
-            isSpeaking: false,
-            hasVideo: false,
-            hasScreenShare: false,
+        if (filteredTracks.length > 0) {
+          console.log(`[VoiceStore] Pulling existing participant ${p.pubkey.slice(0, 8)}... tracks:`, filteredTracks)
+          prov.pullRemoteTracks(p.sessionId, filteredTracks).catch((err) => {
+            console.warn('[VoiceStore] Failed to pull existing tracks:', err)
+          })
+        }
+        // Also subscribe to their DataChannel
+        get()._subscribeParticipantDC(p.pubkey, p.sessionId)
+        set((s) => ({
+          participants: {
+            ...s.participants,
+            [p.pubkey]: {
+              id: p.pubkey,
+              pubkey: p.pubkey,
+              isMuted: false,
+              isDeafened: false,
+              isSpeaking: false,
+              hasVideo: false,
+              hasScreenShare: false,
+            },
           },
-        },
-      }))
+        }))
+      }
     }
+    pullExisting()
+    setTimeout(pullExisting, 1_500)
+    setTimeout(pullExisting, 4_000)
   },
 
   switchHost: async (hostPubkey) => {
@@ -2165,12 +2177,14 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
         // Check if we need to pull tracks — either new participant or new tracks from existing one
         const existingParticipant = state.participants[presence.pubkey]
         if (!existingParticipant) {
-          // Only add brand-new participants from very recent presence events.
-          // Stale relay events (e.g. from a user who left <60s ago) can cause
-          // ghost users to appear briefly. The DC heartbeat will clean them
-          // up eventually, but this prevents them from appearing at all.
-          const presenceAge = Math.floor(Date.now() / 1000) - presence.createdAt
-          if (presenceAge > 15) return // Too old — wait for a fresh heartbeat
+          // Pull a brand-new participant as long as their presence is still LIVE (not stale). Use the
+          // same isPresenceStale (STALE_TIMEOUT, 60s) threshold as the connect-time pull and the sidebar —
+          // NOT a tighter window: presence is re-broadcast every 45s (KEEPALIVE_INTERVAL), so a genuinely
+          // present peer's newest event can be up to ~45s old. A too-tight guard here made a late joiner
+          // stay blind to everyone already present until their next keepalive (the reported "they see me,
+          // I don't see them"). A departed user's keepalive stops, so their presence ages past 60s and is
+          // rejected here; any brief ghost is cleaned up by the DC heartbeat.
+          if (isPresenceStale(presence)) return
           // Filter tracks: skip screenshare (opt-in) and hidden cameras (opt-out)
           const filteredTracks = presence.tracks.filter((t: string) => {
             if (t.endsWith(':screenshare')) return state._screenWatching.has(presence.pubkey)
