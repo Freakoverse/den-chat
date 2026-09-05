@@ -24,6 +24,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { truncateNpub, cn } from '@/lib/utils'
 import { nip19 } from 'nostr-tools'
 import { markJoinRequestsSeen } from '@/hooks/useJoinRequestCount'
+import { getJoinSeen } from '@/lib/hub/joinReadState'
 import {
   X, Search, Loader2, Check, CheckSquare, Square, AlertTriangle, ChevronDown, ChevronUp, UserPlus, RotateCw,
 } from 'lucide-react'
@@ -45,19 +46,11 @@ interface JoinRequest {
   pPub?: string
 }
 
-/** Time filter options */
-const TIME_FILTERS = [
-  { label: 'Last 24 hours', seconds: 24 * 3600 },
-  { label: 'Last 48 hours', seconds: 48 * 3600 },
-  { label: 'Last 7 days', seconds: 7 * 24 * 3600 },
-  { label: 'Last 30 days', seconds: 30 * 24 * 3600 },
-  { label: 'Last 3 months', seconds: 90 * 24 * 3600 },
-  { label: 'Last year', seconds: 365 * 24 * 3600 },
-  { label: 'All time', seconds: 0 },
-] as const
+/** Max events per relay query (relays typically cap here). Pagination walks older with `until`. */
+const PAGE_LIMIT = 500
 
-/** localStorage key for the creator's preferred join-request lookback range (persists across sessions). */
-const TIME_FILTER_KEY = 'den_join_requests_time_filter'
+/** localStorage key for the creator's "Show all" vs "Unseen" preference (persists across sessions). */
+const SHOW_ALL_KEY = 'den_join_requests_show_all'
 
 const EMPTY_MEMBERS: HubMember[] = []
 
@@ -89,24 +82,25 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
 
   const [requests, setRequests] = useState<JoinRequest[]>([])
   const [loading, setLoading] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
+  // The newest-first fetch was capped at PAGE_LIMIT → older requests may exist below what's loaded.
+  const [hasMore, setHasMore] = useState(false)
   const [search, setSearch] = useState('')
   const [profilePubkey, setProfilePubkey] = useState<string | null>(null)
-  const [timeFilterIdx, setTimeFilterIdx] = useState(() => {
-    // Restore the creator's last-chosen lookback range; default to 48h (index 1).
-    try {
-      const raw = localStorage.getItem(TIME_FILTER_KEY)
-      if (raw !== null) {
-        const n = parseInt(raw, 10)
-        if (Number.isInteger(n) && n >= 0 && n < TIME_FILTERS.length) return n
-      }
-    } catch { /* ignore */ }
-    return 1
+  // Default view = only requests newer than the creator's synced "seen" watermark; toggle shows all.
+  const [showAll, setShowAll] = useState(() => {
+    try { return localStorage.getItem(SHOW_ALL_KEY) === '1' } catch { return false }
   })
-  // Persist the chosen range so reopening the modal shows the same window (and its entries).
   useEffect(() => {
-    try { localStorage.setItem(TIME_FILTER_KEY, String(timeFilterIdx)) } catch { /* ignore */ }
-  }, [timeFilterIdx])
-  const [showTimeDropdown, setShowTimeDropdown] = useState(false)
+    try { localStorage.setItem(SHOW_ALL_KEY, showAll ? '1' : '0') } catch { /* ignore */ }
+  }, [showAll])
+  // Accumulator across pages (deduped by identity) + the oldest raw created_at fetched (load-more cursor).
+  const rawByPubkeyRef = useRef<Map<string, JoinRequest>>(new Map())
+  const oldestCursorRef = useRef<number | null>(null)
+  // The "seen" watermark captured at modal-open. The query keeps using THIS snapshot for the whole
+  // session even after mark-seen advances the stored watermark — otherwise approving a member
+  // mid-session (which reloads the list) would re-query `since: now` and collapse it to empty.
+  const sessionWRef = useRef(0)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [adding, setAdding] = useState(false)
   const [addError, setAddError] = useState<string | null>(null)
@@ -129,30 +123,43 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
   // On success the overlay stays open showing the result + "Show details" until
   // the user closes it (see the Done block below) — no auto-dismiss.
 
-  // Fetch join requests
-  const loadRequests = useCallback(async () => {
+  // Fetch a page of join requests. `append=false` reloads from the top (newest); `append=true` pages
+  // older via an `until` cursor. Default mode bounds the query with `since: W` (the synced "seen"
+  // watermark) so we only fetch the unseen tail; "Show all" drops that bound. Because a single
+  // watermark can only mean "seen everything newer than W", we can advance it to now ONLY once we've
+  // fetched contiguously from now back to W (a page returns < PAGE_LIMIT — nothing older remains
+  // within the bound). Until then `hasMore` is true and the creator loads older pages.
+  const loadPage = useCallback(async (append: boolean) => {
     if (!hub.generalRelays.length) return
-    setLoading(true)
+    if (append) setLoadingMore(true); else setLoading(true)
     try {
-      const since = TIME_FILTERS[timeFilterIdx].seconds > 0
-        ? Math.floor(Date.now() / 1000) - TIME_FILTERS[timeFilterIdx].seconds
-        : undefined
-
       const v2 = isV2(hub)
       const coord = `${KINDS.HUB_EVENT}:${hub.creatorPubkey}:${hub.dTag}`
+      const w = sessionWRef.current
+
+      if (!append) { rawByPubkeyRef.current = new Map(); oldestCursorRef.current = null }
+
       const filter: any = {
         kinds: [KINDS.JOIN_REQUEST],
         // v2 joins are sealed-sender and indexed by the hub coordinate; v1 by the d-tag.
         ...(v2 ? { '#a': [coord] } : { '#d': [hub.dTag] }),
-        limit: 500,
+        limit: PAGE_LIMIT,
       }
-      if (since) filter.since = since
+      if (!showAll && w > 0) filter.since = w
+      if (append && oldestCursorRef.current != null) filter.until = oldestCursorRef.current - 1
 
       const events = await fetchEvents(filter)
 
-      // Deduplicate: one per identity, keep latest.
+      // Cursor + cap detection use the RAW page (pre membership/PoW filtering — those still occupy the
+      // relay's PAGE_LIMIT slots and the created_at range).
+      const gotFull = events.length >= PAGE_LIMIT
+      let pageOldest: number | null = null
+      for (const e of events) if (pageOldest == null || e.created_at < pageOldest) pageOldest = e.created_at
+      if (pageOldest != null) oldestCursorRef.current = pageOldest
+
+      // Deduplicate across pages: one per identity, keep latest.
       // Skip events that carry the ["deleted", "true"] marker (rescinded requests).
-      const byPubkey = new Map<string, JoinRequest>()
+      const byPubkey = rawByPubkeyRef.current
       if (v2) {
         // Sealed-sender: the author is a throwaway addr key; decrypt (as owner O) to recover
         // the joiner's real key R + pseudonym P. parseV2JoinRequest returns null if it can't.
@@ -210,23 +217,35 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
         return true
       })
 
-      // Sort: oldest first
-      filtered.sort((a, b) => a.createdAt - b.createdAt)
+      // Newest first (older pages load in below via "Load older").
+      filtered.sort((a, b) => b.createdAt - a.createdAt)
 
       setRequests(filtered)
+      setHasMore(gotFull)
+
+      // Coverage is complete when a page comes back short (nothing older remains within the bound).
+      // In the default/unseen view that means we've contiguously covered everything above W, so it's
+      // safe to advance the watermark to now (badge resets). Never in "Show all" (a browse mode) — it
+      // isn't bounded by W, so a short page there doesn't prove the unseen tail was reviewed.
+      if (!gotFull && !showAll) markJoinRequestsSeen(hub.dTag)
     } catch (err) {
       console.error('Failed to fetch join requests:', err)
     } finally {
       setLoading(false)
+      setLoadingMore(false)
     }
-  }, [hub, hub.dTag, hub.generalRelays, hub.creatorPubkey, hub.minPow, hubMembers.length, hubBanList, timeFilterIdx, privateKey, signer])
+  }, [hub, hub.dTag, hub.generalRelays, hub.creatorPubkey, hub.minPow, hubMembers.length, hubBanList, showAll, privateKey, signer])
 
-  // Reset transient UI state ONLY when the modal opens — not when loadRequests'
+  // Reset transient UI state ONLY when the modal opens — not when loadPage's
   // identity changes (e.g. hubMembers.length bumps after an approval), which
   // would otherwise wipe the success overlay the moment a member is added.
   useEffect(() => {
     if (!open) return
-    markJoinRequestsSeen(hub.dTag)
+    // Snapshot the watermark for this session's queries (see sessionWRef). NOTE: no longer marks
+    // "seen" on open — the watermark advances only once loadPage confirms it has contiguously fetched
+    // the whole unseen tail (a short page), so >PAGE_LIMIT unseen requests aren't buried by an
+    // open-and-forget.
+    sessionWRef.current = getJoinSeen(hub.dTag)
     setSelected(new Set())
     setAddedCount(0)
     setAddError(null)
@@ -236,10 +255,10 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
     setShowPublishDetails(false)
   }, [open, hub.dTag])
 
-  // (Re)load requests on open and whenever the relevant hub state changes.
+  // (Re)load requests from the top on open, on toggle, and whenever the relevant hub state changes.
   useEffect(() => {
-    if (open) loadRequests()
-  }, [open, loadRequests])
+    if (open) loadPage(false)
+  }, [open, loadPage])
 
   // Filter by search
   const filteredRequests = useMemo(() => {
@@ -766,8 +785,6 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
 
   if (!open) return null
 
-  const timeFilter = TIME_FILTERS[timeFilterIdx]
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center px-2 bg-black/60" onClick={onClose}>
       <div
@@ -782,38 +799,32 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
           </button>
         </div>
 
-        {/* Toolbar: time filter + multi-select + search */}
+        {/* Toolbar: unseen/all toggle + count + search */}
         <div className="px-4 pt-3 pb-2 space-y-2 border-b border-border">
           <div className="flex items-center gap-2">
-            {/* Time filter dropdown */}
-            <div className="relative">
+            {/* Unseen (since last-seen watermark) vs All. Default shows only new-since-you-last-looked;
+                All browses every request regardless (does not advance the watermark). */}
+            <div className="flex items-center rounded-lg bg-secondary/50 border border-border p-0.5 text-xs">
               <button
-                onClick={() => setShowTimeDropdown(!showTimeDropdown)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-secondary/50 border border-border text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                onClick={() => setShowAll(false)}
+                className={`px-2.5 py-1 rounded-md transition-colors cursor-pointer
+                  ${!showAll ? 'text-primary bg-primary/10' : 'text-muted-foreground hover:text-foreground'}`}
               >
-                {timeFilter.label}
-                <ChevronDown size={12} />
+                Unseen
               </button>
-              {showTimeDropdown && (
-                <div className="absolute top-full left-0 mt-1 bg-popover border border-border rounded-lg shadow-lg z-10 p-1 flex flex-col gap-1 min-w-[160px]">
-                  {TIME_FILTERS.map((tf, i) => (
-                    <button
-                      key={i}
-                      onClick={() => { setTimeFilterIdx(i); setShowTimeDropdown(false) }}
-                      className={`w-full text-left px-3 py-1.5 text-xs transition-colors cursor-pointer rounded-md
-                        ${i === timeFilterIdx ? 'text-primary bg-primary/10' : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'}`}
-                    >
-                      {tf.label}
-                    </button>
-                  ))}
-                </div>
-              )}
+              <button
+                onClick={() => setShowAll(true)}
+                className={`px-2.5 py-1 rounded-md transition-colors cursor-pointer
+                  ${showAll ? 'text-primary bg-primary/10' : 'text-muted-foreground hover:text-foreground'}`}
+              >
+                All
+              </button>
             </div>
 
             <div className="flex-1" />
 
             <span className="text-xs text-muted-foreground">
-              {filteredRequests.length} request{filteredRequests.length !== 1 ? 's' : ''}
+              {filteredRequests.length}{hasMore ? '+' : ''} request{filteredRequests.length !== 1 ? 's' : ''}
             </span>
           </div>
 
@@ -897,6 +908,21 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
                 )
               })}
             </div>
+          )}
+
+          {/* The last fetch was capped at PAGE_LIMIT — older requests remain below what's loaded. In
+              the Unseen view, loading older is also what advances the "seen" watermark (a short page
+              proves full coverage). */}
+          {hasMore && !loading && (
+            <button
+              onClick={() => loadPage(true)}
+              disabled={loadingMore}
+              className="flex items-center justify-center gap-2 w-full mt-2 py-2 rounded-lg bg-secondary/50 border border-border text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {loadingMore
+                ? <><Loader2 size={12} className="animate-spin" /> Loading older…</>
+                : 'Load older requests'}
+            </button>
           )}
         </div>
 
