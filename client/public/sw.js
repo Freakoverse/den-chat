@@ -25,37 +25,50 @@ self.addEventListener('activate', (event) => {
 })
 
 self.addEventListener('fetch', (event) => {
-  const url = new URL(event.request.url)
+  const req = event.request
+  const url = new URL(req.url)
 
-  // Only handle same-origin navigation/asset requests
+  // Only handle same-origin GET requests
   if (url.origin !== self.location.origin) return
+  if (req.method !== 'GET') return
 
-  // Don't cache API-like or WebSocket-upgrade requests
-  if (event.request.method !== 'GET') return
+  const isNavigation = req.mode === 'navigate' ||
+    (req.headers.get('accept') || '').includes('text/html')
 
-  // Network-first strategy: try network, fall back to cache for offline shell
+  if (isNavigation) {
+    // Navigations (the app shell / index.html) MUST always be fresh. GitHub Pages caps every file at
+    // Cache-Control: max-age=600 and offers no way to override it, so a normal fetch can serve a
+    // 10-min-stale index.html that points at asset hashes a later deploy deleted → those chunks 404 →
+    // blank page. `cache: 'no-store'` bypasses the HTTP cache so we always get the current index;
+    // fall back to a cached shell only when genuinely offline.
+    event.respondWith(
+      fetch(req, { cache: 'no-store' })
+        .then((response) => {
+          if (response.ok) {
+            const clone = response.clone()
+            caches.open(CACHE_NAME).then((cache) => cache.put('/index.html', clone))
+          }
+          return response
+        })
+        .catch(() =>
+          caches.match('/index.html').then((cached) => cached || new Response('Offline', { status: 503 }))
+        )
+    )
+    return
+  }
+
+  // Assets (content-addressed hashed filenames) — network-first, cache for offline fallback.
   event.respondWith(
-    fetch(event.request)
+    fetch(req)
       .then((response) => {
-        // Cache successful responses for offline fallback
         if (response.ok) {
           const clone = response.clone()
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put(event.request, clone)
-          })
+          caches.open(CACHE_NAME).then((cache) => cache.put(req, clone))
         }
         return response
       })
-      .catch(() => {
-        // Offline — serve from cache if available
-        return caches.match(event.request).then((cached) => {
-          if (cached) return cached
-          // For navigation requests, serve the cached index.html (SPA fallback)
-          if (event.request.mode === 'navigate') {
-            return caches.match('/index.html')
-          }
-          return new Response('Offline', { status: 503 })
-        })
-      })
+      .catch(() =>
+        caches.match(req).then((cached) => cached || new Response('Offline', { status: 503 }))
+      )
   )
 })

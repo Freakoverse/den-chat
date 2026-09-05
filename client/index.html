@@ -96,10 +96,12 @@
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
     <script>
-      // Register service worker for PWA support (browser only, skip Tauri)
+      // Register service worker for PWA support (browser only, skip Tauri).
+      // updateViaCache:'none' — always fetch /sw.js bypassing the HTTP cache when checking for an
+      // update; otherwise GitHub Pages' 10-min max-age would delay a new SW taking effect.
       if ('serviceWorker' in navigator && !window.__TAURI_INTERNALS__) {
         window.addEventListener('load', () => {
-          navigator.serviceWorker.register('/sw.js').catch(() => {})
+          navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' }).catch(() => {})
         })
       }
     </script>
