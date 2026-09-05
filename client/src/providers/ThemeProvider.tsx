@@ -22,13 +22,16 @@ function updateCSSVariables(color: TPrimaryColor, currentTheme: TTheme) {
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [themeSetting, setThemeSetting] = useState<TThemeSetting>(
-    (localStorage.getItem(StorageKey.THEME_SETTING) as TThemeSetting) ?? 'dark'
-  )
+  // Lazy + guarded: ThemeProvider is the outermost component, so a throw here (Firefox with blocked
+  // site data) would blank the whole app. storageGuard normally prevents the throw, but read safely
+  // regardless so first render can never fail on storage.
+  const [themeSetting, setThemeSetting] = useState<TThemeSetting>(() => {
+    try { return (localStorage.getItem(StorageKey.THEME_SETTING) as TThemeSetting) ?? 'dark' } catch { return 'dark' }
+  })
   const [theme, setTheme] = useState<TTheme>('dark')
-  const [primaryColor, setPrimaryColor] = useState<TPrimaryColor>(
-    (localStorage.getItem(StorageKey.PRIMARY_COLOR) as TPrimaryColor) ?? 'DEFAULT'
-  )
+  const [primaryColor, setPrimaryColor] = useState<TPrimaryColor>(() => {
+    try { return (localStorage.getItem(StorageKey.PRIMARY_COLOR) as TPrimaryColor) ?? 'DEFAULT' } catch { return 'DEFAULT' }
+  })
 
   // Resolve theme setting → actual theme
   useEffect(() => {

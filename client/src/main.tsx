@@ -1,3 +1,7 @@
+// MUST be first: installs an in-memory fallback if the browser blocks Web Storage (Firefox strict
+// privacy / private windows / blocked site data), so an unguarded localStorage access can't blank
+// the whole app on first load. Import before anything that might touch storage at eval/render.
+import './lib/storageGuard'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { ThemeProvider } from './providers/ThemeProvider'

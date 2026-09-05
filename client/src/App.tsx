@@ -40,7 +40,11 @@ function GlobalProfileModalListener() {
   )
 }
 
-const skipSplash = localStorage.getItem(StorageKey.SKIP_SPLASH) === 'true'
+// Guarded: this runs at module-eval, before React mounts — an unguarded throw here (Firefox with
+// blocked site data) would blank the app. storageGuard normally prevents it; read safely regardless.
+const skipSplash = (() => {
+  try { return localStorage.getItem(StorageKey.SKIP_SPLASH) === 'true' } catch { return false }
+})()
 
 export default function App() {
   useStartup()
