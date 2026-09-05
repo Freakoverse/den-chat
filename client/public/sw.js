@@ -2,7 +2,9 @@
 // All requests go to the network; the SW exists primarily so Chrome/browsers
 // show the "Install as app" prompt and the app can run in standalone mode.
 
-const CACHE_NAME = 'den-chat-v1'
+// Bump this on any SW/cache change: the activate handler deletes every cache whose name != this,
+// so a version bump purges a stale/broken cached build for users whose SW updates.
+const CACHE_NAME = 'den-chat-v2'
 
 self.addEventListener('install', (event) => {
   // Skip waiting so new SW activates immediately

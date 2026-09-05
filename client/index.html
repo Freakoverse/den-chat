@@ -22,7 +22,42 @@
           try { n = parseInt(sessionStorage.getItem(KEY) || '0', 10) || 0 } catch (e) {}
           if (n >= 2) return // gave up — persistent failure, don't reload-loop
           try { sessionStorage.setItem(KEY, String(n + 1)) } catch (e) {}
-          location.reload()
+          // Nuke a stale/broken service-worker + its caches before reloading. A network-first SW
+          // serves fresh assets when online, but if a bad build got cached (a stale index.html
+          // pointing at purged asset hashes, or a corrupt cached chunk), a plain reload just
+          // re-serves the same broken cache and the page stays blank forever. Clearing them forces
+          // the reload to fetch a clean, consistent asset set. Reload once cleanup settles (or after
+          // a short timeout so a hung cleanup can't wedge us). The SW re-registers on the next load.
+          var done = false
+          function go() {
+            if (done) return; done = true
+            // Cache-bust the navigation. The usual root cause is a stale index.html pinned in the
+            // HTTP/CDN cache (served with a max-age it hasn't outlived) that still points at deleted,
+            // post-deploy asset hashes — a plain reload re-serves that same "fresh" cached copy and
+            // stays blank. A unique query forces the browser/CDN to fetch the CURRENT index.html.
+            try {
+              var loc = window.location
+              var params = new URLSearchParams(loc.search)
+              params.set('_denr', String(Date.now()))
+              var q = params.toString()
+              loc.replace(loc.pathname + (q ? '?' + q : '') + loc.hash)
+            } catch (e) { try { window.location.reload() } catch (_) {} }
+          }
+          try {
+            var jobs = []
+            if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
+              jobs.push(navigator.serviceWorker.getRegistrations().then(function (rs) {
+                return Promise.all(rs.map(function (r) { return r.unregister() }))
+              }).catch(function () {}))
+            }
+            if (window.caches && caches.keys) {
+              jobs.push(caches.keys().then(function (ks) {
+                return Promise.all(ks.map(function (k) { return caches.delete(k) }))
+              }).catch(function () {}))
+            }
+            Promise.all(jobs).then(go, go)
+            setTimeout(go, 1500)
+          } catch (e) { go() }
         }
         // An entry <script> or a modulepreload/stylesheet <link> failed to load.
         window.addEventListener('error', function (e) {
