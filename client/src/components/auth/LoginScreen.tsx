@@ -2185,6 +2185,65 @@ export function LoginScreen() {
   }
 
   // ────────────────────────────────────────────
+  // Shared flat, grouped, scrollable account list — every saved key is one click away (→ PIN),
+  // grouped under its seed / "Imported Keys" header. Used on BOTH the main screen and the
+  // Saved Accounts page, so there's no group-picker modal or one-at-a-time paging.
+  const renderAccountList = () => (
+    <div className="w-full max-h-[52vh] overflow-y-auto space-y-3 pr-0.5">
+      {accountGroups.map((group) => {
+        const isSeed = group.type === 'seed'
+        const label = isSeed ? group.seed!.name : 'Imported Keys'
+        return (
+          <div key={isSeed ? group.seed!.id : 'standalone'} className="space-y-1.5">
+            <div className="flex items-center gap-1.5 px-0.5">
+              {isSeed
+                ? <Sprout size={12} className="text-emerald-500 shrink-0" />
+                : <KeySquare size={12} className="text-orange-500 shrink-0" />}
+              <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide truncate">{label}</span>
+            </div>
+            {group.accounts.map((acct) => {
+              const profile = getProfile(acct.pubkey)
+              const displayName = profile?.display_name || profile?.name || null
+              return (
+                <button
+                  key={acct.pubkey}
+                  onClick={() => openPinLogin(acct)}
+                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg border border-border/60 bg-secondary/20 hover:bg-secondary/40 transition-colors cursor-pointer text-left"
+                >
+                  {profile?.picture ? (
+                    <BlossomImage src={profile.picture} alt="" className="w-9 h-9 rounded-full object-cover shrink-0 ring-2 ring-border" />
+                  ) : (
+                    <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                      <User size={16} className="text-primary" />
+                    </div>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-foreground truncate">
+                      {displayName || acct.npub.slice(0, 12) + '...' + acct.npub.slice(-6)}
+                    </p>
+                    <p className="text-[10px] text-muted-foreground font-mono truncate">
+                      {acct.npub.slice(0, 16)}...{acct.npub.slice(-6)}
+                    </p>
+                  </div>
+                  <Lock size={13} className="text-muted-foreground/50 shrink-0" />
+                </button>
+              )
+            })}
+            {isSeed && (
+              <button
+                onClick={() => openDeriveFlow(group.seed!.id)}
+                className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-md border border-dashed border-border/60 hover:bg-secondary/40 hover:border-primary/40 transition-colors cursor-pointer"
+              >
+                <Plus size={12} className="text-muted-foreground" />
+                <span className="text-[11px] text-muted-foreground font-medium">Derive New Account</span>
+              </button>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+
   // ─── Render: Saved Accounts Page ───
   // ────────────────────────────────────────────
   if (screen === 'saved-accounts') {
@@ -2203,85 +2262,7 @@ export function LoginScreen() {
               <h2 className="text-lg font-bold text-foreground">Saved Accounts</h2>
             </div>
 
-            {accountGroups.length > 0 && currentAccount && (() => {
-              const profile = getProfile(currentAccount.pubkey)
-              const displayName = profile?.display_name || profile?.name || null
-              const groupLabel = currentGroup?.type === 'seed' ? currentGroup.seed!.name : 'Imported Keys'
-              const groupIcon = currentGroup?.type === 'seed'
-                ? <Sprout size={13} className="text-emerald-500 shrink-0" />
-                : <KeySquare size={13} className="text-orange-500 shrink-0" />
-
-              return (
-                <div className="w-full space-y-2">
-                  {/* Seed/group selector */}
-                  <button
-                    onClick={() => setShowSeedPicker(true)}
-                    className="w-full flex items-center gap-2 px-3 py-1.5 rounded-md border border-border/60 bg-secondary/30 hover:bg-secondary/50 transition-colors cursor-pointer text-left"
-                  >
-                    {groupIcon}
-                    <span className="text-xs font-medium text-foreground truncate flex-1">{groupLabel}</span>
-                    <ChevronRight size={12} className="text-muted-foreground shrink-0" />
-                  </button>
-
-                  {/* Account card — click to login */}
-                  <button
-                    onClick={() => openPinLogin(currentAccount)}
-                    className="w-full flex items-center gap-3 px-3 py-3 rounded-lg border border-border/60 bg-secondary/20 hover:bg-secondary/40 transition-colors cursor-pointer text-left"
-                  >
-                    {profile?.picture ? (
-                      <BlossomImage src={profile.picture} alt="" className="w-10 h-10 rounded-full object-cover shrink-0 ring-2 ring-border" />
-                    ) : (
-                      <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                        <User size={18} className="text-primary" />
-                      </div>
-                    )}
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-foreground truncate">
-                        {displayName || currentAccount.npub.slice(0, 12) + '...' + currentAccount.npub.slice(-6)}
-                      </p>
-                      <p className="text-[10px] text-muted-foreground font-mono truncate">
-                        {currentAccount.npub.slice(0, 16)}...{currentAccount.npub.slice(-6)}
-                      </p>
-                    </div>
-                    <Lock size={14} className="text-muted-foreground/50 shrink-0" />
-                  </button>
-
-                  {/* Derive button (seed groups only) */}
-                  {currentGroup?.type === 'seed' && (
-                    <button
-                      onClick={() => openDeriveFlow(currentGroup.seed!.id)}
-                      className="w-full flex items-center justify-center gap-1.5 py-2 rounded-md border border-dashed border-border/60 hover:bg-secondary/40 hover:border-primary/40 transition-colors cursor-pointer"
-                    >
-                      <Plus size={13} className="text-muted-foreground" />
-                      <span className="text-[11px] text-muted-foreground font-medium">Derive New Account</span>
-                    </button>
-                  )}
-
-                  {/* Navigation arrows */}
-                  {currentAccounts.length > 1 && (
-                    <div className="flex items-center justify-center gap-3">
-                      <button
-                        onClick={() => setAccountIdx((i) => Math.max(0, i - 1))}
-                        disabled={accountIdx === 0}
-                        className="p-2 grow-1 flex justify-center rounded-md hover:bg-secondary/50 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                      >
-                        <ChevronLeft size={16} className="text-muted-foreground" />
-                      </button>
-                      <span className="text-xs text-muted-foreground font-medium tabular-nums">
-                        {accountIdx + 1} / {currentAccounts.length}
-                      </span>
-                      <button
-                        onClick={() => setAccountIdx((i) => Math.min(currentAccounts.length - 1, i + 1))}
-                        disabled={accountIdx === currentAccounts.length - 1}
-                        className="p-2 grow-1 flex justify-center rounded-md hover:bg-secondary/50 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                      >
-                        <ChevronRight size={16} className="text-muted-foreground" />
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )
-            })()}
+            {accountGroups.length > 0 && renderAccountList()}
 
             {/* Empty state */}
             {accountGroups.length === 0 && (
