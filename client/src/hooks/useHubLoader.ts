@@ -1257,6 +1257,26 @@ export function useHubLoader() {
                 setHubPref(dTag, 'facilitator', undefined)
                 setHubPref(dTag, 'facilitatorSecret', undefined)
               }
+              // Confirmed real member (owner-tree decrypt, NOT merely facilitated). Auto-clean our
+              // now-redundant pending join request: tombstone + NIP-09 deletion (never leaves the
+              // hub), so the creator's join-request badge/list stops re-surfacing us instead of the
+              // creator having to scan the whole roster to dedup us. Once per device (flag); detached
+              // so it doesn't delay the load; no-ops if there's no live request (e.g. we were
+              // invited/added directly, or already withdrew).
+              try {
+                const rescindFlag = `den-jr-rescinded:${dTag}:${pubkey}`
+                if (!localStorage.getItem(rescindFlag)) {
+                  void (async () => {
+                    try {
+                      const { tombstoneOwnJoinRequest } = await import('@/lib/hub/rescindJoinRequest')
+                      await tombstoneOwnJoinRequest(hubData, pubkey)
+                      try { localStorage.setItem(rescindFlag, '1') } catch { /* storage full/blocked */ }
+                    } catch (err) {
+                      console.warn(`Hub ${dTag}: auto-rescind own join request failed (will retry):`, err)
+                    }
+                  })()
+                }
+              } catch { /* localStorage unavailable — skip the once-per-device guard */ }
               // v2: the structural content (channels/roles/categories) is encrypted with the
               // hub content key. parseHubEvent left it empty; decrypt it now and merge.
               if (hubData.version === 2) {
