@@ -8,6 +8,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
+import { useEscToClose } from '@/hooks/useEscToClose'
 import { useBlossomMedia } from '@/hooks/useBlossomMedia'
 import { useUserStore } from '@/stores/userStore'
 import { useBlockStore } from '@/stores/blockStore'
@@ -103,6 +104,7 @@ const V2_MEMBER_BAN_STEPS = ['Downloading index & tree', 'Removing member & rota
 const V2_NONMEMBER_BAN_STEPS = ['Downloading index & tree', 'Uploading ban pages', 'Publishing hub event']
 
 export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPosts, onDM, startEditing: startEditingProp, hubContext }: UserProfileModalProps) {
+  useEscToClose(onClose, open)
   const myPubkey = useUserStore((s) => s.pubkey)
   const signer = useUserStore((s) => s.signer)
   const privateKey = useUserStore((s) => s.privateKey)

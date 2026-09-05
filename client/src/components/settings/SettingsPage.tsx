@@ -5838,12 +5838,14 @@ interface KeybindSettings {
   pushToTalk: string
   muteToggle: string
   deafenToggle: string
+  closeModal: string
 }
 
 const KEYBIND_DEFAULTS: KeybindSettings = {
   pushToTalk: '',
   muteToggle: '',
   deafenToggle: '',
+  closeModal: 'Escape',
 }
 
 function loadKeybinds(): KeybindSettings {
@@ -5956,9 +5958,10 @@ function KeybindsTab() {
       })
       setCapturingAction(null)
     }
-    // Escape cancels capture
+    // Escape cancels capture — EXCEPT when capturing `closeModal`, where Escape is the intended value
+    // (it falls through to the main handler below, which records it).
     const escHandler = (e: KeyboardEvent) => {
-      if (e.code === 'Escape') {
+      if (e.code === 'Escape' && capturingAction !== 'closeModal') {
         e.preventDefault()
         e.stopPropagation()
         setCapturingAction(null)
@@ -6023,13 +6026,22 @@ function KeybindsTab() {
         </div>
       </div>
 
-      {/* Other */}
+      {/* Interface */}
       <div>
         <div className="flex items-center gap-2 mb-1">
           <Keyboard size={16} className="text-muted-foreground" />
-          <h3 className="text-sm font-semibold text-foreground uppercase tracking-wider">Other</h3>
+          <h3 className="text-sm font-semibold text-foreground uppercase tracking-wider">Interface</h3>
         </div>
-        <p className="text-xs text-muted-foreground py-4 px-1">No keybinds available yet.</p>
+        <div className="divide-y divide-border/50">
+          <KeybindRow
+            label="Close Modal"
+            description="Close the current pop-up / dialog (the same as clicking its X). Operations in progress are never cancelled by this."
+            value={keybinds.closeModal}
+            capturing={capturingAction === 'closeModal'}
+            onCapture={() => setCapturingAction('closeModal')}
+            onClear={() => updateKeybind('closeModal', '')}
+          />
+        </div>
       </div>
 
       {/* Tip */}

@@ -9,6 +9,7 @@
 
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import { createPortal } from 'react-dom'
+import { useEscToClose } from '@/hooks/useEscToClose'
 import {
   X, Settings, Shield, Hash, Camera, ImageIcon,
   Loader2, Plus, Minus, Trash2, GripVertical, ChevronDown, ChevronUp,
@@ -234,6 +235,7 @@ const PAGES: { id: SettingsPage; label: string; icon: React.ElementType; danger?
 // ── Main Modal ──
 
 export function HubSettingsModal({ open, onClose, hub }: HubSettingsModalProps) {
+  useEscToClose(onClose, open)
   const [activePage, setActivePage] = useState<SettingsPage>('general')
   const [mobileShowNav, setMobileShowNav] = useState(true)
 

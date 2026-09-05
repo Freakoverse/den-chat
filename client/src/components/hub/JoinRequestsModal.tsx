@@ -12,6 +12,7 @@
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { createPortal } from 'react-dom'
+import { useEscToClose, useEscBlock } from '@/hooks/useEscToClose'
 import { useHubStore, type HubData, type HubMember } from '@/stores/hubStore'
 import { useUserStore } from '@/stores/userStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
@@ -74,6 +75,7 @@ const ADD_STEPS = [
 ]
 
 export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps) {
+  useEscToClose(onClose, open)
   const pubkey = useUserStore((s) => s.pubkey)
   const signer = useUserStore((s) => s.signer)
   const privateKey = useUserStore((s) => s.privateKey)
@@ -117,6 +119,9 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
   // Progress tracking
   const [addStep, setAddStep] = useState<string | null>(null)
   const [addSteps, setAddSteps] = useState<string[]>([])
+  // While the "Adding Members…" progress modal is up, absorb the close-modal keybind: its X
+  // *cancels* the operation, so Esc must NOT trigger it (nor fall through to close this modal).
+  useEscBlock(adding || addSteps.length > 0)
   const addAbortRef = useRef<AbortController | null>(null)
   const addTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const addStepRef = useRef<string | null>(null)
