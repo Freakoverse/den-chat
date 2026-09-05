@@ -74,4 +74,7 @@ export const APP_DATA_DTAGS = {
   DM_READ_STATE: 'den-dm-read-state',
   /** Public chat — per-topic read timestamps (plaintext content) */
   PC_READ_STATE: 'den-pc-read-state',
+  /** Hub join requests — per-hub "seen" watermark, creator-only (encrypted: lists moderated hub
+   *  d-tags, which would link R → a private v2 hub they own if published in the clear) */
+  JOIN_READ_STATE: 'den-join-read-state',
 } as const

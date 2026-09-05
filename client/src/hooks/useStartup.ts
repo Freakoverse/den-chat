@@ -245,6 +245,12 @@ export function useStartup() {
       console.warn('[Startup] DNN service init failed:', err)
     )
 
+    // Hydrate the creator's join-request "seen" watermark (NIP-78, synced across devices) +
+    // migrate any legacy device-local watermark. Fire-and-forget; the badge reads it synchronously.
+    import('@/lib/hub/joinReadState')
+      .then((m) => m.hydrateJoinReadState(pubkey, signer, privateKey))
+      .catch((err) => console.warn('[Startup] join read-state hydrate failed:', err))
+
     // Initialize notification read-state from localStorage + relays
     useNotificationStore.getState().init(pubkey, signer, privateKey)
       .then(() => {

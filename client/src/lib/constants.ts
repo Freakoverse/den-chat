@@ -124,6 +124,7 @@ export const StorageKey = {
   NOTIF_HUB_READ_STATE: 'den-chat-notif-hub',
   NOTIF_DM_READ_STATE: 'den-chat-notif-dm',
   NOTIF_PC_READ_STATE: 'den-chat-notif-pc',
+  NOTIF_JOIN_READ_STATE: 'den-chat-notif-join',
 } as const
 
 /** Admin / creator identity */

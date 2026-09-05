@@ -63,12 +63,18 @@ export interface PcReadState {
   topics: Record<string, number>
 }
 
+/** Hub join-request read-state: per-hub "seen" watermark (creator-only, encrypted content). */
+export interface JoinReadState {
+  hubs: Record<string, number>  // hub d-tag → last-seen unix timestamp
+}
+
 /** Map of domain → localStorage key */
 const STORAGE_KEYS: Record<string, string> = {
   social: StorageKey.NOTIF_SOCIAL_SEEN_AT,
   hub:    StorageKey.NOTIF_HUB_READ_STATE,
   dm:     StorageKey.NOTIF_DM_READ_STATE,
   pc:     StorageKey.NOTIF_PC_READ_STATE,
+  join:   StorageKey.NOTIF_JOIN_READ_STATE,
 }
 
 /** Map of domain → NIP-78 d-tag */
@@ -77,9 +83,10 @@ const DTAGS: Record<string, string> = {
   hub:    APP_DATA_DTAGS.HUB_READ_STATE,
   dm:     APP_DATA_DTAGS.DM_READ_STATE,
   pc:     APP_DATA_DTAGS.PC_READ_STATE,
+  join:   APP_DATA_DTAGS.JOIN_READ_STATE,
 }
 
-export type NotifDomain = 'social' | 'hub' | 'dm' | 'pc'
+export type NotifDomain = 'social' | 'hub' | 'dm' | 'pc' | 'join'
 
 // ── Per-account scoping ──
 // The read-state caches are namespaced by the active account's pubkey, so switching
@@ -234,6 +241,17 @@ export function buildPcReadStateEvent(state: PcReadState): UnsignedEvent {
   )
 }
 
+/**
+ * Build a Hub join-request read-state event with encrypted content (creator-only).
+ */
+export function buildJoinReadStateEvent(encryptedContent: string): UnsignedEvent {
+  return createUnsignedEvent(
+    STANDARD_KINDS.APP_DATA,
+    encryptedContent,
+    [['d', DTAGS.join]]
+  )
+}
+
 // ── Content Parsing ──
 
 /**
@@ -281,6 +299,18 @@ export function parsePcReadState(event: Event | null): PcReadState {
     return { topics: parsed.topics ?? {} }
   } catch {
     return { topics: {} }
+  }
+}
+
+/**
+ * Parse hub join-request read-state from a NIP-78 event's decrypted content.
+ */
+export function parseJoinReadState(decryptedContent: string): JoinReadState {
+  try {
+    const parsed = JSON.parse(decryptedContent)
+    return { hubs: parsed.hubs ?? {} }
+  } catch {
+    return { hubs: {} }
   }
 }
 

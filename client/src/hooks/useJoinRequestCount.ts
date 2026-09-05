@@ -16,28 +16,24 @@ import { fetchEventsFromRelays, subscribeToRelays, getRelays } from '@/lib/nostr
 import { KINDS } from '@/lib/crypto/constants'
 import { countLeadingZeroBits } from '@/lib/pow/pow'
 import { isV2 } from '@/lib/hub/version'
+import { getJoinSeen, setJoinSeen, refreshJoinSeenFromCache } from '@/lib/hub/joinReadState'
+import { StorageKey } from '@/lib/constants'
 import type { HubData, HubMember } from '@/stores/hubStore'
 
-const STORAGE_PREFIX = 'den-join-requests-seen:'
 const SEEN_EVENT = 'den-join-requests-seen'
 
-/** Get the "last seen" unix timestamp for a hub */
+/** Get the "last seen" unix timestamp for a hub (synced across devices via NIP-78). */
 function getLastSeen(hubDTag: string): number {
-  try {
-    const raw = localStorage.getItem(STORAGE_PREFIX + hubDTag)
-    if (raw) return parseInt(raw, 10) || 0
-  } catch { /* ignore */ }
-  return 0
+  return getJoinSeen(hubDTag)
 }
 
 /**
- * Mark join requests as seen (set to current unix timestamp).
- * Dispatches a custom DOM event so same-tab hooks reset immediately.
+ * Mark join requests as seen (set to current unix timestamp). Persists to the creator's synced
+ * NIP-78 join read-state (follows them across devices) and dispatches a custom DOM event so
+ * same-tab hooks reset immediately.
  */
 export function markJoinRequestsSeen(hubDTag: string) {
-  try {
-    localStorage.setItem(STORAGE_PREFIX + hubDTag, String(Math.floor(Date.now() / 1000)))
-  } catch { /* ignore */ }
+  setJoinSeen(hubDTag, Math.floor(Date.now() / 1000))
   // Notify same-tab listeners
   window.dispatchEvent(new CustomEvent(SEEN_EVENT, { detail: hubDTag }))
 }
@@ -201,9 +197,14 @@ export function useJoinRequestCount(
       }
     }
     const handleStorage = (e: StorageEvent) => {
-      if (e.key === STORAGE_PREFIX + hub.dTag) {
-        setCount(0)
-        knownPubkeysRef.current.clear()
+      // Another tab advanced the synced join read-state cache — pull it into this tab's in-memory
+      // map, then reset (marking seen in any tab zeroes the badge everywhere).
+      if (e.key && e.key.startsWith(StorageKey.NOTIF_JOIN_READ_STATE)) {
+        refreshJoinSeenFromCache()
+        if (getLastSeen(hub.dTag) > 0) {
+          setCount(0)
+          knownPubkeysRef.current.clear()
+        }
       }
     }
 
