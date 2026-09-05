@@ -223,19 +223,33 @@ export class PC55Signer {
   // Mirrors the vault signer's `.skd` surface. `peer` is the TRAILING positional param and is
   // OMITTED entirely for self derivations (§7). The sub-key never leaves the signer (DENOS).
 
-  async skdGetSubkeyPubkey(context: string, peerPub?: string): Promise<string> {
-    return this.sendRequest('skd_get_subkey_pubkey', peerPub ? [context, peerPub] : [context])
+  // self form (no peer)
+  async skdGetSelfSubkeyPubkey(context: string): Promise<string> {
+    return this.sendRequest('skd_get_self_subkey_pubkey', [context])
   }
-  async skdSignAsSubkey(context: string, event: unknown, peerPub?: string): Promise<Record<string, unknown>> {
-    const eventJson = JSON.stringify(event)
-    const resultJson = await this.sendRequest('skd_sign_as_subkey', peerPub ? [context, eventJson, peerPub] : [context, eventJson])
+  async skdSignAsSelfSubkey(context: string, event: unknown): Promise<Record<string, unknown>> {
+    const resultJson = await this.sendRequest('skd_sign_as_self_subkey', [context, JSON.stringify(event)])
     return JSON.parse(resultJson)
   }
-  async skdNip44EncryptAsSubkey(context: string, recipientPub: string, plaintext: string, peerPub?: string): Promise<string> {
-    return this.sendRequest('skd_nip44_encrypt_as_subkey', peerPub ? [context, recipientPub, plaintext, peerPub] : [context, recipientPub, plaintext])
+  async skdNip44EncryptAsSelfSubkey(context: string, recipientPub: string, plaintext: string): Promise<string> {
+    return this.sendRequest('skd_nip44_encrypt_as_self_subkey', [context, recipientPub, plaintext])
   }
-  async skdNip44DecryptAsSubkey(context: string, senderPub: string, ciphertext: string, peerPub?: string): Promise<string> {
-    return this.sendRequest('skd_nip44_decrypt_as_subkey', peerPub ? [context, senderPub, ciphertext, peerPub] : [context, senderPub, ciphertext])
+  async skdNip44DecryptAsSelfSubkey(context: string, senderPub: string, ciphertext: string): Promise<string> {
+    return this.sendRequest('skd_nip44_decrypt_as_self_subkey', [context, senderPub, ciphertext])
+  }
+  // shared form (peer required)
+  async skdGetSharedSubkeyPubkey(context: string, peerPub: string): Promise<string> {
+    return this.sendRequest('skd_get_shared_subkey_pubkey', [context, peerPub])
+  }
+  async skdSignAsSharedSubkey(context: string, event: unknown, peerPub: string): Promise<Record<string, unknown>> {
+    const resultJson = await this.sendRequest('skd_sign_as_shared_subkey', [context, JSON.stringify(event), peerPub])
+    return JSON.parse(resultJson)
+  }
+  async skdNip44EncryptAsSharedSubkey(context: string, recipientPub: string, plaintext: string, peerPub: string): Promise<string> {
+    return this.sendRequest('skd_nip44_encrypt_as_shared_subkey', [context, recipientPub, plaintext, peerPub])
+  }
+  async skdNip44DecryptAsSharedSubkey(context: string, senderPub: string, ciphertext: string, peerPub: string): Promise<string> {
+    return this.sendRequest('skd_nip44_decrypt_as_shared_subkey', [context, senderPub, ciphertext, peerPub])
   }
 
   // ── blinded form (NIP-SKD §1) — `peer` is a required positional param; the blinded private scalar
@@ -280,10 +294,14 @@ export class PC55Signer {
   get skd() {
     if (!this.skdSupported) return undefined
     return {
-      getSubkeyPubkey: (context: string, peerPub?: string) => this.skdGetSubkeyPubkey(context, peerPub),
-      signAsSubkey: (context: string, event: unknown, peerPub?: string) => this.skdSignAsSubkey(context, event, peerPub),
-      nip44EncryptAsSubkey: (context: string, recipientPub: string, plaintext: string, peerPub?: string) => this.skdNip44EncryptAsSubkey(context, recipientPub, plaintext, peerPub),
-      nip44DecryptAsSubkey: (context: string, senderPub: string, ciphertext: string, peerPub?: string) => this.skdNip44DecryptAsSubkey(context, senderPub, ciphertext, peerPub),
+      getSelfSubkeyPubkey: (context: string) => this.skdGetSelfSubkeyPubkey(context),
+      signAsSelfSubkey: (context: string, event: unknown) => this.skdSignAsSelfSubkey(context, event),
+      nip44EncryptAsSelfSubkey: (context: string, recipientPub: string, plaintext: string) => this.skdNip44EncryptAsSelfSubkey(context, recipientPub, plaintext),
+      nip44DecryptAsSelfSubkey: (context: string, senderPub: string, ciphertext: string) => this.skdNip44DecryptAsSelfSubkey(context, senderPub, ciphertext),
+      getSharedSubkeyPubkey: (context: string, peerPub: string) => this.skdGetSharedSubkeyPubkey(context, peerPub),
+      signAsSharedSubkey: (context: string, event: unknown, peerPub: string) => this.skdSignAsSharedSubkey(context, event, peerPub),
+      nip44EncryptAsSharedSubkey: (context: string, recipientPub: string, plaintext: string, peerPub: string) => this.skdNip44EncryptAsSharedSubkey(context, recipientPub, plaintext, peerPub),
+      nip44DecryptAsSharedSubkey: (context: string, senderPub: string, ciphertext: string, peerPub: string) => this.skdNip44DecryptAsSharedSubkey(context, senderPub, ciphertext, peerPub),
       getBlindedPubkey: (context: string, peerPub: string) => this.skdGetBlindedPubkey(context, peerPub),
       getPeerBlindedPubkey: (context: string, peerPub: string) => this.skdGetPeerBlindedPubkey(context, peerPub),
       signAsBlinded: (context: string, event: unknown, peerPub: string) => this.skdSignAsBlinded(context, event, peerPub),

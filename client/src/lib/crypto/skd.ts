@@ -254,17 +254,25 @@ export function deriveFacilitatedPseudonymForFacilitator(
 
 // ── Remote-signer routing (NIP-SKD-capable signer) ───────────────────────────
 
-/** Optional NIP-SKD surface a signer may expose (NIP-07 shape, `docs/NIP-SKD.md` §6). */
+/**
+ * Optional NIP-SKD surface a signer may expose (NIP-07 shape, `docs/NIP-SKD.md` §6). Each of the three
+ * forms — self, shared, blinded — has its **own** method names (no form-selecting optional argument), so
+ * a call site's form is explicit and a mistaken `peer` can never silently derive the wrong key.
+ */
 export interface SkdSigner {
   skd?: {
-    // ── self (no peer) / shared (peer) forms ──
-    getSubkeyPubkey(context: string, peerPub?: string): Promise<string>
-    signAsSubkey(context: string, event: unknown, peerPub?: string): Promise<unknown>
-    /** nip44-encrypt FROM the sub-key TO `recipientPub` — e.g. an owner (`O`) wrapping a
-     *  member's leaf key. `peerPub` is the sub-key's derivation peer (omitted for self). */
-    nip44EncryptAsSubkey(context: string, recipientPub: string, plaintext: string, peerPub?: string): Promise<string>
-    /** nip44-decrypt a ciphertext addressed to the sub-key from `senderPub`. */
-    nip44DecryptAsSubkey(context: string, senderPub: string, ciphertext: string, peerPub?: string): Promise<string>
+    // ── self form (no peer) ──
+    getSelfSubkeyPubkey(context: string): Promise<string>
+    signAsSelfSubkey(context: string, event: unknown): Promise<unknown>
+    nip44EncryptAsSelfSubkey(context: string, recipientPub: string, plaintext: string): Promise<string>
+    nip44DecryptAsSelfSubkey(context: string, senderPub: string, ciphertext: string): Promise<string>
+
+    // ── shared form (peer required; both parties derive the identical keypair) ──
+    getSharedSubkeyPubkey(context: string, peerPub: string): Promise<string>
+    signAsSharedSubkey(context: string, event: unknown, peerPub: string): Promise<unknown>
+    /** nip44-encrypt FROM the shared sub-key TO `recipientPub`. `peerPub` is the derivation peer. */
+    nip44EncryptAsSharedSubkey(context: string, recipientPub: string, plaintext: string, peerPub: string): Promise<string>
+    nip44DecryptAsSharedSubkey(context: string, senderPub: string, ciphertext: string, peerPub: string): Promise<string>
 
     // ── blinded form (NIP-SKD §1) — the caller's own key is `root + t·G`; a peer can verify but not sign ──
     /** The caller's OWN blinded pubkey (base = caller's root, blinded toward `peerPub`). */
@@ -292,7 +300,7 @@ export class SkdUnsupportedError extends Error {
  */
 export function signerSupportsSkd(signer: unknown): signer is Required<SkdSigner> {
   const skd = (signer as SkdSigner | null)?.skd
-  return typeof skd?.getSubkeyPubkey === 'function' && typeof skd?.getBlindedPubkey === 'function'
+  return typeof skd?.getSelfSubkeyPubkey === 'function' && typeof skd?.getBlindedPubkey === 'function'
 }
 
 /**
@@ -307,7 +315,12 @@ export async function resolveSubkeyPubkey(
   opts: { privateKey?: string | null; signer?: unknown; peerPub?: string }
 ): Promise<string> {
   if (opts.privateKey) return deriveSubKeyLocal(opts.privateKey, context, opts.peerPub).pubHex
-  if (signerSupportsSkd(opts.signer)) return opts.signer.skd.getSubkeyPubkey(context, opts.peerPub)
+  if (signerSupportsSkd(opts.signer)) {
+    // self (no peer) vs shared (peer) → the matching explicit op
+    return opts.peerPub
+      ? opts.signer.skd.getSharedSubkeyPubkey(context, opts.peerPub)
+      : opts.signer.skd.getSelfSubkeyPubkey(context)
+  }
   throw new SkdUnsupportedError()
 }
 

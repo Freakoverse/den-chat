@@ -74,11 +74,21 @@ export function makeSubkeySigner(
         nip44Decrypt: (senderPub, ciphertext) => skd.nip44DecryptAsBlinded(context, senderPub, ciphertext, peer),
       }
     }
+    if (form === 'shared') {
+      const peer = opts.peerPub!
+      return {
+        getPublicKey: () => skd.getSharedSubkeyPubkey(context, peer),
+        signEvent: (event) => skd.signAsSharedSubkey(context, event, peer) as Promise<Event>,
+        nip44Encrypt: (recipientPub, plaintext) => skd.nip44EncryptAsSharedSubkey(context, recipientPub, plaintext, peer),
+        nip44Decrypt: (senderPub, ciphertext) => skd.nip44DecryptAsSharedSubkey(context, senderPub, ciphertext, peer),
+      }
+    }
+    // self (no peer)
     return {
-      getPublicKey: () => skd.getSubkeyPubkey(context, opts.peerPub),
-      signEvent: (event) => skd.signAsSubkey(context, event, opts.peerPub) as Promise<Event>,
-      nip44Encrypt: (recipientPub, plaintext) => skd.nip44EncryptAsSubkey(context, recipientPub, plaintext, opts.peerPub),
-      nip44Decrypt: (senderPub, ciphertext) => skd.nip44DecryptAsSubkey(context, senderPub, ciphertext, opts.peerPub),
+      getPublicKey: () => skd.getSelfSubkeyPubkey(context),
+      signEvent: (event) => skd.signAsSelfSubkey(context, event) as Promise<Event>,
+      nip44Encrypt: (recipientPub, plaintext) => skd.nip44EncryptAsSelfSubkey(context, recipientPub, plaintext),
+      nip44Decrypt: (senderPub, ciphertext) => skd.nip44DecryptAsSelfSubkey(context, senderPub, ciphertext),
     }
   }
   throw new SkdUnsupportedError()

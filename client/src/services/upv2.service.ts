@@ -35,10 +35,14 @@ type UPV2Action =
   | 'nip44_decrypt'
   // NIP-SKD (§7 methods, used as the UPV2 action). `skd_sign_as_subkey` gets a 'signed_event'
   // response (like sign_event); the others echo their own action name with a { result } body.
-  | 'skd_get_subkey_pubkey'
-  | 'skd_sign_as_subkey'
-  | 'skd_nip44_encrypt_as_subkey'
-  | 'skd_nip44_decrypt_as_subkey'
+  | 'skd_get_self_subkey_pubkey'
+  | 'skd_sign_as_self_subkey'
+  | 'skd_nip44_encrypt_as_self_subkey'
+  | 'skd_nip44_decrypt_as_self_subkey'
+  | 'skd_get_shared_subkey_pubkey'
+  | 'skd_sign_as_shared_subkey'
+  | 'skd_nip44_encrypt_as_shared_subkey'
+  | 'skd_nip44_decrypt_as_shared_subkey'
   | 'skd_get_blinded_pubkey'
   | 'skd_get_peer_blinded_pubkey'
   | 'skd_sign_as_blinded'
@@ -508,49 +512,87 @@ class UPV2Service {
   // Matches DENOS's handle_skd (upv2.rs): session-authenticated (no challenge_signature), the
   // sign op replies with a 'signed_event' { event } and the rest echo their own action + { result }.
 
-  async skdGetSubkeyPubkey(context: string, peerPub?: string): Promise<string> {
+  // self form (no peer)
+  async skdGetSelfSubkeyPubkey(context: string): Promise<string> {
     const s = this.currentSession
     if (!s) throw new Error('Not logged in via UPV2')
     const nonce = bytesToHex(crypto.getRandomValues(new Uint8Array(16)))
     const requestTime = Math.floor(Date.now() / 1000)
-    await this.sendUPV2Event(s.relays, s.loginPk, s.loginSk, s.signerPubkey, 'skd_get_subkey_pubkey', s.sessionId,
-      { context, ...(peerPub ? { peerPub } : {}), nonce })
-    const response = await this.pollForResponse(s.relays, s.loginPk, s.loginSk, 'skd_get_subkey_pubkey', 30000, s.sessionId, requestTime, nonce)
+    await this.sendUPV2Event(s.relays, s.loginPk, s.loginSk, s.signerPubkey, 'skd_get_self_subkey_pubkey', s.sessionId, { context, nonce })
+    const response = await this.pollForResponse(s.relays, s.loginPk, s.loginSk, 'skd_get_self_subkey_pubkey', 30000, s.sessionId, requestTime, nonce)
     if (response?.result) return response.result as string
-    throw new Error('skd_get_subkey_pubkey failed: no result from signer')
+    throw new Error('skd_get_self_subkey_pubkey failed: no result from signer')
   }
-  async skdSignAsSubkey(context: string, event: unknown, peerPub?: string): Promise<Record<string, unknown>> {
+  async skdSignAsSelfSubkey(context: string, event: unknown): Promise<Record<string, unknown>> {
     const s = this.currentSession
     if (!s) throw new Error('Not logged in via UPV2')
     const nonce = bytesToHex(crypto.getRandomValues(new Uint8Array(16)))
     const requestTime = Math.floor(Date.now() / 1000)
-    await this.sendUPV2Event(s.relays, s.loginPk, s.loginSk, s.signerPubkey, 'skd_sign_as_subkey', s.sessionId,
-      { context, ...(peerPub ? { peerPub } : {}), nonce, event })
+    await this.sendUPV2Event(s.relays, s.loginPk, s.loginSk, s.signerPubkey, 'skd_sign_as_self_subkey', s.sessionId, { context, nonce, event })
     const response = await this.pollForResponse(s.relays, s.loginPk, s.loginSk, 'signed_event', 30000, s.sessionId, requestTime, nonce)
     if (response?.event) return response.event as Record<string, unknown>
-    throw new Error('skd_sign_as_subkey failed: no signed event from signer')
+    throw new Error('skd_sign_as_self_subkey failed: no signed event from signer')
   }
-  async skdNip44EncryptAsSubkey(context: string, recipientPub: string, plaintext: string, peerPub?: string): Promise<string> {
+  async skdNip44EncryptAsSelfSubkey(context: string, recipientPub: string, plaintext: string): Promise<string> {
     const s = this.currentSession
     if (!s) throw new Error('Not logged in via UPV2')
     const nonce = bytesToHex(crypto.getRandomValues(new Uint8Array(16)))
     const requestTime = Math.floor(Date.now() / 1000)
-    await this.sendUPV2Event(s.relays, s.loginPk, s.loginSk, s.signerPubkey, 'skd_nip44_encrypt_as_subkey', s.sessionId,
-      { context, ...(peerPub ? { peerPub } : {}), nonce, recipientPub, plaintext })
-    const response = await this.pollForResponse(s.relays, s.loginPk, s.loginSk, 'skd_nip44_encrypt_as_subkey', 30000, s.sessionId, requestTime, nonce)
+    await this.sendUPV2Event(s.relays, s.loginPk, s.loginSk, s.signerPubkey, 'skd_nip44_encrypt_as_self_subkey', s.sessionId, { context, nonce, recipientPub, plaintext })
+    const response = await this.pollForResponse(s.relays, s.loginPk, s.loginSk, 'skd_nip44_encrypt_as_self_subkey', 30000, s.sessionId, requestTime, nonce)
     if (response?.result) return response.result as string
-    throw new Error('skd_nip44_encrypt_as_subkey failed: no result from signer')
+    throw new Error('skd_nip44_encrypt_as_self_subkey failed: no result from signer')
   }
-  async skdNip44DecryptAsSubkey(context: string, senderPub: string, ciphertext: string, peerPub?: string): Promise<string> {
+  async skdNip44DecryptAsSelfSubkey(context: string, senderPub: string, ciphertext: string): Promise<string> {
     const s = this.currentSession
     if (!s) throw new Error('Not logged in via UPV2')
     const nonce = bytesToHex(crypto.getRandomValues(new Uint8Array(16)))
     const requestTime = Math.floor(Date.now() / 1000)
-    await this.sendUPV2Event(s.relays, s.loginPk, s.loginSk, s.signerPubkey, 'skd_nip44_decrypt_as_subkey', s.sessionId,
-      { context, ...(peerPub ? { peerPub } : {}), nonce, senderPub, ciphertext })
-    const response = await this.pollForResponse(s.relays, s.loginPk, s.loginSk, 'skd_nip44_decrypt_as_subkey', 30000, s.sessionId, requestTime, nonce)
+    await this.sendUPV2Event(s.relays, s.loginPk, s.loginSk, s.signerPubkey, 'skd_nip44_decrypt_as_self_subkey', s.sessionId, { context, nonce, senderPub, ciphertext })
+    const response = await this.pollForResponse(s.relays, s.loginPk, s.loginSk, 'skd_nip44_decrypt_as_self_subkey', 30000, s.sessionId, requestTime, nonce)
     if (response?.result) return response.result as string
-    throw new Error('skd_nip44_decrypt_as_subkey failed: no result from signer')
+    throw new Error('skd_nip44_decrypt_as_self_subkey failed: no result from signer')
+  }
+  // shared form (peer required)
+  async skdGetSharedSubkeyPubkey(context: string, peerPub: string): Promise<string> {
+    const s = this.currentSession
+    if (!s) throw new Error('Not logged in via UPV2')
+    const nonce = bytesToHex(crypto.getRandomValues(new Uint8Array(16)))
+    const requestTime = Math.floor(Date.now() / 1000)
+    await this.sendUPV2Event(s.relays, s.loginPk, s.loginSk, s.signerPubkey, 'skd_get_shared_subkey_pubkey', s.sessionId, { context, peerPub, nonce })
+    const response = await this.pollForResponse(s.relays, s.loginPk, s.loginSk, 'skd_get_shared_subkey_pubkey', 30000, s.sessionId, requestTime, nonce)
+    if (response?.result) return response.result as string
+    throw new Error('skd_get_shared_subkey_pubkey failed: no result from signer')
+  }
+  async skdSignAsSharedSubkey(context: string, event: unknown, peerPub: string): Promise<Record<string, unknown>> {
+    const s = this.currentSession
+    if (!s) throw new Error('Not logged in via UPV2')
+    const nonce = bytesToHex(crypto.getRandomValues(new Uint8Array(16)))
+    const requestTime = Math.floor(Date.now() / 1000)
+    await this.sendUPV2Event(s.relays, s.loginPk, s.loginSk, s.signerPubkey, 'skd_sign_as_shared_subkey', s.sessionId, { context, peerPub, nonce, event })
+    const response = await this.pollForResponse(s.relays, s.loginPk, s.loginSk, 'signed_event', 30000, s.sessionId, requestTime, nonce)
+    if (response?.event) return response.event as Record<string, unknown>
+    throw new Error('skd_sign_as_shared_subkey failed: no signed event from signer')
+  }
+  async skdNip44EncryptAsSharedSubkey(context: string, recipientPub: string, plaintext: string, peerPub: string): Promise<string> {
+    const s = this.currentSession
+    if (!s) throw new Error('Not logged in via UPV2')
+    const nonce = bytesToHex(crypto.getRandomValues(new Uint8Array(16)))
+    const requestTime = Math.floor(Date.now() / 1000)
+    await this.sendUPV2Event(s.relays, s.loginPk, s.loginSk, s.signerPubkey, 'skd_nip44_encrypt_as_shared_subkey', s.sessionId, { context, peerPub, nonce, recipientPub, plaintext })
+    const response = await this.pollForResponse(s.relays, s.loginPk, s.loginSk, 'skd_nip44_encrypt_as_shared_subkey', 30000, s.sessionId, requestTime, nonce)
+    if (response?.result) return response.result as string
+    throw new Error('skd_nip44_encrypt_as_shared_subkey failed: no result from signer')
+  }
+  async skdNip44DecryptAsSharedSubkey(context: string, senderPub: string, ciphertext: string, peerPub: string): Promise<string> {
+    const s = this.currentSession
+    if (!s) throw new Error('Not logged in via UPV2')
+    const nonce = bytesToHex(crypto.getRandomValues(new Uint8Array(16)))
+    const requestTime = Math.floor(Date.now() / 1000)
+    await this.sendUPV2Event(s.relays, s.loginPk, s.loginSk, s.signerPubkey, 'skd_nip44_decrypt_as_shared_subkey', s.sessionId, { context, peerPub, nonce, senderPub, ciphertext })
+    const response = await this.pollForResponse(s.relays, s.loginPk, s.loginSk, 'skd_nip44_decrypt_as_shared_subkey', 30000, s.sessionId, requestTime, nonce)
+    if (response?.result) return response.result as string
+    throw new Error('skd_nip44_decrypt_as_shared_subkey failed: no result from signer')
   }
 
   // ── blinded form (NIP-SKD §1) — UPV2 uses named-object params; `peer` is required ──
@@ -626,10 +668,14 @@ class UPV2Service {
   get skd() {
     if (!this.skdSupported) return undefined
     return {
-      getSubkeyPubkey: (context: string, peerPub?: string) => this.skdGetSubkeyPubkey(context, peerPub),
-      signAsSubkey: (context: string, event: unknown, peerPub?: string) => this.skdSignAsSubkey(context, event, peerPub),
-      nip44EncryptAsSubkey: (context: string, recipientPub: string, plaintext: string, peerPub?: string) => this.skdNip44EncryptAsSubkey(context, recipientPub, plaintext, peerPub),
-      nip44DecryptAsSubkey: (context: string, senderPub: string, ciphertext: string, peerPub?: string) => this.skdNip44DecryptAsSubkey(context, senderPub, ciphertext, peerPub),
+      getSelfSubkeyPubkey: (context: string) => this.skdGetSelfSubkeyPubkey(context),
+      signAsSelfSubkey: (context: string, event: unknown) => this.skdSignAsSelfSubkey(context, event),
+      nip44EncryptAsSelfSubkey: (context: string, recipientPub: string, plaintext: string) => this.skdNip44EncryptAsSelfSubkey(context, recipientPub, plaintext),
+      nip44DecryptAsSelfSubkey: (context: string, senderPub: string, ciphertext: string) => this.skdNip44DecryptAsSelfSubkey(context, senderPub, ciphertext),
+      getSharedSubkeyPubkey: (context: string, peerPub: string) => this.skdGetSharedSubkeyPubkey(context, peerPub),
+      signAsSharedSubkey: (context: string, event: unknown, peerPub: string) => this.skdSignAsSharedSubkey(context, event, peerPub),
+      nip44EncryptAsSharedSubkey: (context: string, recipientPub: string, plaintext: string, peerPub: string) => this.skdNip44EncryptAsSharedSubkey(context, recipientPub, plaintext, peerPub),
+      nip44DecryptAsSharedSubkey: (context: string, senderPub: string, ciphertext: string, peerPub: string) => this.skdNip44DecryptAsSharedSubkey(context, senderPub, ciphertext, peerPub),
       getBlindedPubkey: (context: string, peerPub: string) => this.skdGetBlindedPubkey(context, peerPub),
       getPeerBlindedPubkey: (context: string, peerPub: string) => this.skdGetPeerBlindedPubkey(context, peerPub),
       signAsBlinded: (context: string, event: unknown, peerPub: string) => this.skdSignAsBlinded(context, event, peerPub),
