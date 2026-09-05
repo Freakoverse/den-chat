@@ -7,6 +7,7 @@
  */
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
+import { useEscToClose } from '@/hooks/useEscToClose'
 import { getForumDraft, setForumDraft, clearDraft, forumDraftKey } from '@/stores/draftStore'
 import { useHubStore } from '@/stores/hubStore'
 import { useUserStore } from '@/stores/userStore'
@@ -1354,6 +1355,9 @@ interface CreateForumPostModalProps {
 }
 
 function CreateForumPostModal({ onClose, sendMessage, canPublish, signer, privateKey, hub, hubDTag, channelId }: CreateForumPostModalProps) {
+  // Esc = click the X. onClose is a safe dismiss (it doesn't abort an in-flight publish — publishing
+  // continues in the background just as clicking the X does), so wire it directly.
+  useEscToClose(onClose)
   const _forumKey = forumDraftKey(hubDTag, channelId)
   const _saved = useMemo(() => getForumDraft(_forumKey), [_forumKey])
   const [title, setTitle] = useState(() => _saved?.title ?? '')
@@ -1967,6 +1971,8 @@ interface EditForumPostModalProps {
 }
 
 function EditForumPostModal({ post, onClose, editMessage, signer, privateKey, hub }: EditForumPostModalProps) {
+  // Esc = click the X. onClose is a safe dismiss (it doesn't abort an in-flight save), so wire directly.
+  useEscToClose(onClose)
   const [title, setTitle] = useState(post.title || '')
   const [body, setBody] = useState(post.content || '')
   const [tags, setTags] = useState<string[]>(post.forumTags || [])
@@ -2490,6 +2496,7 @@ interface ForumFilterModalProps {
 }
 
 function ForumFilterModal({ open, onClose, filterTags, setFilterTags, filterAuthor, setFilterAuthor, availableTags }: ForumFilterModalProps) {
+  useEscToClose(onClose, open)
   const [localTags, setLocalTags] = useState<string[]>(filterTags)
   const [localAuthor, setLocalAuthor] = useState(filterAuthor)
   const [tagInput, setTagInput] = useState('')

@@ -4,6 +4,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef, useMemo, type ReactNode } from 'react'
+import { useEscToClose } from '@/hooks/useEscToClose'
 import { getDraft, setDraft, clearDraft, pcDraftKey } from '@/stores/draftStore'
 import { usePublicChatStore, type PublicChatMessage, type PCStoredReaction } from '@/stores/publicChatStore'
 import { useNotificationStore } from '@/stores/notificationStore'
@@ -526,6 +527,7 @@ function PCNotificationRow({ notif, onJump }: { notif: PCNotification; onJump: (
 /* ═══════════════════════════════════════════ */
 
 function AddTopicModal({ onClose }: { onClose: () => void }) {
+  useEscToClose(onClose)
   const [value, setValue] = useState('')
   const myPubkey = useUserStore((s) => s.pubkey)
   const signer = useUserStore((s) => s.signer)
@@ -601,6 +603,7 @@ function AddTopicModal({ onClose }: { onClose: () => void }) {
 /* ═══════════════════════════════════════════ */
 
 function InfoModal({ onClose }: { onClose: () => void }) {
+  useEscToClose(onClose)
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center px-2" onClick={onClose}>
       <div className="absolute inset-0 bg-black/60" />
@@ -1861,6 +1864,7 @@ function PublicMessageActions({ msg, onReply, onRequestDelete, onAddReaction }: 
 /* ═══════════════════════════════════════════ */
 
 function PublicChatSettingsModal({ onClose }: { onClose: () => void }) {
+  useEscToClose(onClose)
   const powDifficulty = usePublicChatStore((s) => s.powDifficulty)
   const setPowDifficulty = usePublicChatStore((s) => s.setPowDifficulty)
   const showMedia = usePublicChatStore((s) => s.showMedia)

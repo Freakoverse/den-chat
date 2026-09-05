@@ -16,6 +16,7 @@ import { truncateNpub } from '@/lib/utils'
 import { nip19 } from 'nostr-tools'
 import { X, Search, Copy, Check, Send, Link, Loader2 } from 'lucide-react'
 import type { HubData } from '@/stores/hubStore'
+import { useEscToClose } from '@/hooks/useEscToClose'
 
 interface InviteModalProps {
   open: boolean
@@ -24,6 +25,7 @@ interface InviteModalProps {
 }
 
 export function InviteModal({ open, onClose, hub }: InviteModalProps) {
+  useEscToClose(onClose, open)
   const myPubkey = useUserStore((s) => s.pubkey)
   const signer = useUserStore((s) => s.signer)
   const privateKey = useUserStore((s) => s.privateKey)

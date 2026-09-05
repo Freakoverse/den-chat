@@ -14,6 +14,7 @@ import {
   publishVirtualAvatar,
   clearVirtualAvatarCache,
 } from '@/lib/voice/virtualAvatar'
+import { useEscToClose } from '@/hooks/useEscToClose'
 
 interface Side { url?: string; preview?: string; uploading: boolean }
 
@@ -22,6 +23,7 @@ function uploadLimitMb(): number {
 }
 
 export default function VirtualAvatarModal({ onClose }: { onClose: () => void }) {
+  useEscToClose(onClose)
   const pubkey = useUserStore((s) => s.pubkey)
   const signer = useUserStore((s) => s.signer)
   const privateKey = useUserStore((s) => s.privateKey)

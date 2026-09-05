@@ -10,6 +10,7 @@
  */
 
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { useEscToClose } from '@/hooks/useEscToClose'
 import { useUserStore } from '@/stores/userStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { fetchEventsWide } from '@/lib/nostr/readRelays'
@@ -264,14 +265,8 @@ function CommentModal({ comment, canGoBack, onGoBack, onClose, onDrillInto, repl
     if (e.target === backdropRef.current) onClose()
   }
 
-  // Close on Escape
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  }, [onClose])
+  // Close on the configurable close-modal keybind (topmost modal only)
+  useEscToClose(onClose)
 
   return (
     <div

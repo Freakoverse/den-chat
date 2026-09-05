@@ -21,6 +21,7 @@ import { publishPersonal, getPublishRelays, getDeletePublishRelays } from '@/sto
 import { uploadToBlossomServers } from '@/lib/blossom'
 import type { UploadProgress } from '@/lib/blossom'
 import type { Event } from 'nostr-tools'
+import { useEscToClose } from '@/hooks/useEscToClose'
 
 // ─── Types ───
 
@@ -93,6 +94,7 @@ interface LinksViewerModalProps {
 }
 
 export function LinksViewerModal({ open, onClose, pubkey, onEdit, isSelf }: LinksViewerModalProps) {
+  useEscToClose(onClose, open)
   const [linkSets, setLinkSets] = useState<LinkSet[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -246,6 +248,7 @@ interface EditingLinkSet {
 }
 
 export function LinksEditorModal({ open, onClose, onSaved }: LinksEditorModalProps) {
+  useEscToClose(onClose, open)
   const myPubkey = useUserStore((s) => s.pubkey)
   const signer = useUserStore((s) => s.signer)
   const privateKey = useUserStore((s) => s.privateKey)

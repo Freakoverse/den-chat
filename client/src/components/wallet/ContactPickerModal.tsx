@@ -6,6 +6,7 @@
  */
 
 import { useState, useMemo } from 'react'
+import { useEscToClose } from '@/hooks/useEscToClose'
 import { X, Search, UserPlus, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -23,6 +24,7 @@ interface ContactPickerProps {
 }
 
 export function ContactPickerModal({ onSelect, onClose }: ContactPickerProps) {
+  useEscToClose(onClose)
   const [search, setSearch] = useState('')
   const [selected, setSelected] = useState<string | null>(null)
 

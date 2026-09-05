@@ -20,6 +20,7 @@ import { HubSettingsModal } from '@/components/hub/HubSettingsModal'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { Hash, Megaphone, Users, Pin, PinOff, Bell, Search, Send, Plus, Smile, Sticker, Check, X, RotateCcw, Pencil, Reply, MoreVertical, Copy, MessageSquarePlus, Trash2, Loader2, Zap, Code, Bold, Italic, Strikethrough, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, Link, CodeSquare, ALargeSmall, Clipboard, ClipboardCheck, ClipboardPaste, Upload, FileIcon, Download, Image, Paperclip, AlertTriangle, AlertCircle, Eye, EyeOff, ShieldBan, ShieldAlert, ShieldOff, Lock, LockOpen, Settings, ArrowDown, ArrowLeft, ImagePlay, Star, Vote, Clock, Flag, Shield, Globe, Radio, History, BadgeCheck, Mic, WifiOff, Scissors, Type } from 'lucide-react'
 import { useState, useEffect, useRef, useCallback, memo, useMemo, Fragment } from 'react'
+import { useEscToClose, useEscBlock } from '@/hooks/useEscToClose'
 import { createPortal } from 'react-dom'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -514,6 +515,7 @@ export function ChannelDescriptionModal({ channelId, channelName, description, i
   isCreator: boolean
   onClose: () => void
 }) {
+  useEscToClose(onClose)
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(description || '')
   const [saving, setSaving] = useState(false)
@@ -4464,6 +4466,11 @@ export function DeleteConfirmDialog({ onConfirm, onCancel, title, description, p
   const [deleting, setDeleting] = useState(false)
   const [step, setStep] = useState(0)
 
+  // Esc mirrors the backdrop: while not deleting, it dismisses via onCancel (the backdrop's action);
+  // once the destructive delete is in flight the backdrop is inert (pure progress), so absorb Esc too.
+  useEscToClose(onCancel, !deleting)
+  useEscBlock(deleting)
+
   const steps = progressSteps || [
     'Marking post as deleted...',
     'Publishing changes...',
@@ -6542,6 +6549,7 @@ export function RawEventModal({ rawJson, decryptedContent, isDecrypted, onClose,
   onClose: () => void
   hideDecryptedTab?: boolean
 }) {
+  useEscToClose(onClose)
   const [copied, setCopied] = useState(false)
   const [activeTab, setActiveTab] = useState<'raw' | 'decrypted'>('raw')
 
@@ -6654,6 +6662,7 @@ export function MessageHistoryModal({ pubkey, dTag, hubDTag, channelId, onClose 
   channelId?: string
   onClose: () => void
 }) {
+  useEscToClose(onClose)
   const [versions, setVersions] = useState<HistoryVersion[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -7009,6 +7018,7 @@ function ThreadModal({ parentMsg, threadReplies, hubDTag, channelId, getProfile,
   initialScrollToId?: string | null
   onInitialScrollComplete?: () => void
 }) {
+  useEscToClose(onClose)
   const myPubkey = useUserStore((s) => s.pubkey)
   const myDisplayName = useUserStore((s) => s.displayName)
   const myAvatar = useUserStore((s) => s.avatar)

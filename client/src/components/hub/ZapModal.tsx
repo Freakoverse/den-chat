@@ -35,6 +35,7 @@ import {
 import { STANDARD_KINDS } from '@/lib/crypto/constants'
 import { subscribeEvents } from '@/lib/nostr/relay-pool'
 import { useZapStore } from '@/stores/zapStore'
+import { useEscToClose } from '@/hooks/useEscToClose'
 
 type ZapState = 'idle' | 'resolving' | 'invoice' | 'paying' | 'dev-invoice' | 'success' | 'error'
 
@@ -64,6 +65,7 @@ const PRESET_AMOUNTS = [
 ]
 
 export function ZapModal({ open, onClose, recipientPubkey, messageEventId, messageDTag, messageKind, hubDTag, disableSplit, storeNamespace }: ZapModalProps) {
+  useEscToClose(onClose, open)
   const { getProfile } = useProfileCache()
   const signer = useUserStore((s) => s.signer)
   const privateKey = useUserStore((s) => s.privateKey)

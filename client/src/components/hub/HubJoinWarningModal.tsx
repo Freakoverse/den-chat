@@ -10,6 +10,7 @@
 
 import { useState } from 'react'
 import { ShieldAlert, ShieldCheck, Eye, Check, KeyRound } from 'lucide-react'
+import { useEscToClose } from '@/hooks/useEscToClose'
 
 // Separate dismiss keys: v1 and v2 carry different information (public-membership warning vs.
 // what-is-protected + the NIP-SKD login requirement), so dismissing one must NOT hide the other.
@@ -35,6 +36,7 @@ interface HubJoinWarningModalProps {
 }
 
 export function HubJoinWarningModal({ open, onClose, onConfirm, isV2 = false }: HubJoinWarningModalProps) {
+  useEscToClose(onClose, open)
   const [neverShow, setNeverShow] = useState(false)
 
   if (!open) return null

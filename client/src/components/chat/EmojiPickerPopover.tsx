@@ -19,6 +19,7 @@ import { useUserStore } from '@/stores/userStore'
 import { useBlockStore } from '@/stores/blockStore'
 import { UserProfileModal } from '@/components/hub/UserProfileModal'
 import { useProfileCache } from '@/hooks/useProfileCache'
+import { useEscToClose, useEscBlock } from '@/hooks/useEscToClose'
 import { truncateNpub } from '@/lib/utils'
 import { nip19 } from 'nostr-tools'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
@@ -348,6 +349,11 @@ function MineTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcode:
       setDeleteSetDTag(null)
     }
   }
+
+  // Esc on the "Request Delete Emoji Set" confirmation behaves like its Cancel/backdrop
+  // (dismiss when not mid-request), and is absorbed while the deletion request is in flight.
+  useEscToClose(() => setDeleteSetDTag(null), !!deleteSetDTag && !deletingSet)
+  useEscBlock(!!deleteSetDTag && deletingSet)
 
   return (
     <div className="h-full flex flex-col">
@@ -1165,6 +1171,8 @@ function DiscoverEmojiTab({ onPickerClose }: { onPickerClose?: () => void }) {
 // ─── Discovery Modal ───
 
 export function EmojiDiscoveryModal({ onClose, initialSearch = '', initialAuthor = '' }: { onClose: () => void; initialSearch?: string; initialAuthor?: string }) {
+  // Full-screen modal, mounted only while shown — Esc closes it like its X.
+  useEscToClose(onClose)
   const [sets, setSets] = useState<EmojiSet[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState(initialSearch)

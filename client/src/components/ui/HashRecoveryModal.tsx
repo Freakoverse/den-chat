@@ -9,6 +9,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { X, Loader2, Check, AlertTriangle, Download, ShieldAlert } from 'lucide-react'
+import { useEscToClose } from '@/hooks/useEscToClose'
 
 interface ServerAttempt {
   url: string
@@ -38,6 +39,8 @@ export function HashRecoveryModal({ expectedHash, servers, ext, onClose, onRecov
   const [anySuccess, setAnySuccess] = useState(false)
   const cancelledRef = useRef(false)
   const unmatchedBlobRef = useRef<string | null>(null)
+
+  useEscToClose(onClose)
 
   useEffect(() => {
     cancelledRef.current = false

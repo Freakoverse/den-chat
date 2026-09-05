@@ -13,8 +13,10 @@ import { nip19 } from 'nostr-tools'
 import { useUserStore } from '@/stores/userStore'
 import { useHubStore, type HubData } from '@/stores/hubStore'
 import { loadFacilitatorSecret } from '@/hooks/useHubLoader'
+import { useEscToClose } from '@/hooks/useEscToClose'
 
 export function SetFacilitatorModal({ hub, onClose }: { hub: HubData; onClose: () => void }) {
+  useEscToClose(onClose)
   const pubkey = useUserStore((s) => s.pubkey)
   const signer = useUserStore((s) => s.signer)
   const privateKey = useUserStore((s) => s.privateKey)

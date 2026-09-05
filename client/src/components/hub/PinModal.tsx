@@ -17,6 +17,7 @@ import { Button } from '@/components/ui/button'
 import { truncateNpub } from '@/lib/utils'
 import { nip19 } from 'nostr-tools'
 import { useMessages, type ChatMessage } from '@/hooks/useMessages'
+import { useEscToClose } from '@/hooks/useEscToClose'
 
 interface PinModalProps {
   hubDTag: string
@@ -36,6 +37,7 @@ interface PinSection {
 }
 
 export function PinModal({ hubDTag, channelId, onClose, onJumpToMessage }: PinModalProps) {
+  useEscToClose(onClose)
   const { getProfile } = useProfileCache()
   const myPubkey = useUserStore((s) => s.pubkey)
   const signer = useUserStore((s) => s.signer)

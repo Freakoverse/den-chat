@@ -2495,6 +2495,7 @@ function RoleAssignmentPanel({ hubDTag, memberPubkey }: { hubDTag: string; membe
 
 /* ─── Following List Modal ─── */
 function FollowingListModal({ open, onClose, pubkeys }: { open: boolean; onClose: () => void; pubkeys: string[] }) {
+  useEscToClose(onClose, open)
   const { getProfile } = useProfileCache()
   const [search, setSearch] = useState('')
 

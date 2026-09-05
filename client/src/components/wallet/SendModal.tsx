@@ -6,6 +6,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react'
+import { useEscToClose, useEscBlock } from '@/hooks/useEscToClose'
 import {
   X, Send, ArrowRight, Loader2, CheckCircle, XCircle,
   ExternalLink, AlertTriangle, Fuel, Users, Zap, Clock, Wallet, ChevronDown,
@@ -137,6 +138,11 @@ export function SendModal({ chain, address, balance, selectedToken, onClose }: S
   const [sendAddressType, setSendAddressType] = useState<'taproot' | 'segwit-even' | 'segwit-odd'>('taproot')
   const [showAddressTypes, setShowAddressTypes] = useState(false)
   const [allBtcAddresses, setAllBtcAddresses] = useState<{ taproot: string; segwitEven: string; segwitOdd: string } | null>(null)
+
+  // Esc dismisses while composing/reviewing/after the result, but is absorbed during the
+  // in-flight 'sending' broadcast so it can't tear the modal down mid-send.
+  useEscToClose(onClose, step !== 'sending')
+  useEscBlock(step === 'sending')
 
   const isEvm = chain !== 'bitcoin'
   const decimals = CHAIN_DECIMALS[chain]

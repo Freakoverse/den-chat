@@ -6,6 +6,7 @@
  */
 
 import { useState, useCallback, useMemo } from 'react'
+import { useEscToClose } from '@/hooks/useEscToClose'
 import { QRCodeSVG } from 'qrcode.react'
 import { X, Copy, Check, Heart, ChevronLeft } from 'lucide-react'
 import { ADMIN_PUBKEY } from '@/lib/constants'
@@ -232,6 +233,8 @@ export function DonateModal({ open, onClose }: DonateModalProps) {
     setCopied(false)
     onClose()
   }, [onClose])
+
+  useEscToClose(resetAndClose, open)
 
   // ── QR value ──
   const qrValue = useMemo(() => {

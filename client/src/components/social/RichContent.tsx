@@ -11,6 +11,7 @@
  */
 
 import { useState, useEffect, useMemo, useCallback, Fragment } from 'react'
+import { useEscToClose } from '@/hooks/useEscToClose'
 import { nip19 } from 'nostr-tools'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { useBlossomMedia } from '@/hooks/useBlossomMedia'
@@ -499,10 +500,12 @@ export function ImageGallery({ images, startIndex, onClose }: {
   const prev = () => { setImgLoaded(false); setIndex((i) => (i > 0 ? i - 1 : images.length - 1)) }
   const next = () => { setImgLoaded(false); setIndex((i) => (i < images.length - 1 ? i + 1 : 0)) }
 
-  // Keyboard navigation
+  // Close via the configurable close-modal keybind (topmost modal only)
+  useEscToClose(onClose)
+
+  // Keyboard navigation (arrows)
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
       if (e.key === 'ArrowLeft') prev()
       if (e.key === 'ArrowRight') next()
     }

@@ -10,6 +10,7 @@
  */
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
+import { useEscToClose } from '@/hooks/useEscToClose'
 import { createPortal } from 'react-dom'
 import { useSocialStore } from '@/stores/socialStore'
 import { useNavigationStore } from '@/stores/navigationStore'
@@ -284,6 +285,7 @@ function ForumToggle({ enabled, onToggle, icon, label, description, disabled }: 
 }
 
 function ForumSettingsModal({ onClose }: { onClose: () => void }) {
+  useEscToClose(onClose)
   const showMedia = useForumStore((s) => s.showMedia)
   const setShowMedia = useForumStore((s) => s.setShowMedia)
   const showEmbeds = useForumStore((s) => s.showEmbeds)
@@ -1093,6 +1095,7 @@ function FeedControls() {
 }
 
 function ClassifierFilterModal({ onClose }: { onClose: () => void }) {
+  useEscToClose(onClose)
   const filterCategory = useForumStore((s) => s.filterCategory)
   const setFilterCategory = useForumStore((s) => s.setFilterCategory)
   const filterTags = useForumStore((s) => s.filterTags)
@@ -1222,6 +1225,7 @@ function WordHeader({ word }: { word: string }) {
 }
 
 function WordProfileModal({ word, onClose }: { word: string; onClose: () => void }) {
+  useEscToClose(onClose)
   const mine = useForumStore((s) => s.myWordProfile[word])
   const others = useForumStore((s) => s.othersWordProfiles[word])
   const { publishWordProfile, setWordDelegation, fetchOthersWordProfiles } = useForumStore()
@@ -1642,6 +1646,7 @@ function parsePubkeyInput(input: string): string | null {
 }
 
 function EditCommunityModal({ def, onClose }: { def: CommunityDef; onClose: () => void }) {
+  useEscToClose(onClose)
   const updateCommunity = useForumStore((s) => s.updateCommunity)
   const [name, setName] = useState(def.name)
   const [description, setDescription] = useState(def.description)

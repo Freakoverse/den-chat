@@ -12,6 +12,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { useUserStore } from '@/stores/userStore'
 import { useDMStore } from '@/stores/dmStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
+import { useEscToClose } from '@/hooks/useEscToClose'
 import { fetchEvents } from '@/lib/nostr/relay-pool'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { truncateNpub } from '@/lib/utils'
@@ -44,6 +45,9 @@ export function NewDMModal({ open, onClose, onStartConversation }: Props) {
   const [publicResults, setPublicResults] = useState<SearchResult[]>([])
   const [publicSearching, setPublicSearching] = useState(false)
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Esc closes the modal like its X (gated on `open`, before the early return below).
+  useEscToClose(onClose, open)
 
   // Load follow list
   useEffect(() => {

@@ -20,6 +20,7 @@ import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
 import { usePermissions, getPermissionsForUser } from '@/lib/hub/permissions'
 import { useHubStore } from '@/stores/hubStore'
+import { useEscToClose } from '@/hooks/useEscToClose'
 
 interface CalendarPanelProps {
   hubDTag: string
@@ -37,6 +38,7 @@ const MONTHS = [
 ]
 
 export function CalendarPanel({ hubDTag, open, onClose }: CalendarPanelProps) {
+  useEscToClose(onClose, open)
   const {
     decryptedEvents,
     liveEventCount,

@@ -6,6 +6,7 @@
  */
 
 import { Globe, Lock, X } from 'lucide-react'
+import { useEscToClose } from '@/hooks/useEscToClose'
 import type { BlockType } from '@/stores/blockStore'
 
 interface BlockTypeModalProps {
@@ -17,6 +18,8 @@ interface BlockTypeModalProps {
 }
 
 export function BlockTypeModal({ open, onClose, onSelect, displayName }: BlockTypeModalProps) {
+  useEscToClose(onClose, open)
+
   if (!open) return null
 
   return (

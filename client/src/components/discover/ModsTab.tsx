@@ -5,6 +5,7 @@
  */
 
 import { useEffect, useMemo, useState, useRef } from 'react'
+import { useEscToClose } from '@/hooks/useEscToClose'
 import { nip19 } from 'nostr-tools'
 import {
   Package, Loader2, ChevronLeft, ChevronRight, SlidersHorizontal, X, ExternalLink,
@@ -220,6 +221,7 @@ function PlaceholderArt() {
 // ─── Open-in modal ───
 
 function ModOpenModal({ mod, onClose }: { mod: Mod; onClose: () => void }) {
+  useEscToClose(onClose)
   const { targets, addTarget, removeTarget } = useModOpenTargetsStore()
   const [draft, setDraft] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
@@ -300,6 +302,7 @@ const REPOST_OPTS: { v: RepostMode; label: string }[] = [{ v: 'show', label: 'Sh
 const EMU_OPTS: { v: EmulationMode; label: string }[] = [{ v: 'show', label: 'Show emulated' }, { v: 'native', label: 'Native only' }, { v: 'only', label: 'Only emulated' }]
 
 function ModFiltersModal({ availableClients, onClose }: { availableClients: string[]; onClose: () => void }) {
+  useEscToClose(onClose)
   const s = useModFiltersStore()
 
   return (

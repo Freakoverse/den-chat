@@ -12,6 +12,7 @@
  */
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { X, RotateCcw, RotateCw, RefreshCw, Loader2, ZoomIn } from 'lucide-react'
+import { useEscToClose, useEscBlock } from '@/hooks/useEscToClose'
 
 interface ImageCropModalProps {
   file: File
@@ -59,6 +60,10 @@ export function ImageCropModal({ file, aspect = 1, round, maxOutput = 1024, titl
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const dragRef = useRef<{ x: number; y: number; px: number; py: number } | null>(null)
   const isGif = file.type === 'image/gif'
+
+  // Esc mirrors the X / Cancel (both disabled while the crop renders → absorb Esc then).
+  useEscToClose(onCancel, !busy)
+  useEscBlock(busy)
 
   // Load the dropped image
   useEffect(() => {

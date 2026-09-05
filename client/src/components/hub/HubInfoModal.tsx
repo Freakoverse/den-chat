@@ -22,6 +22,7 @@ import { getHubEvent, putHubEvent } from '@/lib/cache/hubEventCache'
 import { buildHubBackup, fmtBytes } from '@/lib/hub/hubBackup'
 import { KINDS } from '@/lib/crypto/constants'
 import { nip19 } from 'nostr-tools'
+import { useEscToClose } from '@/hooks/useEscToClose'
 
 interface HubInfoModalProps {
   open: boolean
@@ -41,6 +42,7 @@ interface CreatorProfile {
 }
 
 export function HubInfoModal({ open, onClose, hub, blurMedia, onCreatorClick }: HubInfoModalProps) {
+  useEscToClose(onClose, open)
   const [creator, setCreator] = useState<CreatorProfile | null>(null)
   const [copied, setCopied] = useState(false)
 
@@ -409,6 +411,7 @@ export function HubInfoModal({ open, onClose, hub, blurMedia, onCreatorClick }: 
 
 /** Queries each of the user's relays for the hub event and reports coverage. */
 function HubAvailabilityModal({ hub, onClose }: { hub: HubData; onClose: () => void }) {
+  useEscToClose(onClose)
   const [loading, setLoading] = useState(true)
   const [results, setResults] = useState<RelayAvailability[]>([])
 
@@ -485,6 +488,7 @@ function HubAvailabilityModal({ hub, onClose }: { hub: HubData; onClose: () => v
 }
 
 function BlossomAvailabilityModal({ hub, onClose }: { hub: HubData; onClose: () => void }) {
+  useEscToClose(onClose)
   const pubkey = useUserStore((s) => s.pubkey)
   const [loading, setLoading] = useState(true)
   const [files, setFiles] = useState<BlossomFileAvailability[]>([])

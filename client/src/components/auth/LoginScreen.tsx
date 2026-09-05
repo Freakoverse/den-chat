@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { useEscToClose } from '@/hooks/useEscToClose'
 import { useUserStore, type ISigner } from '@/stores/userStore'
 import { isTauri, isMobileOS } from '@/lib/utils'
 import { ADMIN_PUBKEY, StorageKey } from '@/lib/constants'
@@ -2718,6 +2719,8 @@ const TERMS_SECTIONS = [
 function TermsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [expanded, setExpanded] = useState<number | null>(null)
 
+  useEscToClose(onClose, open)
+
   if (!open) return null
 
   return (
@@ -3004,6 +3007,8 @@ function GuideModal({ open, onClose, isDesktop, isMobile, onGenerate, onLocalSig
       if (parsed.length > 0) setLatestBuild(parsed[0])
     }).finally(() => setBuildLoading(false))
   }, [showDownload])
+
+  useEscToClose(onClose, open)
 
   if (!open) return null
 
@@ -3321,6 +3326,8 @@ const FIREFOX_EXTENSIONS = [
 ]
 
 function ExtensionGuideModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  useEscToClose(onClose, open)
+
   if (!open) return null
 
   return (
@@ -3523,6 +3530,8 @@ function NoLocalSignerModal({ open, onClose, isDesktop }: { open: boolean; onClo
       : 'https://blossom.primal.net'
     return `${base}/${hash}.${ext}`
   }
+
+  useEscToClose(onClose, open)
 
   if (!open) return null
 

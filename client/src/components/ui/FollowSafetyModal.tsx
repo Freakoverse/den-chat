@@ -8,6 +8,7 @@
 
 import { useState } from 'react'
 import { AlertTriangle, RotateCw, UserPlus, X, Loader2 } from 'lucide-react'
+import { useEscToClose } from '@/hooks/useEscToClose'
 import { Button } from '@/components/ui/button'
 import { useFollowStore, type FollowLoadStatus } from '@/stores/followStore'
 import { useUserStore } from '@/stores/userStore'
@@ -36,6 +37,8 @@ export function FollowSafetyModal({
   const refetchFollowList = useFollowStore((s) => s.refetchFollowList)
   const followedPubkeys = useFollowStore((s) => s.followedPubkeys)
   const loadStatus = useFollowStore((s) => s.loadStatus)
+
+  useEscToClose(onClose, open)
 
   if (!open) return null
 

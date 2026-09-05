@@ -10,6 +10,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react'
+import { useEscToClose } from '@/hooks/useEscToClose'
 import { QRCodeSVG } from 'qrcode.react'
 import { TransactionDetailModal } from './TransactionDetailModal'
 import { SendModal } from './SendModal'
@@ -913,6 +914,7 @@ function ReceiveModal({
 // ══════════════════════════════════════════════════════════
 
 function HowToSendModal({ onClose }: { onClose: () => void }) {
+  useEscToClose(onClose)
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[200]" onClick={onClose}>
       <div
@@ -980,6 +982,7 @@ function HowToSendModal({ onClose }: { onClose: () => void }) {
 // ══════════════════════════════════════════════════════════
 
 function WalletInfoModal({ onClose }: { onClose: () => void }) {
+  useEscToClose(onClose)
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[200]" onClick={onClose}>
       <div

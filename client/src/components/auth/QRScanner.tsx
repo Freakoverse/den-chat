@@ -7,8 +7,10 @@
 import { useEffect, useRef, useState } from 'react'
 import jsQR from 'jsqr'
 import { Loader2, X } from 'lucide-react'
+import { useEscToClose } from '@/hooks/useEscToClose'
 
 export function QRScanner({ onResult, onClose, caption = 'Point your camera at the backup QR code' }: { onResult: (text: string) => void; onClose: () => void; caption?: string }) {
+  useEscToClose(onClose)
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const rafRef = useRef<number | null>(null)

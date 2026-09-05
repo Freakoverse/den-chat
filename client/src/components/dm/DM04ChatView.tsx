@@ -11,6 +11,7 @@ import { useUserStore } from '@/stores/userStore'
 import { useDM04Store, type DM04Message, type DM04Reaction } from '@/stores/dm04Store'
 import { useBlockStore } from '@/stores/blockStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
+import { useEscToClose } from '@/hooks/useEscToClose'
 import { UserProfileModal } from '@/components/hub/UserProfileModal'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
@@ -193,6 +194,12 @@ export function DM04ChatView({ recipientPubkey, onSwitchProtocol, onBack }: { re
   // ─── Sticker click modal state ───
   const [clickedSticker, setClickedSticker] = useState<{ shortcode: string; url: string; setAddress: string | null } | null>(null)
   const [stickerDiscoverSearch, setStickerDiscoverSearch] = useState<{ search: string; author: string } | null>(null)
+
+  // Esc closes the inline emoji/sticker info modals (defined in this file) like their
+  // Close button/backdrop. The discovery modals rendered here register Esc in their own
+  // components, so they're not wired again from here.
+  useEscToClose(() => setClickedEmoji(null), !!clickedEmoji)
+  useEscToClose(() => setClickedSticker(null), !!clickedSticker)
 
   useEffect(() => {
     const emojiHandler = (e: Event) => {
@@ -1555,6 +1562,9 @@ function DM04ThreadModal({ parentMsg, threadReplies, recipientPubkey, getProfile
   const [inThreadReply, setInThreadReply] = useState<ReplyContext | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const modalContainerRef = useRef<HTMLDivElement>(null)
+
+  // Mounted only while shown — Esc closes the thread modal like its X.
+  useEscToClose(onClose)
 
   const parentProfile = getProfile(parentMsg.senderPubkey)
   const parentName = parentProfile?.display_name || parentProfile?.name || truncateNpub(nip19.npubEncode(parentMsg.senderPubkey))

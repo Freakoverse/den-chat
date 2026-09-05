@@ -9,10 +9,11 @@
  * - "Attach" produces a File that plugs into ChatInputBar's addFiles flow
  */
 
-import { useCallback, useRef, useEffect } from 'react'
+import { useCallback, useRef } from 'react'
 import { X, Mic, Square, RotateCcw, Paperclip, AlertCircle } from 'lucide-react'
 import { CustomAudioPlayer } from '@/components/ui/CustomAudioPlayer'
 import { useVoiceRecorder } from '@/hooks/useVoiceRecorder'
+import { useEscToClose, useEscBlock } from '@/hooks/useEscToClose'
 import { usePreferencesStore } from '@/stores/preferencesStore'
 
 interface VoiceNoteModalProps {
@@ -55,14 +56,12 @@ export function VoiceNoteModal({ onAttach, onClose }: VoiceNoteModalProps) {
 
   const audioRef = useRef<HTMLAudioElement>(null)
 
-  // Close on Escape
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  }, [onClose])
+  // Esc behaves like the X (a plain discard-and-close) when idle or after a take is
+  // recorded — but is ABSORBED while actively recording, so it can't discard an
+  // in-flight recording out from under the user. (Replaces the old raw keydown
+  // listener so the close-modal keybind is respected and topmost-modal-aware.)
+  useEscBlock(state === 'recording')
+  useEscToClose(onClose, state !== 'recording')
 
   const handleAttach = useCallback(() => {
     if (!audioBlob) return

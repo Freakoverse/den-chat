@@ -9,6 +9,7 @@
  */
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
+import { useEscToClose, useEscBlock } from '@/hooks/useEscToClose'
 import { createPortal } from 'react-dom'
 import { useHubStore, type HubData, type HubMember, type HubPrefs, type HideEntry } from '@/stores/hubStore'
 import { useMessageStore } from '@/stores/messageStore'
@@ -125,6 +126,12 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
   const [modBanSteps, setModBanSteps] = useState<string[]>([])
   const [modBanActionType, setModBanActionType] = useState<'ban' | 'unban'>('ban')
   const [banNpub, setBanNpub] = useState('')
+
+  // Esc = click the X (safe dismiss). While the mod-ban/unban progress overlay is up it's a pure
+  // progress spinner (dismiss only appears at done/error), so absorb Esc during that phase — it must
+  // not fall through and close the settings modal underneath. Mirrors JoinRequestsModal's both-pattern.
+  useEscToClose(onClose, open)
+  useEscBlock(modBanBusy || modBanSteps.length > 0)
   const [selectedMod, setSelectedMod] = useState<string | null>(null)
   const [otherModBanList, setOtherModBanList] = useState<string[]>([])
   const [otherModLoading, setOtherModLoading] = useState(false)

@@ -39,6 +39,7 @@ import { useUserStore } from '@/stores/userStore'
 import { useBlockStore } from '@/stores/blockStore'
 
 import { useProfileCache } from '@/hooks/useProfileCache'
+import { useEscToClose } from '@/hooks/useEscToClose'
 import { truncateNpub } from '@/lib/utils'
 import { UserProfileModal } from '@/components/hub/UserProfileModal'
 import { nip19 } from 'nostr-tools'
@@ -234,6 +235,9 @@ function DiscoverGifTab({ onSelect, onPickerClose }: { onSelect: (g: { name: str
   const [publishingAddr, setPublishingAddr] = useState<string | null>(null)
   const [viewingCollection, setViewingCollection] = useState<GifCollection | null>(null)
   const [searchMode, setSearchMode] = useState<'g' | 'd'>('g')
+
+  // Esc closes the collection-preview modal like its X/backdrop when it's open.
+  useEscToClose(() => setViewingCollection(null), !!viewingCollection)
 
   const blockedPubkeys = useBlockStore((s) => s.blockedPubkeys)
   const { getProfile } = useProfileCache()
@@ -1154,6 +1158,11 @@ function GifCollectionCard({
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
+  // Esc closes the delete/unsubscribe confirmation like its Cancel/backdrop. The
+  // confirm action closes this modal itself before the async request, so closing is
+  // always a safe dismiss (never aborts an in-flight deletion).
+  useEscToClose(() => setShowDeleteModal(false), showDeleteModal)
+
   // Staged upload
   type StagedGif = { file: File; preview: string; name: string; nsfw: boolean }
   const [staged, setStaged] = useState<StagedGif[]>([])
@@ -1435,6 +1444,8 @@ function GifCollectionCard({
 /* ═══════════ Favorite GIF Modal (for non-blossom/untagged GIFs) ═══════════ */
 
 export function GifFavoriteModal({ gifUrl, onClose }: { gifUrl: string; onClose: () => void }) {
+  // Mounted only while shown — Esc closes it like its Cancel/backdrop.
+  useEscToClose(onClose)
   const signer = useUserStore((s) => s.signer)
   const privateKey = useUserStore((s) => s.privateKey)
   const [name, setName] = useState('')
@@ -1510,6 +1521,8 @@ export function GifFavoriteModal({ gifUrl, onClose }: { gifUrl: string; onClose:
 /* ═══════════ Discovery Modal (full-screen, like StickerDiscoveryModal) ═══════════ */
 
 export function GifDiscoveryModal({ onClose, initialSearch = '' }: { onClose: () => void; initialSearch?: string }) {
+  // Full-screen modal, mounted only while shown — Esc closes it like its X.
+  useEscToClose(onClose)
   const subscriptionAddresses = useGifStore((s) => s.subscriptionAddresses)
   const nsfwEnabled = useGifStore((s) => s.nsfwEnabled)
   const signer = useUserStore((s) => s.signer)

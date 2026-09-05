@@ -12,6 +12,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { truncateNpub } from '@/lib/utils'
 import { nip19 } from 'nostr-tools'
 import { formatSats, type ZapInfo } from '@/lib/nostr/zap'
+import { useEscToClose } from '@/hooks/useEscToClose'
 
 interface ZapListModalProps {
   open: boolean
@@ -21,6 +22,7 @@ interface ZapListModalProps {
 }
 
 export function ZapListModal({ open, onClose, zaps, onOpenProfile }: ZapListModalProps) {
+  useEscToClose(onClose, open)
   const { getProfile } = useProfileCache()
 
   const sorted = useMemo(

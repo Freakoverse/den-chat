@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef, Fragment, type ReactNode } from 'react'
+import { useEscToClose } from '@/hooks/useEscToClose'
 import { createPortal } from 'react-dom'
 import { useTheme } from '@/providers/ThemeProvider'
 import { useUserStore, type ISigner } from '@/stores/userStore'
@@ -670,6 +671,8 @@ function LanguageModal({ open, onClose, currentLanguage, onSelect }: {
   useEffect(() => {
     if (open) setSearch('')
   }, [open])
+
+  useEscToClose(onClose, open)
 
   if (!open) return null
 
@@ -7114,12 +7117,8 @@ function GuideCodeBlock({ children, language }: { children: ReactNode; language?
 }
 
 function GuideReaderModal({ guide, onClose }: { guide: ResolvedGuide; onClose: () => void }) {
-  // Close on Escape
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  }, [onClose])
+  // Close on the configurable close-modal keybind (topmost modal only)
+  useEscToClose(onClose)
 
   return createPortal(
     <div className="fixed inset-0 z-[200] flex items-center justify-center">

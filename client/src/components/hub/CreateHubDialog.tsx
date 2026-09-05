@@ -7,6 +7,7 @@
  */
 
 import { useState, useRef, useEffect } from 'react'
+import { useEscToClose, useEscBlock } from '@/hooks/useEscToClose'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Separator } from '@/components/ui/separator'
@@ -123,6 +124,11 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
   const [creationStep, setCreationStep] = useState<CreationStep | null>(null)
   const [completedSteps, setCompletedSteps] = useState<Set<CreationStep>>(new Set())
   const [memberFileProgress, setMemberFileProgress] = useState<{ fileIndex: number; totalFiles: number; label: string } | null>(null)
+
+  // Esc = click the X (safe dismiss). While the creation progress overlay is up (a pure-progress
+  // spinner with no close control), absorb Esc so it can't fall through and dismiss the form behind it.
+  useEscToClose(onClose, open)
+  useEscBlock(!!creationStep && creationStep !== 'error')
 
   // Image state
   const [iconPreview, setIconPreview] = useState<string | null>(null)

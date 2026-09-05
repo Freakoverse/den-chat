@@ -4,6 +4,7 @@
 
 import { useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { useEscToClose } from '@/hooks/useEscToClose'
 import { X, Smile, Code, MoreVertical } from 'lucide-react'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -51,6 +52,8 @@ export function ReactionListModal({ open, onClose, reactions, onOpenProfile, dis
     }
     return Array.from(map.entries()).sort((a, b) => b[1] - a[1])
   }, [reactions])
+
+  useEscToClose(onClose, open)
 
   if (!open) return null
 

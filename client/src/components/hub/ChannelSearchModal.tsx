@@ -26,6 +26,7 @@ import { getHour12 } from '@/stores/preferencesStore'
 import { nip19 } from 'nostr-tools'
 import { Search, X, Globe, Hash, Megaphone, MessageSquare, Loader2, Radio, User, Image, Music, Video, FileIcon, Link2 } from 'lucide-react'
 import { CustomAudioPlayer } from '@/components/ui/CustomAudioPlayer'
+import { useEscToClose } from '@/hooks/useEscToClose'
 
 interface SearchResult {
   /** Raw message id */
@@ -63,6 +64,7 @@ interface ChannelSearchModalProps {
 }
 
 export function ChannelSearchModal({ hubDTag, channelId, onClose }: ChannelSearchModalProps) {
+  useEscToClose(onClose)
   const [query, setQuery] = useState('')
   const [globalMode, setGlobalMode] = useState(false)
   const [results, setResults] = useState<SearchResult[]>([])

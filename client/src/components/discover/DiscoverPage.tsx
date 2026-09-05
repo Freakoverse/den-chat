@@ -11,6 +11,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { useEscToClose } from '@/hooks/useEscToClose'
 import { useHubStore, type HubData } from '@/stores/hubStore'
 import { useUserStore } from '@/stores/userStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
@@ -397,6 +398,8 @@ function FilterModal({ open, onClose, showNsfw, setShowNsfw, powMin, setPowMin, 
       setClientTagOptions([...combined])
     }
   }, [open, showNsfw, powMin, powMax, requireMessagePow, joinPowMin, joinPowMax, requireJoinPow, filterTags, filterClientTags])
+
+  useEscToClose(onClose, open)
 
   if (!open) return null
 

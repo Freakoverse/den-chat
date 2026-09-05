@@ -18,6 +18,7 @@ import { useUserStore } from '@/stores/userStore'
 import { useBlockStore } from '@/stores/blockStore'
 import { UserProfileModal } from '@/components/hub/UserProfileModal'
 import { useProfileCache } from '@/hooks/useProfileCache'
+import { useEscToClose } from '@/hooks/useEscToClose'
 import { truncateNpub } from '@/lib/utils'
 import { nip19 } from 'nostr-tools'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
@@ -595,6 +596,9 @@ function StickerSetCard({
 
   const [showDeleteModal, setShowDeleteModal] = useState(false)
 
+  // Esc closes the "Request Delete Sticker Set" confirmation like its Cancel/backdrop.
+  useEscToClose(() => setShowDeleteModal(false), showDeleteModal)
+
   const handleDeleteSet = async () => {
     setDeleting(true)
     setShowDeleteModal(false)
@@ -984,6 +988,8 @@ function DiscoverStickerTab({ onPickerClose }: { onPickerClose?: () => void }) {
 /* ═══════════ Standalone Sticker Discovery Modal (for external use) ═══════════ */
 
 export function StickerDiscoveryModal({ onClose, initialSearch = '', initialAuthor = '' }: { onClose: () => void; initialSearch?: string; initialAuthor?: string }) {
+  // Full-screen modal, mounted only while shown — Esc closes it like its X.
+  useEscToClose(onClose)
   const subscriptionAddresses = useStickerStore((s) => s.subscriptionAddresses)
   const nsfwEnabled = useStickerStore((s) => s.nsfwEnabled)
   const untaggedAsNsfw = useStickerStore((s) => s.untaggedAsNsfw)

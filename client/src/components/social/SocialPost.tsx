@@ -4,6 +4,7 @@
 
 import { useState, useCallback, useRef, useEffect, forwardRef } from 'react'
 import { createPortal } from 'react-dom'
+import { useEscToClose } from '@/hooks/useEscToClose'
 import { useUserStore } from '@/stores/userStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { useBlockStore } from '@/stores/blockStore'
@@ -793,6 +794,7 @@ function InteractionButton({ icon, label, onClick, active, activeColor, activeFi
 /* ─── Raw Event Modal (reused from hub pattern) ─── */
 
 export function RawEventModal({ rawJson, onClose }: { rawJson: string; onClose: () => void }) {
+  useEscToClose(onClose)
   const [copied, setCopied] = useState(false)
 
   let pretty: string

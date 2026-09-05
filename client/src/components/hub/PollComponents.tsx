@@ -25,6 +25,7 @@ import { EmojiPickerPopover } from '@/components/chat/EmojiPickerPopover'
 import type { Reaction } from '@/components/hub/ChannelView'
 import { cn } from '@/lib/utils'
 import { truncateNpub, formatTimestamp } from '@/lib/utils'
+import { useEscToClose } from '@/hooks/useEscToClose'
 
 // ─── Decrypted poll content type ───
 
@@ -59,6 +60,7 @@ interface VotersModalProps {
 }
 
 function VotersModal({ optionLabel, voters, onClose }: VotersModalProps) {
+  useEscToClose(onClose)
   const { getProfile } = useProfileCache()
 
   return (
@@ -106,6 +108,7 @@ interface CreatePollModalProps {
 }
 
 export function CreatePollModal({ hubDTag, channelId, onClose }: CreatePollModalProps) {
+  useEscToClose(onClose)
   const { createPoll } = usePoll(hubDTag, channelId)
   const [question, setQuestion] = useState('')
   const [options, setOptions] = useState<{ id: string; label: string }[]>([
