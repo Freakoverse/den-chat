@@ -223,11 +223,13 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
       setRequests(filtered)
       setHasMore(gotFull)
 
-      // Coverage is complete when a page comes back short (nothing older remains within the bound).
-      // In the default/unseen view that means we've contiguously covered everything above W, so it's
-      // safe to advance the watermark to now (badge resets). Never in "Show all" (a browse mode) — it
-      // isn't bounded by W, so a short page there doesn't prove the unseen tail was reviewed.
-      if (!gotFull && !showAll) markJoinRequestsSeen(hub.dTag)
+      // Best-effort watermark: opening the Unseen view records "seen up to now" on the first page (the
+      // query still uses the OPEN-time snapshot, so the list stays put). Strict fetch-until-W isn't a
+      // real guarantee anyway — tombstoned/GC'd requests make a "short page" ambiguous — so we don't
+      // gate on it. Anything past a page, or buried by the advancing watermark, stays reachable via
+      // "Show all", and a waiting applicant can Resend to bump a stale request back above the mark.
+      // Never advance in "Show all" (a browse mode, not a review).
+      if (!append && !showAll) markJoinRequestsSeen(hub.dTag)
     } catch (err) {
       console.error('Failed to fetch join requests:', err)
     } finally {

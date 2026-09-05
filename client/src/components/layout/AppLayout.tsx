@@ -28,7 +28,8 @@ import { useBlockStore } from '@/stores/blockStore'
 import { useWotStore } from '@/stores/wotStore'
 import { useMobile } from '@/hooks/useMobile'
 import { useMemo, useEffect, useState } from 'react'
-import { ShieldAlert, LogOut, Plus, MessageSquare, MessagesSquare, AtSign, Compass, Settings, Home, X, Wallet, Loader2, MoreHorizontal, UserMinus, UserCheck, Copy, Check, Lock } from 'lucide-react'
+import { ShieldAlert, LogOut, Plus, MessageSquare, MessagesSquare, AtSign, Compass, Settings, Home, X, Wallet, Loader2, MoreHorizontal, UserMinus, UserCheck, Copy, Check, Lock, RotateCw } from 'lucide-react'
+import { RESEND_MIN_AGE_S } from '@/lib/hub/resendJoinRequest'
 import { nip19 } from 'nostr-tools'
 import { UserProfileModal } from '@/components/hub/UserProfileModal'
 import { useProfileCache } from '@/hooks/useProfileCache'
@@ -453,6 +454,10 @@ function AwaitingApprovalOverlay({ dTag }: { dTag: string | null }) {
   const { getProfile } = useProfileCache()
   const [showConfirm, setShowConfirm] = useState(false)
   const [withdrawing, setWithdrawing] = useState(false)
+  // Resend: the current request's created_at (null = none/loading), and transient states.
+  const [reqCreatedAt, setReqCreatedAt] = useState<number | null>(null)
+  const [resending, setResending] = useState(false)
+  const [resent, setResent] = useState(false)
   const [showFacilitator, setShowFacilitator] = useState(false)
   const [showFacProfile, setShowFacProfile] = useState(false)
   const [copiedNpub, setCopiedNpub] = useState(false)
@@ -495,6 +500,41 @@ function AwaitingApprovalOverlay({ dTag }: { dTag: string | null }) {
     setShowConfirm(false)
   }
 
+  // Load the current request's created_at to gate the Resend button.
+  useEffect(() => {
+    if (!hub || !pubkey) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const { getOwnJoinRequestCreatedAt } = await import('@/lib/hub/resendJoinRequest')
+        const ts = await getOwnJoinRequestCreatedAt(hub, pubkey)
+        if (!cancelled) setReqCreatedAt(ts)
+      } catch { /* leave null — Resend stays hidden */ }
+    })()
+    return () => { cancelled = true }
+  }, [hub?.dTag, pubkey])
+
+  const nowSec = Math.floor(Date.now() / 1000)
+  const canResend = reqCreatedAt != null && nowSec - reqCreatedAt >= RESEND_MIN_AGE_S
+  const resendDaysLeft = reqCreatedAt != null
+    ? Math.max(1, Math.ceil((RESEND_MIN_AGE_S - (nowSec - reqCreatedAt)) / 86400))
+    : null
+
+  const handleResend = async () => {
+    if (!hub || !pubkey || resending || !canResend) return
+    setResending(true)
+    try {
+      const { resendJoinRequest } = await import('@/lib/hub/resendJoinRequest')
+      await resendJoinRequest(hub, pubkey)
+      setReqCreatedAt(Math.floor(Date.now() / 1000)) // resets the 3-day gate
+      setResent(true)
+      setTimeout(() => setResent(false), 3000)
+    } catch (err) {
+      console.error('Failed to resend join request:', err)
+    }
+    setResending(false)
+  }
+
   return (
     <div className="flex-1 flex items-center justify-center bg-background p-6">
       <div className="max-w-sm text-center space-y-4">
@@ -514,13 +554,33 @@ function AwaitingApprovalOverlay({ dTag }: { dTag: string | null }) {
           Your request to join is pending. You'll get access to its channels, messages, and members once a hub admin
           approves you — or a member with the right role facilitates you.
         </p>
-        <button
-          onClick={() => setShowConfirm(true)}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-secondary/60 border border-border/50 text-sm text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors cursor-pointer"
-        >
-          <LogOut size={14} />
-          Withdraw request
-        </button>
+        <div className="flex items-center justify-center gap-2 flex-wrap">
+          <button
+            onClick={() => setShowConfirm(true)}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-secondary/60 border border-border/50 text-sm text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors cursor-pointer"
+          >
+            <LogOut size={14} />
+            Withdraw request
+          </button>
+          {/* Resend: bump created_at to now so an inactive creator sees the request again above their
+              "seen" watermark. Gated to once every RESEND_MIN_AGE_S (3 days) to prevent bump-spam. */}
+          {reqCreatedAt != null && (
+            <button
+              onClick={handleResend}
+              disabled={!canResend || resending}
+              title={canResend ? 'Re-send your request so the hub admins see it again' : `Available ${resendDaysLeft}d after your last request`}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-secondary/60 border border-border/50 text-sm text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:text-muted-foreground"
+            >
+              {resending
+                ? <><Loader2 size={14} className="animate-spin" /> Resending…</>
+                : resent
+                  ? <><Check size={14} className="text-emerald-500" /> Resent</>
+                  : canResend
+                    ? <><RotateCw size={14} /> Resend request</>
+                    : <><RotateCw size={14} /> Resend in {resendDaysLeft}d</>}
+            </button>
+          )}
+        </div>
         {facilitatorNpub ? (
           <div className="mx-auto max-w-xs rounded-lg border border-border/50 bg-secondary/30 px-3 py-3 space-y-2.5 text-left">
             <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
