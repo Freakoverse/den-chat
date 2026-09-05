@@ -535,6 +535,10 @@ function HubIcon({ label, isActive, onClick, children, isAction, isPreview, stat
   const hasMention = notifReady && !isMuted && hubUnreads
     ? Object.values(hubUnreads).some((ch) => ch.hasMention)
     : false
+  // Blue "fresh general notification" flash (10s from arrival) — a hint of WHERE a new notification
+  // landed. Mentions keep their red badge; blue only applies to plain (non-mention) unreads.
+  const hubFlashUntil = useNotificationStore((s) => hubDTag ? s.hubFlashUntil[hubDTag] : undefined)
+  const isFresh = notifReady && !isMuted && !hasMention && !!hubFlashUntil && Date.now() < hubFlashUntil
 
   return (
     <div className="relative group flex items-center justify-center w-full">
@@ -599,18 +603,23 @@ function HubIcon({ label, isActive, onClick, children, isAction, isPreview, stat
         </div>
       )}
 
-      {/* Unread notification badge — or pulsing dot while loading */}
-      {!isActive && status !== 'deleted' && status !== 'not-found' && !isInVoice && hubDTag && (
+      {/* Unread notification badge — or pulsing dot while loading. Shows even when the hub is active:
+          selecting a hub no longer hides its unread count. */}
+      {status !== 'deleted' && status !== 'not-found' && !isInVoice && hubDTag && (
         !notifReady ? (
-          /* Pulsing dot — indicates notifications are being loaded */
-          <div className={cn('absolute bottom-0 w-[14px] h-[14px] rounded-full bg-muted-foreground/40 z-10 animate-pulse border-2 border-secondary', compact ? 'right-0' : 'right-3')} />
+          /* Pulsing dot — indicates notifications are being loaded (only before a hub is opened) */
+          !isActive
+            ? <div className={cn('absolute bottom-0 w-[14px] h-[14px] rounded-full bg-muted-foreground/40 z-10 animate-pulse border-2 border-secondary', compact ? 'right-0' : 'right-3')} />
+            : null
         ) : totalUnread > 0 ? (
           <div className={cn(
             'absolute bottom-0 min-w-[18px] h-[18px] flex items-center justify-center rounded-full text-[10px] font-bold px-1 shadow-md z-10 border-2 border-secondary',
             compact ? '-right-1' : 'right-2',
             hasMention
               ? 'bg-destructive text-destructive-foreground'
-              : 'bg-foreground text-background'
+              : isFresh
+                ? 'bg-blue-500 text-white'
+                : 'bg-foreground text-background'
           )}>
             {totalUnread > 99 ? '99+' : totalUnread}
           </div>

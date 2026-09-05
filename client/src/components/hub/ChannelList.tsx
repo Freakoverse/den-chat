@@ -68,6 +68,23 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
   useEffect(() => {
     try { localStorage.setItem('den_hub_menu_open', hubMenuOpen ? '1' : '0') } catch { /* ignore */ }
   }, [hubMenuOpen])
+
+  // Leaving a hub (switching hubs, navigating away/unmount, or the app losing focus) starts the
+  // blue→white timer for any channel flash still "pending" (never scrolled into view) — so those
+  // don't stay blue forever. Channels seen in-view already started their own timers.
+  useEffect(() => {
+    if (!activeHubId) return
+    const hubDTag = activeHubId
+    const startPending = () => useNotificationStore.getState().startPendingHubChannelTimers(hubDTag)
+    const onVisibility = () => { if (document.hidden) startPending() }
+    window.addEventListener('blur', startPending)
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      window.removeEventListener('blur', startPending)
+      document.removeEventListener('visibilitychange', onVisibility)
+      startPending() // hub switch / unmount
+    }
+  }, [activeHubId])
   const [userSettingsInitialTab, setUserSettingsInitialTab] = useState<'messages' | 'notifications' | 'voice' | undefined>(undefined)
 
   // ── Creator-only channel/category reordering (drag & drop, desktop) ──
@@ -1237,6 +1254,32 @@ function ChannelItem({ channel, position, positionDigits, isActive, onClick, isL
   const hasMention = notifReady && (channelUnread?.hasMention ?? false)
   const unreadCount = notifReady ? (channelUnread?.count ?? 0) : 0
 
+  // Blue "fresh general notification" flash for this channel's unread badge. Blue while the flash is
+  // pending (Infinity — no timer yet) or its timer hasn't elapsed; then reverts to the normal badge.
+  const channelFlashVal = useNotificationStore((s) =>
+    activeHubId ? s.channelFlash[activeHubId]?.[channel.channelId] : undefined
+  )
+  const startChannelFlashTimer = useNotificationStore((s) => s.startChannelFlashTimer)
+  const isFresh = notifReady && !hasMention && channelFlashVal !== undefined &&
+    (channelFlashVal === Number.POSITIVE_INFINITY || Date.now() < channelFlashVal)
+  const rowRef = useRef<HTMLDivElement>(null)
+
+  // Start this channel's blue→white timer once its row scrolls into view (only while still "pending" —
+  // blue with no timer). If it never comes into view, leaving the hub starts it (see ChannelList).
+  useEffect(() => {
+    if (channelFlashVal !== Number.POSITIVE_INFINITY || !activeHubId) return
+    const el = rowRef.current
+    if (!el || typeof IntersectionObserver === 'undefined') return
+    const obs = new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting)) {
+        startChannelFlashTimer(activeHubId, channel.channelId)
+        obs.disconnect()
+      }
+    }, { threshold: 0.5 })
+    obs.observe(el)
+    return () => obs.disconnect()
+  }, [channelFlashVal, activeHubId, channel.channelId, startChannelFlashTimer])
+
   const isVoice = channel.type === 'voice'
   const isInVoice = isVoice && connectionState === 'connected' && currentChannelId === channel.channelId
   const isConnecting = isVoice && connectionState === 'connecting' && currentChannelId === channel.channelId
@@ -1252,6 +1295,7 @@ function ChannelItem({ channel, position, positionDigits, isActive, onClick, isL
 
   return (
     <div
+      ref={rowRef}
       className={cn('mb-1 relative rounded-md transition-shadow', drag?.isOver && 'ring-2 ring-primary/40')}
       data-channel-id={channel.channelId}
       data-channel-hub={activeHubId || undefined}
@@ -1310,7 +1354,9 @@ function ChannelItem({ channel, position, positionDigits, isActive, onClick, isL
             'shrink-0 min-w-[18px] h-[18px] flex items-center justify-center rounded-full text-[10px] font-bold px-1',
             hasMention
               ? 'bg-destructive text-destructive-foreground'
-              : 'bg-muted-foreground/30 text-foreground'
+              : isFresh
+                ? 'bg-blue-500 text-white'
+                : 'bg-muted-foreground/30 text-foreground'
           )}>
             {unreadCount > 99 ? '99+' : unreadCount}
           </span>

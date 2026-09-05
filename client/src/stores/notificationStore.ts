@@ -81,6 +81,13 @@ export interface NotificationState {
   hubUnreads: Record<string, Record<string, ChannelUnread>>
   /** Per-hub granular mute settings */
   hubMuteSettings: Record<string, HubMuteSettings>
+  /** "Fresh general notification" flash (ephemeral, in-memory only). A hub badge is BLUE while the
+   *  hub's entry here is in the future (10s from arrival), then reverts to white. */
+  hubFlashUntil: Record<string, number>
+  /** Per-hub, per-channel flash state: a channel badge is BLUE while its entry is FLASH_PENDING (blue,
+   *  no timer yet — set on arrival) or a future timestamp (timer running). The timer starts only when
+   *  the channel scrolls into view, or when the user leaves the hub. Ephemeral / in-memory only. */
+  channelFlash: Record<string, Record<string, number>>
 
   // ── DMs ──
   /** NIP-17 DM per-conversation unread state */
@@ -124,6 +131,16 @@ export interface NotificationState {
   raiseHubUnreadCounts: (hubDTag: string, perChannel: Record<string, number>) => void
   setHubMuteSettings: (hubDTag: string, settings: HubMuteSettings) => void
   pruneHubs: (activeHubDTags: Set<string>, channelsByHub: Record<string, Set<string>>) => void
+
+  // Notification "freshness" flash (blue badge) — see hubFlashUntil / channelFlash.
+  /** Mark a hub + channel freshly notified (general, non-mention). Hub badge blues for FLASH_MS from
+   *  now; the channel badge blues but its timer is deferred (starts on viewport / hub-leave). */
+  flashHubChannel: (hubDTag: string, channelId: string) => void
+  /** Start a channel's blue→white timer (call when the channel scrolls into view). No-op unless the
+   *  channel is currently pending (blue, no timer). */
+  startChannelFlashTimer: (hubDTag: string, channelId: string) => void
+  /** Start the timer for every still-pending channel of a hub (call when the user leaves the hub). */
+  startPendingHubChannelTimers: (hubDTag: string) => void
 
   // DMs
   markDmRead: (conversationId: string, type: 'nip17' | 'nip04') => void
@@ -281,12 +298,22 @@ function preloadFromLocalStorage() {
 
 const _preloaded = preloadFromLocalStorage()
 
+/** How long a "fresh general notification" badge stays blue. */
+const FLASH_MS = 10_000
+/** Sentinel for a channel flash that is blue but whose timer hasn't started (not yet in view). */
+const FLASH_PENDING = Number.POSITIVE_INFINITY
+/** Module-level clear timers for the ephemeral blue flash (keyed by hub, and by `hub::channel`). */
+const _hubFlashTimers: Record<string, ReturnType<typeof setTimeout>> = {}
+const _chFlashTimers: Record<string, ReturnType<typeof setTimeout>> = {}
+
 const initialState = {
   initialized: false,
   socialSeenAt: _preloaded.socialSeenAt,
   hasSocialNotification: false,
   hubUnreads: _preloaded.hubUnreads,
   hubMuteSettings: _preloaded.hubMuteSettings,
+  hubFlashUntil: {} as Record<string, number>,
+  channelFlash: {} as Record<string, Record<string, number>>,
   dm17Unreads: _preloaded.dm17Unreads,
   dm04Unreads: _preloaded.dm04Unreads,
   pcReadTimes: _preloaded.pcReadTimes,
@@ -552,6 +579,7 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
   },
 
   incrementChannelUnread: (hubDTag, channelId, messageTimestamp, mentionType) => {
+    let applied = false
     set((state) => {
       // Check granular mute settings — skip increment if muted for this type
       const muteSettings = state.hubMuteSettings[hubDTag]
@@ -572,9 +600,70 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
         count: existing.count + 1,
         hasMention: existing.hasMention || !!mentionType,
       }
+      applied = true
       const hubUnreads = { ...state.hubUnreads, [hubDTag]: hubChannels }
       return { hubUnreads, ...recomputeTotals({ ...state, hubUnreads }) }
     })
+    // Blue "fresh notification" flash — general (non-mention) arrivals only; mentions stay red.
+    if (applied && !mentionType) get().flashHubChannel(hubDTag, channelId)
+  },
+
+  flashHubChannel: (hubDTag, channelId) => {
+    const until = Date.now() + FLASH_MS
+    set((state) => ({
+      hubFlashUntil: { ...state.hubFlashUntil, [hubDTag]: until },
+      channelFlash: {
+        ...state.channelFlash,
+        [hubDTag]: { ...(state.channelFlash[hubDTag] || {}), [channelId]: FLASH_PENDING },
+      },
+    }))
+    // Hub badge reverts to white after FLASH_MS, whether or not the hub is open.
+    if (_hubFlashTimers[hubDTag]) clearTimeout(_hubFlashTimers[hubDTag])
+    _hubFlashTimers[hubDTag] = setTimeout(() => {
+      delete _hubFlashTimers[hubDTag]
+      set((state) => {
+        if ((state.hubFlashUntil[hubDTag] ?? 0) > Date.now()) return {} // re-flashed meanwhile
+        const next = { ...state.hubFlashUntil }
+        delete next[hubDTag]
+        return { hubFlashUntil: next }
+      })
+    }, FLASH_MS + 50)
+  },
+
+  startChannelFlashTimer: (hubDTag, channelId) => {
+    if (get().channelFlash[hubDTag]?.[channelId] !== FLASH_PENDING) return // only a pending flash starts a timer
+    const until = Date.now() + FLASH_MS
+    set((state) => ({
+      channelFlash: {
+        ...state.channelFlash,
+        [hubDTag]: { ...(state.channelFlash[hubDTag] || {}), [channelId]: until },
+      },
+    }))
+    const key = `${hubDTag}::${channelId}`
+    if (_chFlashTimers[key]) clearTimeout(_chFlashTimers[key])
+    _chFlashTimers[key] = setTimeout(() => {
+      delete _chFlashTimers[key]
+      set((state) => {
+        const hubCh = state.channelFlash[hubDTag]
+        if (!hubCh) return {}
+        const v = hubCh[channelId]
+        if (typeof v === 'number' && v > Date.now()) return {} // re-timed meanwhile
+        const nextHubCh = { ...hubCh }
+        delete nextHubCh[channelId]
+        const channelFlash = { ...state.channelFlash }
+        if (Object.keys(nextHubCh).length === 0) delete channelFlash[hubDTag]
+        else channelFlash[hubDTag] = nextHubCh
+        return { channelFlash }
+      })
+    }, FLASH_MS + 50)
+  },
+
+  startPendingHubChannelTimers: (hubDTag) => {
+    const hubCh = get().channelFlash[hubDTag]
+    if (!hubCh) return
+    for (const [chId, v] of Object.entries(hubCh)) {
+      if (v === FLASH_PENDING) get().startChannelFlashTimer(hubDTag, chId)
+    }
   },
 
   raiseHubUnreadCounts: (hubDTag, perChannel) => {
