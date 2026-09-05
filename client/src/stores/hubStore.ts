@@ -304,6 +304,17 @@ function persistFacilitatorMembers(map: Record<string, Record<string, string[]>>
   } catch { /* storage unavailable / quota — non-fatal */ }
 }
 
+/**
+ * Session-only memory of the last channel the user had open in each hub (hub d-tag → channel id).
+ * Lets re-entering a hub reopen that channel instead of the first one. In-memory ONLY: a client
+ * restart clears it (falls back to first-channel), and it never syncs across devices.
+ */
+const _lastChannelByHub: Record<string, string> = {}
+/** The last channel opened in `dTag` this session, or undefined. */
+export function getLastChannelForHub(dTag: string): string | undefined {
+  return _lastChannelByHub[dTag]
+}
+
 export const useHubStore = create<HubState>((set) => ({
   hubEntries: [],
   folders: [],
@@ -384,7 +395,11 @@ export const useHubStore = create<HubState>((set) => ({
     return { activeHubId: dTag, activeChannelId: null, ...clearPreview }
   }),
 
-  setActiveChannel: (channelId) => set({ activeChannelId: channelId }),
+  setActiveChannel: (channelId) => set((state) => {
+    // Remember this hub's last-opened channel for the session (see _lastChannelByHub).
+    if (channelId && state.activeHubId) _lastChannelByHub[state.activeHubId] = channelId
+    return { activeChannelId: channelId }
+  }),
 
   removeHubEntry: (dTag) =>
     set((state) => ({

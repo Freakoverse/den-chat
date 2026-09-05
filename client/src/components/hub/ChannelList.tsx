@@ -1,4 +1,4 @@
-import { useHubStore, type HubData } from '@/stores/hubStore'
+import { useHubStore, getLastChannelForHub, type HubData } from '@/stores/hubStore'
 import { useUserStore } from '@/stores/userStore'
 import { useNotificationStore } from '@/stores/notificationStore'
 import { useNavigationStore } from '@/stores/navigationStore'
@@ -205,16 +205,28 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
   // that was locked at first can be picked once it unlocks.
   useEffect(() => {
     if (!hub || activeChannelId) return
+    const canView = (channelId: string) =>
+      isCreator || !pubkey ? true : getPermissionsForUser(hub, pubkey, hubMembers, channelId).view_channel
+    const accessible = (c: { channelId: string; encryption: string | null; synced: boolean; categoryId: string | null }) =>
+      canView(c.channelId) && hasGroupAccess(getChannelGroupId(c))
+
+    // Reopen the last channel the user had open in this hub THIS SESSION (any type), if it still
+    // exists and is accessible. Session-only — a restart clears it and we fall back to the first
+    // channel below. (Not persisted, not cross-device.)
+    const rememberedId = getLastChannelForHub(hub.dTag)
+    if (rememberedId) {
+      const remembered = hub.channels.find((c) => c.channelId === rememberedId)
+      if (remembered && accessible(remembered)) { setActiveChannel(remembered.channelId); return }
+    }
+
+    // Default: the first *text* (chat) channel the user can use, in sidebar order.
     const byPos = (a: { position: number }, b: { position: number }) => a.position - b.position
     const ordered = [
       ...hub.channels.filter((c) => !c.categoryId).sort(byPos),
       ...[...hub.categories].sort(byPos).flatMap((cat) =>
         hub.channels.filter((c) => c.categoryId === cat.categoryId).sort(byPos)),
     ]
-    const canView = (channelId: string) =>
-      isCreator || !pubkey ? true : getPermissionsForUser(hub, pubkey, hubMembers, channelId).view_channel
-    const first = ordered.find((c) =>
-      c.type === 'chat' && canView(c.channelId) && hasGroupAccess(getChannelGroupId(c)))
+    const first = ordered.find((c) => c.type === 'chat' && accessible(c))
     if (first) setActiveChannel(first.channelId)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hub, activeChannelId, groupSecrets, hubMembers, pubkey, isCreator])
