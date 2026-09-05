@@ -185,18 +185,15 @@ but a consumer SHOULD still pick one form per purpose to avoid confusion.
 
 A conforming signer **MUST NOT** return the `seed`, any sub-key or blinded private key, the raw
 ECDH result, or `HKDF(root_priv, ·)` to the client. It exposes operations that **use** the derived
-key internally. The form is selected by the **method name** (not by argument presence); `peer` is a
-required parameter of the shared and blinded methods and absent from the self methods.
+key internally. The **self** and **shared** forms **share one method set**, distinguished by whether a
+`peer` is supplied — absent ⇒ self, present ⇒ shared. That is unambiguous because only these two forms
+use `peer` this way; the **blinded** form (which also takes a `peer`) has its **own** method names, so
+it can never be confused with `shared` by argument presence.
 
-**Self** (no peer):
-- `getSelfSubkeyPubkey(context) → sub_pub`
-- `signAsSelfSubkey(context, event) → event`
-- `nip44EncryptAsSelfSubkey(context, recipient, plaintext) → ciphertext`, `nip44DecryptAsSelfSubkey(context, sender, ciphertext) → plaintext` (+ `nip04*` equivalents for NIP-04 signers)
-
-**Shared** (peer required):
-- `getSharedSubkeyPubkey(context, peer) → sub_pub`
-- `signAsSharedSubkey(context, event, peer) → event`
-- `nip44EncryptAsSharedSubkey(context, recipient, plaintext, peer)`, `nip44DecryptAsSharedSubkey(context, sender, ciphertext, peer)` (+ `nip04*`)
+**Self (no peer) / shared (trailing `peer`):**
+- `getSubkeyPubkey(context[, peer]) → sub_pub`
+- `signAsSubkey(context, event[, peer]) → event`
+- `nip44EncryptAsSubkey(context, recipient, plaintext[, peer])`, `nip44DecryptAsSubkey(context, sender, ciphertext[, peer])` (+ `nip04*` equivalents for NIP-04 signers)
 
 **Blinded** (peer required):
 - `getBlindedPubkey(context, peer) → blinded_pub` — the **caller's own** blinded key (base = the
@@ -219,7 +216,7 @@ event byte-for-byte.
 
 ### 2.1 Interactivity
 
-The pubkey derivations — `getSelfSubkeyPubkey`, `getSharedSubkeyPubkey`, `getBlindedPubkey`, and
+The pubkey derivations — `getSubkeyPubkey` (self/shared), `getBlindedPubkey`, and
 `getPeerBlindedPubkey` — are **read-only**: they return a public key, no secret and no signature. A
 signer **SHOULD** answer them **non-interactively** (no user-approval prompt), exactly as it answers
 `get_public_key` (NIP-46) or the injected `getPublicKey` (NIP-07). This is required for the capability
@@ -296,19 +293,13 @@ salt, so adding or choosing a form never changes the scheme version. A signer th
 
 ```ts
 window.nostr.skd = {
-  // self
-  getSelfSubkeyPubkey(context: string): Promise<string>,
-  signAsSelfSubkey(context: string, event: EventTemplate): Promise<Event>,
-  nip44EncryptAsSelfSubkey(context: string, recipient: string, plaintext: string): Promise<string>,
-  nip44DecryptAsSelfSubkey(context: string, sender: string, ciphertext: string): Promise<string>,
+  // self (no peerPub) / shared (with peerPub) — one method set, peer distinguishes them
+  getSubkeyPubkey(context: string, peerPub?: string): Promise<string>,
+  signAsSubkey(context: string, event: EventTemplate, peerPub?: string): Promise<Event>,
+  nip44EncryptAsSubkey(context: string, recipient: string, plaintext: string, peerPub?: string): Promise<string>,
+  nip44DecryptAsSubkey(context: string, sender: string, ciphertext: string, peerPub?: string): Promise<string>,
 
-  // shared (both parties derive the same keypair)
-  getSharedSubkeyPubkey(context: string, peerPub: string): Promise<string>,
-  signAsSharedSubkey(context: string, event: EventTemplate, peerPub: string): Promise<Event>,
-  nip44EncryptAsSharedSubkey(context: string, recipient: string, plaintext: string, peerPub: string): Promise<string>,
-  nip44DecryptAsSharedSubkey(context: string, sender: string, ciphertext: string, peerPub: string): Promise<string>,
-
-  // blinded (caller owns the private key; a peer can derive only the public key to verify)
+  // blinded (caller owns the private key; a peer can derive only the public key to verify) — peer REQUIRED
   getBlindedPubkey(context: string, peerPub: string): Promise<string>,       // my own blinded key
   getPeerBlindedPubkey(context: string, peerPub: string): Promise<string>,   // a peer's blinded key (verify) — pubkey only
   signAsBlinded(context: string, event: EventTemplate, peerPub: string): Promise<Event>,
@@ -319,42 +310,43 @@ window.nostr.skd = {
 }
 ```
 
-Feature-detection: `typeof window.nostr?.skd?.getSelfSubkeyPubkey === 'function'` (a signer exposing
-the surface implements all three forms).
+Feature-detection: `typeof window.nostr?.skd?.getBlindedPubkey === 'function'` — a signer must expose
+the **blinded** op (required for NIP-CHAT v2), and one that does implements the whole surface. Checking
+the blinded op (not the self/shared one) ensures an older signer with only the pre-blinded surface is
+correctly treated as unsupported.
 
 ## 7. Remote signer (NIP-46)
 
 New request methods, mirroring §6:
 
 ```
-# self
-skd_get_self_subkey_pubkey          params: [context]
-skd_sign_as_self_subkey             params: [context, event]
-skd_nip44_encrypt_as_self_subkey    params: [context, recipient, plaintext]
-skd_nip44_decrypt_as_self_subkey    params: [context, sender, ciphertext]
+# self (no peer) / shared (trailing peer) — one method set
+skd_get_subkey_pubkey          params: [context]                        (+ peer for shared)
+skd_sign_as_subkey             params: [context, event]                 (+ peer)
+skd_nip44_encrypt_as_subkey    params: [context, recipient, plaintext]  (+ peer)
+skd_nip44_decrypt_as_subkey    params: [context, sender, ciphertext]    (+ peer)
+skd_nip04_encrypt_as_subkey    params: [context, recipient, plaintext]  (+ peer)   # NIP-04 signers only
+skd_nip04_decrypt_as_subkey    params: [context, sender, ciphertext]    (+ peer)   # NIP-04 signers only
 
-# shared
-skd_get_shared_subkey_pubkey        params: [context, peer]
-skd_sign_as_shared_subkey           params: [context, event, peer]
-skd_nip44_encrypt_as_shared_subkey  params: [context, recipient, plaintext, peer]
-skd_nip44_decrypt_as_shared_subkey  params: [context, sender, ciphertext, peer]
-
-# blinded
+# blinded — peer REQUIRED on every method
 skd_get_blinded_pubkey              params: [context, peer]     # my own blinded key
 skd_get_peer_blinded_pubkey         params: [context, peer]     # a peer's blinded key (verify) — pubkey only
 skd_sign_as_blinded                 params: [context, event, peer]
 skd_nip44_encrypt_as_blinded        params: [context, recipient, plaintext, peer]
 skd_nip44_decrypt_as_blinded        params: [context, sender, ciphertext, peer]
 
-# skd_nip04_* equivalents of each nip44 method, for NIP-04 signers only
+# skd_nip04_*_as_blinded equivalents for NIP-04 signers only
 ```
 
-`peer` is a **fixed positional parameter** of the shared and blinded methods; the self methods have no
-`peer` parameter (the form is chosen by the method name, not by argument presence). A client discovers
-support by attempting `skd_get_self_subkey_pubkey` and handling a method-not-supported response — so a
-signer **MUST** answer that method non-interactively (§2.1), the same as `get_public_key`, or the probe
-stalls and the signer wrongly appears to lack NIP-SKD. Connection permission grants extend the
-connection's permission set with `skd:<context-prefix>` entries (§4).
+For the self/shared methods, `peer` is the **trailing** positional parameter — **omitted** for self,
+**present** for shared (never sent as an empty string). For the blinded methods `peer` is a required
+positional parameter. A client discovers support by attempting **`skd_get_blinded_pubkey`** (with a peer
+— any valid pubkey, e.g. the client's own) and handling a method-not-supported response. The blinded op
+is the probe (not the self/shared one) because NIP-CHAT v2 authors members under the blinded form, so a
+signer with only the older self/shared surface must be treated as unsupported. The signer **MUST** answer
+that method non-interactively (§2.1), the same as `get_public_key`, or the probe stalls and the signer
+wrongly appears to lack NIP-SKD. Connection permission grants extend the connection's permission set with
+`skd:<context-prefix>` entries (§4).
 
 **Other transports.** The method names and their logical parameters above are the contract; the
 **positional-array** encoding is specific to NIP-46. A non-NIP-46 signer protocol (e.g. NIP-UPV2)
@@ -364,7 +356,7 @@ The derivation itself (§1, §5) and the test vectors (§8) are transport-indepe
 derived over any transport is byte-identical.
 
 **Capability discovery when the probe is unavailable.** The two discovery mechanisms above — the §6
-method-presence check and the §7 attempt-`skd_get_self_subkey_pubkey` probe — both assume the *client*
+method-presence check and the §7 attempt-`skd_get_blinded_pubkey` probe — both assume the *client*
 can tell whether the *signer* implements NIP-SKD by inspecting or calling the signer directly. Some
 transports break that assumption:
 
