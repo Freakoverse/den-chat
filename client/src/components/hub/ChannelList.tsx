@@ -1172,17 +1172,17 @@ function UnreadScrollHints({ scrollRef, hubDTag, activeChannelId }: {
       onClick={() => scrollTo(hint.channelId)}
       className={cn(
         'absolute left-1/2 -translate-x-1/2 z-20 flex items-center gap-1 px-2.5 py-1 rounded-full',
-        'text-[10px] font-semibold shadow-md cursor-pointer transition-colors max-w-[92%]',
+        'text-sm font-semibold shadow-md cursor-pointer transition-colors max-w-[92%]',
         dir === 'up' ? 'top-1' : 'bottom-1',
         hint.mention
           ? 'bg-primary text-primary-foreground hover:bg-primary/90'
           : 'bg-background/95 text-foreground border border-border hover:bg-accent',
       )}
     >
-      {dir === 'up' ? <ChevronUp size={11} className="shrink-0" /> : null}
-      {hint.mention && <AtSign size={11} className="shrink-0" />}
+      {dir === 'up' ? <ChevronUp size={14} className="shrink-0" /> : null}
+      {hint.mention && <AtSign size={14} className="shrink-0" />}
       <span className="truncate">{hint.mention ? 'Someone mentioned you' : 'New unreads'}</span>
-      {dir === 'down' ? <ChevronDown size={11} className="shrink-0" /> : null}
+      {dir === 'down' ? <ChevronDown size={14} className="shrink-0" /> : null}
     </button>
   )
 
