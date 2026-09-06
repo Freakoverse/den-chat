@@ -134,7 +134,7 @@ export class PC55Signer {
           // Send connect handshake with client name + client pubkey
           try {
             await this.sendRequest('connect', ['DEN Chat', this.clientPublicKey])
-            // Feature-detect NIP-SKD (§7): probe skd_get_subkey_pubkey once. A signer that
+            // Feature-detect NIP-SKD (§7): probe skd_get_blinded_pubkey once. A signer that
             // supports it enables private (v2) hubs; one that doesn't returns method-not-supported
             // (or any error) and we leave v2 disabled. Non-fatal — login proceeds either way.
             this.skdSupported = await this.probeSkd()

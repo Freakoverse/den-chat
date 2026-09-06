@@ -87,7 +87,7 @@ All messages are JSON-serializable objects sent with `postMessage`, targeted at 
 
 | `type` | Meaning |
 |---|---|
-| `vault-ready` | Sent once the Vault has loaded and is ready to receive ops. |
+| `vault-ready` `{ capabilities?: string[] }` | Sent once the Vault has loaded and is ready to receive ops. `capabilities` advertises optional surfaces this build supports (e.g. `["skd:1"]` for the NIP-SKD sub-key ops, §7.1); absent ⇒ none. |
 | `vault-overlay` `{ show: boolean }` | Asks the Client to resize the iframe to a full-viewport overlay (`show:true`) or back to hidden (`show:false`). |
 
 ### 5.3 Origin gating (both directions, normative)
@@ -128,6 +128,23 @@ These re-use NIP-07's method semantics. They require the Vault to be **unlocked*
 | `nip44Decrypt` | `{ pubkey, ciphertext }` | `string` |
 
 A conforming Client SDK SHOULD expose these as a standard `window.nostr` provider so existing NIP-07-consuming apps work unchanged.
+
+### 7.1 Sub-key derivation (NIP-SKD `skd:1`)
+
+A Vault MAY implement the [NIP-SKD](./NIP-SKD.md) sub-key surface so origin-isolated apps can use derived per-context pseudonyms (e.g. NIP-CHAT v2 private hubs) **without the derived private material ever leaving the Vault** — exactly like the root key. All ops require the Vault to be **unlocked** and derive from the session root; each returns only a public key, a signed event, or a nip44 result — never a private scalar.
+
+| `type` | Params | Result |
+|---|---|---|
+| `skdGetSelfSubkeyPubkey` | `{ context }` | `string` (x-only pubkey) |
+| `skdSignAsSelfSubkey` | `{ context, event }` | signed event |
+| `skdNip44Encrypt/DecryptAsSelfSubkey` | `{ context, recipientPub\|senderPub, plaintext\|ciphertext }` | `string` |
+| `skdGetSharedSubkeyPubkey` | `{ context, peerPub }` | `string` |
+| `skdSignAsSharedSubkey` / `skdNip44*AsSharedSubkey` | `{ context, …, peerPub }` | signed event / `string` |
+| `skdGetBlindedPubkey` | `{ context, peerPub }` | `string` (caller's own blinded pubkey) |
+| `skdGetPeerBlindedPubkey` | `{ context, peerPub }` | `string` (a peer's blinded pubkey — verifier side, pubkey only) |
+| `skdSignAsBlinded` / `skdNip44*AsBlinded` | `{ context, …, peerPub }` | signed event / `string` |
+
+**Capability advertisement (normative).** A Vault that implements this surface MUST include `"skd:1"` in the `capabilities` array of its `vault-ready` handshake (§5.2), so the Client can feature-gate correctly (a Vault that omits it MUST be treated as NIP-SKD-unsupported). See NIP-SKD §6–§7 for the forms and §7 for capability discovery.
 
 ---
 

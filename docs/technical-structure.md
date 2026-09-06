@@ -5,7 +5,7 @@
 > v1 hub: member tree leaves store per-hub **pseudonyms `P`** (not real keys), leaf pages
 > and the ban list are **encrypted blobs**, each event carries an encrypted `identity`
 > attestation, join requests are sealed to the owner, and migration is by **forking** to a
-> fresh hub (never in place). See `HUB-PRIVACY-V2-PLAN.md` and NIP-CHAT §0 for the full
+> fresh hub (never in place). See NIP-CHAT §0 for the full
 > model. v1 hubs are frozen and keep working as-is.
 
 ## Tech Stack
@@ -89,7 +89,7 @@
 | `j` (GIF) | Hub Chat, DMs | GIF attachments with encrypted URLs (`j` is used because `g` is the standard Nostr geohash tag per NIP-52) |
 | `client` | All events | Client identification tag (`DEN Chat`) |
 | `nonce` (NIP-13) | Hub Chat | Proof-of-Work for spam prevention |
-| `identity` (**v2**) | Hub Chat (all member events) | Encrypted `R_pub \|\| sig_R` attestation binding the pseudonymous author `P` to their real key. Required in v2 hubs; events without it are dropped. |
+| `identity` (**v2**) | Hub Chat (all member events) | Encrypted `"R_pub:sig_R"` attestation (`sig_R` = a per-message kind-`27492` attestation) binding the pseudonymous author `P` to their real key. Required in v2 hubs; events without it are dropped. |
 | `version` (**v2**) | Hub Event | Hub format version. Absent ⇒ v1; `"2"` ⇒ v2. |
 | `new_hub` (**v2**) | Hub Event | On a forked v1 hub, the `d` tag of its v2 successor. |
 
@@ -145,8 +145,12 @@ Merges client blossom servers, user blossom servers (kind 10063), and hub-specif
 ```
 DEN Chat/
 ├── docs/
-│   ├── NIP-CHAT.md                  # Protocol specification
-│   └── technical-structure.md       # This file
+│   ├── NIP-CHAT.md                             # Hub chat protocol spec (v2)
+│   ├── NIP-SKD.md                              # Sub-key derivation scheme (pseudonyms)
+│   ├── NIP-WEB-Vault.md                        # Web-vault (PWA remote signer) spec
+│   ├── aes to Logical Key Hierarchy (LKH).md   # Member-tree key management
+│   ├── general-structure-and-design.md         # High-level design
+│   └── technical-structure.md                  # This file
 ├── readme.md                        # Project overview
 │
 └── client/
@@ -388,7 +392,7 @@ The hub's member key hierarchy uses a **paginated spine-and-page architecture**.
 
 > **v2:** Leaf identifiers are pseudonyms `P`, and each **page** carries a group-encrypted,
 > epoch-stamped **roster segment** line (`roster:<epoch>:<enc({P:R})>` under
-> `HKDF(hub_secret, "roster")`). The **leaf pages stay plaintext** (keyed on the unlinkable
+> `HKDF(hub_secret_epoch, "roster:epoch:<epoch>")`). The **leaf pages stay plaintext** (keyed on the unlinkable
 > `P`), so `findPageForPubkey` binary search and the v1 hub-secret bootstrap are unchanged —
 > the page *is* the tree distributing the hub secret, so a hub-secret-derived page key would be
 > undecryptable before you hold the secret. The ban page is encrypted and stores real keys `R`.

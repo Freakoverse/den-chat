@@ -12,7 +12,7 @@
 > invisible in Discover, but it still publishes a public hub event (stable `d`, `epoch`,
 > `m`) and its pseudonymous `h`-tag traffic is still observable on relays; only its
 > branding and discoverability are hidden, not its existence or activity. UI deltas are
-> called out inline below. See `HUB-PRIVACY-V2-PLAN.md` and NIP-CHAT §0/§12A.
+> called out inline below. See NIP-CHAT §0/§12.
 
 ## App Identity
 
@@ -180,7 +180,7 @@ App identifier for secure storage: `den-chat` (distinct from DENOS's `denos`).
 #### Member List (~240px, right)
 
 - Grouped by role (e.g., "Admin — 1", "Moderators — 3", "Members — 47")
-- Visual differentiation per spec §7.4:
+- Visual differentiation per spec §7.3:
   - Creator's list members: full color, solid badge
   - Facilitated members: slightly muted, facilitated-by indicator
   - Manually followed: more muted, small indicator
@@ -188,7 +188,7 @@ App identifier for secure storage: `den-chat` (distinct from DENOS's `denos`).
 - No online/offline status (no reliable decentralized presence mechanism; relay polling would be too costly)
 - Click → profile card modal
 - **v2:** the tree stores pseudonyms `P`; the sidebar shows the **real user** by decrypting the
-  page's group-encrypted **roster segment** (`{P:R}` under `HKDF(hub_secret, "roster")`) — one
+  page's group-encrypted **roster segment** (`{P:R}` under `HKDF(hub_secret_epoch, "roster:epoch:<epoch>")`) — one
   decrypt per page, free with the page, and present even for members who never posted — then
   rendering `R`'s profile. The `P→R` mapping is cached. (Message authorship is proven
   per-message, §0.1; the roster segment carries the real keys for the roster and bans.)

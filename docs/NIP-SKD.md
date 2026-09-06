@@ -320,10 +320,10 @@ window.nostr.skd = {
 }
 ```
 
-Feature-detection: `typeof window.nostr?.skd?.getBlindedPubkey === 'function'` — a signer must expose
-the **blinded** op (required for NIP-CHAT v2), and one that does implements the whole surface. Checking
-the blinded op (not the self/shared one) ensures an older signer with only the pre-blinded surface is
-correctly treated as unsupported.
+Feature-detection: `typeof skd?.getSelfSubkeyPubkey === 'function' && typeof skd?.getBlindedPubkey ===
+'function'` — a conforming `skd:1` signer implements the whole surface, so requiring the **blinded** op
+(needed for NIP-CHAT v2) rejects an older signer that has only the pre-blinded self/shared surface;
+the `getSelfSubkeyPubkey` half keeps the check robust against a partial object exposing just one op.
 
 ## 7. Remote signer (NIP-46)
 
@@ -443,6 +443,18 @@ peer_pub  = 94576ae28a4583c68e5641b10befe9a90c92680271dc839052937a8552fc0ae5    
 context   = "nip-chat:v2:member-pseudonym:abc-123"
 blinded_pub (holder, root_priv_evenY = n - root_priv)  => 75a5ff6d888b7065181e9f2108f2ebd7e3000236cd409d19cf4f56ac0224a919
 blinded_pub (verifier, lift_even_y(root_pub))          => 75a5ff6d888b7065181e9f2108f2ebd7e3000236cd409d19cf4f56ac0224a919   ✓
+
+# ── facilitated: nested blinded (NIP-CHAT facilitated pseudonym Pf) ──
+# Same blinded form, one level deeper: Pf blinds the facilitated member's R_f toward the FACILITATOR's
+# own pseudonym P_fac (which is itself R_fac blinded toward O). Base = lift_even_y(R_f_pub); the ECDH
+# peer is P_fac. The facilitator re-derives the same Pf via getPeerBlindedPubkey (ECDH symmetry).
+R_fac_priv = 3333333333333333333333333333333333333333333333333333333333333333
+P_fac_pub  = 55b5f44d71211d5505f3a66115aad173e24a68f5510866269ed52cde4d398803     # R_fac blinded toward O
+R_f_priv   = 4444444444444444444444444444444444444444444444444444444444444444     # facilitated member
+context    = "nip-chat:v2:facilitated-pseudonym:abc-123"
+info       = "nip-skd:blinded" ‖ 0x1F ‖ context
+Pf_pub (facilitated: base = lift_even_y(R_f_pub), IKM = ecdh_x(R_f_priv, P_fac_pub))       => 31b1370ab9902ae59ee73d76bc5c7fb451d7bd52ec7c111a48f42d9ed2389a06
+Pf_pub (facilitator: getPeerBlindedPubkey, base = R_f_pub, IKM = ecdh_x(P_fac_priv, R_f_pub)) => 31b1370ab9902ae59ee73d76bc5c7fb451d7bd52ec7c111a48f42d9ed2389a06   ✓
 ```
 
 The shared and blinded forms feed the **raw** ECDH x-coordinate into HKDF (as NIP-44 does), **not**

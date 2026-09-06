@@ -2,7 +2,7 @@
 
 > **Status**: Draft v4 (hub format **v2** — privacy)
 > **Depends on**: NIP-01, NIP-13, NIP-44
-> **Companion**: `HUB-PRIVACY-V2-PLAN.md` (authoritative implementation plan for v2).
+> **Companion**: [`NIP-SKD.md`](./NIP-SKD.md) (the sub-key derivation scheme v2 pseudonyms use).
 
 ---
 
@@ -92,12 +92,22 @@ sig_owner = signEvent(R_owner, { kind: 27493, tags: [["a", coord]], content: "" 
 ```
 
 **Accountable identity — `R` signs every message.** Every member event carries
-`["identity", "<ciphertext>"]` = `enc(key, R_pub || sig_R)`, where `sig_R` is a **per-message
-signature by the real key over the event**, not a static binding:
+`["identity", "<ciphertext>"]` = `enc(key, "R_pub:sig_R")` (the real pubkey and signature joined by a
+`:`), where `sig_R` is a **per-message signature by the real key over the message** — not a static
+binding, and **not** a raw signature over `event.id`. Because a signer only exposes `signEvent` (it
+can't sign an arbitrary digest), `R` signs a **never-published kind `27492` attestation event** whose
+`m` tag commits to the message digest — the same event-based indirection used for the owner
+attestation above:
 
 ```
-sig_R = schnorr_sign(R_priv, event.id)
+digest = getEventHash(event without its `identity` and `nonce` tags)   // stable across PoW mining
+sig_R  = signEvent(R, { kind: 27492, tags: [["m", digest]], content: "" }).sig
 ```
+
+The digest **excludes** the `identity` tag (circular — it holds the sig) and the `nonce` tag (PoW
+mining varies it), so it binds `R` to the content and every semantic tag yet stays stable across
+mining and works identically for local keys and remote signers. Verifiers reconstruct the kind-`27492`
+event from `(R_pub, event.created_at, digest)` and check `sig_R`.
 
 - hub messages / reactions / activity → encrypted with the **channel/hub key** for the
   event's epoch (members decrypt, public cannot).
@@ -133,7 +143,7 @@ banned `R` cannot evade by minting a new `P`.
   unlinkable, so hiding the P-set buys nothing but count/churn — which the file size leaks
   anyway.
 - Each **leaf page carries one group-encrypted roster segment** — a `{ P: R }` map for that
-  page's members, encrypted with `HKDF(hubSecret_epoch, "roster")` and **stamped with the
+  page's members, encrypted with `HKDF(hubSecret_epoch, "roster:epoch:<epoch>")` and **stamped with the
   epoch** whose secret encrypts it (§5.2.1). Members resolve the roster (the real user, including
   **silent members** who never posted) *after* they hold the hub secret; non-members and the
   plaintext page reveal only the unlinkable `P`. One group AES op per page (not per member),
@@ -145,7 +155,7 @@ banned `R` cannot evade by minting a new `P`.
   the key but **never anyone added later**. A bare rotation rewrites 0 roster segments; a
   kick/add rewrites one — v1-parity even at 10M members.
 - **Ban list** stores real keys `R` (you ban the person, not a throwaway pseudonym) and is
-  **encrypted** with `HKDF(hubSecret_epoch, "ban-list")`. It must be its own encrypted file
+  **encrypted** with `HKDF(hubSecret_epoch, "ban-list:epoch:<epoch>")`. It must be its own encrypted file
   because banned members are removed from the tree.
 
 ### 0.3 What changes on events (see §6, §14)
@@ -517,13 +527,15 @@ Forgery of member events is thereby prevented *structurally*; the per-message si
 additionally gives members trustless attribution.
 
 **Accountable identity — `R` signs every message.** Rather than a static binding, the real
-key signs **each** member event:
+key signs **each** member event — via a never-published kind `27492` attestation (signers only
+expose `signEvent`, not raw-digest signing), whose `m` tag commits to the message digest:
 
 ```
-sig_R = schnorr_sign(R_priv, event.id)
+digest = getEventHash(event without its `identity` and `nonce` tags)   // stable across PoW mining
+sig_R  = signEvent(R, { kind: 27492, tags: [["m", digest]], content: "" }).sig
 ```
 
-carried as `["identity", enc(key, R_pub || sig_R)]`. The blinded pseudonym already makes `P`
+carried as `["identity", enc(key, "R_pub:sig_R")]`. The blinded pseudonym already makes `P`
 unforgeable by the owner (it cannot derive `P_priv`), so this signature is not what prevents
 owner-forgery — it provides **trustless attribution**: a member cannot re-derive another
 member's `P ↔ R` binding on their own (that needs `O_priv`), so `sig_R` is how *any* member
@@ -534,11 +546,11 @@ model that consciously drops the deniability of the old static-endorsement desig
 **Transport.** The identity ciphertext is keyed by the hub secret, never by the public hub
 id:
 
-- In hub messages/reactions/activity: `enc = AES-GCM(channel_or_hub_key_for_epoch, R_pub || sig_R)`,
+- In hub messages/reactions/activity: `enc = AES-GCM(channel_or_hub_key_for_epoch, "R_pub:sig_R")`,
   carried as `["identity", enc]`. The epoch is already on the event.
 - In join requests: encrypted to the owner `O` via ephemeral-static ECDH (§6.3).
 - In the member tree: each leaf **page** carries a group-encrypted, epoch-stamped roster
-  segment (`{ P: R }`) under `HKDF(hub_secret, "roster")` (the page itself stays plaintext,
+  segment (`{ P: R }`) under `HKDF(hub_secret_epoch, "roster:epoch:<epoch>")` (the page itself stays plaintext,
   §5.2.1), for the roster and for banning by real key.
 
 Enforcement (drop events lacking a valid per-message signature) is specified in §9.9.
@@ -584,9 +596,9 @@ roster) so the live subscription, the on-load fetch, and the moderator's own wri
 **Pins.** The per-user pin list (a replaceable event) is authored by, and keyed on, `P` — so
 `R`'s membership isn't exposed by their pin list.
 
-**Hide / unhide (moderation).** Hidden-message events are authored by `O` when the **owner**
-moderates (globally verifiable, since `O` is the public hub author) and by `P` when a **non-owner
-moderator** does (same-page verifiable via the roster). A client honours a hide iff its author is
+**Hide / unhide (moderation).** Hidden-message events (kind `36949`) are authored by `O` when the
+**owner** moderates (globally verifiable, since `O` is the public hub author) and by `P` when a
+**non-owner moderator** does (same-page verifiable via the roster). A client honours a hide iff its author is
 `O`, or is a same-page member holding the `hide_messages` permission — the exact v1 rule, lifted
 to pseudonyms. `R_owner` for the owner check comes from the decrypted owner attestation (§4.5).
 
@@ -792,7 +804,7 @@ The member/key file uses a **Logical Key Hierarchy (LKH)** tree structure.
 > **v2 differences (see §0.2).** In a v2 hub: (1) each `leaf`'s `member_pubkey` is the
 > member's **pseudonym `P`**, not their real key; (2) each **page** carries one extra line — a
 > group-encrypted, epoch-stamped **roster segment** `roster:<epoch>:<enc({P:R})>` under
-> `HKDF(hub_secret, "roster")` (§5.2.1), used to render real users in the roster and to ban by
+> `HKDF(hub_secret_epoch, "roster:epoch:<epoch>")` (§5.2.1), used to render real users in the roster and to ban by
 > real key; (3) the **leaf pages stay plaintext** (keyed on the unlinkable `P`), so the
 > top-level binary search **and the v1 hub-secret bootstrap are unchanged** — the page *is* the
 > tree that distributes the hub secret, so encrypting it whole would be undecryptable before
@@ -852,7 +864,7 @@ Same fields as `node`. The page-root's key bridges to the spine tree (the spine 
 | Field | Description |
 |-------|-------------|
 | `epoch` | The epoch whose hub secret encrypts this segment (so a reader picks the right secret from history). |
-| `aes_encrypted_P_to_R_map` | `AES-GCM(HKDF(hub_secret_epoch, "roster"), JSON({ P: R, … }))` — the `P→R` map for **this page's** members. Base64 (no `:`), so the line splits cleanly. |
+| `aes_encrypted_P_to_R_map` | `AES-GCM(HKDF(hub_secret_epoch, "roster:epoch:<epoch>"), JSON({ P: R, … }))` — the `P→R` map for **this page's** members. Base64 (no `:`), so the line splits cleanly. |
 
 The roster segment is what lets members (who hold the hub secret) resolve each pseudonym `P` to the real key `R` — including **silent members** who never posted — and ban by real key. Keying it on the hub secret means members can deanonymize each other *inside* the hub while the public cannot; the leaf pages themselves stay plaintext and reveal only `P`.
 
@@ -1370,7 +1382,7 @@ Clients split on known offsets: first 12 bytes = IV, last 16 bytes = auth tag, e
 | `published_at` | Yes | Unix timestamp of the original message creation. On first publish, set to `created_at`. On edits, carry forward unchanged. Used for display ordering (see Editing Messages below). |
 | `nonce` | Conditional | PoW nonce (NIP-13 format: `["nonce", "<counter>", "<target_difficulty>"]`). Required if hub has a `w` tag with difficulty > 0. |
 | `facilitator` | No | Hex pubkey of the member who facilitated this non-member's access to the hub secret (see §5.6). Clients SHOULD verify the facilitator is in the creator's member list before rendering. |
-| `identity` | Conditional (**v2**) | Encrypted **per-message** identity signature binding the event's pseudonymous author `P` (= `pubkey`) to the member's real key `R`. Value is `AES-GCM(channel_or_hub_key_for_epoch, R_pub \|\| sig_R)` where `sig_R = sign(R_priv, event.id)` — a fresh signature **over this event**, not a static binding. Because `P` is a blinded pseudonym the owner cannot sign as (§4.5), this signature is not what prevents forgery; it lets **any member** cryptographically verify which real `R` authored the event (trustless attribution) without trusting the owner's roster. **Required on every member event in a v2 hub**; events lacking a valid signature are dropped (§9.9). Opaque ciphertext — not usable for relay-level filtering. |
+| `identity` | Conditional (**v2**) | Encrypted **per-message** identity signature binding the event's pseudonymous author `P` (= `pubkey`) to the member's real key `R`. Value is `AES-GCM(channel_or_hub_key_for_epoch, "R_pub:sig_R")` where `sig_R` is `R`'s signature on a never-published kind-`27492` attestation whose `m` tag is the message digest = `getEventHash(event)` computed with the `identity` and `nonce` tags removed (so it survives PoW mining and works via `signEvent` on remote signers) — a fresh signature **over this event**, not a static binding and not over `event.id`. Because `P` is a blinded pseudonym the owner cannot sign as (§4.5), this signature is not what prevents forgery; it lets **any member** cryptographically verify which real `R` authored the event (trustless attribution) without trusting the owner's roster. **Required on every member event in a v2 hub**; events lacking a valid signature are dropped (§9.9). Opaque ciphertext — not usable for relay-level filtering. |
 | `content-warning` | No | NIP-36: marks this message as containing sensitive/NSFW content. Value is an optional reason string (may be empty). Clients SHOULD blur or hide the message until the user clicks to reveal. |
 | `L` | Conditional | NIP-32: label namespace. Set to `"content-warning"` when the `content-warning` tag is present. Required if `content-warning` is present. |
 
@@ -1618,7 +1630,9 @@ Published by a user to signal they want to join a hub. Shows up in a request que
 >    to confirm the authoring key belongs to the sealed `R`.
 > 3. The request carries `["ephemeral", "<e_pub>"]` and a plaintext `["version", "2"]` marker
 >    (so owners route it as a v2 join and never feed a v1 join into the decrypt path), and its
->    `content` is `AES-GCM(shared, {R_pub, P_pub, note?})`.
+>    `content` is `NIP-44 v2` encrypted — `nip44.encrypt(getConversationKey(e_priv, O_pub), {r, p, note?})`
+>    (payload keys `r` = `R_pub`, `p` = `P_pub`) — not raw `AES-GCM(shared, …)`; the NIP-44 conversation
+>    key is itself an HKDF over the ephemeral↔`O` ECDH.
 > 4. The owner decrypts with `ECDH(O_priv, e_pub)` to learn the real requester, then
 >    **re-derives `P_pub` from `R`** via the blinded verifier op —
 >    `getPeerBlindedPubkey("nip-chat:v2:member-pseudonym:"+d_tag, peer = R_pub)` — and admits `P`
@@ -2668,11 +2682,12 @@ Unlike the Message Edit Hint, a typing signal triggers **no downstream relay que
 ## 7. Member List Mechanics
 
 > [!IMPORTANT]
-> **v2 roster (see §0.2).** In a v2 hub the tree stores pseudonyms `P`. To show the
-> **real user** in the member sidebar, the client decrypts each leaf's **encrypted `R_pub`**
-> (`HKDF(hub_secret, "leaf-rpub")` — free with the plaintext page it already fetched, and
-> present even for **silent members** who never posted), resolves `R`, and fetches `R`'s
-> kind:0 profile. Ban subtraction is performed on `R`. This is preferred over reading `P`'s
+> **v2 roster (see §0.2, §5.2.1).** In a v2 hub the tree stores pseudonyms `P`. To show the
+> **real user** in the member sidebar, the client decrypts the page's **group-encrypted roster
+> segment** — one `AES-GCM(HKDF(hub_secret_epoch, "roster:epoch:<epoch>"), {P:R})` blob per page (a
+> single op for the whole page, not per-leaf), free with the plaintext page it already fetched and
+> present even for **silent members** who never posted — to recover the `{P → R}` map, then fetches
+> `R`'s kind:0 profile. Ban subtraction is performed on `R`. This is preferred over reading `P`'s
 > kind:0 (which would be a double kind:0 fetch).
 >
 > **Render cost — window the viewport and cache the verification.** The per-member Schnorr
@@ -2882,9 +2897,13 @@ presence):
 1. **Cheap pre-check (plaintext):** the event carries an `["identity", …]` tag. If absent,
    **drop** the event before any decryption — do not render, do not notify. This is the v2
    analogue of "hide non-member messages," and stops anonymous spam.
-2. **Validity check (post-decrypt):** decrypt the tag with the channel/hub key for the
-   event's epoch to recover `R_pub` and `sig_R`; verify `sig_R` is a valid signature by
-   `R_pub` **over `event.id`** (with `P_pub = event.pubkey`). If verification fails, **drop**.
+2. **Validity check (post-decrypt):** decrypt the tag (`"R_pub:sig_R"`) with the channel/hub key
+   for the event's epoch to recover `R_pub` and `sig_R`; recompute the digest =
+   `getEventHash(event)` with the `identity` and `nonce` tags removed, reconstruct the kind-`27492`
+   attestation `{ kind: 27492, pubkey: R_pub, created_at: event.created_at, tags: [["m", digest]],
+   content: "" }`, and verify `sig_R` against it (with `P_pub = event.pubkey`). If verification
+   fails, **drop**. (The outer `P` signature is already checked by the relay pool; do not verify over
+   `event.id` — the attestation digest deliberately excludes `nonce` so it survives PoW mining.)
 3. **Ban check:** if `R_pub` (or `P_pub`) is on the decrypted ban set (§5.3), **drop**
    (hard filter, no reveal — same treatment as a v1 ban).
 4. Otherwise render, attributing the message to the **real user `R`** (resolved via the
@@ -3152,6 +3171,7 @@ Clients MUST hide any hub carrying a `new_hub` tag from search/browse/discovery.
 | `36946` | Voice Host Availability | Addressable Replaceable | Hub general relays |
 | `36947` | Voice Presence Heartbeat | Addressable Replaceable | Hub general relays |
 | `36948` | Hub Report | Addressable Replaceable | Hub general relays |
+| `36949` | Hide Message (moderation hide/unhide, §4.6) | Addressable Replaceable | Hub general relays |
 | `31923` | Calendar Time Event (NIP-52) | Addressable Replaceable | Hub general relays |
 | `31925` | Calendar RSVP (NIP-52) | Addressable Replaceable | Hub general relays |
 | `1067` | Poll | Regular | Hub general relays |
@@ -3206,7 +3226,7 @@ Clients MUST hide any hub carrying a `new_hub` tag from search/browse/discovery.
 | `deleted` | Hub, Message | Deletion fallback flag. `["deleted", "true"]` marks the event as request-deleted. Used when relays do not honor NIP-09 Kind 5 deletion. |
 | `version` | Hub | Hub format version (**v2**, §0). Absent ⇒ v1; `"2"` ⇒ v2; higher ⇒ update client. |
 | `new_hub` | Hub | On a forked v1 hub: `d` tag of the v2 successor (§12). Honor only if same creator pubkey. |
-| `identity` | Message + all member-authored hub events (**v2**) | Encrypted `R_pub \|\| sig_R` attestation binding the pseudonymous author to their real key (§0.1, §6.2). Opaque ciphertext; required in v2, drop events without it (§9.9). |
+| `identity` | Message + all member-authored hub events (**v2**) | Encrypted `"R_pub:sig_R"` attestation (`sig_R` = a per-message kind-`27492` attestation, not a signature over `event.id`) binding the pseudonymous author to their real key (§0.1, §6.2). Opaque ciphertext; required in v2, drop events without it (§9.9). |
 | `picture` | Hub (**v2**) | Plaintext hub icon URL for the join/Discover card (moved out of the encrypted `content`). |
 | `banner` | Hub (**v2**) | Plaintext hub banner URL for the join/Discover card. |
 | `about` | Hub (**v2**) | Plaintext public blurb for the join/Discover card. |
