@@ -4,6 +4,18 @@
 > **Status**: Proposed
 > **Affects**: NIP-CHAT §4 (Cryptographic Model), §5 (Blossom File System), §12 (Join/Removal Flow)
 
+> **Hub format v2 (privacy) note.** v2 hubs keep this exact LKH tree — the key hierarchy,
+> spine, pagination, and O(log N) re-key are unchanged. v2 only layers privacy on top: leaf
+> identifiers become per-hub **pseudonyms `P`**, and each **page** carries a group-encrypted,
+> epoch-stamped **roster segment** (`{P:R}` under `HKDF(hub_secret, "roster")`) — one AES op
+> per page, forward-secret across kicks/rotations. The **leaf pages stay plaintext** (keyed
+> on the unlinkable `P`), so the hub-secret bootstrap and binary search are unchanged — the
+> page *is* the tree that distributes the hub secret, so encrypting it whole would be
+> undecryptable before you hold the secret. The **ban page** is encrypted and stores real keys
+> `R`. The v1→v2 change is **not** an in-place migration like the one below — it is a **fork**
+> to a fresh hub (v1 plaintext history cannot become v2 ciphertext, and the owner authors v2
+> under a different key `O`). See `HUB-PRIVACY-V2-PLAN.md` and NIP-CHAT §0/§12.
+
 ---
 
 ## Why the Change

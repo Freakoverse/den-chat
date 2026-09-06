@@ -1,5 +1,19 @@
 # DEN Chat — General Structure & Design
 
+> **Hub format v2 (privacy).** New hubs are created as **v2** (`["version","2"]`), which
+> hides real member identities, the ban list, join authorship, sender→hub linkage, **and
+> the hub's internal structure** (roles, categories, channel names) from the public. Only a
+> **public face** (name, icon, banner, blurb, topics) stays visible for the join/Discover
+> card; the structure is encrypted and readable only after joining. Members act under a
+> per-hub pseudonym `P`; the client resolves the real user behind `P` for display via an
+> encrypted identity attestation. v1 hubs are frozen and keep working; a creator upgrades
+> by **forking** to a fresh v2 hub (a "this hub has moved" banner then guides members to
+> re-join). An **unlisted hub** leaves the public face blank and sets `f=off` — it is
+> invisible in Discover, but it still publishes a public hub event (stable `d`, `epoch`,
+> `m`) and its pseudonymous `h`-tag traffic is still observable on relays; only its
+> branding and discoverability are hidden, not its existence or activity. UI deltas are
+> called out inline below. See `HUB-PRIVACY-V2-PLAN.md` and NIP-CHAT §0/§12A.
+
 ## App Identity
 
 - **Name**: DEN Chat
@@ -173,6 +187,11 @@ App identifier for secure storage: `den-chat` (distinct from DENOS's `denos`).
   - Unknown: greyed, behind "show unverified" toggle
 - No online/offline status (no reliable decentralized presence mechanism; relay polling would be too costly)
 - Click → profile card modal
+- **v2:** the tree stores pseudonyms `P`; the sidebar shows the **real user** by decrypting the
+  page's group-encrypted **roster segment** (`{P:R}` under `HKDF(hub_secret, "roster")`) — one
+  decrypt per page, free with the page, and present even for members who never posted — then
+  rendering `R`'s profile. The `P→R` mapping is cached. (Message authorship is proven
+  per-message, §0.1; the roster segment carries the real keys for the roster and bans.)
 
 #### User Panel (bottom-left)
 
@@ -188,7 +207,7 @@ App identifier for secure storage: `den-chat` (distinct from DENOS's `denos`).
 
 1. Hub name
 2. Hub icon (upload via Blossom)
-3. Select/add relay(s) — general + optional filter
+3. Select/add general relay(s)
 4. Select/add Blossom server(s) (min 1, recommend 3)
 5. Default roles (auto-create `everyone` role)
 6. `[Create]` → generates hub secret → creates member file → uploads to Blossom → publishes kind 36942
@@ -200,7 +219,7 @@ App identifier for secure storage: `den-chat` (distinct from DENOS's `denos`).
 - **Channels**: create/edit/delete/reorder channels and categories
 - **Members**: view member list, accept join requests, batch actions, sync from mod lists
 - **Blossom**: manage Blossom servers, view index file status
-- **Relays**: manage general + filter relays
+- **Relays**: manage general relays
 - **Security**: view current epoch, trigger manual secret rotation
 
 ### Join Request Queue
@@ -337,6 +356,23 @@ User clicks [+] on hub sidebar → [Join Hub]
   → Kind 16942 updated with new hub entry
 ```
 
+**v2 join & fork UX:**
+
+- **Joining a v2 hub:** the client derives the user's per-hub pseudonym `P` and its
+  identity attestation, and publishes a **sealed** join request (kind `36944`) that only
+  the hub owner can decrypt (ephemeral-static ECDH). The owner's join queue shows the real
+  requester; on accept, `P` is added to the tree. Thereafter the user posts as `P` with an
+  encrypted `identity` tag on every event.
+- **v2 join preview:** the join card shows only the **public face** (name, icon, banner,
+  blurb, topics, approximate member count from the public index) — **not** the channel
+  list, which is in the encrypted `content` and unlocks only after the user is admitted and
+  obtains the hub secret from the tree.
+- **Forking a v1 hub:** the creator uses **Create v2 copy** (hub settings). It spawns a
+  fresh v2 hub and stamps the old hub with `new_hub`. The old hub then shows a permanent
+  **"This hub has moved to a new version — request to join"** banner (creator also sees a
+  **Delete old hub** control). History does not move; the old hub stays readable until
+  deleted. Discovery hides hubs that carry a `new_hub` tag.
+
 ### Sending a Message
 
 ```
@@ -351,7 +387,7 @@ User types in message input (Tiptap)
     5. Encrypts with AES-256-GCM → base64(IV || ciphertext || tag)
     6. Creates kind 36943 event with h, c, epoch tags
     7. Signs event (via signer or local key)
-    8. Publishes to filter relays (or general relays if no filter)
+    8. Publishes to the hub's general relays
 ```
 
 ### Creating a Hub
@@ -362,7 +398,6 @@ User clicks [+] → [Create Hub]
   → Fills in: name, icon, description
   → Adds relays (at least 1 general)
   → Adds Blossom servers (recommend 3)
-  → Optionally adds filter relay
   → Clicks [Create]
   → Client:
     1. Generates hub UUID (d tag)

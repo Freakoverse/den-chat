@@ -1,5 +1,13 @@
 # DEN Chat — Technical Structure
 
+> **Hub format v2 (privacy).** This document describes the shared implementation. Where
+> hub-member privacy applies, a v2 hub (`["version","2"]` on kind `36942`) differs from a
+> v1 hub: member tree leaves store per-hub **pseudonyms `P`** (not real keys), leaf pages
+> and the ban list are **encrypted blobs**, each event carries an encrypted `identity`
+> attestation, join requests are sealed to the owner, and migration is by **forking** to a
+> fresh hub (never in place). See `HUB-PRIVACY-V2-PLAN.md` and NIP-CHAT §0 for the full
+> model. v1 hubs are frozen and keep working as-is.
+
 ## Tech Stack
 
 | Layer | Technology | Version | Notes |
@@ -81,6 +89,9 @@
 | `j` (GIF) | Hub Chat, DMs | GIF attachments with encrypted URLs (`j` is used because `g` is the standard Nostr geohash tag per NIP-52) |
 | `client` | All events | Client identification tag (`DEN Chat`) |
 | `nonce` (NIP-13) | Hub Chat | Proof-of-Work for spam prevention |
+| `identity` (**v2**) | Hub Chat (all member events) | Encrypted `R_pub \|\| sig_R` attestation binding the pseudonymous author `P` to their real key. Required in v2 hubs; events without it are dropped. |
+| `version` (**v2**) | Hub Event | Hub format version. Absent ⇒ v1; `"2"` ⇒ v2. |
+| `new_hub` (**v2**) | Hub Event | On a forked v1 hub, the `d` tag of its v2 successor. |
 
 ---
 
@@ -108,7 +119,7 @@ Each source can be independently toggled on/off. Optional "limit to 3 per list" 
 await publishToSpecificRelays(getPublishRelays(hubRelays), signedEvent)
 
 // Hub-scoped events (messages, join requests, hub edits):
-const hubRelays = [...hub.generalRelays, ...hub.filterRelays]
+const hubRelays = [...hub.generalRelays]
 await publishToSpecificRelays(getPublishRelays(hubRelays), signedEvent)
 
 // Non-hub events (profile, DMs, social posts, emoji sets):
@@ -375,6 +386,14 @@ export const DOMAIN_SALT = '14bf723f-5c4d-4898-9e57-a6aee6e2c8fa-v1';
 
 The hub's member key hierarchy uses a **paginated spine-and-page architecture**. Members are partitioned into **leaf pages** of up to 10,000 leaves each, with a **spine tree** connecting page roots to a single root that encrypts the hub secret.
 
+> **v2:** Leaf identifiers are pseudonyms `P`, and each **page** carries a group-encrypted,
+> epoch-stamped **roster segment** line (`roster:<epoch>:<enc({P:R})>` under
+> `HKDF(hub_secret, "roster")`). The **leaf pages stay plaintext** (keyed on the unlinkable
+> `P`), so `findPageForPubkey` binary search and the v1 hub-secret bootstrap are unchanged —
+> the page *is* the tree distributing the hub secret, so a hub-secret-derived page key would be
+> undecryptable before you hold the secret. The ban page is encrypted and stores real keys `R`.
+> See NIP-CHAT §5.2.1 and §5.3.
+
 ```
 Paginated LKH Architecture:
 
@@ -461,6 +480,14 @@ The page count is stored in `hubStore.hubPageCounts` (set by `useHubLoader` from
 1. HKDF(hub_secret, hub_d_tag, channel_id)         → channel_message_key
 2. AES-GCM(channel_message_key, plaintext_json)    → message content
 ```
+
+> **v2 — encrypted hub content.** A v2 hub also encrypts the hub event's structural
+> `content` (roles, categories, channel names, permissions, plugins):
+> `hub_content_key = HKDF(hub_secret, salt, "hub-content:epoch:<epoch>")`, then
+> `AES-GCM`. The public face (`n`, `picture`, `banner`, `about`, `t`) moves to plaintext
+> tags so the join/Discover card renders. The hub **secret still lives in the tree** (via
+> `m` → page/spine), not in the content — so a newly-added member gets the secret from the
+> tree first, then decrypts the content like any message.
 
 ### Ciphertext Format
 
@@ -651,7 +678,6 @@ if (isTauri()) {
 | NIP-19 | Encoding — `npub`, `naddr`, `nevent` for sharing |
 | NIP-25 | Reactions on messages and posts |
 | NIP-30 | Custom emoji shortcodes and sets (kind 30030) |
-| NIP-42 | AUTH — filter relay authentication |
 | NIP-44 | NIP-44 encryption (used by NIP-17 gift wrap) |
 | NIP-46 | Nostr Connect — relay-based remote signing |
 | NIP-51 | Lists — profile link sets (kind 30003, linktree-style) |

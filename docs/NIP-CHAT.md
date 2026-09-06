@@ -1,7 +1,201 @@
 # NIP-CHAT: Decentralized Hub-Based Chat Protocol for Nostr
 
-> **Status**: Draft v3  
+> **Status**: Draft v4 (hub format **v2** — privacy)
 > **Depends on**: NIP-01, NIP-13, NIP-44
+> **Companion**: `HUB-PRIVACY-V2-PLAN.md` (authoritative implementation plan for v2).
+
+---
+
+## 0. Hub Format Versions (v1 & v2)
+
+NIP-CHAT hubs come in two **formats**, distinguished by a `["version", "N"]` tag on the
+hub event (kind `36942`). **Both are permanent, first-class options** — v2 is *not* a
+migration target that deprecates v1:
+
+- **v1** — `version` tag **absent**. Fully public: member list, ban list, join authorship,
+  and message sender→hub linkage are public (encrypted content, public metadata). Works
+  with **any** signer. Choose v1 when reach matters more than privacy.
+- **v2** — `["version", "2"]`. Adds **member- and creator-identity privacy**: the real
+  identities of members *and* the creator, the ban list, and join authorship are hidden
+  from the public, and cross-hub linkage is broken (per-hub pseudonyms), while moderation
+  and O(log N) routing are preserved. **Requires a capable signing setup** (§0.5). The one
+  leak it **reduces rather than closes** is sender→hub linkage: the plaintext `h` tag stays
+  (for routing), so an observer still learns *a pseudonym posted to hub X* — pseudonymous
+  per-hub activity, never real-identity or cross-hub linkage (see §10 threat table).
+
+Clients MUST branch on the tag: absent → v1; `"2"` → v2; **any higher/unknown number →
+prompt the user to update their client** and do not render the hub.
+
+**Version integrity — fail toward privacy.** The `version` tag is a mutable field, so a
+buggy client or a careless admin could strip or alter it after the hub is live. To stop
+that from silently downgrading a private hub into plaintext behaviour (a dox), a client
+MUST treat a hub as **v2 if _any_ of these signals says v2**, and as v1 only if **all**
+agree v1:
+
+1. the **hub type recorded in the user's own hub list** when they joined (§6.4) — empty ⇒
+   v1, `"2"` ⇒ v2;
+2. the live `version` tag on the hub event;
+3. **encrypted `content`** on the hub event — intrinsic and unspoofable (a v2 hub's
+   structural body *is* ciphertext; it cannot be forged back to plaintext).
+
+On any inconsistency (recorded v2 but live tag reads v1, or tag reads v1 but `content` is
+encrypted, etc.), the client MUST **warn the user, refuse to render/post as v1, and block
+publishing** until resolved. The one transition a client must never make silently is
+turning a hub the user joined as v2 into v1 behaviour.
+
+### 0.1 The v2 model in one page
+
+**Requires NIP-SKD (§0.5).** v2 identities are derived with [NIP-SKD](./NIP-SKD.md) Sub-Key
+Derivation — via a local key, or a signer that implements it. A signer without NIP-SKD
+cannot participate privately.
+
+**Pseudonymous membership, owner-verifiable.** Each member acts under a per-hub pseudonym
+`P` — a **blinded** derivation of their real key `R` toward the hub owner `O` (NIP-SKD
+`blinded` form). The owner can independently re-derive `P`'s **public** key to verify it, but
+**cannot** obtain `P`'s private key:
+
+```
+// NIP-SKD blinded form: context = "nip-chat:v2:member-pseudonym:" + d_tag, peer = O_pub
+t      = HKDF( ECDH(R_priv, O_pub), salt = "nip-skd-v1", info = blinded(context) )   // see NIP-SKD §1
+P_pub  = xonly( lift_even_y(R_pub) + t·G )      // P_priv = R_priv + t, held only by the member
+// owner verifies:  getPeerBlindedPubkey(context, peer = R_pub) == P_pub   // pubkey only; never P_priv
+```
+
+where `O` is the owner pseudonym (below), and `blinded(context)` is the form-tagged HKDF `info`
+of NIP-SKD §1. Local keys compute it directly; capable signers derive `P` as a NIP-SKD blinded
+sub-key (§0.5). `P` is deterministic per (member, hub), unlinkable across hubs, unlinkable to
+`R` for the public, **owner-verifiable, and squat-proof**: a leaked `P` cannot be re-bound to a
+different `R` because the owner would derive a *different* `P` for that `R`. Crucially the owner
+derives only `P_pub` (to verify and place the leaf) and **never `P_priv`**, so it cannot sign as
+a member. The member tree stores `P`; every member-authored event is signed by `P`.
+
+**Hidden creator.** The hub is authored not by the creator's real key `R_owner` but by a
+derived **owner pseudonym `O`**:
+
+```
+// NIP-SKD self form: context = "nip-chat:v2:owner-pseudonym:" + d_tag
+O_priv = HKDF( R_owner_priv, salt = "nip-skd-v1", info = self(context) )   // see NIP-SKD §1
+O_pub  = derivePublic(O_priv)
+```
+
+The hub coordinate is `kind:O_pub:d_tag`; `R_owner` never appears publicly. `O` is
+**self-authoritative** — it *is* the hub's owner key, recognised as the owner without an
+`identity` tag, and only `R_owner`'s holder can derive `O_priv`, so no one can forge it. A
+static **owner attestation**, stored encrypted with the hub secret, reveals the real creator
+to members once they are in:
+
+```
+// R_owner signs a never-published attestation event committing to the coordinate,
+// via signEvent (remote-compatible), kind 27493 with tags [["a", coord]]:
+sig_owner = signEvent(R_owner, { kind: 27493, tags: [["a", coord]], content: "" }).sig
+// stored as enc(hubSecret, {R_owner_pub, created_at, sig_owner})
+```
+
+**Accountable identity — `R` signs every message.** Every member event carries
+`["identity", "<ciphertext>"]` = `enc(key, R_pub || sig_R)`, where `sig_R` is a **per-message
+signature by the real key over the event**, not a static binding:
+
+```
+sig_R = schnorr_sign(R_priv, event.id)
+```
+
+- hub messages / reactions / activity → encrypted with the **channel/hub key** for the
+  event's epoch (members decrypt, public cannot).
+- join requests → encrypted to the owner `O` via ephemeral-static ECDH (§6.3).
+
+The owner **cannot** derive `P_priv` (blinded form, above), so it cannot forge a member's
+messages — that unforgeability is now **structural**. The per-message `R` signature stays for a
+different, essential reason: **trustless attribution**. A member cannot re-derive another member's
+`P ↔ R` binding themselves (that needs `O_priv`), so `sig_R` is how *any* member cryptographically
+verifies **which real `R`** authored a message — without trusting the owner's roster. This is an
+**accountable** model: within the hub, authorship is provable and member-verifiable. It gives up
+the deniability of the earlier static-endorsement design — a conscious, in-scope trade for a
+Discord-like community platform (§10).
+
+**Drop rule.** In a v2 hub, an event without a valid `identity` tag is not rendered and does
+not notify: cheap plaintext presence check first, then post-decrypt validity (verify `sig_R`
+over the event and that `P == event.pubkey`). Owner-authored (`O`) events are **exempt** —
+`O` is the recognised owner key.
+
+**Everything authoritative keys on `R`.** Bans, roster, roles, and membership all key on the
+real key `R` (resolved from the identity tag / owner-side derivation), never on the
+disposable label `P`. So a member whose `P` ever changes is still the same person, and a
+banned `R` cannot evade by minting a new `P`.
+
+### 0.2 What changes on Blossom (see §5)
+
+- **Member tree** stores `P` (not `R`); the **leaf pages stay plaintext** (keyed on the
+  unlinkable pseudonym `P`), so the top-level binary search **and the v1 hub-secret bootstrap
+  are unchanged** — a member finds their leaf by `P`, decrypts their leaf key, and walks to
+  the hub secret exactly as in v1. Encrypting whole pages is **deliberately not done**: the
+  page *is* the tree that distributes the hub secret, so a hub-secret-derived page key would
+  be undecryptable before you have the hub secret (chicken-and-egg); and `P` is already
+  unlinkable, so hiding the P-set buys nothing but count/churn — which the file size leaks
+  anyway.
+- Each **leaf page carries one group-encrypted roster segment** — a `{ P: R }` map for that
+  page's members, encrypted with `HKDF(hubSecret_epoch, "roster")` and **stamped with the
+  epoch** whose secret encrypts it (§5.2.1). Members resolve the roster (the real user, including
+  **silent members** who never posted) *after* they hold the hub secret; non-members and the
+  plaintext page reveal only the unlinkable `P`. One group AES op per page (not per member),
+  keyed on the client-held hub secret, so it adds **no signer round-trips** — owner tree ops
+  stay v1-class even with a remote signer. The per-epoch stamp gives **forward-secret
+  identity**: on a kick/rotation the touched page's segment is rewritten under the new epoch,
+  untouched pages keep their old stamp, and a rotated-out secret can't open a segment written
+  after it — so a kicked member (or a leaked old secret) sees who was present when they held
+  the key but **never anyone added later**. A bare rotation rewrites 0 roster segments; a
+  kick/add rewrites one — v1-parity even at 10M members.
+- **Ban list** stores real keys `R` (you ban the person, not a throwaway pseudonym) and is
+  **encrypted** with `HKDF(hubSecret_epoch, "ban-list")`. It must be its own encrypted file
+  because banned members are removed from the tree.
+
+### 0.3 What changes on events (see §6, §14)
+
+- Hub event is authored by the **owner pseudonym `O`** (coordinate `kind:O:d_tag`); it gains
+  a `version` tag, an encrypted owner attestation, and (on an optional v2 copy of a v1 hub) a
+  `new_hub` tag.
+- Hub event **`content` is encrypted** with `hub_content_key` (§4.2): the structural body
+  (roles, categories, **channel names**, permissions, plugins) is member-only, while the
+  **public face** (`n`, `picture`, `banner`, `about`, `t`) moves out to plaintext tags for
+  the join/Discover card (§6.1). The hub **secret is not in the content** — it stays in the
+  tree — so this adds no bootstrap step.
+- Message and every member-authored hub event gain the encrypted `identity` tag (`P_pub`
+  bound to `R` by a **per-message** `sig_R`); `pubkey` is `P`.
+- Join requests are sealed to the owner `O` (§6.3).
+
+### 0.4 v1 and v2 coexist — no forced migration (see §12)
+
+v1 and v2 are permanent options, not stages, and v1 is **not** deprecated. There is no
+migration directive. A creator who wants to take a public hub private MAY use an optional
+**"Create v2 copy"** action that spawns a fresh v2 hub and (optionally) stamps the old hub
+with `["new_hub", "<new_d_tag>"]` to point members at the successor; the old hub keeps
+working. History does **not** move (v1 plaintext cannot become v2 ciphertext). Clients honour
+`new_hub` only when the successor's creator matches, and treat it as an informational
+pointer, not a shutdown.
+
+### 0.5 Capability requirement — NIP-SKD (v2)
+
+v2 identities are derived with **[NIP-SKD](./NIP-SKD.md) Sub-Key Derivation** (salt
+`"nip-skd-v1"`). Derivation needs one of:
+
+- a **local key** — the client holds `R_priv` and computes the HKDF/ECDH directly; or
+- a **remote/browser signer that implements NIP-SKD** — it derives and operates the sub-keys
+  **internally**, never exposing their private material:
+  - owner `O` → **self** form on context `"nip-chat:v2:owner-pseudonym:"+d_tag`;
+  - member `P` → **blinded** form on `"nip-chat:v2:member-pseudonym:"+d_tag` with peer `O_pub`
+    (the owner verifies `P` via `getPeerBlindedPubkey` but cannot derive `P_priv`);
+  - facilitated `Pf` → **blinded** form on `"nip-chat:v2:facilitated-pseudonym:"+d_tag` with peer
+    `P_fac`; join address → **blinded** form on `"nip-chat:v2:join-addr:"+d_tag` with peer `O_pub`.
+
+  NIP-CHAT v2 uses only the **self** and **blinded** NIP-SKD forms — never the `shared` form.
+
+Because NIP-SKD extracts under salt `"nip-skd-v1"` (disjoint from NIP-44's `"nip44-v2"`), no
+v2 derivation can reproduce a DM key. The DEN client ships NIP-SKD itself (local key or its
+own signer), so v2 works for DEN-client users immediately; third-party signers adopt over
+time. A signer **without** NIP-SKD cannot join or post in a v2 hub: the client shows an
+explanatory page ("use the DEN client or a NIP-SKD signer") and **never** falls back to
+publishing in the clear. The scheme each hub uses is recorded in
+`["signer_scheme", "skd", "1"]` (§6.1), so clients route derivation by it and a future
+NIP-SKD version or replacement never breaks existing hubs.
 
 ---
 
@@ -12,7 +206,7 @@ NIP-CHAT defines a decentralized, hub-based chat system built on Nostr. It provi
 ### 1.1 Design Philosophy
 
 - **Encrypted by default.** All hub messages are encrypted with a hub-wide shared secret. Non-members cannot read content. Users should understand: *"messages are encrypted, but any member could leak them — treat it like a private group chat, not a vault."*
-- **Anyone can post.** The protocol layer does not gatekeep who can publish events to a channel. Filtering is a client-side (or filter-relay-side) rendering decision based on member lists.
+- **Anyone can post.** The protocol layer does not gatekeep who can publish events to a channel. Enforcement is a client-side rendering decision (in v2, the identity drop rule of §0.1) based on member lists.
 - **Mesh membership.** There is no single authoritative member list. The hub creator maintains the canonical list, but any member can maintain their own list for the hub (facilitation). Clients verify facilitated messages via the `facilitator` tag.
 - **Encryption is layered.** The hub-wide secret encrypts all channels by default. Private channels can use separate per-group secrets via `grouped_roles` for additional isolation.
 - **Full history access.** Current members can decrypt all historical messages from any epoch. Removed members lose access to all history upon secret rotation. This mirrors the Discord model — no forward secrecy, prioritizing UX over Signal-grade privacy.
@@ -31,7 +225,9 @@ NIP-CHAT defines a decentralized, hub-based chat system built on Nostr. It provi
 
 A hub is a collection of roles, categories, channels, and members. It is the top-level container, analogous to a Discord server.
 
-A hub is represented by a **single addressable replaceable event** (kind `36942`). The creator's pubkey is the hub owner. Updating the hub (renaming a channel, adding a role, etc.) means publishing a new version of this event with the same `d` tag.
+A hub is represented by a **single addressable replaceable event** (kind `36942`). In **v1** the hub is authored by the creator's real key, which is the hub owner. In **v2** the hub is authored by a derived **owner pseudonym `O`** (§0.1, §4.5), so the real creator stays hidden from the public; a static owner attestation inside the encrypted content reveals the creator to members only. Updating the hub (renaming a channel, adding a role, etc.) means publishing a new version of this event with the same `d` tag (in v2, signed by `O`).
+
+> **Hiding the creator (optional).** The owner's pubkey is public — it authors the hub event and appears in the hub's `36942:<pubkey>:<d>` coordinate. A creator who does not want the hub tied to their main identity can simply **create a separate Nostr account — one with no profile, links, or other identifying activity — and use it solely to create and manage the hub.** This is a manual choice available today, requires no protocol support, and keeps the hub unlinked from their intended identity as long as that account is never used for anything identifying.
 
 ### 2.2 Channels
 
@@ -71,47 +267,16 @@ A member is any Nostr pubkey that appears on a followed member list for the hub.
 
 ### 3.1 General Relays (`general`)
 
-General relays store:
+General relays store all hub events:
 - Hub events (kind `36942`)
 - Join request events (kind `36944`)
+- Channel messages (kind `36943`), poll (`1067`), vote (`1017`), and report (`36948`) events, and every other member-authored hub event
 
-These events are **always public** and meant for discoverability and coordination. Any standard Nostr relay can serve as a general relay.
+Any standard Nostr relay can serve as a general relay. Hub content is protected by encryption, not by the relay: messages are encrypted with the hub secret, so a relay serving the ciphertext publicly leaks nothing beyond the already-priced `h`-tag traffic residual (§10 threat table; plan §8.1). Access control and spam control are **entirely client-side** (§9.9): the identity drop rule renders only member-authored events, and the message PoW (`w`) plus join PoW (`W`) price spam. There is no relay-side membership gate in v2 — that would require the relay to read the encrypted member pages, which needs the hub secret a relay must never hold.
 
-### 3.2 Filter Relays (`filter`)
+Operators who want an *additional* spam floor MAY run a generic PoW/rate-limit relay, but that is **not** part of this spec; it is a general-purpose, ecosystem-wide relay policy that belongs in its own NIP, and v2's security floor does not depend on it.
 
-Filter relays are **optional, specialized relays** that store channel messages (kind `36943`), poll events (kind `1067`), vote events (kind `1017`), and report events (kind `36948`). When a hub defines one or more filter relays:
-
-- **Messages MUST be published ONLY to filter relays**, not to general relays
-- The filter relay maintains a copy of the creator's member list
-- The filter relay **rejects posts** from pubkeys not on the creator's member list
-- The filter relay **removes stored posts** of members who are removed from the creator's list
-- The filter relay **refuses to serve messages** to pubkeys not on the creator's member list (NIP-42 AUTH)
-
-This provides:
-- Spam prevention (non-members can't post)
-- Privacy (non-members can't access even the encrypted blobs)
-- Reduced client processing (relay does the filtering)
-
-#### 3.2.1 Trust Model for Filter Relays
-
-Filter relays are trusted to:
-- Honestly enforce membership-based access
-- Stay online and serve messages
-
-Filter relays are **NOT** trusted to:
-- Read message content (messages are encrypted with the hub secret)
-- Decide membership (creator's list is the source of truth)
-- Be the sole relay (multiple filter relays are supported)
-
-#### 3.2.2 When No Filter Relay Is Defined
-
-If the hub event contains no `filter` relay tags:
-- Messages are published to `general` relays
-- Messages are still encrypted (hub-wide secret), but the encrypted blobs are publicly visible
-- Client-side filtering by member lists determines what is rendered
-- The client SHOULD display a notice: *"This hub has no filter relay. Messages are encrypted but visible to anyone (even non-members). Metadata (who posted, when) is not protected."*
-
-### 3.3 Blossom Servers
+### 3.2 Blossom Servers
 
 Blossom servers store files that are too large for Nostr relays:
 - **Member/key files** — membership list and encrypted key material
@@ -126,12 +291,11 @@ Hub events reference Blossom servers via `o` tags.
 - Clients MUST verify file hash matches the expected value before trusting contents
 - If a file from one Blossom server fails hash verification, the client SHOULD try the next server
 
-### 3.4 Architecture Summary
+### 3.3 Architecture Summary
 
 | Type | Stores | Access Control | Required |
 |------|--------|---------------|----------|
-| `general` relay | Hub event, join requests | None (public) | Yes (≥1) |
-| `filter` relay | Channel messages, reports | Membership-gated (NIP-42 AUTH) | Optional |
+| `general` relay | Hub event, join requests, channel messages, reports, all hub events | None at the relay (public); enforcement is client-side (§9.9) | Yes (≥1) |
 | Blossom server | Member files, block lists, history, media | Public download, hash-verified | Yes (≥1, recommend 3) |
 
 ---
@@ -223,6 +387,13 @@ voice_host_key = HKDF-SHA256(
     info               = "voice-host:epoch:<epoch_number>",
     output_length      = 32 bytes
 )
+
+hub_content_key = HKDF-SHA256(            // v2 only — encrypts the hub event's structural content (§6.1)
+    input_key_material = hub_secret,
+    salt               = domain_salt,
+    info               = "hub-content:epoch:<epoch_number>",
+    output_length      = 32 bytes
+)
 ```
 
 The `events_key` encrypts calendar events (kind `31923`) and RSVPs (kind `31925`). The `voice_host_key` encrypts SFU provider credentials in voice host events (kind `36946`). For group-scoped voice hosts, the group secret is used instead of the hub secret.
@@ -285,6 +456,271 @@ When removing multiple members at once, the client SHOULD:
 | 10,000,000 | ~23 | ~23 AES | 0 |
 
 Adding a member: 1 NIP-04 encrypt + ~log₂(N) AES operations.
+
+### 4.5 Pseudonymous Identity (v2)
+
+v2 hubs add an identity layer on top of the LKH model. Nothing in §4.1–§4.4 changes — the
+tree still distributes the hub secret exactly as described — but the **leaf identities are
+pseudonyms**, the **hub owner is itself a pseudonym**, and every member event carries a
+**per-message signature by the real key**. All derivation runs through the v2 capability
+(§0.5): a local key computes the HKDF/ECDH directly; a remote signer derives them as
+[NIP-SKD](./NIP-SKD.md) sub-keys, never exposing the private material.
+
+**Owner pseudonym `O`.** The creator does not author the hub under their real key `R_owner`.
+They derive a self-scoped owner pseudonym:
+
+```
+// NIP-SKD self form: context = "nip-chat:v2:owner-pseudonym:" + d_tag
+O_priv = HKDF( R_owner_priv, salt = "nip-skd-v1", info = self(context) )   // see NIP-SKD §1
+O_pub  = derivePublic(O_priv)
+```
+
+The hub coordinate is `coord = kind:O_pub:d_tag`; `R_owner` never appears in public
+metadata. `O` is **self-authoritative**: it is the owner key referenced by the coordinate,
+so `O`-authored events need no `identity` tag, and because only `R_owner`'s holder can
+derive `O_priv`, no one — not even a member who can compute their own `P` — can forge `O`.
+
+**Owner attestation (creator revealed to members).** A single signature, stored encrypted
+with the hub secret, lets members learn who really runs the hub once they are in:
+
+```
+// R_owner signs a never-published attestation event committing to the coordinate,
+// via signEvent (remote-compatible), kind 27493 with tags [["a", coord]]:
+sig_owner = signEvent(R_owner, { kind: 27493, tags: [["a", coord]], content: "" }).sig
+// stored as enc(hubSecret, {R_owner_pub, created_at, sig_owner}) in the hub's encrypted content
+```
+
+Members decrypt it and verify `sig_owner` against `R_owner_pub`. Outsiders see only `O`. A
+static attestation is sufficient here (unlike member events, which need per-message
+signatures) because `O_priv` is derivable **only** by `R_owner` — there is no party who can
+forge `O`, so nothing to bind per-message.
+
+**Per-hub member pseudonym `P`, owner-verifiable.** A member's pseudonym is a **blinded**
+derivation of their real key `R` toward the owner, so the owner can independently re-derive its
+**public** key to verify it — but cannot obtain its private key:
+
+```
+// NIP-SKD blinded form: context = "nip-chat:v2:member-pseudonym:" + d_tag, peer = O_pub
+t      = HKDF( ECDH(R_priv, O_pub), salt = "nip-skd-v1", info = blinded(context) )   // see NIP-SKD §1
+P_pub  = xonly( lift_even_y(R_pub) + t·G )      // P_priv = R_priv + t, held only by the member
+```
+
+`P` is deterministic per (member, hub), unlinkable across hubs, and unlinkable to `R` for
+the public. The **owner re-derives `P_pub`** via the blinded verifier op
+`getPeerBlindedPubkey(context, peer = R_pub) = xonly( lift_even_y(R_pub) + t·G )` — the same
+`t`, because `ECDH(O_priv, R_pub) == ECDH(R_priv, O_pub)` — and checks it against the claimed
+`P_pub`, giving **owner verification** at admission and **squat-resistance**: a leaked `P`
+cannot be re-bound to a different `R`, because the owner would derive a *different* `P` for that
+`R`. The owner obtains only `P_pub` (to verify and place the leaf) and **never `P_priv`** — so,
+unlike the earlier shared-derivation design, it **cannot sign as, or decrypt as, a member**.
+Forgery of member events is thereby prevented *structurally*; the per-message signature below
+additionally gives members trustless attribution.
+
+**Accountable identity — `R` signs every message.** Rather than a static binding, the real
+key signs **each** member event:
+
+```
+sig_R = schnorr_sign(R_priv, event.id)
+```
+
+carried as `["identity", enc(key, R_pub || sig_R)]`. The blinded pseudonym already makes `P`
+unforgeable by the owner (it cannot derive `P_priv`), so this signature is not what prevents
+owner-forgery — it provides **trustless attribution**: a member cannot re-derive another
+member's `P ↔ R` binding on their own (that needs `O_priv`), so `sig_R` is how *any* member
+cryptographically verifies **which real `R`** authored an event, without trusting the owner's
+roster. This makes authorship **provable and member-verifiable inside the hub** — an accountable
+model that consciously drops the deniability of the old static-endorsement design (§10).
+
+**Transport.** The identity ciphertext is keyed by the hub secret, never by the public hub
+id:
+
+- In hub messages/reactions/activity: `enc = AES-GCM(channel_or_hub_key_for_epoch, R_pub || sig_R)`,
+  carried as `["identity", enc]`. The epoch is already on the event.
+- In join requests: encrypted to the owner `O` via ephemeral-static ECDH (§6.3).
+- In the member tree: each leaf **page** carries a group-encrypted, epoch-stamped roster
+  segment (`{ P: R }`) under `HKDF(hub_secret, "roster")` (the page itself stays plaintext,
+  §5.2.1), for the roster and for banning by real key.
+
+Enforcement (drop events lacking a valid per-message signature) is specified in §9.9.
+
+### 4.6 Pseudonymous Authoring — Every Member Action
+
+The identity rule (§4.5) is not just for text messages. **Every event a member authors in a v2
+hub channel — message, edit, delete/tombstone, reaction, poll create/vote, calendar event/RSVP,
+forum post/reply — is authored on the wire by `P`** and carries the per-message `["identity",
+enc(channel_or_hub_key, R_pub ‖ sig_R)]` tag. Because a v2 message is stored + addressed by `P`,
+edits and deletes reference the original by `P` too, and NIP-09 `a`-tag deletion requests use the
+`P` coordinate. Auxiliary notifications (edit/delete hints) and kind-5 fallbacks are authored by
+`P` but omit the identity tag (they carry no member content).
+
+**Uploads (Blossom).** The kind-24242 auth event MUST NOT reveal `R`. A **member**'s media
+uploads sign the auth as `P`; the **owner**'s tree-file uploads (leaf pages, spine, index, group
+trees, ban pages) sign as `O`. Otherwise a storage operator could bridge a `P`-authored message
+that references a blob back to the real uploader (or unmask the hub operator). Uploads to a user's
+*own* public sets (custom emoji/gif/sticker) stay under `R` — they are the user's identity, not
+hub content.
+
+**Mentions.** A v2 message MUST NOT carry a plaintext `["p", R]` tag for an @-mentioned member —
+that would expose the mentioned member's real key on a relay-queryable field scoped to the hub. The
+mention lives inside the (encrypted) message content as the `@npub…` text; recipients detect their
+own mentions by decrypting content and scanning for their npub, so no `p`-tag / `#p` pre-filter is
+needed. (Group mentions `@everyone`/`@here`/`@role` carry no individual `R` and stay as `M` tags.)
+
+**Relay-query discipline.** The cardinal rule ("`R` never on the wire") extends to relay *filters*:
+a client MUST NOT issue a subscription/fetch that combines a hub scope (`#h`, or `#d` on a hub
+coordinate, or a hub `a`-ref) with the real key `R` — e.g. `authors:[R]`, `#p:[R]`. Such a filter
+tells the relay that `R` is active in this hub. Query by the pseudonym the events are actually
+authored under (`P`, `O`, the facilitated `Pf`, or the throwaway join-address sub-key for join
+requests). Rescinding a join request (fetch + tombstone + kind-5) is likewise done under the
+**join-address sub-key** (`ChatContext.joinAddr`, peer = `O`), never `R`.
+
+**Moderator ban lists.** A non-owner moderator's soft-ban list (a kind-36944 join request carrying a
+`list` tag → Blossom index/pages) is authored under the moderator's `P`, its Blossom auth signed as
+`P`, and its ban pages **encrypted with the hub secret** (`uploadBanPagesV2`) — never `R`-authored
+with plaintext pages. Consumers subscribe by each moderator's `P` and decrypt pages with the hub
+secret. The ban set is keyed by the moderator's real key `R` in local state (resolving `P→R` via the
+roster) so the live subscription, the on-load fetch, and the moderator's own writer all agree.
+
+**Pins.** The per-user pin list (a replaceable event) is authored by, and keyed on, `P` — so
+`R`'s membership isn't exposed by their pin list.
+
+**Hide / unhide (moderation).** Hidden-message events are authored by `O` when the **owner**
+moderates (globally verifiable, since `O` is the public hub author) and by `P` when a **non-owner
+moderator** does (same-page verifiable via the roster). A client honours a hide iff its author is
+`O`, or is a same-page member holding the `hide_messages` permission — the exact v1 rule, lifted
+to pseudonyms. `R_owner` for the owner check comes from the decrypted owner attestation (§4.5).
+
+**Typing indicators.** Authored by `P`; the real typer is `enc(hub_content_key, R_pub)` placed in
+the (otherwise empty) content — no signature (typing is low-stakes). A receiver decrypts it with
+the hub content key (universal, unlike the *per-page* roster) to show who is typing, cross-page;
+a successful decrypt also proves the sender is a member (AES-GCM auth tag).
+
+**Membership list (kind 16942).** A v2 hub the user belongs to MUST NOT appear in the public `v`
+tags of their user hub list. v2 entries live in the NIP-51 **encrypted content** (nip44 to self);
+v1 entries stay in public tags. One list, read as public-tags ∪ decrypted-content.
+
+**Facilitator (mesh) lists — the facilitator is a "sub-owner".** A facilitator — a member, not the
+owner — vouches for others by distributing the hub secret through their own small LKH tree (§6.3).
+v2 mirrors the owner↔member scheme one level down, with the facilitator's member pseudonym `P_fac`
+playing the owner's role:
+
+- **The facilitated user's identity is `Pf`, a blinded derivation of `R_f` toward `P_fac`** — the
+  exact shape of a member's `P` (blinded toward `O`), one level down with `P_fac` in the owner's
+  role. Context string `nip-chat:v2:facilitated-pseudonym:<dTag>`, peer `P_fac` (NIP-SKD blinded
+  form). The facilitated user derives it from `R_f_priv` + `P_fac_pub` (`Pf_priv = R_f_priv + t`,
+  held only by them); the facilitator re-derives the same **`Pf_pub`** via
+  `getPeerBlindedPubkey(context, peer = R_f_pub)` (same `t` by ECDH symmetry) but **cannot** obtain
+  `Pf_priv`. So **the facilitator adds people by their real npub `R_f`** (v1's UX) — it derives
+  `Pf_pub` itself and keys the leaf on it; `R_f` never enters the tree, and the facilitator cannot
+  impersonate the vouched user. (The verifier-side derivation is a sub-sub-key off `P_fac`, so the
+  *facilitator* role needs a **local** key; the *facilitated* side derives from its own root and
+  works on any NIP-SKD signer.)
+- **Leaf key wrapped `P_fac ↔ Pf`** (to the leaf pubkey), so the facilitator can rehydrate every leaf
+  for a rebuild without needing the `R_f`s back.
+- **The list JR (and its Blossom auth) is authored by `P_fac`** — the facilitator's ordinary public
+  member identity; no `R_fac` leak. The vouched user finds it by that handle.
+- **The facilitated user posts under `Pf`** with a normal identity tag (`enc(channelKey, R_f‖sig)`)
+  plus `["facilitator", P_fac]`. Viewers validate P-to-P: `P_fac` is a member with `facilitate`, and
+  `msg.pubkey` (`= Pf`) is a leaf in `P_fac`'s tree. No roster needed — works for someone the owner
+  never added to the main tree.
+
+> **Resolving the `facilitator` tag (interop).** The `["facilitator", …]` tag carries the
+> facilitator's **on-wire** identity — `P_fac` in v2 (the real key `R_fac` in v1). But the member
+> roster keys members by their **real key `R`** (with the pseudonym `P` in a side field). So to check
+> "is this facilitator a member who holds `facilitate`", a validator must match the tag against
+> **either** the roster's `R` **or** its `P`, then read permissions by the resolved member — matching
+> `P_fac` only against `R` finds nothing and silently hides every message that facilitator vouched.
+> Likewise, the tree-membership check compares the tag-tree leaves against **`msg.pubkey`** (the
+> on-wire `Pf`/`R`), never the identity-tag-resolved `R`. A facilitated user is a non-member with no
+> roster of their own, so their client trusts the secret (obtained through the tree) rather than
+> re-verifying the facilitator's permission it can't see.
+
+`members.ts`: `createAndUploadFacilitatorTreeV2` / `addMemberToFacilitatorTreeV2` /
+`rebuildFacilitatorTreeV2` (by `R_f`) and `decryptSecretFromFacilitatorTreeV2` (facilitated side).
+A facilitated user decrypts the hub's encrypted structural content with the same content key once it
+holds the secret (else it lands in an empty hub with no channels).
+Epoch history rides along exactly as in v1 (see §5.6). **Out-of-band handshake:** the vouched user
+gives the facilitator their npub (`R_f`); the facilitator gives the vouched user their `P_fac` handle
+(surfaced with a copy button in User Settings → My Facilitation List). Because the facilitator can't
+reverse `Pf → R_f`, its client remembers the vouched `R_f`s locally (for the list display + removal).
+
+> **Why `R` in the event, not "look it up in the roster"?** The roster is *paginated* — a member
+> holds `P→R` only for members on **their own** leaf page. So anything that must resolve `R`
+> cross-page carries it **in the event** (the identity tag for content, `enc(R)` for typing),
+> exactly as messages do. The roster is only for the owner's rehydration and same-page display.
+
+### 4.7 Facilitation — the full system
+
+A **facilitator** is a member (not the owner) who can vouch people into a hub *without* an admin
+approving them, by distributing the hub secret through their own LKH tree. It is a delegated,
+resilient admission path (e.g. the owner is offline). The whole system:
+
+**Permission gate (`facilitate`).** Facilitation is gated by a per-role `facilitate` permission,
+**off by default** for every role (the creator always has it via full permissions). Only a member
+whose role grants it may build/maintain a facilitation list (the UI is hidden otherwise). The
+permission is the revocation lever — see message validation below. (Applies to v1 and v2 alike; the
+permission set is client-side-enforced like all others, §8.)
+
+**The list.** A facilitator publishes a kind-`36944` join request carrying a **`list`** tag whose
+value is the Blossom hash of their **index** → **monolithic** LKH tree (§5.2.3) that hands out the
+current hub secret. In **v1** the tree keys leaves on real keys `R` and wraps `R`→`R`. In **v2** it
+keys on the facilitated pseudonym `Pf` (a **blinded** derivation of `R_f` toward `P_fac`, §4.6) and
+wraps `P_fac ↔ Pf` — no `R` ever enters the tree. In **both** versions the facilitator adds people **by their public npub** (in v2 it
+derives `Pf` from that npub itself), and a facilitated user gets in by fetching the facilitator's
+`list` → tree and decrypting their own leaf. Once set,
+the facilitator is remembered (`facilitator` pref) and re-used on reload.
+
+**Facilitated posting + display validation.** A facilitated member tags every message with a
+`["facilitator", <facilitator-pubkey>]` tag. A viewer shows such a message **iff** the named
+facilitator (a) is a member, (b) **currently holds `facilitate`**, and (c) has the author in their
+tree. So **revoking the role/permission hides every message from everyone that facilitator vouched**
+— the same effect as a ban, driven purely by the permission (checked live against current roles, so
+a stale cached list can't re-expose a revoked facilitator). Revocation also **re-gates the vouched
+users themselves**: a facilitated non-member whose facilitator lost the permission (or left) is sent
+back to the awaiting-approval overlay even though the hub secret still sits in their store — the key
+is valid (nothing rotated) but their authorization is gone.
+
+Viewers load a facilitator's member list **lazily** — only for facilitators actually referenced by a
+visible message, once each — never the whole set on load. Because a transient relay miss returns an
+empty list indistinguishable from "no list", the load **retries with backoff** instead of treating
+the first empty as final (otherwise that facilitator's messages would stay hidden until an app
+restart). Fetched lists are **persisted to `localStorage`** (public pubkeys only) so they validate
+instantly on the next start, with a once-per-session background revalidation for add/remove.
+
+**Epoch rotation (the subtle part).** Because a facilitated member's *only* source of the secret is
+the facilitator's tree, the tree must track the **current epoch**, or the member would encrypt with
+a stale secret under a new-epoch tag (undecryptable) — and re-using an old secret would also let a
+just-kicked member read new messages, breaking forward secrecy. So:
+- The facilitation tree carries the **epoch history** (the byte-identical owner-tree history blob,
+  `AES(currentSecret, "hub:<epoch>:<hex>…")`) so a vouched member can decrypt every past epoch.
+- After a rotation the **facilitator rebuilds** their tree under the new secret + updated history and
+  republishes the `list`. This is a **manual, explicit action** ("Update list to current epoch" in
+  User Settings → My Facilitation List): the facilitator is a member, so their client already holds
+  the new secret; the button re-encrypts every vouched leaf under it. (An automatic rebuild was tried
+  but removed — it only fired when the facilitator's client was open at the exact instant the rotation
+  event arrived; a facilitator who logged in *after* the rotation saw no epoch transition to detect,
+  so it silently did nothing. Manual is reliable regardless of timing.) If the facilitator never
+  updates, their vouched members stay at the last epoch they hold — the owner directly admitting them
+  is the escape hatch.
+- The **facilitated member re-fetches** on rotation — automatically when their client is open for the
+  event, and on every hub open/reload (the loader re-pulls the facilitator's tree using the saved
+  `facilitator` npub, which is **persisted to `localStorage`** so it survives sessions; only the npub
+  and the show-facilitated toggle are stored, never the derived secret). The three write sites that
+  install a facilitated secret (load, live rotation, manual "Set facilitator") all enforce one
+  invariant: **`hubSecrets[dTag]` is the current epoch's secret, or empty — never stale.** So if the
+  facilitator is still behind, the client **keeps the epoch history but clears the current secret** —
+  it can read old messages but cannot read *or send* at the new epoch (no stale-secret send under a
+  new tag). Whenever a facilitated user has no current secret — behind on epoch, or their facilitator
+  was de-permissioned — they see the awaiting-approval gate. It renders the saved facilitator as a
+  clickable identity card (avatar, name, copyable npub → opens their profile) explaining they haven't
+  been let in (list not updated, or permission removed), with Remove / Change beside the Withdraw
+  button; it clears on its own once the facilitator updates their list.
+
+**Graduation & interaction with kick.** If a facilitated member is later admitted by the owner
+(added to the main tree), they become a normal member — their new messages carry no facilitator
+tag, and revoking the facilitator no longer affects them. Conversely, kicking a member who is *also*
+in a facilitator's list reverts them to facilitated (a vouch outlives a kick); fully removing them
+needs the owner to also revoke that facilitator (or rotate).
 
 ---
 
@@ -352,6 +788,28 @@ Clients download the index file first, compare with locally cached hashes, and o
 
 The member/key file uses a **Logical Key Hierarchy (LKH)** tree structure.
 
+> [!IMPORTANT]
+> **v2 differences (see §0.2).** In a v2 hub: (1) each `leaf`'s `member_pubkey` is the
+> member's **pseudonym `P`**, not their real key; (2) each **page** carries one extra line — a
+> group-encrypted, epoch-stamped **roster segment** `roster:<epoch>:<enc({P:R})>` under
+> `HKDF(hub_secret, "roster")` (§5.2.1), used to render real users in the roster and to ban by
+> real key; (3) the **leaf pages stay plaintext** (keyed on the unlinkable `P`), so the
+> top-level binary search **and the v1 hub-secret bootstrap are unchanged** — the page *is* the
+> tree that distributes the hub secret, so encrypting it whole would be undecryptable before
+> you hold the secret. The tree math, spine, pagination, and `findPageForPubkey` operate on
+> opaque 32-byte keys and are unchanged.
+>
+> **Residual leak (accepted, but load-bearing).** The plaintext index still exposes each
+> page's `first_pubkey` boundary — roughly **one pseudonym per 10k-member page** (≈
+> `pageCount` pseudonyms) — and, watched across epochs, a coarse **member-count and churn**
+> signal ("~N members, growing/shrinking"). This is **pseudonym-level — no real
+> identities**. It is accepted, but note it is **load-bearing**: since v2 has no relay-side
+> membership gate (enforcement is entirely client-side, §9.9), this index is the *only*
+> public membership signal left, so its residual value is higher than it looks in isolation.
+> Hiding it too would require encrypting the index boundaries and binary-search-with-
+> decryption — deliberately **not** done in v2, a conscious cost/benefit call given the
+> values are pseudonyms.
+
 #### 5.2.1 Leaf Page File (Paginated)
 
 Each leaf page is a self-contained subtree of up to `PAGE_SIZE` (10,000) members. The file is line-based:
@@ -360,6 +818,7 @@ Each leaf page is a self-contained subtree of up to `PAGE_SIZE` (10,000) members
 leaf:<node_id>:<member_pubkey>:<role_ids>:<nip04_encrypted_leaf_key>[:<flags>]
 node:<node_id>:<left_child_id>:<right_child_id>:<aes_encrypted_with_left>:<aes_encrypted_with_right>
 page-root:<node_id>:<left_child_id>:<right_child_id>:<aes_encrypted_with_left>:<aes_encrypted_with_right>
+roster:<epoch>:<aes_encrypted_P_to_R_map>          # v2 only — see "Roster segment" below
 ```
 
 **Line Types:**
@@ -387,6 +846,19 @@ page-root:<node_id>:<left_child_id>:<right_child_id>:<aes_encrypted_with_left>:<
 **`page-root`** — The top node of the page subtree (exactly one per file)
 
 Same fields as `node`. The page-root's key bridges to the spine tree (the spine holds it encrypted with the spine node's key). Unlike the monolithic `root`, the page-root does NOT hold `encHubSecret` — that is the spine's responsibility.
+
+**`roster`** (v2 only) — The page's group-encrypted identity segment. At most one per file.
+
+| Field | Description |
+|-------|-------------|
+| `epoch` | The epoch whose hub secret encrypts this segment (so a reader picks the right secret from history). |
+| `aes_encrypted_P_to_R_map` | `AES-GCM(HKDF(hub_secret_epoch, "roster"), JSON({ P: R, … }))` — the `P→R` map for **this page's** members. Base64 (no `:`), so the line splits cleanly. |
+
+The roster segment is what lets members (who hold the hub secret) resolve each pseudonym `P` to the real key `R` — including **silent members** who never posted — and ban by real key. Keying it on the hub secret means members can deanonymize each other *inside* the hub while the public cannot; the leaf pages themselves stay plaintext and reveal only `P`.
+
+**Group-encrypted, not per-leaf.** One AES op per page (not per member), and because the key is the client-held hub secret, reading/writing it costs **no signer round-trips** — owner tree ops stay v1-class even with a remote signer.
+
+**Epoch stamp → forward-secret identity.** On a kick or rotation, only the *touched* page's segment is rewritten under the **new** epoch and re-stamped; untouched pages keep their old stamp (readers hold every past secret via §5.4 history). A rotated-out secret cannot open a segment written after it, so a **kicked member — or a leaked old secret — sees the members present when they held the key, but never anyone added afterward.** A bare rotation rewrites **0** roster segments; a kick/add rewrites **one** — v1-parity even at 10M members. (Fully re-hiding *already-present* members on a bare rotation would require re-encrypting every segment; that "eager" rewrite is **deliberately not done**.)
 
 #### 5.2.2 Spine File (Paginated)
 
@@ -473,6 +945,15 @@ With the paginated format, the creator downloads only the affected page + spine 
 
 ### 5.3 Ban List File
 
+> [!IMPORTANT]
+> **v2 differences (see §0.2).** In a v2 hub the ban list stores the banned member's
+> **real key `R`** (resolved from their identity attestation), so that a returner who
+> mints a fresh pseudonym `P'` is still caught by matching `R`. The ban file **MUST be
+> encrypted** as a whole blob with `HKDF(hub_secret, salt, "ban-list:epoch:<epoch>")`,
+> and it is a **separate file** (banned members are removed from the tree, so their ban
+> cannot ride in a leaf). Enforcement resolves each rendered event's attested `R` and
+> drops if `R` is on the decrypted ban set.
+
 Ban list pages use a simple format with `member_pubkey` and an optional `reason`:
 
 ```
@@ -551,9 +1032,15 @@ Group secret history is stored in the **unified history file** (§5.4) alongside
 
 Referenced via the `m` field in the `grouped_roles` entry in the hub event content.
 
+**v2 keying — leaves on `P`, wrapped `O ↔ P`.** In a v2 hub a group tree keys each leaf on the member's pseudonym `P` (never `R`), and wraps that leaf's key **`O ↔ P`** — the owner `O` to the member's pseudonym `P` (= the leaf pubkey). A member unwraps with their own `P`-signer (peer = `O`). This differs from the naïve `O ↔ R` (wrapping to the real key), and the choice matters for maintenance:
+
+- Because the wrap is to `leaf.pubkey` (`P`), the **owner can rehydrate the whole tree from the tree alone** — decrypting each leaf against its own `P`, with **no roster / `P→R` lookup**. That in turn enables **incremental** add/remove (`addMemberToGroupTreeV2` / `removeMemberFromGroupTreeV2`): patch the one changed leaf and re-key its path, preserving every other member.
+- This is what keeps group re-keying correct once the roster spans **more than one leaf page**. A full rebuild driven by the in-memory roster only sees the owner's own page, so it would silently drop group members on other pages; reading membership from the *tree* (via incremental ops) avoids that. Kicks and role changes take the incremental path; a full "fix-encryption" rebuild (which already holds the complete roster) rebuilds from scratch and doubles as the `O↔R → O↔P` migration.
+- A removal **rotates** the group secret (forward secrecy) and bumps the group epoch; a pure addition reuses the current secret.
+
 ### 5.6 Mesh Lists (Facilitation)
 
-Any member **whose role grants the `facilitate` permission** (off by default for all roles; see "Permission Gating" below) can maintain their OWN Blossom LKH tree file for the hub, enabling them to act as a **facilitator** — granting non-members access to encrypted hub messages.
+Any member can maintain their OWN Blossom LKH tree file for the hub, enabling them to act as a **facilitator** — granting non-members access to encrypted hub messages.
 
 - They build their own tree with their own members as leaves
 - Leaf keys are NIP-04 encrypted using THEIR keypair (not the creator's)
@@ -562,7 +1049,7 @@ Any member **whose role grants the `facilitate` permission** (off by default for
 - Discovery: the facilitator adds a `["list", "<sha256_of_index_file>"]` tag to their join request (kind `36944`); see §6.3
 - Their files are NOT referenced in the hub event
 
-The creator's list (in the hub event's `m` tag) remains the canonical source. Filter relays use only the creator's list.
+The creator's list (in the hub event's `m` tag) remains the canonical source.
 
 #### Facilitated Messages
 
@@ -579,52 +1066,6 @@ When a non-member obtains the hub secret via a facilitator's mesh list, their me
 - Clients SHOULD additionally verify that the **message author** appears as a leaf in the facilitator's own LKH tree. A valid facilitator tag alone is insufficient — the facilitator must have explicitly added the posting user to their tree.
 - If either verification fails (facilitator not in creator list, or author not in facilitator tree), the client SHOULD treat the message as an unauthorized non-member post and apply the non-member message hiding policy (see §9.8).
 - The hub secret epoch in a facilitated message will match an existing epoch in the creator's history file, so members can decrypt without fetching the facilitator's tree
-
-#### Permission Gating, Revocation & Epoch Rotation
-
-Facilitation is governed by a per-role **`facilitate`** permission that is **off by default** for
-every role (the creator always holds it). Only a member whose role grants it may build or maintain a
-facilitation list; clients MUST hide the facilitation UI otherwise. The permission is also the
-**revocation lever**:
-
-- **Display:** a facilitated message is shown only while its named facilitator is a member who
-  **currently holds `facilitate`** (in addition to the tree checks above). Revoking the role/permission
-  therefore hides every message from everyone that facilitator vouched — no rotation required. This
-  check is evaluated live against the hub's current roles, so a stale cached member list can never
-  re-expose a revoked facilitator's messages.
-- **Access:** a non-member relying on a facilitator whose permission was revoked (or who left the
-  hub) is re-gated behind the awaiting-approval overlay even though the hub secret still sits in their
-  local store — the lingering key is cryptographically valid (nothing rotated) but their authorization
-  is gone. Removing a permission is a permission decision, not a key-rotation event.
-
-**Epoch rotation.** A facilitated user's ONLY source of the hub secret is the facilitator's tree, so
-that tree MUST track the current epoch:
-
-- The facilitator's index carries a **`history:<hash>`** entry pointing at an epoch-history blob in
-  the **byte-identical** owner-tree format (`AES(currentSecret, "hub:<epoch>:<hex>…")`), so a vouched
-  user can decrypt every past epoch, not just the latest.
-- After a rotation the facilitator MUST **rebuild** their tree under the new secret + refreshed
-  history and republish the `list` join request. Clients SHOULD expose this as an explicit action
-  ("Update list to current epoch"). An automatic rebuild is unreliable — it can only fire if the
-  facilitator's client is online at the instant the rotation event arrives; a facilitator who logs in
-  afterward observes no epoch transition to react to.
-- **Forward-secrecy invariant:** a facilitated user's live hub secret MUST be the current epoch's
-  secret, or empty — never a stale one. If the facilitator has not yet rebuilt for the current epoch,
-  the client keeps the epoch history (old messages stay readable) but **clears the current secret**,
-  so the user can neither read nor **send** at the new epoch (a stale-secret send under a new-epoch
-  tag would be undecryptable for everyone and would leak plaintext to a just-kicked member). This
-  invariant is enforced at every site that installs a facilitator-derived secret: initial load, live
-  rotation (cleared synchronously before the async re-fetch), and manual unlock.
-
-**Persistence & fetch resilience (client guidance).**
-
-- A facilitated user's chosen facilitator (npub) SHOULD be persisted locally so they need not re-enter
-  it each session; the derived secret MUST NOT be persisted (it is re-obtained from the tree on load).
-- A member validating facilitated messages must fetch each cited facilitator's tree. A transient
-  relay miss returns an empty list that is indistinguishable from "no list"; clients SHOULD **retry
-  with backoff** rather than treating the first empty result as final (otherwise a facilitator's
-  vouched messages are hidden until an app restart). Fetched member lists SHOULD be cached locally so
-  they validate instantly across restarts, with a background revalidation to pick up add/remove.
 
 ### 5.7 Tree Balance Management
 
@@ -659,11 +1100,11 @@ Deleting a role does NOT trigger a tree update. The hub event is the authority f
     ["d", "<hub_uuid>"],
     ["n", "<hub_name>"],
     ["w", "<pow_difficulty>"],
+    ["W", "<join_pow_difficulty>"],
     ["epoch", "<epoch_number>"],
     ["b", "<on|off>"],
     ["r", "wss://relay1.example.com", "general"],
     ["r", "wss://relay2.example.com", "general"],
-    ["r", "wss://filter.example.com", "filter"],
     ["o", "https://blossom1.example.com"],
     ["o", "https://blossom2.example.com"],
     ["o", "https://blossom3.example.com"],
@@ -682,10 +1123,13 @@ Deleting a role does NOT trigger a tree update. The hub event is the authority f
 |-----|----------|-------------|
 | `d` | Yes | UUID v4. Unique hub identifier for addressable replaceable event. |
 | `n` | Yes | Human-readable hub name for display and discovery. |
-| `w` | No | Minimum PoW difficulty (NIP-13). Messages MUST include a `nonce` tag meeting this difficulty. Clients SHOULD hide messages below this threshold. Useful for spam prevention in hubs without filter relays. Clients discovering hubs can filter by `#w` to find hubs with specific difficulty levels. |
+| `w` | No | Minimum **message** PoW difficulty (NIP-13). Messages MUST include a `nonce` tag meeting this difficulty. Clients SHOULD hide messages below this threshold. This is v2's primary spam floor for messages (enforcement is client-side, §9.9). Clients discovering hubs can filter by `#w` to find hubs with specific difficulty levels. **The hub event itself MUST also be mined to `w`** — see the `nonce` row below. |
+| `W` | No (**v2**) | Minimum **join** PoW difficulty (NIP-13), separate from and set **higher than** the message `w`. The join request (kind `36944`) MUST carry a `nonce` meeting this difficulty; under-PoW joins are dropped before the owner spends an ECDH to decrypt them (§6.3). Plaintext because prospective members cannot read the encrypted `content`. Absent ⇒ no join PoW. |
+| `nonce` | Conditional | The **hub event's own** PoW nonce (NIP-13). Required when `w` > 0: the 36942 event MUST be mined to `w` leading-zero bits on **every publish** — creation *and* every republish (settings edit, channel/role/relay/blossom edit, ban, member add/remove, epoch rotation). This makes publishing a hub cost PoW, so fake hubs can't be spammed for free. Discovery clients **verify it locally** and drop any hub whose event id doesn't actually meet its claimed `w`. `w = 0` ⇒ no nonce needed. |
+| `message_expiration` | No | Disappearing-messages timer as a DURATION in **seconds** (a JSON-number-as-string). Absent, `0`, or malformed ⇒ off. When set, every durable chat event in the hub carries a NIP-40 `["expiration", <created_at + this>]` tag (§9.10). **Named distinctly from NIP-40's `expiration` on purpose** — an `expiration` tag on the hub event would make relays delete the hub itself. Hub-wide policy only; per-message expiry is stamped at send time. |
 | `epoch` | Yes | Current hub-wide secret epoch. Incrementing integer starting at `1`. Increments only on secret rotation (member removal or a user being added to the block list). |
 | `b` | No | DNN ID requirement (`on`/`off`). Default: `off`. |
-| `r` | Yes | Relay. Third value is `general` or `filter`. At least one `general` MUST be defined. |
+| `r` | Yes | Relay. Third value is `general`. At least one `general` MUST be defined. |
 | `o` | Yes | Blossom server URL. Recommend ≥3 for redundancy. Used for member files and media. |
 | `m` | Yes | Index file reference: `["m", "<sha256>", "<epoch>"]`. |
 | `t` | No | Discoverable topic tag (e.g., `["t", "gaming"]`). Multiple `t` tags allowed. Clients can query hubs via `#t` filters for hub discovery. |
@@ -694,6 +1138,12 @@ Deleting a role does NOT trigger a tree update. The hub event is the authority f
 | `f` | No | Discoverability flag (`on`/`off`). Default when absent: `on`. When `off`, compliant clients SHOULD NOT display this hub in public search, browse, or discovery UIs. This is a **client-side convention** — it does not hide the event from relays. Clients can filter relay queries with `#f` to efficiently fetch only discoverable hubs. |
 | `published_at` | Yes | Unix timestamp of the original hub creation. On first publish, set to the same value as `created_at`. On subsequent updates, carry forward the original value unchanged. This provides a stable ordering timestamp for hub discovery and display, since `created_at` drifts with each update. |
 | `client` | No | Name of the client application that created or last updated this hub (e.g., `"DEN Chat"`). Used for discovery filtering — users can search for hubs created by a specific client. Clients SHOULD include this tag for discoverability. |
+| `version` | No | Hub **format** version (§0). **Absent ⇒ v1** (public format — a permanent option, not deprecated). `"2"` ⇒ v2 (member-identity privacy). Any higher/unknown value ⇒ clients SHOULD prompt to update and not render the hub. See the version-integrity fail-safe in §0. |
+| `signer_scheme` | Conditional (**v2**) | Which NIP-SKD derivation scheme produced this hub's identities: `["signer_scheme", "<family>", "<version>"]`, e.g. `["signer_scheme", "skd", "1"]` ⇒ NIP-SKD v1 (salt `"nip-skd-v1"`). **Absent ⇒ `skd`/`1`** (default). Set at creation and **pinned** (the owner pseudonym `O` is scheme-bound). Clients route derivation by `(family, version)`, so a future NIP-SKD version — or a different scheme the ecosystem adopts — is a new tag value, never a break for existing hubs. Bumping the version (e.g. `"2"`) selects salt `"nip-skd-v2"`; changing the family points at a different scheme entirely. |
+| `new_hub` | Conditional | Present only on a **v1 hub that has been forked** to a v2 successor (§12). Value is the successor hub's `d` tag. Clients MUST only honor it when the successor's creator pubkey equals this hub's creator pubkey, and SHOULD (a) show a permanent "this hub has moved" banner and (b) hide this hub from discovery. |
+| `picture` | No (**v2**) | Plaintext hub icon URL for the join/Discover card. In v2 the icon moves out of the (encrypted) `content.settings` into this tag so non-members can preview it. |
+| `banner` | No (**v2**) | Plaintext hub banner URL for the join/Discover card. Moved out of `content.settings` in v2. |
+| `about` | No (**v2**) | Plaintext public description/blurb for the join/Discover card. Moved out of `content.settings` in v2. Member-only prose belongs in a pinned message or channel, not here. |
 
 #### Updating Hub Events (`created_at` Increment)
 
@@ -702,6 +1152,24 @@ Hub events are addressable replaceable events that get updated frequently (setti
 This prevents the hub event from jumping to the current wall-clock time on every update, which would cause discovery UIs that sort by `created_at` to incorrectly show old hubs as "recently created." Clients and discovery aggregators SHOULD sort hubs by `published_at` for display ordering, not `created_at`.
 
 #### Content (JSON)
+
+> [!IMPORTANT]
+> **v2: the `content` field is encrypted (§4.2, §2.5 of the plan).** In a v2 hub the JSON
+> below is serialized and encrypted as
+> `content = base64(IV || AES-GCM(hub_content_key, json) || tag)` — same format as a
+> message — so the **structure (roles, categories, channel names, permissions, plugins)**
+> is member-only. Re-encrypt with the **current** epoch key on every republish. The hub
+> **secret is not here** — it lives in the Blossom tree (via `m` → page/spine), so a new
+> member gets the secret from the tree first and then decrypts this content, exactly like a
+> message; there is no bootstrap loop.
+>
+> The **public face** moves OUT of `content.settings` into the plaintext `picture`,
+> `banner`, and `about` tags (plus `n`, `t`) so the join/Discover card still renders for
+> non-members. `content.settings` is therefore **omitted** in v2. An **unlisted hub** simply
+> leaves the face tags blank and sets `f=off`; members still see the encrypted structure once
+> admitted. An unlisted hub is only hidden from Discover — it still publishes a public hub
+> event (stable `d`, `epoch`, `m`) and its pseudonymous `h`-tag traffic stays observable on
+> relays; only its branding and discoverability are hidden, not its existence or activity.
 
 ```json
 {
@@ -902,6 +1370,7 @@ Clients split on known offsets: first 12 bytes = IV, last 16 bytes = auth tag, e
 | `published_at` | Yes | Unix timestamp of the original message creation. On first publish, set to `created_at`. On edits, carry forward unchanged. Used for display ordering (see Editing Messages below). |
 | `nonce` | Conditional | PoW nonce (NIP-13 format: `["nonce", "<counter>", "<target_difficulty>"]`). Required if hub has a `w` tag with difficulty > 0. |
 | `facilitator` | No | Hex pubkey of the member who facilitated this non-member's access to the hub secret (see §5.6). Clients SHOULD verify the facilitator is in the creator's member list before rendering. |
+| `identity` | Conditional (**v2**) | Encrypted **per-message** identity signature binding the event's pseudonymous author `P` (= `pubkey`) to the member's real key `R`. Value is `AES-GCM(channel_or_hub_key_for_epoch, R_pub \|\| sig_R)` where `sig_R = sign(R_priv, event.id)` — a fresh signature **over this event**, not a static binding. Because `P` is a blinded pseudonym the owner cannot sign as (§4.5), this signature is not what prevents forgery; it lets **any member** cryptographically verify which real `R` authored the event (trustless attribution) without trusting the owner's roster. **Required on every member event in a v2 hub**; events lacking a valid signature are dropped (§9.9). Opaque ciphertext — not usable for relay-level filtering. |
 | `content-warning` | No | NIP-36: marks this message as containing sensitive/NSFW content. Value is an optional reason string (may be empty). Clients SHOULD blur or hide the message until the user clicks to reveal. |
 | `L` | Conditional | NIP-32: label namespace. Set to `"content-warning"` when the `content-warning` tag is present. Required if `content-warning` is present. |
 
@@ -1016,9 +1485,7 @@ Because not all relays honor NIP-09 deletion requests, the client SHOULD also re
 
 #### Publishing Rules
 
-- If the hub defines **filter relays**: publish ONLY to filter relays.
-- If the hub defines **no filter relays**: publish to general relays.
-- MUST NOT publish to both types simultaneously.
+- Publish to the hub's **general relays** (the `general` relays from the hub event, plus the client/user relays per the publishing configuration).
 
 #### Plaintext Format
 
@@ -1137,6 +1604,44 @@ Clients MAY offer an opt-in toggle to encrypt file attachments before uploading 
 
 Published by a user to signal they want to join a hub. Shows up in a request queue in the hub UI for mods/creator to process.
 
+> [!IMPORTANT]
+> **v2 private join (see §0.1).** In a v2 hub the join request MUST NOT reveal the
+> requester to the public. The hub owner is the **owner pseudonym `O`** (§4.5). Use
+> **ephemeral-static ECDH** (sealed-sender):
+> 1. The joiner generates an ephemeral keypair `e` and computes
+>    `shared = ECDH(e_priv, O_pub)`.
+> 2. The request is **signed by a derived throwaway key** `addr` — a **blinded** derivation of the
+>    joiner's `R` toward `O` (NIP-SKD blinded form, context `"nip-chat:v2:join-addr:"+d_tag`, peer
+>    `O_pub`; `addr_pub = xonly(lift_even_y(R_pub) + HKDF(ECDH(joiner_priv, O_pub), …)·G)`) — and
+>    uses `addr_pub` as its `d`-scoped identifier, so a repeat request from the same joiner replaces
+>    the previous one. The owner can later re-derive `addr_pub` from `R` (via `getPeerBlindedPubkey`)
+>    to confirm the authoring key belongs to the sealed `R`.
+> 3. The request carries `["ephemeral", "<e_pub>"]` and a plaintext `["version", "2"]` marker
+>    (so owners route it as a v2 join and never feed a v1 join into the decrypt path), and its
+>    `content` is `AES-GCM(shared, {R_pub, P_pub, note?})`.
+> 4. The owner decrypts with `ECDH(O_priv, e_pub)` to learn the real requester, then
+>    **re-derives `P_pub` from `R`** via the blinded verifier op —
+>    `getPeerBlindedPubkey("nip-chat:v2:member-pseudonym:"+d_tag, peer = R_pub)` — and admits `P`
+>    only if it matches the claimed `P_pub`. This makes the pseudonym **owner-verified and
+>    squat-proof**: a `P` that does not derive from the presented `R` is rejected. The owner obtains
+>    `P_pub` only, never `P_priv`.
+> The public sees only an unlinkable throwaway key posting an opaque blob to the hub.
+>
+> **Legacy joins to a v2 hub.** An outdated client with no v2 guard may send a plaintext v1
+> join (kind `36944`, real-key author) to a v2 hub — it references the same coordinate
+> `36942:O:d_tag`, so the owner receives it. Such a join lacks `["version","2"]` and is
+> **un-admittable** (the sender cannot derive `P`). The owner's client MUST recognise it by the
+> missing marker, skip the v2 decrypt path, and NOT add it to the tree; it MAY surface a subtle
+> "a user on an outdated client tried to join" hint. Nothing can restore the sender's privacy
+> (their old client already published their real key) nor admit them until they update.
+>
+> **Join PoW gate (required when `W` is set).** Because a v2 join is opaque ciphertext, the
+> owner's only way to tell a real request from garbage is to run an ECDH + attempt-decrypt on
+> each one — so the outer `36944` MUST carry a `nonce` (NIP-13) meeting the hub's **`W`**
+> join difficulty (§6.1). Clients and owners drop under-`W` joins **before** spending an
+> ECDH, restoring the cheap-discard property. `W` is set higher than the message `w`: a
+> legitimate user pays it once (a join is rare), an attacker pays it per fake.
+
 ```json
 {
   "kind": 36944,
@@ -1151,9 +1656,9 @@ Published by a user to signal they want to join a hub. Shows up in a request que
 }
 ```
 
-- If the hub has a `w` tag with difficulty > 0, the join request MUST include a `nonce` tag with PoW meeting the hub's difficulty.
+- The join request MUST include a `nonce` tag with PoW meeting the hub's join difficulty: in a v2 hub this is the **`W`** tag (§6.1); in a v1 hub it is the message `w` tag if set with difficulty > 0.
 
-- `d` tag makes this replaceable (one request per user per hub).
+- `d` tag makes this replaceable (one request per user per hub). In v2 the `d`-scoped identifier is the derived `addr_pub` (see the callout above), not the joiner's real pubkey.
 - Published to **general relays**.
 - The user is NOT a member until they appear in a followed member file.
 - Clients MAY display a "Pending" state for users who have a join request but are not yet on any list.
@@ -1185,6 +1690,60 @@ Clients fetching join requests for a hub automatically discover mesh lists from 
 4. Messages posted by the non-member include `["facilitator", "<facilitator_hex_pubkey>"]` tag
 5. On subsequent app restarts, the client auto-fetches the facilitator's tree if the user has a saved facilitator preference
 
+#### Withdrawing, Rescinding & Resending a Join Request
+
+A pending request is a live `36944` event that persists on relays until it is tombstoned, so
+its lifecycle has three client-driven actions (all apply to **both v1 and v2** unless noted).
+
+**Withdraw (dual "edit-then-delete").** When an applicant cancels a pending request the client
+mirrors the message/hub deletion pattern (§6.2, §6.5): (1) re-publish the same request (same
+`d`-scoped identifier) with `["deleted", "true"]` and `created_at + 1`, tombstoning it at the
+source; (2) publish a NIP-09 kind-5 deletion request for the join-request coordinate; and (3)
+remove the hub from the User Hub List (§6.4). In **v2**, (1) and (2) are signed under the
+throwaway **join-address sub-key** (`joinAddr`, blinded toward `O`, §4.6/§6.3), never `R`; in
+**v1** under `R`. Moderator queues filter tombstoned requests via the existing `["deleted",
+"true"]` marker.
+
+**Self-rescind on admit.** When a member's client loads a hub and confirms **actual**
+membership — a successful owner-tree decrypt of its own `P`-leaf (§5.2.1), **not** merely
+facilitated access (§4.7) — it auto-cleans its now-redundant request by running **only steps
+(1) and (2)** of a withdrawal (tombstone + kind-5); it does **not** leave the hub (never step
+(3), the hub-list removal). It **no-ops** when there is no live (non-tombstoned) request, and
+runs **at most once per device** (a local flag). *Rationale:* the `36944` request survives on
+relays after approval, so without this it keeps re-appearing in the creator's join-request
+view; tombstoning it at the source lets every moderator's view/badge filter it via the existing
+marker. Implemented as `tombstoneOwnJoinRequest()` (`client/src/lib/hub/rescindJoinRequest.ts`),
+triggered from the member-load path (`client/src/hooks/useHubLoader.ts`).
+
+**Resend.** A still-pending applicant MAY re-publish their request with a fresh `created_at =
+now` (replacing the previous one under the same `d`-scoped identifier) to re-surface it above an
+inactive creator's "seen" watermark (below). It is gated to **at most once every 3 days**
+(`RESEND_MIN_AGE_S`), measured from the current request's `created_at`. In **v1** the request is
+re-signed under `R` and re-mined to the hub's join PoW. In **v2** it is rebuilt as a fresh
+sealed request (new ephemeral `e` keypair + join-address sub-key, §6.3). Published
+**hub-relays-only in v2** (correlation avoidance, §10.4-1), hub + personal relays in v1.
+Implemented in `client/src/lib/hub/resendJoinRequest.ts`; surfaced as a "Resend" button beside
+"Withdraw" on the awaiting-approval overlay.
+
+#### Creator "Seen" Watermark — `den-join-read-state` (NIP-78)
+
+The creator's per-hub join-request **"seen" watermark** — a map of hub `d`-tag → last-seen unix
+timestamp — is persisted as a **NIP-78 Application-Specific Data** event (kind `30078`) so the
+"already handled up to here" decision syncs across the creator's devices. It mirrors the
+client's other read-states (`den-hub-read-state`, `den-dm-read-state`). This is
+**creator-/moderation-side** state only.
+
+- **`d` tag**: the generic, non-hub-specific value `"den-join-read-state"`, so an observer
+  learns only that this key has a den-chat join read-state — **never which hubs it moderates**.
+- **`content`**: **NIP-44 self-encrypted**. The payload enumerates the hub `d`-tags the creator
+  moderates; because the event is authored by the real key `R`, a plaintext copy would link `R`
+  to the private v2 hubs they own, so it **MUST** be encrypted (the same reasoning as the
+  encrypted v2 entries in the User Hub List, §4.6).
+- Published to the creator's **own relays** (like the other read-states), not hub relays.
+
+The join-request view shows only requests **newer than this watermark** by default (with a "Show
+all" toggle), and advances the watermark **best-effort** when the view is opened.
+
 ---
 
 ### 6.4 User Hub List — Kind `16942`
@@ -1213,7 +1772,7 @@ Published by a user to their own relays. Lists all hubs the user is a member of 
 
 | Tag | Required | Description |
 |-----|----------|-------------|
-| `v` | Yes | Hub reference. Values: `["v", "<hub_d_tag>", "<relay_hint>", "<position>" or "<position>:<folder_uuid>"]`. Position is an integer determining display order. If `position:folder_uuid` format, the hub belongs to that folder. |
+| `v` | Yes | Hub reference. Values: `["v", "<hub_d_tag>", "<relay_hint>", "<position>" or "<position>:<folder_uuid>", "<hub_format>", "<signer_scheme>"]`. Position is an integer determining display order. If `position:folder_uuid` format, the hub belongs to that folder. The 5th value `<hub_format>` records the hub's format **at join time** — empty/absent ⇒ v1, `"2"` ⇒ v2 — and is the first, authoritative signal in the version-integrity fail-safe (§0): a client MUST NOT treat a hub recorded here as `"2"` as if it were v1, even if the live hub event's `version` tag has since been stripped or altered. The 6th value `<signer_scheme>` records the hub's NIP-SKD scheme as `"family:version"` (e.g. `"skd:1"`; empty/absent ⇒ `"skd:1"`), so the owner can re-derive `O` on a new device with the correct derivation. |
 | `folder` | No | Folder definition: `["folder", "<uuid>", "<name>"]`. Defines a folder group that hubs can belong to. |
 
 - One per user (replaceable event — latest timestamp wins).
@@ -1304,7 +1863,7 @@ Published by a member to pin messages across channels in a hub. Each user has **
 
 #### Publishing Rules
 
-- Published to the **same relays as messages** (filter relays if defined, otherwise general relays)
+- Published to the **same relays as messages** (the hub's general relays)
 - This ensures pin visibility is gated by the same access controls as message content
 
 #### Subscription
@@ -1398,7 +1957,7 @@ DEN Chat supports two SFU providers:
 
 #### Publishing Rules
 
-- Published to the **same relays as messages** (filter relays if defined, otherwise general relays)
+- Published to the **same relays as messages** (the hub's general relays)
 - **Hub-wide events**: credentials are encrypted with the hub secret — all hub members can decrypt
 - **Group-scoped events**: credentials are encrypted with the group secret — only members of the grouped role can decrypt
 - The host controls their own SFU availability via the `status` tag
@@ -1572,7 +2131,7 @@ The `content` field is encrypted identically to messages (§6.2): base64-encoded
 
 ##### Publishing Rules
 
-Same as messages (§6.2): publish to filter relays if defined, otherwise to general relays.
+Same as messages (§6.2): publish to the hub's general relays.
 
 #### 6.9.2 Vote Event — Kind `1017`
 
@@ -1627,10 +2186,6 @@ Clients fetch votes by querying: `{kinds: [1017], #e: [<poll_event_id>]}` from t
 - The `e` tag reveals **which poll** a user voted on (necessary for relay indexing), but the vote selection is encrypted in `content` — only hub members can see what option was chosen.
 - This is comparable to Discord polls where the server knows who voted, but here the relay cannot see the choice.
 
-##### Filter Relay Considerations
-
-Filter relays MUST accept kinds `1067`, `1017`, and `36948` in addition to kind `36943` when the event carries an `h` tag or `a` tag matching a hub they serve. The same membership-based access rules apply: only hub members can publish or retrieve poll, vote, and report events.
-
 ---
 
 ### 6.10 Hub Report — Kind `36948`
@@ -1639,10 +2194,12 @@ Filter relays MUST accept kinds `1067`, `1017`, and `36948` in addition to kind 
 
 Published by a member to report another user within a hub. Reports are private — encrypted with the hub secret — and visible only to hub members. Because they are addressable replaceable events, a reporter can retract a report by re-publishing with the same `d` tag and status set to `"retracted"`.
 
+> **v2 (private hubs).** A report is a **member content event** and follows the same rules as a channel message (§4.5, §4.6): it is authored under the reporter's **member pseudonym `P`** — never their real key `R` — and carries an **`identity` tag** (`R`'s attestation, encrypted with the `reports_key`) so a moderator holding that key can still resolve the reporter's real identity, while the relay and non-mods cannot. The **`p` tag names the reported user by *their* pseudonym `P`** too (resolved from the roster; a profile-originated report whose target is only known by `R` is mapped to that member's `P` before publishing). Consequently, a client enumerating **its own** reports (for the "my reports" view and retraction) MUST query by the reporter's `P`, not `R`. Retractions re-publish under the same `P` and `d` tag. A facilitated (`Pf`) reporter authors under `Pf` by the same mechanism. In **v1** the reporter authors under `R` and tags the reported `R` directly, as shown below.
+
 ```json
 {
   "kind": 36948,
-  "pubkey": "<reporter_pubkey>",
+  "pubkey": "<reporter_pubkey — R in v1, member P (or facilitated Pf) in v2>",
   "created_at": "<timestamp>",
   "tags": [
     ["d", "<random_uuid_v4>"],
@@ -1663,7 +2220,8 @@ Published by a member to report another user within a hub. Reports are private �
 |-----|----------|-------------|
 | `d` | Yes | Unique UUID v4 identifier for this report. Enables addressable replacement (retraction). |
 | `a` | Yes | Hub scope: `"36942:<creator_pubkey>:<hub_d_tag>"`. Ties the report to a specific hub. |
-| `p` | Yes | Pubkey of the **reported user** (the violator). |
+| `p` | Yes | Pubkey of the **reported user** (the violator). v1: their real key `R`. **v2: their member pseudonym `P`** (resolved from the roster before publishing). |
+| `identity` | v2 only | The reporter's `R` identity attestation, encrypted with the `reports_key` (§4.6). Lets a mod resolve the real reporter while keeping `R` off the wire. Absent in v1. |
 | `report` | No | Addressable reference to the reported message: `"36943:<author>:<d_tag>"`. Present when reporting a specific message; absent for general user reports. |
 | `y` | Yes | Report type/classification. Predefined values: `"spam"`, `"nudity"`, `"profanity"`, `"illegal"`, `"malware"`, `"impersonation"`, `"other"` (NIP-56 vocabulary). Custom freeform strings are also valid — clients SHOULD present predefined types as suggestions and allow custom input. |
 | `s` | Yes | Report status: `"open"` (active) or `"retracted"` (withdrawn by reporter). |
@@ -1699,7 +2257,7 @@ This uses a separate `"reports"` domain to isolate report encryption keys from c
 
 #### Publishing Rules
 
-- Published to the **same relays as messages** (filter relays if defined, otherwise general relays)
+- Published to the **same relays as messages** (the hub's general relays)
 - Reports are encrypted with the hub secret — only hub members can decrypt
 - PoW requirements follow the hub's `w` tag setting (same as messages)
 
@@ -1745,6 +2303,8 @@ To retract a report, the reporter re-publishes the event with:
 **Type**: Addressable Replaceable Event
 
 Published by a hub member to create a calendar event within a hub. Follows the [NIP-52](https://github.com/nostr-protocol/nips/blob/master/52.md) structure (same kind number, addressable replaceable, d-tag, RSVP via kind 31925) but with **all tag values and content AES-encrypted** using the hub secret. This keeps event details (title, time, location, description) private to hub members.
+
+> **v2 (private hubs).** Calendar events and RSVPs (§6.12) are **member content events**: on a v2 hub the `pubkey` is the author's **member pseudonym `P`** (or facilitated `Pf`) — never `R` — and the event carries an **`identity` tag** (`R`'s attestation, encrypted with the `events_key`), exactly like a channel message (§4.5, §4.6). Because the owner `O` can derive any member's `P`, a roster lookup alone (`P → R`) is **not** sufficient to attribute an event — a client MUST **verify the `identity` tag** (which `R` alone can produce) before showing an author or granting own-event controls, falling back to the roster only when the tag is absent/unverifiable (e.g. a historical epoch). The event's coordinate `31923:<P>:<d>` and the RSVP's `a`-tag reference the event by `P`.
 
 ```json
 {
@@ -1821,7 +2381,7 @@ This uses a separate `"events"` domain from channel message keys (`"channel:..."
 
 #### Publishing Rules
 
-- Published to **hub relays** (filter relays if defined, otherwise general relays)
+- Published to the hub's **general relays**
 - PoW requirements follow the hub's `w` tag setting (same as messages)
 - Editing: re-publish with the **same `d` tag** — relays replace the previous version
 
@@ -1916,10 +2476,6 @@ To fetch all RSVPs for a calendar event:
 ```
 
 RSVPs are fetched **on-demand** when a user opens the event detail view, not eagerly with the event list.
-
-#### Filter Relay Support
-
-Filter relays MUST accept kinds `31923` and `31925` in addition to kind `36943` when the event carries an `h` tag matching a hub they serve. The same membership-based access rules apply: only hub members can publish or retrieve calendar events and RSVPs.
 
 ---
 
@@ -2111,6 +2667,22 @@ Unlike the Message Edit Hint, a typing signal triggers **no downstream relay que
 
 ## 7. Member List Mechanics
 
+> [!IMPORTANT]
+> **v2 roster (see §0.2).** In a v2 hub the tree stores pseudonyms `P`. To show the
+> **real user** in the member sidebar, the client decrypts each leaf's **encrypted `R_pub`**
+> (`HKDF(hub_secret, "leaf-rpub")` — free with the plaintext page it already fetched, and
+> present even for **silent members** who never posted), resolves `R`, and fetches `R`'s
+> kind:0 profile. Ban subtraction is performed on `R`. This is preferred over reading `P`'s
+> kind:0 (which would be a double kind:0 fetch).
+>
+> **Render cost — window the viewport and cache the verification.** The per-member Schnorr
+> verify of `sig_R` is the new cost and it scales with rendered-roster size. Two things keep
+> it cheap: (a) render **viewport-windowed** — only decrypt/verify/fetch the members actually
+> on screen (plus a small buffer), never the whole page at once; and (b) **cache the
+> verification result**, not merely the `P→R` map — verify each `sig_R` **once ever** and
+> remember the verdict, so scrolling or re-opening the roster never re-verifies. With both,
+> v2 roster render stays close to v1's cost in practice.
+
 ### 7.1 Resolution Order
 
 A client constructs its effective member list by:
@@ -2143,10 +2715,6 @@ The creator can protect specific members from mod bans by adding a `w` column to
 | Facilitated (verified `facilitator` tag) | Recognized — slightly muted, facilitated-by indicator |
 | On manually followed list only | Known — more muted, small indicator |
 | On no followed list | Unknown — greyed out, collapsed, or hidden behind "show unverified" toggle |
-
-### 7.4 Filter Relay List Handling
-
-Filter relays use **only the creator's member file and ban list** for access control. They do NOT use mesh lists. The creator remains sole authority for relay-level access.
 
 ---
 
@@ -2185,7 +2753,7 @@ Permissions are **client-side rendering decisions**. The protocol does not enfor
 
 ### 8.3 Important: Permissions Are Not Security
 
-Permissions determine what a compliant client renders. A malicious client can ignore them. For actual access control, use encryption (hub secret / group secrets) and filter relays.
+Permissions determine what a compliant client renders. A malicious client can ignore them. For actual access control, use encryption (hub secret / group secrets); membership and spam enforcement are client-side (the identity drop rule + message/join PoW, §9.9).
 
 ---
 
@@ -2279,7 +2847,7 @@ Although the protocol does not enforce who can publish events (§1.1, §8.3), cl
 - Disable file attachment and emoji picker
 - Thread modals should also respect the same gate
 
-This is a **client-side UX decision** — it does not prevent a malicious client from publishing events. For actual enforcement, use filter relays (§3.2) which reject posts from non-members at the relay level.
+This is a **client-side UX decision** — it does not prevent a malicious client from publishing events. Enforcement is entirely client-side: in v2, the identity drop rule (§9.9) refuses to render events without a valid attestation, and message PoW (`w`) plus join PoW (`W`) price spam. There is no relay-side membership gate.
 
 ### 9.8 Ban Enforcement and Non-Member Message Filtering
 
@@ -2302,54 +2870,84 @@ Clients SHOULD offer a **"Hide non-member messages"** toggle (recommended defaul
 - The toggle applies globally across all hubs
 - Own messages are never filtered regardless of membership status
 
-This prevents cache pollution from events published by unauthorized clients to general relays (where no filter relay is protecting the channel).
+This prevents cache pollution from events published by unauthorized clients to the hub's general relays. In v2 the identity drop rule (§9.9) supersedes this toggle: an event without a valid `identity` attestation is dropped before it can pollute the cache.
+
+### 9.9 v2 Identity Enforcement (Drop Rule)
+
+In a **v2 hub**, membership/accountability is enforced by the identity attestation rather
+than by matching the author's real pubkey (which is never public). For every incoming
+member-authored event (message, reaction, pin, report, poll/vote, calendar, voice
+presence):
+
+1. **Cheap pre-check (plaintext):** the event carries an `["identity", …]` tag. If absent,
+   **drop** the event before any decryption — do not render, do not notify. This is the v2
+   analogue of "hide non-member messages," and stops anonymous spam.
+2. **Validity check (post-decrypt):** decrypt the tag with the channel/hub key for the
+   event's epoch to recover `R_pub` and `sig_R`; verify `sig_R` is a valid signature by
+   `R_pub` **over `event.id`** (with `P_pub = event.pubkey`). If verification fails, **drop**.
+3. **Ban check:** if `R_pub` (or `P_pub`) is on the decrypted ban set (§5.3), **drop**
+   (hard filter, no reveal — same treatment as a v1 ban).
+4. Otherwise render, attributing the message to the **real user `R`** (resolved via the
+   attestation; profile fetched from `R`'s kind:0).
+
+Notifications/sounds fire only for events that pass (1)–(3) **and** the hub's PoW
+threshold **and** decrypt successfully — consistent with the v1 rule that only real,
+readable, sufficiently-PoW'd messages notify.
+
+### 9.10 Disappearing Messages
+
+A hub MAY set a hub-wide disappearing-messages timer via the `message_expiration` tag on
+the hub event (§6.1): a duration in **seconds**, where absent or `0` means off. It is
+configured in hub settings **after creation** (never at creation) and is gated by whoever
+may edit hub settings. The timer is hub-wide for now; per-channel overrides are a future
+extension.
+
+**Stamping (send time).** While the timer is set, a sender MUST add a NIP-40
+`["expiration", "<created_at + message_expiration>"]` tag — an absolute unix timestamp in
+seconds — to every **durable** chat event it publishes: messages (including forum posts),
+reactions, polls, votes, calendar time events (§6.11), and RSVPs (§6.12). The `expiration`
+tag MUST be added **before** mining PoW, because it is part of the event id the `nonce` is
+mined over.
+
+Calendar time events anchor their expiry to the event's **end**, not its creation:
+`expiration = max(created_at, event_end) + message_expiration`. This lets a future event
+survive until it is over and then disappear one timer-window later. If the event has no end
+time, anchor on its start instead.
+
+**Never stamped.** These MUST NOT carry an `expiration` tag: kind-5 deletions and their
+`36943`/calendar tombstones (an expiring tombstone would resurrect the message it erased),
+hide/unhide events, ephemeral edit-hint events, pins, join requests, and the hub event
+(`36942`) itself.
+
+**Non-retroactive.** The tag is baked into each event at send time, so changing the timer
+affects only future messages. Readers MUST honor the per-event `expiration` tag and never
+the current hub policy. An edit MUST preserve the **original** message's `expiration` —
+editing never extends a message's life nor introduces an expiry where the original had none.
+
+**Enforcement (cooperative / best-effort, like Signal).** Relays that honor NIP-40 delete
+the event server-side after its expiry. Independent of any relay, a client:
+
+- MUST NOT ingest or display an already-expired event;
+- SHOULD physically purge expired events from local storage — a seized device is the
+  threat, and hiding is not disappearing;
+- SHOULD hide messages that expire while they are being viewed.
+
+**Metadata leak (accepted).** The `expiration` tag is **plaintext** — NIP-40 requires it so
+relays can act on it — so a relay can observe that a hub uses disappearing messages and
+roughly the timer value. This is a deliberate, accepted leak: the price of real server-side
+deletion, and consistent with v2's other accepted plaintext leaks (the `h`-tag pseudonym
+traffic, the PoW `w`/`W` floors, and the public face tags; see §8.1 of the plan and §10.1).
 
 ---
 
-## 10. Filter Relay Behavior
+## 10. Security Model & Tradeoffs
 
-### 10.1 Setup
-
-1. Hub creator adds the relay via `["r", "wss://...", "filter"]` tag.
-2. Relay fetches the hub event from general relays.
-3. Relay downloads the index file and member/block files from Blossom (using `o` and `m` tags).
-4. Relay builds and maintains an internal member index.
-
-### 10.2 Write Policy
-
-When a message (kind `36943`) is published:
-1. Check if `pubkey` is on the creator's member list and NOT on the block list.
-2. YES → accept and store.
-3. NO → reject with `OK false`.
-
-### 10.3 Read Policy
-
-When a client subscribes (NIP-42 AUTH):
-1. Check if subscribing pubkey is on the creator's member list and NOT blocked.
-2. YES → serve matching events.
-3. NO → return no results.
-
-### 10.4 List Updates
-
-- Relay SHOULD poll the hub event on general relays for `m` tag changes.
-- When the index file hash changes: download new index, download changed pages, update internal member index.
-- **Members removed**: denied future reads/writes. Existing posts by removed members are **deleted** from the relay.
-- **Members added**: granted access immediately.
-
-### 10.5 Multiple Filter Relays
-
-All filter relays follow the same creator member and block files. Clients SHOULD publish to all filter relays for redundancy.
-
----
-
-## 11. Security Model & Tradeoffs
-
-### 11.1 Threat Model
+### 10.1 Threat Model
 
 | Threat | Mitigation |
 |--------|-----------|
-| Non-member reads messages | Hub secret encryption. Filter relay prevents access to ciphertext. |
-| Non-member posts | Filter relay rejects. Without filter relay, client-side filtering. |
+| Non-member reads messages | Hub secret encryption — a non-member obtains only ciphertext (relays serve it publicly). |
+| Non-member posts | Client-side identity drop rule (§9.9): events without a valid attestation are not rendered. Message PoW (`w`) prices spam. |
 | Kicked member reads future messages | Secret rotation. New epoch secret not available to removed members. |
 | Kicked member reads historical messages | History file re-encrypted with new secret. Removed member can't decrypt. |
 | Relay reads content | AES-256-GCM encryption. Relay sees only ciphertext. |
@@ -2357,26 +2955,106 @@ All filter relays follow the same creator member and block files. Clients SHOULD
 | Creator goes rogue | Mesh lists allow community to follow alternative list maintainers. |
 | Blossom server tampers with files | SHA-256 hash verification. Multiple Blossom servers for redundancy. |
 | Key isolation from DMs | NIP-04 at leaf level uses the same key-agreement as DMs, but the encrypted payload (leaf symmetric key) is hub-specific and meaningless outside the tree context. |
+| **(v2)** Public learns the member list | Members are stored as per-hub pseudonyms `P`, and leaf pages are encrypted. Public sees at most ~one pseudonym per page (plaintext index boundary), never real identities. |
+| **(v2)** Public learns who is banned | Ban list stores real keys `R` and is encrypted with a hub-secret-derived key. Only members can read it. |
+| **(v2)** Public learns who joined | Join requests are sealed to the owner via ephemeral-static ECDH and signed by a throwaway derived key (§6.3). |
+| **(v2)** Public links a sender to a hub / across hubs | Messages are signed by `P` (per-hub, derived), unlinkable to `R` or across hubs. Residual: the plaintext `h` tag reveals *a pseudonym* posted to a hub (see plan §8.1). |
+| **(v2)** Member is impersonated by a forged `R` in a leaf/event | `P` is owner-verified at admission (a **blinded** derivation of `R`, re-derived by the owner via `getPeerBlindedPubkey`, §6.3), and each message carries a fresh `sig_R` over the event (§9.9). Only the real `R` holder can produce a valid `P` signature (the owner derives `P_pub` but never `P_priv`), and a `P` that does not derive from the presented `R` is rejected (squat-proof). |
+| **(v2)** User is coerced/accused over `P`'s messages | **v2 is accountable, not deniable** — a conscious trade (§0.1, §4.5): `R` signs **every** message, so authorship is provable to members, and to outsiders if a member leaks the ciphertext+signature. There is no "leaked pseudonym key" defence. Users should understand a v2 hub attributes their words to their real key within the member set — treat it as a private group chat, not an anonymity tool. |
+| **(v2)** Public learns who created/owns the hub | The hub is authored by the owner pseudonym `O` (`kind:O:d_tag`); `R_owner` never appears publicly. A static owner attestation, encrypted with the hub secret, reveals the creator to **members only** (§4.5). |
+| **(v2)** Public learns the hub's internal structure | Hub `content` (roles, categories, channel names, permissions) is encrypted with `hub_content_key`; only the public face (`n`, `picture`, `banner`, `about`, `t`) is visible. |
 
-### 11.2 Explicit Non-Goals
+### 10.2 Explicit Non-Goals
 
 - **Forward secrecy** — current members can decrypt all historical messages via the history file. This is intentional (Discord model).
 - **Instant cryptographic revocation** — there is a window between removal and secret rotation.
 - **Protocol-level permission enforcement** — permissions are client-side rendering decisions only.
 - **Protection against members** — the hub secret protects against outsiders. Any current member can leak content.
 
-### 11.3 Security Tiers
+### 10.3 Security Tiers
 
 | Configuration | Privacy Level |
 |--------------|--------------|
-| Hub secret only (no filter relay) | Encrypted content, public metadata |
-| Hub secret + filter relay | Encrypted content, gated access |
+| v1 hub secret | Encrypted content, public metadata (member list, bans, sender→hub all public) |
+| v2 hub secret | Encrypted content **and** encrypted structure; pseudonymous members, encrypted ban list, sealed joins |
 | Grouped role secret | Additional isolation for specific channels |
-| Grouped role secret + filter relay | Maximum privacy for sensitive channels |
+| v2 + grouped role secret | Maximum isolation for sensitive channels within a private hub |
+
+### 10.4 Client Security Requirements (normative)
+
+The v2 privacy guarantees above hold **only if every client enforces the following**. These are not
+optional optimizations — a client that skips any of them reintroduces a concrete deanonymization or
+integrity break for *all* members of the hubs it touches, so they are stated as MUST/SHOULD requirements
+for interoperability.
+
+1. **Relay-footprint discipline (hub-only publishing).** A v2 event authored under a hub pseudonym
+   (`O`, `P`, `Pf`) — every hub event, message, edit, deletion, reaction, poll, calendar event, hide,
+   voice presence/host/keepalive, join request, and its rescind — **MUST** be published to the hub's own
+   relays only. It **MUST NOT** be sent to the author's personal (NIP-65 / client) relay set. Publishing a
+   pseudonym-authored event onto the relays the author advertises under their real key `R` lets a passive
+   relay/observer correlate the pseudonym → `R` by relay footprint, defeating the pseudonymity. The same
+   applies to Blossom `kind:24242` auth: it **MUST** be signed by the pseudonym (`O`/`P`/`Pf`), never `R`.
+   > *Residual (document to users):* a single client, process, and IP multiplex all of a user's traffic
+   > over one connection pool, so a relay present in *both* a hub's relay set and the user's personal set,
+   > or a network/IP observer, can still correlate across that boundary. Full isolation requires a
+   > dedicated transport per pseudonym (out of scope here).
+
+2. **Version-downgrade rejection.** A hub's format version only ever increases. A client **MUST** persist
+   the highest version accepted for a hub and **MUST** reject (skip, keep the last good state) any hub
+   event whose version is lower — a validly-signed but downgraded event would otherwise force members'
+   clients onto the v1 (plaintext-`R`) path and deanonymize the whole membership. The mark **MUST** be
+   advanced only from events that are cryptographically confirmed to be from the real owner (below).
+
+3. **Epoch-rollback rejection.** A v2 hub's epoch only ever increases. A client **MUST** persist the
+   highest epoch accepted and **MUST** reject any hub event with a lower epoch — a stale (rotated-out)
+   event served by a malicious/eclipsing relay would otherwise re-key the client to a secret a removed
+   member still holds.
+
+4. **Owner binding.** Hub events are addressable (`kind:pubkey:d_tag`) and queried by `d_tag`, so a relay
+   may serve a hub event for a given `d_tag` signed by *any* pubkey. Once a client has cryptographically
+   confirmed a hub's real owner — by successfully decrypting its hub secret with `creatorPubkey` as `O`,
+   which no other key can do — it **MUST** reject any subsequent hub event for that hub from a different
+   author (including a `deleted` tombstone). The downgrade/rollback marks (2–3) and the owner binding
+   **MUST** be recorded only on such a confirmed-owner event, so a forged event that never decrypts can
+   neither poison the marks nor steal the binding. This binding **MUST** be scoped so it cannot bind from a
+   value an attacker controls: bind on the v2 member-tree decrypt (the member's `P`-leaf, unforgeable for a
+   wrong `O`) or on a **verified owner attestation** — never on a bare content decrypt, whose ciphertext is
+   public and replayable under a forged author.
+
+5. **Fail-closed signing and auth.** If a client cannot produce the required pseudonym signer or Blossom
+   auth for a v2 operation (e.g. a signer without NIP-SKD support), it **MUST** refuse the operation. It
+   **MUST NOT** fall back to signing or authing under the real key `R`. Reads that require a partial/
+   unverifiable security input (e.g. an unreadable encrypted ban list) **MUST** fail closed rather than
+   treat "couldn't load" as "empty/allowed".
+
+6. **Attestation & identity verification.** A client **MUST** verify the owner attestation's signature
+   over the hub coordinate before trusting the real-owner key it carries (§4.5). Content events **MUST**
+   follow the identity drop-rule (§9.9): an event whose identity attestation is present-but-invalid, or
+   absent on v2, is dropped — never rendered or attributed by wire pseudonym alone.
+
+7. **Authorization on receipt, by the verified real key.** Because there is no server, every client
+   **MUST** re-check the author's permission when it *receives* an event (send, react, poll, hide,
+   mod-ban, …) — the sender's UI gate is not trusted. The check **MUST** resolve the author to their
+   identity-verified real key `R` (not the on-wire pseudonym), because an unknown pseudonym resolves to the
+   permissive `everyone` role and would let a restricted member bypass a per-channel/role restriction by
+   authoring under a throwaway key.
+
+8. **Content-integrity & bounded parsing.** Every Blossom blob referenced by hash **MUST** be
+   SHA-256-verified before use. A client **SHOULD** bound the resources a hostile blob can consume:
+   cap hub-metadata download size, and guard the LKH tree/spine walks against a maliciously cyclic
+   structure (a cycle a member/facilitator can craft, in which every decrypt legitimately succeeds, would
+   otherwise hang the client).
+
+9. **Sub-key derivation conformance.** Pseudonyms **MUST** be derived per NIP-SKD (salt `"nip-skd-v1"`,
+   the fixed contexts of §0.1, the **form-tagged** HKDF `info` of NIP-SKD §1, HKDF-SHA256 with a
+   **48-byte** output reduced `mod n`). `O` uses the **self** form; `P`, `Pf`, and the join address use
+   the **blinded** form — including its even-`y` base normalization and the `t=0→1` / `blinded_priv=0→1`
+   pins (NIP-SKD §1). All implementations (local and remote signers) must be byte-identical or members
+   will derive mismatched pseudonyms and be unable to interoperate.
 
 ---
 
-## 12. Join Flow
+## 11. Join Flow
 
 ```
 User discovers hub (naddr link, search, browse)
@@ -2388,6 +3066,8 @@ User discovers hub (naddr link, search, browse)
   → User downloads member file → decrypts hub secret → full access
   → User downloads history file → decrypts all epoch secrets → full history
   → Client updates User Hub List (kind 16942) on user's relays
+  → On a later hub load, member's client confirms membership (owner-tree decrypt)
+      and auto-rescinds its now-redundant join request (§6.3)
 ```
 
 ### Removal Flow
@@ -2400,10 +3080,62 @@ Mod/creator removes user from the LKH tree
   → History file re-encrypted with new hub secret
   → Updated tree file and history uploaded to Blossom, index updated
   → Hub event updated with new m tag and epoch
-  → Filter relay removes kicked user's posts
   → Remaining members walk tree with updated keys to get new hub secret
   → Removed user can no longer decrypt new or historical messages
 ```
+
+---
+
+## 12. Optional v1 → v2 Copy (Fork Model)
+
+**v1 and v2 are permanent, coexisting formats — v1 is not deprecated and there is no
+migration directive (§0.4).** A creator who is happy with a public hub keeps it as v1
+indefinitely. A creator who *wants* privacy can **optionally** spawn a fresh v2 successor: a
+hub does not "become" v2 in place (v1 plaintext history cannot become v2 ciphertext, and the
+owner authors the v2 hub under a different key `O`), so the move is a **fork**, never an
+in-place rewrite. This entire section is opt-in; nothing here is required of a v1 hub.
+
+### 12.1 v1 hub UI states
+
+- **No `new_hub` tag** → clients SHOULD show a subtle badge and, on click, a note:
+  *"This is a v1 hub. Its member list, ban list, and who-posts-where are public. v2 hubs
+  don't leak this."* Informative, not nagging.
+- **Has `new_hub` tag** → clients SHOULD show a **permanent "This hub has moved to a new
+  version — click to request to join"** banner to everyone, and hide the hub from
+  discovery. The **creator** additionally sees a **Delete old hub** control (same flow as
+  §6.5), recommended after a grace period, with a warning that deletion permanently loses
+  the old history and orphans anyone who never migrated.
+
+### 12.2 Create v2 copy (fork)
+
+Creator-only action on a v1 hub:
+
+1. Create a **fresh v2 hub**: new `d` tag, authored by the creator's **owner pseudonym `O`**
+   (§4.5) so the coordinate is `kind:O:d_tag`, new `hub_secret`, `epoch = 1`, the encrypted
+   owner attestation, `["version","2"]`, and the source hub's name / icon / description /
+   roles / channels / relays / blossom servers. The creator holds the hub secret directly as
+   owner; members are added via the normal v2 join flow.
+2. Add `["new_hub", "<new_d_tag>"]` to the **old** v1 hub event and republish it
+   (creator-signed → authentic). Clients honor it only if the successor's creator pubkey
+   matches.
+3. Surface the moved-banner UI.
+
+**Not carried over (by design):** no allowlist/auto-admit (would require the creator
+online to admit each member anyway — members just use the normal v2 join
+flow), no ban carry-over (reject bad re-joins manually), and **no history** (old messages
+stay readable in the old hub; copying them would drag `R`-signed history into the private
+hub). Members re-join via §6.3; the creator approves as usual.
+
+**Fork resets bans (evasion side-effect).** Because the fork starts from an empty ban set,
+every prior ban — **including the creator's own** — is void in the new hub. A fork is
+therefore a clean slate: a creator forking to escape a brigade also resets their own bans,
+so forking doubles as a ban-evasion path. This is acceptable at today's scale (few hubs,
+at most a handful of bans each); if hubs grow large, revisit by carrying a re-encrypted ban
+set into the fork.
+
+### 12.3 Discovery
+
+Clients MUST hide any hub carrying a `new_hub` tag from search/browse/discovery.
 
 ---
 
@@ -2412,21 +3144,22 @@ Mod/creator removes user from the LKH tree
 | Kind | Name | Type | Published To |
 |------|------|------|-------------|
 | `36942` | Hub Event | Addressable Replaceable | General relays |
-| `36943` | Message | Addressable Replaceable | Filter relays (if defined) or General relays |
-| `26943` | Message Edit Hint | Ephemeral | Filter relays (if defined) or General relays |
-| `26950` | Typing Indicator | Ephemeral | Filter/General relays (hub) · recipient's inbox relays (DM04) |
+| `36943` | Message | Addressable Replaceable | Hub general relays |
+| `26943` | Message Edit Hint | Ephemeral | Hub general relays |
+| `26950` | Typing Indicator | Ephemeral | Hub general relays (hub) · recipient's inbox relays (DM04) |
 | `36944` | Join Request | Addressable Replaceable | General relays & hub's relays |
-| `36945` | Channel Pin List | Addressable Replaceable | Filter relays (if defined) or General relays |
-| `36946` | Voice Host Availability | Addressable Replaceable | Filter relays (if defined) or General relays |
-| `36947` | Voice Presence Heartbeat | Addressable Replaceable | Filter relays (if defined) or General relays |
-| `36948` | Hub Report | Addressable Replaceable | Filter relays (if defined) or General relays |
-| `31923` | Calendar Time Event (NIP-52) | Addressable Replaceable | Filter relays (if defined) or General relays |
-| `31925` | Calendar RSVP (NIP-52) | Addressable Replaceable | Filter relays (if defined) or General relays |
-| `1067` | Poll | Regular | Filter relays (if defined) or General relays |
-| `1017` | Vote | Regular | Filter relays (if defined) or General relays |
+| `36945` | Channel Pin List | Addressable Replaceable | Hub general relays |
+| `36946` | Voice Host Availability | Addressable Replaceable | Hub general relays |
+| `36947` | Voice Presence Heartbeat | Addressable Replaceable | Hub general relays |
+| `36948` | Hub Report | Addressable Replaceable | Hub general relays |
+| `31923` | Calendar Time Event (NIP-52) | Addressable Replaceable | Hub general relays |
+| `31925` | Calendar RSVP (NIP-52) | Addressable Replaceable | Hub general relays |
+| `1067` | Poll | Regular | Hub general relays |
+| `1017` | Vote | Regular | Hub general relays |
 | `16942` | User Hub List | Replaceable | User's own relays |
 | `1312` | Public Chat Message | Regular | User's relays (§16) |
 | `30078` | Public Chat Topic List (NIP-78) | Addressable Replaceable | User's own relays (§16) |
+| `30078` | Join Read-State (`den-join-read-state`, NIP-78, self-encrypted) | Addressable Replaceable | Creator's own relays (§6.3) |
 | `14` | DM Rumor (NIP-17) | Unsigned (inside seal) | Never published directly (§17) |
 | `15` | DM File (NIP-17) | Unsigned (inside seal) | Never published directly (§17) |
 | `13` | Seal (NIP-17) | Signed | Never published directly (inside gift wrap) |
@@ -2452,17 +3185,18 @@ Mod/creator removes user from the LKH tree
 |-----|---------|-------------|
 | `d` | Hub, Join Request, Pin List, Voice Host, Voice Presence, Report | Addressable replaceable identifier |
 | `n` | Hub | Hub name |
-| `w` | Hub | Minimum PoW difficulty (NIP-13) |
+| `w` | Hub | Minimum **message** PoW difficulty (NIP-13) |
+| `W` | Hub (**v2**) | Minimum **join** PoW difficulty (NIP-13), separate from and higher than `w`; the join request MUST meet it, dropped before the owner spends an ECDH (§6.1, §6.3) |
 | `epoch` | Hub, Message, Poll, Vote, Report, Voice Host | Secret epoch number (incrementing integer) |
 | `b` | Hub | DNN ID requirement flag |
-| `r` | Hub | Relay (`general` or `filter`) |
+| `r` | Hub | Relay (`general`) |
 | `o` | Hub | Blossom server URL |
 | `m` | Hub | Index file reference: `["m", "<sha256>", "<epoch>"]` |
 | `h` | Message | Hub `d` tag reference |
 | `c` | Message, Voice Presence | Channel UUID |
 | `e` | Message | Reply reference |
 | `q` | Message | Quote reference |
-| `nonce` | Message, Report | PoW nonce (NIP-13 format) |
+| `nonce` | Hub, Message, Report | PoW nonce (NIP-13 format). On the hub event (36942) it proves the hub event was mined to its `w` difficulty on every publish (anti-spam); discovery clients drop hubs whose event PoW < claimed `w` (§6.1). |
 | `list` | Join Request | Optional SHA-256 hash of the member's own Blossom index file (mesh list / facilitation discovery, §5.6) |
 | `facilitator` | Message | Hex pubkey of the member who facilitated the sender's access to the hub secret (§5.6). Present only when the sender is not in the creator's member list. |
 | `v` | User Hub List | Hub `d` tag with relay hint, position, and optional folder reference |
@@ -2470,6 +3204,12 @@ Mod/creator removes user from the LKH tree
 | `content-warning` | Hub, Message | NIP-36: sensitive content flag. Value is an optional reason string. |
 | `L` | Hub, Message | NIP-32: label namespace (set to `"content-warning"` for NSFW marking). |
 | `deleted` | Hub, Message | Deletion fallback flag. `["deleted", "true"]` marks the event as request-deleted. Used when relays do not honor NIP-09 Kind 5 deletion. |
+| `version` | Hub | Hub format version (**v2**, §0). Absent ⇒ v1; `"2"` ⇒ v2; higher ⇒ update client. |
+| `new_hub` | Hub | On a forked v1 hub: `d` tag of the v2 successor (§12). Honor only if same creator pubkey. |
+| `identity` | Message + all member-authored hub events (**v2**) | Encrypted `R_pub \|\| sig_R` attestation binding the pseudonymous author to their real key (§0.1, §6.2). Opaque ciphertext; required in v2, drop events without it (§9.9). |
+| `picture` | Hub (**v2**) | Plaintext hub icon URL for the join/Discover card (moved out of the encrypted `content`). |
+| `banner` | Hub (**v2**) | Plaintext hub banner URL for the join/Discover card. |
+| `about` | Hub (**v2**) | Plaintext public blurb for the join/Discover card. |
 | `f` | Hub | Discoverability flag (`on`/`off`). Default when absent: `on`. When `off`, clients SHOULD hide the hub from search/browse UIs. Supports relay-side filtering via `#f`. |
 | `pin` | Pin List | Pinned message reference: `["pin", "<channel_id>", "36943:<author>:<d_tag>"]`. Stable across message edits. |
 | `status` | Voice Host, Voice Presence | State indicator: `"available"`/`"paused"` (host) or `"joined"`/`"left"` (presence). |
@@ -2556,9 +3296,9 @@ This is a separate protocol layer that shares the same client but has completely
 |----------|--------------|-------------|
 | Event Kind | `36943` | `1312` |
 | Encryption | AES-256-GCM (hub secret) | None (plaintext) |
-| Access Control | Membership + filter relays | Open to all |
+| Access Control | Client-side (identity drop rule, §9.9) | Open to all |
 | Identity | Hub member lists | Any Nostr keypair |
-| Spam Prevention | Filter relay + PoW | PoW only |
+| Spam Prevention | Message PoW + join PoW | PoW only |
 | Editing | Re-publish same d-tag | Not supported |
 | Structure | Hub → Channel hierarchy | Flat topics |
 
