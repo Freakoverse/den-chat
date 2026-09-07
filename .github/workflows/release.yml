@@ -72,3 +72,71 @@ jobs:
           args: ${{ matrix.args }}
           projectPath: '.'
           tauriScript: npx -y @tauri-apps/cli
+
+      # Hand each Linux .deb to the flatpak job below (which wraps it into a .flatpak bundle).
+      - name: Upload .deb for Flatpak
+        if: contains(matrix.os, 'ubuntu')
+        uses: actions/upload-artifact@v4
+        with:
+          name: deb-${{ matrix.label }}
+          path: src-tauri/target/release/bundle/deb/*.deb
+          if-no-files-found: error
+
+  # ── Flatpak bundles (Linux x86_64 + aarch64) ──
+  # Self-distributed single-file .flatpak attached to the same release. Wraps each .deb against the
+  # GNOME runtime (bundled WebKitGTK), so it sidesteps the user's-distro-WebKitGTK fragmentation.
+  # No Flathub submission — just extra assets for people who already use Flatpak.
+  flatpak:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            arch: x86_64
+            deb_artifact: deb-linux-x64
+          - runner: ubuntu-24.04-arm
+            arch: aarch64
+            deb_artifact: deb-linux-arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install flatpak + flatpak-builder and the GNOME runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder
+          flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          # Pulls the arch matching THIS runner (aarch64 on the arm runner) automatically.
+          flatpak install --user -y flathub org.gnome.Platform//47 org.gnome.Sdk//47
+
+      - name: Download the .deb built above
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.deb_artifact }}
+          path: flatpak
+
+      - name: Stable-name the .deb (manifest expects den-chat.deb)
+        run: mv flatpak/*.deb flatpak/den-chat.deb
+
+      - name: Build Flatpak bundle
+        working-directory: flatpak
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          OUT="DEN.Chat_${VERSION}_${{ matrix.arch }}.flatpak"
+          # --disable-rofiles-fuse avoids a common FUSE-in-CI failure on GitHub runners.
+          flatpak-builder --user --force-clean --disable-rofiles-fuse \
+            --install-deps-from=flathub --repo=repo build-dir top.denchat.desktop.yml
+          # --runtime-repo bakes in "fetch the GNOME runtime from Flathub" for the rare installer
+          # without Flathub configured (an offer/prompt instead of a hard error).
+          flatpak build-bundle repo "$OUT" top.denchat.desktop \
+            --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo
+          echo "BUNDLE=flatpak/$OUT" >> "$GITHUB_ENV"
+
+      - name: Attach the bundle to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          draft: true
+          files: ${{ env.BUNDLE }}

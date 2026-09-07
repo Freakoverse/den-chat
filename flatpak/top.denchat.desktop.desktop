@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=DEN Chat
+Comment=Decentralized encrypted Nostr chat
+Exec=den-chat %u
+Icon=top.denchat.desktop
+Terminal=false
+Categories=Network;InstantMessaging;Chat;
+MimeType=x-scheme-handler/denchat;
+# Set this to whatever `xprop WM_CLASS` shows for the running window (Tauri usually uses the app id).
+StartupWMClass=top.denchat.desktop

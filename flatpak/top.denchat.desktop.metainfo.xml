@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Minimal AppStream metadata. Optional for a self-distributed bundle to RUN, but flatpak-builder
+     validates it and it gives the app a proper name/icon in Flatpak tooling. If the build fails on
+     appstream validation, either fix the field it names or delete this file + its manifest source. -->
+<component type="desktop-application">
+  <id>top.denchat.desktop</id>
+  <name>DEN Chat</name>
+  <summary>Decentralized encrypted Nostr chat</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <!-- TODO: set to the project's actual SPDX license (e.g. MIT, GPL-3.0-or-later, or
+       LicenseRef-... for a custom/proprietary one). -->
+  <project_license>LicenseRef-proprietary</project_license>
+  <developer id="top.denchat">
+    <name>DEN Chat</name>
+  </developer>
+  <description>
+    <p>
+      DEN Chat is a decentralized, encrypted, Discord-style chat client built on Nostr —
+      hubs, channels, DMs, and voice, with private (v2) hubs that hide member identities.
+    </p>
+  </description>
+  <launchable type="desktop-id">top.denchat.desktop.desktop</launchable>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.3.2" date="2026-01-01"/>
+  </releases>
+</component>

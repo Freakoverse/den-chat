@@ -1,0 +1,65 @@
+# Flatpak manifest for DEN Chat — wraps the Tauri-built .deb (no source build).
+#
+# This is consumed by CI (.github/workflows/release.yml → `flatpak` job): the Linux x64 build uploads
+# its .deb as an artifact, the flatpak job downloads it here as `den-chat.deb`, and flatpak-builder
+# lays those files into /app against the GNOME runtime (which provides WebKitGTK).
+#
+# THINGS TO VERIFY on the first real tagged build (I can't run flatpak-builder from Windows):
+#  - runtime-version: must be a GNOME runtime that ships webkit2gtk-4.1 (what Tauri links against).
+#    Bump if the app fails to start with a missing libwebkit2gtk error.
+#  - the .deb's `data.tar` compression (gz/xz/zst) — `tar -xf data.tar.*` auto-detects, but if it
+#    fails, install the matching compressor or switch to `dpkg-deb -x`.
+#  - StartupWMClass in the .desktop (window grouping) — set to whatever `xprop WM_CLASS` reports.
+app-id: top.denchat.desktop
+runtime: org.gnome.Platform
+runtime-version: '47'
+sdk: org.gnome.Sdk
+command: den-chat
+
+finish-args:
+  # Nostr relays, Blossom servers, WebSocket, AND the localhost:7777 DENOS local-signer probe
+  # (network share uses the host net namespace, so localhost reaches a DENOS on the host).
+  - --share=network
+  - --share=ipc
+  # Windowing
+  - --socket=wayland
+  - --socket=fallback-x11
+  # GPU acceleration — REQUIRED for smooth (GPU-composited) scrolling; without it WebKitGTK
+  # software-renders and scrolling is abysmal (the whole reason for the runtime approach).
+  - --device=dri
+  # Voice chat (mic + playback), via PipeWire/PulseAudio
+  - --socket=pulseaudio
+  # OS keychain (Secret Service) for seeds/nsecs secure storage
+  - --talk-name=org.freedesktop.secrets
+  # Desktop notifications
+  - --talk-name=org.freedesktop.Notifications
+  # Register the denchat:// deep-link scheme
+  - --env=GIO_USE_VFS=local
+
+modules:
+  - name: den-chat
+    buildsystem: simple
+    build-commands:
+      # Unpack the Debian package (control + data archives).
+      - ar x den-chat.deb
+      - tar -xf data.tar.*
+      # Binaries — copy whatever Tauri named the executable, then add a stable-named launcher so
+      # `command: den-chat` above is deterministic regardless of the product name.
+      - install -d /app/bin
+      - cp -a usr/bin/. /app/bin/
+      - sh -c 'bin=$(ls /app/bin | head -n1); [ "$bin" = "den-chat" ] || ln -sf "$bin" /app/bin/den-chat'
+      # Any bundled resources/libraries Tauri shipped under /usr/lib.
+      - sh -c '[ -d usr/lib ] && cp -a usr/lib/. /app/lib/ || true'
+      # Desktop entry + AppStream metainfo, named after the app-id (Flatpak requires this).
+      - install -Dm644 top.denchat.desktop.desktop /app/share/applications/top.denchat.desktop.desktop
+      - install -Dm644 top.denchat.desktop.metainfo.xml /app/share/metainfo/top.denchat.desktop.metainfo.xml
+      # Icons — preserve hicolor/<size>/apps/, rename each basename to the app-id.
+      - sh -c 'cd usr/share/icons 2>/dev/null && find . -type f | while read -r f; do ext="${f##*.}"; dir="$(dirname "$f")"; install -Dm644 "$f" "/app/share/icons/$dir/top.denchat.desktop.$ext"; done || true'
+    sources:
+      # Provided at build time by the CI job (download-artifact → renamed to den-chat.deb).
+      - type: file
+        path: den-chat.deb
+      - type: file
+        path: top.denchat.desktop.desktop
+      - type: file
+        path: top.denchat.desktop.metainfo.xml
