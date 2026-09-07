@@ -99,7 +99,11 @@ interface CreateHubDialogProps {
  * the new scheme ships across client + vault + DENOS. Joining/opening existing v2 hubs is unaffected;
  * this only blocks CREATION.
  */
-const V2_CREATION_ENABLED = false
+const V2_CREATION_ENABLED = true
+
+/** Confirmation password required to turn the private-hub (v2) toggle ON (extra guard on an
+ *  experimental feature). Turning it OFF is unguarded. */
+const V2_TOGGLE_PASSWORD = 'denchat'
 
 export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
   const pubkey = useUserStore((s) => s.pubkey)
@@ -168,12 +172,33 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
   const [showAdvanced, setShowAdvanced] = useState(false)
   // Proof-of-work difficulty (message + join), default 15
   const [createMinPow, setCreateMinPow] = useState(15)
-  /** Create a **v2 (privacy)** hub — requires a local key or a NIP-SKD signer. */
+  /** Create a **v2 (privacy)** hub — requires a local key or a NIP-SKD signer. Set ON only after the
+   *  confirmation-password prompt succeeds. */
   const [createV2, setCreateV2] = useState(false)
+  // Password prompt shown when turning the private-hub toggle ON.
+  const [showV2PwPrompt, setShowV2PwPrompt] = useState(false)
+  const [v2Pw, setV2Pw] = useState('')
+  const [v2PwError, setV2PwError] = useState(false)
   // Stable hub dTag chosen up front so the icon/banner uploads (which happen BEFORE the hub event is
   // built) can sign their Blossom auth as the owner pseudonym O on v2 — not R_owner.
   const hubDTagRef = useRef(crypto.randomUUID())
   const v2Capable = canUseV2({ privateKey, signer })
+
+  // Esc closes the password prompt first (topmost) when it's open.
+  useEscToClose(() => setShowV2PwPrompt(false), showV2PwPrompt)
+  // Clicking the private-hub toggle: turning OFF is immediate; turning ON opens the password prompt.
+  const handleV2ToggleClick = () => {
+    if (!v2Capable || !V2_CREATION_ENABLED) return
+    if (createV2) { setCreateV2(false); return }
+    setV2Pw(''); setV2PwError(false); setShowV2PwPrompt(true)
+  }
+  const confirmV2Password = () => {
+    if (v2Pw === V2_TOGGLE_PASSWORD) {
+      setCreateV2(true); setShowV2PwPrompt(false); setV2Pw(''); setV2PwError(false)
+    } else {
+      setV2PwError(true)
+    }
+  }
   const [createJoinPow, setCreateJoinPow] = useState(15)
   const userRelays = useUserListsStore((s) => s.userRelays)
   const userBlossoms = useUserListsStore((s) => s.userBlossoms)
@@ -1007,16 +1032,18 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
                 <span className="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-500 select-none">Experimental</span>
               </div>
               <p className="text-xs text-muted-foreground">
-                A more private hub: it hides who created it, who its members are, and who is messaging it
-                from the public, unlike a normal (v1) hub. The trade-off: you (and everyone else) can only
-                create or chat in it while signed in from an installed DEN Chat, or with a supported signer
-                (currently one remote signer). A different login can’t open it.
-                {!V2_CREATION_ENABLED ? (
-                  <span className="block mt-1 text-amber-500">
-                    Private hubs are temporarily unavailable while we finish an upgrade. This only affects
-                    creating new ones — joining and opening existing hubs is unaffected.
-                  </span>
-                ) : !v2Capable && (
+                A more private hub.{' '}
+                <TooltipProvider delayDuration={150}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="underline decoration-dotted underline-offset-2 cursor-help text-foreground/80 hover:text-foreground">Learn more</span>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" className="max-w-xs text-xs leading-relaxed whitespace-pre-line">
+                      {"A private hub masks who created it from non-members, masks its members and as a result the activity of the members, and masks join requests, unlike a normal (v1) hub where all of that is publicly visible.\n\nAt the moment, only those with the installed version of DEN Chat where they're logged in within it, or those signed in with a browser extension or remote signer that has support for NIP-SKD, can create a private hub and/or chat in it, otherwise one cannot do so."}
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+                {!v2Capable && (
                   <span className="block mt-1 text-amber-500">
                     Your current signer can’t do this. Sign in with a local key or a supported signer to create a private hub.
                   </span>
@@ -1024,7 +1051,7 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
               </p>
             </div>
             <button
-              onClick={() => v2Capable && V2_CREATION_ENABLED && setCreateV2(!createV2)}
+              onClick={handleV2ToggleClick}
               disabled={!v2Capable || !V2_CREATION_ENABLED}
               className={cn(
                 'relative w-10 h-[22px] rounded-full transition-colors cursor-pointer shrink-0',
@@ -1038,6 +1065,49 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
               )} />
             </button>
           </div>
+
+          {/* Confirmation-password prompt for turning the private-hub toggle ON */}
+          {showV2PwPrompt && (
+            <div
+              className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4"
+              onClick={() => setShowV2PwPrompt(false)}
+            >
+              <div
+                className="bg-background rounded-xl border border-border shadow-2xl w-full max-w-sm p-5 space-y-3"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <h3 className="text-sm font-semibold text-foreground">Enable private hub</h3>
+                <p className="text-xs text-muted-foreground">
+                  Turning on private (v2) hub creation requires a confirmation password.
+                </p>
+                <input
+                  type="password"
+                  autoFocus
+                  value={v2Pw}
+                  onChange={(e) => { setV2Pw(e.target.value); setV2PwError(false) }}
+                  onKeyDown={(e) => { if (e.key === 'Enter') confirmV2Password() }}
+                  placeholder="Password"
+                  className="w-full px-3 py-2 rounded-lg bg-secondary/50 border border-border text-sm text-foreground outline-none focus:border-primary"
+                />
+                {v2PwError && <p className="text-xs text-destructive">Incorrect password.</p>}
+                <div className="flex justify-end gap-2 pt-1">
+                  <button
+                    onClick={() => setShowV2PwPrompt(false)}
+                    className="px-3 py-1.5 rounded-lg text-sm text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={confirmV2Password}
+                    disabled={!v2Pw}
+                    className="px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    Confirm
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* ── Advanced: Relay Selection ── */}
           <div>
