@@ -16,15 +16,13 @@ import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { getFileDraft, setFileDraft, clearFileDraft } from '@/stores/draftStore'
 import {
-  Send, Smile, Sticker, Bold, Italic, Strikethrough,
+  Send, Smile, Bold, Italic, Strikethrough,
   Heading1, Heading2, Heading3, Heading4, Heading5, Heading6,
   List, ListOrdered, Link, Code, CodeSquare, ALargeSmall, Eye,
-  Plus, Upload, Loader2, FileIcon, X, AlertTriangle, ImagePlay,
+  Plus, Upload, Loader2, FileIcon, X, AlertTriangle,
   Clock, Mic, Lock, LockOpen, Scissors, ClipboardPaste, Copy, Type,
 } from 'lucide-react'
-import { EmojiPickerPopover } from '@/components/chat/EmojiPickerPopover'
-import { StickerPickerPopover } from '@/components/chat/StickerPickerPopover'
-import { GifPickerPopover } from '@/components/chat/GifPickerPopover'
+import { MediaPickerPopover } from '@/components/chat/MediaPickerPopover'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { uploadToBlossomServers, computeHash } from '@/lib/blossom'
 import { getUploadBlossoms } from '@/stores/postingBehaviourStore'
@@ -197,15 +195,11 @@ export function ChatInputBar({
   bare = false,
 }: ChatInputBarProps) {
   const [showEmoji, setShowEmoji] = useState(false)
-  const [showSticker, setShowSticker] = useState(false)
-  const [showGif, setShowGif] = useState(false)
   const [showVoiceNote, setShowVoiceNote] = useState(false)
   const [showToolbar, setShowToolbar] = useState(false)
   const [showTimestamp, setShowTimestamp] = useState(false)
   const internalTextareaRef = useRef<HTMLTextAreaElement>(null)
   const emojiButtonRef = useRef<HTMLButtonElement>(null)
-  const stickerButtonRef = useRef<HTMLButtonElement>(null)
-  const gifButtonRef = useRef<HTMLButtonElement>(null)
   const timestampButtonRef = useRef<HTMLButtonElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const uploadAbortRef = useRef<AbortController | null>(null)
@@ -1127,74 +1121,30 @@ export function ChatInputBar({
             <TooltipContent side="top" className="text-xs">Formatting toolbar</TooltipContent>
           </Tooltip>
 
-          {/* Emoji picker */}
+          {/* Emoji / sticker / GIF picker (unified — one button, tabs at the bottom) */}
           <button ref={emojiButtonRef} onClick={() => setShowEmoji(!showEmoji)} className="p-1 cursor-pointer text-muted-foreground hover:text-foreground transition-colors min-[1081px]:order-1">
             <Smile size={20} />
           </button>
           {showEmoji && (
-            <EmojiPickerPopover
+            <MediaPickerPopover
               anchorRef={emojiButtonRef}
               onClose={() => setShowEmoji(false)}
-              onSelect={(emoji) => {
+              onSelectEmoji={(emoji) => {
                 onMessageChange(message + emoji)
                 setShowEmoji(false)
                 textareaRef.current?.focus()
               }}
+              onSelectSticker={onStickerSelect ? (sticker) => {
+                onStickerSelect(sticker)
+                setShowEmoji(false)
+                textareaRef.current?.focus()
+              } : undefined}
+              onSelectGif={onGifSelect ? (gif) => {
+                onGifSelect(gif)
+                setShowEmoji(false)
+                textareaRef.current?.focus()
+              } : undefined}
             />
-          )}
-
-          {/* Sticker picker */}
-          {onStickerSelect && (
-            <>
-              <TooltipProvider delayDuration={300}>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button ref={stickerButtonRef} onClick={() => setShowSticker(!showSticker)} className="p-1 cursor-pointer text-muted-foreground hover:text-foreground transition-colors min-[1081px]:order-1">
-                      <Sticker size={20} />
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent side="top" className="text-xs">Stickers</TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-              {showSticker && (
-                <StickerPickerPopover
-                  anchorRef={stickerButtonRef}
-                  onClose={() => setShowSticker(false)}
-                  onSelect={(sticker) => {
-                    onStickerSelect(sticker)
-                    setShowSticker(false)
-                    textareaRef.current?.focus()
-                  }}
-                />
-              )}
-            </>
-          )}
-
-          {/* GIF picker */}
-          {onGifSelect && (
-            <>
-              <TooltipProvider delayDuration={300}>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button ref={gifButtonRef} onClick={() => setShowGif(!showGif)} className="p-1 cursor-pointer text-muted-foreground hover:text-foreground transition-colors min-[1081px]:order-1">
-                      <ImagePlay size={20} />
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent side="top" className="text-xs">GIFs</TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-              {showGif && (
-                <GifPickerPopover
-                  anchorRef={gifButtonRef}
-                  onClose={() => setShowGif(false)}
-                  onSelect={(gif) => {
-                    onGifSelect(gif)
-                    setShowGif(false)
-                    textareaRef.current?.focus()
-                  }}
-                />
-              )}
-            </>
           )}
 
           {/* Voice note */}

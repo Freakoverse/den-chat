@@ -46,21 +46,7 @@ interface Props {
 
 export function EmojiPickerPopover({ anchorRef, onClose, onSelect }: Props) {
   const [pos, setPos] = useState<{ top: number; left: number; height: number; width: number }>({ top: 0, left: 0, height: PICKER_HEIGHT, width: PICKER_WIDTH })
-  const [tab, setTab] = useState<Tab>('basic')
   const containerRef = useRef<HTMLDivElement>(null)
-  const contentRef = useRef<HTMLDivElement>(null)
-  const [contentHeight, setContentHeight] = useState(PICKER_HEIGHT - 70) // conservative initial estimate
-
-  // Measure actual available height for the emoji content area
-  useEffect(() => {
-    const el = contentRef.current
-    if (!el) return
-    const measure = () => setContentHeight(el.clientHeight)
-    measure()
-    const ro = new ResizeObserver(measure)
-    ro.observe(el)
-    return () => ro.disconnect()
-  }, [pos.height])
 
   const computePosition = useCallback(() => {
     if (!anchorRef.current) return
@@ -126,11 +112,46 @@ export function EmojiPickerPopover({ anchorRef, onClose, onSelect }: Props) {
     return () => document.removeEventListener('mousedown', handler)
   }, [onClose, anchorRef])
 
+  return createPortal(
+    <div
+      ref={containerRef}
+      data-emoji-picker
+      className="fixed z-[300] flex flex-col bg-[hsl(var(--background))] border border-[hsl(var(--border))] rounded-xl shadow-2xl overflow-hidden"
+      style={{ top: pos.top, left: pos.left, width: pos.width, height: pos.height }}
+      onMouseDown={(e) => e.stopPropagation()}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <EmojiPickerBody onSelect={onSelect} onClose={onClose} width={pos.width} />
+    </div>,
+    document.body
+  )
+}
+
+/**
+ * EmojiPickerBody — the tabbed emoji picker content (tab bar + NSFW toggle + content), without any
+ * portal/positioning chrome. Rendered inside {@link EmojiPickerPopover} (emoji-only) and inside the
+ * unified MediaPickerPopover (as its Emoji mode). `width` is the container width, needed by the
+ * emoji-picker-react Basic grid; the content height is measured internally.
+ */
+export function EmojiPickerBody({ onSelect, onClose, width }: { onSelect: (emoji: string) => void; onClose: () => void; width: number }) {
+  const [tab, setTab] = useState<Tab>('basic')
+  const contentRef = useRef<HTMLDivElement>(null)
+  const [contentHeight, setContentHeight] = useState(PICKER_HEIGHT - 70)
+
+  // Measure the actual available height for the emoji content area.
+  useEffect(() => {
+    const el = contentRef.current
+    if (!el) return
+    const measure = () => setContentHeight(el.clientHeight)
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
   // Listen for emoji-picker-discover event (from emoji click modal)
   useEffect(() => {
-    const handler = (e: Event) => {
-      setTab('discover')
-    }
+    const handler = () => setTab('discover')
     window.addEventListener('emoji-picker-discover', handler)
     return () => window.removeEventListener('emoji-picker-discover', handler)
   }, [])
@@ -142,15 +163,8 @@ export function EmojiPickerPopover({ anchorRef, onClose, onSelect }: Props) {
     { id: 'others', label: 'Others', icon: <Users size={16} /> },
   ]
 
-  return createPortal(
-    <div
-      ref={containerRef}
-      data-emoji-picker
-      className="fixed z-[300] flex flex-col bg-[hsl(var(--background))] border border-[hsl(var(--border))] rounded-xl shadow-2xl overflow-hidden"
-      style={{ top: pos.top, left: pos.left, width: pos.width, height: pos.height }}
-      onMouseDown={(e) => e.stopPropagation()}
-      onClick={(e) => e.stopPropagation()}
-    >
+  return (
+    <div className="flex-1 min-h-0 flex flex-col">
       {/* Tab bar */}
       <div className="flex border-b border-[hsl(var(--border))] bg-[hsl(var(--muted)/0.3)] shrink-0">
         {tabs.map((t) => (
@@ -180,7 +194,7 @@ export function EmojiPickerPopover({ anchorRef, onClose, onSelect }: Props) {
         {tab === 'basic' && (
           <EmojiPickerReact
             theme={Theme.DARK}
-            width={pos.width}
+            width={width}
             height={contentHeight}
             autoFocusSearch={false}
             emojiStyle={EmojiStyle.NATIVE}
@@ -214,8 +228,7 @@ export function EmojiPickerPopover({ anchorRef, onClose, onSelect }: Props) {
           <OthersTab onSelect={onSelect} />
         )}
       </div>
-    </div>,
-    document.body
+    </div>
   )
 }
 

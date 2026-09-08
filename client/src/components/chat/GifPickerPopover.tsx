@@ -58,7 +58,6 @@ interface Props {
 
 export function GifPickerPopover({ anchorRef, onClose, onSelect }: Props) {
   const [pos, setPos] = useState<{ top: number; left: number; width: number }>({ top: 0, left: 0, width: PICKER_WIDTH })
-  const [tab, setTab] = useState<Tab>('discover')
   const containerRef = useRef<HTMLDivElement>(null)
 
   const computePosition = useCallback(() => {
@@ -110,13 +109,6 @@ export function GifPickerPopover({ anchorRef, onClose, onSelect }: Props) {
     return () => document.removeEventListener('mousedown', handler)
   }, [onClose, anchorRef])
 
-  const tabItems: { id: Tab; label: string; icon: React.ReactNode }[] = [
-    { id: 'discover', label: 'Discover', icon: <Compass size={16} /> },
-    { id: 'mine', label: 'Mine', icon: <Sparkles size={16} /> },
-    { id: 'others', label: 'Others', icon: <Users size={16} /> },
-    { id: 'favorites', label: 'Favorites', icon: <Star size={14} /> },
-  ]
-
   return createPortal(
     <div
       ref={containerRef}
@@ -126,37 +118,57 @@ export function GifPickerPopover({ anchorRef, onClose, onSelect }: Props) {
       style={{ top: pos.top, left: pos.left, width: pos.width, height: PICKER_HEIGHT }}
     >
       <div className="w-full h-full flex flex-col rounded-xl border border-border bg-background shadow-2xl overflow-hidden">
-        {/* Tab bar */}
-        <div className="flex border-b border-border shrink-0">
-          {tabItems.map((t) => (
-            <button
-              key={t.id}
-              onClick={(e) => { e.stopPropagation(); setTab(t.id) }}
-              className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-sm font-medium transition-colors cursor-pointer
-                ${tab === t.id
-                  ? 'text-primary border-b-2 border-primary bg-primary/5'
-                  : 'text-muted-foreground hover:text-foreground hover:bg-accent/30'
-                }`}
-            >
-              {t.icon}
-              {t.label}
-            </button>
-          ))}
-        </div>
-
-        {/* NSFW toggle */}
-        <NsfwToggle />
-
-        {/* Tab content */}
-        <div className="flex-1 overflow-y-auto">
-          {tab === 'discover' && <DiscoverGifTab onSelect={onSelect} onPickerClose={onClose} />}
-          {tab === 'mine' && <MineGifTab onSelect={onSelect} />}
-          {tab === 'others' && <OthersGifTab onSelect={onSelect} onPickerClose={onClose} />}
-          {tab === 'favorites' && <FavoritesGifTab onSelect={onSelect} />}
-        </div>
+        <GifPickerBody onSelect={onSelect} onClose={onClose} />
       </div>
     </div>,
     document.body
+  )
+}
+
+/**
+ * GifPickerBody — the tabbed GIF picker content (tab bar + NSFW toggle + content) without the
+ * portal/positioning chrome. Rendered inside {@link GifPickerPopover} and the unified MediaPickerPopover.
+ */
+export function GifPickerBody({ onSelect, onClose }: { onSelect: (gif: { name: string; url: string; nsfw: boolean }) => void; onClose: () => void }) {
+  const [tab, setTab] = useState<Tab>('discover')
+  const tabItems: { id: Tab; label: string; icon: React.ReactNode }[] = [
+    { id: 'discover', label: 'Discover', icon: <Compass size={16} /> },
+    { id: 'mine', label: 'Mine', icon: <Sparkles size={16} /> },
+    { id: 'others', label: 'Others', icon: <Users size={16} /> },
+    { id: 'favorites', label: 'Favorites', icon: <Star size={14} /> },
+  ]
+
+  return (
+    <div className="flex-1 min-h-0 flex flex-col">
+      {/* Tab bar */}
+      <div className="flex border-b border-border shrink-0">
+        {tabItems.map((t) => (
+          <button
+            key={t.id}
+            onClick={(e) => { e.stopPropagation(); setTab(t.id) }}
+            className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-sm font-medium transition-colors cursor-pointer
+              ${tab === t.id
+                ? 'text-primary border-b-2 border-primary bg-primary/5'
+                : 'text-muted-foreground hover:text-foreground hover:bg-accent/30'
+              }`}
+          >
+            {t.icon}
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* NSFW toggle */}
+      <NsfwToggle />
+
+      {/* Tab content */}
+      <div className="flex-1 overflow-y-auto">
+        {tab === 'discover' && <DiscoverGifTab onSelect={onSelect} onPickerClose={onClose} />}
+        {tab === 'mine' && <MineGifTab onSelect={onSelect} />}
+        {tab === 'others' && <OthersGifTab onSelect={onSelect} onPickerClose={onClose} />}
+        {tab === 'favorites' && <FavoritesGifTab onSelect={onSelect} />}
+      </div>
+    </div>
   )
 }
 

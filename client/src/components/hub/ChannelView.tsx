@@ -18,7 +18,7 @@ import { useDecryptedMedia, getDecryptedBlobUrl } from '@/hooks/useDecryptedMedi
 import { UserProfileModal } from '@/components/hub/UserProfileModal'
 import { HubSettingsModal } from '@/components/hub/HubSettingsModal'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
-import { Hash, Megaphone, Users, Pin, PinOff, Bell, Search, Send, Plus, Smile, Sticker, Check, X, RotateCcw, Pencil, Reply, MoreVertical, Copy, MessageSquarePlus, Trash2, Loader2, Zap, Code, Bold, Italic, Strikethrough, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, Link, CodeSquare, ALargeSmall, Clipboard, ClipboardCheck, ClipboardPaste, Upload, FileIcon, Download, Image, Paperclip, AlertTriangle, AlertCircle, Eye, EyeOff, ShieldBan, ShieldAlert, ShieldOff, Lock, LockOpen, Settings, ArrowDown, ArrowLeft, ImagePlay, Star, Vote, Clock, Flag, Shield, Globe, Radio, History, BadgeCheck, Mic, WifiOff, Scissors, Type } from 'lucide-react'
+import { Hash, Megaphone, Users, Pin, PinOff, Bell, Search, Send, Plus, Smile, Check, X, RotateCcw, Pencil, Reply, MoreVertical, Copy, MessageSquarePlus, Trash2, Loader2, Zap, Code, Bold, Italic, Strikethrough, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, Link, CodeSquare, ALargeSmall, Clipboard, ClipboardCheck, ClipboardPaste, Upload, FileIcon, Download, Image, Paperclip, AlertTriangle, AlertCircle, Eye, EyeOff, ShieldBan, ShieldAlert, ShieldOff, Lock, LockOpen, Settings, ArrowDown, ArrowLeft, Star, Vote, Clock, Flag, Shield, Globe, Radio, History, BadgeCheck, Mic, WifiOff, Scissors, Type } from 'lucide-react'
 import { useState, useEffect, useRef, useCallback, memo, useMemo, Fragment } from 'react'
 import { useEscToClose, useEscBlock } from '@/hooks/useEscToClose'
 import { createPortal } from 'react-dom'
@@ -48,8 +48,9 @@ import { extractContentMediaGroups, ContentMediaGroups, ContentMediaImage, type 
 import { MessageContent } from '@/components/chat/MessageContent'
 import { DnnBadge } from '@/components/ui/DnnBadge'
 import { EmojiPickerPopover, EmojiDiscoveryModal } from '@/components/chat/EmojiPickerPopover'
-import { StickerPickerPopover, StickerDiscoveryModal } from '@/components/chat/StickerPickerPopover'
-import { GifPickerPopover, GifFavoriteModal } from '@/components/chat/GifPickerPopover'
+import { StickerDiscoveryModal } from '@/components/chat/StickerPickerPopover'
+import { GifFavoriteModal } from '@/components/chat/GifPickerPopover'
+import { MediaPickerPopover } from '@/components/chat/MediaPickerPopover'
 import { VoiceNoteModal } from '@/components/chat/VoiceNoteModal'
 import { CustomAudioPlayer } from '@/components/ui/CustomAudioPlayer'
 import { getEmojiMap } from '@/stores/emojiStore'
@@ -4775,8 +4776,6 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
     if (replyContext) textareaRef.current?.focus()
   }, [replyContext])
   const emojiButtonRef = useRef<HTMLButtonElement>(null)
-  const stickerButtonRef = useRef<HTMLButtonElement>(null)
-  const gifButtonRef = useRef<HTMLButtonElement>(null)
   const timestampButtonRef = useRef<HTMLButtonElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const uploadAbortRef = useRef<AbortController | null>(null)
@@ -4843,7 +4842,6 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
   const [discoverSearch, setDiscoverSearch] = useState<{ search: string; author: string } | null>(null)
 
   // ─── Sticker state ───
-  const [showSticker, setShowSticker] = useState(false)
   type PendingSticker = { shortcode: string; url: string; setAddress: string }
   const [pendingStickers, setPendingStickers] = useState<PendingSticker[]>([])
 
@@ -4852,7 +4850,6 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
   const [stickerDiscoverSearch, setStickerDiscoverSearch] = useState<{ search: string; author: string } | null>(null)
 
   // ─── GIF state ───
-  const [showGif, setShowGif] = useState(false)
   type PendingGif = { name: string; url: string; nsfw: boolean }
   const [pendingGifs, setPendingGifs] = useState<PendingGif[]>([])
 
@@ -6173,6 +6170,7 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
             </div>
           )}
 
+          {/* Emoji / sticker / GIF picker (unified — one button, tabs at the bottom) */}
           <TooltipProvider delayDuration={300}>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -6180,61 +6178,26 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
                   <Smile size={20} />
                 </button>
               </TooltipTrigger>
-              <TooltipContent side="top" className="text-xs">Emoji</TooltipContent>
+              <TooltipContent side="top" className="text-xs">Emoji, stickers & GIFs</TooltipContent>
             </Tooltip>
           </TooltipProvider>
           {showEmoji && (
-            <EmojiPickerPopover
+            <MediaPickerPopover
               anchorRef={emojiButtonRef}
               onClose={() => setShowEmoji(false)}
-              onSelect={(emoji) => {
+              onSelectEmoji={(emoji) => {
                 setMessage((prev) => prev + emoji)
                 setShowEmoji(false)
                 textareaRef.current?.focus()
               }}
-            />
-          )}
-
-          <TooltipProvider delayDuration={300}>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button ref={stickerButtonRef} onClick={() => setShowSticker(!showSticker)} className="p-1 cursor-pointer text-muted-foreground hover:text-foreground transition-colors min-[1081px]:order-1">
-                  <Sticker size={20} />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="top" className="text-xs">Stickers</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-          {showSticker && (
-            <StickerPickerPopover
-              anchorRef={stickerButtonRef}
-              onClose={() => setShowSticker(false)}
-              onSelect={(sticker) => {
+              onSelectSticker={(sticker) => {
                 setPendingStickers((prev) => [...prev, sticker])
-                setShowSticker(false)
+                setShowEmoji(false)
                 textareaRef.current?.focus()
               }}
-            />
-          )}
-
-          {/* GIF picker */}
-          <TooltipProvider delayDuration={300}>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button ref={gifButtonRef} onClick={() => setShowGif(!showGif)} className="p-1 cursor-pointer text-muted-foreground hover:text-foreground transition-colors min-[1081px]:order-1">
-                  <ImagePlay size={20} />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="top" className="text-xs">GIFs</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-          {showGif && (
-            <GifPickerPopover
-              anchorRef={gifButtonRef}
-              onClose={() => setShowGif(false)}
-              onSelect={(gif) => {
+              onSelectGif={(gif) => {
                 setPendingGifs((prev) => [...prev, gif])
-                setShowGif(false)
+                setShowEmoji(false)
                 textareaRef.current?.focus()
               }}
             />
