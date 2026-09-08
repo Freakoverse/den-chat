@@ -247,6 +247,13 @@ function DiscoverGifTab({ onSelect, onPickerClose }: { onSelect: (g: { name: str
   const [publishingAddr, setPublishingAddr] = useState<string | null>(null)
   const [viewingCollection, setViewingCollection] = useState<GifCollection | null>(null)
   const [searchMode, setSearchMode] = useState<'g' | 'd'>('g')
+  const [expandedPreviews, setExpandedPreviews] = useState<Set<string>>(new Set())
+
+  const togglePreview = (addr: string) => setExpandedPreviews((prev) => {
+    const next = new Set(prev)
+    next.has(addr) ? next.delete(addr) : next.add(addr)
+    return next
+  })
 
   // Esc closes the collection-preview modal like its X/backdrop when it's open.
   useEscToClose(() => setViewingCollection(null), !!viewingCollection)
@@ -548,9 +555,9 @@ function DiscoverGifTab({ onSelect, onPickerClose }: { onSelect: (g: { name: str
                           )}
                         </div>
                       </div>
-                      {/* Preview grid */}
+                      {/* Preview grid — click the +N chip to show every GIF in the set */}
                       <div className="flex flex-wrap gap-1">
-                        {visibleGifs.slice(0, 6).map((gif, i) => (
+                        {(expandedPreviews.has(addr) ? visibleGifs : visibleGifs.slice(0, 6)).map((gif, i) => (
                           <button
                             key={`${gif.url}-${i}`}
                             onClick={() => onSelect(gif)}
@@ -560,9 +567,12 @@ function DiscoverGifTab({ onSelect, onPickerClose }: { onSelect: (g: { name: str
                           </button>
                         ))}
                         {visibleGifs.length > 6 && (
-                          <div className="w-12 h-12 rounded border border-border/30 flex items-center justify-center text-xs text-muted-foreground">
-                            +{visibleGifs.length - 6}
-                          </div>
+                          <button
+                            onClick={() => togglePreview(addr)}
+                            className="w-12 h-12 rounded border border-border/30 flex items-center justify-center text-[11px] text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors cursor-pointer"
+                          >
+                            {expandedPreviews.has(addr) ? 'Less' : `+${visibleGifs.length - 6}`}
+                          </button>
                         )}
                       </div>
                     </div>

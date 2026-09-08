@@ -809,8 +809,15 @@ function DiscoverStickerTab({ onPickerClose }: { onPickerClose?: () => void }) {
   const [authorError, setAuthorError] = useState<string | null>(null)
   const [publishingAddr, setPublishingAddr] = useState<string | null>(null)
   const [visibleCount, setVisibleCount] = useState(10)
+  const [expandedPreviews, setExpandedPreviews] = useState<Set<string>>(new Set())
   const sentinelRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
+
+  const togglePreview = (addr: string) => setExpandedPreviews((prev) => {
+    const next = new Set(prev)
+    next.has(addr) ? next.delete(addr) : next.add(addr)
+    return next
+  })
 
   // Follow-scoped discovery — only packs from people the user follows.
   useEffect(() => {
@@ -996,9 +1003,9 @@ function DiscoverStickerTab({ onPickerClose }: { onPickerClose?: () => void }) {
                       </button>
                     )}
                   </div>
-                  {/* Preview grid */}
+                  {/* Preview grid — click the +N chip to show every sticker in the set */}
                   <div className="flex flex-wrap gap-1">
-                    {set.stickers.slice(0, 6).map((st) => (
+                    {(expandedPreviews.has(addr) ? set.stickers : set.stickers.slice(0, 6)).map((st) => (
                       <img
                         key={st.shortcode}
                         src={st.url}
@@ -1008,9 +1015,12 @@ function DiscoverStickerTab({ onPickerClose }: { onPickerClose?: () => void }) {
                       />
                     ))}
                     {set.stickers.length > 6 && (
-                      <div className="w-9 h-9 rounded border border-border/30 flex items-center justify-center text-xs text-muted-foreground">
-                        +{set.stickers.length - 6}
-                      </div>
+                      <button
+                        onClick={() => togglePreview(addr)}
+                        className="w-9 h-9 rounded border border-border/30 flex items-center justify-center text-[10px] leading-tight text-muted-foreground hover:text-foreground hover:bg-muted/50 cursor-pointer"
+                      >
+                        {expandedPreviews.has(addr) ? 'Less' : `+${set.stickers.length - 6}`}
+                      </button>
                     )}
                   </div>
                 </div>

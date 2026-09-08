@@ -994,8 +994,15 @@ function DiscoverEmojiTab({ onPickerClose }: { onPickerClose?: () => void }) {
   const [authorError, setAuthorError] = useState<string | null>(null)
   const [publishingAddr, setPublishingAddr] = useState<string | null>(null)
   const [visibleCount, setVisibleCount] = useState(10)
+  const [expandedPreviews, setExpandedPreviews] = useState<Set<string>>(new Set())
   const sentinelRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
+
+  const togglePreview = (addr: string) => setExpandedPreviews((prev) => {
+    const next = new Set(prev)
+    next.has(addr) ? next.delete(addr) : next.add(addr)
+    return next
+  })
 
   // Follow-scoped discovery — only packs from people the user follows.
   useEffect(() => {
@@ -1182,9 +1189,9 @@ function DiscoverEmojiTab({ onPickerClose }: { onPickerClose?: () => void }) {
                       </button>
                     )}
                   </div>
-                  {/* Preview grid */}
+                  {/* Preview grid — click the +N chip to show every emoji in the set */}
                   <div className="flex flex-wrap gap-0.5">
-                    {set.emojis.slice(0, 12).map((e) => (
+                    {(expandedPreviews.has(addr) ? set.emojis : set.emojis.slice(0, 12)).map((e) => (
                       <TooltipProvider key={e.shortcode} delayDuration={200}>
                         <Tooltip>
                           <TooltipTrigger asChild>
@@ -1195,9 +1202,12 @@ function DiscoverEmojiTab({ onPickerClose }: { onPickerClose?: () => void }) {
                       </TooltipProvider>
                     ))}
                     {set.emojis.length > 12 && (
-                      <span className="w-6 h-6 flex items-center justify-center text-[9px] text-[hsl(var(--muted-foreground))] font-medium">
-                        +{set.emojis.length - 12}
-                      </span>
+                      <button
+                        onClick={() => togglePreview(addr)}
+                        className="h-6 min-w-6 px-1 flex items-center justify-center text-[9px] text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] font-medium rounded hover:bg-[hsl(var(--muted)/0.5)] cursor-pointer"
+                      >
+                        {expandedPreviews.has(addr) ? 'Show less' : `+${set.emojis.length - 12}`}
+                      </button>
                     )}
                   </div>
                 </div>
