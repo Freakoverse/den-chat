@@ -19,6 +19,7 @@ import type { EmojiSet, CustomEmoji } from '@/stores/emojiStore'
 import type { Event } from 'nostr-tools'
 import { publishPersonal, getPublishRelays } from '@/stores/postingBehaviourStore'
 import { useUserListsStore } from '@/stores/userListsStore'
+import { chunkArray } from '@/lib/utils'
 
 const KIND_EMOJI_SET = 30030
 const KIND_LIST = 30000
@@ -124,21 +125,29 @@ function parseEmojiSetEventBroad(event: Event): EmojiSet | null {
 
 /** Discover emoji sets (kind 30030) from the network.
  *  Also queries user NIP-65 relays to find recently published sets that may not be on default relays yet.
+ *
+ *  `authors` scopes the query to a specific set of pubkeys (e.g. the user's follow list) so we never
+ *  surface arbitrary/unmoderated packs from strangers. Passing an EMPTY array returns nothing (the
+ *  caller follows no one); omitting it entirely falls back to the legacy open query.
  */
-export async function discoverEmojiSets(limit = 50): Promise<EmojiSet[]> {
-  const filter: Record<string, any> = {
-    kinds: [KIND_EMOJI_SET],
-    limit,
-  }
+export async function discoverEmojiSets(limit = 50, authors?: string[]): Promise<EmojiSet[]> {
+  if (authors && authors.length === 0) return []
 
   // Query both client relays and user NIP-65 relays in parallel
   const userRelays = useUserListsStore.getState().userRelays
   const clientRelays = getRelays()
   const extraRelays = userRelays.filter((r) => !clientRelays.includes(r))
 
-  const fetches: Promise<Event[]>[] = [fetchEvents(filter)]
-  if (extraRelays.length > 0) {
-    fetches.push(fetchEventsFromRelays(extraRelays, filter).catch(() => []))
+  // Chunk authors so the relay filter never gets too large (big follow lists).
+  const authorBatches = authors ? chunkArray(authors, 500) : [null]
+  const fetches: Promise<Event[]>[] = []
+  for (const batch of authorBatches) {
+    const filter: Record<string, any> = { kinds: [KIND_EMOJI_SET], limit }
+    if (batch) filter.authors = batch
+    fetches.push(fetchEvents(filter))
+    if (extraRelays.length > 0) {
+      fetches.push(fetchEventsFromRelays(extraRelays, filter).catch(() => []))
+    }
   }
 
   const results = await Promise.all(fetches)

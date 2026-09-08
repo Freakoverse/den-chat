@@ -17,10 +17,11 @@ import { uploadToBlossomServers, computeHash } from '@/lib/blossom'
 import { getUploadBlossoms } from '@/stores/postingBehaviourStore'
 import { useUserStore } from '@/stores/userStore'
 import { useBlockStore } from '@/stores/blockStore'
+import { useFollowStore } from '@/stores/followStore'
 import { UserProfileModal } from '@/components/hub/UserProfileModal'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { useEscToClose, useEscBlock } from '@/hooks/useEscToClose'
-import { truncateNpub } from '@/lib/utils'
+import { truncateNpub, resolvePubkeyInput } from '@/lib/utils'
 import { nip19 } from 'nostr-tools'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { Button } from '@/components/ui/button'
@@ -966,19 +967,27 @@ function DiscoverEmojiTab({ onPickerClose }: { onPickerClose?: () => void }) {
   const myPubkey = useUserStore((s) => s.pubkey)
   const { getProfile } = useProfileCache()
   const blockedPubkeys = useBlockStore((s) => s.blockedPubkeys)
+  const followedPubkeys = useFollowStore((s) => s.followedPubkeys)
+  const followLoaded = useFollowStore((s) => s.loaded)
 
   const [loading, setLoading] = useState(true)
   const [discovered, setDiscovered] = useState<EmojiSet[]>([])
   const [search, setSearch] = useState('')
+  // 'name' = browse packs from people you follow (searchable by set name); 'author' = look up one
+  // person's packs by npub. We never surface arbitrary/unmoderated packs from strangers.
   const [searchMode, setSearchMode] = useState<'name' | 'author'>('name')
+  const [authorSets, setAuthorSets] = useState<EmojiSet[]>([])
+  const [authorLoading, setAuthorLoading] = useState(false)
+  const [authorError, setAuthorError] = useState<string | null>(null)
   const [publishingAddr, setPublishingAddr] = useState<string | null>(null)
   const [visibleCount, setVisibleCount] = useState(10)
   const sentinelRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
 
+  // Follow-scoped discovery — only packs from people the user follows.
   useEffect(() => {
     setLoading(true)
-    discoverEmojiSets(100).then(async (found) => {
+    discoverEmojiSets(100, Array.from(followedPubkeys)).then(async (found) => {
       const sizeChecks = await Promise.all(found.map(async (s) => {
         const oversized = await hasOversizedEmoji(s.emojis)
         return oversized ? null : s
@@ -987,15 +996,35 @@ function DiscoverEmojiTab({ onPickerClose }: { onPickerClose?: () => void }) {
     }).catch((err) => {
       console.error('Failed to discover emoji sets:', err)
     }).finally(() => setLoading(false))
-  }, [myPubkey])
+  }, [myPubkey, followedPubkeys])
+
+  // npub-lookup: resolve the entered npub/hex and fetch just that author's packs (debounced).
+  useEffect(() => {
+    if (searchMode !== 'author') return
+    const q = search.trim()
+    if (!q) { setAuthorSets([]); setAuthorError(null); setAuthorLoading(false); return }
+    const pubkey = resolvePubkeyInput(q)
+    if (!pubkey) { setAuthorSets([]); setAuthorError('Enter a valid npub'); setAuthorLoading(false); return }
+    setAuthorLoading(true); setAuthorError(null)
+    const t = setTimeout(() => {
+      fetchEmojiSetsByAuthor(pubkey).then(async (found) => {
+        const sizeChecks = await Promise.all(found.map(async (s) => (await hasOversizedEmoji(s.emojis)) ? null : s))
+        const clean = sizeChecks.filter((s): s is EmojiSet => s !== null)
+        setAuthorSets(clean)
+        if (clean.length === 0) setAuthorError('No emoji sets from this user')
+      }).catch(() => setAuthorError('Failed to load this user’s sets')).finally(() => setAuthorLoading(false))
+    }, 350)
+    return () => clearTimeout(t)
+  }, [search, searchMode])
 
   // Reset visible count when filters change
   useEffect(() => {
     setVisibleCount(10)
   }, [search, searchMode])
 
+  const isAuthorMode = searchMode === 'author'
   const filtered = useMemo(() => {
-    let result = discovered.filter((s) => !blockedPubkeys.has(s.pubkey))
+    let result = (isAuthorMode ? authorSets : discovered).filter((s) => !blockedPubkeys.has(s.pubkey))
 
     // Apply NSFW filtering
     result = result.map((s) => ({
@@ -1003,23 +1032,16 @@ function DiscoverEmojiTab({ onPickerClose }: { onPickerClose?: () => void }) {
       emojis: filterNsfwEmojis(s.emojis),
     })).filter((s) => s.emojis.length > 0)
 
-    if (search.trim()) {
+    // In name mode the text box filters within your follows' packs. In author mode the fetch is
+    // already scoped to the entered npub, so no client-side text filter.
+    if (!isAuthorMode && search.trim()) {
       const q = search.trim().toLowerCase()
-      if (searchMode === 'author') {
-        result = result.filter((s) => {
-          const npub = nip19.npubEncode(s.pubkey)
-          const profile = getProfile(s.pubkey)
-          const name = profile?.display_name || profile?.name || ''
-          return npub.includes(q) || name.toLowerCase().includes(q) || s.pubkey.includes(q)
-        })
-      } else {
-        result = result.filter((s) =>
-          s.name.toLowerCase().includes(q) || s.dTag.toLowerCase().includes(q)
-        )
-      }
+      result = result.filter((s) =>
+        s.name.toLowerCase().includes(q) || s.dTag.toLowerCase().includes(q)
+      )
     }
     return result
-  }, [discovered, search, searchMode, getProfile, blockedPubkeys, nsfwEnabled, untaggedAsNsfw])
+  }, [discovered, authorSets, isAuthorMode, search, blockedPubkeys, nsfwEnabled, untaggedAsNsfw])
 
   const visibleSets = useMemo(() => filtered.slice(0, visibleCount), [filtered, visibleCount])
   const hasMore = visibleCount < filtered.length
@@ -1066,16 +1088,16 @@ function DiscoverEmojiTab({ onPickerClose }: { onPickerClose?: () => void }) {
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder={searchMode === 'author' ? 'Search by author...' : 'Search sets...'}
-            className={`w-full h-9 pl-8 pr-2 rounded-md text-sm bg-[hsl(var(--muted)/0.3)] border border-[hsl(var(--border))] text-[hsl(var(--foreground))] placeholder:text-[hsl(var(--muted-foreground))] focus:outline-none ${searchMode === 'author' ? 'font-mono' : ''}`}
+            placeholder={isAuthorMode ? 'Paste an npub…' : 'Search sets from people you follow…'}
+            className={`w-full h-9 pl-8 pr-2 rounded-md text-sm bg-[hsl(var(--muted)/0.3)] border border-[hsl(var(--border))] text-[hsl(var(--foreground))] placeholder:text-[hsl(var(--muted-foreground))] focus:outline-none ${isAuthorMode ? 'font-mono' : ''}`}
           />
         </div>
         <TooltipProvider delayDuration={300}>
           <Tooltip>
             <TooltipTrigger asChild>
               <button
-                onClick={() => { setSearchMode(searchMode === 'name' ? 'author' : 'name'); setSearch('') }}
-                className={`p-2 rounded-md transition-colors cursor-pointer ${searchMode === 'author'
+                onClick={() => { setSearchMode(isAuthorMode ? 'name' : 'author'); setSearch('') }}
+                className={`p-2 rounded-md transition-colors cursor-pointer ${isAuthorMode
                   ? 'bg-[hsl(var(--primary)/0.15)] text-[hsl(var(--primary))]'
                   : 'text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--muted)/0.5)]'
                 }`}
@@ -1084,7 +1106,7 @@ function DiscoverEmojiTab({ onPickerClose }: { onPickerClose?: () => void }) {
               </button>
             </TooltipTrigger>
             <TooltipContent side="bottom" className="text-xs z-[310]">
-              {searchMode === 'author' ? 'Switch to name search' : 'Search by author'}
+              {isAuthorMode ? 'Back to people you follow' : 'Look up a specific npub'}
             </TooltipContent>
           </Tooltip>
         </TooltipProvider>
@@ -1092,14 +1114,28 @@ function DiscoverEmojiTab({ onPickerClose }: { onPickerClose?: () => void }) {
 
       {/* Content */}
       <div ref={scrollContainerRef} className="flex-1 overflow-y-auto p-2 space-y-2">
-        {loading ? (
+        {(isAuthorMode ? authorLoading : (loading || !followLoaded)) ? (
           <div className="flex items-center justify-center py-8">
             <Loader2 size={18} className="animate-spin text-[hsl(var(--muted-foreground))]" />
           </div>
         ) : filtered.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-8 text-[hsl(var(--muted-foreground))]">
-            <p className="text-xs">{search ? 'No sets found' : 'No emoji sets discovered'}</p>
-            <p className="text-xs mt-1 opacity-60">Try again later as more users publish emoji sets.</p>
+          <div className="flex flex-col items-center justify-center py-8 text-center text-[hsl(var(--muted-foreground))]">
+            {isAuthorMode ? (
+              <>
+                <p className="text-xs">{authorError || (search ? 'No sets found' : 'Paste an npub to see their emoji sets')}</p>
+                <p className="text-xs mt-1 opacity-60">Only this person’s packs are shown.</p>
+              </>
+            ) : followedPubkeys.size === 0 ? (
+              <>
+                <p className="text-xs">You’re not following anyone yet</p>
+                <p className="text-xs mt-1 opacity-60">Packs from people you follow show up here — or tap the person icon to look someone up by npub.</p>
+              </>
+            ) : (
+              <>
+                <p className="text-xs">{search ? 'No sets found' : 'No emoji sets from people you follow'}</p>
+                <p className="text-xs mt-1 opacity-60">Tap the person icon to look someone up by npub.</p>
+              </>
+            )}
           </div>
         ) : (
           <>
@@ -1187,6 +1223,7 @@ export function EmojiDiscoveryModal({ onClose, initialSearch = '', initialAuthor
   const [publishingAddr, setPublishingAddr] = useState<string | null>(null)
   const [profilePubkey, setProfilePubkey] = useState<string | null>(null)
   const blockedPubkeys = useBlockStore((s) => s.blockedPubkeys)
+  const followedPubkeys = useFollowStore((s) => s.followedPubkeys)
   const [visibleCount, setVisibleCount] = useState(10)
   const modalSentinelRef = useRef<HTMLDivElement>(null)
   const modalScrollRef = useRef<HTMLDivElement>(null)
@@ -1209,7 +1246,9 @@ export function EmojiDiscoveryModal({ onClose, initialSearch = '', initialAuthor
       } catch { /* ignore invalid npub */ }
     }
 
-    const discoverPromise = discoverEmojiSets(100)
+    // Generic browse is scoped to people you follow; the targeted author fetch (from "Find this set"
+    // or an npub) surfaces that specific person's packs regardless of whether you follow them.
+    const discoverPromise = discoverEmojiSets(100, Array.from(followedPubkeys))
     const authorPromise = authorPubkey ? fetchEmojiSetsByAuthor(authorPubkey).catch(() => [] as EmojiSet[]) : Promise.resolve([] as EmojiSet[])
 
     Promise.all([discoverPromise, authorPromise]).then(async ([discovered, authorSets]) => {
@@ -1231,7 +1270,7 @@ export function EmojiDiscoveryModal({ onClose, initialSearch = '', initialAuthor
     }).catch((err) => {
       console.error('Failed to discover emoji sets:', err)
     }).finally(() => setLoading(false))
-  }, [myPubkey, initialAuthor])
+  }, [myPubkey, initialAuthor, followedPubkeys])
 
   const filtered = useMemo(() => {
     let result = sets.filter((s) => !blockedPubkeys.has(s.pubkey))

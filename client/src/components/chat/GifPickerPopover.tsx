@@ -28,8 +28,7 @@ import {
   publishGifSubscriptions,
   publishGifFavorites,
   discoverGifCollections,
-  searchGifCollections,
-  searchGifCollectionsByDTag,
+  fetchGifCollectionsByAuthor,
   fetchGifCollectionByAddress,
   deleteGifCollection,
 } from '@/lib/nostr/customGif'
@@ -37,10 +36,10 @@ import { uploadToBlossomServers, computeHash } from '@/lib/blossom'
 import { getUploadBlossoms } from '@/stores/postingBehaviourStore'
 import { useUserStore } from '@/stores/userStore'
 import { useBlockStore } from '@/stores/blockStore'
-
+import { useFollowStore } from '@/stores/followStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { useEscToClose } from '@/hooks/useEscToClose'
-import { truncateNpub } from '@/lib/utils'
+import { truncateNpub, resolvePubkeyInput } from '@/lib/utils'
 import { UserProfileModal } from '@/components/hub/UserProfileModal'
 import { nip19 } from 'nostr-tools'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
@@ -228,9 +227,10 @@ function DiscoverGifTab({ onSelect, onPickerClose }: { onSelect: (g: { name: str
   const [loading, setLoading] = useState(true)
   const [discovered, setDiscovered] = useState<GifCollection[]>([])
   const [search, setSearch] = useState('')
-  const [searchResults, setSearchResults] = useState<GifCollection[]>([])
-  const [searching, setSearching] = useState(false)
-  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [authorMode, setAuthorMode] = useState(false)
+  const [authorCollections, setAuthorCollections] = useState<GifCollection[]>([])
+  const [authorLoading, setAuthorLoading] = useState(false)
+  const [authorError, setAuthorError] = useState<string | null>(null)
   const [togglingFav, setTogglingFav] = useState<string | null>(null)
   const [publishingAddr, setPublishingAddr] = useState<string | null>(null)
   const [viewingCollection, setViewingCollection] = useState<GifCollection | null>(null)
@@ -240,52 +240,46 @@ function DiscoverGifTab({ onSelect, onPickerClose }: { onSelect: (g: { name: str
   useEscToClose(() => setViewingCollection(null), !!viewingCollection)
 
   const blockedPubkeys = useBlockStore((s) => s.blockedPubkeys)
+  const followedPubkeys = useFollowStore((s) => s.followedPubkeys)
+  const followLoaded = useFollowStore((s) => s.loaded)
   const { getProfile } = useProfileCache()
 
+  // Follow-scoped discovery — only collections from people the user follows.
   useEffect(() => {
     setLoading(true)
-    discoverGifCollections(100)
+    discoverGifCollections(100, Array.from(followedPubkeys))
       .then((collections) => {
         setDiscovered(collections)
       })
       .finally(() => setLoading(false))
-  }, [myPubkey])
+  }, [myPubkey, followedPubkeys])
 
-  // Debounced relay search — queries #g or #d tags when user types
+  // npub-lookup: resolve the entered npub/hex and fetch just that author's collections (debounced).
   useEffect(() => {
-    if (searchTimerRef.current) clearTimeout(searchTimerRef.current)
-    if (!search.trim()) {
-      setSearchResults([])
-      setSearching(false)
-      return
-    }
-    setSearching(true)
-    searchTimerRef.current = setTimeout(async () => {
-      try {
-        const results = searchMode === 'g'
-          ? await searchGifCollections(search.trim())
-          : await searchGifCollectionsByDTag(search.trim())
-        setSearchResults(results)
-      } catch (err) {
-        console.error('GIF relay search failed:', err)
-      } finally {
-        setSearching(false)
-      }
-    }, 400)
-    return () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current) }
-  }, [search, myPubkey, searchMode])
+    if (!authorMode) return
+    const q = search.trim()
+    if (!q) { setAuthorCollections([]); setAuthorError(null); setAuthorLoading(false); return }
+    const pubkey = resolvePubkeyInput(q)
+    if (!pubkey) { setAuthorCollections([]); setAuthorError('Enter a valid npub'); setAuthorLoading(false); return }
+    setAuthorLoading(true); setAuthorError(null)
+    const t = setTimeout(() => {
+      fetchGifCollectionsByAuthor(pubkey).then((collections) => {
+        setAuthorCollections(collections)
+        if (collections.length === 0) setAuthorError('No GIFs from this user')
+      }).catch(() => setAuthorError('Failed to load this user’s GIFs')).finally(() => setAuthorLoading(false))
+    }, 350)
+    return () => clearTimeout(t)
+  }, [search, authorMode])
 
-  // Flatten all GIFs from discovered + relay search results
+  // Base collections for the current source (people you follow, or one looked-up npub).
+  const baseCollections = authorMode ? authorCollections : discovered
+  // Text box filters within your follows' collections; in author mode it holds the npub, so no name filter.
+  const nameQuery = !authorMode ? search.trim().toLowerCase() : ''
+
+  // Flatten all GIFs (g-mode)
   const allGifs = useMemo(() => {
-    // Merge discovered collections with relay search results (deduplicate)
-    const merged = [...discovered]
-    for (const sr of searchResults) {
-      if (!merged.some((c) => c.pubkey === sr.pubkey && c.dTag === sr.dTag)) {
-        merged.push(sr)
-      }
-    }
     const result: { gif: GifEntry; collection: GifCollection; addr: string }[] = []
-    for (const c of merged) {
+    for (const c of baseCollections) {
       if (blockedPubkeys.has(c.pubkey)) continue
       const addr = `30032:${c.pubkey}:${c.dTag}`
       for (const g of c.gifs) {
@@ -294,31 +288,23 @@ function DiscoverGifTab({ onSelect, onPickerClose }: { onSelect: (g: { name: str
       }
     }
     return result
-  }, [discovered, searchResults, nsfwEnabled, blockedPubkeys])
+  }, [baseCollections, nsfwEnabled, blockedPubkeys])
 
   const filtered = useMemo(() => {
-    if (!search) return allGifs
-    const q = search.toLowerCase()
-    return allGifs.filter((item) => item.gif.name.toLowerCase().includes(q))
-  }, [allGifs, search])
+    if (!nameQuery) return allGifs
+    return allGifs.filter((item) => item.gif.name.toLowerCase().includes(nameQuery))
+  }, [allGifs, nameQuery])
 
   // For d-mode: collections view
   const filteredCollections = useMemo(() => {
     if (searchMode !== 'd') return []
-    const merged = [...discovered].filter((c) => !blockedPubkeys.has(c.pubkey))
-    for (const sr of searchResults) {
-      if (blockedPubkeys.has(sr.pubkey)) continue
-      if (!merged.some((c) => c.pubkey === sr.pubkey && c.dTag === sr.dTag)) {
-        merged.push(sr)
-      }
-    }
-    if (!search) return merged
-    const q = search.toLowerCase()
+    const merged = baseCollections.filter((c) => !blockedPubkeys.has(c.pubkey))
+    if (!nameQuery) return merged
     return merged.filter((c) =>
-      c.name.toLowerCase().includes(q) ||
-      c.dTag.toLowerCase().includes(q)
+      c.name.toLowerCase().includes(nameQuery) ||
+      c.dTag.toLowerCase().includes(nameQuery)
     )
-  }, [discovered, searchResults, search, searchMode, blockedPubkeys])
+  }, [baseCollections, nameQuery, searchMode, blockedPubkeys])
 
   const isFavorited = useCallback((url: string) => favorites.some((f) => f.url === url), [favorites])
 
@@ -364,8 +350,8 @@ function DiscoverGifTab({ onSelect, onPickerClose }: { onSelect: (g: { name: str
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder={searchMode === 'g' ? 'Search GIFs...' : 'Search sets...'}
-              className="w-full h-9 pl-8 pr-2 rounded-md text-sm bg-muted/30 border border-border text-foreground placeholder:text-muted-foreground focus:outline-none"
+              placeholder={authorMode ? 'Paste an npub…' : (searchMode === 'g' ? 'Search GIFs from people you follow…' : 'Search sets from people you follow…')}
+              className={`w-full h-9 pl-8 pr-2 rounded-md text-sm bg-muted/30 border border-border text-foreground placeholder:text-muted-foreground focus:outline-none ${authorMode ? 'font-mono' : ''}`}
               autoFocus
             />
           </div>
@@ -373,7 +359,23 @@ function DiscoverGifTab({ onSelect, onPickerClose }: { onSelect: (g: { name: str
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
-                  onClick={() => { setSearchMode(searchMode === 'g' ? 'd' : 'g'); setSearchResults([]) }}
+                  onClick={() => { setAuthorMode((v) => !v); setSearch('') }}
+                  className={`p-2 rounded-md transition-colors cursor-pointer ${authorMode
+                      ? 'bg-primary/15 text-primary'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+                    }`}
+                >
+                  <Users size={14} />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="text-xs z-[310]">
+                {authorMode ? 'Back to people you follow' : 'Look up a specific npub'}
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={() => setSearchMode(searchMode === 'g' ? 'd' : 'g')}
                   className={`px-1.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer ${searchMode === 'd'
                       ? 'bg-primary/15 text-primary'
                       : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
@@ -383,7 +385,7 @@ function DiscoverGifTab({ onSelect, onPickerClose }: { onSelect: (g: { name: str
                 </button>
               </TooltipTrigger>
               <TooltipContent side="bottom" className="text-xs z-[310]">
-                {searchMode === 'g' ? 'Switch to set search' : 'Switch to GIF search'}
+                {searchMode === 'g' ? 'View as sets' : 'View as GIFs'}
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
@@ -391,14 +393,7 @@ function DiscoverGifTab({ onSelect, onPickerClose }: { onSelect: (g: { name: str
 
         <div className="flex-1 overflow-y-auto p-3 space-y-2">
 
-          {searching && (
-            <div className="flex items-center gap-1.5 px-1 text-xs text-muted-foreground">
-              <Loader2 size={10} className="animate-spin" />
-              Searching relays...
-            </div>
-          )}
-
-          {loading ? (
+          {(authorMode ? authorLoading : (loading || !followLoaded)) ? (
             <div className="flex items-center justify-center py-8">
               <Loader2 size={20} className="animate-spin text-muted-foreground" />
             </div>
@@ -407,8 +402,22 @@ function DiscoverGifTab({ onSelect, onPickerClose }: { onSelect: (g: { name: str
             filtered.length === 0 ? (
               <div className="text-center py-6 text-xs text-muted-foreground">
                 <ImagePlay size={24} className="mx-auto mb-2 opacity-40" />
-                <p>{search ? 'No GIFs found' : 'No GIFs discovered yet'}</p>
-                <p className="opacity-60 mt-1">Try again later as more users publish GIFs.</p>
+                {authorMode ? (
+                  <>
+                    <p>{authorError || (search ? 'No GIFs found' : 'Paste an npub to see their GIFs')}</p>
+                    <p className="opacity-60 mt-1">Only this person’s GIFs are shown.</p>
+                  </>
+                ) : followedPubkeys.size === 0 ? (
+                  <>
+                    <p>You’re not following anyone yet</p>
+                    <p className="opacity-60 mt-1">GIFs from people you follow show up here — or tap the person icon to look someone up by npub.</p>
+                  </>
+                ) : (
+                  <>
+                    <p>{search ? 'No GIFs found' : 'No GIFs from people you follow'}</p>
+                    <p className="opacity-60 mt-1">Tap the person icon to look someone up by npub.</p>
+                  </>
+                )}
               </div>
             ) : (
               <div className="space-y-2">
@@ -471,8 +480,22 @@ function DiscoverGifTab({ onSelect, onPickerClose }: { onSelect: (g: { name: str
             filteredCollections.length === 0 ? (
               <div className="text-center py-6 text-xs text-muted-foreground">
                 <ImagePlay size={24} className="mx-auto mb-2 opacity-40" />
-                <p>{search ? 'No sets found' : 'No sets discovered yet'}</p>
-                <p className="opacity-60 mt-1">Try again later as more users publish GIFs.</p>
+                {authorMode ? (
+                  <>
+                    <p>{authorError || (search ? 'No sets found' : 'Paste an npub to see their sets')}</p>
+                    <p className="opacity-60 mt-1">Only this person’s sets are shown.</p>
+                  </>
+                ) : followedPubkeys.size === 0 ? (
+                  <>
+                    <p>You’re not following anyone yet</p>
+                    <p className="opacity-60 mt-1">Sets from people you follow show up here — or tap the person icon to look someone up by npub.</p>
+                  </>
+                ) : (
+                  <>
+                    <p>{search ? 'No sets found' : 'No sets from people you follow'}</p>
+                    <p className="opacity-60 mt-1">Tap the person icon to look someone up by npub.</p>
+                  </>
+                )}
               </div>
             ) : (
               <div className="space-y-2">
@@ -1533,54 +1556,24 @@ export function GifDiscoveryModal({ onClose, initialSearch = '' }: { onClose: ()
   const [loading, setLoading] = useState(true)
   const [discovered, setDiscovered] = useState<GifCollection[]>([])
   const [search, setSearch] = useState(initialSearch)
-  const [searchResults, setSearchResults] = useState<GifCollection[]>([])
-  const [searching, setSearching] = useState(false)
-  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [authorFilter, setAuthorFilter] = useState('')
   const [publishingAddr, setPublishingAddr] = useState<string | null>(null)
 
   const blockedPubkeys = useBlockStore((s) => s.blockedPubkeys)
+  const followedPubkeys = useFollowStore((s) => s.followedPubkeys)
 
+  // Follow-scoped discovery — only collections from people the user follows.
   useEffect(() => {
     setLoading(true)
-    discoverGifCollections(100)
+    discoverGifCollections(100, Array.from(followedPubkeys))
       .then((collections) => {
         setDiscovered(collections)
       })
       .finally(() => setLoading(false))
-  }, [myPubkey])
-
-  // Debounced relay search — queries #g tags when user types
-  useEffect(() => {
-    if (searchTimerRef.current) clearTimeout(searchTimerRef.current)
-    if (!search.trim()) {
-      setSearchResults([])
-      setSearching(false)
-      return
-    }
-    setSearching(true)
-    searchTimerRef.current = setTimeout(async () => {
-      try {
-        const results = await searchGifCollections(search.trim())
-        setSearchResults(results)
-      } catch (err) {
-        console.error('GIF relay search failed:', err)
-      } finally {
-        setSearching(false)
-      }
-    }, 400)
-    return () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current) }
-  }, [search, myPubkey])
+  }, [myPubkey, followedPubkeys])
 
   const filtered = useMemo(() => {
-    // Merge discovered + relay search results (deduplicate)
-    const merged = [...discovered]
-    for (const sr of searchResults) {
-      if (!merged.some((c) => c.pubkey === sr.pubkey && c.dTag === sr.dTag)) {
-        merged.push(sr)
-      }
-    }
-    let result = merged.filter((c) => !blockedPubkeys.has(c.pubkey))
+    let result = discovered.filter((c) => !blockedPubkeys.has(c.pubkey))
     if (search) {
       const q = search.toLowerCase()
       result = result.filter((c) =>
@@ -1599,7 +1592,7 @@ export function GifDiscoveryModal({ onClose, initialSearch = '' }: { onClose: ()
       })
     }
     return result
-  }, [discovered, searchResults, search, authorFilter, getProfile])
+  }, [discovered, search, authorFilter, getProfile, blockedPubkeys])
 
   const handleSubscribe = async (collection: GifCollection) => {
     const addr = `30032:${collection.pubkey}:${collection.dTag}`

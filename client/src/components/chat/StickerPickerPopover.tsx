@@ -11,15 +11,16 @@ import { createPortal } from 'react-dom'
 import { Sparkles, Users, Plus, Trash2, Loader2, Upload, Search, X, FolderPlus, Image, AlertTriangle, Check, Compass, ShieldQuestion } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useStickerStore, getStickerUploadLimitBytes, hasOversizedSticker, isStickerSizeOk, type CustomSticker, type StickerSet } from '@/stores/stickerStore'
-import { publishStickerSet, publishStickerSubscriptions, discoverStickerSets, fetchStickerSetByAddress, deleteStickerSet } from '@/lib/nostr/customSticker'
+import { publishStickerSet, publishStickerSubscriptions, discoverStickerSets, fetchStickerSetByAddress, fetchStickerSetsByAuthor, deleteStickerSet } from '@/lib/nostr/customSticker'
 import { uploadToBlossomServers, computeHash } from '@/lib/blossom'
 import { getUploadBlossoms } from '@/stores/postingBehaviourStore'
 import { useUserStore } from '@/stores/userStore'
 import { useBlockStore } from '@/stores/blockStore'
+import { useFollowStore } from '@/stores/followStore'
 import { UserProfileModal } from '@/components/hub/UserProfileModal'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { useEscToClose } from '@/hooks/useEscToClose'
-import { truncateNpub } from '@/lib/utils'
+import { truncateNpub, resolvePubkeyInput } from '@/lib/utils'
 import { nip19 } from 'nostr-tools'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 
@@ -783,19 +784,26 @@ function DiscoverStickerTab({ onPickerClose }: { onPickerClose?: () => void }) {
   const myPubkey = useUserStore((s) => s.pubkey)
   const { getProfile } = useProfileCache()
   const blockedPubkeys = useBlockStore((s) => s.blockedPubkeys)
+  const followedPubkeys = useFollowStore((s) => s.followedPubkeys)
+  const followLoaded = useFollowStore((s) => s.loaded)
 
   const [loading, setLoading] = useState(true)
   const [discovered, setDiscovered] = useState<StickerSet[]>([])
   const [search, setSearch] = useState('')
+  // 'name' = packs from people you follow (searchable by name); 'author' = look up one person by npub.
   const [searchMode, setSearchMode] = useState<'name' | 'author'>('name')
+  const [authorSets, setAuthorSets] = useState<StickerSet[]>([])
+  const [authorLoading, setAuthorLoading] = useState(false)
+  const [authorError, setAuthorError] = useState<string | null>(null)
   const [publishingAddr, setPublishingAddr] = useState<string | null>(null)
   const [visibleCount, setVisibleCount] = useState(10)
   const sentinelRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
 
+  // Follow-scoped discovery — only packs from people the user follows.
   useEffect(() => {
     setLoading(true)
-    discoverStickerSets(100)
+    discoverStickerSets(100, Array.from(followedPubkeys))
       .then(async (sets) => {
         const okSets: StickerSet[] = []
         for (const s of sets) {
@@ -805,15 +813,35 @@ function DiscoverStickerTab({ onPickerClose }: { onPickerClose?: () => void }) {
         setDiscovered(okSets)
       })
       .finally(() => setLoading(false))
-  }, [myPubkey])
+  }, [myPubkey, followedPubkeys])
+
+  // npub-lookup: resolve the entered npub/hex and fetch just that author's packs (debounced).
+  useEffect(() => {
+    if (searchMode !== 'author') return
+    const q = search.trim()
+    if (!q) { setAuthorSets([]); setAuthorError(null); setAuthorLoading(false); return }
+    const pubkey = resolvePubkeyInput(q)
+    if (!pubkey) { setAuthorSets([]); setAuthorError('Enter a valid npub'); setAuthorLoading(false); return }
+    setAuthorLoading(true); setAuthorError(null)
+    const t = setTimeout(() => {
+      fetchStickerSetsByAuthor(pubkey).then(async (sets) => {
+        const okSets: StickerSet[] = []
+        for (const s of sets) { if (!(await hasOversizedSticker(s.stickers))) okSets.push(s) }
+        setAuthorSets(okSets)
+        if (okSets.length === 0) setAuthorError('No sticker sets from this user')
+      }).catch(() => setAuthorError('Failed to load this user’s sets')).finally(() => setAuthorLoading(false))
+    }, 350)
+    return () => clearTimeout(t)
+  }, [search, searchMode])
 
   // Reset visible count when filters change
   useEffect(() => {
     setVisibleCount(10)
   }, [search, searchMode])
 
+  const isAuthorMode = searchMode === 'author'
   const filtered = useMemo(() => {
-    let result = discovered.filter((s) => !blockedPubkeys.has(s.pubkey))
+    let result = (isAuthorMode ? authorSets : discovered).filter((s) => !blockedPubkeys.has(s.pubkey))
 
     // Apply NSFW filtering to stickers within each set
     result = result.map((s) => ({
@@ -821,23 +849,14 @@ function DiscoverStickerTab({ onPickerClose }: { onPickerClose?: () => void }) {
       stickers: filterNsfwStickers(s.stickers),
     })).filter((s) => s.stickers.length > 0)
 
-    if (search.trim()) {
+    if (!isAuthorMode && search.trim()) {
       const q = search.trim().toLowerCase()
-      if (searchMode === 'author') {
-        result = result.filter((s) => {
-          const npub = nip19.npubEncode(s.pubkey)
-          const profile = getProfile(s.pubkey)
-          const name = profile?.display_name || profile?.name || ''
-          return npub.includes(q) || name.toLowerCase().includes(q) || s.pubkey.includes(q)
-        })
-      } else {
-        result = result.filter((s) =>
-          s.name.toLowerCase().includes(q) || s.dTag.toLowerCase().includes(q)
-        )
-      }
+      result = result.filter((s) =>
+        s.name.toLowerCase().includes(q) || s.dTag.toLowerCase().includes(q)
+      )
     }
     return result
-  }, [discovered, search, searchMode, getProfile, blockedPubkeys, nsfwEnabled, untaggedAsNsfw])
+  }, [discovered, authorSets, isAuthorMode, search, blockedPubkeys, nsfwEnabled, untaggedAsNsfw])
 
   const visibleSets = useMemo(() => filtered.slice(0, visibleCount), [filtered, visibleCount])
   const hasMore = visibleCount < filtered.length
@@ -884,16 +903,16 @@ function DiscoverStickerTab({ onPickerClose }: { onPickerClose?: () => void }) {
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder={searchMode === 'author' ? 'Search by author...' : 'Search sets...'}
-            className="w-full h-9 pl-8 pr-2 rounded-md text-sm bg-muted/30 border border-border text-foreground placeholder:text-muted-foreground focus:outline-none"
+            placeholder={isAuthorMode ? 'Paste an npub…' : 'Search sets from people you follow…'}
+            className={`w-full h-9 pl-8 pr-2 rounded-md text-sm bg-muted/30 border border-border text-foreground placeholder:text-muted-foreground focus:outline-none ${isAuthorMode ? 'font-mono' : ''}`}
           />
         </div>
         <TooltipProvider delayDuration={300}>
           <Tooltip>
             <TooltipTrigger asChild>
               <button
-                onClick={() => { setSearchMode(searchMode === 'name' ? 'author' : 'name'); setSearch('') }}
-                className={`p-2 rounded-md transition-colors cursor-pointer ${searchMode === 'author'
+                onClick={() => { setSearchMode(isAuthorMode ? 'name' : 'author'); setSearch('') }}
+                className={`p-2 rounded-md transition-colors cursor-pointer ${isAuthorMode
                   ? 'bg-primary/15 text-primary'
                   : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
                 }`}
@@ -902,7 +921,7 @@ function DiscoverStickerTab({ onPickerClose }: { onPickerClose?: () => void }) {
               </button>
             </TooltipTrigger>
             <TooltipContent side="bottom" className="text-xs z-[310]">
-              {searchMode === 'author' ? 'Switch to name search' : 'Search by author'}
+              {isAuthorMode ? 'Back to people you follow' : 'Look up a specific npub'}
             </TooltipContent>
           </Tooltip>
         </TooltipProvider>
@@ -910,14 +929,28 @@ function DiscoverStickerTab({ onPickerClose }: { onPickerClose?: () => void }) {
 
       {/* Content */}
       <div ref={scrollContainerRef} className="flex-1 overflow-y-auto p-2 space-y-2">
-        {loading ? (
+        {(isAuthorMode ? authorLoading : (loading || !followLoaded)) ? (
           <div className="flex items-center justify-center py-8">
             <Loader2 size={18} className="animate-spin text-muted-foreground" />
           </div>
         ) : filtered.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
-            <p className="text-xs">{search ? 'No sets found' : 'No sticker sets discovered'}</p>
-            <p className="text-xs mt-1 opacity-60">Try again later as more users publish sticker sets.</p>
+          <div className="flex flex-col items-center justify-center py-8 text-center text-muted-foreground">
+            {isAuthorMode ? (
+              <>
+                <p className="text-xs">{authorError || (search ? 'No sets found' : 'Paste an npub to see their sticker sets')}</p>
+                <p className="text-xs mt-1 opacity-60">Only this person’s packs are shown.</p>
+              </>
+            ) : followedPubkeys.size === 0 ? (
+              <>
+                <p className="text-xs">You’re not following anyone yet</p>
+                <p className="text-xs mt-1 opacity-60">Packs from people you follow show up here — or tap the person icon to look someone up by npub.</p>
+              </>
+            ) : (
+              <>
+                <p className="text-xs">{search ? 'No sets found' : 'No sticker sets from people you follow'}</p>
+                <p className="text-xs mt-1 opacity-60">Tap the person icon to look someone up by npub.</p>
+              </>
+            )}
           </div>
         ) : (
           <>
@@ -998,6 +1031,7 @@ export function StickerDiscoveryModal({ onClose, initialSearch = '', initialAuth
   const myPubkey = useUserStore((s) => s.pubkey)
   const { getProfile } = useProfileCache()
   const blockedPubkeys = useBlockStore((s) => s.blockedPubkeys)
+  const followedPubkeys = useFollowStore((s) => s.followedPubkeys)
 
   const [loading, setLoading] = useState(true)
   const [discovered, setDiscovered] = useState<StickerSet[]>([])
@@ -1008,17 +1042,26 @@ export function StickerDiscoveryModal({ onClose, initialSearch = '', initialAuth
 
   useEffect(() => {
     setLoading(true)
-    discoverStickerSets(50)
-      .then(async (sets) => {
+    // Generic browse is scoped to people you follow; a targeted author fetch (from "Find this set")
+    // surfaces that specific person's packs regardless of whether you follow them.
+    const authorPubkey = initialAuthor ? resolvePubkeyInput(initialAuthor) : null
+    const discoverPromise = discoverStickerSets(50, Array.from(followedPubkeys))
+    const authorPromise = authorPubkey ? fetchStickerSetsByAuthor(authorPubkey).catch(() => [] as StickerSet[]) : Promise.resolve([] as StickerSet[])
+    Promise.all([discoverPromise, authorPromise])
+      .then(async ([sets, authorSets]) => {
+        const seen = new Set<string>()
         const okSets: StickerSet[] = []
-        for (const s of sets) {
+        for (const s of [...authorSets, ...sets]) {
+          const key = `${s.pubkey}:${s.dTag}`
+          if (seen.has(key)) continue
+          seen.add(key)
           const oversized = await hasOversizedSticker(s.stickers)
           if (!oversized) okSets.push(s)
         }
         setDiscovered(okSets)
       })
       .finally(() => setLoading(false))
-  }, [myPubkey])
+  }, [myPubkey, initialAuthor, followedPubkeys])
 
   const filtered = useMemo(() => {
     let result = discovered.filter((s) => !blockedPubkeys.has(s.pubkey))

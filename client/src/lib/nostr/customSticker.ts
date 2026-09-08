@@ -18,6 +18,7 @@ import type { Event } from 'nostr-tools'
 import { aesEncrypt, aesDecrypt } from '@/lib/crypto/aes'
 import { publishPersonal, getPublishRelays } from '@/stores/postingBehaviourStore'
 import { useUserListsStore } from '@/stores/userListsStore'
+import { chunkArray } from '@/lib/utils'
 
 const KIND_STICKER_SET = 30031
 const KIND_LIST = 30000
@@ -141,20 +142,27 @@ export async function fetchStickerSetByAddress(address: string): Promise<Sticker
   return parseStickerSetEventBroad(event)
 }
 
-export async function discoverStickerSets(limit = 50): Promise<StickerSet[]> {
-  const filter: Record<string, any> = {
-    kinds: [KIND_STICKER_SET],
-    limit,
-  }
+/** Discover sticker sets (kind 30031). `authors` scopes to specific pubkeys (e.g. the follow list) so
+ *  we never surface arbitrary/unmoderated packs; an EMPTY array returns nothing; omitting it is the
+ *  legacy open query. */
+export async function discoverStickerSets(limit = 50, authors?: string[]): Promise<StickerSet[]> {
+  if (authors && authors.length === 0) return []
 
   // Query both client relays and user NIP-65 relays in parallel
   const userRelays = useUserListsStore.getState().userRelays
   const clientRelays = getRelays()
   const extraRelays = userRelays.filter((r) => !clientRelays.includes(r))
 
-  const fetches: Promise<Event[]>[] = [fetchEvents(filter)]
-  if (extraRelays.length > 0) {
-    fetches.push(fetchEventsFromRelays(extraRelays, filter).catch(() => []))
+  // Chunk authors so the relay filter never gets too large (big follow lists).
+  const authorBatches = authors ? chunkArray(authors, 500) : [null]
+  const fetches: Promise<Event[]>[] = []
+  for (const batch of authorBatches) {
+    const filter: Record<string, any> = { kinds: [KIND_STICKER_SET], limit }
+    if (batch) filter.authors = batch
+    fetches.push(fetchEvents(filter))
+    if (extraRelays.length > 0) {
+      fetches.push(fetchEventsFromRelays(extraRelays, filter).catch(() => []))
+    }
   }
 
   const results = await Promise.all(fetches)

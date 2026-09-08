@@ -21,6 +21,7 @@ import type { GifCollection, GifEntry } from '@/stores/gifStore'
 import type { Event } from 'nostr-tools'
 import { aesEncrypt, aesDecrypt } from '@/lib/crypto/aes'
 import { publishPersonal, getPublishRelays } from '@/stores/postingBehaviourStore'
+import { chunkArray } from '@/lib/utils'
 
 const KIND_GIF_SET = 30032
 const KIND_LIST = 30000
@@ -126,12 +127,20 @@ export async function fetchGifCollectionByAddress(address: string): Promise<GifC
   return parseGifCollectionEvent(event)
 }
 
-/** Discover GIF collections from the network */
-export async function discoverGifCollections(limit = 50): Promise<GifCollection[]> {
-  const events = await fetchEvents({
-    kinds: [KIND_GIF_SET],
-    limit,
+/** Discover GIF collections from the network. `authors` scopes to specific pubkeys (e.g. the follow
+ *  list) so we never surface arbitrary/unmoderated packs; an EMPTY array returns nothing; omitting it
+ *  is the legacy open query. */
+export async function discoverGifCollections(limit = 50, authors?: string[]): Promise<GifCollection[]> {
+  if (authors && authors.length === 0) return []
+
+  // Chunk authors so the relay filter never gets too large (big follow lists).
+  const authorBatches = authors ? chunkArray(authors, 500) : [null]
+  const fetches = authorBatches.map((batch) => {
+    const filter: Record<string, any> = { kinds: [KIND_GIF_SET], limit }
+    if (batch) filter.authors = batch
+    return fetchEvents(filter)
   })
+  const events = (await Promise.all(fetches)).flat()
 
   const collections: GifCollection[] = []
   const seen = new Map<string, Event>()
@@ -150,6 +159,31 @@ export async function discoverGifCollections(limit = 50): Promise<GifCollection[
     if (parsed && parsed.gifs.length > 0) collections.push(parsed)
   }
 
+  return collections
+}
+
+/** Fetch all GIF collections by a specific author (for the npub-lookup path in the Discover tab). */
+export async function fetchGifCollectionsByAuthor(pubkey: string): Promise<GifCollection[]> {
+  const events = await fetchEvents({
+    kinds: [KIND_GIF_SET],
+    authors: [pubkey],
+  })
+
+  const seen = new Map<string, Event>()
+  for (const ev of events) {
+    const dTag = ev.tags.find((t) => t[0] === 'd')?.[1]
+    if (!dTag) continue
+    const existing = seen.get(dTag)
+    if (!existing || ev.created_at > existing.created_at) {
+      seen.set(dTag, ev)
+    }
+  }
+
+  const collections: GifCollection[] = []
+  for (const ev of seen.values()) {
+    const parsed = parseGifCollectionEvent(ev)
+    if (parsed && parsed.gifs.length > 0) collections.push(parsed)
+  }
   return collections
 }
 

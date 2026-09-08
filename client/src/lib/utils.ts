@@ -10,6 +10,28 @@ export function isTauri(): boolean {
   return '__TAURI__' in window
 }
 
+/** Resolve a user-typed npub or 64-char hex pubkey to a hex pubkey, or null if it isn't valid. */
+export function resolvePubkeyInput(input: string): string | null {
+  const q = input.trim()
+  if (!q) return null
+  try {
+    if (q.startsWith('npub1')) {
+      const decoded = nip19.decode(q)
+      if (decoded.type === 'npub') return decoded.data as string
+    }
+  } catch { /* fall through */ }
+  if (/^[0-9a-fA-F]{64}$/.test(q)) return q.toLowerCase()
+  return null
+}
+
+/** Split an array into chunks of at most `size` (used to keep relay filters from getting too large). */
+export function chunkArray<T>(arr: T[], size: number): T[][] {
+  if (size <= 0) return [arr]
+  const out: T[][] = []
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size))
+  return out
+}
+
 /**
  * Open an external URL in the system browser. In Tauri, `window.open`/`target=_blank`
  * don't reach the OS browser from the webview, so use the opener plugin (the same
