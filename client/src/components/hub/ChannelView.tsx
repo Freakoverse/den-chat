@@ -3506,9 +3506,9 @@ export function ChatMessageRow({
   const [zapModalOpen, setZapModalOpen] = useState(false)
   const popoverOpen = showEmoji || showMenu || zapModalOpen
 
-  // Click-outside to dismiss when a popover is open
+  // Click-outside to dismiss when a popover is open, OR (mobile) when the action bar is tap-revealed.
   useEffect(() => {
-    if (!popoverOpen) return
+    if (!popoverOpen && !(isMobile && showActions)) return
     const handler = (e: MouseEvent) => {
       // Never dismiss while zap modal is open (it's portaled outside the row)
       if (zapModalOpen) return
@@ -3523,12 +3523,22 @@ export function ChatMessageRow({
     }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
-  }, [popoverOpen, zapModalOpen])
+  }, [popoverOpen, zapModalOpen, isMobile, showActions])
 
   const handleMouseLeave = () => {
+    // On mobile the action bar is tap-revealed (see handleRowTap), not hover-driven — leave it be.
+    if (isMobile) return
     // Don't dismiss if a popover is pinned open
     if (popoverOpen) return
     setShowActions(false)
+  }
+
+  // Mobile: tap the message body to toggle the action bar (there's no hover). Ignore taps that land on
+  // an interactive child (links, media, reactions, the action buttons themselves) so those still work.
+  const handleRowTap = (e: React.MouseEvent) => {
+    if (!isMobile || isEditing) return
+    if ((e.target as HTMLElement).closest('a, button, [role="button"], img, video, input, textarea, [data-no-row-toggle]')) return
+    setShowActions(v => !v)
   }
 
   const profile = getProfile(authorKey)
@@ -3586,8 +3596,9 @@ export function ChatMessageRow({
       <div
         ref={rowRef}
         className={`flex gap-3 py-0.5 px-2 rounded-md -mx-2 mt-0.5 group hover:bg-accent/30 relative transition-colors duration-100 ${highlighted ? 'bg-primary/10' : ''} ${isHidden && canHide ? 'border border-amber-500/30 bg-amber-500/5' : ''} ${isMentioned && !highlighted ? 'bg-amber-500/[0.08]' : ''}`}
-        onMouseEnter={() => setShowActions(true)}
+        onMouseEnter={() => { if (!isMobile) setShowActions(true) }}
         onMouseLeave={handleMouseLeave}
+        onClick={handleRowTap}
       >
         {/* Time-on-hover in the left avatar slot — DESKTOP only. On mobile the left gutter is dropped so the
             body runs full-width, and the timestamp trails the message text instead (see the suffix below). */}
@@ -3848,8 +3859,9 @@ export function ChatMessageRow({
       )}
       <div
         className={`flex items-start ${isMobile ? 'gap-0' : 'gap-4'} py-1 px-2 rounded-md -mx-2 group hover:bg-accent/30 relative transition-colors duration-100 ${highlighted ? 'bg-primary/10' : ''} ${isHidden && canHide ? 'border border-amber-500/30 bg-amber-500/5' : ''} ${isMentioned && !highlighted ? 'bg-amber-500/[0.08]' : ''}`}
-        onMouseEnter={() => setShowActions(true)}
+        onMouseEnter={() => { if (!isMobile) setShowActions(true) }}
         onMouseLeave={handleMouseLeave}
+        onClick={handleRowTap}
       >
         {/* Desktop: avatar sits in a left gutter spanning the whole message. On mobile the gutter is
             dropped (gap-0, no left avatar) so the message body below runs full-width; a compact avatar is

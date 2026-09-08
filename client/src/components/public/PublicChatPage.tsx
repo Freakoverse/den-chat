@@ -1251,6 +1251,28 @@ function PublicMessageRow({ msg, showDateSep, isGrouped, onReply, onRequestDelet
   const showNsfwPref = typeof window !== 'undefined' && localStorage.getItem('SHOW_NSFW') === 'true'
   const shouldBlurMsg = msg.nsfw && !showNsfwPref && !nsfwRevealed
 
+  // Mobile: no hover, so tap the message body to reveal the action bar (see PublicMessageActions'
+  // `revealed` prop). Taps on interactive children still work; tap outside to dismiss.
+  const isMobile = useMobile()
+  const rowRef = useRef<HTMLDivElement>(null)
+  const [actionsTapped, setActionsTapped] = useState(false)
+  const handleRowTap = (e: React.MouseEvent) => {
+    if (!isMobile) return
+    if ((e.target as HTMLElement).closest('a, button, [role="button"], img, video, input, textarea, [data-no-row-toggle]')) return
+    setActionsTapped(v => !v)
+  }
+  useEffect(() => {
+    if (!(isMobile && actionsTapped)) return
+    const handler = (e: MouseEvent) => {
+      const t = e.target as HTMLElement
+      if (rowRef.current?.contains(t)) return
+      if (t.closest('.EmojiPickerReact') || t.closest('[class*="epr"]') || t.closest('[data-emoji-picker]') || t.closest('[data-emoji-picker-portal]')) return
+      setActionsTapped(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [isMobile, actionsTapped])
+
   // Content filters (must be above reaction aggregation since it uses showCustomEmojis)
   const showMedia = usePublicChatStore((s) => s.showMedia)
   const showLinkPreviews = usePublicChatStore((s) => s.showLinkPreviews)
@@ -1354,7 +1376,7 @@ function PublicMessageRow({ msg, showDateSep, isGrouped, onReply, onRequestDelet
         </div>
       )}
 
-      <div className={`group relative flex gap-3 px-2 hover:bg-accent/30 rounded-lg transition-all duration-300 ${isGrouped ? '' : 'py-2'} ${highlighted ? 'bg-primary/10' : ''} ${isMentioned && !highlighted ? 'bg-amber-500/[0.08]' : ''} ${isPublishing && !hasConfirmation ? 'opacity-50' : isPublishing ? 'opacity-75' : ''}`}>
+      <div ref={rowRef} onClick={handleRowTap} className={`group relative flex gap-3 px-2 hover:bg-accent/30 rounded-lg transition-all duration-300 ${isGrouped ? '' : 'py-2'} ${highlighted ? 'bg-primary/10' : ''} ${isMentioned && !highlighted ? 'bg-amber-500/[0.08]' : ''} ${isPublishing && !hasConfirmation ? 'opacity-50' : isPublishing ? 'opacity-75' : ''}`}>
         {/* Avatar or timestamp gutter */}
         {isGrouped ? (
           <div className="w-10 shrink-0 flex items-center justify-end">
@@ -1565,7 +1587,7 @@ function PublicMessageRow({ msg, showDateSep, isGrouped, onReply, onRequestDelet
         </div>
 
         {/* Actions */}
-        <PublicMessageActions msg={msg} onReply={onReply} onRequestDelete={onRequestDelete} onAddReaction={onAddReaction} />
+        <PublicMessageActions msg={msg} onReply={onReply} onRequestDelete={onRequestDelete} onAddReaction={onAddReaction} revealed={actionsTapped} />
       </div>
     </>
   )
@@ -1663,7 +1685,7 @@ function PCZapBadge({ zaps, onOpenProfile }: { zaps?: ZapInfo[]; onOpenProfile?:
 /*  MESSAGE ACTIONS                            */
 /* ═══════════════════════════════════════════ */
 
-function PublicMessageActions({ msg, onReply, onRequestDelete, onAddReaction }: { msg: PublicChatMessage; onReply: () => void; onRequestDelete: () => void; onAddReaction?: (messageId: string, emoji: string, customUrl?: string) => void }) {
+function PublicMessageActions({ msg, onReply, onRequestDelete, onAddReaction, revealed }: { msg: PublicChatMessage; onReply: () => void; onRequestDelete: () => void; onAddReaction?: (messageId: string, emoji: string, customUrl?: string) => void; revealed?: boolean }) {
   const myPubkey = useUserStore((s) => s.pubkey)
   const isMine = msg.pubkey === myPubkey
   const [showMenu, setShowMenu] = useState(false)
@@ -1738,7 +1760,7 @@ function PublicMessageActions({ msg, onReply, onRequestDelete, onAddReaction }: 
 
   return (
     <>
-      <div className="absolute -top-1 right-2 hidden group-hover:flex items-center gap-0.5 bg-secondary border border-border rounded-md shadow-md px-0.5 py-1 z-10 animate-action-bar-in" onClick={(e) => e.stopPropagation()}>
+      <div className={`absolute -top-1 right-2 ${revealed ? 'flex' : 'hidden'} group-hover:flex items-center gap-0.5 bg-secondary border border-border rounded-md shadow-md px-0.5 py-1 z-10 animate-action-bar-in`} onClick={(e) => e.stopPropagation()}>
         <TooltipProvider delayDuration={200}>
           {/* React */}
           <Tooltip>

@@ -11,6 +11,7 @@ import { useUserStore } from '@/stores/userStore'
 import { useDM04Store, type DM04Message, type DM04Reaction } from '@/stores/dm04Store'
 import { useBlockStore } from '@/stores/blockStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
+import { useMobile } from '@/hooks/useMobile'
 import { useEscToClose } from '@/hooks/useEscToClose'
 import { UserProfileModal } from '@/components/hub/UserProfileModal'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -1135,6 +1136,7 @@ function DM04MessageRow({
   getProfile: (pk: string) => any
   myPubkey: string | null
 }) {
+  const isMobile = useMobile()
   const [showActions, setShowActions] = useState(false)
   const [showEmoji, setShowEmoji] = useState(false)
   const [showMenu, setShowMenu] = useState(false)
@@ -1142,6 +1144,26 @@ function DM04MessageRow({
   const emojiButtonRef = useRef<HTMLButtonElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const dotsRef = useRef<HTMLButtonElement>(null)
+  const rowRef = useRef<HTMLDivElement>(null)
+
+  // Mobile: tap the message body to toggle the action bar (no hover on touch). Ignore taps on
+  // interactive children (links, media, buttons) so those still work; tap outside to dismiss.
+  const handleRowTap = (e: React.MouseEvent) => {
+    if (!isMobile) return
+    if ((e.target as HTMLElement).closest('a, button, [role="button"], img, video, input, textarea, [data-no-row-toggle]')) return
+    setShowActions(v => !v)
+  }
+  useEffect(() => {
+    if (!(isMobile && showActions)) return
+    const handler = (e: MouseEvent) => {
+      const t = e.target as HTMLElement
+      if (rowRef.current?.contains(t)) return
+      if (t.closest('[data-emoji-picker]') || t.closest('.EmojiPickerReact') || t.closest('[class*="epr"]')) return
+      setShowActions(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [isMobile, showActions])
 
   const [blockedRevealed, setBlockedRevealed] = useState(false)
   const isBlockedUser = useBlockStore((s) => s.isBlocked)(msg.senderPubkey)
@@ -1436,10 +1458,12 @@ function DM04MessageRow({
   if (isGrouped) {
     return (
       <div
+        ref={rowRef}
         id={`dm04-msg-${msg.id}`}
         className={`group relative flex gap-3 py-0.5 px-2 rounded-md -mx-2 hover:bg-accent/30 transition-colors duration-100 ${highlighted ? 'bg-primary/10 ring-1 ring-primary/30' : ''}`}
-        onMouseEnter={() => setShowActions(true)}
-        onMouseLeave={() => { if (!showMenu && !showEmoji) setShowActions(false) }}
+        onMouseEnter={() => { if (!isMobile) setShowActions(true) }}
+        onMouseLeave={() => { if (isMobile || showMenu || showEmoji) return; setShowActions(false) }}
+        onClick={handleRowTap}
       >
         <div className="w-11 shrink-0 flex items-center justify-center">
           <span className="text-[10px] text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity select-none cursor-default">
@@ -1480,10 +1504,12 @@ function DM04MessageRow({
       )}
 
       <div
+        ref={rowRef}
         id={`dm04-msg-${msg.id}`}
         className={`group relative flex items-start gap-4 py-1 px-2 rounded-md -mx-2 hover:bg-accent/30 transition-colors duration-100 ${highlighted ? 'bg-primary/10 ring-1 ring-primary/30' : ''}`}
-        onMouseEnter={() => setShowActions(true)}
-        onMouseLeave={() => { if (!showMenu && !showEmoji) setShowActions(false) }}
+        onMouseEnter={() => { if (!isMobile) setShowActions(true) }}
+        onMouseLeave={() => { if (isMobile || showMenu || showEmoji) return; setShowActions(false) }}
+        onClick={handleRowTap}
       >
         <button onClick={onShowProfile} className="shrink-0 cursor-pointer">
           <Avatar className="h-10 w-10 mt-0.5">
