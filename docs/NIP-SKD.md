@@ -109,9 +109,11 @@ blinded_pub  = xonly( lift_even_y(root_pub) + t·G )
 
 - **Both directions land on the same `blinded_pub`.** The root holder derives it as above. A peer
   who holds the *other* ECDH private key derives the **same** key from the peer's side — see
-  §2 (`getPeerBlindedPubkey`) — because `ecdh_x` is symmetric and the base is `root_pub` in both
-  computations. The peer never obtains `blinded_priv`; recovering it would require `root_priv`
-  (a discrete log from `root_pub`).
+  §2 (`getPeerBlindedPubkey` when that peer verifies as its **root**, or the composed
+  `getPeerBlindedPubkeyVia{Self,Blinded}` of §1.2 when it verifies as one of its **sub-keys**, as in
+  NIP-CHAT) — because `ecdh_x` is symmetric and the base is the root holder's key in both computations.
+  The peer never obtains `blinded_priv`; recovering it would require `root_priv` (a discrete log from
+  `root_pub`).
 
 **The `reduce` pins.** `reduce(seed)` maps the wide seed to `[1, n-1]`, pinning `0 → 1`. This keeps
 every form total and deterministic:
@@ -261,8 +263,9 @@ event byte-for-byte.
 
 ### 2.1 Interactivity
 
-The pubkey derivations — `getSelfSubkeyPubkey`, `getSharedSubkeyPubkey`, `getBlindedPubkey`, and
-`getPeerBlindedPubkey` — are **read-only**: they return a public key, no secret and no signature. A
+The pubkey derivations — `getSelfSubkeyPubkey`, `getSharedSubkeyPubkey`, `getBlindedPubkey`,
+`getPeerBlindedPubkey`, and the composed `getPeerBlindedPubkeyViaSelf` / `getPeerBlindedPubkeyViaBlinded`
+(§1.2) — are **read-only**: they return a public key, no secret and no signature. A
 signer **SHOULD** answer them **non-interactively** (no user-approval prompt), exactly as it answers
 `get_public_key` (NIP-46) or the injected `getPublicKey` (NIP-07). This is required for the capability
 probe in §6/§7 to work: a client detects support by *calling* a pubkey op, so a signer that routes it
@@ -455,6 +458,12 @@ the derivation scheme (§5), e.g. `skd:1`, and implies support for all three for
 mechanism only; the methods, parameters, and derivation remain exactly as specified above. (DEN Chat's
 iframe vault does this: its ready handshake carries `capabilities: ["skd:1"]`.)
 
+The **composed verifier ops are NOT implied by that `skd:1` advertisement** — they are additive (§5) and
+an in-process adapter that advertises `skd:1` may predate them. Method-presence is likewise unreliable there
+(the adapter defines the wrappers unconditionally). So a client detects the composed ops by **attempting**
+one and handling method-not-supported (degrading the owner/facilitator roles to local-key-only), or the
+deployed backend advertises them with a distinct capability token; never infer them from `skd:1` alone.
+
 ## 8. Test vectors
 
 Generated and verified by the reference implementation (`client/src/lib/crypto/skd.ts`); every
@@ -521,8 +530,8 @@ P_fac_pub  = 55b5f44d71211d5505f3a66115aad173e24a68f5510866269ed52cde4d398803   
 R_f_priv   = 4444444444444444444444444444444444444444444444444444444444444444     # facilitated member
 context    = "nip-chat:v2:facilitated-pseudonym:abc-123"
 info       = "nip-skd:blinded" ‖ 0x1F ‖ context
-Pf_pub (facilitated: base = lift_even_y(R_f_pub), IKM = ecdh_x(R_f_priv, P_fac_pub))       => 31b1370ab9902ae59ee73d76bc5c7fb451d7bd52ec7c111a48f42d9ed2389a06
-Pf_pub (facilitator: getPeerBlindedPubkey, base = R_f_pub, IKM = ecdh_x(P_fac_priv, R_f_pub)) => 31b1370ab9902ae59ee73d76bc5c7fb451d7bd52ec7c111a48f42d9ed2389a06   ✓
+Pf_pub (facilitated: base = lift_even_y(R_f_pub), IKM = ecdh_x(R_f_priv, P_fac_pub))              => 31b1370ab9902ae59ee73d76bc5c7fb451d7bd52ec7c111a48f42d9ed2389a06
+Pf_pub (facilitator: getPeerBlindedPubkeyViaBlinded, base = R_f_pub, IKM = ecdh_x(P_fac_priv, R_f_pub)) => 31b1370ab9902ae59ee73d76bc5c7fb451d7bd52ec7c111a48f42d9ed2389a06   ✓
 ```
 
 The shared and blinded forms feed the **raw** ECDH x-coordinate into HKDF (as NIP-44 does), **not**
