@@ -18,7 +18,7 @@ import { generateSecretKey, getPublicKey, nip44, type Event } from 'nostr-tools'
 import { createUnsignedEvent } from '@/lib/nostr'
 import { KINDS } from '@/lib/crypto/constants'
 import { makeSubkeySigner, mineAndSignAsSubkey } from '@/lib/nostr/v2send'
-import { ChatContext, deriveMemberPseudonymForOwner } from '@/lib/crypto/skd'
+import { ChatContext, resolveMemberPseudonymForOwner } from '@/lib/crypto/skd'
 import type { ISigner } from '@/stores/userStore'
 
 export interface V2JoinPayload {
@@ -86,12 +86,14 @@ export async function parseV2JoinRequest(
     const parsed = JSON.parse(plaintext) as { r?: string; p?: string; note?: string }
     if (!parsed.r || !parsed.p) return null
 
-    // Squat check (local owner only): re-derive P_pub from R (blinded verifier) and compare.
+    // Squat check: re-derive P_pub from R (blinded verifier) and compare. Works with a LOCAL owner key
+    // or a signer that supports the composed ViaSelf op (§1.2); if neither, `verified` stays undefined
+    // (trusted, as before) rather than false.
     let verified: boolean | undefined
-    if (ownerRootPrivateKey) {
-      const reP = deriveMemberPseudonymForOwner(ownerRootPrivateKey, hubDTag, parsed.r)
+    try {
+      const reP = await resolveMemberPseudonymForOwner(hubDTag, parsed.r, { ownerPrivateKey: ownerRootPrivateKey, signer: ownerSigner })
       verified = reP === parsed.p
-    }
+    } catch { /* no local key and signer can't verify → leave undefined (trusted) */ }
     return { rPub: parsed.r, pPub: parsed.p, note: parsed.note, verified }
   } catch {
     return null

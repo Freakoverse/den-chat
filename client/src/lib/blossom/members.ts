@@ -1464,15 +1464,18 @@ export async function createAndUploadFacilitatorTreeV2(
   signer: ISigner | null,
   blossomServerUrls: string[],
 ): Promise<{ indexHash: string; treeHash: string }> {
-  if (!privateKey) throw new Error('Facilitating a v2 hub requires a local key')
   if (memberRs.length === 0) throw new Error('Cannot create facilitator tree with no members')
-  const { deriveFacilitatedPseudonymForFacilitator } = await import('@/lib/crypto/skd')
+  const { resolveFacilitatedPseudonymForFacilitator } = await import('@/lib/crypto/skd')
   const facSigner = makeSubkeySigner(ChatContext.member(hubDTag), { privateKey, signer, peerPub: ownerPub })
   const facAuth = (e: import('nostr-tools').UnsignedEvent) => facSigner.signEvent(e)
 
+  // Facilitator re-derives each vouched user's Pf from their R — local key, or a signer with the
+  // composed ViaBlinded op (§1.2). Batched with Promise.all for the whole vouched set.
+  const pfByRf = new Map<string, string>(await Promise.all(memberRs.map(async rf =>
+    [rf, await resolveFacilitatedPseudonymForFacilitator(ownerPub, hubDTag, rf, { facilitatorPrivateKey: privateKey, signer })] as const)))
   const leaves: LkhLeaf[] = []
   for (const rf of memberRs) {
-    const pf = deriveFacilitatedPseudonymForFacilitator(privateKey, ownerPub, hubDTag, rf)
+    const pf = pfByRf.get(rf)!
     const leaf = createLeaf(pf, 'member')
     leaf.encryptedLeafKey = await facSigner.nip44Encrypt(pf, toHex(leaf.rawKey!))
     leaves.push(leaf)
@@ -1506,9 +1509,9 @@ export async function addMemberToFacilitatorTreeV2(
   privateKey: string | null,
   signer: ISigner | null,
 ): Promise<string> {
-  if (!privateKey) throw new Error('Facilitating a v2 hub requires a local key')
-  const { deriveFacilitatedPseudonymForFacilitator } = await import('@/lib/crypto/skd')
-  const pf = deriveFacilitatedPseudonymForFacilitator(privateKey, ownerPub, hubDTag, newMemberR)
+  const { resolveFacilitatedPseudonymForFacilitator } = await import('@/lib/crypto/skd')
+  // Facilitator re-derives the vouched user's Pf from their R — local key or composed ViaBlinded op (§1.2).
+  const pf = await resolveFacilitatedPseudonymForFacilitator(ownerPub, hubDTag, newMemberR, { facilitatorPrivateKey: privateKey, signer })
   const tree = deserializeTree(treeContent)
   if (tree.leaves.some(l => l.pubkey === pf)) return serializeTree(tree)
   const facSigner = makeSubkeySigner(ChatContext.member(hubDTag), { privateKey, signer, peerPub: ownerPub })
@@ -1545,7 +1548,7 @@ export async function rebuildFacilitatorTreeV2(
    */
   excludePfs?: Set<string>,
 ): Promise<{ indexHash: string; treeHash: string }> {
-  if (!privateKey) throw new Error('Facilitating a v2 hub requires a local key')
+  // Operates on existing Pf leaves via facSigner (local key OR signer); no Pf re-derivation needed here.
   const facSigner = makeSubkeySigner(ChatContext.member(hubDTag), { privateKey, signer, peerPub: ownerPub })
   const facAuth = (e: import('nostr-tools').UnsignedEvent) => facSigner.signEvent(e)
   const oldTree = deserializeTree(oldTreeContent)

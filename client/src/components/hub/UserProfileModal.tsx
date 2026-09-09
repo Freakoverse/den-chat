@@ -670,13 +670,14 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
         }
         setBanStepLabels(V2_MEMBER_BAN_STEPS) // kickMemberV2 emits these labels via onStep
         let memberP = members.find(m => m.pubkey === displayPubkey)?.p
-        if (!memberP && privateKey) {
-          // Local owner: re-derive P from R (ECDH symmetry) when it isn't cached.
-          const { deriveMemberPseudonymForOwner } = await import('@/lib/crypto/skd')
-          memberP = deriveMemberPseudonymForOwner(privateKey, dTag, displayPubkey)
+        if (!memberP) {
+          // Owner re-derives P from R (ECDH symmetry) — local key, or a signer that supports the
+          // composed ViaSelf op (§1.2). Falls through to the roster scan for a signer without it.
+          const { resolveMemberPseudonymForOwner } = await import('@/lib/crypto/skd')
+          try { memberP = await resolveMemberPseudonymForOwner(dTag, displayPubkey, { ownerPrivateKey: privateKey, signer }) } catch { /* fall through to roster scan */ }
         }
         if (!memberP) {
-          // Remote signer (no local ECDH shortcut): resolve P by scanning the roster segments.
+          // Signer without the composed op: resolve P by scanning the roster segments.
           const { resolveMemberPByRoster } = await import('@/lib/hub/v2kick')
           const secretHexNow = useHubStore.getState().hubSecrets[dTag]
           const epochSecretsNow = {

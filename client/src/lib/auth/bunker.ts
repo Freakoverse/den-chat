@@ -176,6 +176,15 @@ export class BunkerSigner {
     if (!this.signer) throw new Error('Not logged in')
     return this.signer.sendRequest('skd_get_peer_blinded_pubkey', [context, peerPub])
   }
+  // Composed verifier ops (NIP-SKD §1.2) — remote owner (ViaSelf) / facilitator (ViaBlinded); pubkey only.
+  async skdGetPeerBlindedPubkeyViaSelf(viaContext: string, context: string, peerPub: string): Promise<string> {
+    if (!this.signer) throw new Error('Not logged in')
+    return this.signer.sendRequest('skd_get_peer_blinded_pubkey_via_self', [viaContext, context, peerPub])
+  }
+  async skdGetPeerBlindedPubkeyViaBlinded(viaContext: string, viaPeerPub: string, context: string, peerPub: string): Promise<string> {
+    if (!this.signer) throw new Error('Not logged in')
+    return this.signer.sendRequest('skd_get_peer_blinded_pubkey_via_blinded', [viaContext, viaPeerPub, context, peerPub])
+  }
   async skdSignAsBlinded(context: string, event: unknown, peerPub: string): Promise<Record<string, unknown>> {
     if (!this.signer) throw new Error('Not logged in')
     const resultJson = await this.signer.sendRequest('skd_sign_as_blinded', [context, JSON.stringify(event), peerPub])

@@ -173,6 +173,15 @@ export class NostrConnectSigner {
     if (!this.signer) throw new Error('Not logged in')
     return this.signer.sendRequest('skd_get_peer_blinded_pubkey', [context, peerPub])
   }
+  // Composed verifier ops (NIP-SKD §1.2) — remote owner (ViaSelf) / facilitator (ViaBlinded); pubkey only.
+  async skdGetPeerBlindedPubkeyViaSelf(viaContext: string, context: string, peerPub: string): Promise<string> {
+    if (!this.signer) throw new Error('Not logged in')
+    return this.signer.sendRequest('skd_get_peer_blinded_pubkey_via_self', [viaContext, context, peerPub])
+  }
+  async skdGetPeerBlindedPubkeyViaBlinded(viaContext: string, viaPeerPub: string, context: string, peerPub: string): Promise<string> {
+    if (!this.signer) throw new Error('Not logged in')
+    return this.signer.sendRequest('skd_get_peer_blinded_pubkey_via_blinded', [viaContext, viaPeerPub, context, peerPub])
+  }
   async skdSignAsBlinded(context: string, event: unknown, peerPub: string): Promise<Record<string, unknown>> {
     if (!this.signer) throw new Error('Not logged in')
     const resultJson = await this.signer.sendRequest('skd_sign_as_blinded', [context, JSON.stringify(event), peerPub])
@@ -216,6 +225,8 @@ export class NostrConnectSigner {
       nip44DecryptAsSharedSubkey: (context: string, senderPub: string, ciphertext: string, peerPub: string) => this.skdNip44DecryptAsSharedSubkey(context, senderPub, ciphertext, peerPub),
       getBlindedPubkey: (context: string, peerPub: string) => this.skdGetBlindedPubkey(context, peerPub),
       getPeerBlindedPubkey: (context: string, peerPub: string) => this.skdGetPeerBlindedPubkey(context, peerPub),
+      getPeerBlindedPubkeyViaSelf: (viaContext: string, context: string, peerPub: string) => this.skdGetPeerBlindedPubkeyViaSelf(viaContext, context, peerPub),
+      getPeerBlindedPubkeyViaBlinded: (viaContext: string, viaPeerPub: string, context: string, peerPub: string) => this.skdGetPeerBlindedPubkeyViaBlinded(viaContext, viaPeerPub, context, peerPub),
       signAsBlinded: (context: string, event: unknown, peerPub: string) => this.skdSignAsBlinded(context, event, peerPub),
       nip44EncryptAsBlinded: (context: string, recipientPub: string, plaintext: string, peerPub: string) => this.skdNip44EncryptAsBlinded(context, recipientPub, plaintext, peerPub),
       nip44DecryptAsBlinded: (context: string, senderPub: string, ciphertext: string, peerPub: string) => this.skdNip44DecryptAsBlinded(context, senderPub, ciphertext, peerPub),

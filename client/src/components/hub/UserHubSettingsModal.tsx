@@ -754,7 +754,8 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
         // v2: a facilitator tree holds ONLY vouched users' `Pf` leaves — there's no self-leaf, so we
         // can't build an empty tree. Defer: just mark the list "created" locally; the first "Add" (by
         // npub) builds the tree keyed on that person's `Pf` and publishes the `P_fac`-authored list JR.
-        if (!privateKey) throw new Error('Facilitating a private (v2) hub requires a local key')
+        const { signerSupportsComposedVerify } = await import('@/lib/crypto/skd')
+        if (!privateKey && !signerSupportsComposedVerify(signer)) throw new Error('Facilitating a private (v2) hub needs a local key or a signer that supports it (NIP-SKD §1.2)')
         const currentSecret = hubSecrets[hub.dTag]
         if (!currentSecret) throw new Error('You do not have the hub secret yet')
         setMeshListHash(null)
@@ -829,7 +830,8 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
         // v2: add by the person's real npub `R_f` (just like v1's UX). We derive their facilitated
         // pseudonym `Pf = ECDH(P_fac, R_f)` and key the leaf on that — `R_f` never enters the tree.
         // Builds the tree on the first add (create was deferred). List JR is authored under `P_fac`.
-        if (!privateKey) throw new Error('Facilitating a private (v2) hub requires a local key')
+        const { signerSupportsComposedVerify } = await import('@/lib/crypto/skd')
+        if (!privateKey && !signerSupportsComposedVerify(signer)) throw new Error('Facilitating a private (v2) hub needs a local key or a signer that supports it (NIP-SKD §1.2)')
         const t = addNpub.trim()
         let memberR: string
         if (t.startsWith('npub1')) { const d = nip19.decode(t); if (d.type !== 'npub') throw new Error('Invalid npub'); memberR = d.data as string }
@@ -1017,12 +1019,10 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
         if (!idx.treeHash) throw new Error('No tree hash')
         const tree = deserializeTree(await downloadTextFromBlossom(idx.treeHash, hub.blossomServers))
         // meshMembers holds real keys R; the tree is keyed on Pf — derive the target's Pf to find it.
-        // Explicit fail-closed guard (mirrors the other facilitator handlers): deriving Pf needs a LOCAL
-        // key. Without this, `privateKey!` would throw inside the derive anyway, but guard up front.
-        if (!privateKey) throw new Error('Facilitating a private (v2) hub requires a local key')
-        const { deriveFacilitatedPseudonymForFacilitator } = await import('@/lib/crypto/skd')
+        // Local key, or a signer with the composed ViaBlinded op (§1.2).
+        const { resolveFacilitatedPseudonymForFacilitator } = await import('@/lib/crypto/skd')
         const targetPf = /^[0-9a-f]{64}$/i.test(targetPubkey)
-          ? deriveFacilitatedPseudonymForFacilitator(privateKey, hub.creatorPubkey, hub.dTag, targetPubkey)
+          ? await resolveFacilitatedPseudonymForFacilitator(hub.creatorPubkey, hub.dTag, targetPubkey, { facilitatorPrivateKey: privateKey, signer })
           : targetPubkey
         const remaining = tree.leaves.filter((l: any) => l.pubkey !== targetPf)
         if (remaining.length === tree.leaves.length) throw new Error('User not found in tree')
@@ -1155,7 +1155,7 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
         // republish the P_fac-authored list JR.
         const { rebuildFacilitatorTreeV2 } = await import('@/lib/blossom/members')
         const { makeSubkeySigner } = await import('@/lib/nostr/v2send')
-        const { ChatContext, deriveFacilitatedPseudonymForFacilitator } = await import('@/lib/crypto/skd')
+        const { ChatContext, resolveFacilitatedPseudonymForFacilitator } = await import('@/lib/crypto/skd')
 
         // Ban re-check: a member banned from the hub AFTER we vouched them must NOT be re-keyed into the
         // new epoch (that would defeat the owner's kick/ban). Use a FRESH fail-closed download of the hub
@@ -1172,8 +1172,10 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
         const bannedVouched = meshMembers.filter(r => bannedSet.has(r))
         let excludePfs: Set<string> | undefined
         let remainingVouched: string[] | undefined
-        if (bannedVouched.length > 0 && privateKey) {
-          excludePfs = new Set(bannedVouched.map(r => deriveFacilitatedPseudonymForFacilitator(privateKey, hub.creatorPubkey, hub.dTag, r)))
+        if (bannedVouched.length > 0) {
+          // Facilitator re-derives each banned-vouched Pf — local key or composed ViaBlinded op (§1.2).
+          excludePfs = new Set(await Promise.all(bannedVouched.map(r =>
+            resolveFacilitatedPseudonymForFacilitator(hub.creatorPubkey, hub.dTag, r, { facilitatorPrivateKey: privateKey, signer }))))
           remainingVouched = meshMembers.filter(r => !bannedSet.has(r))
         }
         const r = await rebuildFacilitatorTreeV2(

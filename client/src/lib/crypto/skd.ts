@@ -252,6 +252,62 @@ export function deriveFacilitatedPseudonymForFacilitator(
   return deriveBlindedPubForPeer(pFacPriv, ChatContext.facilitated(dTag).context, memberRPub)
 }
 
+// ── Verifier-side resolvers (owner / facilitator): LOCAL key OR a composed-op signer (NIP-SKD §1.2) ──
+
+/** Whether a signer exposes the composed verifier ops (§1.2) — needed for a REMOTE owner/facilitator. */
+export function signerSupportsComposedVerify(signer: unknown): boolean {
+  const skd = (signer as SkdSigner | null)?.skd
+  return typeof skd?.getPeerBlindedPubkeyViaSelf === 'function'
+    && typeof skd?.getPeerBlindedPubkeyViaBlinded === 'function'
+}
+
+/** Thrown when a verifier-side op has neither a local key nor a composed-op signer. */
+export class ComposedVerifyUnsupportedError extends Error {
+  constructor(role: 'owner' | 'facilitator') {
+    super(`This signer can't ${role === 'owner' ? 'admit members to' : 'facilitate'} a v2 hub — it lacks the NIP-SKD composed verifier ops (§1.2). Use a local key or an updated NIP-SKD signer.`)
+    this.name = 'ComposedVerifyUnsupportedError'
+  }
+}
+
+/**
+ * The **owner** re-derives a member's pseudonym `P_pub` from their real key `R` — via a LOCAL owner
+ * key ({@link deriveMemberPseudonymForOwner}), or, with no local key, the signer's composed **ViaSelf**
+ * op (NIP-SKD §1.2) so the owner pseudonym `O`'s private scalar stays inside the signer. Async because
+ * the signer path is remote. Byte-identical result either way (ECDH symmetry).
+ */
+export async function resolveMemberPseudonymForOwner(
+  dTag: string,
+  memberRPub: string,
+  opts: { ownerPrivateKey?: string | null; signer?: unknown },
+): Promise<string> {
+  if (opts.ownerPrivateKey) return deriveMemberPseudonymForOwner(opts.ownerPrivateKey, dTag, memberRPub)
+  const skd = (opts.signer as SkdSigner | null)?.skd
+  if (skd?.getPeerBlindedPubkeyViaSelf) {
+    return skd.getPeerBlindedPubkeyViaSelf(ChatContext.owner(dTag).context, ChatContext.member(dTag).context, memberRPub)
+  }
+  throw new ComposedVerifyUnsupportedError('owner')
+}
+
+/**
+ * The **facilitator** re-derives a vouched user's `Pf_pub` from their real key `R_f` — via a LOCAL
+ * facilitator key ({@link deriveFacilitatedPseudonymForFacilitator}), or the signer's composed
+ * **ViaBlinded** op (NIP-SKD §1.2) so the facilitator's member pseudonym `P_fac` private stays inside
+ * the signer. Async.
+ */
+export async function resolveFacilitatedPseudonymForFacilitator(
+  ownerPubHex: string,
+  dTag: string,
+  memberRPub: string,
+  opts: { facilitatorPrivateKey?: string | null; signer?: unknown },
+): Promise<string> {
+  if (opts.facilitatorPrivateKey) return deriveFacilitatedPseudonymForFacilitator(opts.facilitatorPrivateKey, ownerPubHex, dTag, memberRPub)
+  const skd = (opts.signer as SkdSigner | null)?.skd
+  if (skd?.getPeerBlindedPubkeyViaBlinded) {
+    return skd.getPeerBlindedPubkeyViaBlinded(ChatContext.member(dTag).context, ownerPubHex, ChatContext.facilitated(dTag).context, memberRPub)
+  }
+  throw new ComposedVerifyUnsupportedError('facilitator')
+}
+
 // ── Remote-signer routing (NIP-SKD-capable signer) ───────────────────────────
 
 /**
@@ -277,8 +333,18 @@ export interface SkdSigner {
     // ── blinded form (NIP-SKD §1) — the caller's own key is `root + t·G`; a peer can verify but not sign ──
     /** The caller's OWN blinded pubkey (base = caller's root, blinded toward `peerPub`). */
     getBlindedPubkey(context: string, peerPub: string): Promise<string>
-    /** A PEER's blinded pubkey toward the caller (base = `peerPub`) — verifier side, pubkey only. */
+    /** A PEER's blinded pubkey toward the caller's ROOT (base = `peerPub`) — verifier side, pubkey only. */
     getPeerBlindedPubkey(context: string, peerPub: string): Promise<string>
+    /**
+     * Composed verifier ops (NIP-SKD §1.2) — a PEER's blinded pubkey where the ECDH identity on the
+     * caller's side is one of the caller's own sub-keys, not the root. The intermediate sub-key private
+     * is derived and used INSIDE the signer and never returned (pubkey only). Optional/additive to skd:1
+     * (§5): a signer may omit them, in which case owner/facilitator roles stay local-key-only.
+     *   - ViaSelf: caller acts as its `self` sub-key `viaContext` (owner → member verification).
+     *   - ViaBlinded: caller acts as its `blinded` sub-key `viaContext`↦`viaPeerPub` (facilitator → vouched).
+     */
+    getPeerBlindedPubkeyViaSelf?(viaContext: string, context: string, peerPub: string): Promise<string>
+    getPeerBlindedPubkeyViaBlinded?(viaContext: string, viaPeerPub: string, context: string, peerPub: string): Promise<string>
     signAsBlinded(context: string, event: unknown, peerPub: string): Promise<unknown>
     nip44EncryptAsBlinded(context: string, recipientPub: string, plaintext: string, peerPub: string): Promise<string>
     nip44DecryptAsBlinded(context: string, senderPub: string, ciphertext: string, peerPub: string): Promise<string>

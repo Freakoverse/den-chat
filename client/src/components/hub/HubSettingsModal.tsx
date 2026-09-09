@@ -3140,15 +3140,18 @@ function SecurityPage({ hub }: { hub: HubData }) {
         const { fromHex: fromHexV2 } = await import('@/lib/crypto/lkh')
         const { rebuildTreeV2 } = await import('@/lib/hub/v2kick')
         const { makeSubkeySigner } = await import('@/lib/nostr/v2send')
-        const { ChatContext, deriveMemberPseudonymForOwner } = await import('@/lib/crypto/skd')
+        const { ChatContext, resolveMemberPseudonymForOwner } = await import('@/lib/crypto/skd')
 
-        const membersV2 = storeMembersV2.map(m => {
-          // Local owner: re-derive P from R when a member's pseudonym isn't cached.
+        const membersV2 = await Promise.all(storeMembersV2.map(async m => {
+          // Owner re-derives P from R when a member's pseudonym isn't cached — local key, or a signer
+          // that supports the composed ViaSelf op (§1.2). Batched with Promise.all for the whole roster.
           let p = m.p
-          if (!p && privateKey) p = deriveMemberPseudonymForOwner(privateKey, hub.dTag, m.pubkey)
+          if (!p) {
+            try { p = await resolveMemberPseudonymForOwner(hub.dTag, m.pubkey, { ownerPrivateKey: privateKey, signer }) } catch { /* leave undefined → error below */ }
+          }
           if (!p) throw new Error('Some members are missing their pseudonym — reload the hub and try again')
           return { p, r: m.pubkey, roles: m.roles || 'everyone' }
-        })
+        }))
         // Ensure the owner is in the set (their own leaf may not be in hubMembers).
         if (!membersV2.some(m => m.r === pubkey)) {
           const ownerP = await makeSubkeySigner(
@@ -4195,11 +4198,14 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
             const map = useHubStore.getState().epochSecrets[hub.dTag] || {}
             return map[epoch] ? fromHex(map[epoch]) : (epoch === hub.epoch ? hubSecret : undefined)
           }
-          let deriveP: ((r: string) => string) | null = null
+          let leafIdByR: Map<string, string> | null = null
           if (v2) {
-            if (!privateKey) throw new Error('Re-adding a member to a v2 hub requires a local key')
-            const { deriveMemberPseudonymForOwner } = await import('@/lib/crypto/skd')
-            deriveP = (r) => deriveMemberPseudonymForOwner(privateKey, hub.dTag, r)
+            const { resolveMemberPseudonymForOwner } = await import('@/lib/crypto/skd')
+            // Owner re-derives each member's P from R — local key, or a signer with the composed ViaSelf
+            // op (§1.2). Pre-resolve the whole batch (Promise.all) so the leaf-placement loop stays sync.
+            const entries = await Promise.all(toReadd.map(async (r) =>
+              [r, await resolveMemberPseudonymForOwner(hub.dTag, r, { ownerPrivateKey: privateKey, signer })] as const))
+            leafIdByR = new Map(entries)
           }
 
           // Group members by target page. Carry {p (leaf id), r (real key)} — v1: p === r.
@@ -4207,7 +4213,7 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
           const index = { spineHash, leafPages, pageSize: leafPages.length > 0 ? 10000 : 0 } as any
 
           for (const pk of toReadd) {
-            const leafId = v2 ? deriveP!(pk) : pk
+            const leafId = v2 ? leafIdByR!.get(pk)! : pk
             const pageRef = findPageForPubkey(index, leafId)
             if (!pageRef) continue
             const entry = { p: leafId, r: pk }
