@@ -181,6 +181,38 @@ anywhere the root key is available. HKDF's two stages carry the separation:
 The same `context` MAY be used with more than one form (the form tag keeps the seeds independent),
 but a consumer SHOULD still pick one form per purpose to avoid confusion.
 
+### 1.2 Composed verification (the ECDH identity is a sub-key, not the root)
+
+The verifier-side blinded derivation computes, for a peer's real key `peer`:
+
+```
+t = reduce(HKDF(ecdh_x(K, peer), salt = "nip-skd-v1", info = info("blinded", context), L = 48))
+blinded_pub = xonly( lift_even_y(peer) + t·G )
+```
+
+where **`K` is the verifier's own private key on the ECDH**. In the simple case `K = root_priv` — this is
+`getPeerBlindedPubkey` (§2), which verifies a peer who blinded toward **your root**.
+
+But a peer may blind toward one of **your sub-keys** rather than your root. NIP-CHAT is exactly this case:
+a member blinds toward the owner's **pseudonym** `O` (a `self` key), *not* the owner's real key; a
+facilitated user blinds toward the facilitator's **member pseudonym** (a `blinded` key). To verify such a
+binding, the verifier must use **that sub-key's** private scalar as `K`:
+
+- **ViaSelf** — `K = self(root_priv, viaContext)`. Owner verifying a member: `viaContext` = the owner
+  pseudonym, `context` = the member pseudonym, `peer` = the member's real key `R`.
+- **ViaBlinded** — `K = blinded(root_priv, viaContext, viaPeer)` (its private scalar). Facilitator
+  verifying a vouched user: `viaContext`↦`viaPeer` = the facilitator's member pseudonym toward the owner
+  `O`, `context` = the facilitated pseudonym, `peer` = the vouched user's real key `R_f`.
+
+The result is a **public key** — the same pseudonym the peer computed from its own side (ECDH symmetry), and
+identical whether the verifier used a local key or a signer. The intermediate key `K` is a derived sub-key
+and therefore **root-sensitive** (§3): a `self` `K` fully controls its pseudonym, a `blinded` `K` is
+root-equivalent. So a local-key client derives `K` directly, but a **signer MUST derive `K` internally and
+return only the resulting `blinded_pub` — never `K` itself.** Because a conforming signer never exposes any
+derived private key, the composed ops (§2) are the **only** way a remote/browser signer can support a
+verifier whose identity is a pseudonym — i.e. a hub **owner** or **facilitator**. Without them, those roles
+are local-key-only.
+
 ## 2. Operations (sub-signer)
 
 A conforming signer **MUST NOT** return the `seed`, any sub-key or blinded private key, the raw
@@ -202,11 +234,20 @@ by the presence/absence of an argument, so a call site's form is explicit and a 
 **Blinded** (peer required):
 - `getBlindedPubkey(context, peer) → blinded_pub` — the **caller's own** blinded key (base = the
   caller's root, blinded toward `peer`). The signer also holds `blinded_priv` for the sign/encrypt ops.
-- `getPeerBlindedPubkey(context, peer) → blinded_pub` — a **peer's** blinded key toward the caller
-  (base = `peer`, blinded with `ecdh_x(caller_root, peer)`). **Public key only** — this is the
-  verifier-side derivation. There is deliberately **no** operation to *act as* a peer's blinded key;
-  that is the property that lets a verifier confirm a `blinded ↔ root` binding without being able to
-  impersonate it.
+- `getPeerBlindedPubkey(context, peer) → blinded_pub` — a **peer's** blinded key toward the caller's
+  **root** (base = `peer`, blinded with `ecdh_x(root_priv, peer)`). **Public key only** — the verifier-side
+  derivation for the simple case where the peer blinded toward your raw root. There is deliberately **no**
+  operation to *act as* a peer's blinded key; that is the property that lets a verifier confirm a binding
+  without being able to impersonate it.
+- `getPeerBlindedPubkeyViaSelf(viaContext, context, peer) → blinded_pub` and
+  `getPeerBlindedPubkeyViaBlinded(viaContext, viaPeer, context, peer) → blinded_pub` — the **composed**
+  verifier ops (§1.2). Identical to `getPeerBlindedPubkey` except the ECDH identity `K` on the caller's side
+  is one of the caller's own **sub-keys** — a `self` sub-key `viaContext` (ViaSelf), or a `blinded` sub-key
+  `viaContext`↦`viaPeer` (ViaBlinded) — instead of the raw root. Use these when the peer blinded toward your
+  *pseudonym* rather than your root: a hub **owner** (acting as its owner pseudonym → ViaSelf) re-deriving a
+  member's pseudonym, or a **facilitator** (acting as its member pseudonym → ViaBlinded) re-deriving a vouched
+  user's pseudonym. **Public key only** — the intermediate `K` is derived and used **inside** the signer and
+  never returned (§1.2, §3). There is likewise **no** op to *act as* the peer's key.
 - `signAsBlinded(context, event, peer) → event` — sign as the caller's own blinded key.
 - `nip44EncryptAsBlinded(context, recipient, plaintext, peer)`, `nip44DecryptAsBlinded(context, sender, ciphertext, peer)` (+ `nip04*`)
 
@@ -293,6 +334,14 @@ scheme version and are selected per-operation (§2). The form is carried in the 
 salt, so adding or choosing a form never changes the scheme version. A signer that advertises `skd:1`
 (§7) implements all three forms.
 
+The **composed verifier ops** (`getPeerBlindedPubkeyVia{Self,Blinded}`, §1.2/§2) are an **additive** part
+of the `skd:1` surface: they change no salt, no derivation, and no existing method — the pseudonyms they
+verify are ordinary `skd:1` blinded keys — so they are **not** a version bump. A client feature-detects them
+**independently** of the scheme version (method-presence in §6, or an attempt in §7). A signer built before
+them simply lacks them, in which case the **owner** and **facilitator** roles fall back to **local-key-only**
+(the same outcome as a non-SKD signer); everything else still works. Never gate the composed ops behind a new
+scheme version.
+
 ## 6. Client interface (NIP-07)
 
 ```ts
@@ -311,7 +360,10 @@ window.nostr.skd = {
 
   // blinded (caller owns the private key; a peer can derive only the public key to verify) — peer REQUIRED
   getBlindedPubkey(context: string, peerPub: string): Promise<string>,       // my own blinded key
-  getPeerBlindedPubkey(context: string, peerPub: string): Promise<string>,   // a peer's blinded key (verify) — pubkey only
+  getPeerBlindedPubkey(context: string, peerPub: string): Promise<string>,   // a peer's blinded key toward my ROOT (verify) — pubkey only
+  // composed verify (§1.2): the ECDH identity is one of MY sub-keys, not my root — pubkey only
+  getPeerBlindedPubkeyViaSelf(viaContext: string, context: string, peerPub: string): Promise<string>,                      // owner verifies a member
+  getPeerBlindedPubkeyViaBlinded(viaContext: string, viaPeerPub: string, context: string, peerPub: string): Promise<string>, // facilitator verifies a vouched user
   signAsBlinded(context: string, event: EventTemplate, peerPub: string): Promise<Event>,
   nip44EncryptAsBlinded(context: string, recipient: string, plaintext: string, peerPub: string): Promise<string>,
   nip44DecryptAsBlinded(context: string, sender: string, ciphertext: string, peerPub: string): Promise<string>,
@@ -321,9 +373,13 @@ window.nostr.skd = {
 ```
 
 Feature-detection: `typeof skd?.getSelfSubkeyPubkey === 'function' && typeof skd?.getBlindedPubkey ===
-'function'` — a conforming `skd:1` signer implements the whole surface, so requiring the **blinded** op
-(needed for NIP-CHAT v2) rejects an older signer that has only the pre-blinded self/shared surface;
-the `getSelfSubkeyPubkey` half keeps the check robust against a partial object exposing just one op.
+'function'` — requiring the **blinded** op (needed for NIP-CHAT v2) rejects an older signer that has only
+the pre-blinded self/shared surface; the `getSelfSubkeyPubkey` half keeps the check robust against a partial
+object exposing just one op. This detects the base `skd:1` surface (self/shared/blinded + `getPeerBlindedPubkey`),
+which is enough to **participate as a member**. The **composed verifier ops** are additive (§5) and detected
+**separately** — e.g. `typeof skd?.getPeerBlindedPubkeyViaSelf === 'function'` — because a signer may implement
+the base surface without them; when they are absent, the **owner** and **facilitator** roles fall back to
+local-key-only (§1.2).
 
 ## 7. Remote signer (NIP-46)
 
@@ -343,9 +399,12 @@ skd_nip44_encrypt_as_shared_subkey  params: [context, recipient, plaintext, peer
 skd_nip44_decrypt_as_shared_subkey  params: [context, sender, ciphertext, peer]
 
 # blinded (peer required on every method)
-skd_get_blinded_pubkey              params: [context, peer]     # my own blinded key
-skd_get_peer_blinded_pubkey         params: [context, peer]     # a peer's blinded key (verify) — pubkey only
-skd_sign_as_blinded                 params: [context, event, peer]
+skd_get_blinded_pubkey                   params: [context, peer]     # my own blinded key
+skd_get_peer_blinded_pubkey              params: [context, peer]     # a peer's blinded key toward my ROOT (verify) — pubkey only
+# composed verify (§1.2): ECDH identity is one of my sub-keys, not my root — pubkey only
+skd_get_peer_blinded_pubkey_via_self     params: [viaContext, context, peer]           # owner verifies a member
+skd_get_peer_blinded_pubkey_via_blinded  params: [viaContext, viaPeer, context, peer]  # facilitator verifies a vouched user
+skd_sign_as_blinded                      params: [context, event, peer]
 skd_nip44_encrypt_as_blinded        params: [context, recipient, plaintext, peer]
 skd_nip44_decrypt_as_blinded        params: [context, sender, ciphertext, peer]
 
@@ -362,6 +421,11 @@ the older non-blinded surface must be treated as unsupported. The signer **MUST*
 non-interactively (§2.1), the same as `get_public_key`, or the probe stalls and the signer wrongly
 appears to lack NIP-SKD. Connection permission grants extend the connection's permission set with
 `skd:<context-prefix>` entries (§4).
+
+The **composed verifier methods** (`skd_get_peer_blinded_pubkey_via_self` / `_via_blinded`) are additive
+(§5): a client that needs remote **owner**/**facilitator** support probes one of them separately (attempt +
+handle method-not-supported) and, on absence, keeps those roles local-key-only. They are pubkey reads, so a
+signer **MUST** answer them non-interactively too (§2.1).
 
 **Other transports.** The method names and their logical parameters above are the contract; the
 **positional-array** encoding is specific to NIP-46. A non-NIP-46 signer protocol (e.g. NIP-UPV2)
@@ -429,9 +493,11 @@ t         = reduce(seed)
 P_pub     = xonly( lift_even_y(root_pub) + t·G )
          => 059510a63a230047ffe6e978ade8ad31e4bfb59d414331d5b17b6d50038c51a1     # = P_pub
 
-# ── blinded symmetry (owner re-derives the same P → owner-verification) ──
-# owner computes getPeerBlindedPubkey(context, peer = R_pub) — base = lift_even_y(R_pub), IKM =
-# ecdh_x(O_priv, R_pub). By ECDH symmetry the seed (hence t) is identical, so it reproduces P_pub:
+# ── blinded symmetry (owner re-derives the same P → owner-verification; the ViaSelf composed op §1.2) ──
+# owner computes getPeerBlindedPubkeyViaSelf(viaContext = "nip-chat:v2:owner-pseudonym:abc-123",
+# context = "nip-chat:v2:member-pseudonym:abc-123", peer = R_pub): K = self(owner_root, viaContext) = O_priv,
+# base = lift_even_y(R_pub), IKM = ecdh_x(O_priv, R_pub). By ECDH symmetry the seed (hence t) is identical,
+# so it reproduces P_pub — NOTE this uses O_priv (the owner pseudonym), NOT the owner's root:
 #   => 059510a63a230047ffe6e978ade8ad31e4bfb59d414331d5b17b6d50038c51a1     ✓  (owner never learns P_priv = R_priv + t)
 
 # ── blinded, odd-y base (pins even-y normalization) ──
@@ -444,10 +510,12 @@ context   = "nip-chat:v2:member-pseudonym:abc-123"
 blinded_pub (holder, root_priv_evenY = n - root_priv)  => 75a5ff6d888b7065181e9f2108f2ebd7e3000236cd409d19cf4f56ac0224a919
 blinded_pub (verifier, lift_even_y(root_pub))          => 75a5ff6d888b7065181e9f2108f2ebd7e3000236cd409d19cf4f56ac0224a919   ✓
 
-# ── facilitated: nested blinded (NIP-CHAT facilitated pseudonym Pf) ──
+# ── facilitated: nested blinded (NIP-CHAT facilitated pseudonym Pf; the ViaBlinded composed op §1.2) ──
 # Same blinded form, one level deeper: Pf blinds the facilitated member's R_f toward the FACILITATOR's
 # own pseudonym P_fac (which is itself R_fac blinded toward O). Base = lift_even_y(R_f_pub); the ECDH
-# peer is P_fac. The facilitator re-derives the same Pf via getPeerBlindedPubkey (ECDH symmetry).
+# peer is P_fac. The facilitator re-derives the same Pf via getPeerBlindedPubkeyViaBlinded(viaContext =
+# member-pseudonym, viaPeer = O_pub, context = facilitated-pseudonym, peer = R_f_pub): K = blinded(R_fac,
+# member-ctx, O_pub) = P_fac_priv, then ECDH(P_fac_priv, R_f_pub) — identical seed by symmetry.
 R_fac_priv = 3333333333333333333333333333333333333333333333333333333333333333
 P_fac_pub  = 55b5f44d71211d5505f3a66115aad173e24a68f5510866269ed52cde4d398803     # R_fac blinded toward O
 R_f_priv   = 4444444444444444444444444444444444444444444444444444444444444444     # facilitated member
@@ -469,13 +537,21 @@ NIP-CHAT v2 uses **self** (for the owner) and **blinded** (for members and the j
   R_owner_priv`. The hub is authored by `O`; the creator's real key never appears publicly.
 - **Member pseudonym `P`** (blinded): `context = "nip-chat:v2:member-pseudonym:" + d_tag`, base = the
   member's `R`, peer = `O_pub`. The member holds `P_priv = R_priv + t` (and signs as `P`); the owner
-  re-derives the same `P_pub` via `getPeerBlindedPubkey(context, R_pub)` for owner-verification, leaf
-  placement, and squat-resistance — but **cannot** obtain `P_priv`, so cannot impersonate the member.
+  re-derives the same `P_pub` via **`getPeerBlindedPubkeyViaSelf`** (`viaContext` = the owner-pseudonym
+  context, `context` = the member-pseudonym context, `peer` = `R_pub`) — the ECDH runs on the owner's
+  **pseudonym** `O`, not the owner's root (§1.2) — for owner-verification, leaf placement, and
+  squat-resistance, but **cannot** obtain `P_priv`, so cannot impersonate the member.
 - **Facilitated pseudonym `Pf`** (blinded): the same construction one level down — base = the
-  facilitated user's `R`, peer = the facilitator's member pseudonym `P_fac`. The facilitator verifies
-  via `getPeerBlindedPubkey` but cannot act as `Pf`.
+  facilitated user's `R`, peer = the facilitator's member pseudonym `P_fac`. The facilitator re-derives
+  `Pf_pub` via **`getPeerBlindedPubkeyViaBlinded`** (`viaContext` = the facilitator's member-pseudonym
+  context, `viaPeer` = `O_pub`, `context` = the facilitated-pseudonym context, `peer` = `R_f_pub`) but
+  cannot act as `Pf`.
 - **Join address** (blinded): a per-join key, base = the applicant's `R`, peer = `O_pub`; the owner
-  re-derives it from `R_pub` (after opening the sealed `R`) to confirm the applicant controls `R`.
+  re-derives it from `R_pub` (after opening the sealed `R`) via `getPeerBlindedPubkeyViaSelf` (same as the
+  member case, with the join-addr context) to confirm the applicant controls `R`.
 
-All are used through §2 sub-signer operations on remote signers, or derived directly on a local key.
-See NIP-CHAT §0.1, §4.5, §6.3.
+The member **and** owner sides, and the facilitated **and** facilitator sides, are all used through §2
+sub-signer operations on remote signers, or derived directly on a local key. In particular the composed
+verifier ops (§1.2) let the **owner** (ViaSelf) and **facilitator** (ViaBlinded) roles run on a
+remote/browser signer, not only on a local key — the intermediate pseudonym private (`O`/`P_fac`) is
+derived inside the signer and never leaves it. See NIP-CHAT §0.1, §4.5, §6.3.
