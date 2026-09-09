@@ -5,8 +5,8 @@
  * A v2 member event is signed on the wire by `P`, not by the real key `R`. This
  * module builds a signer bound to a NIP-SKD sub-key from either:
  *   - a local key — derive the sub-key's private key and sign with nostr-tools;
- *   - a NIP-SKD remote signer — `getSubkeyPubkey` / `signAsSubkey`, so the
- *     sub-key's private material never leaves the signer.
+ *   - a NIP-SKD remote signer — its per-form `.skd` surface (`getSelfSubkeyPubkey`/`getBlindedPubkey`
+ *     / `signAsSelfSubkey`/`signAsBlinded`, …), so the sub-key's private material never leaves the signer.
  *
  * It deliberately does NOT go through `signWithSigner`, whose guard requires
  * `pubkey === R` (the active account). Here the wire identity is `P`/`O`.

@@ -33,7 +33,7 @@ type UPV2Action =
   | 'nip04_decrypt'
   | 'nip44_encrypt'
   | 'nip44_decrypt'
-  // NIP-SKD (§7 methods, used as the UPV2 action). `skd_sign_as_subkey` gets a 'signed_event'
+  // NIP-SKD (§7 methods, used as the UPV2 action). The `skd_sign_as_*` methods get a 'signed_event'
   // response (like sign_event); the others echo their own action name with a { result } body.
   | 'skd_get_self_subkey_pubkey'
   | 'skd_sign_as_self_subkey'

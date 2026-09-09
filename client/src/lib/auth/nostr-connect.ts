@@ -124,33 +124,76 @@ export class NostrConnectSigner {
   }
 
   // ── NIP-SKD (§7): derive + act as v2-hub pseudonyms via the remote signer ──
-  // Forwards the §7 request methods over NIP-46. `peer` is the TRAILING positional param and is
-  // OMITTED for self derivations. The sub-key never leaves the signer.
+  // Each of the three forms (self/shared/blinded) has its OWN method names; `peer` is a fixed
+  // trailing positional param of the shared/blinded methods and is ABSENT from self (§7), so the
+  // form is never inferred from argument presence. The sub-key never leaves the signer.
 
-  async skdGetSubkeyPubkey(context: string, peerPub?: string): Promise<string> {
+  // self form (no peer)
+  async skdGetSelfSubkeyPubkey(context: string): Promise<string> {
     if (!this.signer) throw new Error('Not logged in')
-    return this.signer.sendRequest('skd_get_subkey_pubkey', peerPub ? [context, peerPub] : [context])
+    return this.signer.sendRequest('skd_get_self_subkey_pubkey', [context])
   }
-  async skdSignAsSubkey(context: string, event: unknown, peerPub?: string): Promise<Record<string, unknown>> {
+  async skdSignAsSelfSubkey(context: string, event: unknown): Promise<Record<string, unknown>> {
     if (!this.signer) throw new Error('Not logged in')
-    const eventJson = JSON.stringify(event)
-    const resultJson = await this.signer.sendRequest('skd_sign_as_subkey', peerPub ? [context, eventJson, peerPub] : [context, eventJson])
+    const resultJson = await this.signer.sendRequest('skd_sign_as_self_subkey', [context, JSON.stringify(event)])
     return JSON.parse(resultJson)
   }
-  async skdNip44EncryptAsSubkey(context: string, recipientPub: string, plaintext: string, peerPub?: string): Promise<string> {
+  async skdNip44EncryptAsSelfSubkey(context: string, recipientPub: string, plaintext: string): Promise<string> {
     if (!this.signer) throw new Error('Not logged in')
-    return this.signer.sendRequest('skd_nip44_encrypt_as_subkey', peerPub ? [context, recipientPub, plaintext, peerPub] : [context, recipientPub, plaintext])
+    return this.signer.sendRequest('skd_nip44_encrypt_as_self_subkey', [context, recipientPub, plaintext])
   }
-  async skdNip44DecryptAsSubkey(context: string, senderPub: string, ciphertext: string, peerPub?: string): Promise<string> {
+  async skdNip44DecryptAsSelfSubkey(context: string, senderPub: string, ciphertext: string): Promise<string> {
     if (!this.signer) throw new Error('Not logged in')
-    return this.signer.sendRequest('skd_nip44_decrypt_as_subkey', peerPub ? [context, senderPub, ciphertext, peerPub] : [context, senderPub, ciphertext])
+    return this.signer.sendRequest('skd_nip44_decrypt_as_self_subkey', [context, senderPub, ciphertext])
+  }
+  // shared form (peer required)
+  async skdGetSharedSubkeyPubkey(context: string, peerPub: string): Promise<string> {
+    if (!this.signer) throw new Error('Not logged in')
+    return this.signer.sendRequest('skd_get_shared_subkey_pubkey', [context, peerPub])
+  }
+  async skdSignAsSharedSubkey(context: string, event: unknown, peerPub: string): Promise<Record<string, unknown>> {
+    if (!this.signer) throw new Error('Not logged in')
+    const resultJson = await this.signer.sendRequest('skd_sign_as_shared_subkey', [context, JSON.stringify(event), peerPub])
+    return JSON.parse(resultJson)
+  }
+  async skdNip44EncryptAsSharedSubkey(context: string, recipientPub: string, plaintext: string, peerPub: string): Promise<string> {
+    if (!this.signer) throw new Error('Not logged in')
+    return this.signer.sendRequest('skd_nip44_encrypt_as_shared_subkey', [context, recipientPub, plaintext, peerPub])
+  }
+  async skdNip44DecryptAsSharedSubkey(context: string, senderPub: string, ciphertext: string, peerPub: string): Promise<string> {
+    if (!this.signer) throw new Error('Not logged in')
+    return this.signer.sendRequest('skd_nip44_decrypt_as_shared_subkey', [context, senderPub, ciphertext, peerPub])
+  }
+  // blinded form (peer required on every method; the blinded private scalar never leaves the signer)
+  async skdGetBlindedPubkey(context: string, peerPub: string): Promise<string> {
+    if (!this.signer) throw new Error('Not logged in')
+    return this.signer.sendRequest('skd_get_blinded_pubkey', [context, peerPub])
+  }
+  async skdGetPeerBlindedPubkey(context: string, peerPub: string): Promise<string> {
+    if (!this.signer) throw new Error('Not logged in')
+    return this.signer.sendRequest('skd_get_peer_blinded_pubkey', [context, peerPub])
+  }
+  async skdSignAsBlinded(context: string, event: unknown, peerPub: string): Promise<Record<string, unknown>> {
+    if (!this.signer) throw new Error('Not logged in')
+    const resultJson = await this.signer.sendRequest('skd_sign_as_blinded', [context, JSON.stringify(event), peerPub])
+    return JSON.parse(resultJson)
+  }
+  async skdNip44EncryptAsBlinded(context: string, recipientPub: string, plaintext: string, peerPub: string): Promise<string> {
+    if (!this.signer) throw new Error('Not logged in')
+    return this.signer.sendRequest('skd_nip44_encrypt_as_blinded', [context, recipientPub, plaintext, peerPub])
+  }
+  async skdNip44DecryptAsBlinded(context: string, senderPub: string, ciphertext: string, peerPub: string): Promise<string> {
+    if (!this.signer) throw new Error('Not logged in')
+    return this.signer.sendRequest('skd_nip44_decrypt_as_blinded', [context, senderPub, ciphertext, peerPub])
   }
 
-  /** One-shot capability probe (§7), capped so a non-SKD signer doesn't slow login. */
+  /** One-shot capability probe (§7), capped so a non-SKD signer doesn't slow login. Probes the
+   *  **blinded** op (not self) — NIP-CHAT v2 authors members under the blinded form, so a signer
+   *  with only the self/shared surface must be treated as unsupported (v2 gated off). */
   private async probeSkd(): Promise<boolean> {
     try {
       const pub = await Promise.race([
-        this.skdGetSubkeyPubkey('nip-skd:capability-probe'),
+        this.skdGetBlindedPubkey('nip-skd:capability-probe', getPublicKey(this.clientSecretKey)),
         new Promise<string>((_, reject) => setTimeout(() => reject(new Error('probe timeout')), 8000)),
       ])
       return /^[0-9a-f]{64}$/i.test(pub)
@@ -163,10 +206,19 @@ export class NostrConnectSigner {
   get skd() {
     if (!this.skdSupported) return undefined
     return {
-      getSubkeyPubkey: (context: string, peerPub?: string) => this.skdGetSubkeyPubkey(context, peerPub),
-      signAsSubkey: (context: string, event: unknown, peerPub?: string) => this.skdSignAsSubkey(context, event, peerPub),
-      nip44EncryptAsSubkey: (context: string, recipientPub: string, plaintext: string, peerPub?: string) => this.skdNip44EncryptAsSubkey(context, recipientPub, plaintext, peerPub),
-      nip44DecryptAsSubkey: (context: string, senderPub: string, ciphertext: string, peerPub?: string) => this.skdNip44DecryptAsSubkey(context, senderPub, ciphertext, peerPub),
+      getSelfSubkeyPubkey: (context: string) => this.skdGetSelfSubkeyPubkey(context),
+      signAsSelfSubkey: (context: string, event: unknown) => this.skdSignAsSelfSubkey(context, event),
+      nip44EncryptAsSelfSubkey: (context: string, recipientPub: string, plaintext: string) => this.skdNip44EncryptAsSelfSubkey(context, recipientPub, plaintext),
+      nip44DecryptAsSelfSubkey: (context: string, senderPub: string, ciphertext: string) => this.skdNip44DecryptAsSelfSubkey(context, senderPub, ciphertext),
+      getSharedSubkeyPubkey: (context: string, peerPub: string) => this.skdGetSharedSubkeyPubkey(context, peerPub),
+      signAsSharedSubkey: (context: string, event: unknown, peerPub: string) => this.skdSignAsSharedSubkey(context, event, peerPub),
+      nip44EncryptAsSharedSubkey: (context: string, recipientPub: string, plaintext: string, peerPub: string) => this.skdNip44EncryptAsSharedSubkey(context, recipientPub, plaintext, peerPub),
+      nip44DecryptAsSharedSubkey: (context: string, senderPub: string, ciphertext: string, peerPub: string) => this.skdNip44DecryptAsSharedSubkey(context, senderPub, ciphertext, peerPub),
+      getBlindedPubkey: (context: string, peerPub: string) => this.skdGetBlindedPubkey(context, peerPub),
+      getPeerBlindedPubkey: (context: string, peerPub: string) => this.skdGetPeerBlindedPubkey(context, peerPub),
+      signAsBlinded: (context: string, event: unknown, peerPub: string) => this.skdSignAsBlinded(context, event, peerPub),
+      nip44EncryptAsBlinded: (context: string, recipientPub: string, plaintext: string, peerPub: string) => this.skdNip44EncryptAsBlinded(context, recipientPub, plaintext, peerPub),
+      nip44DecryptAsBlinded: (context: string, senderPub: string, ciphertext: string, peerPub: string) => this.skdNip44DecryptAsBlinded(context, senderPub, ciphertext, peerPub),
     }
   }
 
