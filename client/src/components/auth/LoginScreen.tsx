@@ -24,6 +24,7 @@ import {
   type StoredAccount, type StoredSeed,
 } from '@/lib/auth/secure-storage'
 import { rustBackend, vaultBackend, applyLogin } from '@/lib/auth/authBackend'
+import { rememberLogin, getRememberedLogin } from '@/lib/auth/autoLogin'
 import { verifyBackupMatches } from '@/lib/auth/backupCrypto'
 import { QRScanner } from '@/components/auth/QRScanner'
 import { PC55Signer, discover } from '@/lib/auth/pc55'
@@ -292,6 +293,8 @@ export function LoginScreen() {
       if (data.pubkey && data.privKeyHex) {
         // Desktop: the released private key was stashed before the reload.
         login(data.pubkey, data.authMethod as 'seed' | 'nsec', data.privKeyHex)
+        // Point auto-login at the switched-to account (the vault branch does this via applyLogin).
+        rememberLogin({ method: data.authMethod as 'seed' | 'nsec', pubkey: data.pubkey })
       } else if (data.pubkey && data.authMethod === 'vault') {
         // PWA: re-unlock the target account in the vault's own overlay (the app never sees the PIN).
         // The vault collects the PIN in its own overlay, so the pin arg is unused here.
@@ -300,51 +303,126 @@ export function LoginScreen() {
     } catch { /* corrupt data, ignore */ }
   }, [login])
 
-  // Set once the user manually starts a bunker connect, so the background
-  // auto-restore effect below stops retrying and stops writing its status/errors
-  // over the manual attempt (they share the same error slot).
+  // Set once the user manually starts ANY login, so the background auto-resume effect below stops
+  // retrying and stops writing its status/errors over the manual attempt (they share the error slot).
   const bunkerTakeoverRef = useRef(false)
 
-  // ── Bunker auto-login from localStorage (NIP-46 remote signer) ──
+  // ── Auto-login: resume the last method + account on startup (see lib/auth/autoLogin.ts). Explicit
+  //    user actions (account switch / delete) have their own effects and take priority, so skip when
+  //    one is pending. Cleared on logout, so a logged-out app never resumes. ──
   useEffect(() => {
-    const bunkerStored = localStorage.getItem(StorageKey.BUNKER_URL)
-    const clientSecretStored = localStorage.getItem(StorageKey.BUNKER_CLIENT_SECRET)
-    if (!bunkerStored || !clientSecretStored) return
+    if (sessionStorage.getItem('pending-switch') || sessionStorage.getItem('pending-delete')) return
 
     let cancelled = false
-    let retryCount = 0
-    const maxRetries = 3
+    const stop = () => cancelled || bunkerTakeoverRef.current
 
-    const attempt = async (): Promise<void> => {
-      try {
-        const signer = new BunkerSigner(clientSecretStored)
-        // Bound each attempt: a flaky/suspended relay can leave login() hanging
-        // forever (common on mobile after the PWA was backgrounded), which would
-        // stall the whole retry loop. Time out so the next retry actually fires.
-        const pubkey = await Promise.race([
-          signer.login(bunkerStored, false),
-          new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Timed out reaching the remote signer')), 20_000)),
-        ])
-        if (cancelled || bunkerTakeoverRef.current) return
-        setSigner(signer)
-        login(pubkey, 'nip46')
-      } catch (err) {
-        if (cancelled || bunkerTakeoverRef.current) return
-        retryCount++
-        if (retryCount < maxRetries) {
-          setError(`Reconnecting to remote signer… (${retryCount + 1}/${maxRetries})`)
-          await new Promise((r) => setTimeout(r, 2000))
-          if (!cancelled && !bunkerTakeoverRef.current) return attempt()
-        } else {
-          const msg = err instanceof Error ? err.message : 'Connection failed'
-          setError(`Remote signer unreachable: ${msg}. Try again from the Connect button below.`)
+    // Silent reconnect of a bunker-style connection (bunker://, and nostrconnect:// post-handshake).
+    const resumeBunker = async (url: string, secret: string): Promise<void> => {
+      let retry = 0
+      const attempt = async (): Promise<void> => {
+        try {
+          // Bound each attempt: a flaky/suspended relay can leave login() hanging forever (common on
+          // mobile after the PWA was backgrounded), which would stall the whole retry loop.
+          const signer = new BunkerSigner(secret)
+          const pubkey = await Promise.race([
+            signer.login(url, false),
+            new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Timed out reaching the remote signer')), 20_000)),
+          ])
+          if (stop()) return
+          setSigner(signer)
+          login(pubkey, 'nip46')
+        } catch (err) {
+          if (stop()) return
+          retry++
+          if (retry < 3) {
+            setError(`Reconnecting to remote signer… (${retry + 1}/3)`)
+            await new Promise((r) => setTimeout(r, 2000))
+            if (!stop()) return attempt()
+          } else {
+            setError(`Remote signer unreachable: ${err instanceof Error ? err.message : 'Connection failed'}. Try again from the Connect button below.`)
+          }
         }
+      }
+      setError('Connecting to remote signer… (1/3)')
+      return attempt()
+    }
+
+    const run = async () => {
+      const desc = getRememberedLogin()
+
+      // Back-compat: a pre-descriptor bunker user still auto-resumes from their stored bunker keys.
+      if (!desc) {
+        const url = localStorage.getItem(StorageKey.BUNKER_URL)
+        const secret = localStorage.getItem(StorageKey.BUNKER_CLIENT_SECRET)
+        if (url && secret) await resumeBunker(url, secret)
+        return
+      }
+
+      try {
+        switch (desc.method) {
+          case 'bunker':
+          case 'nostrconnect': {
+            const url = localStorage.getItem(StorageKey.BUNKER_URL)
+            const secret = localStorage.getItem(StorageKey.BUNKER_CLIENT_SECRET)
+            if (url && secret) await resumeBunker(url, secret)
+            break
+          }
+          case 'pc55': {
+            // DENOS "Local" — silent only if the signer app is running; fail quietly otherwise.
+            setError('Connecting to local signer…')
+            const info = await discover()
+            if (stop()) return
+            if (!info) { clearError(); return }
+            const signer = new PC55Signer()
+            await signer.init()
+            const pubkey = await signer.getPublicKey()
+            if (stop()) return
+            setSigner(signer)
+            login(pubkey, 'pc55')
+            clearError()
+            break
+          }
+          case 'nip07': {
+            // Browser extension — silent if present and still authorized for this origin.
+            if (!window.nostr) return
+            const signer = new Nip07Signer()
+            await signer.init()
+            const pubkey = await signer.getPublicKey()
+            if (stop()) return
+            setSigner(signer)
+            login(pubkey, 'nip46')
+            break
+          }
+          case 'vault': {
+            // Vault re-locks on reload — re-open its PIN overlay for the last account (a dismissed
+            // prompt is not an error).
+            try {
+              const r = await vaultBackend.loginAccount(desc.pubkey, '')
+              if (!stop()) applyLogin(desc.pubkey, r)
+            } catch { /* user dismissed the vault unlock */ }
+            break
+          }
+          case 'seed':
+          case 'nsec': {
+            // Desktop OS-keyring account — PIN-gated. Pre-select it and jump straight to the PIN screen.
+            const accts = await rustBackend.listAccounts()
+            const acct = accts.find((a) => a.pubkey === desc.pubkey)
+            if (acct && !stop()) { setSelectedAccount(acct); setScreen('pin-login') }
+            break
+          }
+          case 'upv2': {
+            // UPV2 needs the password again — pre-fill the identifier on the UPV2 form.
+            if (desc.identifier) setUsername(desc.identifier)
+            setScreen('upv2')
+            break
+          }
+        }
+      } catch (err) {
+        if (!stop()) console.error('[auto-login] resume failed:', err)
       }
     }
 
-    setError('Connecting to remote signer… (1/3)')
-    attempt()
-
+    run()
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -473,6 +551,7 @@ export function LoginScreen() {
     if (!username.trim()) { setError('Enter a DNN ID or npub'); return }
     if (!password.trim()) { setError('Enter your password'); return }
 
+    bunkerTakeoverRef.current = true // cancel any in-flight auto-resume
     setLoading('upv2')
     clearError()
     try {
@@ -483,6 +562,7 @@ export function LoginScreen() {
       }
       setSigner(upv2Service as any)
       login(result.session.signerPubkey, 'upv2')
+      rememberLogin({ method: 'upv2', pubkey: result.session.signerPubkey, identifier: username.trim() })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed')
     } finally {
@@ -492,6 +572,7 @@ export function LoginScreen() {
 
   // ─── PC55 Login (detect-on-click) ───
   const handleLocalLogin = async () => {
+    bunkerTakeoverRef.current = true // cancel any in-flight auto-resume
     setLoading('pc55')
     clearError()
     try {
@@ -517,6 +598,7 @@ export function LoginScreen() {
       const pubkey = await signer.getPublicKey()
       setSigner(signer)
       login(pubkey, 'pc55')
+      rememberLogin({ method: 'pc55', pubkey })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to connect to local signer')
     } finally {
@@ -526,6 +608,7 @@ export function LoginScreen() {
 
   // ─── NIP-07 Login (Browser Extension) ───
   const handleNip07Login = async () => {
+    bunkerTakeoverRef.current = true // cancel any in-flight auto-resume
     clearError()
     // If no extension detected, show the install guide
     if (!window.nostr) {
@@ -539,6 +622,7 @@ export function LoginScreen() {
       const pubkey = await signer.getPublicKey()
       setSigner(signer)
       login(pubkey, 'nip46') // group with external signers
+      rememberLogin({ method: 'nip07', pubkey })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Browser extension login failed')
     } finally {
@@ -573,6 +657,7 @@ export function LoginScreen() {
       localStorage.setItem(StorageKey.BUNKER_CLIENT_SECRET, signer.getClientSecretKey())
       setSigner(signer)
       login(pubkey, 'nip46')
+      rememberLogin({ method: 'bunker', pubkey })
     } catch (err) {
       console.error('[Bunker] login failed:', err)
       // Show the raw thrown error verbatim so the actual failure is visible
@@ -587,6 +672,7 @@ export function LoginScreen() {
 
   // ─── NIP-46: Open combined dialog ───
   const openNip46Dialog = () => {
+    bunkerTakeoverRef.current = true // cancel any in-flight auto-resume
     clearError()
     const details = generateNostrConnectDetails()
     setConnectDetails(details)
@@ -611,6 +697,14 @@ export function LoginScreen() {
       if (abortController.signal.aborted) return
       setSigner(signer)
       login(pubkey, 'nip46')
+      // A connected nostrconnect:// signer is a bunker connection under the hood — persist its derived
+      // bunker string + client secret so startup resumes it via the same bunker path.
+      const bunkerStr = signer.getBunkerString()
+      if (bunkerStr) {
+        localStorage.setItem(StorageKey.BUNKER_URL, bunkerStr)
+        localStorage.setItem(StorageKey.BUNKER_CLIENT_SECRET, signer.getClientSecretKey())
+        rememberLogin({ method: 'nostrconnect', pubkey })
+      }
     } catch (err) {
       if (abortController.signal.aborted) return
       setConnectError(
@@ -1098,6 +1192,7 @@ export function LoginScreen() {
 
   // ─── PIN Login for saved account ───
   const openPinLogin = async (account: StoredAccount) => {
+    bunkerTakeoverRef.current = true // cancel any in-flight auto-resume
     clearError()
     setSelectedAccount(account)
     setPin('')

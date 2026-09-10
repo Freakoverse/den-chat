@@ -90,7 +90,9 @@ export const useUserStore = create<UserState>((set) => ({
       currentState.signer.close()
     }
 
-    // Clear persisted bunker credentials so auto-login doesn't re-authenticate
+    // Clear the auto-login descriptor + persisted bunker credentials so a logged-out app stays on the
+    // login screen and never silently re-authenticates (see lib/auth/autoLogin.ts).
+    localStorage.removeItem(StorageKey.LAST_LOGIN)
     localStorage.removeItem(StorageKey.BUNKER_URL)
     localStorage.removeItem(StorageKey.BUNKER_CLIENT_SECRET)
 

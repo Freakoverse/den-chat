@@ -16,6 +16,7 @@
 import { nip19 } from 'nostr-tools'
 import { useUserStore, type AuthMethod, type ISigner } from '@/stores/userStore'
 import { getVaultClient, vaultSigner } from '@/lib/auth/vaultClient'
+import { rememberLogin } from '@/lib/auth/autoLogin'
 import {
   listAccounts as rsListAccounts, listSeeds as rsListSeeds, getActiveAccount as rsGetActive,
   generateAccount as rsGenerateAccount, generateNewSeed as rsGenerateNewSeed, deriveNextAccount as rsDerive,
@@ -101,6 +102,11 @@ function signTxLocally(privKey: string, chain: string, tx: BtcSignTx | EvmSignTx
 export function applyLogin(pubkey: string, r: LoginResult) {
   if (r.signer) useUserStore.getState().setSigner(r.signer)
   useUserStore.getState().login(pubkey, r.authMethod, r.privKey)
+  // Remember vault / desktop-keyring logins so startup resumes to their PIN prompt for this account
+  // (autoLogin.ts). The remote-signer methods record themselves in their own LoginScreen handlers.
+  if (r.authMethod === 'vault' || r.authMethod === 'seed' || r.authMethod === 'nsec') {
+    rememberLogin({ method: r.authMethod, pubkey })
+  }
 }
 
 /* ─── Desktop: OS keyring via Tauri ─── */

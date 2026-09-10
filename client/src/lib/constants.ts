@@ -119,6 +119,8 @@ export const StorageKey = {
   /** NIP-46 Bunker auto-login persistence */
   BUNKER_URL: 'den-chat-bunker-url',
   BUNKER_CLIENT_SECRET: 'den-chat-bunker-client-secret',
+  /** Auto-login descriptor: last login method + account to resume on startup (see lib/auth/autoLogin.ts) */
+  LAST_LOGIN: 'den-chat-last-login',
   /** Notification read-state event caches (NIP-78 event JSON) */
   NOTIF_SOCIAL_SEEN_AT: 'den-chat-notif-social',
   NOTIF_HUB_READ_STATE: 'den-chat-notif-hub',
