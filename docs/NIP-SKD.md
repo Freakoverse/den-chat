@@ -175,8 +175,13 @@ anywhere the root key is available. HKDF's two stages carry the separation:
 `"nip-skd:" ‖ form ‖ 0x1F` domain tag (§1). The rules below govern `context`:
 
 - MUST be **non-empty**.
-- SHOULD be **namespaced** by the consuming protocol/app (e.g. `"nip-chat:v2:..."`) to avoid
-  cross-app collisions on the same input.
+- SHOULD be **namespaced by the consuming standard/protocol** (e.g. `"nip-chat:v2:..."`), **not by the
+  app**. An interoperable derived key must be reproducible by *every* app that implements the standard, so
+  baking an app name into the context (`"den-chat:..."` instead of `"nip-chat:..."`) would make two apps
+  derive *different* keys for the same purpose and break interop — e.g. a member on one client and a
+  member on another could no longer derive the same hub pseudonym or verify each other. Namespace by the
+  **app** only for a key a single app deliberately keeps private and never expects another implementation
+  to reproduce.
 - MUST be **stable** per purpose — the derived key depends on it; changing the string changes
   the key.
 
