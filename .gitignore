@@ -41,6 +41,7 @@ desktop.ini
 !.vscode/extensions.json
 !.vscode/settings.json
 .idea/
+.claude/
 *.suo
 *.ntvs*
 *.njsproj
