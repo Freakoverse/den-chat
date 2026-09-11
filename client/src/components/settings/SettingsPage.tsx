@@ -49,7 +49,7 @@ import {
   Copy, Check, Lock, FileDown, AlertTriangle, X, RotateCcw, RefreshCw, Rocket, FileUp,
   Loader2, Send, HelpCircle, XCircle, UserMinus, ShieldOff, Tag, Download, QrCode,
   GripVertical, FolderPlus, ChevronDown, ChevronRight, Pencil, ListPlus, Upload, Undo2,
-  BookOpen, Mic, Volume2, Camera, MonitorPlay, Megaphone, Crown, Sparkles, Zap, Palette as PaletteIcon, BadgeCheck, MessageCircleOff, ArrowUp, ArrowDown, Heart, LogOut, Gamepad2, Activity, Save, MoreVertical,
+  BookOpen, Mic, Volume2, Camera, MonitorPlay, Megaphone, Crown, Sparkles, Zap, Palette as PaletteIcon, BadgeCheck, MessageCircleOff, ArrowUp, ArrowDown, Heart, LogOut, Gamepad2, Activity, Save, MoreVertical, ListMinus,
 } from 'lucide-react'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -5220,50 +5220,45 @@ function MyHubsTab() {
             </button>
           </div>
         ) : (
-          <div className="flex items-center gap-0.5 shrink-0">
+          <div className="relative shrink-0">
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
-                  onClick={() => {
-                    if (isNotFound) setConfirmRemove(entry.dTag)
-                    else handleRemoveFromList(entry.dTag)
-                  }}
-                  aria-label="Remove from hub list"
-                  className="p-1 rounded-md text-muted-foreground hover:text-destructive hover:bg-accent/50 transition-colors cursor-pointer"
+                  onClick={() => setMenuOpenFor(menuOpenFor === entry.dTag ? null : entry.dTag)}
+                  aria-label="Hub actions"
+                  className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors cursor-pointer"
                 >
-                  <Trash2 size={14} />
+                  <MoreVertical size={14} />
                 </button>
               </TooltipTrigger>
-              <TooltipContent side="top" className="text-xs">Remove from your hub list — does not delete the hub</TooltipContent>
+              <TooltipContent side="top" className="text-xs">Hub actions</TooltipContent>
             </Tooltip>
-            {isOwned && (
-              <div className="relative">
-                <Tooltip>
-                  <TooltipTrigger asChild>
+            {menuOpenFor === entry.dTag && (
+              <>
+                <div className="fixed inset-0 z-[60]" onClick={() => setMenuOpenFor(null)} />
+                <div className="absolute right-0 top-full mt-1 z-[61] min-w-[190px] rounded-xl border border-border bg-popover/95 backdrop-blur-md shadow-xl p-1 flex flex-col gap-0.5 text-sm animate-in fade-in-0 zoom-in-95">
+                  {/* Remove from list — leaves the hub itself intact (not-found hubs get an extra confirm). */}
+                  <button
+                    onClick={() => {
+                      setMenuOpenFor(null)
+                      if (isNotFound) setConfirmRemove(entry.dTag)
+                      else handleRemoveFromList(entry.dTag)
+                    }}
+                    className="flex items-center gap-2.5 w-full px-3 py-2 rounded-md text-foreground hover:bg-accent/50 transition-colors cursor-pointer"
+                  >
+                    <ListMinus size={14} className="text-muted-foreground" /> Remove from list
+                  </button>
+                  {/* Request delete — actually deletes the hub; owners only. */}
+                  {isOwned && (
                     <button
-                      onClick={() => setMenuOpenFor(menuOpenFor === entry.dTag ? null : entry.dTag)}
-                      aria-label="Hub actions"
-                      className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors cursor-pointer"
+                      onClick={() => { setMenuOpenFor(null); setDeleteTarget(entry.dTag) }}
+                      className="flex items-center gap-2.5 w-full px-3 py-2 rounded-md text-destructive hover:bg-destructive/10 transition-colors cursor-pointer"
                     >
-                      <MoreVertical size={14} />
+                      <Trash2 size={14} /> Request delete…
                     </button>
-                  </TooltipTrigger>
-                  <TooltipContent side="top" className="text-xs">More actions</TooltipContent>
-                </Tooltip>
-                {menuOpenFor === entry.dTag && (
-                  <>
-                    <div className="fixed inset-0 z-[60]" onClick={() => setMenuOpenFor(null)} />
-                    <div className="absolute right-0 top-full mt-1 z-[61] min-w-[180px] rounded-xl border border-border bg-popover/95 backdrop-blur-md shadow-xl p-1 flex flex-col gap-0.5 text-sm animate-in fade-in-0 zoom-in-95">
-                      <button
-                        onClick={() => { setMenuOpenFor(null); setDeleteTarget(entry.dTag) }}
-                        className="flex items-center gap-2.5 w-full px-3 py-2 rounded-md text-destructive hover:bg-destructive/10 transition-colors cursor-pointer"
-                      >
-                        <Trash2 size={14} /> Request delete…
-                      </button>
-                    </div>
-                  </>
-                )}
-              </div>
+                  )}
+                </div>
+              </>
             )}
           </div>
         )}
