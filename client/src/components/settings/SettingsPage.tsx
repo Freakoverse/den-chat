@@ -3,7 +3,7 @@ import { useEscToClose } from '@/hooks/useEscToClose'
 import { createPortal } from 'react-dom'
 import { useTheme } from '@/providers/ThemeProvider'
 import { useUserStore, type ISigner } from '@/stores/userStore'
-import { useHubStore, type HubStatus, type HubFolder } from '@/stores/hubStore'
+import { useHubStore, type HubStatus, type HubFolder, type HubData } from '@/stores/hubStore'
 import { useBlockStore } from '@/stores/blockStore'
 import { useFollowStore } from '@/stores/followStore'
 import { useMessageStore } from '@/stores/messageStore'
@@ -49,7 +49,7 @@ import {
   Copy, Check, Lock, FileDown, AlertTriangle, X, RotateCcw, RefreshCw, Rocket, FileUp,
   Loader2, Send, HelpCircle, XCircle, UserMinus, ShieldOff, Tag, Download, QrCode,
   GripVertical, FolderPlus, ChevronDown, ChevronRight, Pencil, ListPlus, Upload, Undo2,
-  BookOpen, Mic, Volume2, Camera, MonitorPlay, Megaphone, Crown, Sparkles, Zap, Palette as PaletteIcon, BadgeCheck, MessageCircleOff, ArrowUp, ArrowDown, Heart, LogOut, Gamepad2, Activity, Save,
+  BookOpen, Mic, Volume2, Camera, MonitorPlay, Megaphone, Crown, Sparkles, Zap, Palette as PaletteIcon, BadgeCheck, MessageCircleOff, ArrowUp, ArrowDown, Heart, LogOut, Gamepad2, Activity, Save, MoreVertical,
 } from 'lucide-react'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -4885,6 +4885,9 @@ function MyHubsTab() {
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null)
   const [confirmReDelete, setConfirmReDelete] = useState<string | null>(null)
   const [reDeleting, setReDeleting] = useState<string | null>(null)
+  // Per-row "…" action menu (dTag of the open one) + the hub currently in the Request-Delete modal.
+  const [menuOpenFor, setMenuOpenFor] = useState<string | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
   const [hideDeletedInList, setHideDeletedInList] = useState(true)
   const [adding, setAdding] = useState<string | null>(null)
   const [publishing, setPublishing] = useState(false)
@@ -5153,6 +5156,8 @@ function MyHubsTab() {
     const status = hubStatus[entry.dTag]
     const isNotFound = status === 'not-found'
     const isRemoving = removing === entry.dTag
+    // Request-delete is only meaningful for hubs you created/own (matches the "Created by you" tag).
+    const isOwned = !!hub && (hub.creatorPubkey === pubkey || hub.ownerRealPubkey === pubkey)
 
     return (
       <div
@@ -5197,9 +5202,9 @@ function MyHubsTab() {
           {hub && (hub.creatorPubkey === pubkey || hub.ownerRealPubkey === pubkey) && <p className="text-[10px] text-primary/60">Created by you</p>}
         </div>
 
-        {/* Remove button */}
+        {/* Actions: remove-from-list (trash) + owner "…" menu (Request delete) */}
         {confirmRemove === entry.dTag ? (
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 shrink-0">
             <button
               onClick={() => handleRemoveFromList(entry.dTag)}
               disabled={isRemoving}
@@ -5215,18 +5220,52 @@ function MyHubsTab() {
             </button>
           </div>
         ) : (
-          <button
-            onClick={() => {
-              if (isNotFound) {
-                setConfirmRemove(entry.dTag)
-              } else {
-                handleRemoveFromList(entry.dTag)
-              }
-            }}
-            className="text-xs text-muted-foreground hover:text-destructive transition-colors cursor-pointer"
-          >
-            <Trash2 size={14} />
-          </button>
+          <div className="flex items-center gap-0.5 shrink-0">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={() => {
+                    if (isNotFound) setConfirmRemove(entry.dTag)
+                    else handleRemoveFromList(entry.dTag)
+                  }}
+                  aria-label="Remove from hub list"
+                  className="p-1 rounded-md text-muted-foreground hover:text-destructive hover:bg-accent/50 transition-colors cursor-pointer"
+                >
+                  <Trash2 size={14} />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="text-xs">Remove from your hub list — does not delete the hub</TooltipContent>
+            </Tooltip>
+            {isOwned && (
+              <div className="relative">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={() => setMenuOpenFor(menuOpenFor === entry.dTag ? null : entry.dTag)}
+                      aria-label="Hub actions"
+                      className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors cursor-pointer"
+                    >
+                      <MoreVertical size={14} />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="text-xs">More actions</TooltipContent>
+                </Tooltip>
+                {menuOpenFor === entry.dTag && (
+                  <>
+                    <div className="fixed inset-0 z-[60]" onClick={() => setMenuOpenFor(null)} />
+                    <div className="absolute right-0 top-full mt-1 z-[61] min-w-[180px] rounded-xl border border-border bg-popover/95 backdrop-blur-md shadow-xl p-1 flex flex-col gap-0.5 text-sm animate-in fade-in-0 zoom-in-95">
+                      <button
+                        onClick={() => { setMenuOpenFor(null); setDeleteTarget(entry.dTag) }}
+                        className="flex items-center gap-2.5 w-full px-3 py-2 rounded-md text-destructive hover:bg-destructive/10 transition-colors cursor-pointer"
+                      >
+                        <Trash2 size={14} /> Request delete…
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
         )}
       </div>
     )
@@ -5626,7 +5665,118 @@ function MyHubsTab() {
       <div className="mt-6 pt-6 border-t border-border">
         <RebroadcastHubTool />
       </div>
+
+      {/* Request-delete modal — same two-step deletion as Hub Settings → Security, gated on typing the name */}
+      {deleteTarget && hubs[deleteTarget] && (
+        <RequestDeleteHubModal
+          hub={hubs[deleteTarget]}
+          signer={signer}
+          privateKey={privateKey}
+          onClose={() => setDeleteTarget(null)}
+          onDeleted={() => { setHubStatus(deleteTarget, 'deleted'); setDeleteTarget(null) }}
+        />
+      )}
     </div>
+  )
+}
+
+/* ─────────── Request Delete Hub (from My Hubs list) ─────────── */
+// Mirrors Hub Settings → Security: type the hub name to confirm, then a final confirm dialog runs the
+// same two-step deletion publish (shared requestHubDeletion helper). Portaled + fixed so the list's
+// scroll/overflow can't clip it.
+function RequestDeleteHubModal({ hub, signer, privateKey, onClose, onDeleted }: {
+  hub: HubData
+  signer: ISigner | null
+  privateKey: string | null
+  onClose: () => void
+  onDeleted: () => void
+}) {
+  const [confirmName, setConfirmName] = useState('')
+  const [showFinalConfirm, setShowFinalConfirm] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState(false)
+  useEscToClose(onClose, true)
+
+  const nameMatches = confirmName === hub.name
+
+  const handleDelete = async () => {
+    setDeleting(true)
+    setError(null)
+    try {
+      const { requestHubDeletion } = await import('@/lib/hub/requestDelete')
+      await requestHubDeletion(hub, signer, privateKey)
+      // If we're viewing this (now-deleted) hub, drop out of it like the in-hub flow does.
+      if (useHubStore.getState().activeHubId === hub.dTag) useHubStore.getState().setActiveHub(null)
+      onDeleted()
+    } catch (err: any) {
+      setError(err?.message || 'Failed to publish delete request')
+      setShowFinalConfirm(false)
+      setDeleting(false)
+    }
+  }
+
+  return createPortal(
+    // Backdrop-dismiss is suppressed while the final confirm dialog is open so a click on ITS backdrop
+    // (which bubbles up here) only closes that dialog, not this whole modal.
+    <div className="fixed inset-0 z-[200] flex items-center justify-center px-3" onClick={showFinalConfirm ? undefined : onClose}>
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+      <div
+        className="relative z-10 w-full max-w-md rounded-xl border border-border bg-background shadow-2xl animate-in fade-in-0 zoom-in-95 flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+          <div className="flex items-center gap-2">
+            <AlertTriangle size={16} className="text-destructive" />
+            <h3 className="text-sm font-semibold text-destructive">Request Delete Hub</h3>
+          </div>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground cursor-pointer">
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="px-5 py-4 flex flex-col gap-4">
+          <p className="text-sm text-muted-foreground">
+            This publishes a deletion request for <strong className="text-foreground">{hub.name}</strong>.
+            Because this is a decentralized network, deletion is a <strong className="text-foreground">request</strong> — relays may or may not honor it, and it may not be permanent or reversible.
+          </p>
+
+          <div className="space-y-2">
+            <p className="text-sm text-muted-foreground">To confirm, type the hub name (case-sensitive):</p>
+            <div className="rounded-md border border-border bg-muted/30 px-3 py-2">
+              <span className="text-sm font-mono text-foreground">{hub.name}</span>
+            </div>
+            <Input
+              value={confirmName}
+              onChange={(e) => setConfirmName(e.target.value)}
+              placeholder="Type the hub name to confirm..."
+              className="font-mono"
+              autoFocus
+            />
+          </div>
+
+          {error && <p className="text-sm text-destructive">{error}</p>}
+
+          <button
+            onClick={() => setShowFinalConfirm(true)}
+            disabled={!nameMatches || deleting}
+            className="w-full h-9 rounded-md bg-destructive text-white text-sm font-medium hover:bg-destructive/90 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {deleting ? 'Publishing…' : 'Publish Delete Request'}
+          </button>
+        </div>
+      </div>
+
+      {showFinalConfirm && (
+        <DeleteConfirmDialog
+          onConfirm={handleDelete}
+          onCancel={() => setShowFinalConfirm(false)}
+          title="Request Delete Hub"
+          confirmLabel="Yes, Delete Hub"
+        />
+      )}
+    </div>,
+    document.body,
   )
 }
 

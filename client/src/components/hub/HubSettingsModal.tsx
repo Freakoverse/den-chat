@@ -33,9 +33,9 @@ import { truncateNpub, npubShort } from '@/lib/utils'
 import { uploadToBlossomServers, blossomServers as blossomServerManager } from '@/lib/blossom'
 import type { UploadProgress } from '@/lib/blossom'
 import { buildHubEvent } from '@/lib/hub/buildHubEvent'
-import { signWithSigner, mineAndSign, createUnsignedEvent } from '@/lib/nostr'
+import { mineAndSign } from '@/lib/nostr'
 import { publishToSpecificRelays, publishCriticalWithFailover, getRelayList } from '@/lib/nostr/relay-pool'
-import { getPublishRelays, getDeletePublishRelays } from '@/stores/postingBehaviourStore'
+import { getPublishRelays } from '@/stores/postingBehaviourStore'
 import { KINDS } from '@/lib/crypto/constants'
 import { aesDecrypt } from '@/lib/crypto/aes'
 import { deriveChannelKey } from '@/lib/crypto/hkdf'
@@ -3768,51 +3768,10 @@ function DangerousPage({ hub, onClose, setHubStatus }: DangerousPageProps) {
 
   const handleDelete = async () => {
     try {
-      // 1. Re-publish hub event with deleted tag (primary — addressable replaceable overwrite)
-      // Use eventCreatedAt + 1 so the replacement doesn't jump in timeline
-      const deleteCreatedAt = hub.eventCreatedAt ? hub.eventCreatedAt + 1 : undefined
-      const deletedHubEvent = createUnsignedEvent(KINDS.HUB_EVENT, '', [
-        ['d', hub.dTag],
-        ['n', hub.name],
-        ['epoch', hub.epoch.toString()],
-        ['deleted', 'true'],
-      ] as [string, ...string[]][], deleteCreatedAt)
-
-      // Mine the tombstone (a kind-36942 publish) to the hub's message PoW so PoW-enforcing
-      // relays accept the deletion overwrite. The kind-5 request below stays PoW-free.
-      // v2: the hub is authored by the owner pseudonym O, so the tombstone must be signed as O
-      // to actually replace it (a root-signed event is a different addressable event).
-      let signedDeletedHub
-      const { isV2: isV2Del } = await import('@/lib/hub/version')
-      const v2Delete = isV2Del(hub)
-      let ownerSigner: any = null
-      if (v2Delete) {
-        const { makeSubkeySigner, mineAndSignAsSubkey } = await import('@/lib/nostr/v2send')
-        const { ChatContext } = await import('@/lib/crypto/skd')
-        ownerSigner = makeSubkeySigner(ChatContext.owner(hub.dTag), { privateKey, signer })
-        signedDeletedHub = await mineAndSignAsSubkey(deletedHubEvent, hub.minPow, ownerSigner)
-      } else {
-        signedDeletedHub = await mineAndSign(deletedHubEvent, hub.minPow, hub.creatorPubkey, signer, privateKey)
-      }
-      // Deletions publish fire-once to EVERY delete relay (getDeletePublishRelays already returns all of
-      // them), NOT via failover — failover stops at `target` (3) accepted, which would leave the tombstone
-      // off any relay past the first few, so a relay still holding the original keeps serving the hub. A
-      // delete only takes effect on a relay that actually receives it, so it must reach them all.
-      await publishToSpecificRelays(getDeletePublishRelays([...hub.generalRelays]), signedDeletedHub)
-
-      // 2. NIP-09 Kind 5 deletion request as fallback. On v2 it MUST be signed as O — the hub event's
-      // author — not R_owner: (a) NIP-09 relays only honor a deletion signed by the target's author, and
-      // the target 36942:O:dTag is authored by O; (b) an R_owner-signed kind-5 referencing the hub
-      // coordinate would publicly link R_owner → O → this private hub, deanonymizing the owner. v1 signs
-      // as R (which IS the hub author there).
-      const deleteEvent = createUnsignedEvent(5, 'Hub deletion requested', [
-        ['a', `36942:${hub.creatorPubkey}:${hub.dTag}`],
-      ] as [string, ...string[]][])
-
-      const signedDelete = v2Delete && ownerSigner
-        ? await ownerSigner.signEvent(deleteEvent)
-        : await signWithSigner(deleteEvent, signer, privateKey)
-      await publishToSpecificRelays(getDeletePublishRelays([...hub.generalRelays]), signedDelete)
+      // The two-step deletion publish (deleted-tag hub overwrite + NIP-09 kind-5) lives in a shared
+      // helper so Settings → My Hubs can trigger the identical flow.
+      const { requestHubDeletion } = await import('@/lib/hub/requestDelete')
+      await requestHubDeletion(hub, signer, privateKey)
 
       // Update local state
       setHubStatus(hub.dTag, 'deleted')
