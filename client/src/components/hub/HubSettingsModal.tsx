@@ -248,7 +248,11 @@ export function HubSettingsModal({ open, onClose, hub }: HubSettingsModalProps) 
   const [editCategories, setEditCategories] = useState<Category[]>(() => [...hub.categories].sort((a, b) => a.position - b.position))
   const [editChannels, setEditChannels] = useState<Channel[]>(() => [...hub.channels])
   const [editMinPow, setEditMinPow] = useState(hub.minPow || 0)
-  const [editJoinMinPow, setEditJoinMinPow] = useState(hub.joinMinPow || 0)
+  // Join PoW: a hub with no `W` tag (joinMinPow 0 — e.g. one made before the join-PoW system existed)
+  // defaults the slider to 15 (the create default), so publishing any settings edit adds `W=15`. The
+  // owner can still drag it back to 0 to disable. `|| 15` also treats an explicitly-disabled hub as 15,
+  // since "no W" and "W disabled" are identical on the wire — the owner just re-drags to 0 if they want.
+  const [editJoinMinPow, setEditJoinMinPow] = useState(hub.joinMinPow || 15)
   const [editMessageExpiration, setEditMessageExpiration] = useState(hub.messageExpiration || 0)
   const [editNsfw, setEditNsfw] = useState(hub.nsfw || false)
   const [editDiscoverable, setEditDiscoverable] = useState(hub.discoverable !== false)
@@ -293,7 +297,7 @@ export function HubSettingsModal({ open, onClose, hub }: HubSettingsModalProps) 
       setEditCategories([...hub.categories].sort((a, b) => a.position - b.position))
       setEditChannels([...hub.channels])
       setEditMinPow(hub.minPow || 0)
-      setEditJoinMinPow(hub.joinMinPow || 0)
+      setEditJoinMinPow(hub.joinMinPow || 15)
       setEditNsfw(hub.nsfw || false)
       setEditDiscoverable(hub.discoverable !== false)
       setEditRelays([...hub.generalRelays])
@@ -316,7 +320,7 @@ export function HubSettingsModal({ open, onClose, hub }: HubSettingsModalProps) 
     if (JSON.stringify(editChannels.map(c => ({ id: c.channelId, name: c.name, cat: c.categoryId, pos: c.position, type: c.type, perms: c.permissions }))) !==
       JSON.stringify(hub.channels.map(c => ({ id: c.channelId, name: c.name, cat: c.categoryId, pos: c.position, type: c.type, perms: c.permissions })))) return true
     if (editMinPow !== (hub.minPow || 0)) return true
-    if (editJoinMinPow !== (hub.joinMinPow || 0)) return true
+    if (editJoinMinPow !== (hub.joinMinPow || 15)) return true
     if (editMessageExpiration !== (hub.messageExpiration || 0)) return true
     if (editNsfw !== (hub.nsfw || false)) return true
     if (editDiscoverable !== (hub.discoverable !== false)) return true
@@ -356,7 +360,7 @@ export function HubSettingsModal({ open, onClose, hub }: HubSettingsModalProps) 
     if (editBanner !== (hub.banner || '')) fields.push('banner')
     if (JSON.stringify(editTags) !== JSON.stringify(hub.tags || [])) fields.push('tags')
     if (editMinPow !== (hub.minPow || 0)) fields.push('message proof of work')
-    if (editJoinMinPow !== (hub.joinMinPow || 0)) fields.push('join proof of work')
+    if (editJoinMinPow !== (hub.joinMinPow || 15)) fields.push('join proof of work')
     if (editMessageExpiration !== (hub.messageExpiration || 0)) fields.push('disappearing messages')
     if (editNsfw !== (hub.nsfw || false)) fields.push('NSFW')
     if (editDiscoverable !== (hub.discoverable !== false)) fields.push('discoverability')
@@ -1076,7 +1080,7 @@ export function HubSettingsModal({ open, onClose, hub }: HubSettingsModalProps) 
                         setEditBanner(hub.banner || '')
                         setEditTags(hub.tags || [])
                         setEditMinPow(hub.minPow || 0)
-                        setEditJoinMinPow(hub.joinMinPow || 0)
+                        setEditJoinMinPow(hub.joinMinPow || 15)
                         setEditNsfw(hub.nsfw || false)
                         setEditDiscoverable(hub.discoverable !== false)
                       }}
