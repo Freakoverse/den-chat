@@ -29,6 +29,7 @@ import {
   X, Search, Loader2, Check, CheckSquare, Square, AlertTriangle, ChevronDown, ChevronUp, UserPlus, RotateCw,
 } from 'lucide-react'
 import { UserProfileModal } from '@/components/hub/UserProfileModal'
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 
 interface JoinRequestsModalProps {
   open: boolean
@@ -849,20 +850,26 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
             {/* Below-PoW toggle. OFF hides requests mined under the hub's join PoW (they can't be
                 approved as-is); ON reveals them for review. Always shown, but only DOES anything when
                 the hub actually gates joins by PoW (joinMinPow > 0) — otherwise nothing is "below". */}
-            <button
-              onClick={() => setShowBelowPow(v => !v)}
-              title={hub.joinMinPow > 0
-                ? (showBelowPow
-                    ? `Hiding requests below the hub's join PoW (${hub.joinMinPow})`
-                    : `Showing requests below the hub's join PoW (${hub.joinMinPow})`)
-                : 'This hub has no join-PoW requirement yet, so nothing is below it'}
-              className={`px-2.5 py-1 rounded-md text-xs transition-colors cursor-pointer border
-                ${showBelowPow
-                  ? 'text-amber-400 bg-amber-400/10 border-amber-400/30'
-                  : 'text-muted-foreground hover:text-foreground border-border'}`}
-            >
-              Below PoW
-            </button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={() => setShowBelowPow(v => !v)}
+                  className={`px-2.5 py-1 rounded-md text-xs transition-colors cursor-pointer border
+                    ${showBelowPow
+                      ? 'text-amber-400 bg-amber-400/10 border-amber-400/30'
+                      : 'text-muted-foreground hover:text-foreground border-border'}`}
+                >
+                  Below PoW
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                {hub.joinMinPow > 0
+                  ? (showBelowPow
+                      ? `Hiding requests below the hub's join PoW (${hub.joinMinPow})`
+                      : `Showing requests below the hub's join PoW (${hub.joinMinPow})`)
+                  : 'This hub has no join-PoW requirement yet, so nothing is below it'}
+              </TooltipContent>
+            </Tooltip>
 
             <div className="flex-1" />
 
