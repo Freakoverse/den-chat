@@ -63,14 +63,14 @@ export function ReactionListModal({ open, onClose, reactions, onOpenProfile, dis
       <>
         <div className="fixed inset-0 z-[60]" onClick={() => setMenu(null)} />
         <div
-          className="fixed z-[61] min-w-[150px] -translate-x-full rounded-lg border border-border bg-popover shadow-xl py-1"
+          className="fixed z-[61] min-w-[150px] -translate-x-full rounded-xl border border-border bg-popover/95 backdrop-blur-md shadow-xl p-1 flex flex-col gap-0.5 text-sm animate-in fade-in-0 zoom-in-95"
           style={{ top: menu.y + 4, left: menu.x }}
         >
           <button
             onClick={() => { setRawEventJson(menu.rawEvent); setMenu(null) }}
-            className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-foreground hover:bg-accent/60 transition-colors cursor-pointer"
+            className="flex items-center gap-2.5 w-full px-3 py-2 rounded-md text-foreground hover:bg-accent/50 transition-colors cursor-pointer"
           >
-            <Code size={12} /> View raw event
+            <Code size={14} className="text-muted-foreground" /> View raw event
           </button>
         </div>
       </>,
