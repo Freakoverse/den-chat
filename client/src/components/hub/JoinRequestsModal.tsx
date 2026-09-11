@@ -52,6 +52,9 @@ const PAGE_LIMIT = 500
 /** localStorage key for the creator's "Show all" vs "Unseen" preference (persists across sessions). */
 const SHOW_ALL_KEY = 'den_join_requests_show_all'
 
+/** localStorage key for the creator's "include requests below the hub's join PoW" preference. */
+const SHOW_BELOW_POW_KEY = 'den_join_requests_show_below_pow'
+
 const EMPTY_MEMBERS: HubMember[] = []
 
 const ADD_STEPS = [
@@ -94,6 +97,15 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
   useEffect(() => {
     try { localStorage.setItem(SHOW_ALL_KEY, showAll ? '1' : '0') } catch { /* ignore */ }
   }, [showAll])
+  // When OFF (default), requests mined below the hub's join PoW (`W`) are hidden — they can't be
+  // approved without meeting the requirement anyway. Toggle ON to review under-requirement requests.
+  // Only meaningful when the hub actually has a join PoW (`hub.joinMinPow > 0`).
+  const [showBelowPow, setShowBelowPow] = useState(() => {
+    try { return localStorage.getItem(SHOW_BELOW_POW_KEY) === '1' } catch { return false }
+  })
+  useEffect(() => {
+    try { localStorage.setItem(SHOW_BELOW_POW_KEY, showBelowPow ? '1' : '0') } catch { /* ignore */ }
+  }, [showBelowPow])
   // Accumulator across pages (deduped by identity) + the oldest raw created_at fetched (load-more cursor).
   const rawByPubkeyRef = useRef<Map<string, JoinRequest>>(new Map())
   const oldestCursorRef = useRef<number | null>(null)
@@ -175,8 +187,10 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
           // Enforce the hub's join PoW BEFORE the expensive ECDH+nip44 decrypt. joinMinPow exists to price
           // join spam; without this gate an outsider floods zero-PoW junk 36944 events under `#a:[coord]`
           // and the owner burns an asymmetric-crypto decrypt on each one (a cheap-event → expensive-owner
-          // amplification). PoW is on the event id, so it's checkable without decrypting.
-          if (hub.joinMinPow > 0 && countLeadingZeroBits(e.id) < hub.joinMinPow) continue
+          // amplification). PoW is on the event id, so it's checkable without decrypting. The "show below
+          // PoW" toggle intentionally lifts this gate — the owner is opting IN to decrypting under-requirement
+          // requests, an explicit, manually rate-limited choice they can flip back off.
+          if (!showBelowPow && hub.joinMinPow > 0 && countLeadingZeroBits(e.id) < hub.joinMinPow) continue
           const payload = await parseV2JoinRequest(e, hub.dTag, privateKey, signer)
           if (!payload) continue
           // SECURITY (proof-of-control): a local-key owner re-derives P from the claimed R inside
@@ -221,8 +235,8 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
         // Gate by the hub's JOIN PoW (joinMinPow / the `W` tag) — NOT the message PoW (minPow / `w`).
         // Join requests are mined to the join requirement; filtering them by the message PoW dropped
         // valid requests to any hub whose join PoW was lower than its message PoW (e.g. old hubs with
-        // `w=15` but no `W`).
-        if (hub.joinMinPow > 0 && r.powBits < hub.joinMinPow) return false
+        // `w=15` but no `W`). The "show below PoW" toggle reveals under-requirement requests for review.
+        if (!showBelowPow && hub.joinMinPow > 0 && r.powBits < hub.joinMinPow) return false
         return true
       })
 
@@ -245,7 +259,7 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
       setLoading(false)
       setLoadingMore(false)
     }
-  }, [hub, hub.dTag, hub.generalRelays, hub.creatorPubkey, hub.joinMinPow, hubMembers.length, hubBanList, showAll, privateKey, signer])
+  }, [hub, hub.dTag, hub.generalRelays, hub.creatorPubkey, hub.joinMinPow, hubMembers.length, hubBanList, showAll, showBelowPow, privateKey, signer])
 
   // Reset transient UI state ONLY when the modal opens — not when loadPage's
   // identity changes (e.g. hubMembers.length bumps after an approval), which
@@ -832,6 +846,23 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
               </button>
             </div>
 
+            {/* Below-PoW toggle — only meaningful when the hub gates joins by PoW. OFF hides requests
+                mined under the requirement (they can't be approved as-is); ON reveals them for review. */}
+            {hub.joinMinPow > 0 && (
+              <button
+                onClick={() => setShowBelowPow(v => !v)}
+                title={showBelowPow
+                  ? `Hiding requests below the hub's join PoW (${hub.joinMinPow})`
+                  : `Showing requests below the hub's join PoW (${hub.joinMinPow})`}
+                className={`px-2.5 py-1 rounded-md text-xs transition-colors cursor-pointer border
+                  ${showBelowPow
+                    ? 'text-amber-400 bg-amber-400/10 border-amber-400/30'
+                    : 'text-muted-foreground hover:text-foreground border-border'}`}
+              >
+                Below PoW
+              </button>
+            )}
+
             <div className="flex-1" />
 
             <span className="text-xs text-muted-foreground">
@@ -911,7 +942,11 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
                     </div>
                     <div className="flex flex-col items-end gap-0.5 shrink-0">
                       <span className="text-[10px] text-muted-foreground">{timeAgo}</span>
-                      {req.powBits > 0 && (
+                      {hub.joinMinPow > 0 && req.powBits < hub.joinMinPow ? (
+                        <span className="text-[10px] text-destructive" title={`Mined ${req.powBits} of the required ${hub.joinMinPow} bits`}>
+                          Below join PoW ({req.powBits}/{hub.joinMinPow})
+                        </span>
+                      ) : req.powBits > 0 && (
                         <span className="text-[10px] text-amber-400">Processing needed: {req.powBits}</span>
                       )}
                     </div>
