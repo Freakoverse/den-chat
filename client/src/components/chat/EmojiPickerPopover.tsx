@@ -24,6 +24,7 @@ import { useEscToClose, useEscBlock } from '@/hooks/useEscToClose'
 import { truncateNpub, resolvePubkeyInput } from '@/lib/utils'
 import { nip19 } from 'nostr-tools'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
+import { BlossomImage } from '@/components/ui/BlossomImage'
 import { Button } from '@/components/ui/button'
 import { CustomSelect } from '@/components/ui/custom-select'
 
@@ -561,11 +562,11 @@ function EmojiButton({ emoji, onClick, onDelete }: {
               onClick={onClick}
               className="w-11 h-11 flex items-center justify-center rounded-md hover:bg-[hsl(var(--muted)/0.5)] transition-colors cursor-pointer"
             >
-              <img
+              <BlossomImage
                 src={emoji.url}
                 alt={`:${emoji.shortcode}:`}
-                className="w-8 h-8 object-contain"
-                loading="lazy"
+                className="w-8 h-8"
+                contain
               />
             </button>
           </TooltipTrigger>
@@ -867,7 +868,7 @@ function OthersTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcod
                         onClick={() => onSelect(`:${e.shortcode}:`, { shortcode: e.shortcode, url: e.url })}
                         className="w-11 h-11 flex items-center justify-center rounded-md hover:bg-[hsl(var(--muted)/0.5)] transition-colors cursor-pointer"
                       >
-                        <img src={e.url} alt={`:${e.shortcode}:`} className="w-6 h-6 object-contain" loading="lazy" />
+                        <BlossomImage src={e.url} alt={`:${e.shortcode}:`} className="w-6 h-6" contain />
                       </button>
                     </TooltipTrigger>
                     <TooltipContent side="bottom" className="text-xs z-[310]">:{e.shortcode}: ({e.setName})</TooltipContent>
@@ -911,7 +912,7 @@ function OthersTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcod
                               onClick={() => onSelect(`:${e.shortcode}:`, { shortcode: e.shortcode, url: e.url })}
                               className="w-11 h-11 flex items-center justify-center rounded-md hover:bg-[hsl(var(--muted)/0.5)] transition-colors cursor-pointer"
                             >
-                              <img src={e.url} alt={`:${e.shortcode}:`} className="w-6 h-6 object-contain" loading="lazy" />
+                              <BlossomImage src={e.url} alt={`:${e.shortcode}:`} className="w-6 h-6" contain />
                             </button>
                           </TooltipTrigger>
                           <TooltipContent side="bottom" className="text-xs z-[310]">:{e.shortcode}:</TooltipContent>
@@ -953,7 +954,7 @@ function OthersTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcod
                             onClick={() => onSelect(`:${e.shortcode}:`, { shortcode: e.shortcode, url: e.url })}
                             className="w-11 h-11 flex items-center justify-center rounded-md hover:bg-[hsl(var(--muted)/0.5)] transition-colors cursor-pointer"
                           >
-                            <img src={e.url} alt={`:${e.shortcode}:`} className="w-6 h-6 object-contain" loading="lazy" />
+                            <BlossomImage src={e.url} alt={`:${e.shortcode}:`} className="w-6 h-6" contain />
                           </button>
                         </TooltipTrigger>
                         <TooltipContent side="bottom" className="text-xs z-[310]">:{e.shortcode}:</TooltipContent>
@@ -1197,7 +1198,9 @@ function DiscoverEmojiTab({ onPickerClose }: { onPickerClose?: () => void }) {
                       <TooltipProvider key={e.shortcode} delayDuration={200}>
                         <Tooltip>
                           <TooltipTrigger asChild>
-                            <img src={e.url} alt={`:${e.shortcode}:`} className="w-6 h-6 object-contain rounded" loading="lazy" />
+                            <span className="inline-flex">
+                              <BlossomImage src={e.url} alt={`:${e.shortcode}:`} className="w-6 h-6 rounded" contain />
+                            </span>
                           </TooltipTrigger>
                           <TooltipContent side="bottom" className="text-xs z-[310]">:{e.shortcode}:</TooltipContent>
                         </Tooltip>
@@ -1459,12 +1462,14 @@ export function EmojiDiscoveryModal({ onClose, initialSearch = '', initialAuthor
                             <TooltipProvider key={e.shortcode} delayDuration={200}>
                               <Tooltip>
                                 <TooltipTrigger asChild>
-                                  <img
-                                    src={e.url}
-                                    alt={`:${e.shortcode}:`}
-                                    className="w-7 h-7 object-contain rounded"
-                                    loading="lazy"
-                                  />
+                                  <span className="inline-flex">
+                                    <BlossomImage
+                                      src={e.url}
+                                      alt={`:${e.shortcode}:`}
+                                      className="w-7 h-7 rounded"
+                                      contain
+                                    />
+                                  </span>
                                 </TooltipTrigger>
                                 <TooltipContent side="bottom" className="text-xs z-[320]">:{e.shortcode}:</TooltipContent>
                               </Tooltip>

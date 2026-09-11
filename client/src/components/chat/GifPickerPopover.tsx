@@ -15,6 +15,7 @@ import {
   Search, X, FolderPlus, Image, Check, Users, ImagePlay, Eye, EyeOff, ShieldQuestion,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { BlossomImage } from '@/components/ui/BlossomImage'
 import {
   useGifStore,
   getGifUploadLimitBytes,
@@ -453,11 +454,10 @@ function DiscoverGifTab({ onSelect, onPickerClose }: { onSelect: (g: { name: str
                                 onClick={() => onSelect(item.gif)}
                                 className="w-full aspect-square rounded-lg border border-border/30 overflow-hidden hover:border-primary/40 hover:ring-1 hover:ring-primary/20 transition-all cursor-pointer bg-secondary/20"
                               >
-                                <img
+                                <BlossomImage
                                   src={item.gif.url}
                                   alt={item.gif.name}
-                                  className="w-full h-full object-cover"
-                                  loading="lazy"
+                                  className="w-full h-full"
                                 />
                               </button>
                               <button
@@ -563,7 +563,7 @@ function DiscoverGifTab({ onSelect, onPickerClose }: { onSelect: (g: { name: str
                             onClick={() => onSelect(gif)}
                             className="w-12 h-12 rounded border border-border/30 overflow-hidden hover:border-primary/40 transition-colors cursor-pointer"
                           >
-                            <img src={gif.url} alt={gif.name} className="w-full h-full object-cover" loading="lazy" />
+                            <BlossomImage src={gif.url} alt={gif.name} className="w-full h-full" />
                           </button>
                         ))}
                         {visibleGifs.length > 6 && (
@@ -612,11 +612,10 @@ function DiscoverGifTab({ onSelect, onPickerClose }: { onSelect: (g: { name: str
                       onClick={() => { onSelect(gif); setViewingCollection(null) }}
                       className="w-full aspect-square rounded-lg border border-border/30 overflow-hidden hover:border-primary/40 hover:ring-1 hover:ring-primary/20 transition-all cursor-pointer bg-secondary/20"
                     >
-                      <img
+                      <BlossomImage
                         src={gif.url}
                         alt={gif.name}
-                        className="w-full h-full object-cover"
-                        loading="lazy"
+                        className="w-full h-full"
                       />
                     </button>
                     {gif.nsfw && (
@@ -813,7 +812,7 @@ function MineGifTab({ onSelect }: { onSelect: (g: { name: string; url: string; n
                         onClick={() => onSelect(g)}
                         className="w-full aspect-square rounded-lg border border-border/30 overflow-hidden hover:border-primary/40 hover:ring-1 hover:ring-primary/20 transition-all cursor-pointer bg-secondary/20"
                       >
-                        <img src={g.url} alt={g.name} className="w-full h-full object-cover" loading="lazy" />
+                        <BlossomImage src={g.url} alt={g.name} className="w-full h-full" />
                       </button>
                     </TooltipTrigger>
                     <TooltipContent side="top" className="text-xs z-[310]">{g.name || 'Unnamed'} ({g.setName})</TooltipContent>
@@ -955,7 +954,7 @@ function OthersGifTab({ onSelect, onPickerClose }: { onSelect: (g: { name: strin
                           onClick={() => onSelect(g)}
                           className="w-full aspect-square rounded-lg border border-border/30 overflow-hidden hover:border-primary/40 hover:ring-1 hover:ring-primary/20 transition-all cursor-pointer bg-secondary/20"
                         >
-                          <img src={g.url} alt={g.name} className="w-full h-full object-cover" loading="lazy" />
+                          <BlossomImage src={g.url} alt={g.name} className="w-full h-full" />
                         </button>
                       </TooltipTrigger>
                       <TooltipContent side="top" className="text-xs z-[310]">{g.name || 'Unnamed'} ({g.setName})</TooltipContent>
@@ -1002,7 +1001,7 @@ function OthersGifTab({ onSelect, onPickerClose }: { onSelect: (g: { name: strin
                                 onClick={() => onSelect(gif)}
                                 className="w-12 h-12 rounded border border-border/30 overflow-hidden hover:border-primary/40 transition-colors cursor-pointer"
                               >
-                                <img src={gif.url} alt={gif.name} className="w-full h-full object-cover" loading="lazy" />
+                                <BlossomImage src={gif.url} alt={gif.name} className="w-full h-full" />
                               </button>
                             </TooltipTrigger>
                             <TooltipContent side="top" className="text-xs z-[310]">{gif.name || 'Unnamed GIF'}</TooltipContent>
@@ -1052,7 +1051,7 @@ function OthersGifTab({ onSelect, onPickerClose }: { onSelect: (g: { name: strin
                               onClick={() => onSelect(gif)}
                               className="w-12 h-12 rounded border border-border/30 overflow-hidden hover:border-primary/40 transition-colors cursor-pointer"
                             >
-                              <img src={gif.url} alt={gif.name} className="w-full h-full object-cover" loading="lazy" />
+                              <BlossomImage src={gif.url} alt={gif.name} className="w-full h-full" />
                             </button>
                           </TooltipTrigger>
                           <TooltipContent side="top" className="text-xs z-[310]">{gif.name || 'Unnamed GIF'}</TooltipContent>
@@ -1150,11 +1149,10 @@ function FavoritesGifTab({ onSelect }: { onSelect: (g: { name: string; url: stri
                           onClick={() => onSelect(gif)}
                           className="w-full aspect-square rounded-lg border border-border/30 overflow-hidden hover:border-primary/40 hover:ring-1 hover:ring-primary/20 transition-all cursor-pointer bg-secondary/20"
                         >
-                          <img
+                          <BlossomImage
                             src={gif.url}
                             alt={gif.name}
-                            className="w-full h-full object-cover"
-                            loading="lazy"
+                            className="w-full h-full"
                           />
                         </button>
                         {/* Unfavorite button */}
@@ -1433,11 +1431,10 @@ function GifCollectionCard({
                         onClick={() => onSelect(gif)}
                         className="w-full aspect-square rounded-lg border border-border/30 overflow-hidden hover:border-primary/40 hover:ring-1 hover:ring-primary/20 transition-all cursor-pointer bg-secondary/20"
                       >
-                        <img
+                        <BlossomImage
                           src={gif.url}
                           alt={gif.name}
-                          className="w-full h-full object-cover"
-                          loading="lazy"
+                          className="w-full h-full"
                         />
                       </button>
                       {isMine && (
@@ -1719,12 +1716,11 @@ export function GifDiscoveryModal({ onClose, initialSearch = '' }: { onClose: ()
                       {/* Preview grid */}
                       <div className="flex flex-wrap gap-1">
                         {visibleGifs.slice(0, 6).map((g, i) => (
-                          <img
+                          <BlossomImage
                             key={`${g.url}-${i}`}
                             src={g.url}
                             alt={g.name}
-                            className="w-12 h-12 object-cover rounded border border-border/30"
-                            loading="lazy"
+                            className="w-12 h-12 rounded border border-border/30"
                           />
                         ))}
                         {visibleGifs.length > 6 && (
