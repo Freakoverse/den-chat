@@ -584,9 +584,11 @@ function StickerSetCard({
         const sc = item.shortcode.trim().replace(/[^a-zA-Z0-9_-]/g, '_').toLowerCase() || 'sticker'
         const buffer = new Uint8Array(await item.file.arrayBuffer())
         const servers = getUploadBlossoms()
-        const { hash } = await uploadToBlossomServers(buffer, signer, privateKey, servers, item.file.type)
+        const { hash, serverUrls } = await uploadToBlossomServers(buffer, signer, privateKey, servers, item.file.type)
         const ext = item.file.type.split('/')[1]?.split('+')[0] || 'png'
-        const url = `https://blossom.primal.net/${hash}.${ext}`
+        // Point at a server that actually accepted the blob (hardcoding primal 404'd when the upload
+        // landed elsewhere). serverUrls is non-empty (uploadToBlossomServers throws on zero successes).
+        const url = `${serverUrls[0] || 'https://blossom.primal.net'}/${hash}.${ext}`
         newStickers.push({ shortcode: sc, url, nsfw: item.nsfw, tagged: true })
         URL.revokeObjectURL(item.preview)
       }

@@ -1255,9 +1255,11 @@ function GifCollectionCard({
         const sc = item.name.trim().toLowerCase() || 'gif'
         const buffer = new Uint8Array(await item.file.arrayBuffer())
         const servers = getUploadBlossoms()
-        const { hash } = await uploadToBlossomServers(buffer, signer, privateKey, servers, item.file.type)
+        const { hash, serverUrls } = await uploadToBlossomServers(buffer, signer, privateKey, servers, item.file.type)
         const ext = item.file.type.split('/')[1]?.split('+')[0] || 'gif'
-        const url = `https://blossom.primal.net/${hash}.${ext}`
+        // Point at a server that actually accepted the blob (hardcoding primal 404'd when the upload
+        // landed elsewhere). serverUrls is non-empty (uploadToBlossomServers throws on zero successes).
+        const url = `${serverUrls[0] || 'https://blossom.primal.net'}/${hash}.${ext}`
         newGifs.push({ name: sc, url, nsfw: item.nsfw, tagged: true })
         URL.revokeObjectURL(item.preview)
       }

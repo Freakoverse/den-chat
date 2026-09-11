@@ -892,7 +892,9 @@ function PublicChatView({ topic, pendingHighlightId, onHighlightConsumed, onBack
     if (attachments && attachments.length > 0) {
       const links = attachments.map(a => {
         const ext = a.type ? `.${a.type.split('/')[1]?.split('+')[0] || 'bin'}` : ''
-        return `https://blossom.primal.net/${a.hash}${ext}`
+        // Link to a server that actually accepted the blob, not a hardcoded primal that may 404.
+        const base = a.serverUrls?.[0]?.replace(/\/+$/, '') || 'https://blossom.primal.net'
+        return `${base}/${a.hash}${ext}`
       })
       content = content ? `${content}\n${links.join('\n')}` : links.join('\n')
     }

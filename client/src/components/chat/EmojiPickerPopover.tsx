@@ -642,7 +642,7 @@ function EmojiUploadForm({ sets, targetSet, onTargetChange, onDone }: {
       const data = new Uint8Array(await file.arrayBuffer())
       const servers = getUploadBlossoms()
 
-      const { hash } = await uploadToBlossomServers(
+      const { hash, serverUrls } = await uploadToBlossomServers(
         data,
         signer,
         privateKey,
@@ -651,9 +651,11 @@ function EmojiUploadForm({ sets, targetSet, onTargetChange, onDone }: {
         (progress) => setUploadProgress(progress.percent),
       )
 
-      // Build URL from first server + hash
+      // Build the URL from a server that ACTUALLY accepted this blob — hardcoding blossom.primal.net
+      // produced a dead link (broken picker previews) whenever the upload landed elsewhere. serverUrls
+      // is non-empty here (uploadToBlossomServers throws if zero servers accepted).
       const ext = file.type.split('/')[1]?.split('+')[0] || 'png'
-      const url = `https://blossom.primal.net/${hash}.${ext}`
+      const url = `${serverUrls[0] || 'https://blossom.primal.net'}/${hash}.${ext}`
 
       // Add to the target set
       const set = sets.find((s) => s.dTag === targetSet)
