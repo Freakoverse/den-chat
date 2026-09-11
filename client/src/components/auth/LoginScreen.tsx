@@ -317,16 +317,20 @@ export function LoginScreen() {
     const stop = () => cancelled || bunkerTakeoverRef.current
 
     // Silent reconnect of a bunker-style connection (bunker://, and nostrconnect:// post-handshake).
+    // NIP-46 reconnect is flaky on a cold page: the first get_public_key request often races the relay
+    // subscription being established (or the signer app becoming ready) and is silently lost, so it
+    // hangs until the per-attempt timeout. Recover FAST with a shorter timeout + more attempts rather
+    // than one long 20s stall — the retry, hitting a now-warm relay, usually succeeds.
+    const RECONNECT_TIMEOUT_MS = 12_000
+    const RECONNECT_MAX_RETRIES = 5
     const resumeBunker = async (url: string, secret: string): Promise<void> => {
       let retry = 0
       const attempt = async (): Promise<void> => {
         try {
-          // Bound each attempt: a flaky/suspended relay can leave login() hanging forever (common on
-          // mobile after the PWA was backgrounded), which would stall the whole retry loop.
           const signer = new BunkerSigner(secret)
           const pubkey = await Promise.race([
             signer.login(url, false),
-            new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Timed out reaching the remote signer')), 20_000)),
+            new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Timed out reaching the remote signer')), RECONNECT_TIMEOUT_MS)),
           ])
           if (stop()) return
           setSigner(signer)
@@ -334,9 +338,9 @@ export function LoginScreen() {
         } catch (err) {
           if (stop()) return
           retry++
-          if (retry < 3) {
-            setError(`Reconnecting to remote signer… (${retry + 1}/3)`)
-            await new Promise((r) => setTimeout(r, 2000))
+          if (retry < RECONNECT_MAX_RETRIES) {
+            setError(`Reconnecting to remote signer… (${retry + 1}/${RECONNECT_MAX_RETRIES})`)
+            await new Promise((r) => setTimeout(r, 1500))
             if (!stop()) return attempt()
           } else {
             setError(`Remote signer unreachable: ${err instanceof Error ? err.message : 'Connection failed'}. Try again from the Connect button below.`)
