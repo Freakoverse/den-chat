@@ -39,7 +39,7 @@ import { TypingIndicator } from '@/components/chat/TypingIndicator'
 import { hubTypingKey } from '@/stores/typingStore'
 import { setNameFromAddress } from '@/lib/customSets'
 import type { Channel, HubData, HubMember } from '@/stores/hubStore'
-import { uploadToBlossomServers, computeHash } from '@/lib/blossom'
+import { uploadToBlossomServers, computeHash, blossomServers } from '@/lib/blossom'
 import type { UploadProgress } from '@/lib/blossom'
 import { getUploadBlossoms } from '@/stores/postingBehaviourStore'
 import { isV2 } from '@/lib/hub/version'
@@ -2981,12 +2981,17 @@ function groupAttachments(attachments: Attachment[], baseUrl: string, imageUrls:
 function AttachmentRenderer({ attachments, hubDTag, gifTags }: { attachments: Attachment[]; hubDTag: string; gifTags?: [string, string, string][] }) {
   const hub = useHubStore((s) => s.hubs[hubDTag])
   const hubServers = hub?.blossomServers || []
-  // Merge hub servers with global defaults, deduplicated
+  // Merge hub servers with the SAME curated client blossom list used for uploads
+  // (blossomServers.getServers()). Previously this used a second, hardcoded default list that had
+  // drifted stale — it still named cdn.sovbit.host (DNS-dead) and blossom.nostr.hu (auth-walled) and
+  // was missing the servers uploads had moved to (nostr.download, jumble.social, ditto.pub, uid.ovh).
+  // Because the retrieval set wasn't a superset of the upload set, an (encrypted, unique-hash) blob
+  // uploaded to a current server the viewer never queried 404'd everywhere — with no mirror to save it.
+  // Sourcing both from getServers() keeps them from drifting again.
   const allServers = useMemo(() => {
-    const defaults = ['https://blossom.primal.net', 'https://blossom.band', 'https://blossom.nostr.hu', 'https://cdn.sovbit.host', 'https://blossom.data.haus']
     const merged = [...hubServers]
-    for (const d of defaults) {
-      if (!merged.includes(d)) merged.push(d)
+    for (const s of blossomServers.getServers()) {
+      if (!merged.includes(s)) merged.push(s)
     }
     return merged
   }, [hubServers])
