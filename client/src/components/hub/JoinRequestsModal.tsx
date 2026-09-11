@@ -846,22 +846,23 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
               </button>
             </div>
 
-            {/* Below-PoW toggle — only meaningful when the hub gates joins by PoW. OFF hides requests
-                mined under the requirement (they can't be approved as-is); ON reveals them for review. */}
-            {hub.joinMinPow > 0 && (
-              <button
-                onClick={() => setShowBelowPow(v => !v)}
-                title={showBelowPow
-                  ? `Hiding requests below the hub's join PoW (${hub.joinMinPow})`
-                  : `Showing requests below the hub's join PoW (${hub.joinMinPow})`}
-                className={`px-2.5 py-1 rounded-md text-xs transition-colors cursor-pointer border
-                  ${showBelowPow
-                    ? 'text-amber-400 bg-amber-400/10 border-amber-400/30'
-                    : 'text-muted-foreground hover:text-foreground border-border'}`}
-              >
-                Below PoW
-              </button>
-            )}
+            {/* Below-PoW toggle. OFF hides requests mined under the hub's join PoW (they can't be
+                approved as-is); ON reveals them for review. Always shown, but only DOES anything when
+                the hub actually gates joins by PoW (joinMinPow > 0) — otherwise nothing is "below". */}
+            <button
+              onClick={() => setShowBelowPow(v => !v)}
+              title={hub.joinMinPow > 0
+                ? (showBelowPow
+                    ? `Hiding requests below the hub's join PoW (${hub.joinMinPow})`
+                    : `Showing requests below the hub's join PoW (${hub.joinMinPow})`)
+                : 'This hub has no join-PoW requirement yet, so nothing is below it'}
+              className={`px-2.5 py-1 rounded-md text-xs transition-colors cursor-pointer border
+                ${showBelowPow
+                  ? 'text-amber-400 bg-amber-400/10 border-amber-400/30'
+                  : 'text-muted-foreground hover:text-foreground border-border'}`}
+            >
+              Below PoW
+            </button>
 
             <div className="flex-1" />
 

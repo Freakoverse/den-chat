@@ -249,9 +249,11 @@ export function HubSettingsModal({ open, onClose, hub }: HubSettingsModalProps) 
   const [editChannels, setEditChannels] = useState<Channel[]>(() => [...hub.channels])
   const [editMinPow, setEditMinPow] = useState(hub.minPow || 0)
   // Join PoW: a hub with no `W` tag (joinMinPow 0 — e.g. one made before the join-PoW system existed)
-  // defaults the slider to 15 (the create default), so publishing any settings edit adds `W=15`. The
-  // owner can still drag it back to 0 to disable. `|| 15` also treats an explicitly-disabled hub as 15,
-  // since "no W" and "W disabled" are identical on the wire — the owner just re-drags to 0 if they want.
+  // defaults the slider to 15 (the create default). Because the DISPLAYED 15 differs from the stored 0,
+  // change detection (which compares against the real `hub.joinMinPow`) marks the hub dirty on open, so
+  // Publish is active and a save writes `W=15`. The owner can drag it back to 0 to keep it disabled
+  // (0 === stored 0 → not dirty). Note "no W" and "W explicitly disabled" are identical on the wire, so a
+  // deliberately-disabled hub also opens at 15 and shows as dirty — the owner just re-drags to 0.
   const [editJoinMinPow, setEditJoinMinPow] = useState(hub.joinMinPow || 15)
   const [editMessageExpiration, setEditMessageExpiration] = useState(hub.messageExpiration || 0)
   const [editNsfw, setEditNsfw] = useState(hub.nsfw || false)
@@ -320,7 +322,9 @@ export function HubSettingsModal({ open, onClose, hub }: HubSettingsModalProps) 
     if (JSON.stringify(editChannels.map(c => ({ id: c.channelId, name: c.name, cat: c.categoryId, pos: c.position, type: c.type, perms: c.permissions }))) !==
       JSON.stringify(hub.channels.map(c => ({ id: c.channelId, name: c.name, cat: c.categoryId, pos: c.position, type: c.type, perms: c.permissions })))) return true
     if (editMinPow !== (hub.minPow || 0)) return true
-    if (editJoinMinPow !== (hub.joinMinPow || 15)) return true
+    // Compare against the REAL stored value (0 when no `W`), not the display default — so a no-W hub,
+    // whose slider shows 15, registers as a genuine pending change (15 ≠ 0) and activates Publish.
+    if (editJoinMinPow !== (hub.joinMinPow || 0)) return true
     if (editMessageExpiration !== (hub.messageExpiration || 0)) return true
     if (editNsfw !== (hub.nsfw || false)) return true
     if (editDiscoverable !== (hub.discoverable !== false)) return true
@@ -360,7 +364,7 @@ export function HubSettingsModal({ open, onClose, hub }: HubSettingsModalProps) 
     if (editBanner !== (hub.banner || '')) fields.push('banner')
     if (JSON.stringify(editTags) !== JSON.stringify(hub.tags || [])) fields.push('tags')
     if (editMinPow !== (hub.minPow || 0)) fields.push('message proof of work')
-    if (editJoinMinPow !== (hub.joinMinPow || 15)) fields.push('join proof of work')
+    if (editJoinMinPow !== (hub.joinMinPow || 0)) fields.push('join proof of work')
     if (editMessageExpiration !== (hub.messageExpiration || 0)) fields.push('disappearing messages')
     if (editNsfw !== (hub.nsfw || false)) fields.push('NSFW')
     if (editDiscoverable !== (hub.discoverable !== false)) fields.push('discoverability')
