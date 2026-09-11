@@ -16,7 +16,7 @@ import { useEscToClose, useEscBlock } from '@/hooks/useEscToClose'
 import { useHubStore, type HubData, type HubMember } from '@/stores/hubStore'
 import { useUserStore } from '@/stores/userStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
-import { fetchEvents } from '@/lib/nostr/relay-pool'
+import { fetchEventsFromRelays, getRelays } from '@/lib/nostr/relay-pool'
 import { KINDS } from '@/lib/crypto/constants'
 import { isV2 } from '@/lib/hub/version'
 import { countLeadingZeroBits } from '@/lib/pow/pow'
@@ -148,7 +148,13 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
       if (!showAll && w > 0) filter.since = w
       if (append && oldestCursorRef.current != null) filter.until = oldestCursorRef.current - 1
 
-      const events = await fetchEvents(filter)
+      // Query the hub's own relays PLUS the client relays — a join request publishes to getPublishRelays
+      // (hub + client + NIP-65), and the applicant's client-relay PICK is per-pubkey deterministic, so it
+      // often won't overlap the creator's client relays. Querying client relays alone (the old
+      // `fetchEvents`) then silently missed requests that only landed on the hub relays — the badge sees
+      // them (useJoinRequestCount already broadened to this union) while this modal showed nothing.
+      const queryRelays = [...new Set([...hub.generalRelays, ...getRelays()])]
+      const events = await fetchEventsFromRelays(queryRelays, filter)
 
       // Cursor + cap detection use the RAW page (pre membership/PoW filtering — those still occupy the
       // relay's PAGE_LIMIT slots and the created_at range).
