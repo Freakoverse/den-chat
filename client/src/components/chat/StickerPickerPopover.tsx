@@ -10,6 +10,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { Sparkles, Users, Plus, Trash2, Loader2, Upload, Search, X, FolderPlus, Image, AlertTriangle, Check, Compass, ShieldQuestion } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { BlossomImage } from '@/components/ui/BlossomImage'
 import { useStickerStore, getStickerUploadLimitBytes, hasOversizedSticker, isStickerSizeOk, type CustomSticker, type StickerSet } from '@/stores/stickerStore'
 import { publishStickerSet, publishStickerSubscriptions, discoverStickerSets, fetchStickerSetByAddress, fetchStickerSetsByAuthor, deleteStickerSet } from '@/lib/nostr/customSticker'
 import { uploadToBlossomServers, computeHash } from '@/lib/blossom'
@@ -359,7 +360,7 @@ function MineStickerTab({ onSelect }: { onSelect: (s: { shortcode: string; url: 
                         onClick={() => onSelect({ shortcode: st.shortcode, url: st.url, setAddress: st.setAddress })}
                         className="rounded-md border border-transparent hover:border-primary/40 hover:bg-primary/10 transition-colors cursor-pointer"
                       >
-                        <img src={st.url} alt={`:${st.shortcode}:`} className="w-14 h-14 object-contain rounded" loading="lazy" />
+                        <BlossomImage src={st.url} alt={`:${st.shortcode}:`} className="w-14 h-14 rounded" contain />
                       </button>
                     </TooltipTrigger>
                     <TooltipContent side="top" className="text-xs z-[310]">:{st.shortcode}: ({st.setName})</TooltipContent>
@@ -471,7 +472,7 @@ function OthersStickerTab({ onSelect }: { onSelect: (s: { shortcode: string; url
                         onClick={() => onSelect({ shortcode: st.shortcode, url: st.url, setAddress: st.setAddress })}
                         className="rounded-md border border-transparent hover:border-primary/40 hover:bg-primary/10 transition-colors cursor-pointer"
                       >
-                        <img src={st.url} alt={`:${st.shortcode}:`} className="w-14 h-14 object-contain rounded" loading="lazy" />
+                        <BlossomImage src={st.url} alt={`:${st.shortcode}:`} className="w-14 h-14 rounded" contain />
                       </button>
                     </TooltipTrigger>
                     <TooltipContent side="top" className="text-xs z-[310]">:{st.shortcode}: ({st.setName})</TooltipContent>
@@ -742,11 +743,11 @@ function StickerSetCard({
                       onClick={() => sizeOk && onSelect(sticker.shortcode, sticker.url)}
                       className={`relative group rounded-md border border-transparent hover:border-primary/40 hover:bg-primary/10 transition-colors cursor-pointer ${!sizeOk ? 'opacity-30 cursor-not-allowed' : ''}`}
                     >
-                      <img
+                      <BlossomImage
                         src={sticker.url}
                         alt={`:${sticker.shortcode}:`}
-                        className="w-14 h-14 object-contain rounded"
-                        loading="lazy"
+                        className="w-14 h-14 rounded"
+                        contain
                       />
                       {/* Delete overlay (mine only, visible on hover) */}
                       {isMine && (
@@ -1008,12 +1009,12 @@ function DiscoverStickerTab({ onPickerClose }: { onPickerClose?: () => void }) {
                   {/* Preview grid — click the +N chip to show every sticker in the set */}
                   <div className="flex flex-wrap gap-1">
                     {(expandedPreviews.has(addr) ? set.stickers : set.stickers.slice(0, 6)).map((st) => (
-                      <img
+                      <BlossomImage
                         key={st.shortcode}
                         src={st.url}
                         alt={`:${st.shortcode}:`}
-                        className="w-9 h-9 object-contain rounded border border-border/30"
-                        loading="lazy"
+                        className="w-9 h-9 rounded border border-border/30"
+                        contain
                       />
                     ))}
                     {set.stickers.length > 6 && (
@@ -1190,7 +1191,7 @@ export function StickerDiscoveryModal({ onClose, initialSearch = '', initialAuth
                         )}
                       </div>
                       <div className="flex flex-wrap gap-1">
-                        {set.stickers.slice(0, 8).map((st) => (<img key={st.shortcode} src={st.url} alt={`:${st.shortcode}:`} className="w-10 h-10 object-contain rounded border border-border/30" loading="lazy" />))}
+                        {set.stickers.slice(0, 8).map((st) => (<BlossomImage key={st.shortcode} src={st.url} alt={`:${st.shortcode}:`} className="w-10 h-10 rounded border border-border/30" contain />))}
                         {set.stickers.length > 8 && (<div className="w-10 h-10 rounded border border-border/30 flex items-center justify-center text-xs text-muted-foreground">+{set.stickers.length - 8}</div>)}
                       </div>
                     </div>

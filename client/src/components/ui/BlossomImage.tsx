@@ -22,9 +22,11 @@ interface BlossomImageProps {
   fallback?: React.ReactNode
   /** Optional render size limit in MB (uses imageSizeGuard) */
   maxSizeMB?: number
+  /** Use object-contain instead of the default object-cover (e.g. stickers/emojis that must not crop) */
+  contain?: boolean
 }
 
-export function BlossomImage({ src, alt, className, imgClassName, fallback, maxSizeMB }: BlossomImageProps) {
+export function BlossomImage({ src, alt, className, imgClassName, fallback, maxSizeMB, contain }: BlossomImageProps) {
   const blossom = useBlossomMedia(src, maxSizeMB)
   const [loaded, setLoaded] = useState(false)
   const [imgError, setImgError] = useState(false)
@@ -70,7 +72,7 @@ export function BlossomImage({ src, alt, className, imgClassName, fallback, maxS
         <img
           src={cachedSrc}
           alt={alt || ''}
-          className={`w-full h-full object-cover transition-opacity duration-300 ${loaded ? 'opacity-100' : 'opacity-0'}${imgClassName ? ` ${imgClassName}` : ''}`}
+          className={`w-full h-full ${contain ? 'object-contain' : 'object-cover'} transition-opacity duration-300 ${loaded ? 'opacity-100' : 'opacity-0'}${imgClassName ? ` ${imgClassName}` : ''}`}
           loading="lazy"
           onLoad={() => setLoaded(true)}
           onError={() => { blossom.onImgError(); setImgError(true) }}
