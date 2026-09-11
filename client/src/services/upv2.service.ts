@@ -75,6 +75,18 @@ class UPV2Service {
   // Gates v2-hub capability so `canUseV2`/the create toggle stay accurate.
   private skdSupported = false
 
+  // ── Persistent response stream (perf) ──
+  // Every UPV2 op is a relay round-trip. Opening a fresh subscription + querySync PER request (see the
+  // slow path in pollForResponse) is fine for the 2 pre-session handshake calls, but a hub open fires
+  // hundreds of signer ops back-to-back, and that per-op subscription setup made UPV2 minutes-slow vs
+  // bunker (which multiplexes one persistent subscription). So after login we open ONE subscription for
+  // this session's responses and dispatch each to a waiting request by (action/session/nonce) — the same
+  // matching logic as before, just fed from a shared stream with no per-request setup.
+  private responseSub: { close: () => void } | null = null
+  private responseStreamPk: string | null = null
+  private recentResponses: Array<Record<string, unknown>> = [] // small ring buffer for the register race
+  private responseMatchers: Array<(event: Record<string, unknown>) => boolean> = []
+
   constructor() {
     this.pool = new SimplePool()
   }
@@ -195,6 +207,11 @@ class UPV2Service {
    */
   async login(identifier: string, password: string, relays?: string[]): Promise<UPV2LoginResult> {
     console.log('[UPV2] Starting login for:', identifier)
+    // Reset any stale response stream so the pre-session handshake below uses the slow (per-request)
+    // path — the fast path is only for post-login ops on the stream opened after session_created.
+    this.responseSub?.close()
+    this.responseSub = null
+    this.responseStreamPk = null
 
     const resolved = await this.resolveIdentifier(identifier)
     if (!resolved) {
@@ -228,6 +245,10 @@ class UPV2Service {
         relays: targetRelays,
         expiresAt: session.expiresAt,
       }
+
+      // Open the persistent response stream BEFORE probing SKD so every post-login op (probe included)
+      // takes the fast, no-per-request-setup path.
+      this.startResponseStream(targetRelays, loginPk)
 
       this.skdSupported = await this.probeSkd()
       return { success: true, session: this.currentSession }
@@ -285,111 +306,156 @@ class UPV2Service {
    * A 2-second safety-net re-query handles unreliable relays that drop subscriptions.
    */
   /* eslint-disable @typescript-eslint/no-explicit-any */
+
+  /**
+   * Match a signer response event against an expected action/session/nonce. Returns the parsed payload
+   * if matched, `null` for an explicit error response, or `undefined` if it isn't the awaited one.
+   * `processedIds` dedups an event offered more than once (recent buffer + live stream).
+   */
+  private matchResponse(
+    event: any, loginSk: string, expectedAction: UPV2Action, minTime: number,
+    sessionId: string | undefined, nonce: string | undefined, processedIds: Set<string>,
+  ): any {
+    if (processedIds.has(event.id)) return undefined
+    processedIds.add(event.id)
+    try {
+      if ((event.created_at || 0) < minTime) return undefined
+      const conversationKey = nip44.v2.utils.getConversationKey(hexToBytes(loginSk), event.pubkey)
+      const payload = JSON.parse(nip44.v2.decrypt(event.content, conversationKey))
+
+      if (event.kind === UPV2_KIND) {
+        const actionTag = event.tags.find((t: string[]) => t[0] === 'a')
+        const eventSessionTag = event.tags.find((t: string[]) => t[0] === 's')
+        const eventNonceTag = event.tags.find((t: string[]) => t[0] === 'n')
+        if (sessionId && (!eventSessionTag?.[1] || eventSessionTag[1] !== sessionId)) return undefined
+        if (nonce && (!eventNonceTag?.[1] || eventNonceTag[1] !== nonce)) return undefined
+        if (actionTag?.[1] === expectedAction) return payload
+        if (actionTag?.[1] === 'error') return null // explicit null = error
+      } else if (event.kind === 24133) {
+        if (expectedAction === 'signed_event' && payload.result) {
+          const signedEvent = typeof payload.result === 'string' ? JSON.parse(payload.result) : payload.result
+          return { event: signedEvent }
+        } else if (payload.error) {
+          return null
+        }
+      }
+    } catch { /* skip malformed */ }
+    return undefined
+  }
+
+  /**
+   * Open ONE persistent subscription for this session's responses. Every post-login op then registers a
+   * matcher on the shared stream (pollForResponse fast path) instead of building its own — removing the
+   * per-request subscription + querySync that made hub loads minutes-slow.
+   */
+  private startResponseStream(relays: string[], loginPk: string): void {
+    if (this.responseSub && this.responseStreamPk === loginPk) return
+    this.responseSub?.close()
+    this.responseStreamPk = loginPk
+    this.recentResponses = []
+    this.responseMatchers = []
+    const filter: any = { kinds: [UPV2_KIND, 24133], '#p': [loginPk], since: Math.floor(Date.now() / 1000) - 30 }
+    try {
+      this.responseSub = this.pool.subscribeMany(relays, filter, {
+        onevent: (event: any) => {
+          // Buffer briefly so a response landing between send and matcher-registration isn't missed.
+          this.recentResponses.push(event)
+          if (this.recentResponses.length > 200) this.recentResponses.shift()
+          for (let i = 0; i < this.responseMatchers.length; i++) {
+            if (this.responseMatchers[i](event)) { this.responseMatchers.splice(i, 1); break }
+          }
+        },
+      })
+    } catch {
+      this.responseSub = null
+    }
+  }
+
+  /** Tear down the session + response stream (called via signer.close() on logout). */
+  close(): void {
+    this.responseSub?.close()
+    this.responseSub = null
+    this.responseStreamPk = null
+    this.recentResponses = []
+    this.responseMatchers = []
+    this.currentSession = null
+  }
+
+  /**
+   * Wait for a signer response. FAST path: when the persistent response stream is open for this session,
+   * register a matcher on it (no per-request subscription/querySync). SLOW path: the 2 pre-session
+   * handshake calls (before the stream exists) use a per-request subscribeMany + querySync + 2s re-query.
+   */
   private async pollForResponse(
     relays: string[], loginPk: string, loginSk: string,
     expectedAction: UPV2Action, timeoutMs: number,
     sessionId?: string, requestTime?: number, nonce?: string,
   ): Promise<any> {
     const minTime = (requestTime || Math.floor(Date.now() / 1000)) - 15
-    const startTime = Math.floor(Date.now() / 1000) - 30
     const processedIds = new Set<string>()
 
-    const filter: any = {
-      kinds: [UPV2_KIND, 24133],
-      '#p': [loginPk],
-      since: startTime,
+    // ── Fast path: shared persistent stream (all post-login ops) ──
+    if (this.responseSub && this.responseStreamPk === loginPk) {
+      return new Promise<any>((resolve) => {
+        let settled = false
+        const matcher = (event: any): boolean => {
+          if (settled) return true // already resolved → remove
+          const res = this.matchResponse(event, loginSk, expectedAction, minTime, sessionId, nonce, processedIds)
+          if (res !== undefined) { settled = true; resolve(res); return true }
+          return false
+        }
+        // Register FIRST (so live events are caught), then drain the recent buffer (single-threaded JS
+        // means onevent can't interleave the synchronous drain).
+        this.responseMatchers.push(matcher)
+        for (const e of this.recentResponses) { if (matcher(e)) break }
+        if (settled) {
+          const i = this.responseMatchers.indexOf(matcher)
+          if (i >= 0) this.responseMatchers.splice(i, 1)
+          return
+        }
+        setTimeout(() => {
+          if (settled) return
+          settled = true
+          const i = this.responseMatchers.indexOf(matcher)
+          if (i >= 0) this.responseMatchers.splice(i, 1)
+          resolve(null)
+        }, timeoutMs)
+      })
     }
+
+    // ── Slow path: per-request subscription (pre-session handshake only) ──
+    const startTime = Math.floor(Date.now() / 1000) - 30
+    const filter: any = { kinds: [UPV2_KIND, 24133], '#p': [loginPk], since: startTime }
 
     return new Promise<any>((resolve) => {
       let settled = false
       let sub: { close: () => void } | null = null
       let safetyInterval: ReturnType<typeof setInterval> | null = null
-
-      const cleanup = () => {
-        if (settled) return
-        settled = true
-        sub?.close()
-        if (safetyInterval) clearInterval(safetyInterval)
-      }
-
-      const finish = (result: any) => {
-        if (settled) return
-        cleanup()
-        resolve(result)
-      }
-
-      // Timeout — resolve null if no response in time
+      const cleanup = () => { if (settled) return; settled = true; sub?.close(); if (safetyInterval) clearInterval(safetyInterval) }
+      const finish = (result: any) => { if (settled) return; cleanup(); resolve(result) }
       setTimeout(() => finish(null), timeoutMs)
-
-      /**
-       * Try to match a single event against expected action/session/nonce.
-       * Returns the parsed payload if matched, undefined if not.
-       */
-      const tryMatchEvent = (event: any): any => {
-        if (processedIds.has(event.id)) return undefined
-        processedIds.add(event.id)
-
-        try {
-          if ((event.created_at || 0) < minTime) return undefined
-
-          const conversationKey = nip44.v2.utils.getConversationKey(
-            hexToBytes(loginSk),
-            event.pubkey,
-          )
-          const decrypted = nip44.v2.decrypt(event.content, conversationKey)
-          const payload = JSON.parse(decrypted)
-
-          if (event.kind === UPV2_KIND) {
-            const actionTag = event.tags.find((t: string[]) => t[0] === 'a')
-            const eventSessionTag = event.tags.find((t: string[]) => t[0] === 's')
-            const eventNonceTag = event.tags.find((t: string[]) => t[0] === 'n')
-
-            if (sessionId && (!eventSessionTag?.[1] || eventSessionTag[1] !== sessionId)) return undefined
-            if (nonce && (!eventNonceTag?.[1] || eventNonceTag[1] !== nonce)) return undefined
-
-            if (actionTag?.[1] === expectedAction) return payload
-            if (actionTag?.[1] === 'error') return null // explicit null = error
-          } else if (event.kind === 24133) {
-            if (expectedAction === 'signed_event' && payload.result) {
-              const signedEvent = typeof payload.result === 'string' ? JSON.parse(payload.result) : payload.result
-              return { event: signedEvent }
-            } else if (payload.error) {
-              return null
-            }
-          }
-        } catch { /* skip malformed */ }
-        return undefined
-      }
-
-      // 1. Set up push-based subscription for real-time events
       try {
         sub = this.pool.subscribeMany(relays, filter, {
           onevent: (event: any) => {
             if (settled) return
-            const result = tryMatchEvent(event)
+            const result = this.matchResponse(event, loginSk, expectedAction, minTime, sessionId, nonce, processedIds)
             if (result !== undefined) finish(result)
           },
         })
-      } catch {
-        // Subscription setup failed — fall through to safety-net polling
-      }
-
-      // 2. Initial querySync to catch events that arrived before subscription
+      } catch { /* fall through to querySync + interval */ }
       this.pool.querySync(relays, filter).then((events) => {
         if (settled) return
         for (const event of events) {
-          const result = tryMatchEvent(event)
+          const result = this.matchResponse(event, loginSk, expectedAction, minTime, sessionId, nonce, processedIds)
           if (result !== undefined) { finish(result); return }
         }
       }).catch(() => { /* ignore query errors */ })
-
-      // 3. Safety-net re-query every 2s for relays that don't push reliably
       safetyInterval = setInterval(async () => {
         if (settled) return
         try {
           const events = await this.pool.querySync(relays, filter)
           for (const event of events) {
-            const result = tryMatchEvent(event)
+            const result = this.matchResponse(event, loginSk, expectedAction, minTime, sessionId, nonce, processedIds)
             if (result !== undefined) { finish(result); return }
           }
         } catch { /* ignore */ }
