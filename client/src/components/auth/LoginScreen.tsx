@@ -383,8 +383,11 @@ export function LoginScreen() {
             break
           }
           case 'nip07': {
-            // Browser extension — silent if present and still authorized for this origin.
-            if (!window.nostr) return
+            // Browser extension — silent if present and still authorized for this origin. Do NOT bail on
+            // an immediate `!window.nostr` check: extensions inject window.nostr asynchronously AFTER the
+            // page loads, so on a refresh it's usually not there yet when this boot effect runs.
+            // Nip07Signer.init() polls for it (up to 5s); if no extension ever appears it throws and we
+            // fall through to the login screen.
             const signer = new Nip07Signer()
             await signer.init()
             const pubkey = await signer.getPublicKey()
