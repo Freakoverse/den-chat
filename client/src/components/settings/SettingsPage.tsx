@@ -10383,6 +10383,8 @@ function BuildPlatformRow({ plat, onUpdate, onRemove, signer, privateKey }: {
             { value: 'Linux deb ARM', label: 'Linux .deb ARM' },
             { value: 'Linux rpm x64', label: 'Linux .rpm x64' },
             { value: 'Linux rpm ARM', label: 'Linux .rpm ARM' },
+            { value: 'Linux Flatpak x64', label: 'Linux Flatpak x64' },
+            { value: 'Linux Flatpak ARM', label: 'Linux Flatpak ARM' },
             { value: 'macOS Intel', label: 'macOS Intel' },
             { value: 'macOS ARM', label: 'macOS ARM' },
           ]}
