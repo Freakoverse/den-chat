@@ -218,8 +218,11 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
         if (r.pubkey === hub.creatorPubkey) return false
         if (memberPubkeys.has(r.pubkey)) return false
         if (bannedPubkeys.has(r.pubkey)) return false
-        // Filter by PoW requirement
-        if (hub.minPow > 0 && r.powBits < hub.minPow) return false
+        // Gate by the hub's JOIN PoW (joinMinPow / the `W` tag) — NOT the message PoW (minPow / `w`).
+        // Join requests are mined to the join requirement; filtering them by the message PoW dropped
+        // valid requests to any hub whose join PoW was lower than its message PoW (e.g. old hubs with
+        // `w=15` but no `W`).
+        if (hub.joinMinPow > 0 && r.powBits < hub.joinMinPow) return false
         return true
       })
 
@@ -242,7 +245,7 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
       setLoading(false)
       setLoadingMore(false)
     }
-  }, [hub, hub.dTag, hub.generalRelays, hub.creatorPubkey, hub.minPow, hubMembers.length, hubBanList, showAll, privateKey, signer])
+  }, [hub, hub.dTag, hub.generalRelays, hub.creatorPubkey, hub.joinMinPow, hubMembers.length, hubBanList, showAll, privateKey, signer])
 
   // Reset transient UI state ONLY when the modal opens — not when loadPage's
   // identity changes (e.g. hubMembers.length bumps after an approval), which
