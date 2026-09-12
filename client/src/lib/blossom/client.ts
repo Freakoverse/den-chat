@@ -341,6 +341,32 @@ function pickRandomServers(servers: string[], count: number): string[] {
  * @param getAbortSignal - Called before each server upload, returns AbortSignal for that server
  * @returns SHA-256 hash of the file and success count
  */
+/**
+ * Turn a per-server upload rejection into a short human-readable reason. The parallel upload
+ * throws `new Error("<http status>")` per server, so a bare numeric message is an HTTP status;
+ * anything else is a fetch-level failure (CORS/DNS/network → TypeError, timeout → AbortError).
+ * Surfacing these is what lets a "no Blossom servers accepted the file" report be diagnosed:
+ * 401 = auth signature rejected, 403 = server refuses this pubkey (e.g. a gated server seeing an
+ * unknown v2 pseudonym), 400 = hash/body mismatch, 413 = too large, network = dead/CORS server.
+ */
+function describeUploadFailure(reason: unknown): string {
+  const msg = reason instanceof Error ? reason.message : String(reason)
+  if (/^\d{3}$/.test(msg)) {
+    const status = Number(msg)
+    const hint: Record<number, string> = {
+      400: 'bad request (hash/body mismatch?)',
+      401: 'auth rejected',
+      403: 'forbidden (server may not accept this pubkey)',
+      413: 'file too large',
+      429: 'rate limited',
+    }
+    return hint[status] ? `${status} ${hint[status]}` : `HTTP ${status}`
+  }
+  if (reason instanceof Error && reason.name === 'AbortError') return 'timed out'
+  if (reason instanceof TypeError) return 'network/CORS error'
+  return msg || 'unknown error'
+}
+
 export async function uploadToBlossomServers(
   data: Uint8Array,
   signer: ISigner | null,
@@ -399,14 +425,20 @@ export async function uploadToBlossomServers(
       })
     )
 
-    for (const r of results) {
+    // Results are index-aligned with `ordered`, so a rejection can be attributed to its server.
+    // Keep the per-server reasons: the generic "no servers accepted" message alone is undiagnosable
+    // (it hides whether the auth was rejected, the pubkey was refused, the hash mismatched, …).
+    const failures: string[] = []
+    results.forEach((r, i) => {
       if (r.status === 'fulfilled' && r.value) {
         serverUrls.push(normalize(r.value))
+      } else if (r.status === 'rejected') {
+        failures.push(`${normalize(ordered[i]).replace(/^wss?:\/\/|^https?:\/\//, '')}: ${describeUploadFailure(r.reason)}`)
       }
-    }
+    })
 
     if (serverUrls.length === 0) {
-      throw new Error('Upload failed: no Blossom servers accepted the file')
+      throw new Error(`Upload failed: no Blossom servers accepted the file (${failures.join('; ')})`)
     }
 
     return { hash, successCount: serverUrls.length, serverUrls }
