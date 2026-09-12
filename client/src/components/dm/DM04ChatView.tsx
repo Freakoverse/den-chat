@@ -540,7 +540,9 @@ export function DM04ChatView({ recipientPubkey, onSwitchProtocol, onBack }: { re
             </div>
           </div>
         </div>
-        {onSwitchProtocol && (
+        {/* Note to Self: "Extra Private" hides metadata from relays, but there's no other party's
+            metadata to protect when you're messaging yourself — so the switch is pointless here. */}
+        {onSwitchProtocol && recipientPubkey !== myPubkey && (
           <TooltipProvider delayDuration={200}>
             <Tooltip>
               <TooltipTrigger asChild>
