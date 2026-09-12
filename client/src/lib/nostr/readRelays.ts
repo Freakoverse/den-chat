@@ -44,3 +44,37 @@ export function subscribeEventsWide(
 ): { close: () => void } {
   return subscribeToRelays(getReadRelays(), filter, onEvent, onEose)
 }
+
+/**
+ * The NIP-17 gift-wrap inbox read set: getReadRelays() PLUS the user's OWN kind-10050 DM relays.
+ *
+ * NIP-17 says senders deliver to the recipient's advertised kind-10050 mailbox. DEN doesn't publish a
+ * 10050 itself, but many users have one from another client — and a spec-strict sender (e.g. Armada)
+ * delivers there and nowhere else. Reading it here is what lets those DMs actually surface in DEN.
+ * Read-only: DEN never writes a 10050, so there's no consent/clobber concern. Empty when none exists.
+ */
+export function getDMReadRelays(): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  const add = (url: string) => {
+    const norm = url.replace(/\/+$/, '')
+    if (norm && !seen.has(norm)) { seen.add(norm); out.push(url) }
+  }
+  for (const r of getReadRelays()) add(r)
+  for (const r of useUserListsStore.getState().userDMRelays) add(r)
+  return out
+}
+
+/** One-shot fetch across the gift-wrap inbox read set (getDMReadRelays). */
+export function fetchDMInbox(filter: Filter | Filter[]): Promise<Event[]> {
+  return fetchEventsFromRelays(getDMReadRelays(), filter)
+}
+
+/** Real-time subscription across the gift-wrap inbox read set (getDMReadRelays). */
+export function subscribeDMInbox(
+  filter: Filter,
+  onEvent: (event: Event) => void,
+  onEose?: () => void,
+): { close: () => void } {
+  return subscribeToRelays(getDMReadRelays(), filter, onEvent, onEose)
+}

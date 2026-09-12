@@ -27,30 +27,46 @@ async function fetchReplaceableWithRetry(pubkey: string, kind: number, attempts 
 interface UserListsState {
   userRelays: string[]
   userBlossoms: string[]
+  /**
+   * The user's own NIP-17 DM inbox relays (kind 10050), if they've published one — typically via
+   * ANOTHER client (Amethyst, 0xchat, …), since DEN doesn't publish its own. DEN reads its gift-wrap
+   * inbox from these too (see getDMReadRelays), so a DM a spec-strict sender delivered to the user's
+   * advertised 10050 mailbox is actually seen here. Empty when no 10050 exists → no effect.
+   */
+  userDMRelays: string[]
   loaded: boolean
   refreshingRelays: boolean
   refreshingBlossoms: boolean
 
-  /** Load both lists on login */
+  /** Load all three lists on login */
   loadUserLists: (pubkey: string) => Promise<void>
   /** Refresh just the user relay list */
   refreshUserRelays: (pubkey: string) => Promise<void>
   /** Refresh just the user blossom list */
   refreshUserBlossoms: (pubkey: string) => Promise<void>
+  /** Refresh just the user's own DM (kind-10050) relay list */
+  refreshUserDMRelays: (pubkey: string) => Promise<void>
+}
+
+/** Parse a kind-10050 event's `["relay", url]` tags into a URL list. */
+function parseDMRelays(ev: Event | null): string[] {
+  return ev ? ev.tags.filter((t) => t[0] === 'relay' && t[1]).map((t) => t[1]) : []
 }
 
 export const useUserListsStore = create<UserListsState>((set) => ({
   userRelays: [],
   userBlossoms: [],
+  userDMRelays: [],
   loaded: false,
   refreshingRelays: false,
   refreshingBlossoms: false,
 
   loadUserLists: async (pubkey: string) => {
     // Retry on launch — a single cold-start fetch often misses before relays connect.
-    const [relayEv, blossomEv] = await Promise.all([
+    const [relayEv, blossomEv, dmRelayEv] = await Promise.all([
       fetchReplaceableWithRetry(pubkey, STANDARD_KINDS.RELAY_LIST),
       fetchReplaceableWithRetry(pubkey, STANDARD_KINDS.BLOSSOM_SERVER_LIST),
+      fetchReplaceableWithRetry(pubkey, STANDARD_KINDS.DM_RELAY_LIST),
     ])
 
     const userRelays = relayEv
@@ -61,7 +77,7 @@ export const useUserListsStore = create<UserListsState>((set) => ({
       ? blossomEv.tags.filter((t) => t[0] === 'server').map((t) => t[1])
       : []
 
-    set({ userRelays, userBlossoms, loaded: true })
+    set({ userRelays, userBlossoms, userDMRelays: parseDMRelays(dmRelayEv), loaded: true })
   },
 
   refreshUserRelays: async (pubkey: string) => {
@@ -88,5 +104,10 @@ export const useUserListsStore = create<UserListsState>((set) => ({
     } finally {
       set({ refreshingBlossoms: false })
     }
+  },
+
+  refreshUserDMRelays: async (pubkey: string) => {
+    const ev = await fetchReplaceable(pubkey, STANDARD_KINDS.DM_RELAY_LIST).catch(() => null)
+    set({ userDMRelays: parseDMRelays(ev) })
   },
 }))
