@@ -377,6 +377,46 @@ export async function uploadToBlossomServers(
   getAbortSignal?: () => AbortSignal | undefined,
   authSigner?: BlossomAuthSigner,
 ): Promise<{ hash: string; successCount: number; serverUrls: string[] }> {
+  try {
+    return await uploadToBlossomServersOnce(data, signer, privateKey, servers, contentType, onProgress, getAbortSignal, authSigner)
+  } catch (primaryErr) {
+    // Fall back to the client's curated servers ONLY when the caller pinned an explicit list (e.g. a
+    // hub's baked-in `hub.blossomServers`) and NONE of it accepted. A hub's list is frozen at creation
+    // (getServers().slice(0,3) at the time) and rots as public servers change policy or die — the
+    // pre-2026-08 default {primal, band, nostr.hu} is now 415/401/CORS across the board — which
+    // bricked member-add ("no Blossom servers accepted the file") for every hub carrying it. The
+    // download path already falls back to client servers (see downloadFromBlossom); uploads didn't.
+    //
+    // Privacy: this targets blossomServers.getServers() — the SHARED client defaults, not the user's
+    // kind-10063 (`userBlossoms`). Shared defaults aren't advertised as anyone's, so a P/O-signed
+    // tree upload landing there doesn't link a pseudonym to R (same reasoning that made relay
+    // `hubOnly` inert). A user-cancelled upload must NOT trigger a second round.
+    if (!servers || servers.length === 0) throw primaryErr
+    if (getAbortSignal?.()?.aborted) throw primaryErr
+    const tried = new Set(servers.map(normalize))
+    const fallback = blossomServers.getServers().filter((s) => !tried.has(normalize(s)))
+    if (fallback.length === 0) throw primaryErr
+    console.warn(`Blossom: none of the ${servers.length} target server(s) accepted the upload — falling back to ${fallback.length} client server(s).`, primaryErr)
+    try {
+      return await uploadToBlossomServersOnce(data, signer, privateKey, fallback, contentType, onProgress, getAbortSignal, authSigner)
+    } catch (fallbackErr) {
+      // Keep BOTH rounds' per-server reasons — the whole point of the diagnostic message.
+      const reason = (e: unknown) => (e instanceof Error ? e.message : String(e)).replace(/^Upload failed: no Blossom servers accepted the file\s*/, '')
+      throw new Error(`Upload failed: no Blossom servers accepted the file. Target servers ${reason(primaryErr)}; client fallback ${reason(fallbackErr)}`)
+    }
+  }
+}
+
+async function uploadToBlossomServersOnce(
+  data: Uint8Array,
+  signer: ISigner | null,
+  privateKey: string | null,
+  servers?: string[],
+  contentType: string = 'application/octet-stream',
+  onProgress?: (progress: UploadProgress) => void,
+  getAbortSignal?: () => AbortSignal | undefined,
+  authSigner?: BlossomAuthSigner,
+): Promise<{ hash: string; successCount: number; serverUrls: string[] }> {
   const allServers = servers || blossomServers.getServers()
   // When the caller passes an explicit list, it's already in a deterministic,
   // pubkey-seeded order (getUploadBlossoms) — preserve it so the sequential
