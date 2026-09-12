@@ -737,9 +737,10 @@ export function SocialFeedPage() {
             </div>
 
             {/* Filter bar — mirror the composer/feed wrapper (overflow-y-scroll reserves the same
-                scrollbar gutter) so its centered 640px column lines up with them instead of sitting
-                a half-scrollbar to the right. */}
-            <div className="shrink-0 overflow-y-scroll scrollbar-invisible">
+                scrollbar gutter) so its centered 640px column lines up with them on desktop instead of
+                sitting a half-scrollbar to the right. On mobile the composer is hidden (a full-width Post
+                button replaces it), so that reserved gutter is just dead space to the right — drop it. */}
+            <div className="shrink-0 overflow-y-scroll scrollbar-invisible max-[1080px]:overflow-y-visible">
               <div className="w-full mx-auto" style={{ maxWidth: 640 }}>
                 <div className="w-full flex items-center justify-end px-4 py-1 bg-secondary rounded-sm">
                   <button
