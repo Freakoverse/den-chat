@@ -729,10 +729,12 @@ export function SocialFeedPage() {
               </button>
             </div>
 
-            {/* Filter bar */}
-            <div className="shrink-0">
-              <div className="w-full flex" style={{ maxWidth: 640, width: '100%', margin: '0 auto' }}>
-                <div className="flex items-center justify-end px-4 py-1 bg-secondary rounded-sm" style={{ maxWidth: 640, width: '100%', margin: '0 auto' }}>
+            {/* Filter bar — mirror the composer/feed wrapper (overflow-y-scroll reserves the same
+                scrollbar gutter) so its centered 640px column lines up with them instead of sitting
+                a half-scrollbar to the right. */}
+            <div className="shrink-0 overflow-y-scroll scrollbar-invisible">
+              <div className="w-full mx-auto" style={{ maxWidth: 640 }}>
+                <div className="w-full flex items-center justify-end px-4 py-1 bg-secondary rounded-sm">
                   <button
                     onClick={() => setShowFilterModal(true)}
                     className="flex items-center gap-1.5 px-2 py-1 rounded-md text-xs text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors cursor-pointer"
