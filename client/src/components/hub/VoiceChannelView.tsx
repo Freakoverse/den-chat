@@ -1132,8 +1132,9 @@ export function VoiceChannelView() {
               </>
               )}
 
-              {/* Voice controls */}
-              <div className="flex justify-center gap-2 pb-4 pt-2">
+              {/* Voice controls — flex-wrap so the 7-8 buttons flow to a second centered row on narrow
+                  (mobile) widths instead of overflowing off the edge. */}
+              <div className="flex flex-wrap justify-center gap-2 pb-4 pt-2">
                 <VoiceActionButton
                   icon={isMuted ? MicOff : Mic}
                   label={!perms.speak ? 'No permission to speak' : isMuted ? 'Unmute' : 'Mute'}

@@ -297,7 +297,9 @@ function TopicListPanel({ isMobile, topics, activeTopic, onSelect, onAdd, onInfo
         )}
       </div>
 
-      <UserPanel />
+      {/* Desktop-only, matching the hub sidebar. On mobile the bottom tab bar is the nav anchor and
+          voice controls live in the in-call view, so the identity/voice panel would just eat space. */}
+      {!isMobile && <UserPanel />}
     </TopicListContainer>
   )
 }
