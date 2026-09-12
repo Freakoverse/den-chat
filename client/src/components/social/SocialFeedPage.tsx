@@ -37,6 +37,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { DnnBadge } from '@/components/ui/DnnBadge'
 import { cn, truncateNpub, formatTimestamp } from '@/lib/utils'
 import { parseZapReceipt } from '@/lib/nostr/zap'
+import { useSocialNotificationStore, type SocialNotification, type NotifType } from '@/stores/socialNotificationStore'
 import { useZapStore } from '@/stores/zapStore'
 import type { ReactionInfo } from '@/components/social/ReactionListModal'
 import type { Event } from 'nostr-tools'
@@ -224,6 +225,12 @@ export function SocialFeedPage() {
   const pubkey = useUserStore((s) => s.pubkey)
   const signer = useUserStore((s) => s.signer)
   const privateKey = useUserStore((s) => s.privateKey)
+
+  // Warm the notifications cache when the social area opens, so the Notifications tab is ready to show
+  // the latest the moment the user clicks it (throttled + in-flight-guarded in the store).
+  useEffect(() => {
+    if (pubkey) useSocialNotificationStore.getState().load(pubkey)
+  }, [pubkey])
 
   const [feedTab, setFeedTab] = useState<FeedTab>('home')
   const [loading, setLoading] = useState(false)
@@ -876,21 +883,8 @@ export function SocialFeedPage() {
 /*  SOCIAL NOTIFICATION VIEW                   */
 /* ═══════════════════════════════════════════ */
 
-type NotifType = 'mention' | 'reply' | 'reaction' | 'repost' | 'zap'
+// SocialNotification + NotifType now live in socialNotificationStore (imported above).
 type NotifFilter = 'all' | NotifType
-
-interface SocialNotification {
-  id: string
-  type: NotifType
-  event: Event        // the notification event itself
-  sourceEvent?: Event // the referenced post (resolved)
-  createdAt: number
-  // Zap-specific — parsed from the kind 9735 receipt (the receipt's own pubkey
-  // is the wallet/LNURL service, NOT the zapper, so we resolve the real sender).
-  zapSenderPubkey?: string
-  zapAmount?: number
-  zapMessage?: string
-}
 
 function SocialNotificationView({ onOpenProfile, onOpenThread }: {
   onOpenProfile: (pubkey: string) => void
@@ -903,9 +897,15 @@ function SocialNotificationView({ onOpenProfile, onOpenThread }: {
   const updateSocialSeenAt = useNotificationStore((s) => s.updateSocialSeenAt)
   const setHasSocialNotification = useNotificationStore((s) => s.setHasSocialNotification)
 
-  const [notifications, setNotifications] = useState<SocialNotification[]>([])
-  const [loading, setLoading] = useState(true)
+  // Notifications come from the warm cache (socialNotificationStore) so the list survives navigation
+  // and can be pre-fetched when the feed opens — no cold spinner-and-refetch on every visit.
+  const notifications = useSocialNotificationStore((s) => s.notifications)
+  const loading = useSocialNotificationStore((s) => s.loading)
+  const lastFetchedAt = useSocialNotificationStore((s) => s.lastFetchedAt)
+  const loadNotifications = useSocialNotificationStore((s) => s.load)
   const [activeFilter, setActiveFilter] = useState<NotifFilter>('all')
+  // Spinner only before the first load resolves; a background refresh keeps the current list visible.
+  const showSpinner = loading || (lastFetchedAt === 0 && notifications.length === 0)
 
   // Mark as seen when opening the tab
   useEffect(() => {
@@ -917,126 +917,12 @@ function SocialNotificationView({ onOpenProfile, onOpenThread }: {
     return () => clearTimeout(timer)
   }, [signer, privateKey, updateSocialSeenAt, setHasSocialNotification])
 
-  // Fetch notification events on mount
+  // Refresh the notification cache on open. The store keeps the last result (and may already have been
+  // warmed when the feed opened), so this renders instantly and refreshes in the background — throttled
+  // so opening the feed then Notifications doesn't double-fetch.
   useEffect(() => {
-    if (!myPubkey) { setLoading(false); return }
-
-    const load = async () => {
-      setLoading(true)
-      try {
-        // Fetch all event types that tag us
-        const [mentions, reactions, reposts, zaps] = await Promise.all([
-          fetchEventsWide({ kinds: [1], '#p': [myPubkey], limit: 50 }),
-          fetchEventsWide({ kinds: [7], '#p': [myPubkey], limit: 50 }),
-          fetchEventsWide({ kinds: [6], '#p': [myPubkey], limit: 30 }),
-          fetchEventsWide({ kinds: [9735], '#p': [myPubkey], limit: 30 }),
-        ])
-
-        const notifs: SocialNotification[] = []
-
-        // Process mentions — kind 1 events that tag us but aren't our own
-        for (const event of mentions) {
-          if (event.pubkey === myPubkey) continue
-          const hasReplyTag = event.tags.some(t => t[0] === 'e')
-          notifs.push({
-            id: event.id,
-            type: hasReplyTag ? 'reply' : 'mention',
-            event,
-            createdAt: event.created_at,
-          })
-        }
-
-        // Process reactions — pre-filter by k tag when available (NIP-25)
-        for (const event of reactions) {
-          if (event.pubkey === myPubkey) continue
-          const kTag = event.tags.find(t => t[0] === 'k')
-          if (kTag && kTag[1] !== '1') continue // fast-path: skip non-kind-1 reactions
-          notifs.push({
-            id: event.id,
-            type: 'reaction',
-            event,
-            createdAt: event.created_at,
-          })
-        }
-
-        // Process reposts — kind 6 is specifically for kind 1, but filter just in case
-        for (const event of reposts) {
-          if (event.pubkey === myPubkey) continue
-          const kTag = event.tags.find(t => t[0] === 'k')
-          if (kTag && kTag[1] !== '1') continue
-          notifs.push({
-            id: event.id,
-            type: 'repost',
-            event,
-            createdAt: event.created_at,
-          })
-        }
-
-        // Process zaps — parse the receipt to get the REAL zapper (the receipt's
-        // own pubkey is the wallet service), the amount, and the comment.
-        for (const event of zaps) {
-          const kTag = event.tags.find(t => t[0] === 'k')
-          if (kTag && kTag[1] !== '1') continue
-          const zapInfo = parseZapReceipt(event)
-          if (!zapInfo) continue // unparseable receipt — skip
-          if (zapInfo.senderPubkey === myPubkey) continue // ignore self-zaps
-          notifs.push({
-            id: event.id,
-            type: 'zap',
-            event,
-            createdAt: event.created_at,
-            zapSenderPubkey: zapInfo.senderPubkey,
-            zapAmount: zapInfo.amount,
-            zapMessage: zapInfo.message,
-          })
-        }
-
-        // Sort newest first
-        notifs.sort((a, b) => b.createdAt - a.createdAt)
-
-        // Resolve referenced posts for reactions/reposts/zaps to confirm kind 1
-        const refIds = new Set<string>()
-        for (const n of notifs) {
-          if (n.type === 'reaction' || n.type === 'repost' || n.type === 'zap') {
-            const eTag = n.event.tags.find(t => t[0] === 'e')
-            if (eTag?.[1]) refIds.add(eTag[1])
-          }
-        }
-        if (refIds.size > 0) {
-          const resolved = await fetchEventsWide({ ids: [...refIds].slice(0, 80), limit: 80 })
-          const resolvedMap = new Map(resolved.map(e => [e.id, e]))
-          for (const n of notifs) {
-            if (n.type === 'reaction' || n.type === 'repost' || n.type === 'zap') {
-              const eTag = n.event.tags.find(t => t[0] === 'e')
-              if (eTag?.[1]) n.sourceEvent = resolvedMap.get(eTag[1])
-            }
-          }
-        }
-
-        // Filter: only keep notifications that target kind 1 posts
-        // Mentions/replies are inherently kind 1. For reactions/reposts/zaps,
-        // drop any whose resolved source event is not kind 1.
-        const kind1Only = notifs.filter(n => {
-          if (n.type === 'mention' || n.type === 'reply') return true
-          // If we resolved the source event, check its kind
-          if (n.sourceEvent) return n.sourceEvent.kind === 1
-          // If source couldn't be resolved but had a k tag = "1", keep it
-          const kTag = n.event.tags.find(t => t[0] === 'k')
-          if (kTag?.[1] === '1') return true
-          // No k tag and no resolved source — drop (can't confirm it's kind 1)
-          return false
-        })
-
-        setNotifications(kind1Only)
-      } catch (err) {
-        console.error('[Social] Failed to fetch notifications:', err)
-      } finally {
-        setLoading(false)
-      }
-    }
-
-    load()
-  }, [myPubkey])
+    loadNotifications(myPubkey)
+  }, [myPubkey, loadNotifications])
 
   const filtered = useMemo(() => {
     if (activeFilter === 'all') return notifications
@@ -1075,7 +961,7 @@ function SocialNotificationView({ onOpenProfile, onOpenThread }: {
       {/* Notification list */}
       <div className="flex-1 overflow-y-auto">
         <div className="w-full mx-auto py-2" style={{ maxWidth: 640 }}>
-          {loading ? (
+          {showSpinner ? (
             <div className="flex items-center justify-center py-12">
               <Loader2 size={20} className="animate-spin text-muted-foreground" />
             </div>

@@ -25,6 +25,7 @@ import { useHubStore } from '@/stores/hubStore'
 import { useMessageStore } from '@/stores/messageStore'
 import { useNotificationStore } from '@/stores/notificationStore'
 import { useSocialStore } from '@/stores/socialStore'
+import { useSocialNotificationStore } from '@/stores/socialNotificationStore'
 import { useFollowStore } from '@/stores/followStore'
 import { useBlockStore } from '@/stores/blockStore'
 import { usePinStore } from '@/stores/pinStore'
@@ -101,7 +102,7 @@ export function resetSession(): void {
   // 3) Hard-reset every other per-account store to its initial empty state.
   const stores: AnyStore[] = [
     useHubStore, useMessageStore, useDMStore, useDM04Store,
-    useSocialStore, useFollowStore, useBlockStore,
+    useSocialStore, useSocialNotificationStore, useFollowStore, useBlockStore,
     usePinStore, useForumStore, useEmojiStore, useStickerStore, useGifStore,
     useUserListsStore, useWotStore, useReportStore, useZapStore, usePublicChatStore,
     // v2: these hold hub-scoped events whose author is the pseudonym P/Pf — a stale copy would
