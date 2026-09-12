@@ -225,13 +225,22 @@ export function DMPage() {
   const setActiveConversation = dmProtocol === 'nip04' ? setNip04Active : setNip17Active
   const loading = dmProtocol === 'nip04' ? loadingNip04 : loadingNip17
 
-  // When the active conversation changes externally (e.g. onDM from profile),
-  // automatically switch to the chat panel on mobile.
+  // Mobile list ↔ chat auto-switching. Two cases must be told apart, because both change
+  // `activeConversation` (it's derived from the protocol's own persisted active conversation):
+  //  - a PROTOCOL switch (nip04 ↔ nip17 tab) must return to the LIST — not silently re-open whatever
+  //    conversation that tab last had open (the reported bug: open a DM, back to list, switch tabs and
+  //    back, and it jumped into the old chat because that store's activeConversation was still set);
+  //  - a same-protocol change (e.g. onDM from a profile) should open the chat panel.
+  const prevProtocolRef = useRef(dmProtocol)
   useEffect(() => {
-    if (activeConversation) {
-      setMobileShowList(false)
+    const protocolChanged = prevProtocolRef.current !== dmProtocol
+    prevProtocolRef.current = dmProtocol
+    if (protocolChanged) {
+      setMobileShowList(true)
+      return
     }
-  }, [activeConversation])
+    if (activeConversation) setMobileShowList(false)
+  }, [activeConversation, dmProtocol])
 
   // DM subscriptions are now started at app launch in useStartup.ts
   // No need to start/stop them on DMPage mount/unmount
