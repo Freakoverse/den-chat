@@ -166,8 +166,16 @@ export function useStartup() {
         setTimeout(() => useWotStore.getState().buildGraph(), 2000)
       }
     })
-    // Load user's relay list (NIP-65) and blossom server list — used by posting behaviour
-    useUserListsStore.getState().loadUserLists(pubkey)
+    // Load user's relay list (NIP-65), blossom server list, and own DM (kind-10050) inbox relays.
+    useUserListsStore.getState().loadUserLists(pubkey).then(() => {
+      // The NIP-17 DM subscription starts on the first hub secret, which can beat this load. If it
+      // already started AND we just discovered the user's own 10050 relays, restart it so the gift-wrap
+      // inbox actually subscribes to that advertised mailbox (startSubscription closes the old sub first;
+      // processedWrapIds dedups the re-fetched batch, so the restart is cheap and safe).
+      if (useUserListsStore.getState().userDMRelays.length > 0 && useDMStore.getState().subscription) {
+        useDMStore.getState().startSubscription(pubkey, signer, privateKey)
+      }
+    }).catch(() => { /* non-critical — subscription still works on client + NIP-65 relays */ })
 
     // Load custom emoji sets (NIP-30)
     ;(async () => {
