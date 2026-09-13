@@ -8,8 +8,8 @@
  */
 
 import { create } from 'zustand'
-import { publishToSpecificRelays, publishEventProgressive, fetchEventsFromRelays } from '@/lib/nostr/relay-pool'
-import { fetchDMInbox, subscribeDMInbox, getDMReadRelays } from '@/lib/nostr/readRelays'
+import { publishToSpecificRelays, publishEventProgressive } from '@/lib/nostr/relay-pool'
+import { fetchDMInbox, subscribeDMInbox } from '@/lib/nostr/readRelays'
 import { getPublishRelays } from '@/stores/postingBehaviourStore'
 import { STANDARD_KINDS } from '@/lib/crypto/constants'
 import { createGiftWrap, unwrapGiftWrap, computeRumorId, foreignKindWrapIds, type UnwrappedDM } from '@/lib/nostr/nip17'
@@ -166,55 +166,6 @@ function scheduleUnwrapRetry(event: Event, myPubkey: string, signer: UnwrapSigne
   retryTimers.add(timer)
 }
 
-/* ─── TEMPORARY DIAGNOSTIC — remove after the missing-message investigation ───
- * Fetch specific gift-wrap ids from EVERY inbox relay individually, unwrap each, and log exactly
- * what happens at each step: which relay holds it, whether it decrypts, the rumor kind, who sent
- * it, and which conversation it files under. Any that turn out to be real DMs are injected into
- * the store so they show up. Runs once, after the initial inbox load. Empty the list to disable. */
-const DEBUG_PROBE_WRAP_IDS: string[] = [
-  'e58eedd7312627dcda72d54620fec7e42ed996fbd2774716b9453720ecb6f6af',
-  '0a9939bcfef5db6ef14909fa685dfc06d89a6749d7e7bca0897e7ec2776a1ef4',
-  '8cac1b84adf23f33257ec720c607e6b98f35d8e41205ec166fc3ac2a62b1eb26',
-  'eabaebb4084802347542234dc16ac450a2b46818768b777015dc862d8bf39200',
-  'be99fd0b74be06dde29db4372676b514d822901488bd3c4e6e94969172a4920a',
-]
-
-async function debugProbeWraps(myPubkey: string, signer: UnwrapSigner, privateKey: UnwrapPrivateKey): Promise<void> {
-  const relays = getDMReadRelays()
-  const foundOn = new Map<string, string[]>()
-  const events = new Map<string, Event>()
-  await Promise.all(relays.map(async (relay) => {
-    try {
-      const evs = await fetchEventsFromRelays([relay], { ids: DEBUG_PROBE_WRAP_IDS })
-      for (const e of evs) {
-        events.set(e.id, e)
-        foundOn.set(e.id, [...(foundOn.get(e.id) ?? []), relay.replace(/^wss:\/\//, '')])
-      }
-    } catch (err) {
-      console.warn(`[DM probe] ${relay}: fetch failed`, err)
-    }
-  }))
-  console.log(`[DM probe] queried ${relays.length} inbox relays for ${DEBUG_PROBE_WRAP_IDS.length} wrap ids: ${relays.map((r) => r.replace(/^wss:\/\//, '')).join(', ')}`)
-  for (const id of DEBUG_PROBE_WRAP_IDS) {
-    const short = id.slice(0, 8)
-    const ev = events.get(id)
-    if (!ev) { console.log(`[DM probe] ${short}… NOT FOUND on any inbox relay`); continue }
-    const where = foundOn.get(id)!.join(', ')
-    const dm = await unwrapGiftWrap(ev, myPubkey, signer, privateKey)
-    if (!dm) { console.log(`[DM probe] ${short}… found on ${where} — UNWRAP FAILED (see the [NIP-17] line above for why)`); continue }
-    const isMine = dm.senderPubkey === myPubkey
-    const counterparty = isMine ? (dm.rumor.tags.find((t) => t[0] === 'p')?.[1] || dm.recipientPubkey) : dm.senderPubkey
-    console.log(`[DM probe] ${short}… found on ${where} — unwrapped: kind ${dm.rumor.kind}, ${isMine ? 'SENT BY ME' : `from ${dm.senderPubkey.slice(0, 8)}…`}, conversation ${counterparty.slice(0, 8)}…, rumor time ${new Date(dm.rumor.created_at * 1000).toISOString()}, content "${dm.rumor.content.slice(0, 40)}"`)
-    useDMStore.setState((s) => {
-      const conversations = new Map(s.conversations)
-      addDMToConversations(conversations, dm, myPubkey)
-      const conv = conversations.get(counterparty)
-      const present = conv?.messages.some((m) => m.id === dm.wrapId) ?? false
-      console.log(`[DM probe] ${short}… ${present ? 'IS NOW in' : 'NOT in'} the store for conversation ${counterparty.slice(0, 8)}… (${conv?.messages.length ?? 0} msgs there)`)
-      return { conversations, processedWrapIds: new Set(s.processedWrapIds).add(dm.wrapId) }
-    })
-  }
-}
 /** Max messages per conversation in memory (FIFO eviction) */
 const MAX_PER_CONVERSATION = 1000
 
@@ -365,8 +316,6 @@ export const useDMStore = create<DMState>((set, get) => ({
       () => {
         initialPhase = false
         console.log(`[DM] initial inbox load: ${received} wraps received, ${unwrapped} unwrapped, ${foreign} non-DM (ignored), ${failed} failed${failed ? ' (retrying with backoff — see [NIP-17] unwrap failed lines above for reasons)' : ''}`)
-        // TEMPORARY DIAGNOSTIC (see DEBUG_PROBE_WRAP_IDS) — fire-and-forget, never blocks the load.
-        if (DEBUG_PROBE_WRAP_IDS.length > 0) void debugProbeWraps(myPubkey, signer, privateKey)
 
         // Flush all buffered DMs in a single state update
         if (dmBuffer.length > 0) {
