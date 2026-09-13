@@ -438,7 +438,16 @@ export function subscribeToRelays(
   relays: string[],
   filter: Filter,
   onEvent: (event: Event) => void,
-  onEose?: () => void
+  onEose?: () => void,
+  opts?: {
+    /**
+     * NIP-42: called when a relay demands authentication (AUTH challenge / CLOSED auth-required).
+     * nostr-tools builds the kind-22242 template (relay + challenge tags); we sign it. The pool sends
+     * the AUTH and re-issues the subscription on its own. Omit for subscriptions that must never
+     * reveal the user's real key to the relay (see lib/nostr/relayAuth.ts for the guarded signer).
+     */
+    onauth?: NonNullable<Parameters<typeof pool.subscribeMany>[2]['onauth']>
+  },
 ): { close: () => void } {
   const sub = pool.subscribeMany(
     relays,
@@ -446,6 +455,7 @@ export function subscribeToRelays(
     {
       onevent: onEvent,
       oneose: onEose,
+      onauth: opts?.onauth,
     }
   )
 

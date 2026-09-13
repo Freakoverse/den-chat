@@ -70,11 +70,16 @@ export function fetchDMInbox(filter: Filter | Filter[]): Promise<Event[]> {
   return fetchEventsFromRelays(getDMReadRelays(), filter)
 }
 
-/** Real-time subscription across the gift-wrap inbox read set (getDMReadRelays). */
+/**
+ * Real-time subscription across the gift-wrap inbox read set (getDMReadRelays).
+ * Pass `opts.onauth` (see lib/nostr/relayAuth.ts) so relays that NIP-42-gate kind-1059 reads — which
+ * NIP-17 recommends — actually serve the user's own inbox instead of silently CLOSEing the sub.
+ */
 export function subscribeDMInbox(
   filter: Filter,
   onEvent: (event: Event) => void,
   onEose?: () => void,
+  opts?: Parameters<typeof subscribeToRelays>[4],
 ): { close: () => void } {
-  return subscribeToRelays(getDMReadRelays(), filter, onEvent, onEose)
+  return subscribeToRelays(getDMReadRelays(), filter, onEvent, onEose, opts)
 }

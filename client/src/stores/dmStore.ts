@@ -13,6 +13,7 @@ import { fetchDMInbox, subscribeDMInbox } from '@/lib/nostr/readRelays'
 import { getPublishRelays } from '@/stores/postingBehaviourStore'
 import { STANDARD_KINDS } from '@/lib/crypto/constants'
 import { createGiftWrap, unwrapGiftWrap, computeRumorId, foreignKindWrapIds, type UnwrappedDM } from '@/lib/nostr/nip17'
+import { makeRelayAuthSigner } from '@/lib/nostr/relayAuth'
 import { useBlockStore } from '@/stores/blockStore'
 import { useNotificationStore } from '@/stores/notificationStore'
 import { useWotStore } from '@/stores/wotStore'
@@ -257,6 +258,10 @@ export const useDMStore = create<DMState>((set, get) => ({
     let failed = 0
     let foreign = 0 // decrypted fine but not a DM (reactions, Vector signals, …) — never retried
 
+    // NIP-42: answer relay AUTH challenges as the logged-in user (guarded — see relayAuth.ts) so relays
+    // that gate kind-1059 reads actually return the inbox, including our own self-copies.
+    const onauth = makeRelayAuthSigner(signer, privateKey)
+
     const sub = subscribeDMInbox(
       {
         kinds: [STANDARD_KINDS.GIFT_WRAP],
@@ -357,6 +362,7 @@ export const useDMStore = create<DMState>((set, get) => ({
 
         recalcUnreads()
       },
+      { onauth },
     )
 
     set({ subscription: sub })
