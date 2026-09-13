@@ -32,7 +32,7 @@ import {
   parseIndexFile,
   findPageForPubkey,
 } from '@/lib/blossom'
-import type { BlossomAuthSigner } from '@/lib/blossom/client'
+import { mirrorToBlossomServer, uploadToBlossomServersOnce, type BlossomAuthSigner } from '@/lib/blossom/client'
 import { cacheHubBlob, getCachedHubBlob } from '@/lib/blossom/hubBlobStore'
 import { useUserStore } from '@/stores/userStore'
 import { useUserListsStore } from '@/stores/userListsStore'
@@ -95,7 +95,7 @@ function getCandidateServers(hub: HubData): string[] {
 }
 
 /** HEAD a hash on a server — true if the server holds the blob. */
-async function headExists(server: string, hash: string): Promise<boolean> {
+export async function headExists(server: string, hash: string): Promise<boolean> {
   try {
     const res = await fetch(`${normalize(server)}/${hash}`, {
       method: 'HEAD',
@@ -123,12 +123,22 @@ async function headExists(server: string, hash: string): Promise<boolean> {
  * pseudonymous; cooperative member mirroring omits it (uploads as the member, the existing
  * tradeoff).
  */
-async function mirrorHash(
+export async function mirrorHash(
   hash: string,
   candidates: string[],
   label: string,
   target = TARGET_COPIES,
   authSigner?: BlossomAuthSigner,
+  /**
+   * Upload content-type. Hub tree files are `text/plain` in production (treeUpdater); pass it so a
+   * probe-verified server sees the identical request it will get from a real member-add.
+   */
+  contentType?: string,
+  /**
+   * BUD-04 source URL (`<server>/<hash>`) to mirror from when NO candidate already holds the blob —
+   * lets the server pull the bytes itself instead of us uploading them.
+   */
+  sourceUrl?: string,
 ): Promise<number> {
   if (!hash) return 0
 
@@ -170,9 +180,20 @@ async function mirrorHash(
   const filled: string[] = []
   for (const server of nonHolders) {
     if (copies >= target) break
+    // BUD-04 first: have the server pull the bytes from a holder ITSELF (nothing leaves this client).
+    // Source = a candidate that holds it, else the caller-supplied sourceUrl. Falls through to a
+    // normal byte upload for servers without /mirror or that refuse it.
+    const mirrorSource = holders.length > 0 ? `${normalize(holders[0])}/${hash}` : sourceUrl
+    if (mirrorSource) {
+      const mirrored = await mirrorToBlossomServer(server, hash, mirrorSource, signer, privateKey, authSigner)
+      if (mirrored) { copies++; filled.push(server); continue }
+    }
     try {
-      const { successCount } = await uploadToBlossomServers(
-        bytes, signer, privateKey, [server], undefined, undefined, undefined, authSigner,
+      // No-fallback variant on purpose: "upload to [server]" must mean THIS server. With the client
+      // fallback, a rejection here would be masked by the bytes landing on a client default, and
+      // we'd count a copy that isn't actually on `server`.
+      const { successCount } = await uploadToBlossomServersOnce(
+        bytes, signer, privateKey, [server], contentType, undefined, undefined, authSigner,
       )
       if (successCount > 0) {
         copies++

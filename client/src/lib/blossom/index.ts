@@ -2,8 +2,8 @@
  * Blossom — File storage for NIP-CHAT LKH tree files and media
  */
 
-export { blossomServers, uploadToBlossomServers, downloadFromBlossom, downloadFromBlossomWithProgress, downloadTextFromBlossom, deleteFromBlossom, computeHash } from './client'
-export type { UploadProgress, DownloadProgress } from './client'
+export { blossomServers, uploadToBlossomServers, uploadToBlossomServersOnce, downloadFromBlossom, downloadFromBlossomDetailed, downloadFromBlossomWithProgress, downloadTextFromBlossom, downloadTextFromBlossomDetailed, mirrorToBlossomServer, deleteFromBlossom, computeHash } from './client'
+export type { UploadProgress, DownloadProgress, BlossomDownloadResult } from './client'
 
 // Monolithic tree operations (group trees, facilitator mesh lists)
 export { createAndUploadMemberFiles, decryptHubSecret, addMemberToTree, removeMemberFromTree, updateMemberRoles, rehydrateTreeKeys, parseIndexFile, createIndexFile, banPageToken, createBanPage, parseBanPage, uploadBanPages, downloadBanList, createAndUploadGroupTree, addMemberToGroupTree, removeMemberFromGroupTree, decryptGroupSecret } from './members'

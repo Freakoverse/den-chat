@@ -138,6 +138,12 @@ export interface HubState {
   hubs: Record<string, HubData>
   /** Per-hub load status */
   hubStatus: Record<string, HubStatus>
+  /**
+   * Per-hub: the hub's OWN advertised Blossom servers that failed to serve its tree files on load
+   * (normalized URLs, unioned across every blob load). Drives the creator's "check & fix" banner;
+   * cleared when the hub event is republished with a working list.
+   */
+  blossomHealth: Record<string, string[]>
   /** Decrypted hub secrets (keyed by d tag) — Uint8Array stored as hex */
   hubSecrets: Record<string, string>
   /** Currently selected hub d tag */
@@ -200,6 +206,9 @@ export interface HubState {
   setHubListLoaded: (loaded: boolean) => void
   setHubData: (dTag: string, data: HubData) => void
   setHubStatus: (dTag: string, status: HubStatus) => void
+  /** Union `servers` into the hub's failed-advertised-server set (see blossomHealth). */
+  addBlossomHealthFailures: (dTag: string, servers: string[]) => void
+  clearBlossomHealth: (dTag: string) => void
   setHubSecret: (dTag: string, secretHex: string) => void
   setActiveHub: (dTag: string | null) => void
   setActiveChannel: (channelId: string | null) => void
@@ -321,6 +330,7 @@ export const useHubStore = create<HubState>((set) => ({
   hubListLoaded: false,
   hubs: {},
   hubStatus: {},
+  blossomHealth: {},
   hubSecrets: {},
   activeHubId: null,
   activeChannelId: null,
@@ -379,6 +389,21 @@ export const useHubStore = create<HubState>((set) => ({
 
   setHubStatus: (dTag, status) =>
     set((state) => ({ hubStatus: { ...state.hubStatus, [dTag]: status } })),
+  addBlossomHealthFailures: (dTag, servers) =>
+    set((state) => {
+      const prev = state.blossomHealth[dTag] ?? []
+      const merged = Array.from(new Set([...prev, ...servers.map((s) => s.replace(/\/+$/, ''))]))
+      // Same set as before → keep the reference stable so repeated loads don't re-render the banner.
+      if (merged.length === prev.length) return {}
+      return { blossomHealth: { ...state.blossomHealth, [dTag]: merged } }
+    }),
+  clearBlossomHealth: (dTag) =>
+    set((state) => {
+      if (!state.blossomHealth[dTag]) return {}
+      const next = { ...state.blossomHealth }
+      delete next[dTag]
+      return { blossomHealth: next }
+    }),
 
   setHubSecret: (dTag, secretHex) =>
     set((state) => ({ hubSecrets: { ...state.hubSecrets, [dTag]: secretHex }, _secretsVersion: state._secretsVersion + 1 })),

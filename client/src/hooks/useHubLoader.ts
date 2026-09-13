@@ -16,6 +16,7 @@ import { getAllHubEvents } from '@/lib/cache/hubEventCache'
 import { KINDS } from '@/lib/crypto/constants'
 import { getTrustedCreator } from '@/lib/hub/hubCreatorGuard'
 import { downloadTextFromBlossom, parseIndexFile, decryptHubSecret, decryptGroupSecret, downloadBanList } from '@/lib/blossom'
+import { downloadTextFromBlossomDetailed } from '@/lib/blossom/client'
 import { cacheHubBlob, getCachedHubText } from '@/lib/blossom/hubBlobStore'
 import { aesDecrypt } from '@/lib/crypto/aes'
 import type { BanEntry } from '@/lib/blossom'
@@ -291,10 +292,15 @@ export function parseHubEvent(event: Event, contentOverride?: string): (HubData 
  */
 async function loadHubText(hash: string, servers: string[], dTag: string): Promise<string> {
   try {
-    const text = await downloadTextFromBlossom(hash, servers)
+    const { text, failedRequested } = await downloadTextFromBlossomDetailed(hash, servers)
+    // Health signal for the creator's "your advertised Blossom servers are failing" banner: which of the
+    // hub's OWN servers couldn't serve this blob (unioned across every blob load of this hub).
+    if (failedRequested.length > 0) useHubStore.getState().addBlossomHealthFailures(dTag, failedRequested)
     cacheHubBlob(hash, new TextEncoder().encode(text), dTag).catch(() => {})
     return text
   } catch (err) {
+    // Gone from EVERY server (incl. the client fallback): all advertised servers failed by definition.
+    useHubStore.getState().addBlossomHealthFailures(dTag, servers)
     const local = await getCachedHubText(hash)
     if (local !== null) {
       console.warn(`[useHubLoader] ${dTag}: blob ${hash} gone from all servers — loaded from local retention (will re-mirror)`)

@@ -407,7 +407,13 @@ export async function uploadToBlossomServers(
   }
 }
 
-async function uploadToBlossomServersOnce(
+/**
+ * The upload WITHOUT the client-server fallback that uploadToBlossomServers adds. Use this when
+ * "upload to these servers" must mean exactly these servers — server health probes, and the
+ * cooperative mirror counting a copy on a specific server — otherwise a rejection is silently
+ * masked by the bytes landing on a client default instead.
+ */
+export async function uploadToBlossomServersOnce(
   data: Uint8Array,
   signer: ISigner | null,
   privateKey: string | null,
@@ -650,12 +656,29 @@ async function readBodyWithCap(res: Response, maxBytes: number): Promise<Uint8Ar
   return out
 }
 
-export async function downloadFromBlossom(
+export interface BlossomDownloadResult {
+  data: Uint8Array
+  /** The server that actually served the (hash-verified) bytes. */
+  servedBy: string
+  /**
+   * The caller's explicitly requested servers (e.g. a hub's advertised `blossomServers`) that FAILED
+   * to serve the blob before it was found — the "these advertised servers are rotten" signal the
+   * creator's repair banner runs on. Empty when the first requested server served it, or when no
+   * explicit list was given.
+   */
+  failedRequested: string[]
+}
+
+/**
+ * downloadFromBlossom, but also reporting WHICH server served the bytes and which of the requested
+ * servers failed first. Tries the requested servers in order, then the client defaults as fallback.
+ */
+export async function downloadFromBlossomDetailed(
   hash: string,
   servers?: string[],
   /** Optional hard byte cap (used for small hub-metadata blobs to prevent an OOM DoS from a hostile server). */
   maxBytes?: number,
-): Promise<Uint8Array> {
+): Promise<BlossomDownloadResult> {
   const targetServers = servers || blossomServers.getServers()
 
   // Build a deduped server list: provided servers first, then client defaults as fallback
@@ -664,12 +687,18 @@ export async function downloadFromBlossom(
     ? blossomServers.getServers().filter(s => !triedSet.has(normalize(s)))
     : []
   const allServers = [...targetServers, ...fallbackServers]
+  const requested = new Set(servers ? servers.map(normalize) : [])
+  const failedRequested: string[] = []
+  const noteFailure = (server: string) => {
+    const n = normalize(server)
+    if (requested.has(n)) failedRequested.push(n)
+  }
 
   for (const server of allServers) {
     try {
       const url = `${normalize(server)}/${hash}`
       const res = await fetch(url, { signal: AbortSignal.timeout(30_000) })
-      if (!res.ok) continue
+      if (!res.ok) { noteFailure(server); continue }
 
       const data = maxBytes ? await readBodyWithCap(res, maxBytes) : new Uint8Array(await res.arrayBuffer())
 
@@ -677,17 +706,27 @@ export async function downloadFromBlossom(
       const actualHash = computeHash(data)
       if (actualHash !== hash) {
         console.warn(`Hash mismatch from ${server}: expected ${hash}, got ${actualHash}`)
+        noteFailure(server)
         continue
       }
 
-      return data
+      return { data, servedBy: normalize(server), failedRequested }
     } catch (err) {
       console.warn(`Blossom download failed for ${server}:`, err)
+      noteFailure(server)
       continue
     }
   }
 
   throw new Error(`Failed to download file ${hash} from any Blossom server`)
+}
+
+export async function downloadFromBlossom(
+  hash: string,
+  servers?: string[],
+  maxBytes?: number,
+): Promise<Uint8Array> {
+  return (await downloadFromBlossomDetailed(hash, servers, maxBytes)).data
 }
 
 /**
@@ -813,6 +852,49 @@ export async function downloadTextFromBlossom(
 ): Promise<string> {
   const data = await downloadFromBlossom(hash, servers, TEXT_BLOB_MAX_BYTES)
   return new TextDecoder().decode(data)
+}
+
+/** downloadTextFromBlossom, also reporting which server served it and which requested servers failed. */
+export async function downloadTextFromBlossomDetailed(
+  hash: string,
+  servers?: string[],
+): Promise<{ text: string; servedBy: string; failedRequested: string[] }> {
+  const { data, servedBy, failedRequested } = await downloadFromBlossomDetailed(hash, servers, TEXT_BLOB_MAX_BYTES)
+  return { text: new TextDecoder().decode(data), servedBy, failedRequested }
+}
+
+// ─── Mirror (BUD-04) ───
+
+/**
+ * BUD-04 mirror: ask `server` to fetch the blob at `sourceUrl` ITSELF (PUT /mirror), so the bytes never
+ * leave this client. Authenticated exactly like an upload (kind-24242, t=upload, x=hash). Returns true only
+ * once the server confirms it now serves the blob (HEAD after the mirror). Returns false — never throws —
+ * for servers without BUD-04 (404/405/501) or any other refusal, so callers can fall back to a normal
+ * byte upload.
+ */
+export async function mirrorToBlossomServer(
+  server: string,
+  hash: string,
+  sourceUrl: string,
+  signer: ISigner | null,
+  privateKey: string | null,
+  authSigner?: BlossomAuthSigner,
+): Promise<boolean> {
+  try {
+    const authHeader = await createAuthHeader('upload', hash, signer, privateKey, authSigner)
+    const res = await fetch(`${normalize(server)}/mirror`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'Authorization': authHeader },
+      body: JSON.stringify({ url: sourceUrl }),
+      signal: AbortSignal.timeout(30_000),
+    })
+    if (!res.ok) return false
+    // Trust-but-verify: a 200 from /mirror must translate into the server actually serving the hash.
+    const head = await fetch(`${normalize(server)}/${hash}`, { method: 'HEAD', signal: AbortSignal.timeout(5_000) }).catch(() => null)
+    return !!head?.ok
+  } catch {
+    return false
+  }
 }
 
 // ─── Delete ───
