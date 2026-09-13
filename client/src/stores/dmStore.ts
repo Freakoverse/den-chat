@@ -12,7 +12,7 @@ import { publishToSpecificRelays, publishEventProgressive } from '@/lib/nostr/re
 import { fetchDMInbox, subscribeDMInbox } from '@/lib/nostr/readRelays'
 import { getPublishRelays } from '@/stores/postingBehaviourStore'
 import { STANDARD_KINDS } from '@/lib/crypto/constants'
-import { createGiftWrap, unwrapGiftWrap, computeRumorId, type UnwrappedDM } from '@/lib/nostr/nip17'
+import { createGiftWrap, unwrapGiftWrap, computeRumorId, foreignKindWrapIds, type UnwrappedDM } from '@/lib/nostr/nip17'
 import { useBlockStore } from '@/stores/blockStore'
 import { useNotificationStore } from '@/stores/notificationStore'
 import { useWotStore } from '@/stores/wotStore'
@@ -254,6 +254,7 @@ export const useDMStore = create<DMState>((set, get) => ({
     let received = 0
     let unwrapped = 0
     let failed = 0
+    let foreign = 0 // decrypted fine but not a DM (reactions, Vector signals, …) — never retried
 
     const sub = subscribeDMInbox(
       {
@@ -283,6 +284,13 @@ export const useDMStore = create<DMState>((set, get) => ({
           inflightWrapIds.delete(event.id)
         }
         if (!dm) {
+          if (foreignKindWrapIds.has(event.id)) {
+            // Deterministic rejection (a kind-7 reaction, a Vector 30078 signal, …): not a DM, so never
+            // retry — just remember it so it isn't re-examined on every delivery.
+            foreign++
+            set((s) => ({ processedWrapIds: new Set(s.processedWrapIds).add(event.id) }))
+            return
+          }
           failed++
           scheduleUnwrapRetry(event, myPubkey, signer, privateKey)
           return
@@ -306,7 +314,7 @@ export const useDMStore = create<DMState>((set, get) => ({
       // onEose — initial batch complete: flush buffer + recalculate unreads
       () => {
         initialPhase = false
-        console.log(`[DM] initial inbox load: ${received} wraps received, ${unwrapped} unwrapped, ${failed} failed${failed ? ' (retrying with backoff — see [NIP-17] unwrap failed lines above for reasons)' : ''}`)
+        console.log(`[DM] initial inbox load: ${received} wraps received, ${unwrapped} unwrapped, ${foreign} non-DM (ignored), ${failed} failed${failed ? ' (retrying with backoff — see [NIP-17] unwrap failed lines above for reasons)' : ''}`)
 
         // Flush all buffered DMs in a single state update
         if (dmBuffer.length > 0) {
@@ -401,8 +409,15 @@ export const useDMStore = create<DMState>((set, get) => ({
           signer,
           privateKey,
         )
-        // Same treatment as the live path: retry a failed unwrap with backoff instead of dropping it.
-        if (!dm) { scheduleUnwrapRetry(event, myPubkey, signer, privateKey); continue }
+        // Same treatment as the live path: a non-DM kind is skipped for good; anything else retries with backoff.
+        if (!dm) {
+          if (foreignKindWrapIds.has(event.id)) {
+            set((s) => ({ processedWrapIds: new Set(s.processedWrapIds).add(event.id) }))
+          } else {
+            scheduleUnwrapRetry(event, myPubkey, signer, privateKey)
+          }
+          continue
+        }
 
         // Determine which conversation this belongs to
         const isMine = dm.senderPubkey === myPubkey

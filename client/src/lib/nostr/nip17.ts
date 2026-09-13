@@ -316,6 +316,14 @@ function createWrapEnvelope(
 /* ─── Unwrap (receive) ─── */
 
 /**
+ * Wrap ids that decrypted fine but carried a rumor kind DEN doesn't handle (a kind-7 reaction from
+ * another client, Vector's kind-30078 peer signal, …). These are DETERMINISTIC rejections — never
+ * worth retrying — so the inbox marks them processed at once instead of running the transient-failure
+ * backoff on them.
+ */
+export const foreignKindWrapIds = new Set<string>()
+
+/**
  * Unwrap a kind 1059 gift wrap event to extract the inner DM rumor.
  *
  * 1. Decrypt the outer gift wrap (NIP-44 with our key + gift wrap pubkey)
@@ -342,6 +350,7 @@ export async function unwrapGiftWrap(
     const seal = JSON.parse(sealJson)
     if (seal.kind !== STANDARD_KINDS.SEAL) {
       console.warn('[NIP-17] Expected kind 13 seal, got:', seal.kind)
+      foreignKindWrapIds.add(giftWrapEvent.id)
       return null
     }
 
@@ -357,6 +366,7 @@ export async function unwrapGiftWrap(
     const rumor: DMRumor = JSON.parse(rumorJson)
     if (rumor.kind !== STANDARD_KINDS.DM_RUMOR && rumor.kind !== STANDARD_KINDS.DM_FILE) {
       console.warn('[NIP-17] Expected kind 14 or 15 rumor, got:', rumor.kind)
+      foreignKindWrapIds.add(giftWrapEvent.id)
       return null
     }
 
