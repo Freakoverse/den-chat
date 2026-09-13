@@ -114,6 +114,57 @@ interface DMState {
 const INITIAL_LIMIT = 50
 /** Pagination batch size — older messages loaded on scroll */
 const PAGE_SIZE = 50
+
+/* ─── Unwrap retry (F1) ───
+ * A wrap that fails to unwrap used to be blacklisted for the whole session (marked processed BEFORE
+ * the unwrap, then silently dropped). A transient failure — a remote-signer timeout, an open signer
+ * circuit during the hub-secret decrypt storm — therefore hid that message until the next launch,
+ * with no trace. Instead: never mark a wrap processed until it unwraps, and retry failures with
+ * backoff. Genuinely bad wraps (wrong key, foreign protocol, corrupt) give up after a few attempts.
+ */
+const UNWRAP_RETRY_DELAYS_MS = [5_000, 30_000, 120_000]
+type UnwrapSigner = Parameters<typeof unwrapGiftWrap>[2]
+type UnwrapPrivateKey = Parameters<typeof unwrapGiftWrap>[3]
+const failedWraps = new Map<string, { event: Event; attempts: number }>()
+const retryTimers = new Set<ReturnType<typeof setTimeout>>()
+/** Wraps currently being unwrapped — a race guard (the same wrap can arrive from several relays at once), NOT a permanent mark. */
+const inflightWrapIds = new Set<string>()
+
+function clearUnwrapRetries(): void {
+  for (const t of retryTimers) clearTimeout(t)
+  retryTimers.clear()
+  failedWraps.clear()
+  inflightWrapIds.clear()
+}
+
+function scheduleUnwrapRetry(event: Event, myPubkey: string, signer: UnwrapSigner, privateKey: UnwrapPrivateKey): void {
+  const entry = failedWraps.get(event.id) ?? { event, attempts: 0 }
+  entry.attempts++
+  failedWraps.set(event.id, entry)
+  if (entry.attempts > UNWRAP_RETRY_DELAYS_MS.length) {
+    // Give up: skip this wrap for the rest of the session.
+    failedWraps.delete(event.id)
+    useDMStore.setState((s) => ({ processedWrapIds: new Set(s.processedWrapIds).add(event.id) }))
+    console.warn(`[DM] giving up on wrap ${event.id.slice(0, 8)}… after ${entry.attempts - 1} retries`)
+    return
+  }
+  const delay = UNWRAP_RETRY_DELAYS_MS[entry.attempts - 1]
+  const timer = setTimeout(async () => {
+    retryTimers.delete(timer)
+    if (!failedWraps.has(event.id)) return // retries were cleared (logout / account switch / resubscribe)
+    const dm = await unwrapGiftWrap(event, myPubkey, signer, privateKey)
+    if (!dm) { scheduleUnwrapRetry(event, myPubkey, signer, privateKey); return }
+    failedWraps.delete(event.id)
+    useDMStore.setState((s) => {
+      if (s.processedWrapIds.has(event.id)) return {}
+      const conversations = new Map(s.conversations)
+      addDMToConversations(conversations, dm, myPubkey)
+      return { conversations, processedWrapIds: new Set(s.processedWrapIds).add(event.id) }
+    })
+    console.log(`[DM] wrap ${event.id.slice(0, 8)}… unwrapped on retry ${entry.attempts}`)
+  }, delay)
+  retryTimers.add(timer)
+}
 /** Max messages per conversation in memory (FIFO eviction) */
 const MAX_PER_CONVERSATION = 1000
 
@@ -189,8 +240,9 @@ export const useDMStore = create<DMState>((set, get) => ({
       return
     }
 
-    // Close any existing subscription
+    // Close any existing subscription (and drop any pending unwrap retries from it)
     get().subscription?.close()
+    clearUnwrapRetries()
 
     set({ loading: true })
 
@@ -198,6 +250,10 @@ export const useDMStore = create<DMState>((set, get) => ({
     // then flush them in a single state update to avoid N re-renders.
     let initialPhase = true
     const dmBuffer: UnwrappedDM[] = []
+    // F2: one summary line per initial load makes "how many wraps did we get vs. show" a glance, not forensics.
+    let received = 0
+    let unwrapped = 0
+    let failed = 0
 
     const sub = subscribeDMInbox(
       {
@@ -208,20 +264,32 @@ export const useDMStore = create<DMState>((set, get) => ({
       // onEvent — handles both initial batch AND real-time events
       async (event: Event) => {
         const state = get()
-        if (state.processedWrapIds.has(event.id)) return
+        if (state.processedWrapIds.has(event.id) || inflightWrapIds.has(event.id)) return
+        received++
 
-        // Mark as processed immediately to prevent race conditions
-        set((s) => ({
-          processedWrapIds: new Set(s.processedWrapIds).add(event.id),
-        }))
-
-        const dm = await unwrapGiftWrap(
-          event as { id: string; pubkey: string; created_at: number; content: string; tags: string[][] },
-          myPubkey,
-          signer,
-          privateKey,
-        )
-        if (!dm) return
+        // In-flight guard — NOT a permanent mark. The same wrap can arrive from several relays at once;
+        // this stops a double-unwrap without blacklisting a wrap whose unwrap merely failed (the old
+        // "mark processed immediately" did exactly that, hiding transient failures for the session).
+        inflightWrapIds.add(event.id)
+        let dm: UnwrappedDM | null = null
+        try {
+          dm = await unwrapGiftWrap(
+            event as { id: string; pubkey: string; created_at: number; content: string; tags: string[][] },
+            myPubkey,
+            signer,
+            privateKey,
+          )
+        } finally {
+          inflightWrapIds.delete(event.id)
+        }
+        if (!dm) {
+          failed++
+          scheduleUnwrapRetry(event, myPubkey, signer, privateKey)
+          return
+        }
+        unwrapped++
+        // Mark processed only now — after a SUCCESSFUL unwrap.
+        set((s) => ({ processedWrapIds: new Set(s.processedWrapIds).add(event.id) }))
 
         if (initialPhase) {
           // Buffer during initial load — will be flushed in onEose
@@ -238,6 +306,7 @@ export const useDMStore = create<DMState>((set, get) => ({
       // onEose — initial batch complete: flush buffer + recalculate unreads
       () => {
         initialPhase = false
+        console.log(`[DM] initial inbox load: ${received} wraps received, ${unwrapped} unwrapped, ${failed} failed${failed ? ' (retrying with backoff — see [NIP-17] unwrap failed lines above for reasons)' : ''}`)
 
         // Flush all buffered DMs in a single state update
         if (dmBuffer.length > 0) {
@@ -289,6 +358,7 @@ export const useDMStore = create<DMState>((set, get) => ({
    */
   stopSubscription: () => {
     get().subscription?.close()
+    clearUnwrapRetries()
     set({ subscription: null })
   },
 
@@ -331,7 +401,8 @@ export const useDMStore = create<DMState>((set, get) => ({
           signer,
           privateKey,
         )
-        if (!dm) continue
+        // Same treatment as the live path: retry a failed unwrap with backoff instead of dropping it.
+        if (!dm) { scheduleUnwrapRetry(event, myPubkey, signer, privateKey); continue }
 
         // Determine which conversation this belongs to
         const isMine = dm.senderPubkey === myPubkey

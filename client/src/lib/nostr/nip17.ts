@@ -371,8 +371,11 @@ export async function unwrapGiftWrap(
       wrapId: giftWrapEvent.id,
       wrapCreatedAt: giftWrapEvent.created_at,
     }
-  } catch {
-    // Silently skip events that can't be unwrapped (wrong key, different protocol, etc.)
+  } catch (err) {
+    // Not silent any more: an undecryptable wrap addressed to us is exactly what we need to see when
+    // "my message is missing" — sealed with the wrong key at send time, a foreign protocol, corrupt
+    // ciphertext, or a remote-signer failure all land here. Callers retry transient cases (dmStore).
+    console.warn(`[NIP-17] unwrap failed ${giftWrapEvent.id.slice(0, 8)}…: ${err instanceof Error ? err.message : String(err)}`)
     return null
   }
 }
