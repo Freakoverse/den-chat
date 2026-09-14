@@ -71,8 +71,11 @@ interface DMState {
   processedWrapIds: Set<string>
   subscription: { close: () => void } | null
 
-  /** Relay publish progress per event ID (for inline indicators on real messages) */
-  relayProgress: Record<string, { confirmed: number; total: number; acceptedRelays: string[] }>
+  /** Relay publish progress per event ID (for inline indicators on real messages).
+   *  `confirmed/total/acceptedRelays` is the RECIPIENT copy (did it reach them?); `self` is the
+   *  user's own copy, tracked separately because it answers a different question: will this
+   *  message still be here after a reload? (see SelfCopyProgress) */
+  relayProgress: Record<string, { confirmed: number; total: number; acceptedRelays: string[]; self?: SelfCopyProgress }>
 
   setActiveConversation: (pubkey: string | null) => void
   addPendingConversation: (pubkey: string) => void
@@ -105,7 +108,56 @@ interface DMState {
     other: Conversation[]
   }
   setRelayProgress: (eventId: string, confirmed: number, total: number, acceptedRelays?: string[]) => void
+  setSelfCopyProgress: (eventId: string, self: SelfCopyProgress) => void
+  /** Re-publish the self copy of a message whose first attempt no relay accepted (wrap kept in memory). */
+  retrySelfCopy: (eventId: string) => Promise<void>
   clearRelayProgress: (eventId: string) => void
+}
+
+/** Publish progress of the user's OWN gift-wrap copy of a sent NIP-17 message.
+ *  `settled && confirmed === 0` is the "saved nowhere" state: the message is on screen now but no
+ *  relay will hand it back after a reload — the indicator pins that and offers Retry. */
+export interface SelfCopyProgress {
+  confirmed: number
+  total: number
+  acceptedRelays: string[]
+  settled: boolean
+  retrying: boolean
+}
+
+/** Self-copy wraps kept for Retry, keyed by progress id (the self wrap's event id). */
+const selfCopyWraps = new Map<string, Event>()
+
+/** Publish the self copy and mirror its progress into `relayProgress[progressId].self`. Returns the accepted count. */
+async function publishSelfCopy(progressId: string, wrap: Event, relays: string[], retrying: boolean): Promise<number> {
+  const { setSelfCopyProgress } = useDMStore.getState()
+  if (relays.length === 0) {
+    setSelfCopyProgress(progressId, { confirmed: 0, total: 0, acceptedRelays: [], settled: true, retrying: false })
+    console.warn(`[DM] self-copy of ${progressId.slice(0, 8)}…: no publish relays configured — it will not survive a reload`)
+    return 0
+  }
+  setSelfCopyProgress(progressId, { confirmed: 0, total: relays.length, acceptedRelays: [], settled: false, retrying })
+  const accepted = await publishEventProgressive(
+    wrap,
+    (confirmed, total, acceptedRelays) => {
+      setSelfCopyProgress(progressId, { confirmed, total, acceptedRelays, settled: false, retrying })
+    },
+    relays,
+  )
+  setSelfCopyProgress(progressId, { confirmed: accepted.length, total: relays.length, acceptedRelays: accepted, settled: true, retrying: false })
+  if (accepted.length === 0) {
+    console.warn(`[DM] self-copy of ${progressId.slice(0, 8)}… was accepted by NO relay (${relays.length} tried: ${relays.join(', ')}) — it will not survive a reload. Retry is available on the message.`)
+  }
+  return accepted.length
+}
+
+/** Fade the indicator after a few seconds — unless the self copy landed nowhere, which stays pinned. */
+function scheduleProgressClear(progressId: string) {
+  setTimeout(() => {
+    const p = useDMStore.getState().relayProgress[progressId]
+    if (p?.self && p.self.settled && p.self.confirmed === 0) return
+    useDMStore.getState().clearRelayProgress(progressId)
+  }, 5000)
 }
 
 /** Initial subscription limit — kept low for NIP-17.
@@ -570,7 +622,10 @@ export const useDMStore = create<DMState>((set, get) => ({
       // Seed relay progress at 0/N immediately so the counter is visible
       // from the moment the message appears — no gap where it looks "published"
       const progressId = wrapSelfId || 'self'
+      const wrapForSelf = wraps.wrapForSelf as unknown as Event
+      selfCopyWraps.set(progressId, wrapForSelf)
       get().setRelayProgress(progressId, 0, publishRelays.length, [])
+      get().setSelfCopyProgress(progressId, { confirmed: 0, total: publishRelays.length, acceptedRelays: [], settled: false, retrying: false })
       onProgress?.('publishing', { confirmed: 0, total: publishRelays.length })
 
       ;(async () => {
@@ -585,41 +640,24 @@ export const useDMStore = create<DMState>((set, get) => ({
           }
 
           onProgress?.('publishing')
-          const allRelays = [...new Set([...recipientRelays, ...publishRelays])]
-          const totalRelays = allRelays.length
-          let recipientConfirmed = 0
-          let selfConfirmed = 0
-          const allAcceptedRelays: string[] = []
+          // The two copies are tracked separately: the main counter is the RECIPIENT copy (did it
+          // reach them?), `self` is our own copy (will we see it again after a reload?). Summing them
+          // into one number hid the case where the recipient got it and we saved it nowhere.
+          get().setRelayProgress(progressId, 0, recipientRelays.length, [])
 
           await Promise.all([
             publishEventProgressive(
               wraps.wrapForRecipient as unknown as Event,
-              (confirmed, _total, acceptedRelays) => {
-                recipientConfirmed = confirmed
-                allAcceptedRelays.push(...(acceptedRelays || []))
-                const selfWrapId = wrapSelfId || 'self'
-                get().setRelayProgress(selfWrapId, recipientConfirmed + selfConfirmed, totalRelays, [...allAcceptedRelays])
-                onProgress?.('publishing', { confirmed: recipientConfirmed + selfConfirmed, total: totalRelays })
+              (confirmed, total, acceptedRelays) => {
+                get().setRelayProgress(progressId, confirmed, total, acceptedRelays)
+                onProgress?.('publishing', { confirmed, total })
               },
               recipientRelays,
             ),
-            publishEventProgressive(
-              wraps.wrapForSelf as unknown as Event,
-              (confirmed, _total, acceptedRelays) => {
-                selfConfirmed = confirmed
-                allAcceptedRelays.push(...(acceptedRelays || []))
-                const selfWrapId = wrapSelfId || 'self'
-                get().setRelayProgress(selfWrapId, recipientConfirmed + selfConfirmed, totalRelays, [...allAcceptedRelays])
-                onProgress?.('publishing', { confirmed: recipientConfirmed + selfConfirmed, total: totalRelays })
-              },
-              publishRelays,
-            ),
+            publishSelfCopy(progressId, wrapForSelf, publishRelays, false),
           ])
 
-          // Auto-clear relay progress after 5 seconds
-          setTimeout(() => {
-            get().clearRelayProgress(progressId)
-          }, 5000)
+          scheduleProgressClear(progressId)
         } catch (err) {
           console.error('[DM] Relay publish failed:', err)
         }
@@ -682,12 +720,33 @@ export const useDMStore = create<DMState>((set, get) => ({
     set((state) => ({
       relayProgress: {
         ...state.relayProgress,
-        [eventId]: { confirmed, total, acceptedRelays: acceptedRelays || [] },
+        // Preserve `self` — the recipient-copy counter and the self-copy counter update independently
+        [eventId]: { ...state.relayProgress[eventId], confirmed, total, acceptedRelays: acceptedRelays || [] },
       },
     })),
 
+  setSelfCopyProgress: (eventId, self) =>
+    set((state) => {
+      const cur = state.relayProgress[eventId]
+      if (!cur) return {} // already cleared — nothing to attach to
+      return { relayProgress: { ...state.relayProgress, [eventId]: { ...cur, self } } }
+    }),
+
+  retrySelfCopy: async (eventId) => {
+    const wrap = selfCopyWraps.get(eventId)
+    const cur = get().relayProgress[eventId]
+    if (!wrap || !cur?.self || cur.self.retrying) return
+    // Re-read the publish set rather than reusing the failed one: the user may have fixed their
+    // relay config (or a relay came back) since the first attempt.
+    const relays = getPublishRelays()
+    get().setSelfCopyProgress(eventId, { ...cur.self, settled: false, retrying: true })
+    const accepted = await publishSelfCopy(eventId, wrap, relays, true)
+    if (accepted > 0) scheduleProgressClear(eventId)
+  },
+
   clearRelayProgress: (eventId) =>
     set((state) => {
+      selfCopyWraps.delete(eventId)
       const { [eventId]: _, ...rest } = state.relayProgress
       return { relayProgress: rest }
     }),

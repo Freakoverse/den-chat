@@ -34,8 +34,10 @@ import { getUploadBlossoms, getPublishRelays } from '@/stores/postingBehaviourSt
 import {
   Search, Plus, MessageSquare, Loader2,
   Lock, Users, UserPlus, AlertCircle, X, ShieldBan, Eye, EyeOff, Shield, ShieldCheck, Info,
-  AlertTriangle, Download, Star, ChevronLeft, Check, NotebookPen,
+  AlertTriangle, Download, Star, ChevronLeft, Check, NotebookPen, RefreshCw, Radio,
 } from 'lucide-react'
+import { useEscToClose } from '@/hooks/useEscToClose'
+import { fetchDMRelayList, type DMRelayListInfo } from '@/lib/nostr/relayDiscovery'
 import { MessageContent } from '@/components/chat/MessageContent'
 import { ScrollableContent } from '../chat/ScrollableContent'
 import { ContentMediaGroupsWithGallery, extractContentMediaGroups } from '@/components/chat/ContentMediaGrouping'
@@ -881,9 +883,13 @@ function DMChatView({ recipientPubkey, onSwitchProtocol, onBack }: { recipientPu
             <p className="text-sm font-semibold text-foreground truncate">
               {profile?.display_name || profile?.name || truncateNpub(npubStr, 10)}
             </p>
-            <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
-              <ShieldCheck size={9} />
-              <span>Extra Private (NIP-17)</span>
+            <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground min-w-0">
+              <ShieldCheck size={9} className="shrink-0" />
+              <span className="shrink-0">Extra Private (NIP-17)</span>
+              <PeerDMRelayListPill
+                pubkey={recipientPubkey}
+                displayName={profile?.display_name || profile?.name || truncateNpub(npubStr, 8)}
+              />
             </div>
           </div>
         </div>
@@ -1291,6 +1297,7 @@ function DMEmptyState() {
 
 function DMRelayProgressIndicator({ eventId }: { eventId: string }) {
   const progress = useDMStore((s) => s.relayProgress[eventId])
+  const retrySelfCopy = useDMStore((s) => s.retrySelfCopy)
   const [showPopover, setShowPopover] = useState(false)
   const popRef = useRef<HTMLDivElement>(null)
 
@@ -1304,36 +1311,239 @@ function DMRelayProgressIndicator({ eventId }: { eventId: string }) {
   }, [showPopover])
 
   if (!progress) return null
-  const done = progress.confirmed >= progress.total
+  const self = progress.self
+  const recipientDone = progress.confirmed >= progress.total
+  const selfPending = !!self && !self.settled
+  // "Saved nowhere": every relay answered and none kept our copy. The message is on screen now but
+  // won't come back after a reload — this state stays pinned (the store skips the auto-clear).
+  const selfFailed = !!self && self.settled && self.confirmed === 0
+  const done = recipientDone && !selfPending
+
+  const tone = selfFailed
+    ? 'text-amber-400 hover:text-amber-300'
+    : done ? 'text-muted-foreground/40 hover:text-muted-foreground' : 'text-muted-foreground/70 hover:text-muted-foreground'
+
+  const relayRows = (accepted: string[], pending: number, spinning: boolean) => (
+    <div className="space-y-1">
+      {accepted.map((url) => (
+        <div key={url} className="flex items-center gap-2">
+          <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
+          <span className="text-[10px] text-muted-foreground font-mono truncate">{url.replace('wss://', '')}</span>
+        </div>
+      ))}
+      {pending > 0 && (
+        <div className="flex items-center gap-2">
+          {spinning
+            ? <Loader2 size={8} className="animate-spin text-muted-foreground/50 shrink-0" />
+            : <div className="w-1.5 h-1.5 rounded-full bg-muted-foreground/30 shrink-0" />}
+          <span className="text-[10px] text-muted-foreground/50">{pending} {spinning ? 'pending...' : 'rejected / timed out'}</span>
+        </div>
+      )}
+    </div>
+  )
+
   return (
     <span className="relative inline-flex items-center">
       <button
         onClick={(e) => { e.stopPropagation(); setShowPopover(!showPopover) }}
-        className={`text-[10px] inline-flex items-center gap-1 ml-1 cursor-pointer hover:text-muted-foreground transition-colors ${done ? 'text-muted-foreground/40' : 'text-muted-foreground/70'}`}
+        className={`text-[10px] inline-flex items-center gap-1 ml-1 cursor-pointer transition-colors ${tone}`}
       >
         {!done && <Loader2 size={9} className="animate-spin" />}
+        {selfFailed && <AlertTriangle size={9} />}
         {progress.confirmed}/{progress.total}
+        {self && (
+          <span className={selfFailed ? '' : 'opacity-70'}>
+            · {selfFailed ? 'not saved' : 'you'} {self.confirmed}/{self.total}
+          </span>
+        )}
       </button>
       {showPopover && (
-        <div ref={popRef} className="absolute bottom-full left-0 mb-1 z-50 bg-popover border border-border rounded-lg shadow-xl p-2.5 min-w-[200px]" onClick={(e) => e.stopPropagation()}>
-          <p className="text-[10px] font-medium text-foreground mb-1.5">Relay Status</p>
-          <div className="space-y-1">
-            {progress.acceptedRelays.map((url) => (
-              <div key={url} className="flex items-center gap-2">
-                <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
-                <span className="text-[10px] text-muted-foreground font-mono truncate">{url.replace('wss://', '')}</span>
-              </div>
-            ))}
-            {progress.confirmed < progress.total && (
-              <div className="flex items-center gap-2">
-                <Loader2 size={8} className="animate-spin text-muted-foreground/50 shrink-0" />
-                <span className="text-[10px] text-muted-foreground/50">{progress.total - progress.confirmed} pending...</span>
-              </div>
-            )}
-          </div>
+        <div ref={popRef} className="absolute bottom-full left-0 mb-1 z-50 bg-popover border border-border rounded-lg shadow-xl p-2.5 min-w-[220px] max-w-[280px]" onClick={(e) => e.stopPropagation()}>
+          <p className="text-[10px] font-medium text-foreground mb-1.5">To them</p>
+          {relayRows(progress.acceptedRelays, progress.total - progress.confirmed, !recipientDone)}
+
+          {self && (
+            <>
+              <p className="text-[10px] font-medium text-foreground mt-2.5 mb-1.5">Your copy</p>
+              {selfFailed ? (
+                <div className="space-y-2">
+                  <p className="text-[10px] text-amber-400/90 leading-relaxed">
+                    {self.total === 0
+                      ? 'No publish relays are configured, so your copy was saved nowhere.'
+                      : `None of your ${self.total} relay${self.total === 1 ? '' : 's'} accepted your copy.`}
+                    {' '}It shows here now but will be gone after a reload.
+                  </p>
+                  <button
+                    onClick={() => retrySelfCopy(eventId)}
+                    disabled={self.retrying}
+                    className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-medium bg-secondary hover:bg-secondary/70 text-foreground border border-border/50 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-default"
+                  >
+                    {self.retrying ? <Loader2 size={9} className="animate-spin" /> : <RefreshCw size={9} />}
+                    {self.retrying ? 'Retrying…' : 'Retry'}
+                  </button>
+                </div>
+              ) : (
+                relayRows(self.acceptedRelays, self.total - self.confirmed, !self.settled)
+              )}
+            </>
+          )}
         </div>
       )}
     </span>
+  )
+}
+
+/* ═══════════════════════════════════════════ */
+/*  PEER DM RELAY LIST (kind 10050) PILL       */
+/* ═══════════════════════════════════════════ */
+
+/**
+ * "Does this person have a kind-10050 DM relay list, and does it have relays in it?" — shown next to
+ * the Extra Private (NIP-17) label. NIP-17 senders are supposed to deliver ONLY to that list, so its
+ * presence decides whether spec-strict clients can reach this person at all. Click opens the list.
+ */
+function PeerDMRelayListPill({ pubkey, displayName }: { pubkey: string; displayName: string }) {
+  const [info, setInfo] = useState<DMRelayListInfo | null | undefined>(undefined) // undefined = loading
+  const [refreshKey, setRefreshKey] = useState(0)
+  const [open, setOpen] = useState(false)
+
+  useEffect(() => {
+    let alive = true
+    setInfo(undefined)
+    fetchDMRelayList(pubkey, { force: refreshKey > 0 }).then((r) => { if (alive) setInfo(r) })
+    return () => { alive = false }
+  }, [pubkey, refreshKey])
+
+  const loading = info === undefined
+  const relayCount = info?.relays.length ?? 0
+  const label = loading ? '10050' : info === null ? 'No 10050' : relayCount === 0 ? '10050 · empty' : `10050 · ${relayCount} relay${relayCount === 1 ? '' : 's'}`
+  const tone = loading
+    ? 'border-border/40 text-muted-foreground/50'
+    : info === null
+      ? 'border-border/50 text-muted-foreground hover:text-foreground hover:bg-secondary/60'
+      : relayCount === 0
+        ? 'border-amber-400/40 text-amber-400 hover:bg-amber-400/10'
+        : 'border-emerald-400/40 text-emerald-400 hover:bg-emerald-400/10'
+  const hint = loading
+    ? 'Checking for a DM relay list (kind 10050)…'
+    : info === null
+      ? `${displayName} hasn't published a DM relay list (kind 10050). Spec-strict NIP-17 clients can't message them; DEN falls back to their NIP-65 relays and your client relays.`
+      : relayCount === 0
+        ? `${displayName} published a DM relay list (kind 10050) with no relays in it.`
+        : `${displayName} has a DM relay list (kind 10050). DEN delivers their copy of your messages there. Click to view.`
+
+  return (
+    <>
+      <TooltipProvider delayDuration={200}>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              onClick={(e) => { e.stopPropagation(); if (!loading) setOpen(true) }}
+              className={`inline-flex items-center gap-1 px-1.5 py-[1px] rounded-full border text-[9px] font-medium leading-tight transition-colors cursor-pointer shrink-0 ${tone}`}
+            >
+              {loading ? <Loader2 size={8} className="animate-spin" /> : <Radio size={8} />}
+              {label}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" className="text-xs max-w-[260px]">{hint}</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+      {open && (
+        <PeerDMRelayListModal
+          info={info ?? null}
+          displayName={displayName}
+          refreshing={loading}
+          onRefresh={() => setRefreshKey((k) => k + 1)}
+          onClose={() => setOpen(false)}
+        />
+      )}
+    </>
+  )
+}
+
+function PeerDMRelayListModal({ info, displayName, refreshing, onRefresh, onClose }: {
+  info: DMRelayListInfo | null
+  displayName: string
+  refreshing: boolean
+  onRefresh: () => void
+  onClose: () => void
+}) {
+  useEscToClose(onClose, true)
+  const relays = info?.relays ?? []
+
+  return createPortal(
+    <div className="fixed inset-0 z-[250] flex items-center justify-center" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+      <div
+        className="relative z-10 w-full max-w-[420px] mx-4 bg-card rounded-xl border border-border shadow-2xl animate-in fade-in-0 zoom-in-95 duration-200"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+          <div className="min-w-0">
+            <h3 className="text-sm font-semibold text-foreground">DM relay list</h3>
+            <p className="text-[11px] text-muted-foreground truncate">kind 10050 · {displayName}</p>
+          </div>
+          <button onClick={onClose} className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors cursor-pointer shrink-0">
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="px-5 py-4 space-y-3">
+          {refreshing ? (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground py-2">
+              <Loader2 size={14} className="animate-spin" /> Checking your relays…
+            </div>
+          ) : info === null ? (
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              No kind-10050 event by <span className="font-medium text-foreground">{displayName}</span> was found on your relays.
+              NIP-17 says senders deliver only to this list, so spec-strict clients can't message them.
+              DEN still delivers to their NIP-65 relays and your client relays.
+            </p>
+          ) : relays.length === 0 ? (
+            <p className="text-xs text-amber-400/90 leading-relaxed">
+              <span className="font-medium">{displayName}</span> published a DM relay list, but it contains no relays.
+              DEN falls back to their NIP-65 relays and your client relays.
+            </p>
+          ) : (
+            <>
+              <div className="space-y-1.5">
+                {relays.map((url) => (
+                  <div key={url} className="flex items-center gap-2 px-2.5 py-1.5 rounded-md bg-secondary/50 border border-border/40">
+                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
+                    <span className="text-[11px] text-foreground font-mono truncate">{url}</span>
+                  </div>
+                ))}
+              </div>
+              <p className="text-[11px] text-muted-foreground leading-relaxed">
+                DEN delivers their copy of each message to these relays, plus their NIP-65 relays and your client relays.
+              </p>
+            </>
+          )}
+          {info && !refreshing && (
+            <p className="text-[10px] text-muted-foreground/60">
+              Published {new Date(info.createdAt * 1000).toLocaleString()}
+            </p>
+          )}
+        </div>
+
+        <div className="flex items-center justify-between gap-2 px-5 py-3 border-t border-border">
+          <button
+            onClick={onRefresh}
+            disabled={refreshing}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 border border-border/50 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-default"
+          >
+            <RefreshCw size={11} className={refreshing ? 'animate-spin' : ''} /> Re-check
+          </button>
+          <button
+            onClick={onClose}
+            className="px-3 py-1.5 rounded-lg text-[11px] font-medium bg-secondary hover:bg-secondary/70 text-foreground transition-colors cursor-pointer"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
   )
 }
 

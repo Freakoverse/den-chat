@@ -215,6 +215,12 @@ export function publishEventProgressive(
 ): Promise<string[]> {
   const relays = relayUrls && relayUrls.length > 0 ? [...relayUrls] : getRelays()
   const total = relays.length
+  // No relays at all (empty explicit list AND empty client list): nothing will ever settle, so
+  // resolve now instead of hanging the caller forever.
+  if (total === 0) {
+    onProgress(0, 0, [])
+    return Promise.resolve([])
+  }
   const promises = pool.publish(relays, event)
   let confirmed = 0
   const accepted: string[] = []

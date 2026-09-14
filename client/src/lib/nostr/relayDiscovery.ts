@@ -10,6 +10,7 @@
  */
 
 import { fetchEvents } from '@/lib/nostr/relay-pool'
+import { fetchEventsWide } from '@/lib/nostr/readRelays'
 import { STANDARD_KINDS } from '@/lib/crypto/constants'
 
 /** TTL for cached relay discovery results (5 minutes) */
@@ -17,6 +18,56 @@ const RELAY_CACHE_TTL_MS = 5 * 60 * 1000
 
 /** Cache of discovered network relays keyed by recipient pubkey */
 const relayCache = new Map<string, { relays: string[]; ts: number }>()
+
+/** A peer's kind-10050 DM relay list exactly as published (deduped, may legitimately be empty). */
+export interface DMRelayListInfo {
+  relays: string[]
+  createdAt: number
+}
+
+const dmRelayListCache = new Map<string, { info: DMRelayListInfo | null; ts: number }>()
+
+/**
+ * Fetch a peer's kind-10050 DM relay list for DISPLAY — the "do they have a 10050, and does it
+ * have relays" pill in the NIP-17 chat header. Distinct from discoverRecipientRelays (which folds
+ * 10050 into the send set): this preserves the difference between "no list at all" (`null`) and
+ * "a list with zero relays" (`{ relays: [] }`), which is exactly what the user needs to see to
+ * understand why a spec-strict client can or can't reach this person.
+ *
+ * Reads across client + own NIP-65 relays (fetchEventsWide) so a list published from another
+ * client has a fair chance of being found. `force` bypasses the 5-minute cache.
+ */
+export async function fetchDMRelayList(
+  pubkey: string,
+  opts?: { force?: boolean },
+): Promise<DMRelayListInfo | null> {
+  const cached = dmRelayListCache.get(pubkey)
+  if (!opts?.force && cached && Date.now() - cached.ts < RELAY_CACHE_TTL_MS) return cached.info
+
+  let info: DMRelayListInfo | null = null
+  try {
+    const events = await fetchEventsWide({ kinds: [STANDARD_KINDS.DM_RELAY_LIST], authors: [pubkey], limit: 1 })
+    const latest = [...events].sort((a, b) => b.created_at - a.created_at)[0]
+    if (latest) {
+      const seen = new Set<string>()
+      const relays: string[] = []
+      for (const tag of latest.tags) {
+        if (tag[0] !== 'relay' || !tag[1]) continue
+        const norm = tag[1].replace(/\/+$/, '').toLowerCase()
+        if (seen.has(norm)) continue
+        seen.add(norm)
+        relays.push(tag[1])
+      }
+      info = { relays, createdAt: latest.created_at }
+    }
+  } catch {
+    // Network failure: don't cache a "not found" we didn't actually establish
+    return cached?.info ?? null
+  }
+
+  dmRelayListCache.set(pubkey, { info, ts: Date.now() })
+  return info
+}
 
 /**
  * Discover a recipient's preferred relays from NIP-65, DM relay list, and DNN metadata.
