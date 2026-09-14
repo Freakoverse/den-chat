@@ -11,6 +11,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { HUB_BANNER_PLACEHOLDER } from '@/lib/constants'
 import { useEscToClose } from '@/hooks/useEscToClose'
 import { useHubStore, type HubData } from '@/stores/hubStore'
 import { useUserStore } from '@/stores/userStore'
@@ -868,7 +869,7 @@ function DiscoverHubCard({ hub }: { hub: DiscoveredHub }) {
         {hub.banner ? (
           <BannerImage src={hub.banner} alt={hub.name} />
         ) : (
-          <div className="w-full h-full bg-gradient-to-br from-primary/15 via-transparent to-secondary/30" />
+          <img src={HUB_BANNER_PLACEHOLDER} alt="" className="w-full h-full object-cover" loading="lazy" />
         )}
         <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent" />
 
@@ -1087,9 +1088,12 @@ function DiscoverHubCard({ hub }: { hub: DiscoveredHub }) {
 // ── Blossom image helpers ──
 function BannerImage({ src, alt }: { src: string; alt: string }) {
   const blossom = useBlossomMedia(src)
+  const [imgError, setImgError] = useState(false)
+  useEffect(() => { setImgError(false) }, [src, blossom.src])
   if (blossom.loading) return <div className="w-full h-full bg-secondary animate-pulse" />
-  if (blossom.error) return <div className="w-full h-full bg-gradient-to-br from-primary/15 via-transparent to-secondary/30" />
-  return <img src={blossom.src || src} alt={alt} className="w-full h-full object-cover blur-lg" loading="lazy" />
+  // Unreachable / broken banner → DEN placeholder (ours, so no blur needed)
+  if (blossom.error || imgError) return <img src={HUB_BANNER_PLACEHOLDER} alt="" className="w-full h-full object-cover" loading="lazy" />
+  return <img src={blossom.src || src} alt={alt} className="w-full h-full object-cover blur-lg" loading="lazy" onError={() => { blossom.onImgError(); setImgError(true) }} />
 }
 
 function IconImage({ src, name }: { src: string; name: string }) {

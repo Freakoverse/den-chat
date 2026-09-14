@@ -132,6 +132,9 @@ export const StorageKey = {
 } as const
 
 /** Admin / creator identity */
+/** Default hub banner (public/assets) — shown wherever a hub has no banner or its banner fails to load. */
+export const HUB_BANNER_PLACEHOLDER = '/assets/hub-banner-placeholder.jpg'
+
 export const ADMIN_NPUB = 'npub1lw0alc5n7gpgc9hv7n230zcump7p63a8atfgf23d6gcxvqykm5xqqqmduf'
 export const ADMIN_PUBKEY = 'fb9fdfe293f2028c16ecf4d5178b1cd87c1d47a7ead284aa2dd230660096dd0c'
 

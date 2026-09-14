@@ -6,6 +6,7 @@
  */
 
 import { useState, useEffect } from 'react'
+import { HUB_BANNER_PLACEHOLDER } from '@/lib/constants'
 import { useHubStore, type HubData } from '@/stores/hubStore'
 import { useUserStore } from '@/stores/userStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
@@ -278,12 +279,15 @@ export function HubEventCard({ identifier, pubkey, relays }: HubEventCardProps) 
       onClick={(e) => e.stopPropagation()}
     >
       {/* Banner */}
-      {hubData.banner && (
-        <div className="relative h-20 overflow-hidden rounded-t-lg">
+      {/* Banner — the hub's own, or the DEN placeholder when there is none / it fails to load */}
+      <div className="relative h-20 overflow-hidden rounded-t-lg">
+        {hubData.banner ? (
           <BlossomBanner src={hubData.banner} alt={`${hubData.name} banner`} />
-          <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent" />
-        </div>
-      )}
+        ) : (
+          <img src={HUB_BANNER_PLACEHOLDER} alt="" className="w-full h-full object-cover" loading="lazy" />
+        )}
+        <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent" />
+      </div>
 
       <div className="p-3 space-y-2 relative">
         {/* Hub identity */}
@@ -498,13 +502,12 @@ export function HubEventCard({ identifier, pubkey, relays }: HubEventCardProps) 
 
 function BlossomBanner({ src, alt }: { src: string; alt: string }) {
   const blossom = useBlossomMedia(src)
+  const [imgError, setImgError] = useState(false)
+  useEffect(() => { setImgError(false) }, [src, blossom.src])
 
-  if (blossom.error === 'not-found') {
-    return (
-      <div className="w-full h-full bg-secondary flex items-center justify-center text-xs text-muted-foreground">
-        Banner not found
-      </div>
-    )
+  // Unreachable / broken banner → DEN placeholder
+  if (blossom.error || imgError) {
+    return <img src={HUB_BANNER_PLACEHOLDER} alt="" className="w-full h-full object-cover" loading="lazy" />
   }
   if (blossom.loading) {
     return (
@@ -513,7 +516,7 @@ function BlossomBanner({ src, alt }: { src: string; alt: string }) {
       </div>
     )
   }
-  return <img src={blossom.src || src} alt={alt} className="w-full h-full object-cover" loading="lazy" />
+  return <img src={blossom.src || src} alt={alt} className="w-full h-full object-cover" loading="lazy" onError={() => { blossom.onImgError(); setImgError(true) }} />
 }
 
 function BlossomIcon({ src, name }: { src: string; name: string }) {

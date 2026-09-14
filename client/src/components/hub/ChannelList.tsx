@@ -6,9 +6,7 @@ import { getPermissionsForUser } from '@/lib/hub/permissions'
 import { Hash, Megaphone, MessagesSquare, MessageSquare, ChevronDown, ChevronUp, ChevronRight, Settings, UserPlus, Inbox, Loader2, SlidersHorizontal, Volume2, MicOff, HeadphoneOff, Camera, ScreenShare, X, User, Radar, Boxes, AlertTriangle, CalendarDays, Lock, Undo2, AtSign, GripVertical, ListOrdered, Check } from 'lucide-react'
 import { cn, npubShort } from '@/lib/utils'
 import { BlossomImage } from '@/components/ui/BlossomImage'
-
-/** Shown in the hub header when the hub event has no banner, or its banner fails to load (public/assets). */
-const HUB_BANNER_PLACEHOLDER = '/assets/hub-banner-placeholder.jpg'
+import { HUB_BANNER_PLACEHOLDER } from '@/lib/constants'
 import { useState, useCallback, useEffect, useRef, useMemo, type ReactNode, type DragEvent as ReactDragEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { Separator } from '@/components/ui/separator'
