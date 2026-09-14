@@ -30,7 +30,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { truncateNpub, formatTimestamp } from '@/lib/utils'
 import { getHour12 } from '@/stores/preferencesStore'
 import { nip19, type Event } from 'nostr-tools'
-import { getUploadBlossoms, getPublishRelays } from '@/stores/postingBehaviourStore'
+import { getUploadBlossoms, getPublishRelays, getDMSelfCopyRelays } from '@/stores/postingBehaviourStore'
 import {
   Search, Plus, MessageSquare, Loader2,
   Lock, Users, UserPlus, AlertCircle, X, ShieldBan, Eye, EyeOff, Shield, ShieldCheck, Info,
@@ -839,7 +839,8 @@ function DMChatView({ recipientPubkey, onSwitchProtocol, onBack }: { recipientPu
 
           // Publish gift wraps for kind 15
           await publishToSpecificRelays(recipientRelays, fileWraps.wrapForRecipient as unknown as Event)
-          await publishToSpecificRelays(publishRelays, fileWraps.wrapForSelf as unknown as Event)
+          // Self copy also goes to the user's own kind-10050 inbox relays (same rule as text sends)
+          await publishToSpecificRelays(getDMSelfCopyRelays(), fileWraps.wrapForSelf as unknown as Event)
         }
       }
 

@@ -162,6 +162,32 @@ export function getPublishRelays(hubRelays?: string[], opts?: { hubOnly?: boolea
 }
 
 /**
+ * Relay set for the user's OWN copy of a NIP-17 DM (the gift wrap addressed to themselves).
+ *
+ * getPublishRelays() PLUS every relay in the user's own kind-10050 DM relay list (minus any they
+ * disabled in client settings), uncapped. The 10050 list is, by definition, where the user has told
+ * the network their DM inbox is — and it's already in DEN's inbox READ set (getDMReadRelays). Writing
+ * the self copy there too is what makes a sent message reliably come back after a reload; without it
+ * the self copy lived only on a 3-relay pick from the client list, which is exactly how sent messages
+ * were vanishing. Read-and-use only: DEN never publishes or edits a 10050 on the user's behalf.
+ */
+export function getDMSelfCopyRelays(): string[] {
+  const norm = (u: string) => u.replace(/\/+$/, '')
+  const disabled = new Set(getRelayList().filter((r) => !r.enabled).map((r) => norm(r.url)))
+  const seen = new Set<string>()
+  const out: string[] = []
+  const add = (u: string) => {
+    const n = norm(u)
+    if (!n || seen.has(n) || disabled.has(n)) return
+    seen.add(n)
+    out.push(u)
+  }
+  for (const r of getPublishRelays()) add(r)
+  for (const r of useUserListsStore.getState().userDMRelays) add(r)
+  return out
+}
+
+/**
  * Publish a PERSONAL (real-key-authored) event with failover. Seeds with the normal getPublishRelays()
  * pick, then routes around dead/write-rejecting relays across ALL enabled destinations the user has
  * turned on (client + NIP-65 relays) — uncapped, and excluding relays disabled in settings — until

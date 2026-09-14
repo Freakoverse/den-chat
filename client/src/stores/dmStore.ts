@@ -10,7 +10,7 @@
 import { create } from 'zustand'
 import { publishToSpecificRelays, publishEventProgressive } from '@/lib/nostr/relay-pool'
 import { fetchDMInbox, subscribeDMInbox } from '@/lib/nostr/readRelays'
-import { getPublishRelays } from '@/stores/postingBehaviourStore'
+import { getPublishRelays, getDMSelfCopyRelays } from '@/stores/postingBehaviourStore'
 import { STANDARD_KINDS } from '@/lib/crypto/constants'
 import { createGiftWrap, unwrapGiftWrap, computeRumorId, foreignKindWrapIds, type UnwrappedDM } from '@/lib/nostr/nip17'
 import { makeRelayAuthSigner } from '@/lib/nostr/relayAuth'
@@ -623,9 +623,11 @@ export const useDMStore = create<DMState>((set, get) => ({
       // from the moment the message appears — no gap where it looks "published"
       const progressId = wrapSelfId || 'self'
       const wrapForSelf = wraps.wrapForSelf as unknown as Event
+      // Self copy: posting relays + the user's own kind-10050 inbox relays (see getDMSelfCopyRelays)
+      const selfCopyRelays = getDMSelfCopyRelays()
       selfCopyWraps.set(progressId, wrapForSelf)
       get().setRelayProgress(progressId, 0, publishRelays.length, [])
-      get().setSelfCopyProgress(progressId, { confirmed: 0, total: publishRelays.length, acceptedRelays: [], settled: false, retrying: false })
+      get().setSelfCopyProgress(progressId, { confirmed: 0, total: selfCopyRelays.length, acceptedRelays: [], settled: false, retrying: false })
       onProgress?.('publishing', { confirmed: 0, total: publishRelays.length })
 
       ;(async () => {
@@ -654,7 +656,7 @@ export const useDMStore = create<DMState>((set, get) => ({
               },
               recipientRelays,
             ),
-            publishSelfCopy(progressId, wrapForSelf, publishRelays, false),
+            publishSelfCopy(progressId, wrapForSelf, selfCopyRelays, false),
           ])
 
           scheduleProgressClear(progressId)
@@ -736,9 +738,9 @@ export const useDMStore = create<DMState>((set, get) => ({
     const wrap = selfCopyWraps.get(eventId)
     const cur = get().relayProgress[eventId]
     if (!wrap || !cur?.self || cur.self.retrying) return
-    // Re-read the publish set rather than reusing the failed one: the user may have fixed their
+    // Re-read the self-copy set rather than reusing the failed one: the user may have fixed their
     // relay config (or a relay came back) since the first attempt.
-    const relays = getPublishRelays()
+    const relays = getDMSelfCopyRelays()
     get().setSelfCopyProgress(eventId, { ...cur.self, settled: false, retrying: true })
     const accepted = await publishSelfCopy(eventId, wrap, relays, true)
     if (accepted > 0) scheduleProgressClear(eventId)
