@@ -127,12 +127,12 @@ export async function safeTreeUpdate(params: SafeTreeUpdateParams): Promise<Safe
 
   // ── Step 1: Upload new tree ──
   const treeBytes = new TextEncoder().encode(newTreeContent)
-  const { hash: newTreeHash } = await uploadToBlossomServers(
+  const { hash: newTreeHash, serverUrls: treeServerUrls } = await uploadToBlossomServers(
     treeBytes, signer, privateKey, hub.blossomServers, 'text/plain', undefined, undefined, authSigner,
   )
 
   // ── Step 2: Verify new tree is downloadable ──
-  await verifyFileExists(newTreeHash, hub.blossomServers)
+  await verifyFileExists(newTreeHash, hub.blossomServers, treeServerUrls)
 
   // ── Step 3: Upload new history (if epoch bumped — single-blob format) ──
   let newHistoryHash = oldHistoryHash
@@ -438,11 +438,11 @@ export async function safePaginatedTreeUpdate(params: SafePaginatedTreeUpdatePar
   for (const page of updatedPages) {
     uploadTasks.push((async () => {
       const pageBytes = new TextEncoder().encode(page.content)
-      const { hash } = await uploadToBlossomServers(
+      const { hash, serverUrls } = await uploadToBlossomServers(
         pageBytes, signer, privateKey, hub.blossomServers, 'text/plain', undefined, undefined, authSigner,
       )
       await cacheHubBlob(hash, pageBytes, hub.dTag) // local source of truth (see top of fn)
-      await verifyFileExists(hash, hub.blossomServers)
+      await verifyFileExists(hash, hub.blossomServers, serverUrls)
       updatedPageHashes.set(page.pageIndex, { firstPubkey: page.firstPubkey, hash })
     })())
   }
@@ -452,11 +452,11 @@ export async function safePaginatedTreeUpdate(params: SafePaginatedTreeUpdatePar
     const idx = i
     uploadTasks.push((async () => {
       const pageBytes = new TextEncoder().encode(newPages[idx].content)
-      const { hash } = await uploadToBlossomServers(
+      const { hash, serverUrls } = await uploadToBlossomServers(
         pageBytes, signer, privateKey, hub.blossomServers, 'text/plain', undefined, undefined, authSigner,
       )
       await cacheHubBlob(hash, pageBytes, hub.dTag)
-      await verifyFileExists(hash, hub.blossomServers)
+      await verifyFileExists(hash, hub.blossomServers, serverUrls)
       newPageEntries.push({
         pageIndex: nextPageIndex + idx,
         firstPubkey: newPages[idx].firstPubkey,
@@ -468,11 +468,11 @@ export async function safePaginatedTreeUpdate(params: SafePaginatedTreeUpdatePar
   // Spine (parallel with pages — independent file)
   uploadTasks.push((async () => {
     const spineBytes = new TextEncoder().encode(newSpineContent)
-    const { hash } = await uploadToBlossomServers(
+    const { hash, serverUrls } = await uploadToBlossomServers(
       spineBytes, signer, privateKey, hub.blossomServers, 'text/plain', undefined, undefined, authSigner,
     )
     await cacheHubBlob(hash, spineBytes, hub.dTag)
-    await verifyFileExists(hash, hub.blossomServers)
+    await verifyFileExists(hash, hub.blossomServers, serverUrls)
     newSpineHash = hash
   })())
 
@@ -695,11 +695,18 @@ export async function safePaginatedTreeUpdate(params: SafePaginatedTreeUpdatePar
  * Verify a file exists on at least one Blossom server via HEAD request.
  * Throws if file cannot be found on any server.
  */
-export async function verifyFileExists(hash: string, servers: string[]): Promise<void> {
+export async function verifyFileExists(hash: string, servers: string[], alsoServers: string[] = []): Promise<void> {
+  // `alsoServers` = the servers the upload actually reported accepting the blob. uploadToBlossomServers
+  // falls back to the client's curated servers when none of the hub's (frozen-at-creation) list accept,
+  // so verifying against hub.blossomServers alone failed one step later with "not found on any Blossom
+  // server" — the exact error that kept member-add broken for hubs on a dead list.
+  const norm = (s: string) => s.replace(/\/+$/, '')
+  const seen = new Set<string>()
+  const targets = [...servers, ...alsoServers].filter((s) => { const n = norm(s); if (!n || seen.has(n)) return false; seen.add(n); return true })
   // Fire all HEAD requests simultaneously — resolve on first success
   try {
     await Promise.any(
-      servers.map(async (server) => {
+      targets.map(async (server) => {
         const url = `${server.replace(/\/+$/, '')}/${hash}`
         const res = await fetch(url, {
           method: 'HEAD',
