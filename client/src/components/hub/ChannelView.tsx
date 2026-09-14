@@ -3626,7 +3626,7 @@ export function ChatMessageRow({
           </div>
         )}
 
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 flex-1 flex">
           <ScrollableContent>
           {isEditing ? (
             <EditField text={editText} onChange={setEditText} onCancel={() => { cancelEdit(); setRemovedAttachmentHashes(new Set()) }} unchanged={editUnchanged} onSave={async () => { await onSaveEdit(msg, editText, removedAttachmentHashes); setRemovedAttachmentHashes(new Set()) }} hubDTag={hubDTag} channelId={channelId} />
