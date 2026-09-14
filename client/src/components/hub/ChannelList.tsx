@@ -6,6 +6,9 @@ import { getPermissionsForUser } from '@/lib/hub/permissions'
 import { Hash, Megaphone, MessagesSquare, MessageSquare, ChevronDown, ChevronUp, ChevronRight, Settings, UserPlus, Inbox, Loader2, SlidersHorizontal, Volume2, MicOff, HeadphoneOff, Camera, ScreenShare, X, User, Radar, Boxes, AlertTriangle, CalendarDays, Lock, Undo2, AtSign, GripVertical, ListOrdered, Check } from 'lucide-react'
 import { cn, npubShort } from '@/lib/utils'
 import { BlossomImage } from '@/components/ui/BlossomImage'
+
+/** Shown in the hub header when the hub event has no banner, or its banner fails to load (public/assets). */
+const HUB_BANNER_PLACEHOLDER = '/assets/hub-banner-placeholder.jpg'
 import { useState, useCallback, useEffect, useRef, useMemo, type ReactNode, type DragEvent as ReactDragEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { Separator } from '@/components/ui/separator'
@@ -519,39 +522,26 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
       {/* Header card — banner + (live event) + nav merged into one card */}
       <div className="rounded-lg overflow-hidden shadow-md shrink-0">
       {/* Banner area */}
-      <div className="relative bg-secondary/50" style={{ minHeight: hub.banner ? '110px' : '48px' }}>
-        {hub.banner ? (
-          <>
-            <BlossomImage
-              src={hub.banner}
-              alt={`${hub.name} banner`}
-              className="w-full h-28 object-cover"
-            />
-            {/* Bottom gradient so the hub name stays readable over the banner */}
-            <div className="absolute bottom-0 left-0 right-0 h-full max-h-[50%] bg-gradient-to-t from-black/75 to-transparent pointer-events-none" />
-            {/* Hub name — positioned over the gradient */}
-            <div className="absolute bottom-0 left-0 right-0 flex items-center px-3 py-2 gap-2">
+      <div className="relative bg-secondary/50" style={{ minHeight: '110px' }}>
+        {/* Always a banner: the hub's own, or the DEN placeholder when the event has none / it fails to load */}
+        <BlossomImage
+          src={hub.banner}
+          alt={`${hub.name} banner`}
+          className="w-full h-28 object-cover"
+          fallback={<img src={HUB_BANNER_PLACEHOLDER} alt="" className="w-full h-28 object-cover" />}
+        />
+        {/* Bottom gradient so the hub name stays readable over the banner */}
+        <div className="absolute bottom-0 left-0 right-0 h-full max-h-[50%] bg-gradient-to-t from-black/75 to-transparent pointer-events-none" />
+        {/* Hub name — positioned over the gradient */}
+        <div className="absolute bottom-0 left-0 right-0 flex items-center px-3 py-2 gap-2">
 
-              <button
-                onClick={() => setShowInfo(true)}
-                className="font-semibold text-sm truncate text-white flex-1 text-left rounded-md px-2 py-0.5 drop-shadow-sm transition-all duration-300 hover:bg-white/10 cursor-pointer"
-              >
-                {hub.name}
-              </button>
-            </div>
-          </>
-        ) : (
-          /* No banner — simple header with hub name */
-          <div className="flex items-center gap-2 px-4 h-12 min-h-12">
-
-            <button
-              onClick={() => setShowInfo(true)}
-              className="font-semibold text-sm truncate text-foreground hover:underline cursor-pointer"
-            >
-              {hub.name}
-            </button>
-          </div>
-        )}
+          <button
+            onClick={() => setShowInfo(true)}
+            className="font-semibold text-sm truncate text-white flex-1 text-left rounded-md px-2 py-0.5 drop-shadow-sm transition-all duration-300 hover:bg-white/10 cursor-pointer"
+          >
+            {hub.name}
+          </button>
+        </div>
       </div>
 
       {/* Live event banner */}
