@@ -113,6 +113,8 @@ export const StorageKey = {
   ALLOW_LARGE_STICKERS: 'den-chat-allow-large-stickers',
   CLIENT_RELAYS: 'den-chat-client-relays',
   CLIENT_BLOSSOMS: 'den-chat-client-blossoms',
+  /** Revision of the one-time reconciliation applied to the stored Blossom list (see lib/blossom/client.ts) */
+  CLIENT_BLOSSOMS_REVISION: 'den-chat-client-blossoms-rev',
   BG_SHOWCASE: 'den-chat-bg-showcase',
   AD_SHOWCASE: 'den-chat-ad-showcase',
   SKIP_SPLASH: 'den-chat-skip-splash',

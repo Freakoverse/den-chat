@@ -8,9 +8,10 @@ import { StorageKey } from '@/lib/constants'
 // from a browser origin. Removed 2026-08: cdn.sovbit.host (DNS no longer resolves),
 // blossom.nostr.hu (upload now 401 auth-walled), milo/mibo.nostria.app (missing CORS
 // headers + 301 redirect that browsers refuse to follow on a preflighted request).
+// Removed 2026-09: blossom.band (rejects text/plain uploads — the hub tree files — with
+// 400/415 "content-type does not match"; every new hub picked it as server #2).
 const DEFAULT_SERVERS = [
   'https://blossom.primal.net',
-  'https://blossom.band',
   'https://blossom.data.haus',
   'https://nostr.download',
   'https://blossom.jumble.social',
@@ -18,6 +19,21 @@ const DEFAULT_SERVERS = [
   'https://blossom-01.uid.ovh',
   'https://blossom-02.uid.ovh',
 ]
+
+/**
+ * Servers pulled from users' STORED lists by reconcileStoredList (verified 2026-09-14: sovbit DNS
+ * dead, nostr.hu 401 whitelist-only, band rejects text/plain). The stored list is a snapshot of
+ * whatever DEFAULT_SERVERS was when it was first written and never followed later curation — so
+ * a long-time user kept uploading (and picking new-hub servers) from a list that had rotted.
+ */
+const RETIRED_SERVERS = [
+  'https://cdn.sovbit.host',
+  'https://blossom.nostr.hu',
+  'https://blossom.band',
+]
+
+/** Bump when RETIRED_SERVERS / DEFAULT_SERVERS change in a way stored lists must pick up. */
+const STORED_LIST_REVISION = 1
 
 function normalize(url: string): string {
   return url.replace(/\/+$/, '')
@@ -73,8 +89,42 @@ function migrateOldBlossomKeys(): void {
   localStorage.removeItem('denchat_blossom_fallback')
 }
 
-// Run migration on module load
+/**
+ * One-time reconciliation of the STORED list against current curation. Runs once per revision:
+ * drops RETIRED_SERVERS, appends any curated default the list is missing (enabled), and leaves
+ * every custom entry and every toggle state exactly as the user set it. Without this, the stored
+ * list (written once, then only edited by hand) silently diverged from DEFAULT_SERVERS forever.
+ */
+function reconcileStoredList(): void {
+  try {
+    if (localStorage.getItem(StorageKey.CLIENT_BLOSSOMS_REVISION) === String(STORED_LIST_REVISION)) return
+    const stored = localStorage.getItem(StorageKey.CLIENT_BLOSSOMS)
+    if (stored) {
+      const parsed: unknown = JSON.parse(stored)
+      if (Array.isArray(parsed)) {
+        const retired = new Set(RETIRED_SERVERS.map(normalize))
+        const valid = (parsed as { url?: unknown; enabled?: unknown }[])
+          .filter((s): s is { url: string; enabled: boolean } => !!s && typeof s.url === 'string')
+        const kept = valid.filter((s) => !retired.has(normalize(s.url)))
+        const removedCount = valid.length - kept.length
+        const have = new Set(kept.map((s) => normalize(s.url)))
+        let addedCount = 0
+        for (const url of DEFAULT_SERVERS) {
+          if (!have.has(normalize(url))) { kept.push({ url, enabled: true }); addedCount++ }
+        }
+        localStorage.setItem(StorageKey.CLIENT_BLOSSOMS, JSON.stringify(kept))
+        if (removedCount > 0 || addedCount > 0) {
+          console.log(`[Blossom] stored server list reconciled: retired ${removedCount} dead server(s), added ${addedCount} curated default(s) → ${kept.length} total`)
+        }
+      }
+    }
+    localStorage.setItem(StorageKey.CLIENT_BLOSSOMS_REVISION, String(STORED_LIST_REVISION))
+  } catch { /* ignore — worst case the list is reconciled on the next load */ }
+}
+
+// Run migration + reconciliation on module load
 migrateOldBlossomKeys()
+reconcileStoredList()
 
 // ─── Server Management ───
 
