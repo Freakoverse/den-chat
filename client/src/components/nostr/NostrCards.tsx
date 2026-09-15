@@ -12,7 +12,7 @@ import { fetchEvents, fetchEventsFromRelays } from '@/lib/nostr/relay-pool'
 import { MOD_KIND, getModRelays, parseModEvent, type Mod } from '@/lib/mods/modEvent'
 import { ModCard, ModOpenModal } from '@/components/discover/ModsTab'
 import { nip19 } from 'nostr-tools'
-import { truncateNpub, formatTimestamp } from '@/lib/utils'
+import { truncateNpub, formatTimestamp, openExternalUrl } from '@/lib/utils'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Copy, Check, Loader2, FileText, MessageSquare, Radio, ExternalLink } from 'lucide-react'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
@@ -194,10 +194,12 @@ export function LongFormCard({ identifier, pubkey, relays }: {
  * brs.degmods.com still resolves from chat. Plain https://degmods.com/... links are untouched —
  * they stay ordinary links.
  */
-export function GameModCard({ identifier, pubkey, relays }: {
+export function GameModCard({ identifier, pubkey, relays, openUrl }: {
   identifier: string
   pubkey: string
   relays?: string[]
+  /** When the address came from a link (https://degmods.com/mod/naddr…), clicking opens THAT link instead of the chooser. */
+  openUrl?: string
 }) {
   const [mod, setMod] = useState<Mod | null>(null)
   const [loading, setLoading] = useState(true)
@@ -245,7 +247,7 @@ export function GameModCard({ identifier, pubkey, relays }: {
   return (
     <>
       <div className="my-2 max-w-[350px]">
-        <ModCard mod={mod} compact onOpen={() => setOpen(true)} />
+        <ModCard mod={mod} compact onOpen={() => { if (openUrl) openExternalUrl(openUrl); else setOpen(true) }} />
       </div>
       {open && createPortal(<ModOpenModal mod={mod} onClose={() => setOpen(false)} />, document.body)}
     </>

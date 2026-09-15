@@ -973,8 +973,9 @@ export const MessageContent = memo(function MessageContent({ content, suffix, on
           <a href={href} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">{children}</a>
         )
       }
-      // Defer link preview to render after all text content
-      if (!effectiveDisablePreviews) {
+      // Defer link preview to render after all text content. A URL carrying a nostr address already
+      // gets its own card (see splitNostr `href`), so skip the generic OG preview to avoid two cards.
+      if (!effectiveDisablePreviews && !urlHasNostrAddress(href)) {
         collectedEmbedsRef.current.push({ type: 'preview', href })
       }
       return (
@@ -1150,7 +1151,7 @@ export const MessageContent = memo(function MessageContent({ content, suffix, on
       <>
         {nostrSegments.map((seg, i) => {
           if (seg.type === 'nostr') {
-            return <NostrCard key={i} bech32={seg.value} onProfileClick={onProfileClick} disableHubInviteCards={disableHubInviteCards} />
+            return <NostrCard key={i} bech32={seg.value} href={seg.href} onProfileClick={onProfileClick} disableHubInviteCards={disableHubInviteCards} />
           }
           if (hasSpoilers) {
             const segs = splitSpoilerSegments(seg.value)
@@ -1532,20 +1533,50 @@ function emojifyTimestampAndMention(text: string, eventEmojiTags?: [string, stri
 
 /** Matches bare bech32 (npub1, nprofile1, note1, nevent1, naddr1), nostr:-prefixed URIs, and @-prefixed npub */
 const NOSTR_PATTERN = /(?:nostr:)?@?(?:npub1|nprofile1|note1|nevent1|naddr1)[a-zA-Z0-9]+/g
+const URL_SPAN_PATTERN = /https?:\/\/[^\s<]+/g
 
-function splitNostr(content: string): { type: 'text' | 'nostr'; value: string }[] {
-  const segments: { type: 'text' | 'nostr'; value: string }[] = []
+/** True when a URL carries a nostr address in it (https://degmods.com/mod/naddr1…, njump.me/nevent1…). */
+export function urlHasNostrAddress(url: string): boolean {
+  return /(?:npub1|nprofile1|note1|nevent1|naddr1)[a-zA-Z0-9]{20,}/.test(url)
+}
+
+type NostrSegment =
+  | { type: 'text'; value: string }
+  /** `href` is set when the address was found INSIDE a URL — the card then opens that URL, not its own chooser. */
+  | { type: 'nostr'; value: string; href?: string }
+
+function splitNostr(content: string): NostrSegment[] {
+  const segments: NostrSegment[] = []
   let lastIndex = 0
   let match: RegExpExecArray | null
+
+  // URLs are kept whole. A bech32 inside one (https://degmods.com/mod/naddr1…) used to be cut out
+  // of the link — leaving a dead "https://degmods.com/mod/" — and rendered as a standalone card.
+  // Now the link stays intact in the text and the card is attached to it with `href`.
+  const urlSpans: { start: number; end: number; url: string }[] = []
+  for (const m of content.matchAll(URL_SPAN_PATTERN)) {
+    urlSpans.push({ start: m.index!, end: m.index! + m[0].length, url: m[0] })
+  }
+  const spanAt = (i: number) => urlSpans.find((s) => i >= s.start && i < s.end)
 
   NOSTR_PATTERN.lastIndex = 0
 
   while ((match = NOSTR_PATTERN.exec(content)) !== null) {
+    // Strip nostr: and @ prefixes if present
+    const raw = match[0].replace('nostr:', '').replace(/^@/, '')
+    const span = spanAt(match.index)
+    if (span) {
+      if (span.end > lastIndex) {
+        segments.push({ type: 'text', value: content.slice(lastIndex, span.end) })
+      }
+      segments.push({ type: 'nostr', value: raw, href: span.url })
+      lastIndex = span.end
+      NOSTR_PATTERN.lastIndex = span.end
+      continue
+    }
     if (match.index > lastIndex) {
       segments.push({ type: 'text', value: content.slice(lastIndex, match.index) })
     }
-    // Strip nostr: and @ prefixes if present
-    const raw = match[0].replace('nostr:', '').replace(/^@/, '')
     segments.push({ type: 'nostr', value: raw })
     lastIndex = NOSTR_PATTERN.lastIndex
   }
@@ -1556,7 +1587,7 @@ function splitNostr(content: string): { type: 'text' | 'nostr'; value: string }[
 }
 
 /** Decodes a bech32 nostr identifier and renders the appropriate card */
-function NostrCard({ bech32, onProfileClick, disableHubInviteCards }: { bech32: string; onProfileClick?: (pubkey: string) => void; disableHubInviteCards?: boolean }) {
+function NostrCard({ bech32, href, onProfileClick, disableHubInviteCards }: { bech32: string; href?: string; onProfileClick?: (pubkey: string) => void; disableHubInviteCards?: boolean }) {
   try {
     const decoded = nip19.decode(bech32)
 
@@ -1609,7 +1640,8 @@ function NostrCard({ bech32, onProfileClick, disableHubInviteCards }: { bech32: 
         return <CalendarTimeEventCard identifier={data.identifier} pubkey={data.pubkey} relays={data.relays} />
       }
       if (data.kind === 31142) {
-        return <GameModCard identifier={data.identifier} pubkey={data.pubkey} relays={data.relays} />
+        // Shared as a link (degmods.com/mod/naddr…) → the card opens that exact link. Bare naddr → open-in chooser.
+        return <GameModCard identifier={data.identifier} pubkey={data.pubkey} relays={data.relays} openUrl={href} />
       }
     }
   } catch { }
