@@ -12,6 +12,9 @@ import { useUserStore } from '@/stores/userStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { useBlossomMedia } from '@/hooks/useBlossomMedia'
 import { fetchEvents } from '@/lib/nostr/relay-pool'
+
+/** Hubs resolved from relays for cards of hubs the user ISN'T in — a re-mounting card shows instantly instead of refetching. */
+const hubCardCache = new Map<string, HubData>()
 import { KINDS } from '@/lib/crypto/constants'
 
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -65,11 +68,20 @@ export function HubEventCard({ identifier, pubkey, relays }: HubEventCardProps) 
   const hubMembers = useHubStore((s) => s.hubMembers[dTag])
   const isMember = !!hubSecret || (!!myPubkey && (hubMembers?.some(m => m.pubkey === myPubkey) ?? false))
 
-  // Fetch hub event data
+  // Fetch hub event data. Depends on THIS hub's store entry, not the whole `hubs` map — the map
+  // changes whenever any hub updates, which refetched every card of a hub the user isn't in.
+  const storeHub = hubs[identifier]
   useEffect(() => {
     // Check if hub is already in store
-    if (hubs[identifier]) {
-      setLocalHubData(hubs[identifier])
+    if (storeHub) {
+      setLocalHubData(storeHub)
+      setLoading(false)
+      return
+    }
+    // Resolved earlier this session (card re-mounted) — no loading flash, no refetch
+    const cachedHub = hubCardCache.get(identifier)
+    if (cachedHub) {
+      setLocalHubData(cachedHub)
       setLoading(false)
       return
     }
@@ -147,6 +159,7 @@ export function HubEventCard({ identifier, pubkey, relays }: HubEventCardProps) 
           version: (() => { const v = latest.tags.find(t => t[0] === 'version')?.[1]; return v ? (parseInt(v, 10) || undefined) : undefined })(),
         }
 
+        hubCardCache.set(identifier, parsed)
         setLocalHubData(parsed)
       } catch (err) {
         console.error('Failed to fetch hub event:', err)
@@ -156,7 +169,7 @@ export function HubEventCard({ identifier, pubkey, relays }: HubEventCardProps) 
     }
 
     fetchHub()
-  }, [identifier, pubkey, hubs])
+  }, [identifier, pubkey, storeHub])
 
   const handleRequestJoin = async () => {
     if (!myPubkey || !hubData || joining) return

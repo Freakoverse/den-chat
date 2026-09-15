@@ -20,6 +20,7 @@ import { verifyEventIdentity } from '@/lib/nostr/identity'
 import { CalendarEventDetailModal } from '@/components/hub/CalendarEventDetailModal'
 import { CreateCalendarEventModal } from '@/components/hub/CreateCalendarEventModal'
 import { fetchEvents, subscribeToRelays } from '@/lib/nostr/relay-pool'
+import { useCachedFetch } from '@/hooks/useCachedFetch'
 import { KINDS } from '@/lib/crypto/constants'
 import { aesDecrypt } from '@/lib/crypto/aes'
 import { deriveEventsKey } from '@/lib/crypto/hkdf'
@@ -64,8 +65,6 @@ export function CalendarTimeEventCard({ identifier, pubkey, relays }: CalendarTi
   const hubMembersByHub = useHubStore((s) => s.hubMembers)
   const { getProfile } = useProfileCache()
 
-  const [fetchedEvent, setFetchedEvent] = useState<FetchedEvent | null>(null)
-  const [loading, setLoading] = useState(true)
   const [decrypted, setDecrypted] = useState<DecryptedCalendarEvent | null>(null)
   const [publicEvent, setPublicEvent] = useState<{
     title: string
@@ -78,57 +77,42 @@ export function CalendarTimeEventCard({ identifier, pubkey, relays }: CalendarTi
   const [showDetail, setShowDetail] = useState(false)
   const [showEdit, setShowEdit] = useState(false)
 
+  // Fetch the event — cached per coordinate (+ relay hints). Keyed on a joined string, not the
+  // `relays` array: nip19.decode hands the card a new array every parent render, and depending on it
+  // directly re-ran the fetch (loading → card → loading…) on every re-render.
+  const relayKey = (relays || []).join('|')
+  const { data: fetchedEvent, loading } = useCachedFetch<FetchedEvent>(`calev:${pubkey}:${identifier}|${relayKey}`, () =>
+    new Promise<FetchedEvent | null>((resolve) => {
+      const filter: any = { kinds: [KINDS.CALENDAR_TIME_EVENT], authors: [pubkey], '#d': [identifier], limit: 1 }
+      const parse = (event: any): FetchedEvent => ({
+        id: event.id,
+        pubkey: event.pubkey,
+        content: event.content,
+        createdAt: event.created_at,
+        hubDTag: event.tags.find((t: string[]) => t[0] === 'h')?.[1] || null,
+        dTag: event.tags.find((t: string[]) => t[0] === 'd')?.[1] || identifier,
+        tags: event.tags,
+        rawEvent: JSON.stringify(event),
+      })
+      let done = false
+      const finish = (v: FetchedEvent | null) => { if (!done) { done = true; resolve(v) } }
+
+      if (relays && relays.length > 0) {
+        let found: FetchedEvent | null = null
+        const sub = subscribeToRelays(relays, filter, (event) => { if (!found) found = parse(event) }, () => { sub.close(); finish(found) })
+        setTimeout(() => { sub.close(); finish(found) }, 10000)
+      } else {
+        fetchEvents(filter)
+          .then((events) => finish(events.length > 0 ? parse(events[0]) : null))
+          .catch(() => finish(null))
+      }
+    }))
+
   // For the detail modal we need the calendar hook for RSVP support
   const isSameHub = fetchedEvent?.hubDTag === activeHubId && !!activeHubId
   const calendarHubDTag = isSameHub ? activeHubId : null
 
   const calendar = useCalendar(calendarHubDTag)
-
-  // Fetch the event
-  useEffect(() => {
-    let cancelled = false
-
-    const filter: any = {
-      kinds: [KINDS.CALENDAR_TIME_EVENT],
-      authors: [pubkey],
-      '#d': [identifier],
-      limit: 1,
-    }
-
-    const handleEvent = (event: any) => {
-      if (cancelled) return
-      const dTag = event.tags.find((t: string[]) => t[0] === 'd')?.[1] || identifier
-      const hubDTag = event.tags.find((t: string[]) => t[0] === 'h')?.[1] || null
-
-      setFetchedEvent({
-        id: event.id,
-        pubkey: event.pubkey,
-        content: event.content,
-        createdAt: event.created_at,
-        hubDTag,
-        dTag,
-        tags: event.tags,
-        rawEvent: JSON.stringify(event),
-      })
-    }
-
-    if (relays && relays.length > 0) {
-      const sub = subscribeToRelays(
-        relays,
-        filter,
-        handleEvent,
-        () => { sub.close(); if (!cancelled) setLoading(false) }
-      )
-      const timer = setTimeout(() => { sub.close(); if (!cancelled) setLoading(false) }, 10000)
-      return () => { cancelled = true; clearTimeout(timer); sub.close() }
-    } else {
-      fetchEvents(filter).then((events) => {
-        if (!cancelled && events.length > 0) handleEvent(events[0])
-        if (!cancelled) setLoading(false)
-      }).catch(() => { if (!cancelled) setLoading(false) })
-      return () => { cancelled = true }
-    }
-  }, [identifier, pubkey, relays])
 
   // Attempt decryption / parse public event
   useEffect(() => {

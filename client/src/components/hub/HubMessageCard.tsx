@@ -15,6 +15,7 @@ import { useUserStore } from '@/stores/userStore'
 import { useNavigationStore } from '@/stores/navigationStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { fetchEvents, subscribeToRelays } from '@/lib/nostr/relay-pool'
+import { useCachedFetch } from '@/hooks/useCachedFetch'
 import { KINDS } from '@/lib/crypto/constants'
 import { aesDecrypt } from '@/lib/crypto/aes'
 import { deriveChannelKey } from '@/lib/crypto/hkdf'
@@ -50,68 +51,38 @@ export function HubMessageCard({ identifier, pubkey, relays }: HubMessageCardPro
   const setActiveChannel = useHubStore((s) => s.setActiveChannel)
   const { getProfile } = useProfileCache()
 
-  const [msg, setMsg] = useState<FetchedMessage | null>(null)
-  const [loading, setLoading] = useState(true)
   const [decryptedContent, setDecryptedContent] = useState<string | null>(null)
   const [decryptionFailed, setDecryptionFailed] = useState(false)
 
-  // Fetch the message event
-  useEffect(() => {
-    let cancelled = false
+  // Fetch the message event — cached per coordinate (+ relay hints). Keyed on a joined string, not the
+  // `relays` array: nip19.decode hands the card a new array every parent render, and depending on it
+  // directly re-ran the fetch (loading → card → loading…) on every re-render.
+  const relayKey = (relays || []).join('|')
+  const { data: msg, loading } = useCachedFetch<FetchedMessage>(`hubmsg:${pubkey}:${identifier}|${relayKey}`, () =>
+    new Promise<FetchedMessage | null>((resolve) => {
+      const filter: any = { kinds: [KINDS.MESSAGE], authors: [pubkey], '#d': [identifier], limit: 1 }
+      const parse = (event: any): FetchedMessage | null => {
+        const dTag = event.tags.find((t: string[]) => t[0] === 'd')?.[1] || identifier
+        const hubDTag = event.tags.find((t: string[]) => t[0] === 'h')?.[1]
+        const channelId = event.tags.find((t: string[]) => t[0] === 'c')?.[1]
+        if (!hubDTag || !channelId) return null
+        return { id: event.id, pubkey: event.pubkey, content: event.content, createdAt: event.created_at, hubDTag, channelId, dTag }
+      }
+      let done = false
+      const finish = (v: FetchedMessage | null) => { if (!done) { done = true; resolve(v) } }
 
-    const filter: any = {
-      kinds: [KINDS.MESSAGE],
-      authors: [pubkey],
-      '#d': [identifier],
-      limit: 1,
-    }
-
-    const handleEvent = (event: any) => {
-      if (cancelled) return
-      const dTag = event.tags.find((t: string[]) => t[0] === 'd')?.[1] || identifier
-      const hubDTag = event.tags.find((t: string[]) => t[0] === 'h')?.[1]
-      const channelId = event.tags.find((t: string[]) => t[0] === 'c')?.[1]
-
-      if (!hubDTag || !channelId) return
-
-      setMsg({
-        id: event.id,
-        pubkey: event.pubkey,
-        content: event.content,
-        createdAt: event.created_at,
-        hubDTag,
-        channelId,
-        dTag,
-      })
-    }
-
-    if (relays && relays.length > 0) {
-      // Use relay hints from the naddr
-      const sub = subscribeToRelays(
-        relays,
-        filter,
-        handleEvent,
-        () => {
-          sub.close()
-          if (!cancelled) setLoading(false)
-        }
-      )
-      // Safety timeout
-      const timer = setTimeout(() => { sub.close(); if (!cancelled) setLoading(false) }, 10000)
-      return () => { cancelled = true; clearTimeout(timer); sub.close() }
-    } else {
-      // Fallback: fetch from default pool
-      fetchEvents(filter).then((events) => {
-        if (!cancelled && events.length > 0) {
-          handleEvent(events[0])
-        }
-        if (!cancelled) setLoading(false)
-      }).catch(() => {
-        if (!cancelled) setLoading(false)
-      })
-      return () => { cancelled = true }
-    }
-  }, [identifier, pubkey, relays])
+      if (relays && relays.length > 0) {
+        // Use relay hints from the naddr; EOSE or the 10s safety timeout settles it
+        let found: FetchedMessage | null = null
+        const sub = subscribeToRelays(relays, filter, (event) => { if (!found) found = parse(event) }, () => { sub.close(); finish(found) })
+        setTimeout(() => { sub.close(); finish(found) }, 10000)
+      } else {
+        // Fallback: fetch from default pool
+        fetchEvents(filter)
+          .then((events) => finish(events.length > 0 ? parse(events[0]) : null))
+          .catch(() => finish(null))
+      }
+    }))
 
   // Attempt decryption once we have the message
   useEffect(() => {

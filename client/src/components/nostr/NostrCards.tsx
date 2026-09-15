@@ -11,6 +11,7 @@ import { useProfileCache } from '@/hooks/useProfileCache'
 import { fetchEvents, fetchEventsFromRelays } from '@/lib/nostr/relay-pool'
 import { MOD_KIND, getModRelays, parseModEvent, type Mod } from '@/lib/mods/modEvent'
 import { ModCard, ModOpenModal } from '@/components/discover/ModsTab'
+import { useCachedFetch } from '@/hooks/useCachedFetch'
 import { nip19 } from 'nostr-tools'
 import { truncateNpub, formatTimestamp, openExternalUrl } from '@/lib/utils'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -51,16 +52,9 @@ export function ProfileCard({ pubkey, onProfileClick }: { pubkey: string; onProf
 /* ─── Embedded Note (kind 1) ─────────────────────────────────── */
 
 export function NoteCard({ eventId }: { eventId: string }) {
-  const [event, setEvent] = useState<Event | null>(null)
-  const [loading, setLoading] = useState(true)
   const { getProfile } = useProfileCache()
-
-  useEffect(() => {
-    fetchEvents({ ids: [eventId], limit: 1 }).then((events) => {
-      if (events.length > 0) setEvent(events[0])
-      setLoading(false)
-    })
-  }, [eventId])
+  const { data: event, loading } = useCachedFetch<Event>(`e:${eventId}`, () =>
+    fetchEvents({ ids: [eventId], limit: 1 }).then((events) => events[0] ?? null))
 
   if (loading) {
     return (
@@ -110,21 +104,10 @@ export function LongFormCard({ identifier, pubkey, relays }: {
   pubkey: string
   relays?: string[]
 }) {
-  const [event, setEvent] = useState<Event | null>(null)
-  const [loading, setLoading] = useState(true)
   const { getProfile } = useProfileCache()
-
-  useEffect(() => {
-    fetchEvents({
-      kinds: [30023],
-      authors: [pubkey],
-      '#d': [identifier],
-      limit: 1,
-    }).then((events) => {
-      if (events.length > 0) setEvent(events.sort((a, b) => b.created_at - a.created_at)[0])
-      setLoading(false)
-    })
-  }, [identifier, pubkey])
+  const { data: event, loading } = useCachedFetch<Event>(`30023:${pubkey}:${identifier}`, () =>
+    fetchEvents({ kinds: [30023], authors: [pubkey], '#d': [identifier], limit: 1 })
+      .then((events) => [...events].sort((a, b) => b.created_at - a.created_at)[0] ?? null))
 
   if (loading) {
     return (
@@ -199,9 +182,6 @@ export function LongFormCard({ identifier, pubkey, relays }: {
 
 /* ─── Game Mod Card (kind 31142, DEG Mods) ───────────────────── */
 
-/** Resolved mods by `<pubkey>:<d>` — a card that re-mounts (list re-render, scroll) shows instantly instead of "Loading…" again. */
-const gameModCache = new Map<string, { mod: Mod | null }>()
-
 /**
  * Inline preview for a shared game-mod naddr: the same card Discover › Game Mods renders, and the
  * same "Open this mod" chooser (degmods.com or a saved custom domain) on click. Fetches from the
@@ -216,20 +196,11 @@ export function GameModCard({ identifier, pubkey, relays, openUrl }: {
   /** When the address came from a link (https://degmods.com/mod/naddr…), clicking opens THAT link instead of the chooser. */
   openUrl?: string
 }) {
-  const coord = `${pubkey}:${identifier}`
-  const cached = gameModCache.get(coord)
-  const [mod, setMod] = useState<Mod | null>(cached?.mod ?? null)
-  const [loading, setLoading] = useState(!cached)
   const [open, setOpen] = useState(false)
-  // `relays` is a fresh array from nip19.decode on every parent render — depending on it directly
-  // re-ran this effect (loading → card → loading…) each time e.g. the profile cache updated.
+  // `relays` is a fresh array from nip19.decode on every parent render — keying the fetch on the
+  // array itself re-ran it (loading → card → loading…) each time e.g. the profile cache updated.
   const relayKey = (relays || []).join('|')
-
-  useEffect(() => {
-    if (gameModCache.get(coord)) return
-    let alive = true
-    setLoading(true)
-    setMod(null)
+  const { data: mod, loading } = useCachedFetch<Mod>(`31142:${pubkey}:${identifier}|${relayKey}`, async () => {
     const seen = new Set<string>()
     const relaySet = [...(relays || []), ...getModRelays()].filter((r) => {
       const n = r.replace(/\/+$/, '')
@@ -237,19 +208,11 @@ export function GameModCard({ identifier, pubkey, relays, openUrl }: {
       seen.add(n)
       return true
     })
-    fetchEventsFromRelays(relaySet, { kinds: [MOD_KIND], authors: [pubkey], '#d': [identifier], limit: 1 })
-      .then((events) => {
-        const latest = [...events].sort((a, b) => b.created_at - a.created_at)[0]
-        const parsed = latest ? parseModEvent(latest) : null
-        const result = parsed && !parsed.isDeleted ? parsed : null
-        gameModCache.set(coord, { mod: result })
-        if (alive) setMod(result)
-      })
-      .catch(() => { /* not found — fallback badge below; not cached so a retry can succeed */ })
-      .finally(() => { if (alive) setLoading(false) })
-    return () => { alive = false }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [coord, relayKey])
+    const events = await fetchEventsFromRelays(relaySet, { kinds: [MOD_KIND], authors: [pubkey], '#d': [identifier], limit: 1 })
+    const latest = [...events].sort((a, b) => b.created_at - a.created_at)[0]
+    const parsed = latest ? parseModEvent(latest) : null
+    return parsed && !parsed.isDeleted ? parsed : null
+  })
 
   const naddr = nip19.naddrEncode({ identifier, pubkey, kind: MOD_KIND, relays: relays || [] })
 
@@ -278,16 +241,9 @@ export function GameModCard({ identifier, pubkey, relays, openUrl }: {
 /* ─── Comment Card (kind 1111) ───────────────────────────────── */
 
 export function CommentCard({ eventId, relays }: { eventId: string; relays?: string[] }) {
-  const [event, setEvent] = useState<Event | null>(null)
-  const [loading, setLoading] = useState(true)
   const { getProfile } = useProfileCache()
-
-  useEffect(() => {
-    fetchEvents({ ids: [eventId], limit: 1 }).then((events) => {
-      if (events.length > 0) setEvent(events[0])
-      setLoading(false)
-    })
-  }, [eventId])
+  const { data: event, loading } = useCachedFetch<Event>(`e:${eventId}`, () =>
+    fetchEvents({ ids: [eventId], limit: 1 }).then((events) => events[0] ?? null))
 
   if (loading) {
     return (
@@ -352,21 +308,10 @@ export function LiveActivityCard({ identifier, pubkey, relays }: {
   pubkey: string
   relays?: string[]
 }) {
-  const [event, setEvent] = useState<Event | null>(null)
-  const [loading, setLoading] = useState(true)
   const { getProfile } = useProfileCache()
-
-  useEffect(() => {
-    fetchEvents({
-      kinds: [30311],
-      authors: [pubkey],
-      '#d': [identifier],
-      limit: 1,
-    }).then((events) => {
-      if (events.length > 0) setEvent(events.sort((a, b) => b.created_at - a.created_at)[0])
-      setLoading(false)
-    })
-  }, [identifier, pubkey])
+  const { data: event, loading } = useCachedFetch<Event>(`30311:${pubkey}:${identifier}`, () =>
+    fetchEvents({ kinds: [30311], authors: [pubkey], '#d': [identifier], limit: 1 })
+      .then((events) => [...events].sort((a, b) => b.created_at - a.created_at)[0] ?? null))
 
   if (loading) {
     return (

@@ -26,6 +26,7 @@ import { LongFormCard, CommentCard, LiveActivityCard, GameModCard } from '@/comp
 import { getEmojiMap } from '@/stores/emojiStore'
 import { MutedWordPill } from '@/components/chat/MessageContent'
 import { detectEmbed, isEmbeddable } from '@/lib/embeds'
+import { useCachedFetch } from '@/hooks/useCachedFetch'
 import { Embed } from '@/components/ui/Embed'
 import type { EmbedInfo } from '@/lib/embeds'
 import type { Event } from 'nostr-tools'
@@ -677,16 +678,9 @@ function EmbeddedNote({ eventId, onOpenProfile, onOpenThread }: {
   onOpenProfile?: (pubkey: string) => void
   onOpenThread?: (eventId: string) => void
 }) {
-  const [event, setEvent] = useState<Event | null>(null)
-  const [loading, setLoading] = useState(true)
   const { getProfile } = useProfileCache()
-
-  useEffect(() => {
-    fetchEvents({ ids: [eventId], limit: 1 }).then((events) => {
-      if (events.length > 0) setEvent(events[0])
-      setLoading(false)
-    })
-  }, [eventId])
+  const { data: event, loading } = useCachedFetch<Event>(`e:${eventId}`, () =>
+    fetchEvents({ ids: [eventId], limit: 1 }).then((events) => events[0] ?? null))
 
   if (loading) {
     return (
