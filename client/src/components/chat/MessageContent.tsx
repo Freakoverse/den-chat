@@ -23,6 +23,8 @@ import { HubEventCard } from '@/components/hub/HubEventCard'
 import { HubMessageCard } from '@/components/hub/HubMessageCard'
 import { CalendarTimeEventCard } from '@/components/hub/CalendarTimeEventCard'
 import { ProfileCard, NoteCard, LongFormCard, CommentCard, LiveActivityCard, GameModCard } from '@/components/nostr/NostrCards'
+import { ShortAddressCard } from '@/components/nostr/ShortAddressCard'
+import { SHORT_ADDRESS_PATTERN, looksLikeShortAddress } from '@/lib/nostr/nipShort'
 import { detectEmbed } from '@/lib/embeds'
 import { Embed } from '@/components/ui/Embed'
 import { usePreferencesStore } from '@/stores/preferencesStore'
@@ -1535,10 +1537,15 @@ function emojifyTimestampAndMention(text: string, eventEmojiTags?: [string, stri
 const NOSTR_PATTERN = /(?:nostr:)?@?(?:npub1|nprofile1|note1|nevent1|naddr1)[a-zA-Z0-9]+/g
 const URL_SPAN_PATTERN = /https?:\/\/[^\s<]+/g
 
-/** True when a URL carries a nostr address in it (https://degmods.com/mod/naddr1…, njump.me/nevent1…). */
+/** True when a URL carries a nostr address in it (https://degmods.com/mod/naddr1…, njump.me/nevent1…, …/snpub1…f3c49d). */
 export function urlHasNostrAddress(url: string): boolean {
-  return /(?:npub1|nprofile1|note1|nevent1|naddr1)[a-zA-Z0-9]{20,}/.test(url)
+  if (/(?:npub1|nprofile1|note1|nevent1|naddr1)[a-zA-Z0-9]{20,}/.test(url)) return true
+  const short = url.match(/\/(sn[a-zA-Z0-9.]{7,}(?:-[0-9a-f]{1,8})?)(?:[/?#]|$)/)
+  return !!short && looksLikeShortAddress(short[1])
 }
+
+/** Short addresses first so `snpub1…` is claimed whole and never seen as an `npub1…` starting one character in. */
+const REFERENCE_PATTERN = new RegExp(`${SHORT_ADDRESS_PATTERN.source}|${NOSTR_PATTERN.source}`, 'g')
 
 type NostrSegment =
   | { type: 'text'; value: string }
@@ -1559,11 +1566,14 @@ function splitNostr(content: string): NostrSegment[] {
   }
   const spanAt = (i: number) => urlSpans.find((s) => i >= s.start && i < s.end)
 
-  NOSTR_PATTERN.lastIndex = 0
+  REFERENCE_PATTERN.lastIndex = 0
 
-  while ((match = NOSTR_PATTERN.exec(content)) !== null) {
+  while ((match = REFERENCE_PATTERN.exec(content)) !== null) {
     // Strip nostr: and @ prefixes if present
     const raw = match[0].replace('nostr:', '').replace(/^@/, '')
+    // A "sn…" hit is only a NIP-SHORT address if its code and authority check out; otherwise it's
+    // an ordinary word ("snapshot") and stays text.
+    if (raw.startsWith('s') && !looksLikeShortAddress(raw)) continue
     const span = spanAt(match.index)
     if (span) {
       if (span.end > lastIndex) {
@@ -1571,14 +1581,14 @@ function splitNostr(content: string): NostrSegment[] {
       }
       segments.push({ type: 'nostr', value: raw, href: span.url })
       lastIndex = span.end
-      NOSTR_PATTERN.lastIndex = span.end
+      REFERENCE_PATTERN.lastIndex = span.end
       continue
     }
     if (match.index > lastIndex) {
       segments.push({ type: 'text', value: content.slice(lastIndex, match.index) })
     }
     segments.push({ type: 'nostr', value: raw })
-    lastIndex = NOSTR_PATTERN.lastIndex
+    lastIndex = REFERENCE_PATTERN.lastIndex
   }
   if (lastIndex < content.length) {
     segments.push({ type: 'text', value: content.slice(lastIndex) })
@@ -1588,6 +1598,10 @@ function splitNostr(content: string): NostrSegment[] {
 
 /** Decodes a bech32 nostr identifier and renders the appropriate card */
 function NostrCard({ bech32, href, onProfileClick, disableHubInviteCards }: { bech32: string; href?: string; onProfileClick?: (pubkey: string) => void; disableHubInviteCards?: boolean }) {
+  // NIP-SHORT address (snpub1…f3c49d / snabandondeliveraf3c49d) → resolve, then the kind's own card
+  if (looksLikeShortAddress(bech32)) {
+    return <ShortAddressCard address={bech32} href={href} disableHubInviteCards={disableHubInviteCards} />
+  }
   try {
     const decoded = nip19.decode(bech32)
 

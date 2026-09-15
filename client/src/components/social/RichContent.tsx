@@ -23,6 +23,8 @@ import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/comp
 import { HubEventCard } from '@/components/hub/HubEventCard'
 import { HubMessageCard } from '@/components/hub/HubMessageCard'
 import { LongFormCard, CommentCard, LiveActivityCard, GameModCard } from '@/components/nostr/NostrCards'
+import { ShortAddressCard } from '@/components/nostr/ShortAddressCard'
+import { SHORT_ADDRESS_PATTERN, looksLikeShortAddress } from '@/lib/nostr/nipShort'
 import { getEmojiMap } from '@/stores/emojiStore'
 import { MutedWordPill } from '@/components/chat/MessageContent'
 import { detectEmbed, isEmbeddable } from '@/lib/embeds'
@@ -81,7 +83,8 @@ interface ContentSegment {
 
 function parseContent(content: string): ContentSegment[] {
   const segments: ContentSegment[] = []
-  const combined = new RegExp(`${NOSTR_REGEX.source}|${URL_REGEX.source}`, 'g')
+  // Short addresses first so `snpub1…` is claimed whole and never seen as an `npub1…` starting one character in
+  const combined = new RegExp(`${SHORT_ADDRESS_PATTERN.source}|${NOSTR_REGEX.source}|${URL_REGEX.source}`, 'g')
   let lastIndex = 0
   let match: RegExpExecArray | null
 
@@ -92,7 +95,15 @@ function parseContent(content: string): ContentSegment[] {
 
     const matched = match[0]
 
-    if (matched.startsWith('nostr:') || matched.startsWith('@') || /^(?:npub1|nprofile1|note1|nevent1|naddr1)/.test(matched)) {
+    // A "sn…" hit is only a NIP-SHORT address if its code and authority check out; otherwise it's
+    // an ordinary word ("snapshot") and stays text.
+    if (/^(?:nostr:)?sn/i.test(matched) && !looksLikeShortAddress(matched)) {
+      segments.push({ type: 'text', value: matched })
+      lastIndex = match.index + matched.length
+      continue
+    }
+
+    if (matched.startsWith('nostr:') || matched.startsWith('@') || /^(?:npub1|nprofile1|note1|nevent1|naddr1)/.test(matched) || looksLikeShortAddress(matched)) {
       segments.push({ type: 'nostr', value: matched })
     } else if (IMAGE_REGEX.test(matched)) {
       segments.push({ type: 'image', value: matched })
@@ -605,6 +616,11 @@ function NostrMention({ uri, onOpenProfile, onOpenThread }: {
   onOpenThread?: (eventId: string) => void
 }) {
   const raw = uri.replace('nostr:', '').replace(/^@/, '')
+
+  // NIP-SHORT address (snpub1…f3c49d / snabandondeliveraf3c49d) → resolve, then the kind's own card
+  if (looksLikeShortAddress(raw)) {
+    return <ShortAddressCard address={raw} />
+  }
 
   try {
     const decoded = nip19.decode(raw)

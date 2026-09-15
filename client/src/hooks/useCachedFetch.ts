@@ -17,6 +17,11 @@ import { useEffect, useState } from 'react'
 
 const cache = new Map<string, unknown>()
 
+/** Seed the cache — e.g. a short address resolved to an event the kind-specific card would otherwise refetch. */
+export function primeCachedFetch<T>(key: string, value: T): void {
+  cache.set(key, value)
+}
+
 export function useCachedFetch<T>(key: string, load: () => Promise<T | null>): { data: T | null; loading: boolean } {
   const cached = cache.has(key) ? (cache.get(key) as T) : null
   const [data, setData] = useState<T | null>(cached)

@@ -12,10 +12,12 @@ import { fetchEvents, fetchEventsFromRelays } from '@/lib/nostr/relay-pool'
 import { MOD_KIND, getModRelays, parseModEvent, type Mod } from '@/lib/mods/modEvent'
 import { ModCard, ModOpenModal } from '@/components/discover/ModsTab'
 import { useCachedFetch } from '@/hooks/useCachedFetch'
+import { useDnnStore } from '@/stores/dnnStore'
+import { verifiedShortAddress, shareableShortAddress } from '@/lib/nostr/nipShort'
 import { nip19 } from 'nostr-tools'
 import { truncateNpub, formatTimestamp, openExternalUrl } from '@/lib/utils'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import { Copy, Check, Loader2, FileText, MessageSquare, Radio, ExternalLink, ArrowUpRight } from 'lucide-react'
+import { Copy, Check, Loader2, FileText, MessageSquare, Radio, ExternalLink, ArrowUpRight, Link2 } from 'lucide-react'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
 import { useNavigationStore } from '@/stores/navigationStore'
 import { useSocialStore } from '@/stores/socialStore'
@@ -88,6 +90,7 @@ export function NoteCard({ eventId }: { eventId: string }) {
       </div>
       <div className="flex items-center gap-3">
         <CopyAddress bech32={nip19.noteEncode(eventId)} />
+        <CopyShort event={event} />
         <OpenInDen onOpen={() => {
           useSocialStore.getState().setActiveThread(eventId)
           useNavigationStore.getState().setActivePage('social')
@@ -170,6 +173,7 @@ export function LongFormCard({ identifier, pubkey, relays }: {
 
         <div className="flex items-center gap-3">
           <CopyAddress bech32={naddr} />
+          <CopyShort event={event} />
           <OpenInDen onOpen={() => {
             useSocialStore.getState().setActiveArticle(naddr)
             useNavigationStore.getState().setActivePage('social')
@@ -200,7 +204,8 @@ export function GameModCard({ identifier, pubkey, relays, openUrl }: {
   // `relays` is a fresh array from nip19.decode on every parent render — keying the fetch on the
   // array itself re-ran it (loading → card → loading…) each time e.g. the profile cache updated.
   const relayKey = (relays || []).join('|')
-  const { data: mod, loading } = useCachedFetch<Mod>(`31142:${pubkey}:${identifier}|${relayKey}`, async () => {
+  // Keeps the raw event next to the parsed Mod: "Copy short" needs the event's own `s` tag + fields.
+  const { data, loading } = useCachedFetch<{ mod: Mod; event: Event }>(`31142:${pubkey}:${identifier}|${relayKey}`, async () => {
     const seen = new Set<string>()
     const relaySet = [...(relays || []), ...getModRelays()].filter((r) => {
       const n = r.replace(/\/+$/, '')
@@ -211,8 +216,9 @@ export function GameModCard({ identifier, pubkey, relays, openUrl }: {
     const events = await fetchEventsFromRelays(relaySet, { kinds: [MOD_KIND], authors: [pubkey], '#d': [identifier], limit: 1 })
     const latest = [...events].sort((a, b) => b.created_at - a.created_at)[0]
     const parsed = latest ? parseModEvent(latest) : null
-    return parsed && !parsed.isDeleted ? parsed : null
+    return parsed && !parsed.isDeleted ? { mod: parsed, event: latest } : null
   })
+  const mod = data?.mod ?? null
 
   const naddr = nip19.naddrEncode({ identifier, pubkey, kind: MOD_KIND, relays: relays || [] })
 
@@ -232,6 +238,10 @@ export function GameModCard({ identifier, pubkey, relays, openUrl }: {
     <>
       <div className="my-2 max-w-[350px]">
         <ModCard mod={mod} compact onOpen={() => { if (openUrl) openExternalUrl(openUrl); else setOpen(true) }} />
+        <div className="flex items-center gap-3 px-1">
+          <CopyAddress bech32={naddr} />
+          {data?.event && <CopyShort event={data.event} />}
+        </div>
       </div>
       {open && createPortal(<ModOpenModal mod={mod} onClose={() => setOpen(false)} />, document.body)}
     </>
@@ -295,7 +305,10 @@ export function CommentCard({ eventId, relays }: { eventId: string; relays?: str
           {event.content}
         </div>
 
-        <CopyAddress bech32={nip19.neventEncode({ id: eventId, relays })} />
+        <div className="flex items-center gap-3">
+          <CopyAddress bech32={nip19.neventEncode({ id: eventId, relays })} />
+          <CopyShort event={event} />
+        </div>
       </div>
     </div>
   )
@@ -404,7 +417,10 @@ export function LiveActivityCard({ identifier, pubkey, relays }: {
               <ExternalLink size={10} /> {isLive ? 'Watch' : 'Open'}
             </a>
           )}
-          <CopyAddress bech32={naddr} />
+          <div className="flex items-center gap-3">
+            <CopyAddress bech32={naddr} />
+            <CopyShort event={event} />
+          </div>
         </div>
       </div>
     </div>
@@ -428,6 +444,51 @@ function OpenInDen({ onOpen }: { onOpen: () => void }) {
           </button>
         </TooltipTrigger>
         <TooltipContent side="top" className="text-xs">Open in DEN Chat</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  )
+}
+
+/**
+ * "Copy short" — the event's NIP-SHORT address (`s` + author + 6-hex code). Only shown when the
+ * event carries an `s` tag that verifies against its own fields. The author's verified DNN ID is
+ * used as the authority when known (dramatically shorter); otherwise the npub. Copying needs one
+ * relay round-trip to see whether the author has another event on the same code (collision
+ * selector), hence the spinner.
+ */
+function CopyShort({ event }: { event: Event }) {
+  const [state, setState] = useState<'idle' | 'busy' | 'copied'>('idle')
+  if (!verifiedShortAddress(event)) return null
+
+  const handleCopy = async (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (state === 'busy') return
+    setState('busy')
+    try {
+      const authority = useDnnStore.getState().getVerifiedDnnId(event.pubkey) || undefined
+      const address = await shareableShortAddress(event, authority)
+      if (!address) { setState('idle'); return }
+      await navigator.clipboard.writeText(address)
+      setState('copied')
+      setTimeout(() => setState('idle'), 2000)
+    } catch {
+      setState('idle')
+    }
+  }
+
+  return (
+    <TooltipProvider delayDuration={300}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            onClick={handleCopy}
+            className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer mt-1"
+          >
+            {state === 'copied' ? <Check size={10} className="text-green-500" /> : state === 'busy' ? <Loader2 size={10} className="animate-spin" /> : <Link2 size={10} />}
+            {state === 'copied' ? 'Copied' : 'Copy short'}
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="text-xs max-w-[220px]">Copy the NIP-SHORT address — a compact reference that resolves without any link shortener</TooltipContent>
       </Tooltip>
     </TooltipProvider>
   )
