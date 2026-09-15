@@ -14,7 +14,7 @@ import { ModCard, ModOpenModal } from '@/components/discover/ModsTab'
 import { nip19 } from 'nostr-tools'
 import { truncateNpub, formatTimestamp, openExternalUrl } from '@/lib/utils'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import { Copy, Check, Loader2, FileText, MessageSquare, Radio, ExternalLink } from 'lucide-react'
+import { Copy, Check, Loader2, FileText, MessageSquare, Radio, ExternalLink, ArrowUpRight } from 'lucide-react'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
 import { useNavigationStore } from '@/stores/navigationStore'
 import { useSocialStore } from '@/stores/socialStore'
@@ -92,7 +92,13 @@ export function NoteCard({ eventId }: { eventId: string }) {
       <div className="text-xs text-foreground/80 whitespace-pre-wrap break-words line-clamp-4">
         {event.content}
       </div>
-      <CopyAddress bech32={nip19.noteEncode(eventId)} />
+      <div className="flex items-center gap-3">
+        <CopyAddress bech32={nip19.noteEncode(eventId)} />
+        <OpenInDen onOpen={() => {
+          useSocialStore.getState().setActiveThread(eventId)
+          useNavigationStore.getState().setActivePage('social')
+        }} />
+      </div>
     </div>
   )
 }
@@ -179,7 +185,13 @@ export function LongFormCard({ identifier, pubkey, relays }: {
           <span className="text-[10px] text-muted-foreground">· {wordCount.toLocaleString()} words</span>
         </div>
 
-        <CopyAddress bech32={naddr} />
+        <div className="flex items-center gap-3">
+          <CopyAddress bech32={naddr} />
+          <OpenInDen onOpen={() => {
+            useSocialStore.getState().setActiveArticle(naddr)
+            useNavigationStore.getState().setActivePage('social')
+          }} />
+        </div>
       </div>
     </div>
   )
@@ -455,6 +467,26 @@ export function LiveActivityCard({ identifier, pubkey, relays }: {
 }
 
 /* ─── Helpers ────────────────────────────────────────────────── */
+
+/** "Open in DEN Chat" — jumps to the in-app view for the referenced event (thread / article reader). */
+function OpenInDen({ onOpen }: { onOpen: () => void }) {
+  return (
+    <TooltipProvider delayDuration={300}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            onClick={(e) => { e.stopPropagation(); onOpen() }}
+            className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer mt-1"
+          >
+            <ArrowUpRight size={10} />
+            Open in DEN Chat
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="text-xs">Open in DEN Chat</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  )
+}
 
 function CopyAddress({ bech32 }: { bech32: string }) {
   const [copied, setCopied] = useState(false)

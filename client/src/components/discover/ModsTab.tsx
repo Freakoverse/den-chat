@@ -185,7 +185,7 @@ export function ModCard({ mod, onOpen, compact }: { mod: Mod; onOpen: () => void
       <div className="relative w-full aspect-video overflow-hidden bg-secondary">
         {mod.featuredImageUrl && showMedia ? (
           <BlossomImage src={mod.featuredImageUrl} alt={mod.title}
-            className={cn('w-full h-full object-cover group-hover:scale-105 transition-transform duration-300', nsfw && 'blur-lg')}
+            className={cn('w-full h-full object-cover group-hover:scale-[1.02] transition-transform duration-300', nsfw && 'blur-lg')}
             fallback={<PlaceholderArt />} />
         ) : (
           <div className="w-full h-full flex items-center justify-center">
