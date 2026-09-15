@@ -187,6 +187,9 @@ export function LongFormCard({ identifier, pubkey, relays }: {
 
 /* ─── Game Mod Card (kind 31142, DEG Mods) ───────────────────── */
 
+/** Resolved mods by `<pubkey>:<d>` — a card that re-mounts (list re-render, scroll) shows instantly instead of "Loading…" again. */
+const gameModCache = new Map<string, { mod: Mod | null }>()
+
 /**
  * Inline preview for a shared game-mod naddr: the same card Discover › Game Mods renders, and the
  * same "Open this mod" chooser (degmods.com or a saved custom domain) on click. Fetches from the
@@ -201,11 +204,17 @@ export function GameModCard({ identifier, pubkey, relays, openUrl }: {
   /** When the address came from a link (https://degmods.com/mod/naddr…), clicking opens THAT link instead of the chooser. */
   openUrl?: string
 }) {
-  const [mod, setMod] = useState<Mod | null>(null)
-  const [loading, setLoading] = useState(true)
+  const coord = `${pubkey}:${identifier}`
+  const cached = gameModCache.get(coord)
+  const [mod, setMod] = useState<Mod | null>(cached?.mod ?? null)
+  const [loading, setLoading] = useState(!cached)
   const [open, setOpen] = useState(false)
+  // `relays` is a fresh array from nip19.decode on every parent render — depending on it directly
+  // re-ran this effect (loading → card → loading…) each time e.g. the profile cache updated.
+  const relayKey = (relays || []).join('|')
 
   useEffect(() => {
+    if (gameModCache.get(coord)) return
     let alive = true
     setLoading(true)
     setMod(null)
@@ -218,17 +227,17 @@ export function GameModCard({ identifier, pubkey, relays, openUrl }: {
     })
     fetchEventsFromRelays(relaySet, { kinds: [MOD_KIND], authors: [pubkey], '#d': [identifier], limit: 1 })
       .then((events) => {
-        if (!alive) return
         const latest = [...events].sort((a, b) => b.created_at - a.created_at)[0]
-        if (latest) {
-          const parsed = parseModEvent(latest)
-          setMod(parsed.isDeleted ? null : parsed)
-        }
+        const parsed = latest ? parseModEvent(latest) : null
+        const result = parsed && !parsed.isDeleted ? parsed : null
+        gameModCache.set(coord, { mod: result })
+        if (alive) setMod(result)
       })
-      .catch(() => { /* not found — fallback badge below */ })
+      .catch(() => { /* not found — fallback badge below; not cached so a retry can succeed */ })
       .finally(() => { if (alive) setLoading(false) })
     return () => { alive = false }
-  }, [identifier, pubkey, relays])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [coord, relayKey])
 
   const naddr = nip19.naddrEncode({ identifier, pubkey, kind: MOD_KIND, relays: relays || [] })
 
