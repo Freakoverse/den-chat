@@ -276,7 +276,7 @@ export function RichContent({ content, onOpenProfile, onOpenThread, mutedWords, 
                           href={seg.value}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="text-primary hover:underline"
+                          className="text-primary hover:underline break-all"
                           onClick={(e) => e.stopPropagation()}
                         >
                           {seg.value}

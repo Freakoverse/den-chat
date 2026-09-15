@@ -970,7 +970,7 @@ export const MessageContent = memo(function MessageContent({ content, suffix, on
         // Defer the embed — or a "hidden" placeholder when previews are disabled — to render after text.
         collectedEmbedsRef.current.push(effectiveDisablePreviews ? { type: 'hidden', href, embed: embedInfo } : { type: 'embed', href, embed: embedInfo })
         return (
-          <a href={href} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">{children}</a>
+          <a href={href} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline break-all">{children}</a>
         )
       }
       // Defer link preview to render after all text content. A URL carrying a nostr address already
@@ -982,7 +982,7 @@ export const MessageContent = memo(function MessageContent({ content, suffix, on
         <TooltipProvider delayDuration={300}>
           <Tooltip>
             <TooltipTrigger asChild>
-              <a href={href} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
+              <a href={href} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline break-all">
                 {children}
               </a>
             </TooltipTrigger>
