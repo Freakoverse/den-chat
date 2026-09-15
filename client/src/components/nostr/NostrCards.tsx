@@ -5,7 +5,7 @@
  * Each card fetches its event data and renders a compact, styled preview.
  */
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { fetchEvents, fetchEventsFromRelays } from '@/lib/nostr/relay-pool'
@@ -14,10 +14,14 @@ import { ModCard, ModOpenModal } from '@/components/discover/ModsTab'
 import { useCachedFetch } from '@/hooks/useCachedFetch'
 import { useDnnStore } from '@/stores/dnnStore'
 import { verifiedShortAddress, shareableShortAddress } from '@/lib/nostr/nipShort'
+import { BlossomImage } from '@/components/ui/BlossomImage'
+import { CustomAudioPlayer } from '@/components/ui/CustomAudioPlayer'
+import { getRenderLimit } from '@/lib/imageSizeGuard'
+import { usePreferencesStore } from '@/stores/preferencesStore'
 import { nip19 } from 'nostr-tools'
 import { truncateNpub, formatTimestamp, openExternalUrl } from '@/lib/utils'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import { Copy, Check, Loader2, FileText, MessageSquare, Radio, ExternalLink, ArrowUpRight, Link2 } from 'lucide-react'
+import { Copy, Check, Loader2, FileText, MessageSquare, Radio, ExternalLink, ArrowUpRight, Link2, ImageOff } from 'lucide-react'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
 import { useNavigationStore } from '@/stores/navigationStore'
 import { useSocialStore } from '@/stores/socialStore'
@@ -85,9 +89,7 @@ export function NoteCard({ eventId }: { eventId: string }) {
         <span className="text-xs font-semibold text-foreground">{displayName}</span>
         <span className="text-[10px] text-muted-foreground">{formatTimestamp(event.created_at)}</span>
       </div>
-      <div className="text-xs text-foreground/80 whitespace-pre-wrap break-words line-clamp-4">
-        {event.content}
-      </div>
+      <NoteBody content={event.content} />
       <div className="flex items-center gap-3">
         <CopyAddress bech32={nip19.noteEncode(eventId)} />
         <CopyShort event={event} />
@@ -97,6 +99,91 @@ export function NoteCard({ eventId }: { eventId: string }) {
         }} />
       </div>
     </div>
+  )
+}
+
+/* ─── Note body: text + inline media ─────────────────────────── */
+
+const NOTE_URL_RE = /https?:\/\/[^\s<]+/g
+const NOTE_IMAGE_RE = /\.(png|jpe?g|gif|webp|avif|bmp|svg)(\?[^#\s]*)?(#\S*)?$/i
+const NOTE_VIDEO_RE = /\.(mp4|webm|mov|m4v|mkv|avi)(\?[^#\s]*)?(#\S*)?$/i
+const NOTE_AUDIO_RE = /\.(mp3|ogg|wav|flac|aac|m4a)(\?[^#\s]*)?(#\S*)?$/i
+
+/** Pull media URLs out of a note's text so they render as media instead of as raw links. */
+function splitNoteMedia(content: string): { text: string; images: string[]; videos: string[]; audios: string[] } {
+  const images: string[] = []
+  const videos: string[] = []
+  const audios: string[] = []
+  const text = content.replace(NOTE_URL_RE, (url) => {
+    if (NOTE_IMAGE_RE.test(url)) { images.push(url); return '' }
+    if (NOTE_VIDEO_RE.test(url)) { videos.push(url); return '' }
+    if (NOTE_AUDIO_RE.test(url)) { audios.push(url); return '' }
+    return url
+  }).replace(/\n{3,}/g, '\n\n').trim()
+  return { text, images, videos, audios }
+}
+
+/**
+ * A note card's body. Images go through BlossomImage with the Settings › Moderation "chat" render
+ * limit (too-large images show the size prompt with an override, like everywhere else in chat).
+ * Video and audio render as players that preload NOTHING — the bytes only start moving when the
+ * user presses play. The global "show media" preference hides all of it.
+ */
+function NoteBody({ content }: { content: string }) {
+  const showMedia = usePreferencesStore((s) => s.showMedia)
+  const { text, images, videos, audios } = useMemo(() => splitNoteMedia(content), [content])
+  const hasMedia = images.length + videos.length + audios.length > 0
+  const chatLimitMB = getRenderLimit('chat')
+
+  return (
+    <>
+      {text && (
+        <div className="text-xs text-foreground/80 whitespace-pre-wrap break-words line-clamp-4">
+          {text}
+        </div>
+      )}
+      {hasMedia && !showMedia && (
+        <p className="flex items-center gap-1 mt-1 text-[10px] text-muted-foreground"><ImageOff size={10} /> Media hidden</p>
+      )}
+      {hasMedia && showMedia && (
+        <div className="mt-1.5 space-y-1.5">
+          {images.length > 0 && (
+            <div className={images.length > 1 ? 'grid grid-cols-2 gap-1' : ''}>
+              {images.slice(0, 4).map((url) => (
+                <BlossomImage
+                  key={url}
+                  src={url}
+                  alt=""
+                  maxSizeMB={chatLimitMB}
+                  className={`rounded-md overflow-hidden ${images.length > 1 ? 'h-[120px]' : 'max-h-[220px]'}`}
+                />
+              ))}
+            </div>
+          )}
+          {videos.map((url) => <NoteVideo key={url} src={url} />)}
+          {audios.map((url) => (
+            <CustomAudioPlayer key={url} src={url} title={url.split('/').pop()?.split('?')[0] || 'Audio'} preload="none" />
+          ))}
+        </div>
+      )}
+    </>
+  )
+}
+
+/** Plain <video preload="none">: nothing is fetched until the user presses play. */
+function NoteVideo({ src }: { src: string }) {
+  const [failed, setFailed] = useState(false)
+  if (failed) {
+    return <a href={src} target="_blank" rel="noopener noreferrer" className="text-primary text-xs hover:underline break-all">{src}</a>
+  }
+  return (
+    <video
+      src={src}
+      controls
+      preload="none"
+      className="w-full max-h-[220px] rounded-md bg-black/40"
+      onError={() => setFailed(true)}
+    />
   )
 }
 
