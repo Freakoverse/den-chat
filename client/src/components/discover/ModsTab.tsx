@@ -11,7 +11,7 @@ import {
   Package, Loader2, ChevronLeft, ChevronRight, SlidersHorizontal, X, ExternalLink,
   Plus, Repeat2, Gamepad2, ImageOff,
 } from 'lucide-react'
-import { cn, truncateNpub, openExternalUrl } from '@/lib/utils'
+import { cn, truncateNpub, openExternalUrl, formatTimestamp } from '@/lib/utils'
 import { BlossomImage } from '@/components/ui/BlossomImage'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { useProfileCache } from '@/hooks/useProfileCache'
@@ -168,7 +168,12 @@ export function ModsTab() {
 
 // ─── Card ───
 
-function ModCard({ mod, onOpen }: { mod: Mod; onOpen: () => void }) {
+/**
+ * Game mod card (kind 31142). Used by the Discover › Game Mods grid and, via GameModCard in
+ * components/nostr/NostrCards, as the inline preview for a shared mod naddr in chat and social.
+ * `compact` = the inline-preview variant: summary clamped to 2 lines.
+ */
+export function ModCard({ mod, onOpen, compact }: { mod: Mod; onOpen: () => void; compact?: boolean }) {
   const author = useModAuthor(mod.pubkey)
   const showMedia = usePreferencesStore((s) => s.showMedia)
   const nsfw = !!mod.contentWarning
@@ -197,17 +202,18 @@ function ModCard({ mod, onOpen }: { mod: Mod; onOpen: () => void }) {
       <div className="flex flex-col gap-2 p-3 flex-1">
         <h3 className="font-semibold text-sm text-foreground line-clamp-1 group-hover:text-primary transition-colors">{mod.title || 'Untitled mod'}</h3>
         {mod.game && <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground w-fit"><Gamepad2 size={11} /> {mod.game}</span>}
-        {mod.summary && <p className="text-xs text-muted-foreground line-clamp-3">{mod.summary}</p>}
+        {mod.summary && <p className={cn('text-xs text-muted-foreground', compact ? 'line-clamp-2' : 'line-clamp-3')}>{mod.summary}</p>}
 
-        {/* Author */}
-        <div className="flex items-center gap-2 mt-auto pt-1">
-          <Avatar className="h-5 w-5">
+        {/* Author + published date */}
+        <div className="flex items-center gap-2 mt-auto pt-1 min-w-0">
+          <Avatar className="h-5 w-5 shrink-0">
             {author.picture && <AvatarImage src={author.picture} />}
             <AvatarFallback className="text-[8px] bg-primary/20 text-primary">{author.name.slice(0, 2).toUpperCase()}</AvatarFallback>
           </Avatar>
           <span className="text-[11px] text-muted-foreground truncate">
             {author.hasName ? author.name : truncateNpub(author.npub, 8)}
           </span>
+          <span className="text-[10px] text-muted-foreground/70 shrink-0 ml-auto">{formatTimestamp(mod.publishedAt)}</span>
         </div>
       </div>
     </button>
@@ -220,7 +226,7 @@ function PlaceholderArt() {
 
 // ─── Open-in modal ───
 
-function ModOpenModal({ mod, onClose }: { mod: Mod; onClose: () => void }) {
+export function ModOpenModal({ mod, onClose }: { mod: Mod; onClose: () => void }) {
   useEscToClose(onClose)
   const { targets, addTarget, removeTarget } = useModOpenTargetsStore()
   const [draft, setDraft] = useState('')

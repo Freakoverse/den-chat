@@ -6,8 +6,11 @@
  */
 
 import { useState, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { useProfileCache } from '@/hooks/useProfileCache'
-import { fetchEvents } from '@/lib/nostr/relay-pool'
+import { fetchEvents, fetchEventsFromRelays } from '@/lib/nostr/relay-pool'
+import { MOD_KIND, getModRelays, parseModEvent, type Mod } from '@/lib/mods/modEvent'
+import { ModCard, ModOpenModal } from '@/components/discover/ModsTab'
 import { nip19 } from 'nostr-tools'
 import { truncateNpub, formatTimestamp } from '@/lib/utils'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -179,6 +182,73 @@ export function LongFormCard({ identifier, pubkey, relays }: {
         <CopyAddress bech32={naddr} />
       </div>
     </div>
+  )
+}
+
+/* ─── Game Mod Card (kind 31142, DEG Mods) ───────────────────── */
+
+/**
+ * Inline preview for a shared game-mod naddr: the same card Discover › Game Mods renders, and the
+ * same "Open this mod" chooser (degmods.com or a saved custom domain) on click. Fetches from the
+ * naddr's relay hints + the DEG source relay + the user's relays, so a mod that only lives on
+ * brs.degmods.com still resolves from chat. Plain https://degmods.com/... links are untouched —
+ * they stay ordinary links.
+ */
+export function GameModCard({ identifier, pubkey, relays }: {
+  identifier: string
+  pubkey: string
+  relays?: string[]
+}) {
+  const [mod, setMod] = useState<Mod | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [open, setOpen] = useState(false)
+
+  useEffect(() => {
+    let alive = true
+    setLoading(true)
+    setMod(null)
+    const seen = new Set<string>()
+    const relaySet = [...(relays || []), ...getModRelays()].filter((r) => {
+      const n = r.replace(/\/+$/, '')
+      if (!n || seen.has(n)) return false
+      seen.add(n)
+      return true
+    })
+    fetchEventsFromRelays(relaySet, { kinds: [MOD_KIND], authors: [pubkey], '#d': [identifier], limit: 1 })
+      .then((events) => {
+        if (!alive) return
+        const latest = [...events].sort((a, b) => b.created_at - a.created_at)[0]
+        if (latest) {
+          const parsed = parseModEvent(latest)
+          setMod(parsed.isDeleted ? null : parsed)
+        }
+      })
+      .catch(() => { /* not found — fallback badge below */ })
+      .finally(() => { if (alive) setLoading(false) })
+    return () => { alive = false }
+  }, [identifier, pubkey, relays])
+
+  const naddr = nip19.naddrEncode({ identifier, pubkey, kind: MOD_KIND, relays: relays || [] })
+
+  if (loading) {
+    return (
+      <div className="my-2 rounded-lg border border-border p-3 flex items-center gap-2 text-xs text-muted-foreground max-w-[350px]">
+        <Loader2 size={12} className="animate-spin" /> Loading game mod...
+      </div>
+    )
+  }
+
+  if (!mod) {
+    return <FallbackBadge label="Game mod not found" bech32={naddr} />
+  }
+
+  return (
+    <>
+      <div className="my-2 max-w-[350px]">
+        <ModCard mod={mod} compact onOpen={() => setOpen(true)} />
+      </div>
+      {open && createPortal(<ModOpenModal mod={mod} onClose={() => setOpen(false)} />, document.body)}
+    </>
   )
 }
 

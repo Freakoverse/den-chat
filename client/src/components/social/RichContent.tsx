@@ -22,7 +22,7 @@ import { Copy, Check, X, ChevronLeft, ChevronRight, ImageOff, Link as LinkIcon, 
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
 import { HubEventCard } from '@/components/hub/HubEventCard'
 import { HubMessageCard } from '@/components/hub/HubMessageCard'
-import { LongFormCard, CommentCard, LiveActivityCard } from '@/components/nostr/NostrCards'
+import { LongFormCard, CommentCard, LiveActivityCard, GameModCard } from '@/components/nostr/NostrCards'
 import { getEmojiMap } from '@/stores/emojiStore'
 import { MutedWordPill } from '@/components/chat/MessageContent'
 import { detectEmbed, isEmbeddable } from '@/lib/embeds'
@@ -642,6 +642,9 @@ function NostrMention({ uri, onOpenProfile, onOpenThread }: {
       }
       if (data.kind === 30311) {
         return <LiveActivityCard identifier={data.identifier} pubkey={data.pubkey} relays={data.relays} />
+      }
+      if (data.kind === 31142) {
+        return <GameModCard identifier={data.identifier} pubkey={data.pubkey} relays={data.relays} />
       }
     }
 

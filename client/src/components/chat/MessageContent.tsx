@@ -22,7 +22,7 @@ import { BlossomImg } from '@/components/ui/BlossomImg'
 import { HubEventCard } from '@/components/hub/HubEventCard'
 import { HubMessageCard } from '@/components/hub/HubMessageCard'
 import { CalendarTimeEventCard } from '@/components/hub/CalendarTimeEventCard'
-import { ProfileCard, NoteCard, LongFormCard, CommentCard, LiveActivityCard } from '@/components/nostr/NostrCards'
+import { ProfileCard, NoteCard, LongFormCard, CommentCard, LiveActivityCard, GameModCard } from '@/components/nostr/NostrCards'
 import { detectEmbed } from '@/lib/embeds'
 import { Embed } from '@/components/ui/Embed'
 import { usePreferencesStore } from '@/stores/preferencesStore'
@@ -1607,6 +1607,9 @@ function NostrCard({ bech32, onProfileClick, disableHubInviteCards }: { bech32: 
       }
       if (data.kind === 31923) {
         return <CalendarTimeEventCard identifier={data.identifier} pubkey={data.pubkey} relays={data.relays} />
+      }
+      if (data.kind === 31142) {
+        return <GameModCard identifier={data.identifier} pubkey={data.pubkey} relays={data.relays} />
       }
     }
   } catch { }
