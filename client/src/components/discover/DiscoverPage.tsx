@@ -1563,6 +1563,27 @@ export function DiscoverPage() {
                     )}
                   </button>
                 </div>
+
+                {/* Quick filters — same state the Filters modal edits (the modal re-reads it on open) */}
+                <div className="flex items-center gap-2 mt-2">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        onClick={() => setShowNsfw(!showNsfw)}
+                        className={`flex items-center gap-2 px-2.5 py-1 rounded-full border text-[11px] font-medium transition-colors cursor-pointer
+                          ${showNsfw ? 'bg-red-500/10 border-red-500/40 text-red-400' : 'bg-secondary/60 border-border text-muted-foreground hover:text-foreground'}`}
+                      >
+                        <span className={`relative w-7 h-4 rounded-full transition-colors shrink-0 ${showNsfw ? 'bg-red-500' : 'bg-muted-foreground/30'}`}>
+                          <span className={`absolute top-[2px] w-3 h-3 rounded-full bg-white shadow transition-transform ${showNsfw ? 'translate-x-[14px]' : 'translate-x-[2px]'}`} />
+                        </span>
+                        NSFW hubs
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" className="text-xs">
+                      {showNsfw ? 'Showing hubs marked as sensitive content' : 'Include hubs marked as sensitive content'}
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
               </div>
 
               {/* Results */}
