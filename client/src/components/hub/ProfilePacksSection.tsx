@@ -7,7 +7,7 @@
  * of time for users whose profile hasn't been opened. Results are dropped on close so a reopen is a
  * fresh look. Each tab shows a loading state until its query settles; tab labels carry the counts.
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Loader2, Check, Smile, Sticker as StickerIcon, Film, PackageOpen } from 'lucide-react'
 import { useUserStore } from '@/stores/userStore'
 import { useEmojiStore, type EmojiSet } from '@/stores/emojiStore'
@@ -170,6 +170,42 @@ function PackHeader({ name, count, noun, addr, isMine, subscribed, publishing, o
 }
 
 const PREVIEW_LIMIT = 12
+const PAGE_SIZE = 5
+
+/**
+ * Reveal-on-scroll, the same sentinel pattern the discovery modals use. Everything for one author
+ * arrives in the single by-author query (relays return all of an author's kind-30030 sets at once),
+ * so paging is client-side: the DOM — each pack is up to 12 images — only grows as the reader
+ * scrolls toward the end of what's shown.
+ */
+function PagedList<T>({ items, children }: { items: T[]; children: (item: T) => React.ReactNode }) {
+  const [visible, setVisible] = useState(PAGE_SIZE)
+  const sentinelRef = useRef<HTMLDivElement>(null)
+  useEffect(() => { setVisible(PAGE_SIZE) }, [items])
+  const hasMore = visible < items.length
+
+  useEffect(() => {
+    const el = sentinelRef.current
+    if (!el || !hasMore) return
+    const observer = new IntersectionObserver(
+      (entries) => { if (entries[0]?.isIntersecting) setVisible((v) => v + PAGE_SIZE) },
+      { rootMargin: '120px' },
+    )
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [hasMore, items])
+
+  return (
+    <div className="space-y-2">
+      {items.slice(0, visible).map(children)}
+      {hasMore && (
+        <div ref={sentinelRef} className="flex items-center justify-center py-2">
+          <Loader2 size={12} className="animate-spin text-muted-foreground" />
+        </div>
+      )}
+    </div>
+  )
+}
 
 function PreviewTile({ url, label, blur, wide }: { url: string; label: string; blur: boolean; wide?: boolean }) {
   return (
@@ -218,8 +254,8 @@ function EmojiPacks({ pubkey, state }: { pubkey: string; state: Loadable<EmojiSe
   const placeholder = renderListState(state, 'emoji sets')
   if (placeholder) return <>{placeholder}</>
   return (
-    <div className="space-y-2">
-      {state.items.map((set) => {
+    <PagedList items={state.items}>
+      {(set) => {
         const addr = `30030:${set.pubkey}:${set.dTag}`
         return (
           <div key={addr} className="rounded-lg border border-border bg-secondary/20 p-2.5">
@@ -231,8 +267,8 @@ function EmojiPacks({ pubkey, state }: { pubkey: string; state: Loadable<EmojiSe
             </div>
           </div>
         )
-      })}
-    </div>
+      }}
+    </PagedList>
   )
 }
 
@@ -262,8 +298,8 @@ function StickerPacks({ pubkey, state }: { pubkey: string; state: Loadable<Stick
   const placeholder = renderListState(state, 'sticker sets')
   if (placeholder) return <>{placeholder}</>
   return (
-    <div className="space-y-2">
-      {state.items.map((set) => {
+    <PagedList items={state.items}>
+      {(set) => {
         const addr = `30030:${set.pubkey}:${set.dTag}`
         return (
           <div key={addr} className="rounded-lg border border-border bg-secondary/20 p-2.5">
@@ -277,8 +313,8 @@ function StickerPacks({ pubkey, state }: { pubkey: string; state: Loadable<Stick
             </div>
           </div>
         )
-      })}
-    </div>
+      }}
+    </PagedList>
   )
 }
 
@@ -308,8 +344,8 @@ function GifPacks({ pubkey, state }: { pubkey: string; state: Loadable<GifCollec
   const placeholder = renderListState(state, 'GIF collections')
   if (placeholder) return <>{placeholder}</>
   return (
-    <div className="space-y-2">
-      {state.items.map((c) => {
+    <PagedList items={state.items}>
+      {(c) => {
         const addr = `30030:${c.pubkey}:${c.dTag}`
         return (
           <div key={addr} className="rounded-lg border border-border bg-secondary/20 p-2.5">
@@ -323,7 +359,7 @@ function GifPacks({ pubkey, state }: { pubkey: string; state: Loadable<GifCollec
             </div>
           </div>
         )
-      })}
-    </div>
+      }}
+    </PagedList>
   )
 }
