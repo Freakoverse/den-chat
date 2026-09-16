@@ -68,14 +68,14 @@ export function ProfilePacksSection({ pubkey, open }: { pubkey: string; open: bo
 
       {/* One box: full-width tab strip (three equal cells, active one boxed) over the list */}
       <div className="rounded-lg border border-border bg-secondary/10 overflow-hidden">
-        <div className="grid grid-cols-3 border-b border-border">
+        <div className="grid grid-cols-3 gap-1 p-1.5 border-b border-border">
           {tabs.map((t) => (
             <button
               key={t.key}
               onClick={() => setTab(t.key)}
-              className={`flex items-center justify-center gap-1.5 px-2 py-2 text-[11px] font-medium transition-colors cursor-pointer
+              className={`flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-md text-[11px] font-medium transition-colors cursor-pointer
                 ${tab === t.key
-                  ? 'bg-secondary/60 text-foreground shadow-[inset_0_0_0_1px_hsl(var(--border))] rounded-t-md'
+                  ? 'bg-secondary/70 text-foreground'
                   : 'text-muted-foreground hover:text-foreground hover:bg-secondary/30'}`}
             >
               {t.icon}
