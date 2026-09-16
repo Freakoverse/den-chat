@@ -37,6 +37,7 @@ import { Input } from '@/components/ui/input'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { truncateNpub } from '@/lib/utils'
 import { fetchEvents, publishToSpecificRelays, publishCriticalWithFailover } from '@/lib/nostr/relay-pool'
+import { ProfilePacksSection } from '@/components/hub/ProfilePacksSection'
 import { publishPersonal, getPublishRelays } from '@/stores/postingBehaviourStore'
 import { signWithSigner } from '@/lib/nostr/events'
 import { nip19 } from 'nostr-tools'
@@ -2107,6 +2108,12 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
               {/* ── Roles (read-only display) ── */}
               {hubContext && displayPubkey && (
                 <RoleAssignmentPanel hubDTag={hubContext.dTag} memberPubkey={displayPubkey} />
+              )}
+
+              {/* ── Packs (emoji / sticker / GIF sets) — every profile, fetched on open like the profile itself.
+                    Sits under Roles when opened from a hub; last section everywhere else. ── */}
+              {displayPubkey && (
+                <ProfilePacksSection pubkey={displayPubkey} open={open} />
               )}
             </div>
           )}
