@@ -1570,7 +1570,7 @@ export function DiscoverPage() {
                     <TooltipTrigger asChild>
                       <button
                         onClick={() => setShowNsfw(!showNsfw)}
-                        className={`flex items-center gap-2 px-2.5 py-1 rounded-full border text-[11px] font-medium transition-colors cursor-pointer
+                        className={`flex items-center gap-2 pl-1 pr-2 py-1 rounded-full border text-[11px] font-medium transition-colors cursor-pointer
                           ${showNsfw ? 'bg-red-500/10 border-red-500/40 text-red-400' : 'bg-secondary/60 border-border text-muted-foreground hover:text-foreground'}`}
                       >
                         <span className={`relative inline-block w-7 h-4 rounded-full transition-colors shrink-0 ${showNsfw ? 'bg-red-500' : 'bg-muted-foreground/30'}`}>
