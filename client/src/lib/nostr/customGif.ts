@@ -163,10 +163,13 @@ export async function discoverGifCollections(limit = 50, authors?: string[]): Pr
 }
 
 /** Fetch all GIF collections by a specific author (for the npub-lookup path in the Discover tab). */
-export async function fetchGifCollectionsByAuthor(pubkey: string): Promise<GifCollection[]> {
+/** One batch of an author's GIF-collection events, deduped by d-tag (latest wins). */
+async function fetchGifCollectionEventsByAuthor(pubkey: string, opts?: { limit?: number; until?: number }): Promise<Event[]> {
   const events = await fetchEvents({
     kinds: [KIND_GIF_SET],
     authors: [pubkey],
+    ...(opts?.limit ? { limit: opts.limit } : {}),
+    ...(opts?.until ? { until: opts.until } : {}),
   })
 
   const seen = new Map<string, Event>()
@@ -178,13 +181,33 @@ export async function fetchGifCollectionsByAuthor(pubkey: string): Promise<GifCo
       seen.set(dTag, ev)
     }
   }
+  return [...seen.values()]
+}
 
+export async function fetchGifCollectionsByAuthor(pubkey: string): Promise<GifCollection[]> {
   const collections: GifCollection[] = []
-  for (const ev of seen.values()) {
+  for (const ev of await fetchGifCollectionEventsByAuthor(pubkey)) {
     const parsed = parseGifCollectionEvent(ev)
     if (parsed && parsed.gifs.length > 0) collections.push(parsed)
   }
   return collections
+}
+
+/** A page of the author's collections for cursor pagination — see AuthorSetBatch in customEmoji. */
+export async function fetchGifCollectionsByAuthorBatch(pubkey: string, opts: { limit: number; until?: number }): Promise<{
+  items: { set: GifCollection; createdAt: number }[]
+  oldest?: number
+  rawCount: number
+}> {
+  const events = await fetchGifCollectionEventsByAuthor(pubkey, opts)
+  const items: { set: GifCollection; createdAt: number }[] = []
+  let oldest: number | undefined
+  for (const ev of events) {
+    if (oldest === undefined || ev.created_at < oldest) oldest = ev.created_at
+    const parsed = parseGifCollectionEvent(ev)
+    if (parsed && parsed.gifs.length > 0) items.push({ set: parsed, createdAt: ev.created_at })
+  }
+  return { items, oldest, rawCount: events.length }
 }
 
 /** Search GIF collections on relays by querying #g tag values (exact match per term) */

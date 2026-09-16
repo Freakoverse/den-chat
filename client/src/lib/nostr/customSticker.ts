@@ -190,10 +190,13 @@ export async function discoverStickerSets(limit = 50, authors?: string[]): Promi
 }
 
 /** Fetch all sticker sets by a specific author. Queries both client and user relays. */
-export async function fetchStickerSetsByAuthor(pubkey: string): Promise<StickerSet[]> {
+/** One batch of an author's sticker-set events (client + NIP-65 relays), deduped by d-tag (latest wins). */
+async function fetchStickerSetEventsByAuthor(pubkey: string, opts?: { limit?: number; until?: number }): Promise<Event[]> {
   const filter = {
     kinds: [KIND_STICKER_SET],
     authors: [pubkey],
+    ...(opts?.limit ? { limit: opts.limit } : {}),
+    ...(opts?.until ? { until: opts.until } : {}),
   }
 
   const userRelays = useUserListsStore.getState().userRelays
@@ -206,11 +209,10 @@ export async function fetchStickerSetsByAuthor(pubkey: string): Promise<StickerS
   }
 
   const results = await Promise.all(fetches)
-  const allEvents = results.flat()
 
   // Deduplicate by dTag (keep latest)
   const seen = new Map<string, Event>()
-  for (const ev of allEvents) {
+  for (const ev of results.flat()) {
     const dTag = ev.tags.find((t) => t[0] === 'd')?.[1]
     if (!dTag) continue
     const existing = seen.get(dTag)
@@ -218,13 +220,33 @@ export async function fetchStickerSetsByAuthor(pubkey: string): Promise<StickerS
       seen.set(dTag, ev)
     }
   }
+  return [...seen.values()]
+}
 
+export async function fetchStickerSetsByAuthor(pubkey: string): Promise<StickerSet[]> {
   const sets: StickerSet[] = []
-  for (const ev of seen.values()) {
+  for (const ev of await fetchStickerSetEventsByAuthor(pubkey)) {
     const parsed = parseStickerSetEventBroad(ev)
     if (parsed && parsed.stickers.length > 0) sets.push(parsed)
   }
   return sets
+}
+
+/** A page of the author's sets for cursor pagination — see AuthorSetBatch in customEmoji. */
+export async function fetchStickerSetsByAuthorBatch(pubkey: string, opts: { limit: number; until?: number }): Promise<{
+  items: { set: StickerSet; createdAt: number }[]
+  oldest?: number
+  rawCount: number
+}> {
+  const events = await fetchStickerSetEventsByAuthor(pubkey, opts)
+  const items: { set: StickerSet; createdAt: number }[] = []
+  let oldest: number | undefined
+  for (const ev of events) {
+    if (oldest === undefined || ev.created_at < oldest) oldest = ev.created_at
+    const parsed = parseStickerSetEventBroad(ev)
+    if (parsed && parsed.stickers.length > 0) items.push({ set: parsed, createdAt: ev.created_at })
+  }
+  return { items, oldest, rawCount: events.length }
 }
 
 // ─── Publishing ───

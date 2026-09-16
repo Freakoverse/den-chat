@@ -5,55 +5,137 @@
  * Fetch timing is deliberate: the three author-scoped queries fire when the modal OPENS for this
  * pubkey — the same moment it fetches the kind-0 profile, status and follow list — and never ahead
  * of time for users whose profile hasn't been opened. Results are dropped on close so a reopen is a
- * fresh look. Each tab shows a loading state until its query settles; tab labels carry the counts.
+ * fresh look.
+ *
+ * Pagination is the mods-tab pattern: relays are asked for a BATCH (50) of the author's newest sets,
+ * the list is paged with the shared numbered Pagination (10 per page), and when the reader reaches
+ * the second-to-last page the next older batch is fetched with an `until` cursor (oldest seen − 1)
+ * and appended — so the page numbers grow as more arrives. A batch that returns nothing new marks
+ * the end. A set republished with a newer created_at may surface twice across batches; the newest
+ * revision per d-tag wins.
  */
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Loader2, Check, Smile, Sticker as StickerIcon, Film, PackageOpen } from 'lucide-react'
 import { useUserStore } from '@/stores/userStore'
 import { useEmojiStore, type EmojiSet } from '@/stores/emojiStore'
 import { useStickerStore, type StickerSet } from '@/stores/stickerStore'
 import { useGifStore, type GifCollection } from '@/stores/gifStore'
-import { fetchEmojiSetsByAuthor, publishEmojiSubscriptions } from '@/lib/nostr/customEmoji'
-import { fetchStickerSetsByAuthor, publishStickerSubscriptions } from '@/lib/nostr/customSticker'
-import { fetchGifCollectionsByAuthor, publishGifSubscriptions } from '@/lib/nostr/customGif'
+import { fetchEmojiSetsByAuthorBatch, publishEmojiSubscriptions } from '@/lib/nostr/customEmoji'
+import { fetchStickerSetsByAuthorBatch, publishStickerSubscriptions } from '@/lib/nostr/customSticker'
+import { fetchGifCollectionsByAuthorBatch, publishGifSubscriptions } from '@/lib/nostr/customGif'
 import { BlossomImage } from '@/components/ui/BlossomImage'
+import { Pagination } from '@/components/ui/Pagination'
 import { getRenderLimit } from '@/lib/imageSizeGuard'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
 
 type PackTab = 'emoji' | 'sticker' | 'gif'
 
-interface Loadable<T> { items: T[]; loading: boolean; error: boolean }
-const idle = <T,>(): Loadable<T> => ({ items: [], loading: false, error: false })
-const pending = <T,>(): Loadable<T> => ({ items: [], loading: true, error: false })
+const BATCH = 50
+const PER_PAGE = 10
+const PREVIEW_LIMIT = 12
+
+interface Batch<T> { items: { set: T; createdAt: number }[]; oldest?: number; rawCount: number }
+type BatchFetcher<T> = (pubkey: string, opts: { limit: number; until?: number }) => Promise<Batch<T>>
+
+interface PagedPacks<T> {
+  items: T[]
+  loading: boolean      // first batch in flight
+  loadingMore: boolean  // an older batch in flight
+  reachedEnd: boolean
+  error: boolean
+  page: number
+  totalPages: number
+  pageItems: T[]
+  setPage: (p: number) => void
+}
+
+/** Cursor-batched, numbered-page list of one author's sets (the useModFeed + ModsTab pattern, per tab). */
+function usePagedPacks<T extends { dTag: string }>(open: boolean, pubkey: string, fetchBatch: BatchFetcher<T>): PagedPacks<T> {
+  const [items, setItems] = useState<T[]>([])
+  const [loading, setLoading] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [reachedEnd, setReachedEnd] = useState(false)
+  const [error, setError] = useState(false)
+  const [page, setPage] = useState(1)
+
+  const byDTag = useRef<Map<string, { set: T; createdAt: number }>>(new Map())
+  const oldest = useRef<number | undefined>(undefined)
+  const inFlight = useRef(false)
+
+  const recompute = () => {
+    setItems([...byDTag.current.values()].sort((a, b) => b.createdAt - a.createdAt).map((x) => x.set))
+  }
+
+  const ingest = (batch: Batch<T>): number => {
+    let added = 0
+    for (const { set, createdAt } of batch.items) {
+      const cur = byDTag.current.get(set.dTag)
+      if (!cur) added++
+      if (!cur || createdAt > cur.createdAt) byDTag.current.set(set.dTag, { set, createdAt })
+    }
+    if (batch.oldest !== undefined && (oldest.current === undefined || batch.oldest < oldest.current)) oldest.current = batch.oldest
+    if (added > 0) recompute()
+    return added
+  }
+
+  // Initial batch on open; full reset on close / pubkey change.
+  useEffect(() => {
+    byDTag.current = new Map()
+    oldest.current = undefined
+    inFlight.current = false
+    setItems([]); setReachedEnd(false); setError(false); setPage(1); setLoadingMore(false)
+    if (!open || !pubkey) { setLoading(false); return }
+    let alive = true
+    setLoading(true)
+    fetchBatch(pubkey, { limit: BATCH })
+      .then((batch) => { if (!alive) return; ingest(batch); if (batch.rawCount === 0) setReachedEnd(true) })
+      .catch(() => { if (alive) setError(true) })
+      .finally(() => { if (alive) setLoading(false) })
+    return () => { alive = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, pubkey])
+
+  const loadMore = useCallback(async () => {
+    if (inFlight.current || reachedEnd || loading || !open || !pubkey) return
+    inFlight.current = true
+    setLoadingMore(true)
+    try {
+      const batch = await fetchBatch(pubkey, { limit: BATCH, until: oldest.current ? oldest.current - 1 : undefined })
+      const added = ingest(batch)
+      // Nothing new at all → the relays have nothing older; also stop if the relays had fewer than a batch
+      if (batch.rawCount === 0 || added === 0) setReachedEnd(true)
+    } catch {
+      setReachedEnd(true)
+    } finally {
+      inFlight.current = false
+      setLoadingMore(false)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fetchBatch, reachedEnd, loading, open, pubkey])
+
+  const totalPages = Math.max(1, Math.ceil(items.length / PER_PAGE))
+  const currentPage = Math.min(page, totalPages)
+  const pageItems = items.slice((currentPage - 1) * PER_PAGE, currentPage * PER_PAGE)
+
+  // Prefetch the next older batch as the reader nears the last loaded page.
+  useEffect(() => {
+    if (!loading && !reachedEnd && items.length > 0 && currentPage >= totalPages - 1) loadMore()
+  }, [currentPage, totalPages, loading, reachedEnd, items.length, loadMore])
+
+  return { items, loading, loadingMore, reachedEnd, error, page: currentPage, totalPages, pageItems, setPage }
+}
 
 export function ProfilePacksSection({ pubkey, open }: { pubkey: string; open: boolean }) {
   const [tab, setTab] = useState<PackTab>('emoji')
-  const [emoji, setEmoji] = useState<Loadable<EmojiSet>>(idle())
-  const [sticker, setSticker] = useState<Loadable<StickerSet>>(idle())
-  const [gif, setGif] = useState<Loadable<GifCollection>>(idle())
+  const emoji = usePagedPacks<EmojiSet>(open, pubkey, fetchEmojiSetsByAuthorBatch)
+  const sticker = usePagedPacks<StickerSet>(open, pubkey, fetchStickerSetsByAuthorBatch)
+  const gif = usePagedPacks<GifCollection>(open, pubkey, fetchGifCollectionsByAuthorBatch)
 
-  useEffect(() => {
-    if (!open || !pubkey) {
-      setEmoji(idle()); setSticker(idle()); setGif(idle())
-      return
-    }
-    let alive = true
-    setEmoji(pending()); setSticker(pending()); setGif(pending())
-    fetchEmojiSetsByAuthor(pubkey)
-      .then((items) => { if (alive) setEmoji({ items, loading: false, error: false }) })
-      .catch(() => { if (alive) setEmoji({ items: [], loading: false, error: true }) })
-    fetchStickerSetsByAuthor(pubkey)
-      .then((items) => { if (alive) setSticker({ items, loading: false, error: false }) })
-      .catch(() => { if (alive) setSticker({ items: [], loading: false, error: true }) })
-    fetchGifCollectionsByAuthor(pubkey)
-      .then((items) => { if (alive) setGif({ items, loading: false, error: false }) })
-      .catch(() => { if (alive) setGif({ items: [], loading: false, error: true }) })
-    return () => { alive = false }
-  }, [open, pubkey])
+  useEffect(() => { if (!open) setTab('emoji') }, [open])
 
   const anyLoading = emoji.loading || sticker.loading || gif.loading
 
-  const tabs: { key: PackTab; label: string; icon: React.ReactNode; state: Loadable<unknown> }[] = [
+  const tabs: { key: PackTab; label: string; icon: React.ReactNode; state: PagedPacks<unknown> }[] = [
     { key: 'emoji', label: 'Emoji', icon: <Smile size={12} />, state: emoji },
     { key: 'sticker', label: 'Stickers', icon: <StickerIcon size={12} />, state: sticker },
     { key: 'gif', label: 'GIFs', icon: <Film size={12} />, state: gif },
@@ -66,7 +148,7 @@ export function ProfilePacksSection({ pubkey, open }: { pubkey: string; open: bo
         {anyLoading && <Loader2 size={11} className="animate-spin text-muted-foreground" />}
       </div>
 
-      {/* One box: full-width tab strip (three equal cells, active one boxed) over the list */}
+      {/* One box: full-width tab strip (three equal cells, active one a rounded pill) over the list */}
       <div className="rounded-lg border border-border bg-secondary/10 overflow-hidden">
         <div className="grid grid-cols-3 gap-1 p-1.5 border-b border-border">
           {tabs.map((t) => (
@@ -82,14 +164,16 @@ export function ProfilePacksSection({ pubkey, open }: { pubkey: string; open: bo
               {t.label}
               {t.state.loading
                 ? <Loader2 size={10} className="animate-spin opacity-70" />
-                : <span className={`text-[10px] ${tab === t.key ? 'text-foreground/60' : 'text-muted-foreground/70'}`}>{t.state.items.length}</span>}
+                : <span className={`text-[10px] ${tab === t.key ? 'text-foreground/60' : 'text-muted-foreground/70'}`}>
+                    {t.state.items.length}{t.state.reachedEnd || t.state.items.length === 0 ? '' : '+'}
+                  </span>}
             </button>
           ))}
         </div>
         <div className="p-2.5">
-          {tab === 'emoji' && <EmojiPacks pubkey={pubkey} state={emoji} />}
-          {tab === 'sticker' && <StickerPacks pubkey={pubkey} state={sticker} />}
-          {tab === 'gif' && <GifPacks pubkey={pubkey} state={gif} />}
+          {tab === 'emoji' && <EmojiPacks pubkey={pubkey} paged={emoji} />}
+          {tab === 'sticker' && <StickerPacks pubkey={pubkey} paged={sticker} />}
+          {tab === 'gif' && <GifPacks pubkey={pubkey} paged={gif} />}
         </div>
       </div>
     </div>
@@ -100,7 +184,7 @@ export function ProfilePacksSection({ pubkey, open }: { pubkey: string; open: bo
 
 /** Loading skeleton / error / empty placeholder — or null when there are items to render. (A plain
  *  function, not a component: callers branch on the null, and a JSX element is always truthy.) */
-function renderListState(state: Loadable<unknown>, noun: string): React.ReactNode | null {
+function renderListState(state: PagedPacks<unknown>, noun: string): React.ReactNode | null {
   if (state.loading) {
     return (
       <div className="space-y-2">
@@ -128,11 +212,24 @@ function renderListState(state: Loadable<unknown>, noun: string): React.ReactNod
   return null
 }
 
-function PackHeader({ name, count, noun, addr, isMine, subscribed, publishing, onSubscribe }: {
+/** Numbered pages under the list, plus the "fetching older" spinner while the next batch lands. */
+function PagesFooter({ state }: { state: PagedPacks<unknown> }) {
+  return (
+    <>
+      <Pagination currentPage={state.page} totalPages={state.totalPages} onPageChange={state.setPage} />
+      {state.loadingMore && (
+        <div className="flex items-center justify-center gap-1.5 py-1 text-[10px] text-muted-foreground">
+          <Loader2 size={10} className="animate-spin" /> Fetching older packs…
+        </div>
+      )}
+    </>
+  )
+}
+
+function PackHeader({ name, count, noun, isMine, subscribed, publishing, onSubscribe }: {
   name: string
   count: number
   noun: string
-  addr: string
   isMine: boolean
   subscribed: boolean
   publishing: boolean
@@ -164,45 +261,6 @@ function PackHeader({ name, count, noun, addr, isMine, subscribed, publishing, o
           </Tooltip>
         </TooltipProvider>
       )}
-      <span className="sr-only">{addr}</span>
-    </div>
-  )
-}
-
-const PREVIEW_LIMIT = 12
-const PAGE_SIZE = 5
-
-/**
- * Reveal-on-scroll, the same sentinel pattern the discovery modals use. Everything for one author
- * arrives in the single by-author query (relays return all of an author's kind-30030 sets at once),
- * so paging is client-side: the DOM — each pack is up to 12 images — only grows as the reader
- * scrolls toward the end of what's shown.
- */
-function PagedList<T>({ items, children }: { items: T[]; children: (item: T) => React.ReactNode }) {
-  const [visible, setVisible] = useState(PAGE_SIZE)
-  const sentinelRef = useRef<HTMLDivElement>(null)
-  useEffect(() => { setVisible(PAGE_SIZE) }, [items])
-  const hasMore = visible < items.length
-
-  useEffect(() => {
-    const el = sentinelRef.current
-    if (!el || !hasMore) return
-    const observer = new IntersectionObserver(
-      (entries) => { if (entries[0]?.isIntersecting) setVisible((v) => v + PAGE_SIZE) },
-      { rootMargin: '120px' },
-    )
-    observer.observe(el)
-    return () => observer.disconnect()
-  }, [hasMore, items])
-
-  return (
-    <div className="space-y-2">
-      {items.slice(0, visible).map(children)}
-      {hasMore && (
-        <div ref={sentinelRef} className="flex items-center justify-center py-2">
-          <Loader2 size={12} className="animate-spin text-muted-foreground" />
-        </div>
-      )}
     </div>
   )
 }
@@ -231,7 +289,7 @@ function useSelfAndSigner(pubkey: string) {
 
 /* ─── Emoji ─── */
 
-function EmojiPacks({ pubkey, state }: { pubkey: string; state: Loadable<EmojiSet> }) {
+function EmojiPacks({ pubkey, paged }: { pubkey: string; paged: PagedPacks<EmojiSet> }) {
   const { isMine, signer, privateKey } = useSelfAndSigner(pubkey)
   const subscriptionAddresses = useEmojiStore((s) => s.subscriptionAddresses)
   const addSubscription = useEmojiStore((s) => s.addSubscription)
@@ -251,15 +309,15 @@ function EmojiPacks({ pubkey, state }: { pubkey: string; state: Loadable<EmojiSe
     }
   }
 
-  const placeholder = renderListState(state, 'emoji sets')
+  const placeholder = renderListState(paged, 'emoji sets')
   if (placeholder) return <>{placeholder}</>
   return (
-    <PagedList items={state.items}>
-      {(set) => {
+    <div className="space-y-2">
+      {paged.pageItems.map((set) => {
         const addr = `30030:${set.pubkey}:${set.dTag}`
         return (
           <div key={addr} className="rounded-lg border border-border bg-secondary/20 p-2.5">
-            <PackHeader name={set.name} count={set.emojis.length} noun="emoji" addr={addr} isMine={isMine}
+            <PackHeader name={set.name} count={set.emojis.length} noun="emoji" isMine={isMine}
               subscribed={subscriptionAddresses.includes(addr)} publishing={publishingAddr === addr} onSubscribe={() => subscribe(set)} />
             <div className="flex flex-wrap gap-1">
               {set.emojis.slice(0, PREVIEW_LIMIT).map((e) => <PreviewTile key={e.shortcode} url={e.url} label={`:${e.shortcode}:`} blur={e.nsfw} />)}
@@ -267,14 +325,15 @@ function EmojiPacks({ pubkey, state }: { pubkey: string; state: Loadable<EmojiSe
             </div>
           </div>
         )
-      }}
-    </PagedList>
+      })}
+      <PagesFooter state={paged} />
+    </div>
   )
 }
 
 /* ─── Stickers ─── */
 
-function StickerPacks({ pubkey, state }: { pubkey: string; state: Loadable<StickerSet> }) {
+function StickerPacks({ pubkey, paged }: { pubkey: string; paged: PagedPacks<StickerSet> }) {
   const { isMine, signer, privateKey } = useSelfAndSigner(pubkey)
   const subscriptionAddresses = useStickerStore((s) => s.subscriptionAddresses)
   const addSubscription = useStickerStore((s) => s.addSubscription)
@@ -295,15 +354,15 @@ function StickerPacks({ pubkey, state }: { pubkey: string; state: Loadable<Stick
     }
   }
 
-  const placeholder = renderListState(state, 'sticker sets')
+  const placeholder = renderListState(paged, 'sticker sets')
   if (placeholder) return <>{placeholder}</>
   return (
-    <PagedList items={state.items}>
-      {(set) => {
+    <div className="space-y-2">
+      {paged.pageItems.map((set) => {
         const addr = `30030:${set.pubkey}:${set.dTag}`
         return (
           <div key={addr} className="rounded-lg border border-border bg-secondary/20 p-2.5">
-            <PackHeader name={set.name} count={set.stickers.length} noun="sticker" addr={addr} isMine={isMine}
+            <PackHeader name={set.name} count={set.stickers.length} noun="sticker" isMine={isMine}
               subscribed={subscriptionAddresses.includes(addr)} publishing={publishingAddr === addr} onSubscribe={() => subscribe(set)} />
             <div className="flex flex-wrap gap-1">
               {set.stickers.slice(0, PREVIEW_LIMIT).map((s) => (
@@ -313,14 +372,15 @@ function StickerPacks({ pubkey, state }: { pubkey: string; state: Loadable<Stick
             </div>
           </div>
         )
-      }}
-    </PagedList>
+      })}
+      <PagesFooter state={paged} />
+    </div>
   )
 }
 
 /* ─── GIFs ─── */
 
-function GifPacks({ pubkey, state }: { pubkey: string; state: Loadable<GifCollection> }) {
+function GifPacks({ pubkey, paged }: { pubkey: string; paged: PagedPacks<GifCollection> }) {
   const { isMine, signer, privateKey } = useSelfAndSigner(pubkey)
   const subscriptionAddresses = useGifStore((s) => s.subscriptionAddresses)
   const addSubscription = useGifStore((s) => s.addSubscription)
@@ -341,15 +401,15 @@ function GifPacks({ pubkey, state }: { pubkey: string; state: Loadable<GifCollec
     }
   }
 
-  const placeholder = renderListState(state, 'GIF collections')
+  const placeholder = renderListState(paged, 'GIF collections')
   if (placeholder) return <>{placeholder}</>
   return (
-    <PagedList items={state.items}>
-      {(c) => {
+    <div className="space-y-2">
+      {paged.pageItems.map((c) => {
         const addr = `30030:${c.pubkey}:${c.dTag}`
         return (
           <div key={addr} className="rounded-lg border border-border bg-secondary/20 p-2.5">
-            <PackHeader name={c.name} count={c.gifs.length} noun="GIF" addr={addr} isMine={isMine}
+            <PackHeader name={c.name} count={c.gifs.length} noun="GIF" isMine={isMine}
               subscribed={subscriptionAddresses.includes(addr)} publishing={publishingAddr === addr} onSubscribe={() => subscribe(c)} />
             <div className="flex flex-wrap gap-1">
               {c.gifs.slice(0, PREVIEW_LIMIT).map((g, i) => (
@@ -359,7 +419,8 @@ function GifPacks({ pubkey, state }: { pubkey: string; state: Loadable<GifCollec
             </div>
           </div>
         )
-      }}
-    </PagedList>
+      })}
+      <PagesFooter state={paged} />
+    </div>
   )
 }
