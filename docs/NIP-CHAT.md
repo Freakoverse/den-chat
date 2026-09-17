@@ -1038,7 +1038,7 @@ This provides Discord-like UX where members see the full conversation history fr
 - **The history is unbounded by design.** Each epoch adds one line of roughly 74 bytes, so even
   ten thousand rotations stay under a megabyte. Blossom has no event-size ceiling, so hubs never
   prune. (Contrast the inline history of a **group**, which lives inside a relay event and is
-  capped at 100 epochs — see the Groups section.)
+  capped at 100 epochs — see §21.9.)
 - **A rotation MUST NOT proceed without the prior history.** On every re-key (kick, manual
   rotation, grouped-role rotation) the client decrypts the *current* blob, appends, and re-encrypts.
   If the current blob cannot be fetched or decrypted at that moment, the client MUST abort the
@@ -3195,6 +3195,8 @@ Clients MUST hide any hub carrying a `new_hub` tag from search/browse/discovery.
 | `1067` | Poll | Regular | Hub general relays |
 | `1017` | Vote | Regular | Hub general relays |
 | `16942` | User Hub List | Replaceable | User's own relays |
+| `36950` | Group Event (tree inline, §21) | Addressable Replaceable | Group `r` relays |
+| `16943` | User Group List (NIP-44 self-encrypted, §21.10) | Replaceable | User's own relays |
 | `1312` | Public Chat Message | Regular | User's relays (§16) |
 | `30078` | Public Chat Topic List (NIP-78) | Addressable Replaceable | User's own relays (§16) |
 | `30078` | Join Read-State (`den-join-read-state`, NIP-78, self-encrypted) | Addressable Replaceable | Creator's own relays (§6.3) |
@@ -3938,6 +3940,292 @@ Sort modes (all **best-effort**, reordering only what was fetched):
 - **Reply boxes** are multi-line text areas.
 - **Live updates:** the active feed subscribes to new posts, and a thread subscribes to new comments and reactions, ingesting them in real time.
 - **Render filter:** every post/comment passes the same gate as public chat: view-PoW threshold, blocked pubkeys, Web-of-Trust (`forum` context), and muted words. The same WoT threshold also drops below-threshold authors from **created-community discovery** (by creator) and from the **notification** pages (by actor). Word communities have no creator, so only their posts are WoT-filtered.
+
+---
+
+## 21. Groups — Kind `36950`
+
+A **group** is the small, flat sibling of a hub: one conversation, no channels, no categories,
+no roles, no join requests, no discovery, no Blossom. It is what Discord calls a *group DM* —
+a handful of people talking in one place — scaled to **100 members**. The whole group lives in
+**one relay event**: identity, member tree, epoch history and settings. Everything cryptographic
+is inherited unchanged from hubs (§4): the LKH tree distributes a group secret, removal rotates
+it, and v2 layers NIP-SKD pseudonyms on top exactly as it does for hubs.
+
+### 21.1 Scope
+
+| | Hub (§6.1) | Group |
+|---|---|---|
+| Container | kind `36942` + Blossom tree files | kind `36950`, **tree inline** |
+| Channels / categories / roles | yes | **none** — one conversation |
+| Who adds members | creator, join requests, facilitators | **creator only** |
+| Join requests (`36944`) | yes | **no** |
+| Ban list | Blossom ban pages | **none** — removal is the only tool |
+| Discovery (`t`, `f`, Discover UI) | yes | **never listed** — the address is the invite |
+| Member cap | unbounded (paginated tree) | **100** |
+| Epoch history | unbounded blob on Blossom (§5.4) | **inline, capped at 100 epochs** |
+| Messages | kind `36943` with `h` + `c` | kind `36943` with `h` only |
+| v1 / v2 | both | both (same meaning, §21.8) |
+
+A group is **creator-centric**, unlike Discord's group DMs where any member may add others.
+Only the creator publishes the group event; members only publish messages. There are no
+moderators: the creator removes whom they choose, and a removed member can be re-added later
+by the same action. Because there is no join flow, there is nothing for a ban list to gate.
+
+### 21.2 Group Event — Kind `36950`
+
+**Type**: Addressable Replaceable Event, published to the group's `r` relays.
+
+```json
+{
+  "kind": 36950,
+  "pubkey": "<creator_hex_pubkey (v1)  |  O_pub (v2, §4.5)>",
+  "created_at": "<timestamp>",
+  "tags": [
+    ["d", "<group_uuid>"],
+    ["n", "<group_name>"],
+    ["epoch", "<epoch_number>"],
+    ["r", "wss://relay1.example.com", "general"],
+    ["r", "wss://relay2.example.com", "general"],
+    ["w", "<pow_difficulty>"],
+    ["picture", "<icon_url>"],
+    ["banner", "<banner_url>"],
+    ["about", "<short description>"],
+    ["published_at", "<original_creation_timestamp>"],
+    ["client", "<client_app_name>"],
+    ["version", "2"],
+    ["signer_scheme", "skd", "1"]
+  ],
+  "content": "<JSON string — see below>",
+  "sig": "<signature>"
+}
+```
+
+#### Tags
+
+| Tag | Required | Description |
+|-----|----------|-------------|
+| `d` | Yes | UUID v4. Group identifier. The coordinate is `36950:<pubkey>:<d>` — with `O_pub` as the pubkey in v2. |
+| `n` | Yes | Group name. Plaintext in both versions so an invitee can see what they were invited to. |
+| `epoch` | Yes | Current group-secret epoch, starting at `1`, incremented on every removal (§21.5). |
+| `r` | Yes | Relay, third value `general`. Messages and the group event live here. At least one. |
+| `w` | No | Minimum **message** PoW (NIP-13), same semantics as the hub `w` (§6.1): messages need a `nonce`, and the group event itself MUST be mined to `w` on every publish. |
+| `nonce` | Conditional | The group event's own PoW nonce when `w` > 0. |
+| `message_expiration` | No | Disappearing-messages duration in seconds, as for hubs (§6.1, §9.10). |
+| `picture` / `banner` / `about` | No | The group's public face — icon, banner, short description — **plaintext in both versions** for the same reason as `n`: the person holding an invite has no secret yet. Member-only prose belongs in the conversation. |
+| `content-warning` / `L` | No | NIP-36 / NIP-32 sensitive-content marking, as for hubs. |
+| `published_at` | Yes | Original creation timestamp, carried forward unchanged on every republish. |
+| `client` | No | Publishing client name. |
+| `version` | No | Group **format** version. Absent ⇒ v1. `"2"` ⇒ v2 (§21.8). Unknown ⇒ prompt to update, do not render. |
+| `signer_scheme` | Conditional (**v2**) | NIP-SKD scheme, exactly as on the hub event (§6.1). |
+| `deleted` | Conditional | `["deleted", "true"]` on the tombstone republish (§21.7). |
+
+There is deliberately **no `t`, no `f`, no `o`, no `m`, no `W`, no `b`**: nothing is discoverable,
+nothing is on Blossom, nobody requests to join.
+
+#### `created_at` increment
+
+The group event is republished on every membership change. As for hubs (§6.1) the client
+MUST set `created_at` to the previous event's `created_at + 1`, never the wall clock, and
+order by `published_at` for display.
+
+#### Content (JSON)
+
+```json
+{
+  "tree":     "<monolithic LKH tree, §5.2.3 line format — plaintext>",
+  "history":  "<base64 AES-GCM blob under the CURRENT group secret — §5.4 plaintext format, ≤100 lines>",
+  "settings": { "description": "<text>" },
+  "owner":    "<v2 only — encrypted owner attestation, exactly as in the v2 hub content (§4.5)>"
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `tree` | The **whole** member tree, inline, in the monolithic file format of §5.2.3: `leaf`, `node` and `root` lines, where `root` carries `aes_encrypted_group_secret`. **Always plaintext** — it is the tree that distributes the secret, so it cannot be encrypted with it (the same bootstrap argument as v2 leaf pages, §5.2). In v1 the leaf `member_pubkey` is the real key `R`; in v2 it is the pseudonym `P`, and the tree carries one `roster:<epoch>:<enc({P:R})>` line (§5.2.1). No pagination, no spine: at most 100 leaves and 99 internal nodes. |
+| `history` | The epoch-secret history, in the §5.4 plaintext format (`hub:<epoch>:<secret_hex>` lines — the `hub:` prefix is kept so the parser is shared), AES-GCM encrypted with the **current** group secret. **Capped at 100 epochs** (§21.9). |
+| `settings` | Member-only settings. **v1:** plaintext object. **v2:** the JSON serialized and encrypted as `base64(IV || AES-GCM(group_content_key, json) || tag)` under `group_content_key = HKDF(group_secret, domain_salt, "hub-content:epoch:<epoch>")` — the hub-content derivation of §4.2, unchanged. Currently holds the full `description`; the public `about` tag is the short form. |
+| `owner` | **v2 only.** The creator's real-key attestation binding `R_owner` to the coordinate, encrypted with the group secret, identical to the hub's (§4.5). Members learn who really runs the group; outsiders see `O`. |
+
+**Why the face is plaintext in v2 too.** A v2 hub puts `picture`/`banner`/`about` in plaintext
+so the Discover card renders for non-members. A group has no Discover, but it has an
+**invitee** in exactly the same position: holding an address, no secret yet, deciding whether to
+accept. The same three tags serve that moment.
+
+### 21.3 Messages
+
+Group messages are ordinary kind `36943` events (§6.2) with two differences:
+
+- `["h", "<group_d_tag>"]` is present and **there is no `c` tag**. A `36943` without `c` is a
+  group message; a client that finds one whose `h` is not a known group ignores it.
+- The message key is the hub channel key of §4.2 with the **group's `d` tag in the channel
+  slot**: `HKDF(group_secret, domain_salt, "channel:<group_d_tag>:epoch:<epoch>")`. This reuses
+  the existing derivation verbatim; nothing new to implement.
+
+Everything else carries over unchanged: `epoch`, `published_at`, `nonce` under `w`, edits by
+`d`-tag republish with the `+1` rule, `a`-tag replies and threads, reactions, the `identity`
+tag in v2 (§4.5), edit hints (`26943`), typing (`26950`), polls, `content-warning`.
+Subscribing to a group is one filter: `{"kinds": [36943], "#h": ["<group_d_tag>"]}` on its `r`
+relays.
+
+### 21.4 Adding a Member
+
+Only the creator adds members, by the member's **real public key** `R` — an npub, a DNN ID,
+or a profile pick. No consent from the member is involved at this step; they consent by
+**accepting the invite** (§21.6). The creator:
+
+1. Refuses if the tree already holds **100** leaves.
+2. Adds a leaf (§4.4 add path — one NIP-04/ECDH encryption of the leaf key to the member's key
+   and `log₂(N)` symmetric re-wraps up the path; **no epoch bump**).
+   - **v1:** the leaf is `R`.
+   - **v2:** the creator derives the member's pseudonym public key `P_pub` from `R_pub` with the
+     blinded verifier op of §4.5 (`getPeerBlindedPubkey(context = "nip-chat:v2:member-pseudonym:" + d_tag, peer = R_pub)`),
+     places `P` as the leaf, and rewrites the tree's `roster` line to include `{P: R}`. The
+     creator never obtains `P_priv`. Because this needs only `R_pub`, **v2 adds work exactly
+     like v1** — no round-trip with the member.
+3. Republishes the group event with the new `tree` (`created_at + 1`), then delivers the
+   invite (§21.6).
+
+A member being added again after removal is the same operation; there is no memory of the
+removal beyond the epoch history.
+
+### 21.5 Removing a Member
+
+Removal is the LKH kick of §4.4, applied to the inline tree:
+
+1. Delete the member's leaf; rotate the group secret (`epoch + 1`); re-key the `log₂(N)` nodes
+   on the removed path.
+2. Update `history`: decrypt the current blob, append the outgoing epoch's secret, re-encrypt
+   under the new secret, **prune to the newest 100 epochs** (§21.9).
+3. **v2:** rewrite the `roster` line under the new epoch (§5.2.1), dropping the removed `{P: R}`.
+4. Re-encrypt `settings` (v2) under the new epoch's content key; republish the group event.
+
+**A removal MUST NOT proceed if the current `history` cannot be decrypted** — the same rule
+as §5.4: never rebuild the history from only the old and new epochs. (For a group this can
+only mean a corrupt event, since the blob is inline; the rule still holds.)
+
+Messages the removed member sent stay in the conversation; they can no longer read anything
+encrypted under the new or any later epoch. There is no ban list and no `w` whitelist flag:
+"banned" simply means "not re-added".
+
+### 21.6 Invitation & Acceptance
+
+The group event is not discoverable, so the invitee must be **handed the address** —
+`naddr` for `36950:<pubkey>:<d>` with the group's `r` relays as hints. **How it is handed over
+is not specified.** A client MAY use any direct-message protocol it supports (NIP-04, NIP-17,
+or whatever succeeds them) or simply present the string for the creator to paste into any
+other channel. The address is not secret — membership is gated by the tree, not by knowing
+the address — so no particular transport is required for security.
+
+**Accepting** an invite means the client:
+
+1. Fetches the group event by coordinate from the hinted relays; verifies `version` (§21.8),
+   PoW under `w`, and (v2) that the event is signed by the `O_pub` in the coordinate.
+2. Confirms the user is actually in the tree — a leaf for `R` (v1) or for the user's own
+   derived `P` (v2, computed from their `R` and the group's `O_pub`); decrypts the leaf key and
+   walks to the root to obtain the group secret; decrypts `history`.
+3. Adds the group to the **user group list** (§21.10) and subscribes to its messages.
+
+Until step 3 the user is a member from the creator's point of view but not from their own —
+a client SHOULD show the invite with the group's name and face tags and let the user decline,
+which simply means not adding it to their list. Declining does not remove their leaf; only the
+creator can do that.
+
+### 21.7 Deletion
+
+Mirrors hub deletion (§6.5): a NIP-09 kind `5` with `["a", "36950:<pubkey>:<d>"]`, **and** a
+tombstone republish of the group event carrying only `d`, `n`, `epoch` and `["deleted", "true"]`
+with empty `content` — which also blanks the tree, so the event stops distributing the secret.
+Clients mark the group deleted in the sidebar and ignore deletions from any other pubkey.
+
+### 21.8 v2 — Private Groups (NIP-SKD)
+
+v2 applies the hub v2 model (§0, §4.5–§4.6) to groups without modification:
+
+- The creator authors the group as the owner pseudonym **`O`** derived with
+  `context = "nip-chat:v2:owner-pseudonym:" + d_tag`; the coordinate is `36950:O_pub:d`.
+  `R_owner` is revealed to members only through the encrypted `owner` attestation.
+- Leaves are member pseudonyms **`P`** (`context = "nip-chat:v2:member-pseudonym:" + d_tag`,
+  peer `O_pub`); the tree carries the group-encrypted `roster` segment.
+- Every member message carries the per-message **`identity`** signature by `R` (§4.5) and is
+  dropped without it (§9.9).
+- `settings` and `owner` are encrypted; `n`, `picture`, `banner`, `about` stay plaintext (§21.2).
+- `version = "2"` and `signer_scheme` are set at creation and pinned; the user group list records
+  the format at accept time and is the authoritative fail-safe, exactly as for hubs (§0).
+- Requires the NIP-SKD capability (§0.5). A client without it cannot join or create a v2 group.
+
+What the public learns about a v2 group from relays: its name and face, its member **count**
+(number of leaves) and churn (epoch), and pseudonymous message traffic — never a real key.
+That is the same residual as a v2 hub (§5.2).
+
+### 21.9 Limits & Warnings
+
+| Limit | Value | Why |
+|-------|-------|-----|
+| Members | **100** | A leaf + node pair costs ~370 bytes (v1) or ~505 bytes (v2 with roster). 100 members is ~37 KB / ~50 KB, inside the 64 KiB event ceiling common on relays with room for history and metadata. Depth is 7 for anything from 65 to 128 members, so 100 costs the same per operation as 128 would. |
+| Epoch history | **100 epochs** | ~100 bytes per epoch inline. At the cap the **oldest epoch is pruned** on the next rotation. |
+| Event size | **60 KB** serialized | Client-side guard on every publish, so a long description or URL can never push a full group past a relay's limit. |
+
+**Pruning warning.** Clients MUST warn the creator, at least once and again when the history
+is near the cap, that **after 100 removals the oldest messages become undecryptable for anyone
+who joins later**: a member added after epoch *k* was pruned cannot read messages encrypted
+under epochs ≤ *k*. Existing members are unaffected (they already hold those secrets locally).
+The warning is the whole mitigation; a group that expects heavy churn should be a hub.
+
+### 21.10 User Group List — Kind `16943`
+
+**Type**: Replaceable Event, published to the **user's own relays**. The group counterpart of the
+User Hub List (§6.4); one per user, latest wins.
+
+```json
+{
+  "kind": 16943,
+  "pubkey": "<user_pubkey>",
+  "created_at": "<timestamp>",
+  "tags": [
+    ["client", "<client_app_name>"]
+  ],
+  "content": "<NIP-44 self-encrypted JSON — see below>",
+  "sig": "<signature>"
+}
+```
+
+Unlike the hub list, **every entry is in the encrypted `content`** — there is no plaintext
+`v` tag form. Groups are invite-only; which groups a user belongs to is nobody else's business,
+and a v1/v2 split would only leak the v1 ones. The `content` decrypts to:
+
+```json
+{
+  "groups": [
+    { "a": "36950:<creator_or_O_pubkey>:<group_d>", "relay": "wss://…", "position": 0, "format": "1" },
+    { "a": "36950:<O_pubkey>:<group_d>", "relay": "wss://…", "position": 1, "format": "2", "signer_scheme": "skd:1" }
+  ]
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `a` | Full coordinate. A group needs the creator's (or `O`'s) pubkey to be resolved, so the bare `d` tag is not enough. |
+| `relay` | Relay hint. |
+| `position` | Sidebar order; integers need not be contiguous. |
+| `format` | `"1"` or `"2"` — the group's format **at accept time**, the authoritative version fail-safe (§0). |
+| `signer_scheme` | v2 only — `"family:version"`, so `O`/`P` can be re-derived on a new device. |
+
+Clients fetch `{"kinds": [16942, 16943], "authors": ["<me>"]}` on startup in one filter, load
+each group by coordinate, and drop entries whose event is deleted or no longer contains the
+user's leaf (the user was removed) — showing a distinct indicator for each case, as §6.5 does
+for hubs.
+
+### 21.11 Client Behavior
+
+- **Membership is checked from the tree, on every group event update.** If the user's leaf is
+  gone, the client treats the user as removed: stop the subscription, keep the local history
+  read-only, mark the entry.
+- **Creator-side size guard** before every publish (§21.9) and the **history rule** (§21.5).
+- **Never fetch `36950` events speculatively.** There is no discovery; a client loads exactly
+  the coordinates in the user's group list plus any invite the user is currently looking at.
+- **Member list UI** is the tree's leaves (v2: resolved through the `roster` line), the same
+  rendering as a hub roster minus roles.
 
 ---
 
