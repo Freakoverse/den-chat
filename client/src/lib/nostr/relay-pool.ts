@@ -5,7 +5,12 @@ import {
 } from 'nostr-tools'
 import { StorageKey } from '@/lib/constants'
 
-const pool = new SimplePool()
+// enableReconnect: when a relay's websocket drops (laptop sleep, network blip, relay restart) nostr-tools
+// reconnects with backoff and RE-ISSUES every open subscription (with `since = last seen + 1`). Without it
+// the default is `closeAllSubscriptions` — every live sub on that relay died silently and stayed dead
+// until the app restarted, which is why DMs/hub messages could stop arriving for days and then all show
+// up on the next launch. enablePing detects half-dead connections that never fire onclose.
+const pool = new SimplePool({ enableReconnect: true, enablePing: true })
 
 /** Max time a one-shot query waits before returning what responsive relays have.
  *  Prevents a slow/dead relay from stalling the whole fetch. */
