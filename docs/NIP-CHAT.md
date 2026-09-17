@@ -3946,7 +3946,8 @@ Sort modes (all **best-effort**, reordering only what was fetched):
 ## 21. Groups — Kind `36950`
 
 A **group** is the small, flat sibling of a hub: one conversation, no channels, no categories,
-no roles, no join requests, no discovery, no Blossom. It is what Discord calls a *group DM* —
+no roles, no join requests, no discovery, and **no Blossom in the membership pipeline** (media
+may still live on Blossom, §21.12). It is what Discord calls a *group DM* —
 a handful of people talking in one place — scaled to **100 members**. The whole group lives in
 **one relay event**: identity, member tree, epoch history and settings. Everything cryptographic
 is inherited unchanged from hubs (§4): the LKH tree distributes a group secret, removal rotates
@@ -3956,7 +3957,7 @@ it, and v2 layers NIP-SKD pseudonyms on top exactly as it does for hubs.
 
 | | Hub (§6.1) | Group |
 |---|---|---|
-| Container | kind `36942` + Blossom tree files | kind `36950`, **tree inline** |
+| Container | kind `36942` + Blossom tree files | kind `36950`, **tree inline** (Blossom only for media, via optional `o`) |
 | Channels / categories / roles | yes | **none** — one conversation |
 | Who adds members | creator, join requests, facilitators | **creator only** |
 | Join requests (`36944`) | yes | **no** |
@@ -3987,6 +3988,8 @@ by the same action. Because there is no join flow, there is nothing for a ban li
     ["epoch", "<epoch_number>"],
     ["r", "wss://relay1.example.com", "general"],
     ["r", "wss://relay2.example.com", "general"],
+    ["o", "https://blossom1.example.com"],
+    ["o", "https://blossom2.example.com"],
     ["w", "<pow_difficulty>"],
     ["picture", "<icon_url>"],
     ["banner", "<banner_url>"],
@@ -4009,6 +4012,7 @@ by the same action. Because there is no join flow, there is nothing for a ban li
 | `n` | Yes | Group name. Plaintext in both versions so an invitee can see what they were invited to. |
 | `epoch` | Yes | Current group-secret epoch, starting at `1`, incremented on every removal (§21.5). |
 | `r` | Yes | Relay, third value `general`. Messages and the group event live here. At least one. |
+| `o` | No | Blossom server URL for **media** (attachments, voice notes), exactly as the hub `o` (§6.1). Zero or more; recommend ≥2 when the group shares files. Never used for membership — the tree and history are inline. When absent, senders fall back to their own servers and name them per attachment (§21.12). |
 | `w` | No | Minimum **message** PoW (NIP-13), same semantics as the hub `w` (§6.1): messages need a `nonce`, and the group event itself MUST be mined to `w` on every publish. |
 | `nonce` | Conditional | The group event's own PoW nonce when `w` > 0. |
 | `message_expiration` | No | Disappearing-messages duration in seconds, as for hubs (§6.1, §9.10). |
@@ -4020,8 +4024,8 @@ by the same action. Because there is no join flow, there is nothing for a ban li
 | `signer_scheme` | Conditional (**v2**) | NIP-SKD scheme, exactly as on the hub event (§6.1). |
 | `deleted` | Conditional | `["deleted", "true"]` on the tombstone republish (§21.7). |
 
-There is deliberately **no `t`, no `f`, no `o`, no `m`, no `W`, no `b`**: nothing is discoverable,
-nothing is on Blossom, nobody requests to join.
+There is deliberately **no `t`, no `f`, no `m`, no `W`, no `b`**: nothing is discoverable, no
+membership file is on Blossom, nobody requests to join.
 
 #### `created_at` increment
 
@@ -4237,17 +4241,31 @@ Nothing gets a new kind.
 |---------|-----------|-------|
 | Message (`36943`) | **Yes** | Same structure, encryption, `epoch`, PoW, `identity` (v2). No `c`. |
 | Edit / delete (`d`-tag republish, tombstone, `26943` hint) | **Yes** | Identical, including the `created_at + 1` rule. |
-| Reply & quote (`a` `reply` / `root`, `q`) | **Yes** | Same tags, same code path. |
-| **Thread pane** | **No** | A group is one conversation. Clients still emit `root`/`reply` (so the data is thread-shaped and portable to a hub view), but render replies **inline, DM-style**, and do not offer a thread panel. |
-| Reactions, typing (`26950`) | **Yes** | `h` only. |
+| Reply (`a` `reply` / `root`) | **Yes** | Same tags, same code path. |
+| Quote (`q`) | As hubs | The `q` tag is specified for hub messages (§6.2) and carries over unchanged; it is a spec-level feature that clients may or may not implement, in groups exactly as in hubs. |
+| **Thread pane** | **No** | See "Why no threads" below. Clients still emit `root`/`reply` so the data stays thread-shaped and portable. |
+| Reactions, edit hint (`26943`), typing (`26950`) | **Yes** | Unchanged; `h` only. |
 | Polls (`1067` / `1017`) | **Yes** | `h` only, no `c`; encrypted under the group message key. |
-| Attachments & **voice notes** (§6.2.1) | **Yes, with one addition** | See below. |
-| Pin list (`36945`) | Optional | Creator-only, `h` only. Clients MAY omit pins in groups. |
+| Attachments & **voice notes** (§6.2.1) | **Yes** | Stored on the group's `o` servers when it has them, else the sender's own — see below. |
+| Pin list (`36945`) | **Yes, as hubs** | One pin event per member per group, `d` = group `d`, `["pin", "", "36943:<author>:<d>"]` with an **empty channel slot**. Rendered as §6.6: the creator's pins first and expanded, other members' pins in collapsible sections grouped by pinner. |
 | Join requests, ban list, facilitation, reports (`36944`, §5.3, §5.6, `36948`) | **No** | No join flow, no moderators — the creator's add/remove is the whole model. |
 | Calendar (`31923` / `31925`), voice hosts & presence (`36946` / `36947`) | **No** | Hub-scale features; not part of groups. A later revision may add them with `h` only. |
 
-**Attachments and voice notes without hub Blossom servers.** A hub stores media on its `o`
-servers; a group has none. The attachment entry (§6.2.1) therefore gains one optional field:
+**Why no threads.** Threads are a *channel* tool: they exist so a busy channel with many
+parallel topics can fork one of them out of the main flow, and they need the surrounding
+navigation — a thread list, a side panel, a way back to the channel — to make sense. A group is
+a single stream among at most 100 people, the setting where an inline reply already anchors
+context (as it does in every DM client, and in Discord's own group DMs, which have no threads).
+Forking a 100-person conversation into side streams fragments the one thing a group is. It also
+keeps the group client small: no channel header, no thread panel, no unread-per-thread state.
+The reply tags are still written, so if a group's conversation is ever imported into a hub, or a
+future revision adds threads, nothing is lost.
+
+**Attachments and voice notes.** A group MAY declare Blossom servers with `o` tags (§21.2),
+and when it does, media works exactly as in a hub: uploaded to and fetched from the group's
+servers, referenced by hash (§6.2.1). A group without `o` tags still supports media: the sender
+uploads to their **own** configured servers and names them in the attachment entry, which gains
+one optional field for the purpose:
 
 ```json
 { "hash": "…", "type": "audio/webm", "name": "voice.webm", "size": 12345,
@@ -4257,13 +4275,13 @@ servers; a group has none. The attachment entry (§6.2.1) therefore gains one op
 
 | Field | Description |
 |-------|-------------|
-| `servers` | The Blossom servers the **sender** uploaded to (their own configured upload servers). Readers try these first, then their own client servers, then any server the hash is known on. Optional in hubs (where the `o` list is the default), **expected in groups**. |
+| `servers` | Blossom servers the sender uploaded to. Readers try the group's `o` servers, then these, then their own client servers. Optional everywhere; expected when the group has no `o` tags. Also valid in hubs. |
 
-Because the servers are the sender's own and public, group attachments **SHOULD be encrypted
-by default** (the opt-in of §6.2.1 becomes the default), and in a **v2 group MUST be**: an
-unencrypted blob on a personal server would tie a real Blossom account to pseudonymous traffic.
-The file key lives inside the already-encrypted message, as in hubs. Voice notes are simply
-audio attachments and need nothing further.
+Attachments in a group **SHOULD be encrypted by default** (the opt-in of §6.2.1 becomes the
+default) and in a **v2 group MUST be**: a plaintext blob on a personal server would tie a real
+Blossom account to pseudonymous traffic, and even on the group's own servers the operator
+should see ciphertext. The file key lives inside the already-encrypted message, as in hubs.
+Voice notes are audio attachments and need nothing further.
 
 ---
 
