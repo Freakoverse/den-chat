@@ -3,8 +3,8 @@
  *
  *   A rotation MUST NOT proceed without the prior history.
  *
- * Every rotation path (kick, manual rotate, v1 and v2) used to wrap the history download in
- * `catch { /* start fresh */ }`. A transient Blossom miss at that exact moment then rebuilt the blob
+ * Every rotation path (kick, manual rotate, v1 and v2) used to wrap the history download in a
+ * catch that "started fresh". A transient Blossom miss at that exact moment then rebuilt the blob
  * from only the old + new epochs and dropped every earlier secret. Existing members never noticed —
  * they hold those secrets locally — but anyone added afterwards could never decrypt anything from
  * before that rotation, and nothing told the creator. "Start fresh" is only legitimate when the
