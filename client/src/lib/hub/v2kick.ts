@@ -16,6 +16,7 @@
 
 import type { HubData } from '@/stores/hubStore'
 import type { ISigner } from '@/stores/userStore'
+import { historyReadFailure } from '@/lib/hub/historyGuard'
 
 /**
  * Resolve a member's leaf id `P` from their real key `R` by scanning the roster segments —
@@ -240,11 +241,15 @@ export async function kickMemberV2(opts: {
   // 5. Update the epoch-history blob (append old epoch, re-encrypt under the new secret).
   const lines: string[] = []
   if (index.historyHash) {
+    // Fail loudly: a silent "start fresh" here dropped every earlier epoch secret from the blob on a
+    // transient Blossom miss — new members could then never read anything from before this kick.
     try {
       const historyBlob = await downloadTextFromBlossom(index.historyHash, hub.blossomServers)
       const plaintext = await aesDecrypt(oldSecret, historyBlob)
       lines.push(...plaintext.split('\n').filter(l => l.trim()))
-    } catch { /* start fresh */ }
+    } catch (err) {
+      throw new Error(historyReadFailure(index.historyHash, err))
+    }
   }
   const oldSecretHex = toHex(oldSecret)
   if (!lines.some(l => l.startsWith(`hub:${hub.epoch}:`))) lines.push(`hub:${hub.epoch}:${oldSecretHex}`)
@@ -417,10 +422,13 @@ export async function rebuildTreeV2(opts: {
   // 5. History (append old epoch, re-encrypt under the new secret).
   const lines: string[] = []
   if (oldHistoryHash) {
+    // Fail loudly (see historyReadFailure): never rebuild history from just the old+new epochs.
     try {
       lines.push(...(await aesDecrypt(oldSecret, await downloadTextFromBlossom(oldHistoryHash, hub.blossomServers)))
         .split('\n').filter(l => l.trim()))
-    } catch { /* start fresh */ }
+    } catch (err) {
+      throw new Error(historyReadFailure(oldHistoryHash, err))
+    }
   }
   const oldSecretHex = toHex(oldSecret)
   if (!lines.some(l => l.startsWith(`hub:${hub.epoch}:`))) lines.push(`hub:${hub.epoch}:${oldSecretHex}`)

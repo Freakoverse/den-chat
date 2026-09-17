@@ -48,6 +48,7 @@ import { useReportStore, type HubReport } from '@/stores/reportStore'
 import { nip19 } from 'nostr-tools'
 import { PERMISSION_KEYS, PERMISSION_LABELS, PERMISSION_DESCRIPTIONS, DISABLED_PERMISSIONS, DEFAULT_EVERYONE_PERMISSIONS, getPermissionsForUser, isHubOwner, type ResolvedPermissions } from '@/lib/hub/permissions'
 import { isV2 } from '@/lib/hub/version'
+import { historyReadFailure } from '@/lib/hub/historyGuard'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
 import { PowSection } from './PowSection'
 import { EXPIRATION_PRESETS, formatDuration } from '@/lib/hub/messageExpiration'
@@ -6440,10 +6441,13 @@ function MembersPage({ hub, onFooterState }: { hub: HubData; onFooterState: (sta
                 // Decrypt existing history blob
                 let historyPlaintext = ''
                 if (historyHash) {
+                  // Fail loudly — never rebuild the history blob without the prior one (see historyGuard)
                   try {
                     const blob = await downloadTextFromBlossom(historyHash, hub.blossomServers)
                     historyPlaintext = await aesDecryptFn(hubSecret, blob)
-                  } catch { /* start fresh */ }
+                  } catch (err) {
+                    throw new Error(historyReadFailure(historyHash, err))
+                  }
                 }
 
                 // Append group history lines

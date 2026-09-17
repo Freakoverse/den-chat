@@ -38,6 +38,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { truncateNpub } from '@/lib/utils'
 import { fetchEvents, publishToSpecificRelays, publishCriticalWithFailover } from '@/lib/nostr/relay-pool'
 import { ProfilePacksSection } from '@/components/hub/ProfilePacksSection'
+import { historyReadFailure } from '@/lib/hub/historyGuard'
 import { publishPersonal, getPublishRelays } from '@/stores/postingBehaviourStore'
 import { signWithSigner } from '@/lib/nostr/events'
 import { nip19 } from 'nostr-tools'
@@ -885,10 +886,13 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
 
             let historyPlaintext = ''
             if (index.historyHash) {
+              // Fail loudly — never rebuild the history blob without the prior one (see historyGuard)
               try {
                 const historyBlob = await downloadTextFromBlossom(index.historyHash, hub.blossomServers)
                 historyPlaintext = await aesDecrypt(hubSecret, historyBlob)
-              } catch { /* start fresh */ }
+              } catch (err) {
+                throw new Error(historyReadFailure(index.historyHash, err))
+              }
             }
 
             const oldEpochLine = `hub:${hub.epoch}:${oldSecretHex}`
@@ -1075,10 +1079,13 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
             }
 
             let plaintext = ''
+            // Fail loudly — never rebuild the history blob without the prior one (see historyGuard)
             try {
               const blob = await dlText(historyHash, hub.blossomServers)
               plaintext = await aesDec2(currentSecret, blob)
-            } catch { /* start fresh */ }
+            } catch (err) {
+              throw new Error(historyReadFailure(historyHash, err))
+            }
 
             const lines = plaintext ? plaintext.split('\n').filter(l => l.trim()) : []
             for (const entry of groupHistoryEntries) {

@@ -1033,6 +1033,24 @@ Referenced in the index file as `history:<hash>`.
 
 This provides Discord-like UX where members see the full conversation history from day one.
 
+#### Growth and durability
+
+- **The history is unbounded by design.** Each epoch adds one line of roughly 74 bytes, so even
+  ten thousand rotations stay under a megabyte. Blossom has no event-size ceiling, so hubs never
+  prune. (Contrast the inline history of a **group**, which lives inside a relay event and is
+  capped at 100 epochs — see the Groups section.)
+- **A rotation MUST NOT proceed without the prior history.** On every re-key (kick, manual
+  rotation, grouped-role rotation) the client decrypts the *current* blob, appends, and re-encrypts.
+  If the current blob cannot be fetched or decrypted at that moment, the client MUST abort the
+  rotation and surface the failure — never rebuild the blob from only the old and new epochs.
+  Doing so silently drops every earlier secret: existing members would not notice (they hold those
+  secrets locally), but every member added afterwards would be permanently unable to read anything
+  from before that rotation. "Start fresh" is only legitimate when the index carries no `history`
+  entry at all, i.e. a hub that has genuinely never rotated.
+- **Mirror it with the tree.** The history blob is part of the hub's tree set for durability
+  purposes: whatever replicates the index, spine and pages across Blossom servers (§5.7, the
+  creator's server health/repair flow) MUST include it.
+
 ### 5.5 Grouped Role Key Files
 
 Each `grouped_roles` entry has its own Blossom LKH tree file. Same tree structure as the hub member file (§5.2), but:

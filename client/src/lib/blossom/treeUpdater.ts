@@ -143,10 +143,20 @@ export async function safeTreeUpdate(params: SafeTreeUpdateParams): Promise<Safe
     // Decrypt existing history blob
     let historyPlaintext = ''
     if (oldHistoryHash) {
+      // FAIL LOUDLY. This used to `catch { /* start fresh */ }` — a transient Blossom miss at the
+      // moment of a kick/rotation silently rebuilt the history with only the old+new epochs, and every
+      // earlier secret was dropped from the blob. Existing members never noticed (they hold those
+      // secrets locally); anyone added afterwards could never read anything from before that
+      // rotation, and nothing told the creator. A rotation must not proceed without the prior history.
       try {
         const historyBlob = await downloadTextFromBlossom(oldHistoryHash, hub.blossomServers)
         historyPlaintext = await aesDecrypt(oldHubSecret, historyBlob)
-      } catch { /* start fresh */ }
+      } catch (err) {
+        throw new Error(
+          `Epoch history (${oldHistoryHash.slice(0, 12)}…) could not be read from the hub's Blossom servers, so the rotation was aborted rather than lose past secrets. ` +
+          `Run "Check & fix Blossom servers" and try again. (${err instanceof Error ? err.message : String(err)})`,
+        )
+      }
     }
 
     // Build updated plaintext lines
@@ -488,10 +498,20 @@ export async function safePaginatedTreeUpdate(params: SafePaginatedTreeUpdatePar
 
     let historyPlaintext = ''
     if (oldHistoryHash) {
+      // FAIL LOUDLY. This used to `catch { /* start fresh */ }` — a transient Blossom miss at the
+      // moment of a kick/rotation silently rebuilt the history with only the old+new epochs, and every
+      // earlier secret was dropped from the blob. Existing members never noticed (they hold those
+      // secrets locally); anyone added afterwards could never read anything from before that
+      // rotation, and nothing told the creator. A rotation must not proceed without the prior history.
       try {
         const historyBlob = await downloadTextFromBlossom(oldHistoryHash, hub.blossomServers)
         historyPlaintext = await aesDecrypt(oldHubSecret, historyBlob)
-      } catch { /* start fresh */ }
+      } catch (err) {
+        throw new Error(
+          `Epoch history (${oldHistoryHash.slice(0, 12)}…) could not be read from the hub's Blossom servers, so the rotation was aborted rather than lose past secrets. ` +
+          `Run "Check & fix Blossom servers" and try again. (${err instanceof Error ? err.message : String(err)})`,
+        )
+      }
     }
 
     const lines = historyPlaintext ? historyPlaintext.split('\n').filter(l => l.trim()) : []
