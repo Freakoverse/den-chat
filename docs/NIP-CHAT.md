@@ -1421,7 +1421,6 @@ If replying to a top-level message (not itself a reply), both `root` and `reply`
 ```json
 ["a", "36943:<root_pubkey>:<root_d_tag>", "", "root"]
 ["a", "36943:<parent_pubkey>:<parent_d_tag>", "", "reply"]
-["q", "36943:<quoted_pubkey>:<quoted_d_tag>"]
 ```
 
 **Important:** When editing a message that is a reply, the client MUST carry forward both `root` and `reply` tags in the re-published event.
@@ -3235,7 +3234,6 @@ Clients MUST hide any hub carrying a `new_hub` tag from search/browse/discovery.
 | `h` | Message | Hub `d` tag reference |
 | `c` | Message, Voice Presence | Channel UUID |
 | `e` | Message | Reply reference |
-| `q` | Message | Quote reference |
 | `nonce` | Hub, Message, Report | PoW nonce (NIP-13 format). On the hub event (36942) it proves the hub event was mined to its `w` difficulty on every publish (anti-spam); discovery clients drop hubs whose event PoW < claimed `w` (§6.1). |
 | `list` | Join Request | Optional SHA-256 hash of the member's own Blossom index file (mesh list / facilitation discovery, §5.6) |
 | `facilitator` | Message | Hex pubkey of the member who facilitated the sender's access to the hub secret (§5.6). Present only when the sender is not in the creator's member list. |
@@ -4241,25 +4239,13 @@ Nothing gets a new kind.
 |---------|-----------|-------|
 | Message (`36943`) | **Yes** | Same structure, encryption, `epoch`, PoW, `identity` (v2). No `c`. |
 | Edit / delete (`d`-tag republish, tombstone, `26943` hint) | **Yes** | Identical, including the `created_at + 1` rule. |
-| Reply (`a` `reply` / `root`) | **Yes** | Same tags, same code path. |
-| Quote (`q`) | As hubs | The `q` tag is specified for hub messages (§6.2) and carries over unchanged; it is a spec-level feature that clients may or may not implement, in groups exactly as in hubs. |
-| **Thread pane** | **No** | See "Why no threads" below. Clients still emit `root`/`reply` so the data stays thread-shaped and portable. |
+| Reply & threads (`a` `reply` / `root`) | **Yes, as hubs** | Same tags, same code path, same thread pane — scoped to the group instead of a channel (Matrix and WhatsApp group chats have threads too). |
 | Reactions, edit hint (`26943`), typing (`26950`) | **Yes** | Unchanged; `h` only. |
 | Polls (`1067` / `1017`) | **Yes** | `h` only, no `c`; encrypted under the group message key. |
 | Attachments & **voice notes** (§6.2.1) | **Yes** | Stored on the group's `o` servers when it has them, else the sender's own — see below. |
 | Pin list (`36945`) | **Yes, as hubs** | One pin event per member per group, `d` = group `d`, `["pin", "", "36943:<author>:<d>"]` with an **empty channel slot**. Rendered as §6.6: the creator's pins first and expanded, other members' pins in collapsible sections grouped by pinner. |
 | Join requests, ban list, facilitation, reports (`36944`, §5.3, §5.6, `36948`) | **No** | No join flow, no moderators — the creator's add/remove is the whole model. |
 | Calendar (`31923` / `31925`), voice hosts & presence (`36946` / `36947`) | **No** | Hub-scale features; not part of groups. A later revision may add them with `h` only. |
-
-**Why no threads.** Threads are a *channel* tool: they exist so a busy channel with many
-parallel topics can fork one of them out of the main flow, and they need the surrounding
-navigation — a thread list, a side panel, a way back to the channel — to make sense. A group is
-a single stream among at most 100 people, the setting where an inline reply already anchors
-context (as it does in every DM client, and in Discord's own group DMs, which have no threads).
-Forking a 100-person conversation into side streams fragments the one thing a group is. It also
-keeps the group client small: no channel header, no thread panel, no unread-per-thread state.
-The reply tags are still written, so if a group's conversation is ever imported into a hub, or a
-future revision adds threads, nothing is lost.
 
 **Attachments and voice notes.** A group MAY declare Blossom servers with `o` tags (§21.2),
 and when it does, media works exactly as in a hub: uploaded to and fetched from the group's
