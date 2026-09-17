@@ -9,7 +9,7 @@
 
 import { create } from 'zustand'
 import { publishToSpecificRelays, publishEventProgressive } from '@/lib/nostr/relay-pool'
-import { fetchDMInbox, subscribeDMInbox } from '@/lib/nostr/readRelays'
+import { fetchDMInbox, subscribeDMInbox, getDMReadRelays } from '@/lib/nostr/readRelays'
 import { getPublishRelays, getDMSelfCopyRelays } from '@/stores/postingBehaviourStore'
 import { STANDARD_KINDS } from '@/lib/crypto/constants'
 import { createGiftWrap, unwrapGiftWrap, computeRumorId, foreignKindWrapIds, type UnwrappedDM } from '@/lib/nostr/nip17'
@@ -313,6 +313,10 @@ export const useDMStore = create<DMState>((set, get) => ({
     // NIP-42: answer relay AUTH challenges as the logged-in user (guarded — see relayAuth.ts) so relays
     // that gate kind-1059 reads actually return the inbox, including our own self-copies.
     const onauth = makeRelayAuthSigner(signer, privateKey)
+
+    // One line so "is my 10050 actually being read?" is answerable from the console.
+    const readSet = getDMReadRelays()
+    console.log(`[DM] inbox read set (${readSet.length} relays): ${readSet.map((r) => r.replace(/^wss:\/\//, '')).join(', ')}`)
 
     const sub = subscribeDMInbox(
       {
