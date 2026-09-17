@@ -4227,6 +4227,44 @@ for hubs.
 - **Member list UI** is the tree's leaves (v2: resolved through the `roster` line), the same
   rendering as a hub roster minus roles.
 
+### 21.12 Feature Parity — What Carries Over
+
+A group reuses the hub **event kinds and structures unchanged**; the only systematic difference
+is that every per-channel event drops its `c` tag and keys off the group's `d` tag (§21.3).
+Nothing gets a new kind.
+
+| Feature | In a group | Notes |
+|---------|-----------|-------|
+| Message (`36943`) | **Yes** | Same structure, encryption, `epoch`, PoW, `identity` (v2). No `c`. |
+| Edit / delete (`d`-tag republish, tombstone, `26943` hint) | **Yes** | Identical, including the `created_at + 1` rule. |
+| Reply & quote (`a` `reply` / `root`, `q`) | **Yes** | Same tags, same code path. |
+| **Thread pane** | **No** | A group is one conversation. Clients still emit `root`/`reply` (so the data is thread-shaped and portable to a hub view), but render replies **inline, DM-style**, and do not offer a thread panel. |
+| Reactions, typing (`26950`) | **Yes** | `h` only. |
+| Polls (`1067` / `1017`) | **Yes** | `h` only, no `c`; encrypted under the group message key. |
+| Attachments & **voice notes** (§6.2.1) | **Yes, with one addition** | See below. |
+| Pin list (`36945`) | Optional | Creator-only, `h` only. Clients MAY omit pins in groups. |
+| Join requests, ban list, facilitation, reports (`36944`, §5.3, §5.6, `36948`) | **No** | No join flow, no moderators — the creator's add/remove is the whole model. |
+| Calendar (`31923` / `31925`), voice hosts & presence (`36946` / `36947`) | **No** | Hub-scale features; not part of groups. A later revision may add them with `h` only. |
+
+**Attachments and voice notes without hub Blossom servers.** A hub stores media on its `o`
+servers; a group has none. The attachment entry (§6.2.1) therefore gains one optional field:
+
+```json
+{ "hash": "…", "type": "audio/webm", "name": "voice.webm", "size": 12345,
+  "servers": ["https://blossom.example.com", "https://blossom2.example.com"],
+  "encryption": { "algorithm": "aes-gcm", "key": "…", "nonce": "…" } }
+```
+
+| Field | Description |
+|-------|-------------|
+| `servers` | The Blossom servers the **sender** uploaded to (their own configured upload servers). Readers try these first, then their own client servers, then any server the hash is known on. Optional in hubs (where the `o` list is the default), **expected in groups**. |
+
+Because the servers are the sender's own and public, group attachments **SHOULD be encrypted
+by default** (the opt-in of §6.2.1 becomes the default), and in a **v2 group MUST be**: an
+unencrypted blob on a personal server would tie a real Blossom account to pseudonymous traffic.
+The file key lives inside the already-encrypted message, as in hubs. Voice notes are simply
+audio attachments and need nothing further.
+
 ---
 
 *This specification is a living document. Feedback and contributions are welcome.*
