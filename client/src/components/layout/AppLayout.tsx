@@ -28,7 +28,7 @@ import { useBlockStore } from '@/stores/blockStore'
 import { useWotStore } from '@/stores/wotStore'
 import { useMobile } from '@/hooks/useMobile'
 import { useMemo, useEffect, useState } from 'react'
-import { ShieldAlert, LogOut, Plus, MessageSquare, MessagesSquare, AtSign, Compass, Settings, Home, X, Wallet, Loader2, MoreHorizontal, UserMinus, UserCheck, Copy, Check, Lock, RotateCw } from 'lucide-react'
+import { ShieldAlert, LogOut, Plus, MessageSquare, MessageSquareText, MessagesSquare, AtSign, Compass, Settings, Home, X, Wallet, Loader2, MoreHorizontal, UserMinus, UserCheck, Copy, Check, Lock, RotateCw } from 'lucide-react'
 import { RESEND_MIN_AGE_S } from '@/lib/hub/resendJoinRequest'
 import { nip19 } from 'nostr-tools'
 import { UserProfileModal } from '@/components/hub/UserProfileModal'
@@ -461,6 +461,33 @@ function AwaitingApprovalOverlay({ dTag }: { dTag: string | null }) {
   const [showFacilitator, setShowFacilitator] = useState(false)
   const [showFacProfile, setShowFacProfile] = useState(false)
   const [copiedNpub, setCopiedNpub] = useState(false)
+  // "View my note" (§6.3.1): reopen our own join request to show the note we attached.
+  // v1 decrypts the NIP-44 content (symmetric with the creator); v2 reopens the sealed payload via
+  // the deterministic addr sub-key. `legacy` = an old ephemeral-keyed v2 request that can't be reopened.
+  const [noteView, setNoteView] = useState<{ loading: boolean; text: string | null; legacy?: boolean } | null>(null)
+  const handleViewNote = async () => {
+    if (!hub || !pubkey) return
+    setNoteView({ loading: true, text: null })
+    try {
+      const { getOwnJoinRequest } = await import('@/lib/hub/resendJoinRequest')
+      const { isV2 } = await import('@/lib/hub/version')
+      const { signer, privateKey } = useUserStore.getState()
+      const ev = await getOwnJoinRequest(hub, pubkey)
+      if (!ev) { setNoteView({ loading: false, text: null }); return }
+      if (isV2(hub)) {
+        const { readOwnV2JoinRequest } = await import('@/lib/hub/v2join')
+        const own = await readOwnV2JoinRequest(ev, hub.dTag, hub.creatorPubkey, { privateKey, signer })
+        setNoteView({ loading: false, text: own?.note || null, legacy: !own && ev.tags.some((t) => t[0] === 'ephemeral') })
+      } else if (!ev.content) {
+        setNoteView({ loading: false, text: null })
+      } else {
+        const { nip44DecryptFrom } = await import('@/lib/hub/hubListPrivacy')
+        setNoteView({ loading: false, text: await nip44DecryptFrom(ev.content, hub.creatorPubkey, signer, privateKey) })
+      }
+    } catch {
+      setNoteView({ loading: false, text: null })
+    }
+  }
 
   // A saved facilitator that hasn't unlocked the hub means one of: they haven't rebuilt their list
   // for the hub's current epoch, they lost the `facilitate` permission, or they removed us. We show
@@ -562,6 +589,13 @@ function AwaitingApprovalOverlay({ dTag }: { dTag: string | null }) {
             <LogOut size={14} />
             Withdraw request
           </button>
+          <button
+            onClick={handleViewNote}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-secondary/60 border border-border/50 text-sm text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors cursor-pointer"
+          >
+            <MessageSquareText size={14} />
+            View my note
+          </button>
           {/* Resend: bump created_at to now so an inactive creator sees the request again above their
               "seen" watermark. Gated to once every RESEND_MIN_AGE_S (3 days) to prevent bump-spam. */}
           {reqCreatedAt != null && (
@@ -581,6 +615,40 @@ function AwaitingApprovalOverlay({ dTag }: { dTag: string | null }) {
             </button>
           )}
         </div>
+        {/* Own join note viewer (§6.3.1) */}
+        {noteView && (
+          <div className="fixed inset-0 z-[200] flex items-center justify-center" onClick={() => setNoteView(null)}>
+            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+            <div
+              className="relative z-10 w-full max-w-[420px] mx-4 bg-card rounded-xl border border-border shadow-2xl animate-in fade-in-0 zoom-in-95 duration-200 text-left"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+                <div className="min-w-0">
+                  <h3 className="text-sm font-semibold text-foreground">Your join note</h3>
+                  <p className="text-[11px] text-muted-foreground truncate">Sent with your request to {hub?.name || 'this hub'}</p>
+                </div>
+                <button onClick={() => setNoteView(null)} className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors cursor-pointer shrink-0">
+                  <X size={16} />
+                </button>
+              </div>
+              <div className="px-5 py-4">
+                {noteView.loading ? (
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground"><Loader2 size={14} className="animate-spin" /> Fetching your request…</div>
+                ) : noteView.text ? (
+                  <p className="text-sm text-foreground whitespace-pre-wrap break-words leading-relaxed">{noteView.text}</p>
+                ) : noteView.legacy ? (
+                  <p className="text-xs text-muted-foreground leading-relaxed">This request was sent by an older version and can't be reopened. Resend it to attach a note the new way.</p>
+                ) : (
+                  <p className="text-xs text-muted-foreground">No note was attached to your request.</p>
+                )}
+              </div>
+              <div className="flex items-center justify-end px-5 py-3 border-t border-border">
+                <button onClick={() => setNoteView(null)} className="px-3 py-1.5 rounded-lg text-[11px] font-medium bg-secondary hover:bg-secondary/70 text-foreground transition-colors cursor-pointer">Close</button>
+              </div>
+            </div>
+          </div>
+        )}
         {facilitatorNpub ? (
           <div className="mx-auto max-w-xs rounded-lg border border-border/50 bg-secondary/30 px-3 py-3 space-y-2.5 text-left">
             <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">

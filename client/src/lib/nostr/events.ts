@@ -354,7 +354,9 @@ export function createDeletedMessageEvent(
 export function createJoinRequest(
   hubDTag: string,
   creatorPubkey: string,
-  listHash?: string
+  listHash?: string,
+  /** v1 join note (§6.3.1): NIP-44 ciphertext to the creator — see nip44EncryptTo. Empty = no note. */
+  content = '',
 ): UnsignedEvent {
   const tags: Tag[] = [
     ['d', hubDTag],
@@ -365,7 +367,7 @@ export function createJoinRequest(
     tags.push(['list', listHash])
   }
 
-  return createUnsignedEvent(KINDS.JOIN_REQUEST, '', tags)
+  return createUnsignedEvent(KINDS.JOIN_REQUEST, content, tags)
 }
 
 /**

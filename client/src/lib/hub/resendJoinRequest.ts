@@ -21,6 +21,15 @@ async function v2AddrPub(hub: HubData, privateKey: string | null, signer: import
  * the "Resend" button (only after RESEND_MIN_AGE_S).
  */
 export async function getOwnJoinRequestCreatedAt(hub: HubData, pubkey: string): Promise<number | null> {
+  const e = await getOwnJoinRequest(hub, pubkey)
+  return e ? e.created_at : null
+}
+
+/**
+ * The user's current (non-tombstoned) join request event for `hub`, or null. v1 keys on R + `#d:dTag`;
+ * v2 on the addr sub-key (author + `#d`). Also what "view my note" (§6.3.1) and a resend read from.
+ */
+export async function getOwnJoinRequest(hub: HubData, pubkey: string): Promise<import('nostr-tools').Event | null> {
   const { fetchEventsFromRelays, getRelays } = await import('@/lib/nostr/relay-pool')
   const { KINDS } = await import('@/lib/crypto/constants')
   const { isV2 } = await import('@/lib/hub/version')
@@ -35,11 +44,11 @@ export async function getOwnJoinRequestCreatedAt(hub: HubData, pubkey: string): 
       const addrPub = await v2AddrPub(hub, privateKey, signer)
       const evs = await fetchEventsFromRelays(relays, { kinds: [KINDS.JOIN_REQUEST], authors: [addrPub], '#d': [addrPub], limit: 1 })
       const e = evs[0]
-      return e && !isTombstoned(e.tags) ? e.created_at : null
+      return e && !isTombstoned(e.tags) ? e : null
     }
     const evs = await fetchEventsFromRelays(relays, { kinds: [KINDS.JOIN_REQUEST], authors: [pubkey], '#d': [hub.dTag], limit: 1 })
     const e = evs[0]
-    return e && !isTombstoned(e.tags) ? e.created_at : null
+    return e && !isTombstoned(e.tags) ? e : null
   } catch {
     return null
   }
@@ -61,19 +70,25 @@ export async function resendJoinRequest(hub: HubData, pubkey: string): Promise<v
   const hubRelays = [...hub.generalRelays]
   const v2 = isV2(hub)
 
+  // The join note (§6.3.1) rides along unchanged on a resend. v1: the ciphertext is reused as-is
+  // (already sealed to the creator). v2: reopen our own sealed request to recover the note text.
+  const current = await getOwnJoinRequest(hub, pubkey)
+
   let signed
   if (v2) {
-    const { buildV2JoinRequest } = await import('@/lib/hub/v2join')
+    const { buildV2JoinRequest, readOwnV2JoinRequest } = await import('@/lib/hub/v2join')
     const { KINDS } = await import('@/lib/crypto/constants')
     const coord = `${KINDS.HUB_EVENT}:${hub.creatorPubkey}:${hub.dTag}`
+    const own = current ? await readOwnV2JoinRequest(current, hub.dTag, hub.creatorPubkey, { privateKey, signer }) : null
     signed = await buildV2JoinRequest({
       hubDTag: hub.dTag, ownerPub: hub.creatorPubkey, coord,
       joinPow: hub.joinMinPow || 0, rPub: pubkey, privateKey, signer,
+      note: own?.note || undefined,
     })
   } else {
     const { createJoinRequest } = await import('@/lib/nostr/events')
     const { mineAndSign } = await import('@/lib/nostr')
-    const unsigned = createJoinRequest(hub.dTag, hub.creatorPubkey)
+    const unsigned = createJoinRequest(hub.dTag, hub.creatorPubkey, undefined, current?.content || '')
     signed = await mineAndSign(unsigned, hub.joinMinPow || 0, pubkey, signer, privateKey)
   }
   // v2: hub relays ONLY (see the correlation note in the join/rescind paths). v1: hub + personal.

@@ -23,6 +23,7 @@ import { Input } from '@/components/ui/input'
 import { Separator } from '@/components/ui/separator'
 import { ImageCropModal } from '@/components/ui/ImageCropModal'
 import { useHubStore, type HubData, type Channel, type Category, type Role, type HubMember, type HideEntry } from '@/stores/hubStore'
+import { type JoinNotePolicy, joinNoteEqual, JOIN_PROMPT_MAX } from '@/lib/hub/joinNote'
 import { useMessageStore } from '@/stores/messageStore'
 import { UserProfileModal } from '@/components/hub/UserProfileModal'
 import { useUserStore } from '@/stores/userStore'
@@ -256,6 +257,8 @@ export function HubSettingsModal({ open, onClose, hub }: HubSettingsModalProps) 
   // (0 === stored 0 → not dirty). Note "no W" and "W explicitly disabled" are identical on the wire, so a
   // deliberately-disabled hub also opens at 15 and shows as dirty — the owner just re-drags to 0.
   const [editJoinMinPow, setEditJoinMinPow] = useState(hub.joinMinPow || 15)
+  // Join note (§6.3.1): prompt + optional/required. undefined = no prompt, optional.
+  const [editJoinNote, setEditJoinNote] = useState<JoinNotePolicy | undefined>(hub.joinNote)
   const [editMessageExpiration, setEditMessageExpiration] = useState(hub.messageExpiration || 0)
   const [editNsfw, setEditNsfw] = useState(hub.nsfw || false)
   const [editDiscoverable, setEditDiscoverable] = useState(hub.discoverable !== false)
@@ -300,7 +303,7 @@ export function HubSettingsModal({ open, onClose, hub }: HubSettingsModalProps) 
       setEditCategories([...hub.categories].sort((a, b) => a.position - b.position))
       setEditChannels([...hub.channels])
       setEditMinPow(hub.minPow || 0)
-      setEditJoinMinPow(hub.joinMinPow || 15)
+      setEditJoinMinPow(hub.joinMinPow || 15); setEditJoinNote(hub.joinNote)
       setEditNsfw(hub.nsfw || false)
       setEditDiscoverable(hub.discoverable !== false)
       setEditRelays([...hub.generalRelays])
@@ -326,6 +329,7 @@ export function HubSettingsModal({ open, onClose, hub }: HubSettingsModalProps) 
     // Compare against the REAL stored value (0 when no `W`), not the display default — so a no-W hub,
     // whose slider shows 15, registers as a genuine pending change (15 ≠ 0) and activates Publish.
     if (editJoinMinPow !== (hub.joinMinPow || 0)) return true
+    if (!joinNoteEqual(editJoinNote, hub.joinNote)) return true
     if (editMessageExpiration !== (hub.messageExpiration || 0)) return true
     if (editNsfw !== (hub.nsfw || false)) return true
     if (editDiscoverable !== (hub.discoverable !== false)) return true
@@ -334,7 +338,7 @@ export function HubSettingsModal({ open, onClose, hub }: HubSettingsModalProps) 
     if (JSON.stringify(editRoles.map(r => ({ id: r.roleId, name: r.name, color: r.color, pos: r.position, hoist: r.hoist, perms: r.permissions }))) !==
       JSON.stringify(hub.roles.map(r => ({ id: r.roleId, name: r.name, color: r.color, pos: r.position, hoist: r.hoist, perms: r.permissions })))) return true
     return false
-  }, [editName, editDescription, editIcon, editBanner, editTags, editCategories, editChannels, editMinPow, editJoinMinPow, editMessageExpiration, editNsfw, editDiscoverable, editRelays, editBlossoms, editRoles, hub])
+  }, [editName, editDescription, editIcon, editBanner, editTags, editCategories, editChannels, editMinPow, editJoinMinPow, editJoinNote, editMessageExpiration, editNsfw, editDiscoverable, editRelays, editBlossoms, editRoles, hub])
 
   // Role change summary for the Roles page footer
   const roleChangeSummary = useMemo(() => {
@@ -366,11 +370,12 @@ export function HubSettingsModal({ open, onClose, hub }: HubSettingsModalProps) 
     if (JSON.stringify(editTags) !== JSON.stringify(hub.tags || [])) fields.push('tags')
     if (editMinPow !== (hub.minPow || 0)) fields.push('message proof of work')
     if (editJoinMinPow !== (hub.joinMinPow || 0)) fields.push('join proof of work')
+    if (!joinNoteEqual(editJoinNote, hub.joinNote)) fields.push('join note')
     if (editMessageExpiration !== (hub.messageExpiration || 0)) fields.push('disappearing messages')
     if (editNsfw !== (hub.nsfw || false)) fields.push('NSFW')
     if (editDiscoverable !== (hub.discoverable !== false)) fields.push('discoverability')
     return fields
-  }, [editName, editDescription, editIcon, editBanner, editTags, editMinPow, editJoinMinPow, editMessageExpiration, editNsfw, editDiscoverable, hub])
+  }, [editName, editDescription, editIcon, editBanner, editTags, editMinPow, editJoinMinPow, editJoinNote, editMessageExpiration, editNsfw, editDiscoverable, hub])
 
   // Channels page change summary
   const channelChangeSummary = useMemo(() => {
@@ -795,6 +800,7 @@ export function HubSettingsModal({ open, onClose, hub }: HubSettingsModalProps) 
         roles: editRoles,
         minPow: editMinPow > 0 ? editMinPow : undefined,
         joinMinPow: editJoinMinPow > 0 ? editJoinMinPow : undefined,
+        joinNote: editJoinNote,
         messageExpiration: editMessageExpiration > 0 ? editMessageExpiration : undefined,
         nsfw: editNsfw || undefined,
         discoverable: editDiscoverable,
@@ -859,6 +865,7 @@ export function HubSettingsModal({ open, onClose, hub }: HubSettingsModalProps) 
         blossomServers: editBlossoms,
         minPow: editMinPow,
         joinMinPow: editJoinMinPow,
+        joinNote: editJoinNote,
         messageExpiration: editMessageExpiration,
         nsfw: editNsfw,
         discoverable: editDiscoverable,
@@ -953,6 +960,7 @@ export function HubSettingsModal({ open, onClose, hub }: HubSettingsModalProps) 
                       editTags={editTags} setEditTags={setEditTags}
                       editMinPow={editMinPow} setEditMinPow={setEditMinPow}
                       editJoinMinPow={editJoinMinPow} setEditJoinMinPow={setEditJoinMinPow}
+                      editJoinNote={editJoinNote} setEditJoinNote={setEditJoinNote}
                       editMessageExpiration={editMessageExpiration} setEditMessageExpiration={setEditMessageExpiration}
                       editNsfw={editNsfw} setEditNsfw={setEditNsfw}
                       editDiscoverable={editDiscoverable} setEditDiscoverable={setEditDiscoverable}
@@ -1085,7 +1093,7 @@ export function HubSettingsModal({ open, onClose, hub }: HubSettingsModalProps) 
                         setEditBanner(hub.banner || '')
                         setEditTags(hub.tags || [])
                         setEditMinPow(hub.minPow || 0)
-                        setEditJoinMinPow(hub.joinMinPow || 15)
+                        setEditJoinMinPow(hub.joinMinPow || 15); setEditJoinNote(hub.joinNote)
                         setEditNsfw(hub.nsfw || false)
                         setEditDiscoverable(hub.discoverable !== false)
                       }}
@@ -1527,6 +1535,7 @@ interface GeneralPageProps {
   editTags: string[]; setEditTags: (v: string[]) => void
   editMinPow: number; setEditMinPow: (v: number) => void
   editJoinMinPow: number; setEditJoinMinPow: (v: number) => void
+  editJoinNote: JoinNotePolicy | undefined; setEditJoinNote: (v: JoinNotePolicy | undefined) => void
   editMessageExpiration: number; setEditMessageExpiration: (v: number) => void
   editNsfw: boolean; setEditNsfw: (v: boolean) => void
   editDiscoverable: boolean; setEditDiscoverable: (v: boolean) => void
@@ -1537,6 +1546,7 @@ function GeneralPage({
   editIcon, setEditIcon, editBanner, setEditBanner,
   editTags, setEditTags, editMinPow, setEditMinPow,
   editJoinMinPow, setEditJoinMinPow,
+  editJoinNote, setEditJoinNote,
   editMessageExpiration, setEditMessageExpiration,
   editNsfw, setEditNsfw,
   editDiscoverable, setEditDiscoverable,
@@ -1908,6 +1918,44 @@ function GeneralPage({
 
         {/* Proof of Work */}
         <PowSection editMinPow={editMinPow} setEditMinPow={setEditMinPow} editJoinMinPow={editJoinMinPow} setEditJoinMinPow={setEditJoinMinPow} />
+
+        {/* ── Join note (§6.3.1): ask prospective members a question / require an intro or passphrase ── */}
+        <div className="space-y-2">
+          <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Join note</div>
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            People requesting to join can attach a short note (up to 280 characters) — a reason, an intro, or a passphrase you ask
+            for. Only you can read notes. The prompt below is public so requesters know what to write.
+          </p>
+          <div className="flex items-center gap-1 rounded-lg bg-secondary/40 border border-border p-1 w-fit">
+            {([['off', 'Off'], ['optional', 'Optional'], ['required', 'Required']] as const).map(([v, label]) => {
+              const current = editJoinNote ? editJoinNote.mode : 'off'
+              return (
+                <button
+                  key={v}
+                  onClick={() => setEditJoinNote(v === 'off' ? undefined : { mode: v, prompt: editJoinNote?.prompt ?? '' })}
+                  className={`px-3 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer ${current === v ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground'}`}
+                >
+                  {label}
+                </button>
+              )
+            })}
+          </div>
+          {editJoinNote && (
+            <div className="space-y-1">
+              <input
+                value={editJoinNote.prompt}
+                maxLength={JOIN_PROMPT_MAX}
+                onChange={(e) => setEditJoinNote({ ...editJoinNote, prompt: e.target.value })}
+                placeholder={editJoinNote.mode === 'required' ? 'e.g. Tell us why you want to join, or enter the passphrase' : 'e.g. Anything you want the admins to know? (optional)'}
+                className="w-full h-9 px-3 rounded-lg bg-secondary/40 border border-border text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:border-primary/40"
+              />
+              <div className="flex items-center justify-between text-[10px] text-muted-foreground/70">
+                <span>{editJoinNote.mode === 'required' ? 'Requests without a note will be refused by the client.' : 'Requesters may leave it empty.'}</span>
+                <span>{editJoinNote.prompt.length}/{JOIN_PROMPT_MAX}</span>
+              </div>
+            </div>
+          )}
+        </div>
 
         <Separator />
 
@@ -3489,6 +3537,7 @@ function SecurityPage({ hub }: { hub: HubData }) {
         roles: hub.roles,
         minPow: hub.minPow > 0 ? hub.minPow : undefined,
         joinMinPow: hub.joinMinPow > 0 ? hub.joinMinPow : undefined,
+        joinNote: hub.joinNote,
         nsfw: hub.nsfw || undefined,
         discoverable: hub.discoverable,
         groupedRoles: updatedGroupedRoles,
@@ -4031,6 +4080,7 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
         roles: hub.roles,
         minPow: hub.minPow || undefined,
         joinMinPow: hub.joinMinPow || undefined,
+        joinNote: hub.joinNote,
         nsfw: hub.nsfw || undefined,
         discoverable: hub.discoverable,
         groupedRoles: hub.groupedRoles,
@@ -4283,6 +4333,7 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
         roles: hub.roles,
         minPow: hub.minPow || undefined,
         joinMinPow: hub.joinMinPow || undefined,
+        joinNote: hub.joinNote,
         nsfw: hub.nsfw || undefined,
         discoverable: hub.discoverable,
         groupedRoles: hub.groupedRoles,
@@ -4614,6 +4665,7 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
                                             blossomServers: hub.blossomServers, indexFileHash: newIdxHash,
                                             channels: hub.channels, categories: hub.categories, roles: hub.roles,
                                             minPow: hub.minPow || undefined, joinMinPow: hub.joinMinPow || undefined, nsfw: hub.nsfw || undefined,
+        joinNote: hub.joinNote,
                                             discoverable: hub.discoverable, groupedRoles: hub.groupedRoles,
                                             messageExpiration: hub.messageExpiration || undefined,
                                             publishedAt: hub.publishedAt,
@@ -6127,6 +6179,7 @@ function MembersPage({ hub, onFooterState }: { hub: HubData; onFooterState: (sta
           roles: hub.roles,
           minPow: hub.minPow || undefined,
           joinMinPow: hub.joinMinPow || undefined,
+        joinNote: hub.joinNote,
           nsfw: hub.nsfw || undefined,
           discoverable: hub.discoverable,
           groupedRoles: hub.groupedRoles,
@@ -6519,6 +6572,7 @@ function MembersPage({ hub, onFooterState }: { hub: HubData; onFooterState: (sta
             roles: hub.roles,
             minPow: hub.minPow || undefined,
             joinMinPow: hub.joinMinPow || undefined,
+        joinNote: hub.joinNote,
             nsfw: hub.nsfw || undefined,
             discoverable: hub.discoverable,
             groupedRoles: updatedGroupedRoles,

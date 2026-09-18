@@ -14,6 +14,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { HUB_BANNER_PLACEHOLDER } from '@/lib/constants'
 import { useEscToClose } from '@/hooks/useEscToClose'
 import { useHubStore, type HubData } from '@/stores/hubStore'
+import { parseJoinNoteTag, normalizeJoinNote, type JoinNotePolicy } from '@/lib/hub/joinNote'
 import { useUserStore } from '@/stores/userStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { useBlossomMedia } from '@/hooks/useBlossomMedia'
@@ -28,7 +29,7 @@ import { UserPanel } from '@/components/ui/UserPanel'
 import { ResizablePanel } from '@/components/ui/ResizablePanel'
 import { HubInfoModal } from '@/components/hub/HubInfoModal'
 import { UserProfileModal } from '@/components/hub/UserProfileModal'
-import { HubJoinWarningModal, isJoinWarningDismissed } from '@/components/hub/HubJoinWarningModal'
+import { HubJoinWarningModal } from '@/components/hub/HubJoinWarningModal'
 import { useBlockStore } from '@/stores/blockStore'
 import { useWotStore } from '@/stores/wotStore'
 import { useNavigationStore } from '@/stores/navigationStore'
@@ -60,6 +61,7 @@ interface DiscoveredHub {
   powVerified: boolean
   /** Explicit join PoW (from the W tag); 0 when the hub set none — never inherits minPow. */
   joinMinPow: number
+  joinNote?: JoinNotePolicy
   nsfw: boolean
   discoverable: boolean
   creatorPubkey: string
@@ -138,6 +140,7 @@ function parseHubEventForDiscover(event: Event): DiscoveredHub | null {
       event, dTag, name, description, icon, banner,
       tags: tags.length > 0 ? tags : undefined,
       minPow, powVerified, joinMinPow: wjTagVal ? parseInt(wjTagVal, 10) : 0,
+      joinNote: parseJoinNoteTag(event.tags),
       nsfw, discoverable, creatorPubkey: event.pubkey,
       version: versionVal ? (parseInt(versionVal, 10) || undefined) : undefined,
       generalRelays, blossomServers, publishedAt, clientTag,
@@ -774,16 +777,11 @@ function DiscoverHubCard({ hub }: { hub: DiscoveredHub }) {
       return
     }
 
-    // Show warning modal if not dismissed (v1 and v2 carry different text + separate dismiss keys)
-    if (!isJoinWarningDismissed(hub.version === 2)) {
-      setShowJoinWarning(true)
-      return
-    }
-
-    doJoin()
+    // Always open the request modal: it carries the join note (§6.3.1) + the (dismissable) privacy warning
+    setShowJoinWarning(true)
   }
 
-  const doJoin = async () => {
+  const doJoin = async (note = '') => {
     if (!myPubkey || joining) return
     setJoining(true)
     setJoinError(null)
@@ -802,9 +800,12 @@ function DiscoverHubCard({ hub }: { hub: DiscoveredHub }) {
           throw new Error('This hub is private (v2) — use the DEN client or a NIP-SKD signer to join.')
         }
         const coord = `${KINDS.HUB_EVENT}:${hub.creatorPubkey}:${hub.dTag}`
-        signed = await buildV2JoinRequest({ hubDTag: hub.dTag, ownerPub: hub.creatorPubkey, coord, joinPow: hub.joinMinPow || 0, rPub: myPubkey, privateKey, signer })
+        signed = await buildV2JoinRequest({ hubDTag: hub.dTag, ownerPub: hub.creatorPubkey, coord, joinPow: hub.joinMinPow || 0, rPub: myPubkey, privateKey, signer, note: normalizeJoinNote(note) || undefined })
       } else {
-        const unsigned = createUnsignedEvent(KINDS.JOIN_REQUEST, '', [['d', hub.dTag]])
+        // v1 join note (§6.3.1): NIP-44 to the creator — never plaintext on relays
+        const noteText = normalizeJoinNote(note)
+        const content = noteText ? await (await import('@/lib/hub/hubListPrivacy')).nip44EncryptTo(noteText, hub.creatorPubkey, signer, privateKey) : ''
+        const unsigned = createUnsignedEvent(KINDS.JOIN_REQUEST, content, [['d', hub.dTag]])
         signed = await mineAndSign(unsigned, hub.joinMinPow, myPubkey, signer, privateKey)
       }
       // v2: hub relays ONLY. The join request is authored by a throwaway `addr` key (R is sealed to O
@@ -827,6 +828,7 @@ function DiscoverHubCard({ hub }: { hub: DiscoveredHub }) {
             tags: hub.tags, description: hub.description, epoch: 1, generalRelays: hub.generalRelays,
             blossomServers: hub.blossomServers, indexFileHash: '', channels: [],
             categories: [], roles: [], minPow: hub.minPow, joinMinPow: hub.joinMinPow, nsfw: hub.nsfw, discoverable: hub.discoverable,
+        joinNote: hub.joinNote,
             // MUST carry version: buildHubListEvent (below) classifies v2-vs-public by hubs[dTag].version,
             // and a private (v2) hub misclassified as public publishes its dTag as a PLAINTEXT `v` tag on
             // our R-authored hub list — publicly linking our real key R to this private hub.
@@ -1025,6 +1027,7 @@ function DiscoverHubCard({ hub }: { hub: DiscoveredHub }) {
           tags: hub.tags, description: hub.description, epoch: 1, generalRelays: hub.generalRelays,
           blossomServers: hub.blossomServers, indexFileHash: '', channels: [],
           categories: [], roles: [], minPow: hub.minPow, joinMinPow: hub.joinMinPow, nsfw: hub.nsfw, discoverable: hub.discoverable,
+        joinNote: hub.joinNote,
         }}
         blurMedia
         onCreatorClick={() => {
@@ -1044,8 +1047,9 @@ function DiscoverHubCard({ hub }: { hub: DiscoveredHub }) {
       <HubJoinWarningModal
         open={showJoinWarning}
         onClose={() => setShowJoinWarning(false)}
-        onConfirm={doJoin}
+        onConfirm={(note) => doJoin(note)}
         isV2={hub.version === 2}
+        joinNote={hub.joinNote}
       />
 
       {/* Hub limit reached modal */}

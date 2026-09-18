@@ -26,7 +26,7 @@ import { nip19 } from 'nostr-tools'
 import { markJoinRequestsSeen } from '@/hooks/useJoinRequestCount'
 import { getJoinSeen } from '@/lib/hub/joinReadState'
 import {
-  X, Search, Loader2, Check, CheckSquare, Square, AlertTriangle, ChevronDown, ChevronUp, UserPlus, RotateCw,
+  X, Search, Loader2, Check, CheckSquare, Square, AlertTriangle, ChevronDown, ChevronUp, UserPlus, RotateCw, MessageSquareText,
 } from 'lucide-react'
 import { UserProfileModal } from '@/components/hub/UserProfileModal'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
@@ -45,6 +45,10 @@ interface JoinRequest {
   eventId: string
   /** v2 only: the member pseudonym `P` (leaf identifier in the tree). */
   pPub?: string
+  /** v2: the join note (§6.3.1), already decrypted from the sealed payload. */
+  note?: string
+  /** v1: the join note ciphertext (NIP-44 from the requester to the creator) — decrypted on demand. */
+  noteCipher?: string
 }
 
 /** Max events per relay query (relays typically cap here). Pagination walks older with `until`. */
@@ -91,6 +95,20 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
   const [hasMore, setHasMore] = useState(false)
   const [search, setSearch] = useState('')
   const [profilePubkey, setProfilePubkey] = useState<string | null>(null)
+  // Join note viewer (§6.3.1): v2 notes are already decrypted with the request; v1 decrypt on demand.
+  const [noteView, setNoteView] = useState<{ pubkey: string; loading: boolean; text: string | null } | null>(null)
+  const openNote = async (req: JoinRequest) => {
+    if (req.note) { setNoteView({ pubkey: req.pubkey, loading: false, text: req.note }); return }
+    if (!req.noteCipher) return
+    setNoteView({ pubkey: req.pubkey, loading: true, text: null })
+    try {
+      const { nip44DecryptFrom } = await import('@/lib/hub/hubListPrivacy')
+      const text = await nip44DecryptFrom(req.noteCipher, req.pubkey, signer, privateKey)
+      setNoteView({ pubkey: req.pubkey, loading: false, text })
+    } catch {
+      setNoteView({ pubkey: req.pubkey, loading: false, text: null })
+    }
+  }
   // Default view = only requests newer than the creator's synced "seen" watermark; toggle shows all.
   const [showAll, setShowAll] = useState(() => {
     try { return localStorage.getItem(SHOW_ALL_KEY) === '1' } catch { return false }
@@ -210,6 +228,7 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
             powBits: countLeadingZeroBits(e.id),
             eventId: e.id,
             pPub: payload.pPub,
+            note: payload.note || undefined,
           })
         }
       } else {
@@ -222,6 +241,7 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
             createdAt: e.created_at,
             powBits: countLeadingZeroBits(e.id),
             eventId: e.id,
+            noteCipher: e.content || undefined,
           })
         }
       }
@@ -948,6 +968,14 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
                         {truncateNpub(npubStr, 5)}
                       </p>
                     </div>
+                    {(req.note || req.noteCipher) && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); openNote(req) }}
+                        className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-md border border-border/60 bg-secondary/40 text-[11px] text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors cursor-pointer"
+                      >
+                        <MessageSquareText size={12} /> Note
+                      </button>
+                    )}
                     <div className="flex flex-col items-end gap-0.5 shrink-0">
                       <span className="text-[10px] text-muted-foreground">{timeAgo}</span>
                       {hub.joinMinPow > 0 && req.powBits < hub.joinMinPow ? (
@@ -1129,6 +1157,41 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
                 </button>
               </div>
             )}
+          </div>
+        </div>,
+        document.body,
+      )}
+      {/* Join note viewer (§6.3.1) */}
+      {noteView && createPortal(
+        <div className="fixed inset-0 z-[300] flex items-center justify-center" onClick={() => setNoteView(null)}>
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+          <div
+            className="relative z-10 w-full max-w-[420px] mx-4 bg-card rounded-xl border border-border shadow-2xl animate-in fade-in-0 zoom-in-95 duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+              <div className="min-w-0">
+                <h3 className="text-sm font-semibold text-foreground">Join note</h3>
+                <p className="text-[11px] text-muted-foreground truncate">
+                  from {(() => { const p = getProfile(noteView.pubkey); return p?.display_name || p?.name || truncateNpub(nip19.npubEncode(noteView.pubkey), 10) })()}
+                </p>
+              </div>
+              <button onClick={() => setNoteView(null)} className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors cursor-pointer shrink-0">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="px-5 py-4">
+              {noteView.loading ? (
+                <div className="flex items-center gap-2 text-xs text-muted-foreground"><Loader2 size={14} className="animate-spin" /> Decrypting…</div>
+              ) : noteView.text ? (
+                <p className="text-sm text-foreground whitespace-pre-wrap break-words leading-relaxed">{noteView.text}</p>
+              ) : (
+                <p className="text-xs text-muted-foreground">Couldn't decrypt this note.</p>
+              )}
+            </div>
+            <div className="flex items-center justify-end px-5 py-3 border-t border-border">
+              <button onClick={() => setNoteView(null)} className="px-3 py-1.5 rounded-lg text-[11px] font-medium bg-secondary hover:bg-secondary/70 text-foreground transition-colors cursor-pointer">Close</button>
+            </div>
           </div>
         </div>,
         document.body,

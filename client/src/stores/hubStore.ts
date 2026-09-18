@@ -39,6 +39,8 @@ export interface HubData {
   roles: Role[]
   minPow: number
   joinMinPow: number
+  /** Join-note policy from the `join_note` tag (§6.3.1): prompt + optional/required. Absent = optional, no prompt. */
+  joinNote?: import('@/lib/hub/joinNote').JoinNotePolicy
   /** Disappearing-messages timer in SECONDS (a duration, not a timestamp).
    *  undefined or 0 = off. When set, durable chat events are stamped with a
    *  NIP-40 expiration of created_at + this value. */

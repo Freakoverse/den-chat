@@ -10,6 +10,7 @@
 
 import { useEffect, useRef } from 'react'
 import { useHubStore, type HubData, type Channel, type Category, type Role } from '@/stores/hubStore'
+import { parseJoinNoteTag } from '@/lib/hub/joinNote'
 import { useUserStore } from '@/stores/userStore'
 import { fetchEvents, fetchEventsProgressive } from '@/lib/nostr/relay-pool'
 import { getAllHubEvents } from '@/lib/cache/hubEventCache'
@@ -258,6 +259,7 @@ export function parseHubEvent(event: Event, contentOverride?: string): (HubData 
       roles,
       minPow,
       joinMinPow: wjTag ? parseInt(wjTag, 10) : 0,
+      joinNote: parseJoinNoteTag(event.tags),
       messageExpiration,
       version,
       signerScheme,

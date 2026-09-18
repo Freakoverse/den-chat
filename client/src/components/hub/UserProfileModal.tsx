@@ -1158,6 +1158,7 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
         roles: hub.roles,
         minPow: hub.minPow || undefined,
         joinMinPow: hub.joinMinPow > 0 ? hub.joinMinPow : undefined,
+        joinNote: hub.joinNote,
         messageExpiration: hub.messageExpiration || undefined, // preserve the disappearing-messages timer
         nsfw: hub.nsfw || undefined,
         discoverable: hub.discoverable,

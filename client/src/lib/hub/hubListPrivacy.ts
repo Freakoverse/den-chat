@@ -40,6 +40,22 @@ export async function nip44SelfDecrypt(ciphertext: string, myPubkey: string, sig
 }
 
 /**
+ * nip44-encrypt from the user's real key TO `peerPub` (hex). Used for the v1 join note (§6.3.1):
+ * the requester seals it to the hub creator; the conversation key is symmetric, so the requester
+ * can decrypt it back with nip44DecryptFrom(…, creatorPub) on any device.
+ */
+export async function nip44EncryptTo(plaintext: string, peerPub: string, signer: ISigner | null, privateKey: string | null): Promise<string> {
+  if (privateKey) return nip44.v2.encrypt(plaintext, nip44.v2.utils.getConversationKey(hexToBytes(privateKey), peerPub))
+  return guardedEncrypt(plaintext, peerPub, signer, null, 'nip44')
+}
+
+/** nip44-decrypt a ciphertext exchanged with `peerPub` (hex) — either direction, the key is symmetric. */
+export async function nip44DecryptFrom(ciphertext: string, peerPub: string, signer: ISigner | null, privateKey: string | null): Promise<string> {
+  if (privateKey) return nip44.v2.decrypt(ciphertext, nip44.v2.utils.getConversationKey(hexToBytes(privateKey), peerPub))
+  return guardedDecrypt(ciphertext, peerPub, signer, null, 'nip44')
+}
+
+/**
  * Build the user hub-list event with v2 memberships hidden. Store-aware wrapper over
  * `createHubListEvent`: determines which entries are v2 (from the hub store) and self-encrypts
  * them. Replaces direct `createHubListEvent(entries, folders)` calls.

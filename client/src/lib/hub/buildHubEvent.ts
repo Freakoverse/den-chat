@@ -4,6 +4,7 @@
  */
 
 import type { HubData, Channel, Category, Role } from '@/stores/hubStore'
+import { joinNoteTag, type JoinNotePolicy } from '@/lib/hub/joinNote'
 import type { GroupedRole } from '@/lib/hub/groupEncryption'
 import { createUnsignedEvent } from '@/lib/nostr'
 import { KINDS } from '@/lib/crypto/constants'
@@ -32,6 +33,8 @@ interface BuildHubEventOptions {
   roles: Role[]
   minPow?: number
   joinMinPow?: number
+  /** Join-note prompt/requirement (§6.3.1) → plaintext `join_note` tag. */
+  joinNote?: JoinNotePolicy
   /** Disappearing-messages timer in SECONDS (duration). Omitted/0 = off. */
   messageExpiration?: number
   nsfw?: boolean
@@ -88,7 +91,7 @@ export function buildHubEvent(opts: BuildHubEventOptions) {
 
   const {
     dTag, name, description, epoch, icon, banner, tags,
-    relays, blossomServers, indexFileHash, channels, categories, roles, minPow, joinMinPow, messageExpiration, nsfw, discoverable, groupedRoles,
+    relays, blossomServers, indexFileHash, channels, categories, roles, minPow, joinMinPow, joinNote, messageExpiration, nsfw, discoverable, groupedRoles,
     publishedAt, eventCreatedAt
   } = opts
 
@@ -127,6 +130,8 @@ export function buildHubEvent(opts: BuildHubEventOptions) {
   if (joinMinPow && joinMinPow > 0) {
     eventTags.push(['W', joinMinPow.toString()])
   }
+  // Join-note prompt / requirement (plaintext — prospective members hold no secret yet)
+  { const jn = joinNoteTag(joinNote); if (jn) eventTags.push(jn) }
   // Disappearing-messages timer (seconds). Distinct name from NIP-40's
   // "expiration" ON PURPOSE — an "expiration" tag here would make relays delete
   // the hub event itself. This is only the hub-wide policy; per-message NIP-40
@@ -221,7 +226,7 @@ export async function buildHubEventV2(
   const {
     dTag, name, description, epoch, icon, banner, tags,
     relays, blossomServers, indexFileHash, channels, categories, roles,
-    minPow, joinMinPow, messageExpiration, nsfw, discoverable, groupedRoles,
+    minPow, joinMinPow, joinNote, messageExpiration, nsfw, discoverable, groupedRoles,
     publishedAt, eventCreatedAt, contentKey, ownerAttestation, signerScheme,
   } = opts
 
@@ -237,6 +242,7 @@ export async function buildHubEventV2(
   if (nsfw) { eventTags.push(['content-warning', '']); eventTags.push(['L', 'content-warning']) }
   if (minPow && minPow > 0) eventTags.push(['w', minPow.toString()])
   if (joinMinPow && joinMinPow > 0) eventTags.push(['W', joinMinPow.toString()])
+  { const jn = joinNoteTag(joinNote); if (jn) eventTags.push(jn) }
   if (messageExpiration && messageExpiration > 0) eventTags.push(['message_expiration', Math.floor(messageExpiration).toString()])
   eventTags.push(['f', discoverable === false ? 'off' : 'on'])
 

@@ -8,6 +8,7 @@
 import { useState, useEffect } from 'react'
 import { HUB_BANNER_PLACEHOLDER } from '@/lib/constants'
 import { useHubStore, type HubData } from '@/stores/hubStore'
+import { parseJoinNoteTag, normalizeJoinNote } from '@/lib/hub/joinNote'
 import { useUserStore } from '@/stores/userStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { useBlossomMedia } from '@/hooks/useBlossomMedia'
@@ -25,7 +26,7 @@ import {
   Info, UserPlus, Zap, AlertTriangle, Loader2, Check, Hash, X,
 } from 'lucide-react'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
-import { HubJoinWarningModal, isJoinWarningDismissed } from '@/components/hub/HubJoinWarningModal'
+import { HubJoinWarningModal } from '@/components/hub/HubJoinWarningModal'
 import { MAX_HUB_LIST_ENTRIES } from '@/lib/hub/hubLimits'
 
 interface HubEventCardProps {
@@ -155,6 +156,7 @@ export function HubEventCard({ identifier, pubkey, relays }: HubEventCardProps) 
           roles: [],
           minPow,
           joinMinPow: wjTagVal ? parseInt(wjTagVal, 10) : 0,
+          joinNote: parseJoinNoteTag(latest.tags),
           nsfw,
           version: (() => { const v = latest.tags.find(t => t[0] === 'version')?.[1]; return v ? (parseInt(v, 10) || undefined) : undefined })(),
         }
@@ -180,16 +182,11 @@ export function HubEventCard({ identifier, pubkey, relays }: HubEventCardProps) 
       return
     }
 
-    // Show warning modal if not dismissed (v1 and v2 carry different text + separate dismiss keys)
-    if (!isJoinWarningDismissed(hubData?.version === 2)) {
-      setShowJoinWarning(true)
-      return
-    }
-
-    doJoin()
+    // Always open the request modal: it carries the join note (§6.3.1) + the (dismissable) privacy warning
+    setShowJoinWarning(true)
   }
 
-  const doJoin = async () => {
+  const doJoin = async (note = '') => {
     if (!myPubkey || !hubData || joining) return
     setJoining(true)
     setJoinError(null)
@@ -210,9 +207,12 @@ export function HubEventCard({ identifier, pubkey, relays }: HubEventCardProps) 
           throw new Error('This hub is private (v2) — use the DEN client or a NIP-SKD signer to join.')
         }
         const coord = `${KINDS.HUB_EVENT}:${hubData.creatorPubkey}:${hubData.dTag}`
-        signed = await buildV2JoinRequest({ hubDTag: hubData.dTag, ownerPub: hubData.creatorPubkey, coord, joinPow: hubData.joinMinPow || 0, rPub: myPubkey, privateKey, signer })
+        signed = await buildV2JoinRequest({ hubDTag: hubData.dTag, ownerPub: hubData.creatorPubkey, coord, joinPow: hubData.joinMinPow || 0, rPub: myPubkey, privateKey, signer, note: normalizeJoinNote(note) || undefined })
       } else {
-        const unsigned = createUnsignedEvent(KINDS.JOIN_REQUEST, '', [['d', hubData.dTag]])
+        // v1 join note (§6.3.1): NIP-44 to the creator — never plaintext on relays
+        const noteText = normalizeJoinNote(note)
+        const content = noteText ? await (await import('@/lib/hub/hubListPrivacy')).nip44EncryptTo(noteText, hubData.creatorPubkey, signer, privateKey) : ''
+        const unsigned = createUnsignedEvent(KINDS.JOIN_REQUEST, content, [['d', hubData.dTag]])
         signed = await mineAndSign(unsigned, hubData.joinMinPow, myPubkey, signer, privateKey)
       }
       // v2: hub relays ONLY (mirrors DiscoverPage) — the sealed join request carries the hub coordinate;
@@ -470,8 +470,9 @@ export function HubEventCard({ identifier, pubkey, relays }: HubEventCardProps) 
       <HubJoinWarningModal
         open={showJoinWarning}
         onClose={() => setShowJoinWarning(false)}
-        onConfirm={doJoin}
+        onConfirm={(note) => doJoin(note)}
         isV2={hubData?.version === 2}
+        joinNote={hubData?.joinNote}
       />
 
       {/* Hub limit reached modal */}

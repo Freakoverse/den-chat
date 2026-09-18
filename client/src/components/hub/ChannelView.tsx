@@ -566,6 +566,7 @@ export function ChannelDescriptionModal({ channelId, channelName, description, i
         // its NSFW flag) whenever a channel description was edited.
         minPow: hub.minPow > 0 ? hub.minPow : undefined,
         joinMinPow: hub.joinMinPow > 0 ? hub.joinMinPow : undefined,
+        joinNote: hub.joinNote,
         messageExpiration: hub.messageExpiration || undefined, // preserve the disappearing-messages timer
         nsfw: hub.nsfw || undefined,
         discoverable: hub.discoverable,

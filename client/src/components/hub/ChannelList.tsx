@@ -408,6 +408,7 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
         blossomServers: hub.blossomServers, indexFileHash: hub.indexFileHash,
         channels: layoutDraft.channels, categories: layoutDraft.categories, roles: hub.roles,
         minPow: hub.minPow > 0 ? hub.minPow : undefined, joinMinPow: hub.joinMinPow > 0 ? hub.joinMinPow : undefined, nsfw: hub.nsfw || undefined, messageExpiration: hub.messageExpiration || undefined,
+        joinNote: hub.joinNote,
         discoverable: hub.discoverable, groupedRoles: hub.groupedRoles && hub.groupedRoles.length ? hub.groupedRoles : undefined,
         publishedAt: hub.publishedAt, eventCreatedAt: hub.eventCreatedAt,
       }, { pubkey: pubkey!, privateKey, signer, minPow: hub.minPow })

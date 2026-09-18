@@ -199,6 +199,7 @@ export async function republishHubWithBlossomServers(
     roles: hub.roles,
     minPow: hub.minPow > 0 ? hub.minPow : undefined,
     joinMinPow: hub.joinMinPow > 0 ? hub.joinMinPow : undefined,
+        joinNote: hub.joinNote,
     messageExpiration: hub.messageExpiration && hub.messageExpiration > 0 ? hub.messageExpiration : undefined,
     nsfw: hub.nsfw || undefined,
     discoverable: hub.discoverable !== false,

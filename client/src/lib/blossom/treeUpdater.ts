@@ -241,6 +241,7 @@ export async function safeTreeUpdate(params: SafeTreeUpdateParams): Promise<Safe
       roles: hub.roles,
       minPow: hub.minPow > 0 ? hub.minPow : undefined,
       joinMinPow: hub.joinMinPow > 0 ? hub.joinMinPow : undefined,
+        joinNote: hub.joinNote,
       messageExpiration: hub.messageExpiration || undefined, // preserve the disappearing-messages timer
       nsfw: hub.nsfw || undefined,
       discoverable: hub.discoverable,
@@ -615,6 +616,7 @@ export async function safePaginatedTreeUpdate(params: SafePaginatedTreeUpdatePar
       roles: hub.roles,
       minPow: hub.minPow > 0 ? hub.minPow : undefined,
       joinMinPow: hub.joinMinPow > 0 ? hub.joinMinPow : undefined,
+        joinNote: hub.joinNote,
       messageExpiration: hub.messageExpiration || undefined, // preserve the disappearing-messages timer
       nsfw: hub.nsfw || undefined,
       discoverable: hub.discoverable,
