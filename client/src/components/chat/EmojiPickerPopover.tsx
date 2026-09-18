@@ -10,7 +10,8 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import EmojiPickerReact, { EmojiStyle, Theme } from 'emoji-picker-react'
-import { Smile, Sparkles, Users, Plus, Trash2, Loader2, Upload, Search, X, FolderPlus, Image, AlertTriangle, Check, Compass, ShieldQuestion } from 'lucide-react'
+import { Smile, Sparkles, Users, Plus, Trash2, Loader2, Upload, Search, X, FolderPlus, Image, AlertTriangle, Check, Compass, ShieldQuestion, Pencil } from 'lucide-react'
+import { RenamePackModal } from '@/components/chat/RenamePackModal'
 import { useEmojiStore, getEmojiUploadLimitBytes, hasOversizedEmoji, type CustomEmoji, type EmojiSet } from '@/stores/emojiStore'
 import { publishEmojiSet, publishEmojiSubscriptions, discoverEmojiSets, fetchEmojiSetByAddress, deleteEmojiSet, fetchEmojiSetsByAuthor } from '@/lib/nostr/customEmoji'
 import { uploadToBlossomServers, computeHash } from '@/lib/blossom'
@@ -347,6 +348,15 @@ function MineTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcode:
   }
 
   // Delete set state
+  // Rename: republish the same set (same d-tag, same emojis) with a new `title` — subscriptions survive.
+  const [renameSetDTag, setRenameSetDTag] = useState<string | null>(null)
+  const renameSet = myEmojiSets.find((s) => s.dTag === renameSetDTag)
+  const handleRenameSet = async (name: string) => {
+    if (!renameSet) return
+    await publishEmojiSet(renameSet.dTag, name, renameSet.emojis, signer, privateKey)
+    const st = useEmojiStore.getState()
+    st.setMyEmojiSets(st.myEmojiSets.map((s) => (s.dTag === renameSet.dTag ? { ...s, name } : s)))
+  }
   const [deleteSetDTag, setDeleteSetDTag] = useState<string | null>(null)
   const [deletingSet, setDeletingSet] = useState(false)
   const deleteSet = myEmojiSets.find((s) => s.dTag === deleteSetDTag)
@@ -481,7 +491,19 @@ function MineTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcode:
                     <p className="text-xs font-semibold text-[hsl(var(--muted-foreground))] uppercase tracking-wider">
                       {set.name}
                     </p>
+                    <div className="flex items-center gap-1">
                     <TooltipProvider delayDuration={200}>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button
+                            onClick={() => setRenameSetDTag(set.dTag)}
+                            className="p-0.5 rounded hover:bg-accent/50 text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                          >
+                            <Pencil size={10} />
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="text-xs z-[310]">Rename</TooltipContent>
+                      </Tooltip>
                       <Tooltip>
                         <TooltipTrigger asChild>
                           <button
@@ -494,6 +516,7 @@ function MineTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcode:
                         <TooltipContent side="top" className="text-xs z-[310]">Request Delete</TooltipContent>
                       </Tooltip>
                     </TooltipProvider>
+                    </div>
                   </div>
                   {set.emojis.length === 0 ? (
                     <p className="text-xs text-[hsl(var(--muted-foreground)/0.6)] italic px-0.5">Empty set — add emojis above</p>
@@ -517,6 +540,13 @@ function MineTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcode:
       </div>
 
       {/* Delete set confirmation modal */}
+      <RenamePackModal
+        open={!!renameSet}
+        currentName={renameSet?.name ?? ''}
+        kindLabel="emoji set"
+        onClose={() => setRenameSetDTag(null)}
+        onSave={handleRenameSet}
+      />
       {deleteSetDTag && createPortal(
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[320]" onClick={() => !deletingSet && setDeleteSetDTag(null)}>
           <div className="bg-card border border-border rounded-lg p-6 max-w-md w-full mx-4 shadow-xl" onClick={(e) => e.stopPropagation()}>

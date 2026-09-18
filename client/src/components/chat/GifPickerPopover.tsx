@@ -10,8 +10,9 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { createPortal } from 'react-dom'
+import { RenamePackModal } from '@/components/chat/RenamePackModal'
 import {
-  Compass, Sparkles, Star, StarOff, Plus, Trash2, Loader2, Upload,
+  Compass, Sparkles, Star, StarOff, Plus, Trash2, Loader2, Upload, Pencil,
   Search, X, FolderPlus, Image, Check, Users, ImagePlay, Eye, EyeOff, ShieldQuestion,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -457,7 +458,7 @@ function DiscoverGifTab({ onSelect, onPickerClose }: { onSelect: (g: { name: str
                                 <BlossomImage
                                   src={item.gif.url}
                                   alt={item.gif.name}
-                                  className="w-full h-full"
+                                  className="w-full h-full"
                                 />
                               </button>
                               <button
@@ -615,7 +616,7 @@ function DiscoverGifTab({ onSelect, onPickerClose }: { onSelect: (g: { name: str
                       <BlossomImage
                         src={gif.url}
                         alt={gif.name}
-                        className="w-full h-full"
+                        className="w-full h-full"
                       />
                     </button>
                     {gif.nsfw && (
@@ -1152,7 +1153,7 @@ function FavoritesGifTab({ onSelect }: { onSelect: (g: { name: string; url: stri
                           <BlossomImage
                             src={gif.url}
                             alt={gif.name}
-                            className="w-full h-full"
+                            className="w-full h-full"
                           />
                         </button>
                         {/* Unfavorite button */}
@@ -1278,6 +1279,14 @@ function GifCollectionCard({
     useGifStore.getState().updateMyGifCollection(collection.dTag, updated)
   }
 
+  // Rename: republish the same collection (same d-tag, same GIFs) with a new `title` — subscriptions survive.
+  const [showRename, setShowRename] = useState(false)
+  const handleRename = async (name: string) => {
+    await publishGifCollection(collection.dTag, name, collection.gifs, signer, privateKey)
+    const st = useGifStore.getState()
+    st.setMyGifCollections(st.myGifCollections.map((c) => (c.dTag === collection.dTag ? { ...c, name } : c)))
+  }
+
   const handleDeleteCollection = async () => {
     setDeleting(true)
     setShowDeleteModal(false)
@@ -1330,6 +1339,17 @@ function GifCollectionCard({
                   <TooltipContent side="top" className="text-xs z-[310]">Add GIFs</TooltipContent>
                 </Tooltip>
               )}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setShowRename(true) }}
+                    className="p-1 rounded hover:bg-accent/50 text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                  >
+                    <Pencil size={12} />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="text-xs z-[310]">Rename</TooltipContent>
+              </Tooltip>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button
@@ -1434,7 +1454,7 @@ function GifCollectionCard({
                         <BlossomImage
                           src={gif.url}
                           alt={gif.name}
-                          className="w-full h-full"
+                          className="w-full h-full"
                         />
                       </button>
                       {isMine && (
@@ -1459,6 +1479,7 @@ function GifCollectionCard({
       )}
 
       {/* Delete confirmation modal */}
+      <RenamePackModal open={showRename} currentName={collection.name} kindLabel="GIF collection" onClose={() => setShowRename(false)} onSave={handleRename} />
       {showDeleteModal && createPortal(
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[320]" onClick={() => setShowDeleteModal(false)}>
           <div className="bg-card border border-border rounded-lg p-6 max-w-md w-full mx-4 shadow-xl" onClick={(e) => e.stopPropagation()}>
@@ -1720,7 +1741,7 @@ export function GifDiscoveryModal({ onClose, initialSearch = '' }: { onClose: ()
                             key={`${g.url}-${i}`}
                             src={g.url}
                             alt={g.name}
-                            className="w-12 h-12 rounded border border-border/30"
+                            className="w-12 h-12 rounded border border-border/30"
                           />
                         ))}
                         {visibleGifs.length > 6 && (

@@ -8,7 +8,8 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { createPortal } from 'react-dom'
-import { Sparkles, Users, Plus, Trash2, Loader2, Upload, Search, X, FolderPlus, Image, AlertTriangle, Check, Compass, ShieldQuestion } from 'lucide-react'
+import { Sparkles, Users, Plus, Trash2, Loader2, Upload, Search, X, FolderPlus, Image, AlertTriangle, Check, Compass, ShieldQuestion, Pencil } from 'lucide-react'
+import { RenamePackModal } from '@/components/chat/RenamePackModal'
 import { Button } from '@/components/ui/button'
 import { BlossomImage } from '@/components/ui/BlossomImage'
 import { useStickerStore, getStickerUploadLimitBytes, hasOversizedSticker, isStickerSizeOk, type CustomSticker, type StickerSet } from '@/stores/stickerStore'
@@ -615,6 +616,14 @@ function StickerSetCard({
   // Esc closes the "Request Delete Sticker Set" confirmation like its Cancel/backdrop.
   useEscToClose(() => setShowDeleteModal(false), showDeleteModal)
 
+  // Rename: republish the same set (same d-tag, same stickers) with a new `title` — subscriptions survive.
+  const [showRename, setShowRename] = useState(false)
+  const handleRename = async (name: string) => {
+    await publishStickerSet(set.dTag, name, set.stickers, signer, privateKey)
+    const st = useStickerStore.getState()
+    st.setMyStickerSets(st.myStickerSets.map((s) => (s.dTag === set.dTag ? { ...s, name } : s)))
+  }
+
   const handleDeleteSet = async () => {
     setDeleting(true)
     setShowDeleteModal(false)
@@ -657,6 +666,17 @@ function StickerSetCard({
                   <TooltipContent side="top" className="text-xs z-[310]">Add Stickers</TooltipContent>
                 </Tooltip>
               )}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setShowRename(true) }}
+                    className="p-1 rounded hover:bg-accent/50 text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                  >
+                    <Pencil size={12} />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="text-xs z-[310]">Rename</TooltipContent>
+              </Tooltip>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button
@@ -768,6 +788,7 @@ function StickerSetCard({
         </TooltipProvider>
       </div>
       {/* Delete confirmation modal */}
+      <RenamePackModal open={showRename} currentName={set.name} kindLabel="sticker set" onClose={() => setShowRename(false)} onSave={handleRename} />
       {showDeleteModal && createPortal(
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[320]" onClick={() => setShowDeleteModal(false)}>
           <div className="bg-card border border-border rounded-lg p-6 max-w-md w-full mx-4 shadow-xl" onClick={(e) => e.stopPropagation()}>
