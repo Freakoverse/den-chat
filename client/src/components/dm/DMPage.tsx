@@ -884,7 +884,8 @@ function DMChatView({ recipientPubkey, onSwitchProtocol, onBack }: { recipientPu
             <p className="text-sm font-semibold text-foreground truncate">
               {profile?.display_name || profile?.name || truncateNpub(npubStr, 10)}
             </p>
-            <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground min-w-0">
+            {/* flex-wrap: on narrow screens the 10050 pill drops to its own line instead of pushing into the switch button */}
+            <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[10px] text-muted-foreground min-w-0">
               <ShieldCheck size={9} className="shrink-0" />
               <span className="shrink-0">Extra Private (NIP-17)</span>
               <PeerDMRelayListPill
@@ -901,7 +902,7 @@ function DMChatView({ recipientPubkey, onSwitchProtocol, onBack }: { recipientPu
                 onClick={onSwitchProtocol}
                 className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 border border-border/50 transition-colors cursor-pointer shrink-0"
               >
-                <Shield size={12} /> Switch to Private
+                <Shield size={12} /> <span className="max-[1080px]:hidden">Switch to Private</span>
               </button>
             </TooltipTrigger>
             <TooltipContent side="bottom" className="text-xs max-w-[200px]">

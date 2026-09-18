@@ -54,9 +54,6 @@ interface JoinRequest {
 /** Max events per relay query (relays typically cap here). Pagination walks older with `until`. */
 const PAGE_LIMIT = 500
 
-/** localStorage key for the creator's "Show all" vs "Unseen" preference (persists across sessions). */
-const SHOW_ALL_KEY = 'den_join_requests_show_all'
-
 /** localStorage key for the creator's "include requests below the hub's join PoW" preference. */
 const SHOW_BELOW_POW_KEY = 'den_join_requests_show_below_pow'
 
@@ -110,12 +107,10 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
     }
   }
   // Default view = only requests newer than the creator's synced "seen" watermark; toggle shows all.
-  const [showAll, setShowAll] = useState(() => {
-    try { return localStorage.getItem(SHOW_ALL_KEY) === '1' } catch { return false }
-  })
-  useEffect(() => {
-    try { localStorage.setItem(SHOW_ALL_KEY, showAll ? '1' : '0') } catch { /* ignore */ }
-  }, [showAll])
+  // Always opens on "Unseen" — the view that answers "what's new since I last looked". "Show all" is a
+  // per-opening choice, not a persisted preference (it used to be, which made the modal open on All forever
+  // after one toggle).
+  const [showAll, setShowAll] = useState(false)
   // When OFF (default), requests mined below the hub's join PoW (`W`) are hidden — they can't be
   // approved without meeting the requirement anyway. Toggle ON to review under-requirement requests.
   // Only meaningful when the hub actually has a join PoW (`hub.joinMinPow > 0`).
