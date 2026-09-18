@@ -10,7 +10,7 @@
  */
 
 import { useEffect, useState } from 'react'
-import { ShieldAlert, ShieldCheck, Eye, Check, KeyRound, MessageSquareText, ChevronDown } from 'lucide-react'
+import { ShieldCheck, Eye, Check, KeyRound, MessageSquareText, ChevronDown } from 'lucide-react'
 import { useEscToClose } from '@/hooks/useEscToClose'
 import { JOIN_NOTE_MAX, type JoinNotePolicy } from '@/lib/hub/joinNote'
 
@@ -54,15 +54,7 @@ export function HubJoinWarningModal({ open, onClose, onConfirm, isV2 = false, jo
         className="bg-card rounded-2xl w-full max-w-[560px] overflow-hidden shadow-2xl border border-border/50 animate-in fade-in-0 zoom-in-95 duration-200 max-h-[92vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header icon */}
-        <div className="flex flex-col items-center pt-6 pb-2 px-6 shrink-0">
-          <div className={`w-12 h-12 rounded-full flex items-center justify-center mb-3 ${isV2 ? 'bg-emerald-500/15' : 'bg-amber-500/15'}`}>
-            {isV2 ? <ShieldCheck size={22} className="text-emerald-400" /> : <ShieldAlert size={22} className="text-amber-400" />}
-          </div>
-          <h3 className="text-sm font-semibold text-foreground text-center">Request to join</h3>
-        </div>
-
-        <div className="px-6 pb-4 space-y-3 overflow-y-auto min-h-0">
+        <div className="px-6 pt-6 pb-4 space-y-3 overflow-y-auto min-h-0">
           {/* ── Join note ── */}
           <div className="rounded-xl bg-secondary/40 border border-border/50 p-3.5 space-y-2">
             <div className="flex items-center gap-2.5">
