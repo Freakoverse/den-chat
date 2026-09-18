@@ -111,7 +111,7 @@ event from `(R_pub, event.created_at, digest)` and check `sig_R`.
 
 - hub messages / reactions / activity → encrypted with the **channel/hub key** for the
   event's epoch (members decrypt, public cannot).
-- join requests → encrypted to the owner `O` via ephemeral-static ECDH (§6.3).
+- join requests → encrypted to the owner `O` by the joiner's deterministic join-address sub-key (§6.3).
 
 The owner **cannot** derive `P_priv` (blinded form, above), so it cannot forge a member's
 messages — that unforgeability is now **structural**. The per-message `R` signature stays for a
@@ -548,7 +548,7 @@ id:
 
 - In hub messages/reactions/activity: `enc = AES-GCM(channel_or_hub_key_for_epoch, "R_pub:sig_R")`,
   carried as `["identity", enc]`. The epoch is already on the event.
-- In join requests: encrypted to the owner `O` via ephemeral-static ECDH (§6.3).
+- In join requests: encrypted to the owner `O` by the joiner's join-address sub-key `addr` (§6.3).
 - In the member tree: each leaf **page** carries a group-encrypted, epoch-stamped roster
   segment (`{ P: R }`) under `HKDF(hub_secret_epoch, "roster:epoch:<epoch>")` (the page itself stays plaintext,
   §5.2.1), for the roster and for banning by real key.
@@ -1635,28 +1635,37 @@ Published by a user to signal they want to join a hub. Shows up in a request que
 
 > [!IMPORTANT]
 > **v2 private join (see §0.1).** In a v2 hub the join request MUST NOT reveal the
-> requester to the public. The hub owner is the **owner pseudonym `O`** (§4.5). Use
-> **ephemeral-static ECDH** (sealed-sender):
-> 1. The joiner generates an ephemeral keypair `e` and computes
->    `shared = ECDH(e_priv, O_pub)`.
-> 2. The request is **signed by a derived throwaway key** `addr` — a **blinded** derivation of the
->    joiner's `R` toward `O` (NIP-SKD blinded form, context `"nip-chat:v2:join-addr:"+d_tag`, peer
->    `O_pub`; `addr_pub = xonly(lift_even_y(R_pub) + HKDF(ECDH(joiner_priv, O_pub), …)·G)`) — and
->    uses `addr_pub` as its `d`-scoped identifier, so a repeat request from the same joiner replaces
->    the previous one. The owner can later re-derive `addr_pub` from `R` (via `getPeerBlindedPubkey`)
->    to confirm the authoring key belongs to the sealed `R`.
-> 3. The request carries `["ephemeral", "<e_pub>"]` and a plaintext `["version", "2"]` marker
->    (so owners route it as a v2 join and never feed a v1 join into the decrypt path), and its
->    `content` is `NIP-44 v2` encrypted — `nip44.encrypt(getConversationKey(e_priv, O_pub), {r, p, note?})`
->    (payload keys `r` = `R_pub`, `p` = `P_pub`) — not raw `AES-GCM(shared, …)`; the NIP-44 conversation
->    key is itself an HKDF over the ephemeral↔`O` ECDH.
-> 4. The owner decrypts with `ECDH(O_priv, e_pub)` to learn the real requester, then
+> requester to the public. The hub owner is the **owner pseudonym `O`** (§4.5). The request is
+> sealed to `O` by a **deterministic** sub-key of the joiner — **no ephemeral key is involved**; the
+> whole point of NIP-SKD in v2 is that every identity is re-derivable and nothing per-request has to
+> be generated, stored, or can be lost:
+> 1. The joiner derives the **join address `addr`** — a **blinded** derivation of their `R` toward
+>    `O` (NIP-SKD blinded form, context `"nip-chat:v2:join-addr:"+d_tag`, peer `O_pub`;
+>    `addr_pub = xonly(lift_even_y(R_pub) + HKDF(ECDH(joiner_priv, O_pub), …)·G)`).
+> 2. The request is **signed by `addr`** and uses `addr_pub` as its `d`-scoped identifier, so a
+>    repeat request from the same joiner replaces the previous one. The owner can later re-derive
+>    `addr_pub` from `R` (via `getPeerBlindedPubkey`) to confirm the authoring key belongs to the
+>    sealed `R`.
+> 3. The request carries a plaintext `["version", "2"]` marker (so owners route it as a v2 join and
+>    never feed a v1 join into the decrypt path), and its `content` is `NIP-44 v2` encrypted **by
+>    `addr` to `O`** — `nip44EncryptAsBlinded(join-addr context, O_pub, {r, p, note?}, peer = O_pub)`,
+>    i.e. `nip44.encrypt(getConversationKey(addr_priv, O_pub), …)` (payload keys `r` = `R_pub`,
+>    `p` = `P_pub`, `note` = the optional join note, §6.3.1). Because `addr` is deterministic, the
+>    **joiner can reopen their own request on any device** (`nip44DecryptAsBlinded` with sender
+>    `O_pub`) — e.g. to re-read the note they attached.
+> 4. The owner decrypts as its `O` self sub-key with the request's **author `addr_pub` as sender**
+>    (`nip44DecryptAsSelfSubkey(owner context, addr_pub, content)`) to learn the real requester, then
 >    **re-derives `P_pub` from `R`** via the blinded verifier op —
 >    `getPeerBlindedPubkey("nip-chat:v2:member-pseudonym:"+d_tag, peer = R_pub)` — and admits `P`
 >    only if it matches the claimed `P_pub`. This makes the pseudonym **owner-verified and
 >    squat-proof**: a `P` that does not derive from the presented `R` is rejected. The owner obtains
 >    `P_pub` only, never `P_priv`.
-> The public sees only an unlinkable throwaway key posting an opaque blob to the hub.
+> The public sees only an unlinkable derived key posting an opaque blob to the hub.
+>
+> **Legacy sealed requests.** Earlier v2 builds sealed the content under a per-request throwaway
+> keypair carried in an `["ephemeral", "<e_pub>"]` tag. Owners MUST still open such a request by
+> using `e_pub` as the sender when that tag is present; new requests MUST NOT carry it. The joiner
+> cannot reopen a legacy request (its key was never kept) — one more reason the scheme was dropped.
 >
 > **Legacy joins to a v2 hub.** An outdated client with no v2 guard may send a plaintext v1
 > join (kind `36944`, real-key author) to a v2 hub — it references the same coordinate
@@ -1751,7 +1760,7 @@ now` (replacing the previous one under the same `d`-scoped identifier) to re-sur
 inactive creator's "seen" watermark (below). It is gated to **at most once every 3 days**
 (`RESEND_MIN_AGE_S`), measured from the current request's `created_at`. In **v1** the request is
 re-signed under `R` and re-mined to the hub's join PoW. In **v2** it is rebuilt as a fresh
-sealed request (new ephemeral `e` keypair + join-address sub-key, §6.3). Published
+sealed request under the same deterministic join-address sub-key (§6.3). Published
 **hub-relays-only in v2** (correlation avoidance, §10.4-1), hub + personal relays in v1.
 Implemented in `client/src/lib/hub/resendJoinRequest.ts`; surfaced as a "Resend" button beside
 "Withdraw" on the awaiting-approval overlay.
@@ -1776,6 +1785,27 @@ The join-request view shows only requests **newer than this watermark** by defau
 all" toggle), and advances the watermark **best-effort** when the view is opened.
 
 ---
+
+#### 6.3.1 Join Note
+
+A join request MAY carry a short free-text **note** from the requester — why they want in, an
+introduction, or a passphrase a community asks for. It is **never plaintext on relays**:
+
+| | Where | Encryption | Who can read |
+|---|---|---|---|
+| **v1** | the request's `content` (empty before this) | NIP-44 from the requester's real key `R` **to the hub creator** | the creator; and the requester (the conversation key is symmetric) |
+| **v2** | the `note` field of the sealed payload `{r, p, note?}` (§6.3 step 3) | already sealed to `O` by `addr` | the owner; and the requester via `addr` (deterministic) |
+
+- **Length:** at most **280** characters (the classic short-post limit). Clients MUST enforce it on
+  send and SHOULD ignore anything beyond it on read.
+- **Prompt (optional):** a hub MAY tell prospective members what to write via a plaintext hub-event
+  tag `["join_note", "optional" | "required", "<prompt text>"]` (plaintext because a prospective
+  member holds no secret yet — the same reasoning as `W`). When `required`, a conforming client
+  refuses to send an empty note. Absent ⇒ optional with no prompt.
+- **Reading it back:** the requester's client shows the note it sent (decrypting it from the event in
+  both versions, so it survives a device change); the owner's join-request view offers a per-request
+  "view note" action. Facilitators (§5.6) never see notes — both encryptions target the creator only.
+- The note is **not** part of the resend rule (§6.3): a resend carries the note forward unchanged.
 
 ### 6.4 User Hub List — Kind `16942`
 
@@ -2993,7 +3023,7 @@ traffic, the PoW `w`/`W` floors, and the public face tags; see §8.1 of the plan
 | Key isolation from DMs | NIP-04 at leaf level uses the same key-agreement as DMs, but the encrypted payload (leaf symmetric key) is hub-specific and meaningless outside the tree context. |
 | **(v2)** Public learns the member list | Members are stored as per-hub pseudonyms `P`, and leaf pages are encrypted. Public sees at most ~one pseudonym per page (plaintext index boundary), never real identities. |
 | **(v2)** Public learns who is banned | Ban list stores real keys `R` and is encrypted with a hub-secret-derived key. Only members can read it. |
-| **(v2)** Public learns who joined | Join requests are sealed to the owner via ephemeral-static ECDH and signed by a throwaway derived key (§6.3). |
+| **(v2)** Public learns who joined | Join requests are sealed to the owner by, and signed with, the joiner's deterministic blinded join-address sub-key — unlinkable to `R` without `O` (§6.3). |
 | **(v2)** Public links a sender to a hub / across hubs | Messages are signed by `P` (per-hub, derived), unlinkable to `R` or across hubs. Residual: the plaintext `h` tag reveals *a pseudonym* posted to a hub (see plan §8.1). |
 | **(v2)** Member is impersonated by a forged `R` in a leaf/event | `P` is owner-verified at admission (a **blinded** derivation of `R`, re-derived by the owner via `getPeerBlindedPubkey`, §6.3), and each message carries a fresh `sig_R` over the event (§9.9). Only the real `R` holder can produce a valid `P` signature (the owner derives `P_pub` but never `P_priv`), and a `P` that does not derive from the presented `R` is rejected (squat-proof). |
 | **(v2)** User is coerced/accused over `P`'s messages | **v2 is accountable, not deniable** — a conscious trade (§0.1, §4.5): `R` signs **every** message, so authorship is provable to members, and to outsiders if a member leaks the ciphertext+signature. There is no "leaked pseudonym key" defence. Users should understand a v2 hub attributes their words to their real key within the member set — treat it as a private group chat, not an anonymity tool. |

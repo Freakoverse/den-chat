@@ -48,7 +48,7 @@ export async function getOwnJoinRequestCreatedAt(hub: HubData, pubkey: string): 
 /**
  * Re-publish the user's join request with a fresh `created_at` (now), replacing the previous one
  * (same d-tag), so an inactive creator sees it again above their "seen" watermark. v1 signs under R;
- * v2 rebuilds the sealed request under a fresh ephemeral + the addr sub-key. Does NOT itself enforce
+ * v2 rebuilds the sealed request under the deterministic addr sub-key (no ephemeral key — §6.3). Does NOT itself enforce
  * RESEND_MIN_AGE_S — the caller gates on it.
  */
 export async function resendJoinRequest(hub: HubData, pubkey: string): Promise<void> {
