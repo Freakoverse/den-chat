@@ -1105,6 +1105,19 @@ export function useHubSubscriptions() {
         // read watermark so it isn't re-counted as unread by a later refresh scan
         // (fixes "0 unread while in the hub, then N after leaving").
         useNotificationStore.getState().advanceChannelRead(msg.hubDTag, msg.channelId, msg.createdAt)
+
+        // The window isn't in front (another app focused, minimized, tab hidden): the user can't
+        // see the message land, so ring exactly as any other channel would. Discord, Element and
+        // WhatsApp desktop all sound for the OPEN conversation when the app isn't focused and go
+        // quiet only while it is. Same readability gate as above: no sound for a message we
+        // couldn't decrypt, and the per-hub mute settings still apply.
+        if (!document.hasFocus() || document.visibilityState !== 'visible') {
+          detectMentionType(msg.hubDTag, msg.channelId, msg.epoch, event.content, event.pubkey)
+            .then(({ decrypted, mentionType }) => {
+              if (decrypted) playMessageSoundIfAllowed(msg.hubDTag, mentionType, msg.createdAt)
+            })
+            .catch(() => { /* detectMentionType never throws; nothing to do */ })
+        }
       }
     }
 
