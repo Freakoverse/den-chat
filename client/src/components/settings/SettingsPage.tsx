@@ -10183,8 +10183,10 @@ function AdminBuildsSection({ pubkey, signer, privateKey }: { pubkey: string | n
       const createdAt = !build.isNew && build.createdAt ? build.createdAt + 1 : undefined
       const unsigned = createUnsignedEvent(30078, content, [['d', build.dTag]], createdAt)
       const signed = await signWithSigner(unsigned, signer, privateKey)
-      const publishRelays = getPublishRelays()
-      const accepted = await publishToSpecificRelays(publishRelays, signed)
+      // Failover across the client + NIP-65 pool until 5 relays accept. This was a fire-once publish to the
+      // 3-relay pick: one slow/rejecting relay in the pick showed "published to 1" even though the event
+      // still landed on several others — and a bad pick could genuinely strand a release announcement.
+      const accepted = await publishPersonal(signed, 5)
       const newCreatedAt = signed.created_at
       updateBuild(build.id, { isNew: false, publishedAt, createdAt: newCreatedAt })
       // Update snapshot so it's no longer dirty
@@ -10195,9 +10197,9 @@ function AdminBuildsSection({ pubkey, signer, privateKey }: { pubkey: string | n
       const aRef = `30078:${pubkey}:${build.dTag}`
       const latestUnsigned = createUnsignedEvent(30078, latestContent, [['d', 'den-chat-latest'], ['a', aRef]])
       const latestSigned = await signWithSigner(latestUnsigned, signer, privateKey)
-      await publishToSpecificRelays(publishRelays, latestSigned)
+      const acceptedLatest = await publishPersonal(latestSigned, 5)
 
-      setPublishStatusMap((prev) => ({ ...prev, [build.id]: `Published to ${accepted.length} relay${accepted.length !== 1 ? 's' : ''}` }))
+      setPublishStatusMap((prev) => ({ ...prev, [build.id]: `Published to ${accepted.length} relay${accepted.length !== 1 ? 's' : ''} · "latest" pointer to ${acceptedLatest.length}` }))
     } catch (err) {
       setPublishStatusMap((prev) => ({ ...prev, [build.id]: `Error: ${err instanceof Error ? err.message : 'Publishing failed'}` }))
     } finally {
