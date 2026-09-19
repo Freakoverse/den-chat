@@ -438,9 +438,10 @@ function ConversationList({
         </TooltipProvider>
       </div>
 
-      {/* Protocol tabs — Private (NIP-04) / Extra Private (NIP-17) */}
+      {/* Tabs — one container, two rows: row 1 the 1:1 protocols, row 2 Groups (§21). Exactly one is active. */}
       <div className="shrink-0">
-        <div className="flex items-center gap-1 p-0.5 rounded-lg bg-secondary/60 border border-border">
+        <div className="flex flex-col gap-0.5 p-0.5 rounded-lg bg-secondary/60 border border-border">
+        <div className="flex items-center gap-1">
           <button
             onClick={() => onProtocolChange('nip04')}
             className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 text-[11px] font-medium rounded-md transition-all cursor-pointer
@@ -478,19 +479,17 @@ function ConversationList({
             </Tooltip>
           </TooltipProvider>
         </div>
-      </div>
-
-      {/* Row 2 — Groups (NIP-CHAT §21): a full-width tab of its own; exactly one of the four is active */}
-      <div className="shrink-0">
+        {/* Row 2 — Groups, same pill styling as the protocol tabs */}
         <button
           onClick={() => onSectionChange('groups')}
-          className={`w-full flex items-center justify-center gap-1.5 py-1.5 text-[11px] font-medium rounded-lg border transition-all cursor-pointer
+          className={`w-full flex items-center justify-center gap-1.5 py-1.5 text-[11px] font-medium rounded-md transition-all cursor-pointer
             ${section === 'groups'
-              ? 'bg-background text-foreground shadow-sm border-border'
-              : 'bg-secondary/60 border-border text-muted-foreground hover:text-foreground'}`}
+              ? 'bg-background text-foreground shadow-sm'
+              : 'text-muted-foreground hover:text-foreground'}`}
         >
           <Users size={12} /> Groups
         </button>
+        </div>
       </div>
 
       {section === 'groups' ? (
