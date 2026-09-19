@@ -1,5 +1,5 @@
 /**
- * GroupMembersModal — the members of a group; the creator adds (by npub / hex) and removes.
+ * GroupMembersModal: the members of a group; the creator adds (by npub / hex) and removes.
  * Add = new leaf, no rotation. Remove = LKH kick + rotation + history append (lib/group/groupOps).
  */
 import { useState } from 'react'
@@ -101,7 +101,7 @@ export function GroupMembersModal({ dTag, isCreator, onClose }: { dTag: string; 
                 {busy === 'add' ? <Loader2 size={12} className="animate-spin" /> : <UserPlus size={12} />} Add
               </button>
             </div>
-            <p className="text-[10px] text-muted-foreground/70">Adding publishes a new tree with their leaf — no rotation. They see the group once they accept the invite address.</p>
+            <p className="text-[10px] text-muted-foreground/70">Adding publishes a new tree with their leaf, no rotation. They see the group once they accept the invite address.</p>
           </div>
         )}
 
@@ -148,7 +148,7 @@ export function GroupMembersModal({ dTag, isCreator, onClose }: { dTag: string; 
                             <UserMinus size={14} />
                           </button>
                         </TooltipTrigger>
-                        <TooltipContent side="left" className="text-xs">Remove — rotates the group secret; they can't read anything after this point</TooltipContent>
+                        <TooltipContent side="left" className="text-xs">Remove rotates the group secret. They can't read anything after this point</TooltipContent>
                       </Tooltip>
                     </TooltipProvider>
                   )

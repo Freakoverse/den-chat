@@ -1,5 +1,5 @@
 /**
- * DMPage — Encrypted Direct Messages
+ * DMPage: Encrypted Direct Messages
  *
  * Supports two protocols:
  * - "Private" (NIP-04): standard encrypted DMs with replies, threads, reactions
@@ -73,7 +73,7 @@ import { discoverRecipientRelays } from '@/lib/nostr/relayDiscovery'
 /*  HELPERS                                    */
 /* ═══════════════════════════════════════════ */
 
-/** GIF star overlay for DMs — with publish spinner + blossom failover (matches hub chat) */
+/** GIF star overlay for DMs, with publish spinner + blossom failover (matches hub chat) */
 export function DMGifStarOverlay({ name, url, nsfw }: { name: string; url: string; nsfw: string }) {
   const isFav = useGifStore((s) => s.favorites.some((f) => f.url === url))
   const [publishing, setPublishing] = useState(false)
@@ -237,7 +237,7 @@ export function DMPage() {
     () => !useDM04Store.getState().activeConversation && !useDMStore.getState().activeConversation
   )
 
-  // Use the follow store loaded at startup — no re-fetch needed on mount
+  // Use the follow store loaded at startup, no re-fetch needed on mount
   const followSet = useFollowStore((s) => s.followedPubkeys)
 
   // Active conversation based on protocol
@@ -247,7 +247,7 @@ export function DMPage() {
 
   // Mobile list ↔ chat auto-switching. Two cases must be told apart, because both change
   // `activeConversation` (it's derived from the protocol's own persisted active conversation):
-  //  - a PROTOCOL switch (nip04 ↔ nip17 tab) must return to the LIST — not silently re-open whatever
+  //  - a PROTOCOL switch (nip04 ↔ nip17 tab) must return to the LIST, not silently re-open whatever
   //    conversation that tab last had open (the reported bug: open a DM, back to list, switch tabs and
   //    back, and it jumped into the old chat because that store's activeConversation was still set);
   //  - a same-protocol change (e.g. onDM from a profile) should open the chat panel.
@@ -284,7 +284,7 @@ export function DMPage() {
 
   return (
     <div className="flex flex-1 h-full overflow-hidden">
-      {/* Left — Conversation list */}
+      {/* Left, Conversation list */}
       <ConversationList
         onNewMessage={() => setShowNewDM(true)}
         activePubkey={activeConversation}
@@ -302,7 +302,7 @@ export function DMPage() {
         onJoinGroup={() => setShowJoinGroup(true)}
       />
 
-      {/* Right — Chat */}
+      {/* Right, Chat */}
       <div className={`flex-1 flex flex-col min-w-0 h-full overflow-hidden bg-background pr-2 py-2 gap-2 max-[1080px]:px-2 ${mobileShowList ? 'max-[1080px]:hidden' : ''}`}>
         {section === 'groups' ? (
           activeGroupId
@@ -382,7 +382,7 @@ function ConversationList({
   const nip04Conversations = useDM04Store((s) => s.conversations)
   const nip04Pending = useDM04Store((s) => s.pendingConversations)
 
-  // Block list — needed so the memo re-runs when users are blocked/unblocked
+  // Block list, needed so the memo re-runs when users are blocked/unblocked
   const blockedPubkeys = useBlockStore((s) => s.blockedPubkeys)
   const myPubkey = useUserStore((s) => s.pubkey)
 
@@ -438,7 +438,7 @@ function ConversationList({
         </TooltipProvider>
       </div>
 
-      {/* Tabs — one container, two rows: row 1 the 1:1 protocols, row 2 Groups (§21). Exactly one is active. */}
+      {/* Tabs, one container, two rows: row 1 the 1:1 protocols, row 2 Groups (§21). Exactly one is active. */}
       <div className="shrink-0">
         <div className="flex flex-col gap-0.5 p-0.5 rounded-lg bg-secondary/60 border border-border">
         <div className="flex items-center gap-1">
@@ -479,7 +479,7 @@ function ConversationList({
             </Tooltip>
           </TooltipProvider>
         </div>
-        {/* Row 2 — Groups, same pill styling as the protocol tabs */}
+        {/* Row 2, Groups, same pill styling as the protocol tabs */}
         <button
           onClick={() => onSectionChange('groups')}
           className={`w-full flex items-center justify-center gap-1.5 py-1.5 text-[11px] font-medium rounded-md transition-all cursor-pointer
@@ -495,7 +495,7 @@ function ConversationList({
       {section === 'groups' ? (
         <GroupList activeDTag={activeGroupId} onSelect={onSelectGroup} onCreate={onCreateGroup} onJoin={onJoinGroup} />
       ) : (<>
-      {/* DM self (NIP-04 only) — open an encrypted conversation with your own key */}
+      {/* DM self (NIP-04 only), open an encrypted conversation with your own key */}
       {dmProtocol === 'nip04' && myPubkey && (
         <div className="shrink-0">
           <button
@@ -507,7 +507,7 @@ function ConversationList({
         </div>
       )}
 
-      {/* Following/Other tabs + Search + conversation list — one card */}
+      {/* Following/Other tabs + Search + conversation list, one card */}
       <div className="flex-1 min-h-0 flex flex-col gap-2 p-2 rounded-md bg-secondary/50 shadow-md">
       {/* Following / Other tabs */}
       <div className="flex gap-1 shrink-0">
@@ -726,7 +726,7 @@ function DMChatView({ recipientPubkey, onSwitchProtocol, onBack }: { recipientPu
     isAtBottomRef.current = Math.abs(el.scrollTop) < threshold
   }, [])
 
-  // Auto-scroll to bottom on new messages — only if user is near bottom
+  // Auto-scroll to bottom on new messages, only if user is near bottom
   const prevMsgCountRef = useRef(messages.length)
   useEffect(() => {
     if (messages.length > prevMsgCountRef.current && isAtBottomRef.current) {
@@ -737,7 +737,7 @@ function DMChatView({ recipientPubkey, onSwitchProtocol, onBack }: { recipientPu
     prevMsgCountRef.current = messages.length
   }, [messages.length])
 
-  // Reconcile optimistic messages with store — remove when real message appears
+  // Reconcile optimistic messages with store, remove when real message appears
   useEffect(() => {
     if (optimisticMessages.length === 0) return
     const toRemove = optimisticMessages.filter((opt) =>
@@ -790,7 +790,7 @@ function DMChatView({ recipientPubkey, onSwitchProtocol, onBack }: { recipientPu
     const fileAttachments = attachments?.filter((a) => a.encryption) || []
     const hasFiles = fileAttachments.length > 0
 
-    // Build the text message content (NO attachment URLs — files go as kind 15)
+    // Build the text message content (NO attachment URLs, files go as kind 15)
     let content = text
 
     // Append GIF URLs to content (GIFs stay as kind 14 content, not kind 15)
@@ -934,7 +934,7 @@ function DMChatView({ recipientPubkey, onSwitchProtocol, onBack }: { recipientPu
 
   return (
     <div ref={chatContainerRef} className="flex flex-col flex-1 min-w-0 h-full overflow-hidden relative gap-2">
-      {/* Chat header — clickable to open profile */}
+      {/* Chat header, clickable to open profile */}
       <div className="flex items-center gap-3 px-4 py-3 bg-secondary/50 rounded-md shadow-md shrink-0">
         {onBack && (
           <button onClick={onBack} className="hidden max-[1080px]:flex p-1.5 -ml-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors cursor-pointer shrink-0">
@@ -1187,7 +1187,7 @@ function DMChatView({ recipientPubkey, onSwitchProtocol, onBack }: { recipientPu
       )}
 
 
-      {/* Input — shared ChatInputBar with emoji, markdown toolbar, file upload */}
+      {/* Input, shared ChatInputBar with emoji, markdown toolbar, file upload */}
       <ChatInputBar
         bare
         draftKey={_dm17Key}
@@ -1388,7 +1388,7 @@ function DMRelayProgressIndicator({ eventId }: { eventId: string }) {
   const recipientDone = progress.confirmed >= progress.total
   const selfPending = !!self && !self.settled
   // "Saved nowhere": every relay answered and none kept our copy. The message is on screen now but
-  // won't come back after a reload — this state stays pinned (the store skips the auto-clear).
+  // won't come back after a reload, this state stays pinned (the store skips the auto-clear).
   const selfFailed = !!self && self.settled && self.confirmed === 0
   const done = recipientDone && !selfPending
 
@@ -1471,7 +1471,7 @@ function DMRelayProgressIndicator({ eventId }: { eventId: string }) {
 /* ═══════════════════════════════════════════ */
 
 /**
- * "Does this person have a kind-10050 DM relay list, and does it have relays in it?" — shown next to
+ * "Does this person have a kind-10050 DM relay list, and does it have relays in it?", shown next to
  * the Extra Private (NIP-17) label. NIP-17 senders are supposed to deliver ONLY to that list, so its
  * presence decides whether spec-strict clients can reach this person at all. Click opens the list.
  */
@@ -1693,7 +1693,7 @@ function DMMessageRow({ msg, showDateSep, isGrouped, senderProfile, displayName,
           {shouldBlurBlocked ? (
             <div className="flex items-center gap-2.5 py-1.5 px-3 my-1 rounded-lg bg-muted/50 border border-border/50">
               <ShieldBan size={14} className="text-destructive/70 shrink-0" />
-              <span className="text-xs text-muted-foreground">Message hidden — blocked user</span>
+              <span className="text-xs text-muted-foreground">Message hidden (blocked user)</span>
               <button
                 onClick={() => setBlockedRevealed(true)}
                 className="flex items-center gap-1 ml-auto text-xs font-medium text-primary hover:text-primary/80 bg-primary/10 hover:bg-primary/15 px-2.5 py-1 rounded-full transition-colors cursor-pointer"
@@ -1704,7 +1704,7 @@ function DMMessageRow({ msg, showDateSep, isGrouped, senderProfile, displayName,
           ) : (
             <>
               {(() => {
-                // Extract GIF URLs from content — render them via DMGifStarOverlay (with star + blossom failover)
+                // Extract GIF URLs from content, render them via DMGifStarOverlay (with star + blossom failover)
                 const gifUrlRegex = /https?:\/\/\S+\.gif(?:\?\S*)?/gi
                 const contentGifUrls = msg.content.match(gifUrlRegex) || []
                 const afterGifStrip = contentGifUrls.length > 0
@@ -1818,7 +1818,7 @@ function DMMessageContent({ msg, showDateSep, isGrouped, senderProfile, displayN
 }) {
   const mutedWords = useBlockStore((s) => s.mutedWords)
 
-  // Relay progress — dim own messages that haven't been accepted by any relay yet
+  // Relay progress, dim own messages that haven't been accepted by any relay yet
   const relayPending = useDMStore((s) => {
     const p = s.relayProgress[msg.id]
     return p && p.confirmed === 0
@@ -1861,7 +1861,7 @@ function DMMessageContent({ msg, showDateSep, isGrouped, senderProfile, displayN
           )}
           <ScrollableContent>
           {(() => {
-            // Extract GIF URLs from content — render them via DMGifStarOverlay (with star + blossom failover)
+            // Extract GIF URLs from content, render them via DMGifStarOverlay (with star + blossom failover)
             const gifUrlRegex = /https?:\/\/\S+\.gif(?:\?\S*)?/gi
             const contentGifUrls = msg.content.match(gifUrlRegex) || []
             const afterGifStrip = contentGifUrls.length > 0
@@ -2056,7 +2056,7 @@ function EncryptedFileAttachment({ messageId, fileUrl, mimeType, decryptionKey, 
 
   if (!blobUrl) return null
 
-  // Image — render with gallery lightbox (same UX as non-encrypted images)
+  // Image, render with gallery lightbox (same UX as non-encrypted images)
   if (isImage) {
     return (
       <>

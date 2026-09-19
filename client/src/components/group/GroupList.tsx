@@ -1,5 +1,5 @@
 /**
- * GroupList — the Groups section of the DM page's left panel (NIP-CHAT §21).
+ * GroupList: the Groups section of the DM page's left panel (NIP-CHAT §21).
  * Lists the user's groups (kind-16943 entries) with the loaded face from the hub store, unread
  * count, and a status pill for anything that isn't a normal loaded group.
  */
@@ -45,7 +45,7 @@ export function GroupList({ activeDTag, onSelect, onCreate, onJoin }: {
                 <Plus size={13} /> New group
               </button>
             </TooltipTrigger>
-            <TooltipContent side="bottom" className="text-xs">Create a group — up to 100 people, one conversation</TooltipContent>
+            <TooltipContent side="bottom" className="text-xs">Create a group: up to 100 people, one conversation</TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>

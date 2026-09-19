@@ -1,5 +1,5 @@
 /**
- * GroupInviteCard — a kind-36950 group address (naddr) shared in chat / social renders as its face
+ * GroupInviteCard: a kind-36950 group address (naddr) shared in chat / social renders as its face
  * with Join (opens the invite flow) or Open (already in your list). The address is the invite (§21.6).
  */
 import { useState } from 'react'

@@ -1,5 +1,5 @@
 /**
- * JoinGroupModal — paste an invite address (naddr / coordinate), preview the group's face and
+ * JoinGroupModal: paste an invite address (naddr / coordinate), preview the group's face and
  * whether you're in its tree, then accept (adds it to your kind-16943 list). Declining is just
  * closing. Also used when opening a shared group card.
  */
@@ -98,7 +98,7 @@ export function JoinGroupModal({ initialAddress = '', onClose, onJoined }: {
               <p className={`flex items-center gap-1.5 text-[11px] ${preview.isMember ? 'text-emerald-400' : 'text-amber-400'}`}>
                 {preview.isMember
                   ? <><Check size={12} /> You're in this group's member tree.</>
-                  : <><Users size={12} /> Your key isn't in the member tree yet — ask the creator to add you, then join.</>}
+                  : <><Users size={12} /> Your key isn't in the member tree yet. Ask the creator to add you, then join.</>}
               </p>
               {alreadyIn && <p className="text-[11px] text-muted-foreground">This group is already in your list.</p>}
             </div>

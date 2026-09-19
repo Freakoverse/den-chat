@@ -1,9 +1,9 @@
 /**
- * GroupChatView — the right pane of the DM page's Groups section (NIP-CHAT §21).
+ * GroupChatView: the right pane of the DM page's Groups section (NIP-CHAT §21).
  *
  * A group is registered in the hub store as a single-channel hub (channel id = its d-tag), so the
  * chat itself IS <ChannelView hideHeader /> pointed at it. This component owns the group header
- * (face, member count, creator actions) and the store's active hub/channel while it is mounted —
+ * (face, member count, creator actions) and the store's active hub/channel while it is mounted -
  * set directly (not via setActiveHub, which persists "last active hub" for the hub sidebar) and
  * restored on unmount so leaving the DM page never leaves a group selected on the Hubs page.
  */
@@ -44,7 +44,7 @@ export function GroupChatView({ dTag, onBack }: { dTag: string; onBack?: () => v
   const blocked =
     status === 'removed' ? 'You were removed from this group. Its messages stay readable up to that point.'
     : status === 'deleted' ? 'The creator deleted this group.'
-    : status === 'unsupported' ? 'This is a private group — it needs the DEN Chat client or a NIP-SKD signer.'
+    : status === 'unsupported' ? 'This is a private group. It needs the DEN Chat client or a NIP-SKD signer.'
     : status === 'not-found' ? 'This group could not be found on its relays.'
     : status === 'error' ? 'This group failed to load.'
     : null
@@ -81,7 +81,7 @@ export function GroupChatView({ dTag, onBack }: { dTag: string; onBack?: () => v
                 <Users size={12} /> {count}
               </button>
             </TooltipTrigger>
-            <TooltipContent side="bottom" className="text-xs">Members{isCreator ? ' — add or remove' : ''}</TooltipContent>
+            <TooltipContent side="bottom" className="text-xs">Members{isCreator ? ' (add or remove)' : ''}</TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>

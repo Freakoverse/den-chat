@@ -1,5 +1,5 @@
 /**
- * GroupMenu — the "…" options for a group: copy the invite address, edit (creator), delete
+ * GroupMenu: the "…" options for a group: copy the invite address, edit (creator), delete
  * (creator, typed confirmation), leave (member). House dropdown style (rounded-xl, p-1, rounded-md items).
  */
 import { useEffect, useRef, useState, type RefObject } from 'react'
