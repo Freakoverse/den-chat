@@ -15,6 +15,11 @@ import { getDraft, setDraft, clearDraft, dm17DraftKey } from '@/stores/draftStor
 import { createPortal } from 'react-dom'
 import { useUserStore } from '@/stores/userStore'
 import { useDMStore, type DMMessage } from '@/stores/dmStore'
+import { useGroupStore } from '@/stores/groupStore'
+import { GroupList } from '@/components/group/GroupList'
+import { GroupChatView } from '@/components/group/GroupChatView'
+import { CreateGroupModal } from '@/components/group/CreateGroupModal'
+import { JoinGroupModal } from '@/components/group/JoinGroupModal'
 import { setNameFromAddress } from '@/lib/customSets'
 import { useDM04Store } from '@/stores/dm04Store'
 import { DM04ChatView } from '@/components/dm/DM04ChatView'
@@ -195,6 +200,8 @@ function formatDMShortTime(ts: number): string {
 /* ═══════════════════════════════════════════ */
 
 export type DMProtocol = 'nip17' | 'nip04'
+/** Which section of the page is open: the 1:1 DMs (either protocol) or Groups (§21). */
+export type DMSection = 'dms' | 'groups'
 
 export function DMPage() {
   const myPubkey = useUserStore((s) => s.pubkey)
@@ -213,6 +220,12 @@ export function DMPage() {
 
   const [dmProtocol, setDmProtocol] = useState<DMProtocol>('nip04')
   const [showNewDM, setShowNewDM] = useState(false)
+  // Groups (NIP-CHAT §21) live in this page as their own section: row 1 = the 1:1 protocols, row 2 = Groups.
+  const [section, setSection] = useState<DMSection>('dms')
+  const activeGroupId = useGroupStore((s) => s.activeGroupId)
+  const setActiveGroup = useGroupStore((s) => s.setActiveGroup)
+  const [showCreateGroup, setShowCreateGroup] = useState(false)
+  const [showJoinGroup, setShowJoinGroup] = useState(false)
   // Start with list hidden on mobile if there's already an active conversation
   // (e.g. navigated here via UserProfileModal → onDM)
   const [mobileShowList, setMobileShowList] = useState(
@@ -234,15 +247,18 @@ export function DMPage() {
   //    back, and it jumped into the old chat because that store's activeConversation was still set);
   //  - a same-protocol change (e.g. onDM from a profile) should open the chat panel.
   const prevProtocolRef = useRef(dmProtocol)
+  const prevSectionRef = useRef(section)
   useEffect(() => {
     const protocolChanged = prevProtocolRef.current !== dmProtocol
+    const sectionChanged = prevSectionRef.current !== section
     prevProtocolRef.current = dmProtocol
-    if (protocolChanged) {
+    prevSectionRef.current = section
+    if (protocolChanged || sectionChanged) {
       setMobileShowList(true)
       return
     }
-    if (activeConversation) setMobileShowList(false)
-  }, [activeConversation, dmProtocol])
+    if (section === 'groups' ? !!activeGroupId : !!activeConversation) setMobileShowList(false)
+  }, [activeConversation, dmProtocol, section, activeGroupId])
 
   // DM subscriptions are now started at app launch in useStartup.ts
   // No need to start/stop them on DMPage mount/unmount
@@ -271,13 +287,23 @@ export function DMPage() {
         loading={loading}
         followSet={followSet}
         dmProtocol={dmProtocol}
-        onProtocolChange={setDmProtocol}
+        onProtocolChange={(p) => { setSection('dms'); setDmProtocol(p) }}
         mobileShowList={mobileShowList}
+        section={section}
+        onSectionChange={setSection}
+        activeGroupId={activeGroupId}
+        onSelectGroup={(dTag) => { setActiveGroup(dTag); setMobileShowList(false) }}
+        onCreateGroup={() => setShowCreateGroup(true)}
+        onJoinGroup={() => setShowJoinGroup(true)}
       />
 
       {/* Right — Chat */}
       <div className={`flex-1 flex flex-col min-w-0 h-full overflow-hidden bg-background pr-2 py-2 gap-2 max-[1080px]:px-2 ${mobileShowList ? 'max-[1080px]:hidden' : ''}`}>
-        {activeConversation ? (
+        {section === 'groups' ? (
+          activeGroupId
+            ? <GroupChatView key={activeGroupId} dTag={activeGroupId} onBack={handleMobileBack} />
+            : <DMEmptyState />
+        ) : activeConversation ? (
           dmProtocol === 'nip04'
             ? <DM04ChatView recipientPubkey={activeConversation} onSwitchProtocol={() => { setDmProtocol('nip17'); setNip17Active(activeConversation) }} onBack={handleMobileBack} />
             : <DMChatView recipientPubkey={activeConversation} onSwitchProtocol={() => { setDmProtocol('nip04'); setNip04Active(activeConversation) }} onBack={handleMobileBack} />
@@ -291,6 +317,18 @@ export function DMPage() {
         onClose={() => setShowNewDM(false)}
         onStartConversation={handleStartConversation}
       />
+      {showCreateGroup && (
+        <CreateGroupModal
+          onClose={() => setShowCreateGroup(false)}
+          onCreated={(dTag) => { setSection('groups'); setActiveGroup(dTag); setMobileShowList(false) }}
+        />
+      )}
+      {showJoinGroup && (
+        <JoinGroupModal
+          onClose={() => setShowJoinGroup(false)}
+          onJoined={(dTag) => { setSection('groups'); setActiveGroup(dTag); setMobileShowList(false) }}
+        />
+      )}
     </div>
   )
 }
@@ -308,6 +346,12 @@ function ConversationList({
   dmProtocol,
   onProtocolChange,
   mobileShowList,
+  section,
+  onSectionChange,
+  activeGroupId,
+  onSelectGroup,
+  onCreateGroup,
+  onJoinGroup,
 }: {
   onNewMessage: () => void
   activePubkey: string | null
@@ -317,6 +361,12 @@ function ConversationList({
   dmProtocol: DMProtocol
   onProtocolChange: (protocol: DMProtocol) => void
   mobileShowList: boolean
+  section: DMSection
+  onSectionChange: (section: DMSection) => void
+  activeGroupId: string | null
+  onSelectGroup: (dTag: string) => void
+  onCreateGroup: () => void
+  onJoinGroup: () => void
 }) {
   // NIP-17 store
   const getNip17Conversations = useDMStore((s) => s.getFilteredConversations)
@@ -389,7 +439,7 @@ function ConversationList({
           <button
             onClick={() => onProtocolChange('nip04')}
             className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 text-[11px] font-medium rounded-md transition-all cursor-pointer
-              ${dmProtocol === 'nip04'
+              ${section === 'dms' && dmProtocol === 'nip04'
                 ? 'bg-background text-foreground shadow-sm'
                 : 'text-muted-foreground hover:text-foreground'}`}
           >
@@ -398,7 +448,7 @@ function ConversationList({
           <button
             onClick={() => onProtocolChange('nip17')}
             className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 text-[11px] font-medium rounded-md transition-all cursor-pointer
-              ${dmProtocol === 'nip17'
+              ${section === 'dms' && dmProtocol === 'nip17'
                 ? 'bg-background text-foreground shadow-sm'
                 : 'text-muted-foreground hover:text-foreground'}`}
           >
@@ -425,6 +475,22 @@ function ConversationList({
         </div>
       </div>
 
+      {/* Row 2 — Groups (NIP-CHAT §21): a full-width tab of its own; exactly one of the four is active */}
+      <div className="shrink-0">
+        <button
+          onClick={() => onSectionChange('groups')}
+          className={`w-full flex items-center justify-center gap-1.5 py-1.5 text-[11px] font-medium rounded-lg border transition-all cursor-pointer
+            ${section === 'groups'
+              ? 'bg-background text-foreground shadow-sm border-border'
+              : 'bg-secondary/60 border-border text-muted-foreground hover:text-foreground'}`}
+        >
+          <Users size={12} /> Groups
+        </button>
+      </div>
+
+      {section === 'groups' ? (
+        <GroupList activeDTag={activeGroupId} onSelect={onSelectGroup} onCreate={onCreateGroup} onJoin={onJoinGroup} />
+      ) : (<>
       {/* DM self (NIP-04 only) — open an encrypted conversation with your own key */}
       {dmProtocol === 'nip04' && myPubkey && (
         <div className="shrink-0">
@@ -536,6 +602,7 @@ function ConversationList({
         )}
       </div>
       </div>
+      </>)}
 
       <div className="max-[1080px]:hidden">
         <UserPanel />
