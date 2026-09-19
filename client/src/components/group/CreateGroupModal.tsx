@@ -319,8 +319,10 @@ export function CreateGroupModal({ onClose, onCreated }: { onClose: () => void; 
   )
 
   return createPortal(
-    <div className="fixed inset-0 z-[250] flex items-center justify-center" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+    <div className="fixed inset-0 z-[250] flex items-center justify-center">
+      {/* Only the backdrop closes. The crop editor, size warning and password prompt render inside this
+          root, and a slider drag released outside its thumb fires a click on the shared ancestor. */}
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div
         className="relative z-10 w-full max-w-[520px] mx-4 bg-card rounded-xl border border-border shadow-2xl animate-in fade-in-0 zoom-in-95 duration-200 max-h-[90vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
