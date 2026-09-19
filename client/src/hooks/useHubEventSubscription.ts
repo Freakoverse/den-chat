@@ -84,7 +84,10 @@ export function useHubEventSubscription() {
     // (hub relays → client relays), so when a hub's relays are down the new event lands on client
     // relays. Watching only generalRelays would miss it live — an accepted member would keep seeing
     // the awaiting-approval guard until a manual refresh. Mirrors the join-request badge fix.
-    const batches = buildRelayIndex(hubs, getRelays())
+    // Groups (§21) are registered in the hub store as single-channel hubs, but their container is kind
+    // 36950 (watched by useGroupLoader) — a 36942 `#d` subscription for them would only be noise.
+    const hubsOnly = Object.fromEntries(Object.entries(hubs).filter(([, h]) => !h.isGroup))
+    const batches = buildRelayIndex(hubsOnly, getRelays())
     if (batches.length === 0) return
 
     // Seed each hub's last-seen timestamp to the version we already hold, NOT wall-clock.

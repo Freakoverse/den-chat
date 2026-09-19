@@ -1,0 +1,67 @@
+/**
+ * groupStore — the user's groups (NIP-CHAT §21): the kind-16943 list entries and per-group load
+ * status. The loaded group's chat state (secret, members, epoch secrets, the single-channel HubData)
+ * lives in the HUB store under the group's d-tag (flagged `isGroup`), so the message pipeline reuses
+ * unchanged. This store only knows which groups exist for this user and how their load went.
+ */
+import { create } from 'zustand'
+import type { GroupEntry } from '@/lib/group/groupList'
+import type { GroupData } from '@/lib/group/groupEvent'
+
+export type GroupStatus =
+  | 'loading'
+  | 'loaded'
+  | 'not-found'   // no event on the hinted + client relays
+  | 'removed'     // event found, but my leaf is gone (creator removed me)
+  | 'deleted'     // tombstone
+  | 'unsupported' // v2 group and this signer can't do NIP-SKD
+  | 'error'
+
+interface GroupState {
+  entries: GroupEntry[]
+  listLoaded: boolean
+  listCreatedAt: number | null
+  status: Record<string, GroupStatus>
+  /** The parsed group event per d-tag (creator ops need the raw tree/history/settings). */
+  groups: Record<string, GroupData>
+  /** Group open in the DM page's Groups tab. */
+  activeGroupId: string | null
+  /** Pending invites the user is looking at (naddr coords), not yet accepted. */
+  pendingInvites: string[]
+
+  setEntries: (entries: GroupEntry[], createdAt?: number | null) => void
+  addEntry: (entry: GroupEntry) => void
+  removeEntry: (dTag: string) => void
+  setStatus: (dTag: string, status: GroupStatus) => void
+  setGroup: (dTag: string, group: GroupData) => void
+  removeGroup: (dTag: string) => void
+  setActiveGroup: (dTag: string | null) => void
+  addPendingInvite: (a: string) => void
+  removePendingInvite: (a: string) => void
+  reset: () => void
+}
+
+export const useGroupStore = create<GroupState>((set) => ({
+  entries: [],
+  listLoaded: false,
+  listCreatedAt: null,
+  status: {},
+  groups: {},
+  activeGroupId: null,
+  pendingInvites: [],
+
+  setEntries: (entries, createdAt = null) => set({ entries: [...entries].sort((a, b) => a.position - b.position), listLoaded: true, listCreatedAt: createdAt }),
+  addEntry: (entry) => set((s) => (s.entries.some((e) => e.dTag === entry.dTag) ? {} : { entries: [...s.entries, entry] })),
+  removeEntry: (dTag) => set((s) => ({ entries: s.entries.filter((e) => e.dTag !== dTag) })),
+  setStatus: (dTag, status) => set((s) => ({ status: { ...s.status, [dTag]: status } })),
+  setGroup: (dTag, group) => set((s) => ({ groups: { ...s.groups, [dTag]: group } })),
+  removeGroup: (dTag) => set((s) => {
+    const { [dTag]: _g, ...groups } = s.groups
+    const { [dTag]: _st, ...status } = s.status
+    return { groups, status, activeGroupId: s.activeGroupId === dTag ? null : s.activeGroupId }
+  }),
+  setActiveGroup: (dTag) => set({ activeGroupId: dTag }),
+  addPendingInvite: (a) => set((s) => (s.pendingInvites.includes(a) ? {} : { pendingInvites: [...s.pendingInvites, a] })),
+  removePendingInvite: (a) => set((s) => ({ pendingInvites: s.pendingInvites.filter((x) => x !== a) })),
+  reset: () => set({ entries: [], listLoaded: false, listCreatedAt: null, status: {}, groups: {}, activeGroupId: null, pendingInvites: [] }),
+}))

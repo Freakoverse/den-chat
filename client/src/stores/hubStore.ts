@@ -63,6 +63,13 @@ export interface HubData {
   publishedAt?: number
   /** Actual event created_at — used for +1 replacement on updates */
   eventCreatedAt?: number
+  /**
+   * NIP-CHAT §21 group registered as a single-channel hub so the whole message pipeline (send,
+   * receive, cache, replies, reactions, pins, typing) reuses unchanged. The one channel's id is the
+   * group's own d-tag. Hub-only surfaces (sidebar, hub loader, hub settings, Blossom tree, join
+   * requests, discovery) MUST skip entries with this flag.
+   */
+  isGroup?: boolean
 }
 
 export interface Channel {

@@ -16,6 +16,9 @@ import { fetchReplaceable, fetchEvents } from '@/lib/nostr/relay-pool'
 import { KINDS } from '@/lib/crypto/constants'
 import { useVoiceStore } from '@/stores/voiceStore'
 import { useHubLoader } from './useHubLoader'
+import { useGroupLoader } from './useGroupLoader'
+import { useGroupStore } from '@/stores/groupStore'
+import { fetchGroupListEvent, parseGroupListEvent } from '@/lib/group/groupList'
 import { useHubSubscriptions } from './useHubSubscriptions'
 import { useTypingSubscription } from './useTypingSubscription'
 import { useExceptionSubscriptions } from './useExceptionSubscriptions'
@@ -78,6 +81,7 @@ export function useStartup() {
     // before anything reads them. Persistence is per-account, so this fires on every login / account
     // switch / session restore (pubkey change) and never bleeds another account's data.
     useHubStore.getState().hydratePersistedForAccount(pubkey)
+    useGroupStore.getState().reset()
 
     // Fetch user profile (kind 0)
     fetchReplaceable(pubkey, 0).then((event) => {
@@ -155,6 +159,19 @@ export function useStartup() {
 
       setHubEntries(entries, folders)
     })
+    // Groups (kind 16943, NIP-CHAT §21.10): every entry is NIP-44 self-encrypted, so the decrypt can
+    // fail before a remote signer connects — best-effort here; useGroupLoader picks up whatever parses.
+    fetchGroupListEvent(pubkey).then(async (event) => {
+      if (!event) { useGroupStore.getState().setEntries([], null); return }
+      try {
+        const entries = await parseGroupListEvent(event, pubkey, signer, privateKey)
+        useGroupStore.getState().setEntries(entries, event.created_at)
+      } catch (err) {
+        console.warn('[Groups] could not decrypt the group list yet:', err)
+        useGroupStore.getState().setEntries([], event.created_at)
+      }
+    }).catch(() => useGroupStore.getState().setEntries([], null))
+
     // Load user's encrypted block/mute list (kind 10000)
     loadBlockList(pubkey, signer, privateKey)
     // Load user's follow list (kind 3)
@@ -492,6 +509,10 @@ export function useStartup() {
 
   // Load hub event data from relays for all hub entries
   useHubLoader()
+  // Groups (§21): loads each 16943 entry's 36950 event, derives the secret from the inline tree,
+  // registers it in the hub store as a single-channel hub — before useHubSubscriptions builds its
+  // relay index from hubStore.hubs, so group messages flow through the same subscriptions.
+  useGroupLoader()
 
   // Subscribe to real-time messages for all loaded hubs
   useHubSubscriptions()

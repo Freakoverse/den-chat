@@ -4086,13 +4086,20 @@ accept. The same three tags serve that moment.
 
 ### 21.3 Messages
 
-Group messages are ordinary kind `36943` events (§6.2) with two differences:
+Group messages are ordinary kind `36943` events (§6.2). A group behaves as a hub with exactly
+**one channel whose id is the group's own `d` tag**:
 
-- `["h", "<group_d_tag>"]` is present and **there is no `c` tag**. A `36943` without `c` is a
-  group message; a client that finds one whose `h` is not a known group ignores it.
+- `["h", "<group_d_tag>"]` **and** `["c", "<group_d_tag>"]` — the same value in both slots. A
+  message event is therefore byte-for-byte a hub message; what makes it a *group* message is that
+  its `h` resolves to a kind-`36950` container, never the message shape. A client ignores a
+  `36943` whose `h` it doesn't know.
 - The message key is the hub channel key of §4.2 with the **group's `d` tag in the channel
   slot**: `HKDF(group_secret, domain_salt, "channel:<group_d_tag>:epoch:<epoch>")`. This reuses
   the existing derivation verbatim; nothing new to implement.
+
+Carrying `c` (rather than omitting it) is deliberate: every hub message path — send, receive,
+cache admission, replies/threads, reactions, pins, typing, edit hints, polls — keys on
+`(h, c)`, so a group needs no parallel pipeline.
 
 Everything else carries over unchanged: `epoch`, `published_at`, `nonce` under `w`, edits by
 `d`-tag republish with the `+1` rule, `a`-tag replies and threads, reactions, the `identity`

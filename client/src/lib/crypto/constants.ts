@@ -20,6 +20,10 @@ export const KINDS = {
   REPORT: 36948,
   HIDE_MESSAGE: 36949,
   USER_HUB_LIST: 16942,
+  /** NIP-CHAT §21: a group — one conversation, tree inline, ≤100 members. Messages reuse MESSAGE with h = c = group d. */
+  GROUP_EVENT: 36950,
+  /** NIP-CHAT §21.10: the user's group list (NIP-44 self-encrypted content). */
+  USER_GROUP_LIST: 16943,
   POLL: 1067,
   POLL_VOTE: 1017,
   /** Forum post & comment (NIP-22, §20). Used for both word + NIP-72 communities. */
