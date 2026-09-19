@@ -210,14 +210,70 @@ export function CreateGroupModal({ onClose, onCreated }: { onClose: () => void; 
 
         <div className="px-5 py-4 space-y-5 overflow-y-auto min-h-0">
           <label className="block space-y-1">
-            <span className="text-[11px] text-muted-foreground">Name</span>
+            <span className="text-xs font-medium text-foreground">Name</span>
             <input value={name} maxLength={GROUP_NAME_MAX} onChange={(e) => setName(e.target.value)} placeholder="Weekend crew" className={field} autoFocus />
           </label>
           <label className="block space-y-1">
-            <span className="text-[11px] text-muted-foreground">Short description <span className="text-muted-foreground/60">(public, shown to invitees)</span></span>
-            <textarea value={about} maxLength={GROUP_ABOUT_MAX} rows={2} onChange={(e) => setAbout(e.target.value)} placeholder="Optional" className={`${field} h-auto py-2 resize-none`} />
-            <div className="text-right text-[10px] text-muted-foreground/60">{about.length}/{GROUP_ABOUT_MAX}</div>
+            <span className="text-xs font-medium text-foreground">Short description <span className="font-normal text-muted-foreground">(public, shown to invitees)</span></span>
+            <textarea value={about} maxLength={GROUP_ABOUT_MAX} rows={3} onChange={(e) => setAbout(e.target.value)} placeholder="Optional" className={`${field} h-auto py-2 resize-none`} />
+            <div className="text-right text-[11px] text-muted-foreground/60">{about.length}/{GROUP_ABOUT_MAX}</div>
           </label>
+
+          {/* Members */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-foreground">Members <span className="font-normal text-muted-foreground">(optional now, you can add later)</span></span>
+              <span className="text-xs font-mono tabular-nums text-muted-foreground/60">{members.length + 1}/{GROUP_MAX_MEMBERS}</span>
+            </div>
+            <div className="rounded-lg border border-border overflow-hidden">
+              <div className="flex items-center gap-2 px-3 py-2 border-b border-border bg-secondary/30">
+                <Search size={14} className="text-muted-foreground shrink-0" />
+                <input value={followSearch} onChange={(e) => setFollowSearch(e.target.value)} placeholder="Search people you follow" className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground/60 outline-none" />
+              </div>
+              <div className="max-h-56 overflow-y-auto p-2 space-y-0.5">
+                {followList.length === 0 ? (
+                  <p className="px-2 py-3 text-xs text-muted-foreground/70">{followed.size === 0 ? "You don't follow anyone yet. Add people below." : 'No matches.'}</p>
+                ) : followList.map((pk) => {
+                  const p = getProfile(pk)
+                  const npub = (() => { try { return nip19.npubEncode(pk) } catch { return pk } })()
+                  const label = p?.display_name || p?.name || truncateNpub(npub, 10)
+                  const on = members.includes(pk)
+                  return (
+                    <button key={pk} onClick={() => toggleMember(pk)} className={cn('w-full flex items-center gap-3 px-2.5 py-2 rounded-lg text-left transition-colors cursor-pointer', on ? 'bg-primary/10' : 'hover:bg-secondary/40')}>
+                      <Avatar className="h-9 w-9 shrink-0">
+                        {p?.picture && <AvatarImage src={p.picture} />}
+                        <AvatarFallback className="text-xs bg-primary/20 text-primary">{label.slice(0, 2).toUpperCase()}</AvatarFallback>
+                      </Avatar>
+                      <span className="text-sm text-foreground truncate flex-1">{label}</span>
+                      <span className={cn('w-[18px] h-[18px] rounded border flex items-center justify-center shrink-0', on ? 'bg-primary border-primary' : 'border-border')}>{on && <Check size={12} className="text-primary-foreground" />}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+            {/* Selected people who aren't in the follow list (added by identifier) */}
+            {members.filter((m) => !followed.has(m)).length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {members.filter((m) => !followed.has(m)).map((m) => {
+                  const p = getProfile(m)
+                  const npub = (() => { try { return nip19.npubEncode(m) } catch { return m } })()
+                  return (
+                    <span key={m} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-secondary/60 border border-border/60 text-xs text-foreground">
+                      {p?.display_name || p?.name || truncateNpub(npub, 8)}
+                      <button onClick={() => toggleMember(m)} className="text-muted-foreground hover:text-destructive cursor-pointer"><X size={12} /></button>
+                    </span>
+                  )
+                })}
+              </div>
+            )}
+            <div className="flex items-center gap-2">
+              <input value={customInput} onChange={(e) => setCustomInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') addCustom() }} placeholder="npub, NIP-05 address, or DNN ID" className={field} />
+              <button onClick={addCustom} disabled={resolving || !customInput.trim()} className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary/60 cursor-pointer disabled:opacity-50">
+                {resolving ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+              </button>
+            </div>
+            <p className="text-xs text-muted-foreground/70">People you add still need the invite address to see the group. Copy it from the group's menu and send it however you like.</p>
+          </div>
 
           {/* Private group (v2) toggle, guarded like the private-hub toggle */}
           <div className="flex items-start justify-between gap-3">
@@ -233,7 +289,7 @@ export function CreateGroupModal({ onClose, onCreated }: { onClose: () => void; 
                     <TooltipTrigger asChild>
                       <span className="underline decoration-dotted underline-offset-2 cursor-help text-foreground/80 hover:text-foreground">Learn more</span>
                     </TooltipTrigger>
-                    <TooltipContent side="top" className="max-w-xs text-xs leading-relaxed whitespace-pre-line">
+                    <TooltipContent side="top" className="z-[300] max-w-xs text-xs leading-relaxed whitespace-pre-line">
                       {"A private group masks who created it, who its members are, and who is posting from anyone outside it. In a public (v1) group the messages are still encrypted, but the member keys are visible in the group event.\n\nOnly the DEN Chat client, or a browser extension or remote signer that supports NIP-SKD, can create a private group or take part in one."}
                     </TooltipContent>
                   </Tooltip>
@@ -279,62 +335,6 @@ export function CreateGroupModal({ onClose, onCreated }: { onClose: () => void; 
                 </div>
               </div>
             )}
-          </div>
-
-          {/* Members */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] text-muted-foreground">Members <span className="text-muted-foreground/60">(optional now, you can add later)</span></span>
-              <span className="text-[11px] font-mono tabular-nums text-muted-foreground/60">{members.length + 1}/{GROUP_MAX_MEMBERS}</span>
-            </div>
-            <div className="rounded-lg border border-border overflow-hidden">
-              <div className="flex items-center gap-2 px-2.5 py-1.5 border-b border-border bg-secondary/30">
-                <Search size={12} className="text-muted-foreground shrink-0" />
-                <input value={followSearch} onChange={(e) => setFollowSearch(e.target.value)} placeholder="Search people you follow" className="flex-1 bg-transparent text-xs text-foreground placeholder:text-muted-foreground/60 outline-none" />
-              </div>
-              <div className="max-h-44 overflow-y-auto">
-                {followList.length === 0 ? (
-                  <p className="px-3 py-3 text-[11px] text-muted-foreground/70">{followed.size === 0 ? "You don't follow anyone yet. Add people below." : 'No matches.'}</p>
-                ) : followList.map((pk) => {
-                  const p = getProfile(pk)
-                  const npub = (() => { try { return nip19.npubEncode(pk) } catch { return pk } })()
-                  const label = p?.display_name || p?.name || truncateNpub(npub, 10)
-                  const on = members.includes(pk)
-                  return (
-                    <button key={pk} onClick={() => toggleMember(pk)} className={cn('w-full flex items-center gap-2.5 px-2.5 py-1.5 text-left transition-colors cursor-pointer', on ? 'bg-primary/10' : 'hover:bg-secondary/40')}>
-                      <Avatar className="h-7 w-7 shrink-0">
-                        {p?.picture && <AvatarImage src={p.picture} />}
-                        <AvatarFallback className="text-[10px] bg-primary/20 text-primary">{label.slice(0, 2).toUpperCase()}</AvatarFallback>
-                      </Avatar>
-                      <span className="text-xs text-foreground truncate flex-1">{label}</span>
-                      <span className={cn('w-4 h-4 rounded border flex items-center justify-center shrink-0', on ? 'bg-primary border-primary' : 'border-border')}>{on && <Check size={11} className="text-primary-foreground" />}</span>
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
-            {/* Selected people who aren't in the follow list (added by identifier) */}
-            {members.filter((m) => !followed.has(m)).length > 0 && (
-              <div className="flex flex-wrap gap-1.5">
-                {members.filter((m) => !followed.has(m)).map((m) => {
-                  const p = getProfile(m)
-                  const npub = (() => { try { return nip19.npubEncode(m) } catch { return m } })()
-                  return (
-                    <span key={m} className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-secondary/60 border border-border/60 text-[11px] text-foreground">
-                      {p?.display_name || p?.name || truncateNpub(npub, 8)}
-                      <button onClick={() => toggleMember(m)} className="text-muted-foreground hover:text-destructive cursor-pointer"><X size={10} /></button>
-                    </span>
-                  )
-                })}
-              </div>
-            )}
-            <div className="flex items-center gap-2">
-              <input value={customInput} onChange={(e) => setCustomInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') addCustom() }} placeholder="npub, NIP-05 address, or DNN ID" className={field} />
-              <button onClick={addCustom} disabled={resolving || !customInput.trim()} className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary/60 cursor-pointer disabled:opacity-50">
-                {resolving ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
-              </button>
-            </div>
-            <p className="text-[10px] text-muted-foreground/70">People you add still need the invite address to see the group. Copy it from the group's menu and send it however you like.</p>
           </div>
 
           {error && (
