@@ -13,6 +13,7 @@ import { NoteCard, CommentCard, LongFormCard, LiveActivityCard, GameModCard } fr
 import { HubEventCard } from '@/components/hub/HubEventCard'
 import { HubMessageCard } from '@/components/hub/HubMessageCard'
 import { CalendarTimeEventCard } from '@/components/hub/CalendarTimeEventCard'
+import { GroupInviteCard } from '@/components/group/GroupInviteCard'
 import { parseModEvent, MOD_KIND } from '@/lib/mods/modEvent'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
 
@@ -80,6 +81,8 @@ function ResolvedEventCard({ event, href, disableHubInviteCards }: { event: Even
       if (!mod.isDeleted) primeCachedFetch(`31142:${event.pubkey}:${d}|`, { mod, event })
       return <GameModCard identifier={d} pubkey={event.pubkey} openUrl={href} />
     }
+    case 36950:
+      return <GroupInviteCard identifier={d} pubkey={event.pubkey} />
     case 36942:
       if (disableHubInviteCards) return <ShortFallback label="Hub invite" address={`s…${event.tags.find((t) => t[0] === 's')?.[1] ?? ''}`} />
       return <HubEventCard identifier={d} pubkey={event.pubkey} />

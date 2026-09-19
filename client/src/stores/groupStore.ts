@@ -28,8 +28,12 @@ interface GroupState {
   activeGroupId: string | null
   /** Pending invites the user is looking at (naddr coords), not yet accepted. */
   pendingInvites: string[]
+  /** Bumped by requestOpenGroup so the DM page switches to the Groups section even if the id is unchanged. */
+  openNonce: number
 
   setEntries: (entries: GroupEntry[], createdAt?: number | null) => void
+  /** Open a group in the DM page (from a shared card etc.): sets it active + bumps openNonce. */
+  requestOpenGroup: (dTag: string) => void
   addEntry: (entry: GroupEntry) => void
   removeEntry: (dTag: string) => void
   setStatus: (dTag: string, status: GroupStatus) => void
@@ -49,7 +53,9 @@ export const useGroupStore = create<GroupState>((set) => ({
   groups: {},
   activeGroupId: null,
   pendingInvites: [],
+  openNonce: 0,
 
+  requestOpenGroup: (dTag) => set((s) => ({ activeGroupId: dTag, openNonce: s.openNonce + 1 })),
   setEntries: (entries, createdAt = null) => set({ entries: [...entries].sort((a, b) => a.position - b.position), listLoaded: true, listCreatedAt: createdAt }),
   addEntry: (entry) => set((s) => (s.entries.some((e) => e.dTag === entry.dTag) ? {} : { entries: [...s.entries, entry] })),
   removeEntry: (dTag) => set((s) => ({ entries: s.entries.filter((e) => e.dTag !== dTag) })),

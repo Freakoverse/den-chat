@@ -226,6 +226,11 @@ export function DMPage() {
   const setActiveGroup = useGroupStore((s) => s.setActiveGroup)
   const [showCreateGroup, setShowCreateGroup] = useState(false)
   const [showJoinGroup, setShowJoinGroup] = useState(false)
+  // A shared group card (or anything outside this page) asked to open a group → land on the Groups section
+  const openNonce = useGroupStore((s) => s.openNonce)
+  useEffect(() => {
+    if (openNonce > 0 && useGroupStore.getState().activeGroupId) { setSection('groups'); setMobileShowList(false) }
+  }, [openNonce])
   // Start with list hidden on mobile if there's already an active conversation
   // (e.g. navigated here via UserProfileModal → onDM)
   const [mobileShowList, setMobileShowList] = useState(

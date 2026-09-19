@@ -24,6 +24,7 @@ import { HubMessageCard } from '@/components/hub/HubMessageCard'
 import { CalendarTimeEventCard } from '@/components/hub/CalendarTimeEventCard'
 import { ProfileCard, NoteCard, LongFormCard, CommentCard, LiveActivityCard, GameModCard } from '@/components/nostr/NostrCards'
 import { ShortAddressCard } from '@/components/nostr/ShortAddressCard'
+import { GroupInviteCard } from '@/components/group/GroupInviteCard'
 import { SHORT_ADDRESS_PATTERN, looksLikeShortAddress } from '@/lib/nostr/nipShort'
 import { detectEmbed } from '@/lib/embeds'
 import { Embed } from '@/components/ui/Embed'
@@ -1656,6 +1657,9 @@ function NostrCard({ bech32, href, onProfileClick, disableHubInviteCards }: { be
       if (data.kind === 31142) {
         // Shared as a link (degmods.com/mod/naddr…) → the card opens that exact link. Bare naddr → open-in chooser.
         return <GameModCard identifier={data.identifier} pubkey={data.pubkey} relays={data.relays} openUrl={href} />
+      }
+      if (data.kind === 36950) {
+        return <GroupInviteCard identifier={data.identifier} pubkey={data.pubkey} relays={data.relays} />
       }
     }
   } catch { }
