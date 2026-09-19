@@ -69,12 +69,17 @@ export async function createGroup(opts: {
   /** Initial members' REAL keys (besides the creator, who is always a member). */
   members?: string[]
   minPow?: number
+  /**
+   * Pre-chosen d tag. The create modal picks it up front so a v2 group's picture/banner Blossom
+   * auth can be signed as the owner pseudonym O (derived from this d tag) before the event exists.
+   */
+  dTag?: string
 }): Promise<GroupData> {
   const k = keys()
   if (opts.version === 2 && !canUseV2({ privateKey: k.privateKey, signer: k.signer })) {
     throw new Error('A private (v2) group needs the DEN Chat client or a NIP-SKD signer.')
   }
-  const dTag = crypto.randomUUID()
+  const dTag = opts.dTag || crypto.randomUUID()
   const secret = newGroupSecret()
   const epoch = 1
   const members = [k.me, ...(opts.members ?? []).filter((m) => m !== k.me)]
