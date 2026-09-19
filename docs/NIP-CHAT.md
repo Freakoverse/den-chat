@@ -4101,6 +4101,12 @@ Carrying `c` (rather than omitting it) is deliberate: every hub message path —
 cache admission, replies/threads, reactions, pins, typing, edit hints, polls — keys on
 `(h, c)`, so a group needs no parallel pipeline.
 
+It also leaves room for a future revision without a format break: the channel whose id equals
+the group's `d` tag is the group's **default conversation** and always exists; a later version
+MAY let a group declare additional channels (as some messengers do), each with its own `c`, while
+messages with `c = d` remain valid and unchanged. This revision defines exactly one channel and
+clients MUST ignore `c` values that are not the group's `d`.
+
 Everything else carries over unchanged: `epoch`, `published_at`, `nonce` under `w`, edits by
 `d`-tag republish with the `+1` rule, `a`-tag replies and threads, reactions, the `identity`
 tag in v2 (§4.5), edit hints (`26943`), typing (`26950`), polls, `content-warning`.
