@@ -220,7 +220,8 @@ export function DMPage() {
   const [dmProtocol, setDmProtocol] = useState<DMProtocol>('nip04')
   const [showNewDM, setShowNewDM] = useState(false)
   // Groups (NIP-CHAT §21) live in this page as their own section: row 1 = the 1:1 protocols, row 2 = Groups.
-  const [section, setSection] = useState<DMSection>('dms')
+  const section = useGroupStore((s) => s.dmSection)
+  const setSection = useGroupStore((s) => s.setDmSection)
   const activeGroupId = useGroupStore((s) => s.activeGroupId)
   const setActiveGroup = useGroupStore((s) => s.setActiveGroup)
   const [showCreateGroup, setShowCreateGroup] = useState(false)
@@ -231,9 +232,11 @@ export function DMPage() {
   }, [openNonce])
   // Start with list hidden on mobile if there's already an active conversation
   // (e.g. navigated here via UserProfileModal → onDM)
-  const [mobileShowList, setMobileShowList] = useState(
-    () => !useDM04Store.getState().activeConversation && !useDMStore.getState().activeConversation
-  )
+  const [mobileShowList, setMobileShowList] = useState(() => {
+    const gs = useGroupStore.getState()
+    if (gs.dmSection === 'groups') return !gs.activeGroupId
+    return !useDM04Store.getState().activeConversation && !useDMStore.getState().activeConversation
+  })
 
   // Use the follow store loaded at startup, no re-fetch needed on mount
   const followSet = useFollowStore((s) => s.followedPubkeys)

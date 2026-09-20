@@ -33,18 +33,19 @@ export function GroupList({ activeDTag, onSelect, onCreate }: {
 
   return (
     <div className="flex-1 min-h-0 flex flex-col gap-2 p-2 rounded-md bg-secondary/50 shadow-md">
-      <div className="flex items-center gap-1.5 shrink-0">
+      <div className="flex items-center justify-between pl-2 pr-0.5 shrink-0">
+        <span className="text-sm font-semibold text-foreground">Groups</span>
         <TooltipProvider delayDuration={200}>
           <Tooltip>
             <TooltipTrigger asChild>
               <button
                 onClick={onCreate}
-                className="flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-medium rounded-lg bg-primary/10 text-primary hover:bg-primary/15 transition-colors cursor-pointer"
+                className="p-1.5 rounded-lg text-primary hover:bg-primary/10 transition-colors cursor-pointer"
               >
-                <Plus size={13} /> New group
+                <Plus size={16} />
               </button>
             </TooltipTrigger>
-            <TooltipContent side="bottom" className="text-xs">Create a group: up to 100 people, one conversation</TooltipContent>
+            <TooltipContent side="bottom" className="text-xs">New group: up to 100 people, one conversation</TooltipContent>
           </Tooltip>
         </TooltipProvider>
       </div>

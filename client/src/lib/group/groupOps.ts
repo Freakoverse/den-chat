@@ -119,6 +119,28 @@ export async function addMember(dTag: string, memberR: string): Promise<void> {
   await publishAndApply(signed, g.relays, isGroupV2(g))
 }
 
+/** Add several members in ONE republish (approving join requests). Skips keys already in the tree. */
+export async function addMembers(dTag: string, memberRs: string[]): Promise<void> {
+  const k = keys()
+  const { g, secret, members } = current(dTag)
+  let tree = g.tree
+  let roster = g.roster
+  let current_ = members
+  let added = 0
+  for (const memberR of memberRs) {
+    if (current_.some((m) => m.pubkey === memberR)) continue
+    const res = await addGroupMember({ g: { ...g, tree, roster }, memberR, secret, currentMembers: current_, keys: k })
+    tree = res.tree; roster = res.roster; current_ = [...current_, res.member]; added++
+  }
+  if (added === 0) return
+  const settings = await readGroupSettings(g, secret)
+  const signed = await buildAndSignGroupEvent({
+    ...republishOptions(g, { treeText: joinTreeText(tree, roster), history: g.history, settings }),
+    secret, keys: k,
+  })
+  await publishAndApply(signed, g.relays, isGroupV2(g))
+}
+
 export async function removeMember(dTag: string, member: HubMember): Promise<void> {
   const k = keys()
   const { g, secret, members } = current(dTag)

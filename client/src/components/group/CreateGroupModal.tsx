@@ -8,7 +8,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { nip19, nip05 } from 'nostr-tools'
+import { nip19 } from 'nostr-tools'
 import { X, Loader2, Plus, Trash2, AlertTriangle, ChevronDown, Info, Search, Check, Lock } from 'lucide-react'
 import { GroupFaceEditor, type GroupFaceState } from '@/components/group/GroupFaceEditor'
 import { useEscToClose } from '@/hooks/useEscToClose'
@@ -22,8 +22,7 @@ import { createGroup } from '@/lib/group/groupOps'
 import { GROUP_NAME_MAX, GROUP_ABOUT_MAX, GROUP_MAX_MEMBERS } from '@/lib/group/groupEvent'
 import { HUB_DESCRIPTION_MAX } from '@/lib/hub/hubLimits'
 import { MAX_GENERAL_RELAYS } from '@/lib/hub/hubLimits'
-import { isValidDnnFormat } from '@/lib/dnn/dnnUtils'
-import { dnnService } from '@/lib/dnn/dnnService'
+import { resolveIdentifier } from '@/lib/group/resolveIdentifier'
 import { cn, truncateNpub } from '@/lib/utils'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
@@ -32,32 +31,6 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 const V2_TOGGLE_PASSWORD = 'denchat'
 
 interface RelayEntry { url: string; enabled: boolean }
-
-/** npub / nprofile / hex → hex, or null. */
-function keyFromInput(raw: string): string | null {
-  const s = raw.trim().replace(/^nostr:/i, '')
-  if (/^[0-9a-f]{64}$/i.test(s)) return s.toLowerCase()
-  try {
-    const d = nip19.decode(s)
-    if (d.type === 'npub') return d.data as string
-    if (d.type === 'nprofile') return d.data.pubkey
-  } catch { /* not bech32 */ }
-  return null
-}
-
-/** Resolve any identifier a user might paste: key forms, a NIP-05 address, or a DNN ID. */
-async function resolveIdentifier(raw: string): Promise<string | null> {
-  const direct = keyFromInput(raw)
-  if (direct) return direct
-  const s = raw.trim()
-  if (s.includes('@')) {
-    try { const p = await nip05.queryProfile(s); return p?.pubkey ?? null } catch { return null }
-  }
-  if (isValidDnnFormat(s)) {
-    try { const r = await dnnService.resolve(s); return r?.npub ? keyFromInput(r.npub) : null } catch { return null }
-  }
-  return null
-}
 
 export function CreateGroupModal({ onClose, onCreated }: { onClose: () => void; onCreated: (dTag: string) => void }) {
   const pubkey = useUserStore((s) => s.pubkey)

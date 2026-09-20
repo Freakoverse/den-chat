@@ -333,7 +333,7 @@ export function ChannelView({ hideHeader = false }: { hideHeader?: boolean } = {
   const isAnnouncement = channel.type === 'announcement'
 
   return (
-    <div ref={channelContainerRef} className="flex flex-col h-full bg-background relative py-2 gap-2">
+    <div ref={channelContainerRef} className="flex flex-col h-full bg-background relative gap-2">
       {!hideHeader && <ChannelHeader channel={channel} channelId={activeChannelId!} isCreator={isCreator} />}
       {/* Creator-only: the hub's advertised Blossom servers failed to serve its files on load. */}
       {isCreator && hub && <HubBlossomHealthBanner hub={hub} />}

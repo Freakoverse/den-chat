@@ -57,6 +57,8 @@ export interface GroupData {
   relays: string[]
   blossomServers: string[]
   minPow: number
+  /** Join-request PoW (`W` tag, §21.6.1). Requests mined below it are dropped before any decrypt. */
+  joinMinPow: number
   picture?: string
   banner?: string
   about?: string
@@ -151,6 +153,7 @@ export function parseGroupEvent(event: Event): GroupData | null {
     relays: event.tags.filter((t) => t[0] === 'r' && t[1]).map((t) => t[1]),
     blossomServers: event.tags.filter((t) => t[0] === 'o' && t[1]).map((t) => t[1]),
     minPow: parseInt(tag('w') ?? '0', 10) || 0,
+    joinMinPow: parseInt(tag('W') ?? '0', 10) || 0,
     picture: tag('picture') || undefined,
     banner: tag('banner') || undefined,
     about: tag('about') || undefined,
@@ -237,7 +240,7 @@ export function toHubData(g: GroupData, settings: GroupSettings, ownerRealPubkey
     categories: [],
     roles: [{ roleId: 'everyone', name: 'everyone', position: 0, permissions: { ...DEFAULT_EVERYONE_PERMISSIONS } }],
     minPow: g.minPow,
-    joinMinPow: 0,
+    joinMinPow: g.joinMinPow,
     version: g.version,
     signerScheme: g.signerScheme,
     ownerRealPubkey,
@@ -297,7 +300,7 @@ export async function buildGroupTree(opts: {
 /** Add one member (real key). No rotation. Returns the new tree (+ roster for v2). */
 export async function addGroupMember(opts: {
   g: GroupData; memberR: string; secret: Uint8Array; currentMembers: HubMember[]; keys: CreatorKeys
-}): Promise<{ tree: string; roster?: { epoch: number; blob: string } }> {
+}): Promise<{ tree: string; roster?: { epoch: number; blob: string }; member: HubMember }> {
   const { g, memberR, secret, currentMembers, keys } = opts
   if (currentMembers.length >= GROUP_MAX_MEMBERS) throw new Error(`This group is full (${GROUP_MAX_MEMBERS} members)`)
   if (currentMembers.some((m) => m.pubkey === memberR)) throw new Error('Already a member')
@@ -307,10 +310,10 @@ export async function addGroupMember(opts: {
     const roster: RosterMap = {}
     for (const m of currentMembers) if (m.p) roster[m.p] = m.pubkey
     roster[p] = memberR
-    return { tree, roster: { epoch: g.epoch, blob: await encryptRoster(secret, roster, g.epoch) } }
+    return { tree, roster: { epoch: g.epoch, blob: await encryptRoster(secret, roster, g.epoch) }, member: { pubkey: memberR, roles: '', p } }
   }
   const tree = await addMemberToGroupTree(deserializeTree(g.tree), memberR, secret, keys.signer, keys.privateKey)
-  return { tree }
+  return { tree, member: { pubkey: memberR, roles: '' } }
 }
 
 /**
@@ -366,6 +369,7 @@ export interface BuildGroupEventOptions {
   relays: string[]
   blossomServers?: string[]
   minPow?: number
+  joinMinPow?: number
   picture?: string
   banner?: string
   about?: string
@@ -391,6 +395,7 @@ function groupTags(o: BuildGroupEventOptions): [string, ...string[]][] {
   for (const r of o.relays) tags.push(['r', r, 'general'])
   for (const s of o.blossomServers ?? []) tags.push(['o', s])
   if (o.minPow && o.minPow > 0) tags.push(['w', String(o.minPow)])
+  if (o.joinMinPow && o.joinMinPow > 0) tags.push(['W', String(o.joinMinPow)])
   if (o.picture) tags.push(['picture', o.picture])
   if (o.banner) tags.push(['banner', o.banner])
   if (o.about) tags.push(['about', o.about.slice(0, GROUP_ABOUT_MAX)])
@@ -474,6 +479,7 @@ export function republishOptions(g: GroupData, patch: Partial<BuildGroupEventOpt
     relays: g.relays,
     blossomServers: g.blossomServers,
     minPow: g.minPow,
+    joinMinPow: g.joinMinPow,
     picture: g.picture,
     banner: g.banner,
     about: g.about,

@@ -26,6 +26,10 @@ interface GroupState {
   groups: Record<string, GroupData>
   /** Group open in the DM page's Groups tab. */
   activeGroupId: string | null
+  /** Which DM page section is showing ('dms' | 'groups'). Lives here (not in DMPage state) because the
+   *  page is mounted separately for the desktop and mobile layouts and remounts on a breakpoint change. */
+  dmSection: 'dms' | 'groups'
+  setDmSection: (s: 'dms' | 'groups') => void
   /** Pending invites the user is looking at (naddr coords), not yet accepted. */
   pendingInvites: string[]
   /** Bumped by requestOpenGroup so the DM page switches to the Groups section even if the id is unchanged. */
@@ -52,6 +56,8 @@ export const useGroupStore = create<GroupState>((set) => ({
   status: {},
   groups: {},
   activeGroupId: null,
+  dmSection: 'dms',
+  setDmSection: (dmSection) => set({ dmSection }),
   pendingInvites: [],
   openNonce: 0,
 

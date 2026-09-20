@@ -1,14 +1,14 @@
 /**
  * GroupDetailsModal: opened from the group chat header. Shows the banner, picture, name and the
- * members-only description, the member list (searchable, scrolls), an "Add members" button that
- * opens the manage-members modal, and for the creator an Edit mode (face uploads via
- * GroupFaceEditor, name, public + private descriptions) plus a "Dangerous" accordion holding the
- * request-delete action. A non-creator finds "Leave group" under the same accordion.
+ * members-only description, the member list (searchable, scrolls; the creator removes from here),
+ * an "Add members" button that opens the add modal, the creator's pending join requests (§21.6.1),
+ * an Edit mode (face uploads via GroupFaceEditor, name, public + private descriptions), and a
+ * "Dangerous" accordion holding request-delete (creator) or leave (member).
  */
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { nip19 } from 'nostr-tools'
-import { X, Loader2, Pencil, UserPlus, Search, Crown, Lock, ChevronDown, AlertTriangle, Trash2, LogOut } from 'lucide-react'
+import { X, Loader2, Pencil, UserPlus, UserMinus, Search, Crown, Lock, ChevronDown, AlertTriangle, Trash2, LogOut, RotateCw, Check, MessageSquareText, Square, CheckSquare } from 'lucide-react'
 import { useEscToClose } from '@/hooks/useEscToClose'
 import { useHubStore } from '@/stores/hubStore'
 import { useGroupStore } from '@/stores/groupStore'
@@ -18,7 +18,8 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { GroupFaceEditor, type GroupFaceState } from '@/components/group/GroupFaceEditor'
 import { GroupMembersModal } from '@/components/group/GroupMembersModal'
 import { ConfirmDeleteGroupModal, ConfirmLeaveGroupModal } from '@/components/group/GroupMenu'
-import { updateGroup } from '@/lib/group/groupOps'
+import { updateGroup, removeMember, addMembers } from '@/lib/group/groupOps'
+import { fetchGroupJoinRequests, readGroupJoinNote, type GroupJoinRequest } from '@/lib/group/groupJoin'
 import { GROUP_NAME_MAX, GROUP_ABOUT_MAX, GROUP_DESCRIPTION_MAX, GROUP_MAX_MEMBERS } from '@/lib/group/groupEvent'
 import { HUB_BANNER_PLACEHOLDER } from '@/lib/constants'
 import { cn, truncateNpub } from '@/lib/utils'
@@ -35,10 +36,17 @@ export function GroupDetailsModal({ dTag, isCreator, onClose }: { dTag: string; 
   const creatorReal = hub?.ownerRealPubkey ?? hub?.creatorPubkey
   // toHubData falls back to the public blurb when there is no members-only description.
   const privateDescription = hub?.description && hub.description !== group?.about ? hub.description : ''
+  const profileOf = (pk: string) => {
+    const p = getProfile(pk)
+    const npub = (() => { try { return nip19.npubEncode(pk) } catch { return pk } })()
+    return { p, npub, label: p?.display_name || p?.name || truncateNpub(npub, 10) }
+  }
 
   // Members
   const [search, setSearch] = useState('')
   const [showManage, setShowManage] = useState(false)
+  const [confirmRemove, setConfirmRemove] = useState<string | null>(null)
+  const [removing, setRemoving] = useState<string | null>(null)
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
     if (!q) return members
@@ -47,6 +55,43 @@ export function GroupDetailsModal({ dTag, isCreator, onClose }: { dTag: string; 
       return `${p?.display_name ?? ''} ${p?.name ?? ''} ${p?.nip05 ?? ''}`.toLowerCase().includes(q) || m.pubkey.startsWith(q)
     })
   }, [members, search, getProfile])
+  const doRemove = async (pubkey: string) => {
+    const m = members.find((x) => x.pubkey === pubkey)
+    if (!m) return
+    setRemoving(pubkey); setError(null)
+    try { await removeMember(dTag, m); setConfirmRemove(null) } catch (err) { setError(err instanceof Error ? err.message : 'Failed to remove member') } finally { setRemoving(null) }
+  }
+
+  // Join requests (creator)
+  const [requests, setRequests] = useState<GroupJoinRequest[] | null>(null)
+  const [loadingRequests, setLoadingRequests] = useState(false)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [approving, setApproving] = useState(false)
+  const [noteView, setNoteView] = useState<{ pubkey: string; text: string | null; loading: boolean } | null>(null)
+  const memberSet = useMemo(() => new Set(members.map((m) => m.pubkey)), [members])
+  const loadRequests = useCallback(async () => {
+    if (!group || !creatorReal) return
+    setLoadingRequests(true)
+    try { setRequests(await fetchGroupJoinRequests(group, { memberPubkeys: memberSet, creatorReal })) } catch { setRequests([]) } finally { setLoadingRequests(false) }
+  }, [group, creatorReal, memberSet])
+  useEffect(() => { if (isCreator) void loadRequests() }, [isCreator, loadRequests])
+  const toggleSelected = (pk: string) => setSelected((prev) => { const n = new Set(prev); if (n.has(pk)) n.delete(pk); else n.add(pk); return n })
+  const approve = async () => {
+    if (selected.size === 0) return
+    setApproving(true); setError(null)
+    try {
+      await addMembers(dTag, [...selected])
+      setSelected(new Set())
+      await loadRequests()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to add members')
+    } finally { setApproving(false) }
+  }
+  const openNote = async (req: GroupJoinRequest) => {
+    setNoteView({ pubkey: req.pubkey, text: null, loading: true })
+    const text = await readGroupJoinNote(req)
+    setNoteView({ pubkey: req.pubkey, text, loading: false })
+  }
 
   // Edit mode (creator)
   const [editing, setEditing] = useState(false)
@@ -86,9 +131,10 @@ export function GroupDetailsModal({ dTag, isCreator, onClose }: { dTag: string; 
   const [showDelete, setShowDelete] = useState(false)
   const [showLeave, setShowLeave] = useState(false)
 
-  useEscToClose(onClose, !showManage && !showDelete && !showLeave && !face.overlayOpen)
+  useEscToClose(onClose, !showManage && !showDelete && !showLeave && !face.overlayOpen && !noteView)
 
   const field = 'w-full h-9 px-3 rounded-lg bg-secondary/40 border border-border text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:border-primary/40'
+  const boxHeader = 'flex items-center gap-2 px-3 py-2 border-b border-border bg-secondary/30'
 
   return createPortal(
     <div className="fixed inset-0 z-[250] flex items-center justify-center">
@@ -158,7 +204,7 @@ export function GroupDetailsModal({ dTag, isCreator, onClose }: { dTag: string; 
                   )}
                 </div>
                 <div className="rounded-lg border border-border overflow-hidden">
-                  <div className="flex items-center gap-2 px-3 py-2 border-b border-border bg-secondary/30">
+                  <div className={boxHeader}>
                     <Search size={14} className="text-muted-foreground shrink-0" />
                     <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search members" className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground/60 outline-none" />
                   </div>
@@ -166,9 +212,10 @@ export function GroupDetailsModal({ dTag, isCreator, onClose }: { dTag: string; 
                     {filtered.length === 0 ? (
                       <p className="px-2 py-3 text-xs text-muted-foreground/70">No matches.</p>
                     ) : filtered.map((m) => {
-                      const p = getProfile(m.pubkey)
-                      const npub = (() => { try { return nip19.npubEncode(m.pubkey) } catch { return m.pubkey } })()
-                      const label = p?.display_name || p?.name || truncateNpub(npub, 10)
+                      const { p, npub, label } = profileOf(m.pubkey)
+                      const isMe = m.pubkey === myPubkey
+                      const isOwner = m.pubkey === creatorReal
+                      const isRemoving = removing === m.pubkey
                       return (
                         <div key={m.pubkey} className="flex items-center gap-3 px-2.5 py-2 rounded-lg hover:bg-secondary/40">
                           <Avatar className="h-9 w-9 shrink-0">
@@ -178,17 +225,82 @@ export function GroupDetailsModal({ dTag, isCreator, onClose }: { dTag: string; 
                           <div className="flex-1 min-w-0">
                             <p className="text-sm text-foreground truncate flex items-center gap-1.5">
                               {label}
-                              {m.pubkey === myPubkey && <span className="text-[10px] text-muted-foreground">(you)</span>}
-                              {m.pubkey === creatorReal && <Crown size={11} className="text-amber-400 shrink-0" />}
+                              {isMe && <span className="text-[10px] text-muted-foreground">(you)</span>}
+                              {isOwner && <Crown size={11} className="text-amber-400 shrink-0" />}
                             </p>
                             <p className="text-[11px] text-muted-foreground font-mono truncate">{truncateNpub(npub, 6)}</p>
                           </div>
+                          {isCreator && !isMe && !isOwner && (
+                            confirmRemove === m.pubkey ? (
+                              <div className="flex items-center gap-1 shrink-0">
+                                <button onClick={() => doRemove(m.pubkey)} disabled={isRemoving} className="px-2.5 py-1.5 rounded-md text-xs font-medium bg-destructive text-destructive-foreground hover:bg-destructive/90 cursor-pointer disabled:opacity-50">
+                                  {isRemoving ? <Loader2 size={12} className="animate-spin" /> : 'Confirm remove'}
+                                </button>
+                                <button onClick={() => setConfirmRemove(null)} disabled={isRemoving} className="px-2 py-1.5 rounded-md text-xs text-muted-foreground hover:text-foreground cursor-pointer">Cancel</button>
+                              </div>
+                            ) : (
+                              <button onClick={() => setConfirmRemove(m.pubkey)} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors cursor-pointer shrink-0">
+                                <UserMinus size={13} /> Remove
+                              </button>
+                            )
+                          )}
                         </div>
                       )
                     })}
                   </div>
                 </div>
+                {isCreator && <p className="text-[11px] text-muted-foreground/70">Removing someone rotates the group secret. They can't read anything after that point.</p>}
               </div>
+
+              {/* Join requests (creator) */}
+              {isCreator && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium text-foreground">Join requests {requests && requests.length > 0 && <span className="font-normal font-mono tabular-nums text-muted-foreground/60">{requests.length}</span>}</span>
+                    <div className="flex items-center gap-1.5">
+                      <button onClick={loadRequests} disabled={loadingRequests} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors cursor-pointer disabled:opacity-50" title="Refresh">
+                        <RotateCw size={13} className={cn(loadingRequests && 'animate-spin')} />
+                      </button>
+                      <button onClick={approve} disabled={approving || selected.size === 0} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
+                        {approving ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />} Add selected{selected.size > 0 ? ` (${selected.size})` : ''}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-border overflow-hidden">
+                    <div className="max-h-56 overflow-y-auto p-2 space-y-0.5">
+                      {requests === null || (loadingRequests && requests.length === 0) ? (
+                        <p className="px-2 py-3 text-xs text-muted-foreground/70 flex items-center gap-2"><Loader2 size={12} className="animate-spin" /> Looking for requests...</p>
+                      ) : requests.length === 0 ? (
+                        <p className="px-2 py-3 text-xs text-muted-foreground/70">No pending requests. People can request from the group address card.</p>
+                      ) : requests.map((r) => {
+                        const { p, npub, label } = profileOf(r.pubkey)
+                        const on = selected.has(r.pubkey)
+                        const hasNote = !!(r.note || r.noteCipher)
+                        return (
+                          <div key={r.pubkey} className={cn('flex items-center gap-3 px-2.5 py-2 rounded-lg transition-colors', on ? 'bg-primary/10' : 'hover:bg-secondary/40')}>
+                            <button onClick={() => toggleSelected(r.pubkey)} className="text-muted-foreground hover:text-foreground cursor-pointer shrink-0">
+                              {on ? <CheckSquare size={16} className="text-primary" /> : <Square size={16} />}
+                            </button>
+                            <Avatar className="h-9 w-9 shrink-0">
+                              {p?.picture && <AvatarImage src={p.picture} />}
+                              <AvatarFallback className="text-xs bg-primary/20 text-primary">{label.slice(0, 2).toUpperCase()}</AvatarFallback>
+                            </Avatar>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm text-foreground truncate">{label}</p>
+                              <p className="text-[11px] text-muted-foreground font-mono truncate">{truncateNpub(npub, 6)} · {new Date(r.createdAt * 1000).toLocaleDateString()}{r.powBits > 0 ? ` · PoW ${r.powBits}` : ''}</p>
+                            </div>
+                            {hasNote && (
+                              <button onClick={() => openNote(r)} className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] text-muted-foreground hover:text-foreground hover:bg-secondary/60 cursor-pointer shrink-0">
+                                <MessageSquareText size={12} /> Note
+                              </button>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Dangerous */}
               <div>
@@ -235,7 +347,24 @@ export function GroupDetailsModal({ dTag, isCreator, onClose }: { dTag: string; 
         )}
       </div>
 
-      {showManage && <GroupMembersModal dTag={dTag} isCreator={isCreator} onClose={() => setShowManage(false)} />}
+      {/* Join note viewer */}
+      {noteView && (
+        <div className="fixed inset-0 z-[260] flex items-center justify-center px-2 bg-black/60 backdrop-blur-sm" onClick={() => setNoteView(null)}>
+          <div className="w-full max-w-[400px] bg-card border border-border rounded-xl shadow-2xl p-5 space-y-3" onClick={(e) => e.stopPropagation()}>
+            <h4 className="text-sm font-semibold text-foreground">Note from {profileOf(noteView.pubkey).label}</h4>
+            {noteView.loading ? (
+              <p className="text-xs text-muted-foreground flex items-center gap-2"><Loader2 size={12} className="animate-spin" /> Decrypting...</p>
+            ) : noteView.text ? (
+              <p className="text-sm text-foreground whitespace-pre-wrap break-words leading-relaxed">{noteView.text}</p>
+            ) : (
+              <p className="text-xs text-muted-foreground">The note could not be read.</p>
+            )}
+            <div className="flex justify-end"><button onClick={() => setNoteView(null)} className="px-3 py-1.5 rounded-lg bg-secondary text-foreground text-sm font-medium hover:bg-secondary/80 cursor-pointer">Close</button></div>
+          </div>
+        </div>
+      )}
+
+      {showManage && <GroupMembersModal dTag={dTag} onClose={() => setShowManage(false)} />}
       {showDelete && <ConfirmDeleteGroupModal dTag={dTag} onClose={() => setShowDelete(false)} onDone={onClose} />}
       {showLeave && <ConfirmLeaveGroupModal dTag={dTag} onClose={() => setShowLeave(false)} onDone={onClose} />}
     </div>,

@@ -4042,6 +4042,7 @@ by the same action. Because there is no join flow, there is nothing for a ban li
 | `r` | Yes | Relay, third value `general`. Messages and the group event live here. At least one. |
 | `o` | No | Blossom server URL for **media** (attachments, voice notes), exactly as the hub `o` (§6.1). Zero or more; recommend ≥2 when the group shares files. Never used for membership — the tree and history are inline. When absent, senders fall back to their own servers and name them per attachment (§21.12). |
 | `w` | No | Minimum **message** PoW (NIP-13), same semantics as the hub `w` (§6.1): messages need a `nonce`, and the group event itself MUST be mined to `w` on every publish. |
+| `W` | No | Minimum **join-request** PoW (NIP-13), same semantics as the hub `W` (§6.1): a kind-36944 request for this group (§21.6.1) MUST carry a `nonce` meeting it, and creators drop under-`W` requests before any decrypt. |
 | `nonce` | Conditional | The group event's own PoW nonce when `w` > 0. |
 | `message_expiration` | No | Disappearing-messages duration in seconds, as for hubs (§6.1, §9.10). |
 | `picture` / `banner` / `about` | No | The group's public face — icon, banner, short description — **plaintext in both versions** for the same reason as `n`: the person holding an invite has no secret yet. Member-only prose belongs in the conversation. |
@@ -4052,8 +4053,9 @@ by the same action. Because there is no join flow, there is nothing for a ban li
 | `signer_scheme` | Conditional (**v2**) | NIP-SKD scheme, exactly as on the hub event (§6.1). |
 | `deleted` | Conditional | `["deleted", "true"]` on the tombstone republish (§21.7). |
 
-There is deliberately **no `t`, no `f`, no `m`, no `W`, no `b`**: nothing is discoverable, no
-membership file is on Blossom, nobody requests to join.
+There is deliberately **no `t`, no `f`, no `m`, no `b`**: nothing is discoverable, no
+membership file is on Blossom, and only the creator adds members. A join request (§21.6.1) is
+a way to *ask*; it never changes membership by itself.
 
 #### `created_at` increment
 
@@ -4175,6 +4177,28 @@ Until step 3 the user is a member from the creator's point of view but not from 
 a client SHOULD show the invite with the group's name and face tags and let the user decline,
 which simply means not adding it to their list. Declining does not remove their leaf; only the
 creator can do that.
+
+#### 21.6.1 Join Request
+
+Someone holding the address who is **not** in the tree has no in-band way to ask for a leaf
+other than this. A group MAY accept the hub join request, kind `36944`, **exactly as §6.3**
+(including the join note, §6.3.1, and the withdraw / resend lifecycle), with three differences:
+
+- **`a` is the group coordinate**: `["a", "36950:<pubkey>:<d>"]` (v1: the creator's `R`; v2:
+  `O_pub`). Creators list requests by `#a`; a v1 request also carries `["d", "<d>"]` and
+  `["p", "<creator>"]` as in §6.3.
+- **`W` on the group event is the join difficulty** (§21.2). When absent, no PoW is required.
+  As in hubs, an under-`W` request is discarded before any ECDH, which is what keeps a v2
+  creator's decrypt cost from being an amplification target.
+- **Only the creator processes them.** There are no moderators, no member files, and no
+  facilitators (§5.6), so the `list` tag is meaningless on a group request and is ignored.
+  Approving means running §21.4 for the requester's `R`; nothing else is published.
+
+The v2 sealing is unchanged: the request is authored by the deterministic `addr` sub-key
+(context `nip-chat:v2:join-addr:<d>`, peer `O_pub`), sealed to `O`, and opened by the creator as
+`O` with the squat check of §6.3. The public sees an unlinkable key posting an opaque blob
+under the group coordinate. A v1 request names the requester and the group in plaintext, as a
+v1 hub join does; the note stays encrypted to the creator.
 
 ### 21.7 Deletion
 
