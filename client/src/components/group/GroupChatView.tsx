@@ -3,19 +3,19 @@
  *
  * A group is registered in the hub store as a single-channel hub (channel id = its d-tag), so the
  * chat itself IS <ChannelView hideHeader /> pointed at it. This component owns the group header
- * (face, member count, creator actions) and the store's active hub/channel while it is mounted -
+ * (face, opens GroupDetailsModal) and the store's active hub/channel while it is mounted -
  * set directly (not via setActiveHub, which persists "last active hub" for the hub sidebar) and
  * restored on unmount so leaving the DM page never leaves a group selected on the Hubs page.
  */
 import { useEffect, useRef, useState } from 'react'
-import { ChevronLeft, Users, Lock, Loader2, AlertTriangle, MoreVertical } from 'lucide-react'
+import { ChevronLeft, Lock, Loader2, AlertTriangle, MoreVertical } from 'lucide-react'
 import { useHubStore } from '@/stores/hubStore'
 import { useGroupStore } from '@/stores/groupStore'
 import { useUserStore } from '@/stores/userStore'
 import { ChannelView } from '@/components/hub/ChannelView'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
-import { GroupMembersModal } from '@/components/group/GroupMembersModal'
+import { GroupDetailsModal } from '@/components/group/GroupDetailsModal'
 import { GroupMenu } from '@/components/group/GroupMenu'
 
 export function GroupChatView({ dTag, onBack }: { dTag: string; onBack?: () => void }) {
@@ -23,7 +23,7 @@ export function GroupChatView({ dTag, onBack }: { dTag: string; onBack?: () => v
   const members = useHubStore((s) => s.hubMembers[dTag])
   const status = useGroupStore((s) => s.status[dTag])
   const myPubkey = useUserStore((s) => s.pubkey)
-  const [showMembers, setShowMembers] = useState(false)
+  const [showDetails, setShowDetails] = useState(false)
   const [showMenu, setShowMenu] = useState(false)
   const menuAnchorRef = useRef<HTMLButtonElement>(null)
 
@@ -58,31 +58,25 @@ export function GroupChatView({ dTag, onBack }: { dTag: string; onBack?: () => v
             <ChevronLeft size={18} />
           </button>
         )}
-        <Avatar className="h-8 w-8 rounded-lg">
-          {hub?.icon && <AvatarImage src={hub.icon} />}
-          <AvatarFallback className="text-xs bg-primary/20 text-primary rounded-lg">{name.slice(0, 2).toUpperCase()}</AvatarFallback>
-        </Avatar>
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-semibold text-foreground truncate flex items-center gap-1.5">
-            {hub?.version === 2 && <Lock size={11} className="text-emerald-400 shrink-0" />}
-            {name}
-          </p>
-          <p className="text-[10px] text-muted-foreground truncate">
-            {hub?.version === 2 ? 'Private group' : 'Group'}{hub?.description ? ` · ${hub.description}` : ''}
-          </p>
-        </div>
+        <button
+          onClick={() => hub && setShowDetails(true)}
+          className="flex items-center gap-3 min-w-0 flex-1 -my-1 -ml-1 py-1 pl-1 pr-2 rounded-lg text-left hover:bg-secondary/60 transition-colors cursor-pointer"
+        >
+          <Avatar className="h-8 w-8 rounded-lg shrink-0">
+            {hub?.icon && <AvatarImage src={hub.icon} />}
+            <AvatarFallback className="text-xs bg-primary/20 text-primary rounded-lg">{name.slice(0, 2).toUpperCase()}</AvatarFallback>
+          </Avatar>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold text-foreground truncate flex items-center gap-1.5">
+              {hub?.version === 2 && <Lock size={11} className="text-emerald-400 shrink-0" />}
+              {name}
+            </p>
+            <p className="text-[10px] text-muted-foreground truncate">
+              {hub?.description || `${count} member${count !== 1 ? 's' : ''}`}
+            </p>
+          </div>
+        </button>
         <TooltipProvider delayDuration={200}>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={() => setShowMembers(true)}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 border border-border/50 transition-colors cursor-pointer shrink-0"
-              >
-                <Users size={12} /> {count}
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" className="text-xs">Members{isCreator ? ' (add or remove)' : ''}</TooltipContent>
-          </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
               <button
@@ -114,8 +108,8 @@ export function GroupChatView({ dTag, onBack }: { dTag: string; onBack?: () => v
         <ChannelView hideHeader />
       )}
 
-      {showMembers && hub && <GroupMembersModal dTag={dTag} isCreator={isCreator} onClose={() => setShowMembers(false)} />}
-      {showMenu && hub && <GroupMenu dTag={dTag} isCreator={isCreator} anchorRef={menuAnchorRef} onClose={() => setShowMenu(false)} />}
+      {showDetails && hub && <GroupDetailsModal dTag={dTag} isCreator={isCreator} onClose={() => setShowDetails(false)} />}
+      {showMenu && hub && <GroupMenu dTag={dTag} anchorRef={menuAnchorRef} onClose={() => setShowMenu(false)} />}
     </div>
   )
 }

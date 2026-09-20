@@ -19,7 +19,6 @@ import { useGroupStore } from '@/stores/groupStore'
 import { GroupList } from '@/components/group/GroupList'
 import { GroupChatView } from '@/components/group/GroupChatView'
 import { CreateGroupModal } from '@/components/group/CreateGroupModal'
-import { JoinGroupModal } from '@/components/group/JoinGroupModal'
 import { setNameFromAddress } from '@/lib/customSets'
 import { useDM04Store } from '@/stores/dm04Store'
 import { DM04ChatView } from '@/components/dm/DM04ChatView'
@@ -225,7 +224,6 @@ export function DMPage() {
   const activeGroupId = useGroupStore((s) => s.activeGroupId)
   const setActiveGroup = useGroupStore((s) => s.setActiveGroup)
   const [showCreateGroup, setShowCreateGroup] = useState(false)
-  const [showJoinGroup, setShowJoinGroup] = useState(false)
   // A shared group card (or anything outside this page) asked to open a group → land on the Groups section
   const openNonce = useGroupStore((s) => s.openNonce)
   useEffect(() => {
@@ -299,7 +297,6 @@ export function DMPage() {
         activeGroupId={activeGroupId}
         onSelectGroup={(dTag) => { setActiveGroup(dTag); setMobileShowList(false) }}
         onCreateGroup={() => setShowCreateGroup(true)}
-        onJoinGroup={() => setShowJoinGroup(true)}
       />
 
       {/* Right, Chat */}
@@ -328,12 +325,6 @@ export function DMPage() {
           onCreated={(dTag) => { setSection('groups'); setActiveGroup(dTag); setMobileShowList(false) }}
         />
       )}
-      {showJoinGroup && (
-        <JoinGroupModal
-          onClose={() => setShowJoinGroup(false)}
-          onJoined={(dTag) => { setSection('groups'); setActiveGroup(dTag); setMobileShowList(false) }}
-        />
-      )}
     </div>
   )
 }
@@ -356,7 +347,6 @@ function ConversationList({
   activeGroupId,
   onSelectGroup,
   onCreateGroup,
-  onJoinGroup,
 }: {
   onNewMessage: () => void
   activePubkey: string | null
@@ -371,7 +361,6 @@ function ConversationList({
   activeGroupId: string | null
   onSelectGroup: (dTag: string) => void
   onCreateGroup: () => void
-  onJoinGroup: () => void
 }) {
   // NIP-17 store
   const getNip17Conversations = useDMStore((s) => s.getFilteredConversations)
@@ -493,7 +482,7 @@ function ConversationList({
       </div>
 
       {section === 'groups' ? (
-        <GroupList activeDTag={activeGroupId} onSelect={onSelectGroup} onCreate={onCreateGroup} onJoin={onJoinGroup} />
+        <GroupList activeDTag={activeGroupId} onSelect={onSelectGroup} onCreate={onCreateGroup} />
       ) : (<>
       {/* DM self (NIP-04 only), open an encrypted conversation with your own key */}
       {dmProtocol === 'nip04' && myPubkey && (

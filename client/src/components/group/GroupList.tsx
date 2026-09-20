@@ -3,7 +3,7 @@
  * Lists the user's groups (kind-16943 entries) with the loaded face from the hub store, unread
  * count, and a status pill for anything that isn't a normal loaded group.
  */
-import { Loader2, Plus, Link2, Users, Lock, AlertTriangle } from 'lucide-react'
+import { Loader2, Plus, Users, Lock, AlertTriangle } from 'lucide-react'
 import { useGroupStore, type GroupStatus } from '@/stores/groupStore'
 import { useHubStore } from '@/stores/hubStore'
 import { useNotificationStore } from '@/stores/notificationStore'
@@ -19,11 +19,10 @@ const STATUS_LABEL: Partial<Record<GroupStatus, string>> = {
   error: 'Failed to load',
 }
 
-export function GroupList({ activeDTag, onSelect, onCreate, onJoin }: {
+export function GroupList({ activeDTag, onSelect, onCreate }: {
   activeDTag: string | null
   onSelect: (dTag: string) => void
   onCreate: () => void
-  onJoin: () => void
 }) {
   const entries = useGroupStore((s) => s.entries)
   const listLoaded = useGroupStore((s) => s.listLoaded)
@@ -47,17 +46,6 @@ export function GroupList({ activeDTag, onSelect, onCreate, onJoin }: {
             </TooltipTrigger>
             <TooltipContent side="bottom" className="text-xs">Create a group: up to 100 people, one conversation</TooltipContent>
           </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={onJoin}
-                className="flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors cursor-pointer"
-              >
-                <Link2 size={13} /> Invite
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" className="text-xs">Paste a group address someone sent you</TooltipContent>
-          </Tooltip>
         </TooltipProvider>
       </div>
 
@@ -71,7 +59,7 @@ export function GroupList({ activeDTag, onSelect, onCreate, onJoin }: {
           <div className="flex flex-col items-center justify-center py-8 gap-2 text-center px-4">
             <Users size={20} className="text-muted-foreground/50" />
             <p className="text-xs text-muted-foreground leading-relaxed">
-              No groups yet. Create one, or paste an invite address someone sent you.
+              No groups yet. Create one, or open a group address someone sent you in chat.
             </p>
           </div>
         ) : (

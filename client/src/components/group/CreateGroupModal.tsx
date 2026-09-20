@@ -9,19 +9,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { nip19, nip05 } from 'nostr-tools'
-import { X, Loader2, Plus, Trash2, AlertTriangle, ChevronDown, Info, Search, Check, Lock, Camera, ImageIcon, XCircle } from 'lucide-react'
-import type { UnsignedEvent, Event as NostrEvent } from 'nostr-tools'
-import { ImageCropModal } from '@/components/ui/ImageCropModal'
-import { uploadToBlossomServers } from '@/lib/blossom'
-import type { UploadProgress } from '@/lib/blossom'
-import { makeSubkeySigner } from '@/lib/nostr/v2send'
+import { X, Loader2, Plus, Trash2, AlertTriangle, ChevronDown, Info, Search, Check, Lock } from 'lucide-react'
+import { GroupFaceEditor, type GroupFaceState } from '@/components/group/GroupFaceEditor'
 import { useEscToClose } from '@/hooks/useEscToClose'
 import { useUserStore } from '@/stores/userStore'
 import { useFollowStore } from '@/stores/followStore'
 import { useUserListsStore } from '@/stores/userListsStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { getRelayList } from '@/lib/nostr/relay-pool'
-import { canUseV2, ChatContext } from '@/lib/crypto/skd'
+import { canUseV2 } from '@/lib/crypto/skd'
 import { createGroup } from '@/lib/group/groupOps'
 import { GROUP_NAME_MAX, GROUP_ABOUT_MAX, GROUP_MAX_MEMBERS } from '@/lib/group/groupEvent'
 import { HUB_DESCRIPTION_MAX } from '@/lib/hub/hubLimits'
@@ -36,61 +32,6 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 const V2_TOGGLE_PASSWORD = 'denchat'
 
 interface RelayEntry { url: string; enabled: boolean }
-
-const ACCEPTED_IMAGE_EXTENSIONS = '.png,.jpg,.jpeg,.gif,.webp'
-const ACCEPTED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
-type UploadStatus = 'idle' | 'uploading' | 'success' | 'error'
-
-function formatSpeed(bytesPerSec: number): string {
-  if (bytesPerSec < 1024) return `${Math.round(bytesPerSec)} B/s`
-  if (bytesPerSec < 1024 * 1024) return `${(bytesPerSec / 1024).toFixed(1)} KB/s`
-  return `${(bytesPerSec / (1024 * 1024)).toFixed(1)} MB/s`
-}
-function shortServerName(url: string): string {
-  try { return new URL(url).hostname.replace('www.', '') } catch { return url }
-}
-
-/** One image slot (picture or banner): local preview, Blossom URL once uploaded, and upload progress. */
-interface ImageSlot {
-  preview: string | null
-  url: string | null
-  status: UploadStatus
-  progress: UploadProgress | null
-  successCount: number
-}
-const emptySlot: ImageSlot = { preview: null, url: null, status: 'idle', progress: null, successCount: 0 }
-
-/** Same multi-server upload bar as hub creation: current server, percent, speed, skip. */
-function UploadStatusDisplay({ slot, onSkip }: { slot: ImageSlot; onSkip: () => void }) {
-  const { status, progress, successCount } = slot
-  if (status === 'uploading' && progress) {
-    return (
-      <div className="flex flex-col gap-0.5 w-full mt-1">
-        <div className="flex items-center justify-between text-xs">
-          <span className="text-amber-400 truncate max-w-[140px]">{shortServerName(progress.serverUrl)} ({progress.serverIndex + 1}/{progress.totalServers})</span>
-          <TooltipProvider delayDuration={300}>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button onClick={onSkip} className="text-muted-foreground hover:text-destructive cursor-pointer flex items-center gap-0.5">
-                  <XCircle size={10} /><span className="text-[10px]">Skip</span>
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="top" className="z-[300] text-xs">Skip this server</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-        </div>
-        <div className="w-full h-1.5 rounded-full bg-secondary overflow-hidden">
-          <div className="h-full bg-amber-400 rounded-full transition-all duration-150" style={{ width: `${progress.percent}%` }} />
-        </div>
-        <div className="flex items-center justify-between text-[10px] text-muted-foreground"><span>{progress.percent}%</span><span>{formatSpeed(progress.speed)}</span></div>
-      </div>
-    )
-  }
-  if (status === 'uploading') return <span className="flex items-center gap-1 text-xs text-amber-400 mt-1"><Loader2 size={10} className="animate-spin" /> Preparing...</span>
-  if (status === 'success') return <span className="flex items-center gap-1 text-xs text-emerald-400 mt-1"><Check size={10} /> {successCount} server{successCount !== 1 ? 's' : ''}</span>
-  if (status === 'error') return <span className="flex items-center gap-1 text-xs text-destructive mt-1"><AlertTriangle size={10} /> Failed</span>
-  return null
-}
 
 /** npub / nprofile / hex → hex, or null. */
 function keyFromInput(raw: string): string | null {
@@ -133,54 +74,7 @@ export function CreateGroupModal({ onClose, onCreated }: { onClose: () => void; 
 
   // Stable d tag chosen up front so a v2 group's image uploads can be auth-signed as the owner pseudonym O.
   const dTagRef = useRef(crypto.randomUUID())
-
-  // Images: uploaded to the client's Blossom servers (multi-server, sequential) exactly like hub creation.
-  const [picture, setPicture] = useState<ImageSlot>(emptySlot)
-  const [banner, setBanner] = useState<ImageSlot>(emptySlot)
-  const [pictureEditFile, setPictureEditFile] = useState<File | null>(null)
-  const [bannerEditFile, setBannerEditFile] = useState<File | null>(null)
-  const [fileSizeWarning, setFileSizeWarning] = useState<{ name: string; limitMb: number } | null>(null)
-  const pictureInputRef = useRef<HTMLInputElement>(null)
-  const bannerInputRef = useRef<HTMLInputElement>(null)
-  const pictureAbortRef = useRef<AbortController | null>(null)
-  const bannerAbortRef = useRef<AbortController | null>(null)
-  const [pictureDragOver, setPictureDragOver] = useState(false)
-  const [bannerDragOver, setBannerDragOver] = useState(false)
-  const uploadLimitMb = () => Number(localStorage.getItem('den-chat-upload-limit-mb')) || 10
-
-  const uploadImage = async (file: File, set: (fn: (s: ImageSlot) => ImageSlot) => void, abortRef: React.MutableRefObject<AbortController | null>) => {
-    if (file.size > uploadLimitMb() * 1024 * 1024) { setFileSizeWarning({ name: file.name, limitMb: uploadLimitMb() }); return }
-    set(() => ({ ...emptySlot, preview: URL.createObjectURL(file), status: 'uploading' }))
-    try {
-      const data = new Uint8Array(await file.arrayBuffer())
-      // v2: sign the Blossom auth as O so the blob the O-authored group event references isn't linked to the real key.
-      let ownerAuthSigner: ((e: UnsignedEvent) => Promise<NostrEvent>) | undefined
-      if (createV2 && v2Capable) ownerAuthSigner = makeSubkeySigner(ChatContext.owner(dTagRef.current), { privateKey, signer }).signEvent
-      const { hash, successCount, serverUrls } = await uploadToBlossomServers(
-        data, signer, privateKey, undefined, file.type,
-        (progress) => set((s) => ({ ...s, progress: { ...progress } })),
-        () => { const c = new AbortController(); abortRef.current = c; return c.signal },
-        ownerAuthSigner,
-      )
-      const base = (serverUrls[0] ?? '').replace(/\/+$/, '')
-      set((s) => ({ ...s, url: `${base}/${hash}`, successCount, status: 'success', progress: null }))
-    } catch (err) {
-      console.error('[Group] image upload failed:', err)
-      set((s) => ({ ...s, status: 'error', progress: null }))
-    } finally {
-      abortRef.current = null
-    }
-  }
-  const startEdit = (f: File, set: (f: File | null) => void) => {
-    if (!ACCEPTED_IMAGE_TYPES.includes(f.type)) { setError('Only image files are allowed (PNG, JPG, GIF, WebP)'); return }
-    if (f.size > uploadLimitMb() * 1024 * 1024) { setFileSizeWarning({ name: f.name, limitMb: uploadLimitMb() }); return }
-    set(f)
-  }
-  const uploadPicture = (f: File) => uploadImage(f, setPicture, pictureAbortRef)
-  const uploadBanner = (f: File) => uploadImage(f, setBanner, bannerAbortRef)
-  const skip = (ref: React.MutableRefObject<AbortController | null>) => { ref.current?.abort(); ref.current = null }
-  const dragOver = (e: React.DragEvent, set: (v: boolean) => void) => { e.preventDefault(); e.stopPropagation(); set(true) }
-  const dragLeave = (e: React.DragEvent, set: (v: boolean) => void) => { e.preventDefault(); e.stopPropagation(); set(false) }
+  const [face, setFace] = useState<GroupFaceState>({ face: { picture: null, banner: null }, uploading: false, overlayOpen: false })
 
   // Private (v2) toggle: OFF by default; ON only after the confirmation password, only when the signer can do NIP-SKD.
   const [createV2, setCreateV2] = useState(false)
@@ -188,7 +82,7 @@ export function CreateGroupModal({ onClose, onCreated }: { onClose: () => void; 
   const [pw, setPw] = useState('')
   const [pwError, setPwError] = useState(false)
   useEscToClose(() => setShowPw(false), showPw)
-  useEscToClose(onClose, !showPw && !pictureEditFile && !bannerEditFile && !fileSizeWarning)
+  useEscToClose(onClose, !showPw && !face.overlayOpen)
   const handleV2Toggle = () => {
     if (!v2Capable) return
     if (createV2) { setCreateV2(false); return }
@@ -273,7 +167,7 @@ export function CreateGroupModal({ onClose, onCreated }: { onClose: () => void; 
     if (!name.trim()) { setError('Name is required'); return }
     if (selectedRelays.length === 0) { setError('Select at least one relay under Advanced'); return }
     if (selectedRelays.length > MAX_GENERAL_RELAYS) { setError(`At most ${MAX_GENERAL_RELAYS} relays`); return }
-    if (picture.status === 'uploading' || banner.status === 'uploading') { setError('Wait for the image upload to finish'); return }
+    if (face.uploading) { setError('Wait for the image upload to finish'); return }
     setBusy(true); setError(null)
     try {
       const g = await createGroup({
@@ -281,8 +175,8 @@ export function CreateGroupModal({ onClose, onCreated }: { onClose: () => void; 
         name: name.trim(),
         about: about.trim() || undefined,
         description: description.trim() || undefined,
-        picture: picture.url ?? undefined,
-        banner: banner.url ?? undefined,
+        picture: face.face.picture ?? undefined,
+        banner: face.face.banner ?? undefined,
         relays: selectedRelays,
         version: createV2 && v2Capable ? 2 : 1,
         members,
@@ -336,57 +230,7 @@ export function CreateGroupModal({ onClose, onCreated }: { onClose: () => void; 
         </div>
 
         <div className="px-5 py-4 space-y-5 overflow-y-auto min-h-0">
-          {/* Banner with the picture overlapping its bottom-left corner (like a profile header) */}
-          <div>
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => bannerInputRef.current?.click()}
-                disabled={banner.status === 'uploading'}
-                onDragOver={(e) => dragOver(e, setBannerDragOver)}
-                onDragLeave={(e) => dragLeave(e, setBannerDragOver)}
-                onDrop={(e) => { e.preventDefault(); e.stopPropagation(); setBannerDragOver(false); const f = e.dataTransfer.files?.[0]; if (f) startEdit(f, setBannerEditFile) }}
-                className={cn('relative w-full aspect-[3/1] rounded-lg border-2 border-dashed flex items-center justify-center overflow-hidden transition-colors cursor-pointer group', bannerDragOver ? 'border-primary bg-primary/10' : 'border-border hover:border-primary/50')}
-              >
-                {banner.preview ? <img src={banner.preview} alt="Group banner" className="w-full h-full object-cover" /> : (
-                  <span className="flex flex-col items-center gap-1 text-muted-foreground group-hover:text-primary/70"><ImageIcon size={22} /><span className="text-xs">Banner</span></span>
-                )}
-                {banner.status === 'uploading' && <div className="absolute inset-0 bg-black/50 flex items-center justify-center"><Loader2 size={18} className="animate-spin text-white" /></div>}
-                {banner.preview && banner.status !== 'uploading' && (
-                  <div className={cn('absolute inset-0 bg-black/40 flex items-center justify-center transition-opacity', bannerDragOver ? 'opacity-100' : 'opacity-0 group-hover:opacity-100')}><ImageIcon size={16} className="text-white" /></div>
-                )}
-              </button>
-              <button
-                type="button"
-                onClick={() => pictureInputRef.current?.click()}
-                disabled={picture.status === 'uploading'}
-                onDragOver={(e) => dragOver(e, setPictureDragOver)}
-                onDragLeave={(e) => dragLeave(e, setPictureDragOver)}
-                onDrop={(e) => { e.preventDefault(); e.stopPropagation(); setPictureDragOver(false); const f = e.dataTransfer.files?.[0]; if (f) startEdit(f, setPictureEditFile) }}
-                className={cn('absolute left-4 -bottom-7 w-[72px] h-[72px] rounded-full border-2 border-dashed bg-card flex items-center justify-center overflow-hidden transition-colors cursor-pointer group shadow-lg', pictureDragOver ? 'border-primary bg-primary/10' : 'border-border hover:border-primary/50')}
-              >
-                {picture.preview ? <img src={picture.preview} alt="Group picture" className="w-full h-full object-cover" /> : <Camera size={20} className="text-muted-foreground group-hover:text-primary/70" />}
-                {picture.status === 'uploading' && <div className="absolute inset-0 bg-black/50 flex items-center justify-center"><Loader2 size={16} className="animate-spin text-white" /></div>}
-                {picture.preview && picture.status !== 'uploading' && (
-                  <div className={cn('absolute inset-0 bg-black/40 flex items-center justify-center transition-opacity', pictureDragOver ? 'opacity-100' : 'opacity-0 group-hover:opacity-100')}><Camera size={16} className="text-white" /></div>
-                )}
-              </button>
-            </div>
-            <div className="flex items-start gap-4 mt-8 pl-1">
-              <div className="w-[88px] shrink-0 flex flex-col">
-                <span className="text-xs text-muted-foreground">Picture</span>
-                <UploadStatusDisplay slot={picture} onSkip={() => skip(pictureAbortRef)} />
-                {picture.preview && picture.status !== 'uploading' && <button onClick={() => setPicture(emptySlot)} className="text-xs text-destructive hover:underline cursor-pointer mt-0.5 text-left">Remove</button>}
-              </div>
-              <div className="flex-1 min-w-0 flex flex-col">
-                <span className="text-xs text-muted-foreground">Banner</span>
-                <UploadStatusDisplay slot={banner} onSkip={() => skip(bannerAbortRef)} />
-                {banner.preview && banner.status !== 'uploading' && <button onClick={() => setBanner(emptySlot)} className="text-xs text-destructive hover:underline cursor-pointer mt-0.5 text-left">Remove</button>}
-              </div>
-            </div>
-            <input ref={pictureInputRef} type="file" accept={ACCEPTED_IMAGE_EXTENSIONS} className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) startEdit(f, setPictureEditFile); e.target.value = '' }} />
-            <input ref={bannerInputRef} type="file" accept={ACCEPTED_IMAGE_EXTENSIONS} className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) startEdit(f, setBannerEditFile); e.target.value = '' }} />
-          </div>
+          <GroupFaceEditor dTag={dTagRef.current} v2={createV2 && v2Capable} onChange={setFace} onError={setError} />
 
           <label className="block space-y-1">
             <span className="text-xs font-medium text-foreground">Name</span>
@@ -535,29 +379,6 @@ export function CreateGroupModal({ onClose, onCreated }: { onClose: () => void; 
           </button>
         </div>
       </div>
-
-      {/* Image crop editors, opened before uploading a picked or dropped image */}
-      {pictureEditFile && (
-        <ImageCropModal file={pictureEditFile} aspect={1} round maxOutput={512} title="Edit group picture"
-          onCancel={() => setPictureEditFile(null)}
-          onUploadOriginal={() => { const f = pictureEditFile; setPictureEditFile(null); uploadPicture(f) }}
-          onSave={(f) => { setPictureEditFile(null); uploadPicture(f) }} />
-      )}
-      {bannerEditFile && (
-        <ImageCropModal file={bannerEditFile} aspect={3} maxOutput={1500} title="Edit group banner"
-          onCancel={() => setBannerEditFile(null)}
-          onUploadOriginal={() => { const f = bannerEditFile; setBannerEditFile(null); uploadBanner(f) }}
-          onSave={(f) => { setBannerEditFile(null); uploadBanner(f) }} />
-      )}
-      {fileSizeWarning && (
-        <div className="fixed inset-0 z-[260] flex items-center justify-center px-2 bg-black/60 backdrop-blur-sm" onClick={() => setFileSizeWarning(null)}>
-          <div className="w-[400px] bg-card border border-border rounded-xl shadow-2xl p-5 space-y-3" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center gap-2"><AlertTriangle size={18} className="text-amber-500 shrink-0" /><h4 className="text-sm font-semibold text-foreground">File too large</h4></div>
-            <p className="text-xs text-muted-foreground">{fileSizeWarning.name} is over the {fileSizeWarning.limitMb} MB upload limit set in Settings.</p>
-            <div className="flex justify-end"><button onClick={() => setFileSizeWarning(null)} className="px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 cursor-pointer">OK</button></div>
-          </div>
-        </div>
-      )}
 
       {/* Confirmation password for turning the private toggle ON */}
       {showPw && (

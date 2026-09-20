@@ -11,7 +11,6 @@ import { useHubStore } from '@/stores/hubStore'
 import { useUserStore } from '@/stores/userStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { truncateNpub } from '@/lib/utils'
 import { addMember, removeMember } from '@/lib/group/groupOps'
 import { GROUP_MAX_MEMBERS } from '@/lib/group/groupEvent'
@@ -74,7 +73,7 @@ export function GroupMembersModal({ dTag, isCreator, onClose }: { dTag: string; 
       >
         <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
           <div className="min-w-0">
-            <h3 className="text-sm font-semibold text-foreground">Members</h3>
+            <h3 className="text-sm font-semibold text-foreground">Manage members</h3>
             <p className="text-[11px] text-muted-foreground">{members.length} of {GROUP_MAX_MEMBERS}{hub?.name ? ` · ${hub.name}` : ''}</p>
           </div>
           <button onClick={onClose} className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors cursor-pointer">
@@ -111,6 +110,7 @@ export function GroupMembersModal({ dTag, isCreator, onClose }: { dTag: string; 
           </div>
         )}
 
+        <p className="px-5 pb-2 text-[10px] text-muted-foreground/70 shrink-0">Removing someone rotates the group secret. They can't read anything after that point.</p>
         <div className="px-3 pb-3 overflow-y-auto min-h-0 space-y-0.5">
           {members.map((m) => {
             const profile = getProfile(m.pubkey)
@@ -135,22 +135,15 @@ export function GroupMembersModal({ dTag, isCreator, onClose }: { dTag: string; 
                 {isCreator && !isMe && !isOwner && (
                   confirmRemove === m.pubkey ? (
                     <div className="flex items-center gap-1 shrink-0">
-                      <button onClick={() => handleRemove(m.pubkey)} disabled={removing} className="px-2 py-1 rounded-md text-[11px] font-medium bg-destructive text-destructive-foreground hover:bg-destructive/90 cursor-pointer disabled:opacity-50">
-                        {removing ? <Loader2 size={11} className="animate-spin" /> : 'Remove'}
+                      <button onClick={() => handleRemove(m.pubkey)} disabled={removing} className="px-2.5 py-1.5 rounded-md text-xs font-medium bg-destructive text-destructive-foreground hover:bg-destructive/90 cursor-pointer disabled:opacity-50">
+                        {removing ? <Loader2 size={12} className="animate-spin" /> : 'Confirm remove'}
                       </button>
                       <button onClick={() => setConfirmRemove(null)} disabled={removing} className="px-2 py-1 rounded-md text-[11px] text-muted-foreground hover:text-foreground cursor-pointer">Cancel</button>
                     </div>
                   ) : (
-                    <TooltipProvider delayDuration={200}>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <button onClick={() => setConfirmRemove(m.pubkey)} className="p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors cursor-pointer shrink-0">
-                            <UserMinus size={14} />
-                          </button>
-                        </TooltipTrigger>
-                        <TooltipContent side="left" className="text-xs">Remove rotates the group secret. They can't read anything after this point</TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
+                    <button onClick={() => setConfirmRemove(m.pubkey)} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors cursor-pointer shrink-0">
+                      <UserMinus size={13} /> Remove
+                    </button>
                   )
                 )}
               </div>
