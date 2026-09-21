@@ -25,6 +25,10 @@ export interface Attachment {
   type: string   // MIME type (e.g. "image/png")
   name: string   // Original filename
   size: number   // File size in bytes (ciphertext size when encrypted)
+  /** Blossom servers the sender uploaded to (NIP-CHAT §21.12). Set when the container has no `o`
+   *  servers of its own (a group without them), so readers know where the blob lives. Readers try
+   *  the container's servers, then these, then their own client servers. Optional everywhere. */
+  servers?: string[]
   /** Present only for encrypted file attachments (opt-in per upload) */
   encryption?: {
     algorithm: string      // 'aes-gcm'

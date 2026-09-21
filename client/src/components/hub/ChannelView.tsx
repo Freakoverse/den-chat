@@ -2992,13 +2992,20 @@ function AttachmentRenderer({ attachments, hubDTag, gifTags }: { attachments: At
   // Because the retrieval set wasn't a superset of the upload set, an (encrypted, unique-hash) blob
   // uploaded to a current server the viewer never queried 404'd everywhere — with no mirror to save it.
   // Sourcing both from getServers() keeps them from drifting again.
+  const attachmentServers = useMemo(() => {
+    const out: string[] = []
+    for (const a of attachments) for (const u of a.servers ?? []) { const n = u.replace(/\/+$/, ''); if (!out.includes(n)) out.push(n) }
+    return out
+  }, [attachments])
   const allServers = useMemo(() => {
+    // Order = fetch preference (§21.12): the container's servers, then the ones the sender named, then ours.
     const merged = [...hubServers]
+    for (const s of attachmentServers) if (!merged.includes(s)) merged.push(s)
     for (const s of blossomServers.getServers()) {
       if (!merged.includes(s)) merged.push(s)
     }
     return merged
-  }, [hubServers])
+  }, [hubServers, attachmentServers])
   const baseUrl = allServers[0]?.replace(/\/+$/, '') || 'https://blossom.primal.net'
   const [galleryIndex, setGalleryIndex] = useState<number | null>(null)
   const [favModalUrl, setFavModalUrl] = useState<string | null>(null)
@@ -4798,6 +4805,8 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
   })())
 
   type PendingFile = {
+  /** Servers that accepted the upload (for the attachment `servers` hint, NIP-CHAT §21.12). */
+  serverUrls?: string[]
     id: string
     file: File
     status: 'pending' | 'uploading' | 'encrypting' | 'success' | 'failed'
@@ -5229,7 +5238,7 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
 
         // v2: sign the Blossom upload auth as the member pseudonym P (no R leak to the server).
         const uploadAuthSigner = hub ? await (await import('@/lib/hub/hubMemberSign')).hubBlossomAuthSigner(hub, { privateKey, signer }) : undefined
-        const { hash } = await uploadToBlossomServers(
+        const { hash, serverUrls } = await uploadToBlossomServers(
           data, signer, privateKey, servers, encryptUploads ? 'application/octet-stream' : pf.file.type,
           (progress) => {
             setPendingFiles((prev) => prev.map((f) => f.id === pf.id ? { ...f, progress: { ...progress } } : f))
@@ -5237,7 +5246,7 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
           () => { const c = new AbortController(); uploadAbortRef.current = c; return c.signal },
           uploadAuthSigner,
         )
-        setPendingFiles((prev) => prev.map((f) => f.id === pf.id ? { ...f, status: 'success' as const, hash, progress: undefined, encryption: encMeta } : f))
+        setPendingFiles((prev) => prev.map((f) => f.id === pf.id ? { ...f, status: 'success' as const, hash, serverUrls, progress: undefined, encryption: encMeta } : f))
       } catch {
         setPendingFiles((prev) => prev.map((f) => f.id === pf.id ? { ...f, status: 'failed' as const, progress: undefined } : f))
       }
@@ -5279,6 +5288,9 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
     if (!text && !allFilesSuccess && pendingStickers.length === 0 && pendingGifs.length === 0) return
 
     // Build attachments from successful uploads
+    // A container with no `o` servers (a group can have none, §21.12): name the servers the blob landed
+    // on inside the entry, so readers on other clients know where to fetch it.
+    const nameServers = !hub?.blossomServers?.length
     const attachments: Attachment[] = pendingFiles
       .filter((f) => f.status === 'success' && f.hash)
       .map((f) => ({
@@ -5286,6 +5298,7 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
         type: f.file.type || 'application/octet-stream',
         name: f.file.name,
         size: f.file.size,
+        ...(nameServers && f.serverUrls?.length ? { servers: f.serverUrls.map((u) => u.replace(/\/+$/, '')) } : {}),
         ...(f.encryption ? { encryption: f.encryption } : {}),
       }))
 
