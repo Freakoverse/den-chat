@@ -1,16 +1,17 @@
 /**
  * GroupNotificationSettings: the per-hub mute toggles, for one group. Same flags and the same
- * store (a group is a single-channel hub to the notification store), minus @roles since a group
- * has none. Toggling saves locally at once; Save publishes the group read-state event (§21.9).
+ * store (a group is a single-channel hub to the notification store), minus @roles and @here since
+ * a group has neither (§21.12). Toggling saves locally at once; Save publishes the group read-state
+ * event (§21.9), which is where these flags live (encrypted, next to the read timestamps).
  */
 import { useRef, useState } from 'react'
-import { BellOff, MessagesSquare, AtSign, UsersRound, Radio, Loader2, Check, AlertTriangle } from 'lucide-react'
+import { BellOff, MessagesSquare, AtSign, UsersRound, Loader2, Check, AlertTriangle } from 'lucide-react'
 import { useNotificationStore } from '@/stores/notificationStore'
 import { useUserStore } from '@/stores/userStore'
 import type { HubMuteSettings } from '@/lib/notifications/readState'
 
 const EMPTY: HubMuteSettings = {}
-const KEYS = ['all', 'normal', 'mentions', 'everyone', 'here'] as const
+const KEYS = ['all', 'normal', 'mentions', 'everyone'] as const
 
 function ToggleSwitch({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
   return (
@@ -36,9 +37,9 @@ export function GroupNotificationSettings({ dTag }: { dTag: string }) {
 
   const isDirty = KEYS.some((k) => (settings[k] ?? false) !== (initialRef.current[k] ?? false))
   const update = (next: HubMuteSettings) => {
-    // No roles in a group: keep that flag in step with "all" so the master toggle stays consistent.
-    const allSubsOn = !!(next.normal && next.mentions && next.everyone && next.here)
-    setHubMuteSettings(dTag, { ...next, all: allSubsOn, roles: allSubsOn })
+    // No roles and no @here in a group: keep those flags in step with "all" so the master toggle stays consistent.
+    const allSubsOn = !!(next.normal && next.mentions && next.everyone)
+    setHubMuteSettings(dTag, { ...next, all: allSubsOn, here: allSubsOn, roles: allSubsOn })
     setResult(null)
   }
   const save = async () => {
@@ -54,7 +55,6 @@ export function GroupNotificationSettings({ dTag }: { dTag: string }) {
     { key: 'normal' as const, icon: MessagesSquare, label: 'Mute normal messages', desc: 'Regular messages that do not mention you' },
     { key: 'mentions' as const, icon: AtSign, label: 'Mute @mentions', desc: 'Personal @npub and @DNN mentions' },
     { key: 'everyone' as const, icon: UsersRound, label: 'Mute @everyone', desc: '@everyone mentions' },
-    { key: 'here' as const, icon: Radio, label: 'Mute @here', desc: '@here mentions' },
   ]
 
   return (
@@ -69,7 +69,7 @@ export function GroupNotificationSettings({ dTag }: { dTag: string }) {
               <p className="text-[11px] text-muted-foreground">No badges or sounds from this group</p>
             </div>
           </div>
-          <ToggleSwitch checked={settings.all ?? false} onChange={(v) => update({ all: v, normal: v, mentions: v, everyone: v, here: v, roles: v })} />
+          <ToggleSwitch checked={settings.all ?? false} onChange={(v) => update({ all: v, normal: v, mentions: v, everyone: v })} />
         </label>
         <div className="h-px bg-border my-1" />
         {rows.map(({ key, icon: Icon, label, desc }) => (

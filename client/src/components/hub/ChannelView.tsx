@@ -4908,8 +4908,11 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
   const mentionSuggestions: MentionSuggestion[] = useMemo(() => {
     if (mentionQuery === null) return []
     const q = mentionQuery.toLowerCase()
+    // Groups (NIP-CHAT §21) are one conversation: no #channel and no @here (no presence, no channels).
+    const isGroup = !!hub?.isGroup
     // #channel suggestions (trigger '#')
     if (mentionTrigger === '#') {
+      if (isGroup) return []
       return (hub?.channels || [])
         .filter((c) => c.name && (!q || c.name.toLowerCase().includes(q)))
         .slice(0, 10)
@@ -4923,9 +4926,9 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
 
     // 1. Group mentions (@everyone, @here) — permission-gated
     if (inputPerms.mention_everyone && 'everyone'.includes(q)) {
-      results.push({ type: 'group', keyword: 'everyone', label: '@everyone', description: 'Notify all hub members' })
+      results.push({ type: 'group', keyword: 'everyone', label: '@everyone', description: isGroup ? 'Notify everyone in this group' : 'Notify all hub members' })
     }
-    if (inputPerms.mention_here && 'here'.includes(q)) {
+    if (!isGroup && inputPerms.mention_here && 'here'.includes(q)) {
       results.push({ type: 'group', keyword: 'here', label: '@here', description: 'Notify members in this channel' })
     }
 
@@ -4958,7 +4961,7 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
 
     results.push(...userResults)
     return results.slice(0, 10) // limit total suggestions
-  }, [mentionQuery, mentionTrigger, hub?.channels, hub?.categories, hubMembers, getProfile, inputPerms.mention_everyone, inputPerms.mention_here, inputPerms.mention_roles, hub?.roles])
+  }, [mentionQuery, mentionTrigger, hub?.channels, hub?.categories, hub?.isGroup, hubMembers, getProfile, inputPerms.mention_everyone, inputPerms.mention_here, inputPerms.mention_roles, hub?.roles])
 
   // Detect @mention or #channel query from cursor position
   const updateMentionQuery = useCallback((text: string, cursorPos: number) => {

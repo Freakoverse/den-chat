@@ -4312,6 +4312,7 @@ is that every per-channel event carries the group's own `d` tag in its channel s
 | Message (`36943`) | **Yes** | Same structure, encryption, `epoch`, PoW, `identity` (v2). `c = d`. |
 | Edit / delete (`d`-tag republish, tombstone, `26943` hint) | **Yes** | Identical, including the `created_at + 1` rule. |
 | Reply & threads (`a` `reply` / `root`) | **Yes, as hubs** | Same tags, same code path, same thread pane — scoped to the group instead of a channel (Matrix and WhatsApp group chats have threads too). |
+| Mentions | **People and `@everyone`** | `@<npub>` / `@<DNN>` and `@everyone` (all members) work as in hubs. `@here` and `@<role>` are **not defined** for a group: there is no presence and there are no roles. `#channel` is not defined either. Clients SHOULD NOT suggest them and SHOULD treat them as plain text. |
 | Reactions, edit hint (`26943`), typing (`26950`) | **Yes** | Unchanged; `c = d`. |
 | Polls (`1067` / `1017`) | **Yes** | `c = d`; encrypted under the group message key. |
 | Attachments & **voice notes** (§6.2.1) | **Yes** | Stored on the group's `o` servers when it has them, else the sender's own — see below. |
