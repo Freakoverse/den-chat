@@ -1501,7 +1501,7 @@ function MessageList({ hubDTag, channelId, channelName, optimisticMessages, setO
 
   return (
     <TooltipProvider delayDuration={300}>
-      <div className="flex-1 overflow-y-auto relative flex flex-col-reverse" ref={scrollContainerRef} onScroll={handleScroll}>
+      <div className="flex-1 overflow-y-auto overflow-x-hidden relative flex flex-col-reverse" ref={scrollContainerRef} onScroll={handleScroll}>
         {/* Floating unread banner — above the scroll area */}
         {showUnreadBanner && (
           <UnreadBanner
@@ -2156,7 +2156,7 @@ function BlobMedia({ servers, hash, ext, type, className, tag, encryption }: {
   if (encryption) {
     if (decrypted.loading) {
       return (
-        <div className={`flex items-center gap-2 px-3 py-2 rounded-lg border border-border/50 bg-secondary/30 ${tag === 'video' ? 'max-w-[400px]' : 'max-w-[340px]'}`}>
+        <div className={`flex items-center gap-2 px-3 py-2 rounded-lg border border-border/50 bg-secondary/30 ${tag === 'video' ? 'max-w-[min(400px,100%)]' : 'max-w-[min(340px,100%)]'}`}>
           <Lock size={14} className="text-emerald-400 shrink-0" />
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -2169,7 +2169,7 @@ function BlobMedia({ servers, hash, ext, type, className, tag, encryption }: {
     }
     if (decrypted.error || !decrypted.src) {
       return (
-        <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-destructive/30 bg-destructive/10 max-w-[400px]">
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-destructive/30 bg-destructive/10 max-w-[min(400px,100%)]">
           <AlertTriangle size={14} className="text-destructive shrink-0" />
           <span className="text-xs text-muted-foreground">{decrypted.error || 'Failed to decrypt'}</span>
         </div>
@@ -2178,7 +2178,7 @@ function BlobMedia({ servers, hash, ext, type, className, tag, encryption }: {
     // Decrypted — render from blob URL
     if (tag === 'video') {
       return (
-        <div className="relative inline-block max-w-[400px] group">
+        <div className="relative inline-block max-w-[min(400px,100%)] group">
           <video src={decrypted.src} controls className={className || ''} />
           <div className="absolute top-1.5 right-1.5 flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/30 text-[9px] text-emerald-400 font-medium opacity-0 group-hover:opacity-100 transition-opacity duration-200">
             <Lock size={8} /> Encrypted
@@ -2264,7 +2264,7 @@ function BlobMedia({ servers, hash, ext, type, className, tag, encryption }: {
   if (errorState === 'not-found' && !currentSrc) {
     const fallbackUrl = `${servers[0]?.replace(/\/+$/, '') || ''}/${hash}${ext}`
     return (
-      <div className="flex flex-col items-center gap-1 px-3 py-2 rounded-lg bg-destructive/10 border border-destructive/30 max-w-[400px]">
+      <div className="flex flex-col items-center gap-1 px-3 py-2 rounded-lg bg-destructive/10 border border-destructive/30 max-w-[min(400px,100%)]">
         <span className="text-xs text-muted-foreground">File not found on any server</span>
         <a href={fallbackUrl} target="_blank" rel="noopener noreferrer" className="text-primary text-xs hover:underline">
           ⬇ Try direct download
@@ -2278,7 +2278,7 @@ function BlobMedia({ servers, hash, ext, type, className, tag, encryption }: {
 
   if (tag === 'video') {
     return (
-      <div className="relative inline-block max-w-[400px]">
+      <div className="relative inline-block max-w-[min(400px,100%)]">
         <video
           src={currentSrc}
           controls
@@ -2335,7 +2335,7 @@ function BlobImage({ servers, hash, ext, type, className, wrapperClassName, alt,
   if (encryption) {
     if (decrypted.loading) {
       return (
-        <div className={wrapperClassName || "relative inline-block max-w-[400px]"}>
+        <div className={wrapperClassName || "relative inline-block max-w-[min(400px,100%)]"}>
           <div className="flex items-center gap-2 px-3 py-4 rounded-lg border border-border/50 bg-secondary/30" style={{ minHeight: 100 }}>
             <Lock size={14} className="text-emerald-400 shrink-0" />
             <div className="flex-1 min-w-0">
@@ -2350,7 +2350,7 @@ function BlobImage({ servers, hash, ext, type, className, wrapperClassName, alt,
     }
     if (decrypted.error || !decrypted.src) {
       return (
-        <div className={wrapperClassName || "relative inline-block max-w-[400px]"}>
+        <div className={wrapperClassName || "relative inline-block max-w-[min(400px,100%)]"}>
           <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-destructive/30 bg-destructive/10">
             <AlertTriangle size={14} className="text-destructive shrink-0" />
             <span className="text-xs text-muted-foreground">{decrypted.error || 'Failed to decrypt'}</span>
@@ -2360,7 +2360,7 @@ function BlobImage({ servers, hash, ext, type, className, wrapperClassName, alt,
     }
     // Decrypted — render from blob URL
     return (
-      <div className={`${wrapperClassName || "relative inline-block max-w-[400px]"} group`}>
+      <div className={`${wrapperClassName || "relative inline-block max-w-[min(400px,100%)]"} group`}>
         <img
           src={decrypted.src}
           alt={alt || ''}
@@ -2442,7 +2442,7 @@ function BlobImage({ servers, hash, ext, type, className, wrapperClassName, alt,
   if (errorState === 'not-found' && !currentSrc) {
     const fallbackUrl = `${servers[0]?.replace(/\/+$/, '') || ''}/${hash}${ext}`
     return (
-      <div className="flex flex-col items-center gap-1 px-3 py-2 rounded-lg bg-destructive/10 border border-destructive/30 max-w-[400px]">
+      <div className="flex flex-col items-center gap-1 px-3 py-2 rounded-lg bg-destructive/10 border border-destructive/30 max-w-[min(400px,100%)]">
         <span className="text-xs text-muted-foreground">Image not found on any server</span>
         <a href={fallbackUrl} target="_blank" rel="noopener noreferrer" className="text-primary text-xs hover:underline">
           ⬇ Try direct download
@@ -2456,13 +2456,13 @@ function BlobImage({ servers, hash, ext, type, className, wrapperClassName, alt,
   const isImgLoading = !imgLoaded && !imgError
 
   return (
-    <div className={wrapperClassName || "relative inline-block max-w-[400px]"}>
+    <div className={wrapperClassName || "relative inline-block max-w-[min(400px,100%)]"}>
       {/* Shimmer skeleton while image loads */}
       {isImgLoading && (
         <div className="media-skeleton" style={wrapperClassName ? { width: '100%', height: '100%' } : { minHeight: 160, width: 400, maxWidth: '100%' }} />
       )}
       {imgError && (
-        <div className={`rounded-lg bg-secondary/40 border border-border/50 flex items-center justify-center text-xs text-muted-foreground/60 py-6 ${wrapperClassName ? 'w-full h-full' : 'max-w-[400px]'}`}>
+        <div className={`rounded-lg bg-secondary/40 border border-border/50 flex items-center justify-center text-xs text-muted-foreground/60 py-6 ${wrapperClassName ? 'w-full h-full' : 'max-w-[min(400px,100%)]'}`}>
           Failed to load image
         </div>
       )}
@@ -2651,7 +2651,7 @@ function BlobFile({ servers, hash, ext, name, size, type, encryption }: {
     return (
       <button
         onClick={handleDownload}
-        className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-border bg-secondary/50 hover:bg-secondary transition-colors max-w-[300px] group cursor-pointer"
+        className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-border bg-secondary/50 hover:bg-secondary transition-colors max-w-[min(300px,100%)] group cursor-pointer"
       >
         {encryption ? <Lock size={16} className="text-emerald-400 shrink-0" /> : <FileIcon size={18} className="text-muted-foreground shrink-0" />}
         <div className="min-w-0 flex-1 text-left">
@@ -2665,7 +2665,7 @@ function BlobFile({ servers, hash, ext, name, size, type, encryption }: {
 
   if (state === 'downloading' || state === 'verifying' || state === 'decrypting') {
     return (
-      <div className="inline-flex items-center gap-3 px-3 py-2.5 rounded-lg border border-border bg-secondary/50 max-w-[340px]">
+      <div className="inline-flex items-center gap-3 px-3 py-2.5 rounded-lg border border-border bg-secondary/50 max-w-[min(340px,100%)]">
         {/* Circular progress */}
         <div className="relative shrink-0">
           <svg width="44" height="44" viewBox="0 0 44 44" className="transform -rotate-90">
@@ -2714,7 +2714,7 @@ function BlobFile({ servers, hash, ext, name, size, type, encryption }: {
 
   if (state === 'complete') {
     return (
-      <div className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 max-w-[300px]">
+      <div className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 max-w-[min(300px,100%)]">
         <Check size={16} className="text-emerald-400 shrink-0" />
         <div className="min-w-0 flex-1">
           <p className="text-sm text-foreground truncate">{name}</p>
@@ -2727,7 +2727,7 @@ function BlobFile({ servers, hash, ext, name, size, type, encryption }: {
   if (state === 'tampered') {
     return (
       <>
-        <div className="inline-flex flex-col gap-2 px-3 py-2.5 rounded-lg border border-red-500/30 bg-red-500/10 max-w-[340px]">
+        <div className="inline-flex flex-col gap-2 px-3 py-2.5 rounded-lg border border-red-500/30 bg-red-500/10 max-w-[min(340px,100%)]">
           <div className="flex items-center gap-2">
             <ShieldAlert size={16} className="text-red-400 shrink-0" />
             <div className="min-w-0 flex-1">
@@ -2776,7 +2776,7 @@ function BlobFile({ servers, hash, ext, name, size, type, encryption }: {
 
   // error
   return (
-    <div className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-border bg-secondary/50 max-w-[300px]">
+    <div className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-border bg-secondary/50 max-w-[min(300px,100%)]">
       <AlertTriangle size={16} className="text-muted-foreground shrink-0" />
       <div className="min-w-0 flex-1">
         <p className="text-sm text-foreground truncate">{name}</p>
@@ -2899,7 +2899,7 @@ function GifStarOverlay({ att, ext, url, imgIdx, matchingGTag, allServers, setGa
         wrapperClassName={inGrid ? "relative w-full h-full" : undefined}
         className={inGrid
           ? "w-full h-full object-cover cursor-pointer transition-all"
-          : "max-w-[400px] max-h-[300px] rounded-lg border border-transparent hover:border-border object-contain cursor-pointer transition-all"
+          : "max-w-[min(400px,100%)] max-h-[300px] rounded-lg border border-transparent hover:border-border object-contain cursor-pointer transition-all"
         }
         onClick={() => setGalleryIndex(imgIdx >= 0 ? imgIdx : 0)}
       />
@@ -3061,7 +3061,7 @@ function AttachmentRenderer({ attachments, hubDTag, gifTags }: { attachments: At
                 ext={ext}
                 type={att.type}
                 alt={att.name}
-                className="max-w-[400px] max-h-[300px] rounded-lg border border-transparent hover:border-border object-contain cursor-pointer transition-all"
+                className="max-w-[min(400px,100%)] max-h-[300px] rounded-lg border border-transparent hover:border-border object-contain cursor-pointer transition-all"
                 onClick={() => setGalleryIndex(imgIdx >= 0 ? imgIdx : 0)}
                 encryption={att.encryption}
               />
@@ -3070,7 +3070,7 @@ function AttachmentRenderer({ attachments, hubDTag, gifTags }: { attachments: At
 
           // Multiple images — 2-column grid with equal row heights
           return (
-            <div key={`img-group-${blockIdx}`} className="grid grid-cols-2 gap-1 rounded-lg overflow-hidden max-w-[500px]" style={{ gridAutoRows: '200px' }}>
+            <div key={`img-group-${blockIdx}`} className="grid grid-cols-2 gap-1 rounded-lg overflow-hidden max-w-[min(500px,100%)]" style={{ gridAutoRows: '200px' }}>
               {items.map(({ att, ext, url, imgIdx, isGif, matchingGTag }) => {
                 if (isGif) {
                   return (
@@ -3118,7 +3118,7 @@ function AttachmentRenderer({ attachments, hubDTag, gifTags }: { attachments: At
               ext={block.ext}
               type={block.att.type}
               tag="video"
-              className="max-w-[400px] max-h-[300px] rounded-lg border border-transparent hover:border-border transition-colors"
+              className="max-w-[min(400px,100%)] max-h-[300px] rounded-lg border border-transparent hover:border-border transition-colors"
               encryption={block.att.encryption}
             />
           )
