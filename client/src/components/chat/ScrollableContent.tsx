@@ -33,7 +33,10 @@ export function ScrollableContent({ children }: { children: ReactNode }) {
 
   return (
     <>
-      <div className="relative">
+      {/* min-w-0 w-full: inside a flex row (grouped message rows) a bare block would shrink-wrap its
+          content, and a w-full textarea inside it then collapses to the browser's intrinsic ~20 columns
+          (the "edit box shrinks to the left" report). Giving the box a definite width fixes that. */}
+      <div className="relative min-w-0 w-full">
         <div
           ref={contentRef}
           className={scrollEnabled ? 'overflow-y-auto' : 'overflow-hidden'}
