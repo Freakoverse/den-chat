@@ -86,6 +86,7 @@ import { UnreadBanner } from '@/components/chat/UnreadBanner'
 import { useMobile } from '@/hooks/useMobile'
 import { MESSAGE_MAX_LENGTH, MESSAGE_CHAR_WARN_THRESHOLD } from '@/components/chat/ChatInputBar'
 import { ScrollableContent } from '@/components/chat/ScrollableContent'
+import { useThumbnail } from '@/lib/imageThumb'
 
 /** Optimistic message -- shown immediately before publish confirms */
 export interface OptimisticMessage {
@@ -3228,6 +3229,22 @@ function ReplyPreview({ repliedMessage, getProfile, onScrollTo }: {
 
 /* ──────────────── Reaction Pills ──────────────── */
 
+/** A custom-emoji reaction at ~20px: a device-resolution static thumbnail, never a live downscale. */
+function ReactionEmojiImg({ url, alt }: { url: string; alt: string }) {
+  const src = useThumbnail(url, 20, 'contain')
+  return <img src={src ?? url} alt={alt} className="h-5 w-5 object-contain inline" />
+}
+
+/** A reactor's avatar at 20px, same thumbnail treatment (huge or animated avatars looked blurry on phones). */
+function ReactorAvatar({ picture, initial }: { picture?: string; initial: string }) {
+  const src = useThumbnail(picture, 20, 'cover')
+  return (
+    <span className="w-5 h-5 rounded-full overflow-hidden border border-background bg-secondary inline-flex items-center justify-center text-[9px] font-semibold text-muted-foreground shrink-0">
+      {picture && src ? <img src={src} alt="" className="w-full h-full object-cover" /> : initial}
+    </span>
+  )
+}
+
 export function ReactionBar({ reactions, messageId, onAddReaction, rawReactions, onOpenProfile, children, disableCustomEmojis }: {
   reactions: Reaction[]
   messageId: string
@@ -3321,12 +3338,12 @@ export function ReactionBar({ reactions, messageId, onAddReaction, rawReactions,
               }`}
           >
           <span>{(() => {
-            if (!disableCustomEmojis && r.customUrl) return <img src={r.customUrl} alt={r.emoji} className="h-5 w-5 object-contain inline" />
+            if (!disableCustomEmojis && r.customUrl) return <ReactionEmojiImg url={r.customUrl} alt={r.emoji} />
             if (!disableCustomEmojis) {
               const scMatch = r.emoji.match(/^:([a-zA-Z0-9_-]+):$/)
               if (scMatch) {
                 const entry = getEmojiMap().get(scMatch[1])
-                if (entry) return <img src={entry.url} alt={r.emoji} className="h-5 w-5 object-contain inline" />
+                if (entry) return <ReactionEmojiImg url={entry.url} alt={r.emoji} />
               }
             }
             // When disabled, show 'n/a' for custom emojis instead of raw :shortcode:
@@ -3343,11 +3360,7 @@ export function ReactionBar({ reactions, messageId, onAddReaction, rawReactions,
                   return (
                     <Tooltip key={pk}>
                       <TooltipTrigger asChild>
-                        <span className="w-5 h-5 rounded-full overflow-hidden border border-background bg-secondary inline-flex items-center justify-center text-[9px] font-semibold text-muted-foreground shrink-0">
-                          {p?.picture
-                            ? <img src={p.picture} alt="" className="w-full h-full object-cover" />
-                            : name.slice(0, 1).toUpperCase()}
-                        </span>
+                        <ReactorAvatar picture={p?.picture} initial={name.slice(0, 1).toUpperCase()} />
                       </TooltipTrigger>
                       <TooltipContent side="top" className="text-xs">{name}</TooltipContent>
                     </Tooltip>
