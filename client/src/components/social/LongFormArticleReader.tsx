@@ -6,6 +6,7 @@
  */
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
+import { nowSeconds } from '@/lib/time/clockOffset'
 import { useSocialStore } from '@/stores/socialStore'
 import { useUserStore } from '@/stores/userStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
@@ -674,7 +675,7 @@ function ArticleInteractionBar({ event }: { event: Event }) {
       const unsigned = {
         kind: 7,
         pubkey: myPubkey,
-        created_at: Math.floor(Date.now() / 1000),
+        created_at: nowSeconds(),
         tags,
         content: emoji,
       }
@@ -730,7 +731,7 @@ function ArticleInteractionBar({ event }: { event: Event }) {
       const unsigned = {
         kind: 10003,
         pubkey: myPubkey,
-        created_at: Math.floor(Date.now() / 1000),
+        created_at: nowSeconds(),
         tags: [] as string[][],
         content: encrypted,
       }

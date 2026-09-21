@@ -3,6 +3,7 @@
  */
 
 import { finalizeEvent, type UnsignedEvent, type Event } from 'nostr-tools'
+import { nowSeconds } from '@/lib/time/clockOffset'
 import { KINDS, STANDARD_KINDS } from '@/lib/crypto/constants'
 import { useUserStore, type ISigner } from '@/stores/userStore'
 
@@ -42,7 +43,7 @@ export function createUnsignedEvent(
     kind,
     content,
     tags,
-    created_at: createdAt ?? Math.floor(Date.now() / 1000),
+    created_at: createdAt ?? nowSeconds(),
     pubkey: '', // Placeholder — real pubkey is set by signEvent or signWithSigner
   }
 }

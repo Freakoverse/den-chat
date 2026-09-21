@@ -3,6 +3,7 @@
  */
 
 import { useState, useCallback, useRef, useEffect, forwardRef } from 'react'
+import { nowSeconds } from '@/lib/time/clockOffset'
 import { createPortal } from 'react-dom'
 import { useEscToClose } from '@/hooks/useEscToClose'
 import { useUserStore } from '@/stores/userStore'
@@ -283,7 +284,7 @@ export function SocialPost({ event, onOpenProfile, onOpenThread, compact, isBook
       const unsigned = {
         kind: 7,
         pubkey: myPubkey,
-        created_at: Math.floor(Date.now() / 1000),
+        created_at: nowSeconds(),
         tags: withClientTag(tags),
         content: emoji,
       }
@@ -318,7 +319,7 @@ export function SocialPost({ event, onOpenProfile, onOpenThread, compact, isBook
       const unsigned = {
         kind: 6,
         pubkey: myPubkey,
-        created_at: Math.floor(Date.now() / 1000),
+        created_at: nowSeconds(),
         tags: withClientTag([['e', event.id, ''], ['p', event.pubkey]]),
         content: JSON.stringify(event),
       }
@@ -368,7 +369,7 @@ export function SocialPost({ event, onOpenProfile, onOpenThread, compact, isBook
       const unsigned = {
         kind: 10003,
         pubkey: myPubkey,
-        created_at: Math.floor(Date.now() / 1000),
+        created_at: nowSeconds(),
         tags: [] as string[][], // empty public tags — bookmarks are private
         content: encrypted,
       }
@@ -917,7 +918,7 @@ function QuoteRepostModal({
       const unsigned = {
         kind: 1,
         pubkey: myPubkey,
-        created_at: Math.floor(Date.now() / 1000),
+        created_at: nowSeconds(),
         tags: [['q', event.id], ['p', event.pubkey]],
         content,
       }

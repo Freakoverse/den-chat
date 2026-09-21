@@ -10,6 +10,7 @@
  */
 
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { nowSeconds } from '@/lib/time/clockOffset'
 import { useEscToClose } from '@/hooks/useEscToClose'
 import { useUserStore } from '@/stores/userStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
@@ -457,7 +458,7 @@ function CommentComposeBox({ articleEvent, aCoordinate, replyTo, onPosted, compa
       const unsigned = {
         kind: 1111,
         pubkey,
-        created_at: Math.floor(Date.now() / 1000),
+        created_at: nowSeconds(),
         tags,
         content: text.trim(),
       }

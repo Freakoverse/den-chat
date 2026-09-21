@@ -4,6 +4,7 @@
  */
 
 import { useState, useRef, useCallback } from 'react'
+import { nowSeconds } from '@/lib/time/clockOffset'
 import { useUserStore } from '@/stores/userStore'
 import { useSocialStore } from '@/stores/socialStore'
 import { EmojiPickerPopover } from '@/components/chat/EmojiPickerPopover'
@@ -78,7 +79,7 @@ export function ComposeBox({ replyTo, placeholder, onPosted }: ComposeBoxProps) 
       const unsigned = {
         kind: 1,
         pubkey,
-        created_at: Math.floor(Date.now() / 1000),
+        created_at: nowSeconds(),
         tags,
         content: fullContent,
       }

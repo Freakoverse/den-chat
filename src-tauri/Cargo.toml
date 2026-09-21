@@ -33,6 +33,7 @@ tracing = "0.1"
 futures-util = "0.3"
 tauri-plugin-opener = "2"
 tauri-plugin-deep-link = "2"
+tauri-plugin-http = "2"
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 
 [target.'cfg(windows)'.dependencies]

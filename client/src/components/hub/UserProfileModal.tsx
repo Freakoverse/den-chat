@@ -7,6 +7,7 @@
  */
 
 import { useState, useEffect, useRef } from 'react'
+import { nowSeconds } from '@/lib/time/clockOffset'
 import { createPortal } from 'react-dom'
 import { useEscToClose } from '@/hooks/useEscToClose'
 import { useBlossomMedia } from '@/hooks/useBlossomMedia'
@@ -363,7 +364,7 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
       const unsigned = {
         kind: 30315, // NIP-38 user status
         pubkey: myPubkey,
-        created_at: Math.floor(Date.now() / 1000),
+        created_at: nowSeconds(),
         tags: [['d', 'general']] as string[][],
         content,
       }
@@ -397,7 +398,7 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
       const unsigned = {
         kind: 0,
         pubkey: myPubkey,
-        created_at: Math.floor(Date.now() / 1000),
+        created_at: nowSeconds(),
         tags: [] as string[][],
         content,
       }

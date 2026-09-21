@@ -6,6 +6,7 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { nowSeconds } from '@/lib/time/clockOffset'
 import {
   X, Plus, Trash2, ExternalLink, Loader2,
   Globe, Link2, Pencil, ImageIcon, XCircle, ChevronDown, ChevronUp, Check,
@@ -439,7 +440,7 @@ export function LinksEditorModal({ open, onClose, onSaved }: LinksEditorModalPro
       const unsigned = {
         kind: 30003,
         pubkey: myPubkey,
-        created_at: Math.floor(Date.now() / 1000),
+        created_at: nowSeconds(),
         tags,
         content: '',
       }
@@ -481,7 +482,7 @@ export function LinksEditorModal({ open, onClose, onSaved }: LinksEditorModalPro
       const unsigned = {
         kind: 30003,
         pubkey: myPubkey,
-        created_at: Math.floor(Date.now() / 1000),
+        created_at: nowSeconds(),
         tags,
         content: '',
       }

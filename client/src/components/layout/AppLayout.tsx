@@ -38,6 +38,7 @@ import { isV2 } from '@/lib/hub/version'
 import { canUseV2 } from '@/lib/crypto/skd'
 import { cn } from '@/lib/utils'
 import { OfflineBanner } from '@/components/ui/OfflineBanner'
+import { ClockSkewBanner } from '@/components/ui/ClockSkewBanner'
 import { createHubListEvent, signWithSigner } from '@/lib/nostr/events'
 import { publishToSpecificRelays } from '@/lib/nostr/relay-pool'
 import { getPublishRelays } from '@/stores/postingBehaviourStore'
@@ -191,6 +192,7 @@ export function AppLayout() {
     return (
       <div className="flex flex-col h-full w-full overflow-hidden">
         <OfflineBanner />
+        <ClockSkewBanner />
         {/* Main content area */}
         <div className="flex-1 flex min-h-0 overflow-hidden">
           {activePage === 'settings' ? (
@@ -259,6 +261,7 @@ export function AppLayout() {
   return (
     <div className="flex flex-col h-full w-full overflow-hidden">
       <OfflineBanner />
+        <ClockSkewBanner />
       <div className="flex flex-1 min-h-0 overflow-hidden">
       <HubSidebar activePage={activePage} onNavigate={setActivePage} />
 

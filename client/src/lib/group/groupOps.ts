@@ -5,6 +5,7 @@
  * through the same path the loader uses, so local state is exactly what relays hold.
  */
 import { nip19 } from 'nostr-tools'
+import { nowSeconds } from '@/lib/time/clockOffset'
 import { KINDS } from '@/lib/crypto/constants'
 import { useHubStore, type HubMember } from '@/stores/hubStore'
 import { useGroupStore } from '@/stores/groupStore'
@@ -94,7 +95,7 @@ export async function createGroup(opts: {
 
   const { tree, roster } = await buildGroupTree({ dTag, version: opts.version, members, secret, epoch, keys: k })
   const history = await encryptHistory(secret, { [epoch]: toHex(secret) })
-  const now = Math.floor(Date.now() / 1000)
+  const now = nowSeconds()
   const settings: GroupSettings = { description: opts.description || undefined }
 
   const signed = await buildAndSignGroupEvent({

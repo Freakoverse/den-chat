@@ -8,6 +8,7 @@
  */
 
 import { useEffect } from 'react'
+import { initClockSync } from '@/lib/time/clockOffset'
 import { useUserStore } from '@/stores/userStore'
 import { useHubStore, type HubEntry, type HubFolder } from '@/stores/hubStore'
 import { resetSignerGuard } from '@/lib/auth/signerGuard'
@@ -531,6 +532,9 @@ export function useStartup() {
 
   // Fetch hide message events for the active hub (initial 30-day window)
   useHideMessages(activeHubId)
+
+  // Device clock vs the servers we use: stamps outgoing events with the corrected time (lib/time/clockOffset).
+  useEffect(() => { initClockSync() }, [])
 
   // ─── Hub / group event redundancy (cooperative rebroadcasting) ───
   // When the user opens a hub (kind 36942) or a group (kind 36950), check that its container

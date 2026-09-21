@@ -3,6 +3,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react'
+import { nowSeconds } from '@/lib/time/clockOffset'
 import { useSocialStore } from '@/stores/socialStore'
 import { useUserStore } from '@/stores/userStore'
 import { fetchEvents } from '@/lib/nostr/relay-pool'
@@ -79,7 +80,7 @@ export function LongFormDraftsPage() {
       const { publishToSpecificRelays } = await import('@/lib/nostr/relay-pool')
       const { getDeletePublishRelays } = await import('@/stores/postingBehaviourStore')
       const aRef = `30024:${pubkey}:${d.dTag}`
-      const unsigned = { kind: 5, pubkey, created_at: Math.floor(Date.now() / 1000), tags: [['a', aRef]], content: 'delete draft' }
+      const unsigned = { kind: 5, pubkey, created_at: nowSeconds(), tags: [['a', aRef]], content: 'delete draft' }
       const signed = await signWithSigner(unsigned, signer, privateKey)
       await publishToSpecificRelays(getDeletePublishRelays(), signed)
       setDrafts(prev => prev.filter(x => x.dTag !== d.dTag))
