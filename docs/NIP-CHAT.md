@@ -3974,7 +3974,7 @@ Sort modes (all **best-effort**, reordering only what was fetched):
 ## 21. Groups — Kind `36950`
 
 A **group** is the small, flat sibling of a hub: one conversation, no channels, no categories,
-no roles, no join requests, no discovery, and **no Blossom in the membership pipeline** (media
+no roles, no moderators, no discovery, and **no Blossom in the membership pipeline** (media
 may still live on Blossom, §21.12). It is what Discord calls a *group DM* —
 a handful of people talking in one place — scaled to **100 members**. The whole group lives in
 **one relay event**: identity, member tree, epoch history and settings. Everything cryptographic
@@ -3988,18 +3988,18 @@ it, and v2 layers NIP-SKD pseudonyms on top exactly as it does for hubs.
 | Container | kind `36942` + Blossom tree files | kind `36950`, **tree inline** (Blossom only for media, via optional `o`) |
 | Channels / categories / roles | yes | **none** — one conversation |
 | Who adds members | creator, join requests, facilitators | **creator only** |
-| Join requests (`36944`) | yes | **no** |
+| Join requests (`36944`) | yes, processed by creator and mods | **yes, creator-only** (§21.6.1); a request only asks |
 | Ban list | Blossom ban pages | **none** — removal is the only tool |
 | Discovery (`t`, `f`, Discover UI) | yes | **never listed** — the address is the invite |
 | Member cap | unbounded (paginated tree) | **100** |
 | Epoch history | unbounded blob on Blossom (§5.4) | **inline, capped at 100 epochs** |
-| Messages | kind `36943` with `h` + `c` | kind `36943` with `h` only |
+| Messages | kind `36943` with `h` + `c` | kind `36943` with `h` + `c`, both = the group `d` (§21.3) |
 | v1 / v2 | both | both (same meaning, §21.8) |
 
 A group is **creator-centric**, unlike Discord's group DMs where any member may add others.
 Only the creator publishes the group event; members only publish messages. There are no
 moderators: the creator removes whom they choose, and a removed member can be re-added later
-by the same action. Because there is no join flow, there is nothing for a ban list to gate.
+by the same action. A join request (§21.6.1) only asks; ignoring it is the whole ban list.
 
 ### 21.2 Group Event — Kind `36950`
 
@@ -4019,6 +4019,7 @@ by the same action. Because there is no join flow, there is nothing for a ban li
     ["o", "https://blossom1.example.com"],
     ["o", "https://blossom2.example.com"],
     ["w", "<pow_difficulty>"],
+    ["W", "<join_pow_difficulty>"],
     ["picture", "<icon_url>"],
     ["banner", "<banner_url>"],
     ["about", "<short description>"],
@@ -4045,7 +4046,7 @@ by the same action. Because there is no join flow, there is nothing for a ban li
 | `W` | No | Minimum **join-request** PoW (NIP-13), same semantics as the hub `W` (§6.1): a kind-36944 request for this group (§21.6.1) MUST carry a `nonce` meeting it, and creators drop under-`W` requests before any decrypt. |
 | `nonce` | Conditional | The group event's own PoW nonce when `w` > 0. |
 | `message_expiration` | No | Disappearing-messages duration in seconds, as for hubs (§6.1, §9.10). |
-| `picture` / `banner` / `about` | No | The group's public face — icon, banner, short description — **plaintext in both versions** for the same reason as `n`: the person holding an invite has no secret yet. Member-only prose belongs in the conversation. |
+| `picture` / `banner` / `about` | No | The group's public face — icon, banner, short description — **plaintext in both versions** for the same reason as `n`: the person holding an invite has no secret yet. Member-only prose belongs in `settings.description` (below). |
 | `content-warning` / `L` | No | NIP-36 / NIP-32 sensitive-content marking, as for hubs. |
 | `published_at` | Yes | Original creation timestamp, carried forward unchanged on every republish. |
 | `client` | No | Publishing client name. |
@@ -4118,8 +4119,8 @@ relays.
 ### 21.4 Adding a Member
 
 Only the creator adds members, by the member's **real public key** `R` — an npub, a DNN ID,
-or a profile pick. No consent from the member is involved at this step; they consent by
-**accepting the invite** (§21.6). The creator:
+a profile pick, or by approving a join request (§21.6.1). No consent from the member is
+involved at this step; they consent by **accepting the invite** (§21.6). The creator:
 
 1. Refuses if the tree already holds **100** leaves.
 2. Adds a leaf (§4.4 add path — one NIP-04/ECDH encryption of the leaf key to the member's key
@@ -4303,19 +4304,20 @@ for hubs.
 ### 21.12 Feature Parity — What Carries Over
 
 A group reuses the hub **event kinds and structures unchanged**; the only systematic difference
-is that every per-channel event drops its `c` tag and keys off the group's `d` tag (§21.3).
-Nothing gets a new kind.
+is that every per-channel event carries the group's own `d` tag in its channel slot (`c = d`,
+§21.3). Nothing gets a new kind.
 
 | Feature | In a group | Notes |
 |---------|-----------|-------|
-| Message (`36943`) | **Yes** | Same structure, encryption, `epoch`, PoW, `identity` (v2). No `c`. |
+| Message (`36943`) | **Yes** | Same structure, encryption, `epoch`, PoW, `identity` (v2). `c = d`. |
 | Edit / delete (`d`-tag republish, tombstone, `26943` hint) | **Yes** | Identical, including the `created_at + 1` rule. |
 | Reply & threads (`a` `reply` / `root`) | **Yes, as hubs** | Same tags, same code path, same thread pane — scoped to the group instead of a channel (Matrix and WhatsApp group chats have threads too). |
-| Reactions, edit hint (`26943`), typing (`26950`) | **Yes** | Unchanged; `h` only. |
-| Polls (`1067` / `1017`) | **Yes** | `h` only, no `c`; encrypted under the group message key. |
+| Reactions, edit hint (`26943`), typing (`26950`) | **Yes** | Unchanged; `c = d`. |
+| Polls (`1067` / `1017`) | **Yes** | `c = d`; encrypted under the group message key. |
 | Attachments & **voice notes** (§6.2.1) | **Yes** | Stored on the group's `o` servers when it has them, else the sender's own — see below. |
-| Pin list (`36945`) | **Yes, as hubs** | One pin event per member per group, `d` = group `d`, `["pin", "", "36943:<author>:<d>"]` with an **empty channel slot**. Rendered as §6.6: the creator's pins first and expanded, other members' pins in collapsible sections grouped by pinner. |
-| Join requests, ban list, facilitation, reports (`36944`, §5.3, §5.6, `36948`) | **No** | No join flow, no moderators — the creator's add/remove is the whole model. |
+| Pin list (`36945`) | **Yes, as hubs** | One pin event per member per group, `d` = group `d`, `["pin", "<group_d>", "36943:<author>:<d>"]` with the group's `d` in the channel slot. Rendered as §6.6: the creator's pins first and expanded, other members' pins in collapsible sections grouped by pinner. |
+| Join requests (`36944`) | **Yes, creator-only** | §21.6.1: same event as §6.3 with the group coordinate in `a` and `W` as the difficulty. Approving = §21.4. |
+| Ban list, facilitation, reports (§5.3, §5.6, `36948`) | **No** | No moderators and no member files: the creator's add/remove is the whole model. |
 | Calendar (`31923` / `31925`), voice hosts & presence (`36946` / `36947`) | **No** | Hub-scale features; not part of groups. A later revision may add them with `h` only. |
 
 **Attachments and voice notes.** A group MAY declare Blossom servers with `o` tags (§21.2),
