@@ -26,7 +26,7 @@ import { ConfirmDeleteGroupModal, ConfirmLeaveGroupModal } from '@/components/gr
 import { updateGroup, removeMember, addMembers } from '@/lib/group/groupOps'
 import { fetchGroupJoinRequests, readGroupJoinNote, type GroupJoinRequest } from '@/lib/group/groupJoin'
 import { sendGroupInviteDMs } from '@/lib/group/groupInvite'
-import { GROUP_NAME_MAX, GROUP_ABOUT_MAX, GROUP_DESCRIPTION_MAX, GROUP_MAX_MEMBERS } from '@/lib/group/groupEvent'
+import { GROUP_NAME_MAX, GROUP_ABOUT_MAX, GROUP_DESCRIPTION_MAX, GROUP_MAX_MEMBERS, GROUP_MAX_EPOCHS } from '@/lib/group/groupEvent'
 import { HUB_BANNER_PLACEHOLDER } from '@/lib/constants'
 import { cn, truncateNpub } from '@/lib/utils'
 
@@ -47,6 +47,15 @@ export function GroupDetailsModal({ dTag, isCreator, onClose }: { dTag: string; 
     const npub = (() => { try { return nip19.npubEncode(pk) } catch { return pk } })()
     return { p, npub, label: p?.display_name || p?.name || truncateNpub(npub, 10) }
   }
+
+  // Pruning warning (§21.9): shown to the creator once (dismissable), and again, undismissable, when the
+  // epoch history is near its cap, because past the cap the oldest secrets are dropped on each removal.
+  const epoch = group?.epoch ?? 1
+  const nearCap = epoch >= GROUP_MAX_EPOCHS - 10
+  const pruneKey = `den-group-prune-warned:${dTag}`
+  const [pruneAck, setPruneAck] = useState<boolean>(() => { try { return localStorage.getItem(pruneKey) === '1' } catch { return false } })
+  const ackPrune = () => { setPruneAck(true); try { localStorage.setItem(pruneKey, '1') } catch { /* ignore */ } }
+  const showPruneWarning = isCreator && (nearCap || !pruneAck)
 
   // Members
   const [search, setSearch] = useState('')
@@ -306,6 +315,19 @@ export function GroupDetailsModal({ dTag, isCreator, onClose }: { dTag: string; 
                   </div>
                 </div>
                 {isCreator && <p className="text-[11px] text-muted-foreground/70">Removing someone rotates the group secret. They can't read anything after that point.</p>}
+                {showPruneWarning && (
+                  <div className="flex items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5">
+                    <AlertTriangle size={15} className="text-amber-500 shrink-0 mt-0.5" />
+                    <div className="flex-1 min-w-0 space-y-1.5">
+                      <p className="text-xs text-amber-600 dark:text-amber-400 leading-relaxed">
+                        {nearCap
+                          ? `This group is at removal ${epoch - 1} of ${GROUP_MAX_EPOCHS}. Past ${GROUP_MAX_EPOCHS}, each removal drops the oldest secret: anyone added after that can't read the oldest messages. Current members are unaffected.`
+                          : `A group keeps the secrets of its last ${GROUP_MAX_EPOCHS} removals. After that many, each removal drops the oldest one, and anyone added later can't read the messages from before it. Current members are unaffected. A group with heavy churn should be a hub.`}
+                      </p>
+                      {!nearCap && <button onClick={ackPrune} className="text-[11px] font-medium text-amber-600 dark:text-amber-400 hover:underline cursor-pointer">Got it</button>}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Notifications: the per-hub mute toggles, for this group */}

@@ -4749,14 +4749,22 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
   const [showToolbar, setShowToolbar] = useState(false)
   const [showTimestamp, setShowTimestamp] = useState(false)
   const [isNsfw, setIsNsfw] = useState(false)
-  const [encryptUploads, setEncryptUploads] = useState(() => localStorage.getItem('den-chat-encrypt-uploads') === 'true')
+  // Groups (NIP-CHAT §21.12): encrypted attachments are the default, and in a private (v2) group they are
+  // mandatory (a plaintext blob would tie a Blossom account to pseudonymous traffic). The user's global
+  // preference still applies to hubs; a public group only pre-selects ON for this session.
+  const hubForUploads = useHubStore((s) => hubDTag ? s.hubs[hubDTag] : null)
+  const isGroupContainer = !!hubForUploads?.isGroup
+  const encryptForced = isGroupContainer && hubForUploads?.version === 2
+  const [encryptUploadsPref, setEncryptUploads] = useState(() => isGroupContainer || localStorage.getItem('den-chat-encrypt-uploads') === 'true')
+  const encryptUploads = encryptForced || encryptUploadsPref
   const toggleEncryptUploads = useCallback(() => {
+    if (encryptForced) return
     setEncryptUploads((prev) => {
       const next = !prev
-      localStorage.setItem('den-chat-encrypt-uploads', String(next))
+      if (!isGroupContainer) localStorage.setItem('den-chat-encrypt-uploads', String(next))
       return next
     })
-  }, [])
+  }, [encryptForced, isGroupContainer])
   const hubSecrets = useHubStore((s) => s.hubSecrets)
   const hubPrefs = useHubStore((s) => hubDTag ? s.hubPrefs[hubDTag] : undefined)
   const hasSecret = !!(hubDTag && hubSecrets[hubDTag])
@@ -5933,7 +5941,8 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
                       <button
                         type="button"
                         onClick={toggleEncryptUploads}
-                        className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer select-none"
+                        disabled={encryptForced}
+                        className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs font-medium transition-colors select-none ${encryptForced ? 'cursor-default' : 'cursor-pointer'}`}
                         style={{ background: encryptUploads ? 'rgba(16,185,129,0.06)' : 'rgba(245,158,11,0.06)', border: `1px solid ${encryptUploads ? 'rgba(16,185,129,0.15)' : 'rgba(245,158,11,0.15)'}` }}
                       >
                         <div className={`relative w-8 h-4 rounded-full shrink-0 transition-colors ${encryptUploads ? 'bg-emerald-500' : 'bg-muted-foreground/30'}`}>
@@ -5943,7 +5952,9 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
                       </button>
                     </TooltipTrigger>
                     <TooltipContent side="top" className="text-xs max-w-[260px] leading-snug">
-                      {encryptUploads
+                      {encryptForced
+                        ? 'Private group: files are always encrypted before upload so the server never sees plaintext tied to this group.'
+                        : encryptUploads
                         ? 'Files will be encrypted before upload — only chat participants can view them, but images/video/audio must fully download before displaying.'
                         : 'Media uploads are not encrypted — blossom server operators can view uploaded files, but images/video/audio are streamed immediately.'}
                     </TooltipContent>
