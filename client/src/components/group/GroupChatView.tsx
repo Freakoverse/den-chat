@@ -12,6 +12,7 @@ import { ChevronLeft, Lock, Loader2, AlertTriangle, MoreVertical } from 'lucide-
 import { useHubStore } from '@/stores/hubStore'
 import { useGroupStore } from '@/stores/groupStore'
 import { useUserStore } from '@/stores/userStore'
+import { useNotificationStore } from '@/stores/notificationStore'
 import { ChannelView } from '@/components/hub/ChannelView'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
@@ -31,6 +32,9 @@ export function GroupChatView({ dTag, onBack }: { dTag: string; onBack?: () => v
   useEffect(() => {
     const prev = { hub: useHubStore.getState().activeHubId, channel: useHubStore.getState().activeChannelId }
     useHubStore.setState({ activeHubId: dTag, activeChannelId: dTag })
+    // The hub sidebar's "mark the active channel read" effect isn't mounted on the DM page, so do it here.
+    // Live messages while open are already not counted (the counter skips the active channel).
+    useNotificationStore.getState().markChannelRead(dTag, dTag)
     return () => {
       const cur = useHubStore.getState()
       if (cur.activeHubId === dTag) useHubStore.setState({ activeHubId: prev.hub, activeChannelId: prev.channel })

@@ -4337,11 +4337,14 @@ one optional field for the purpose:
 |-------|-------------|
 | `servers` | Blossom servers the sender uploaded to. Readers try the group's `o` servers, then these, then their own client servers. Optional everywhere; expected when the group has no `o` tags. Also valid in hubs. |
 
-Attachments in a group **SHOULD be encrypted by default** (the opt-in of §6.2.1 becomes the
-default) and in a **v2 group MUST be**: a plaintext blob on a personal server would tie a real
-Blossom account to pseudonymous traffic, and even on the group's own servers the operator
-should see ciphertext. The file key lives inside the already-encrypted message, as in hubs.
-Voice notes are audio attachments and need nothing further.
+Attachment encryption is the **sender's choice**, exactly as in hubs (§6.2.1): a client
+SHOULD expose the per-upload toggle and MAY remember the user's preference. The trade-off is
+the usual one: an encrypted blob is opaque to the server operator but must be fully downloaded
+before it can be shown, while a plaintext blob streams but is readable by whoever runs the
+server. In a **v2 group** the client SHOULD make the privacy side of that trade-off visible,
+because a plaintext blob on a personal server ties a real Blossom account to pseudonymous
+traffic; it remains the user's call. The file key lives inside the already-encrypted message,
+as in hubs. Voice notes are audio attachments and need nothing further.
 
 ---
 
