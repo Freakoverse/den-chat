@@ -1,6 +1,6 @@
 /**
  * GroupInviteCard: a kind-36950 group address shared in chat / social. Deliberately not the hub
- * card: a compact row with a left accent and a "Group" badge instead of a banner card. The button
+ * card: a compact row with a "Group" badge instead of a banner card. The button
  * depends on where the viewer stands: in the tree but not in their list (Join), already in their
  * list (Open), otherwise Request to join (kind 36944 to the creator, §21.6.1) with an optional note.
  */
@@ -90,7 +90,7 @@ export function GroupInviteCard({ identifier, pubkey, relays }: { identifier: st
 
   return (
     <>
-      <div className="my-2 max-w-[350px] rounded-lg border border-border border-l-4 border-l-primary/70 bg-secondary/10 hover:bg-secondary/20 transition-colors">
+      <div className="my-2 max-w-[350px] rounded-lg border border-border bg-secondary/10 hover:bg-secondary/20 transition-colors">
         <div className="px-3 pt-2.5 pb-3 space-y-2">
           <div className="flex items-center gap-1.5">
             <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-primary/10 text-primary text-[10px] font-semibold uppercase tracking-wide">
