@@ -11,6 +11,7 @@ import { createPortal } from 'react-dom'
 import { nip19 } from 'nostr-tools'
 import { X, Loader2, Plus, Trash2, AlertTriangle, ChevronDown, Info, Search, Check, Lock } from 'lucide-react'
 import { GroupFaceEditor, type GroupFaceState } from '@/components/group/GroupFaceEditor'
+import { PowSection } from '@/components/hub/PowSection'
 import { useEscToClose } from '@/hooks/useEscToClose'
 import { useUserStore } from '@/stores/userStore'
 import { useFollowStore } from '@/stores/followStore'
@@ -68,6 +69,9 @@ export function CreateGroupModal({ onClose, onCreated }: { onClose: () => void; 
 
   // Relays (Advanced): deterministic 3-pick per list seeded by the author's pubkey, like hub creation.
   const [showAdvanced, setShowAdvanced] = useState(false)
+  // PoW: message (w) and join-request (W) difficulty, both 15 by default like hub creation.
+  const [minPow, setMinPow] = useState(15)
+  const [joinMinPow, setJoinMinPow] = useState(15)
   const [clientRelays, setClientRelays] = useState<RelayEntry[]>([])
   const [nip65Relays, setNip65Relays] = useState<RelayEntry[]>([])
   const [customRelays, setCustomRelays] = useState<RelayEntry[]>([])
@@ -153,6 +157,8 @@ export function CreateGroupModal({ onClose, onCreated }: { onClose: () => void; 
         relays: selectedRelays,
         version: createV2 && v2Capable ? 2 : 1,
         members,
+        minPow,
+        joinMinPow,
       })
       onCreated(g.dTag)
       onClose()
@@ -308,6 +314,7 @@ export function CreateGroupModal({ onClose, onCreated }: { onClose: () => void; 
             </button>
             {showAdvanced && (
               <div className="mt-3 space-y-4 pl-1">
+                <PowSection editMinPow={minPow} setEditMinPow={setMinPow} editJoinMinPow={joinMinPow} setEditJoinMinPow={setJoinMinPow} />
                 <div className="flex items-center justify-between">
                   <h4 className="text-sm font-semibold text-foreground">Relays</h4>
                   <span className={`text-[11px] font-mono tabular-nums select-none ${selectedRelays.length >= MAX_GENERAL_RELAYS ? 'text-amber-400' : 'text-muted-foreground/60'}`}>{selectedRelays.length}/{MAX_GENERAL_RELAYS}</span>

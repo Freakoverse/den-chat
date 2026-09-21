@@ -16,6 +16,7 @@ import { useUserStore } from '@/stores/userStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { GroupFaceEditor, type GroupFaceState } from '@/components/group/GroupFaceEditor'
+import { PowSection } from '@/components/hub/PowSection'
 import { GroupMembersModal } from '@/components/group/GroupMembersModal'
 import { ConfirmDeleteGroupModal, ConfirmLeaveGroupModal } from '@/components/group/GroupMenu'
 import { updateGroup, removeMember, addMembers } from '@/lib/group/groupOps'
@@ -98,6 +99,9 @@ export function GroupDetailsModal({ dTag, isCreator, onClose }: { dTag: string; 
   const [editName, setEditName] = useState('')
   const [editAbout, setEditAbout] = useState('')
   const [editDescription, setEditDescription] = useState('')
+  const [editMinPow, setEditMinPow] = useState(15)
+  const [editJoinMinPow, setEditJoinMinPow] = useState(15)
+  const [showAdvanced, setShowAdvanced] = useState(false)
   const [face, setFace] = useState<GroupFaceState>({ face: { picture: null, banner: null }, uploading: false, overlayOpen: false })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -105,6 +109,9 @@ export function GroupDetailsModal({ dTag, isCreator, onClose }: { dTag: string; 
     setEditName(hub?.name ?? '')
     setEditAbout(group?.about ?? '')
     setEditDescription(privateDescription)
+    setEditMinPow(group?.minPow ?? 0)
+    setEditJoinMinPow(group?.joinMinPow ?? 0)
+    setShowAdvanced(false)
     setError(null)
     setEditing(true)
   }
@@ -119,6 +126,8 @@ export function GroupDetailsModal({ dTag, isCreator, onClose }: { dTag: string; 
         description: editDescription.trim(),
         picture: face.face.picture ?? '',
         banner: face.face.banner ?? '',
+        minPow: editMinPow,
+        joinMinPow: editJoinMinPow,
       })
       setEditing(false)
     } catch (err) {
@@ -170,6 +179,16 @@ export function GroupDetailsModal({ dTag, isCreator, onClose }: { dTag: string; 
                 <textarea value={editDescription} maxLength={GROUP_DESCRIPTION_MAX} rows={3} onChange={(e) => setEditDescription(e.target.value)} placeholder="Optional" className={`${field} h-auto py-2 resize-none`} />
                 <div className="text-right text-[11px] text-muted-foreground/60">{editDescription.length}/{GROUP_DESCRIPTION_MAX}</div>
               </label>
+              <div>
+                <button type="button" onClick={() => setShowAdvanced(!showAdvanced)} className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
+                  <ChevronDown size={14} className={cn('transition-transform', showAdvanced && 'rotate-180')} /> Advanced
+                </button>
+                {showAdvanced && (
+                  <div className="mt-3 pl-1">
+                    <PowSection editMinPow={editMinPow} setEditMinPow={setEditMinPow} editJoinMinPow={editJoinMinPow} setEditJoinMinPow={setEditJoinMinPow} />
+                  </div>
+                )}
+              </div>
             </>
           ) : (
             <>

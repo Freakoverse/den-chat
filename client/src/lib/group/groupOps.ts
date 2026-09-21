@@ -69,6 +69,7 @@ export async function createGroup(opts: {
   /** Initial members' REAL keys (besides the creator, who is always a member). */
   members?: string[]
   minPow?: number
+  joinMinPow?: number
   /**
    * Pre-chosen d tag. The create modal picks it up front so a v2 group's picture/banner Blossom
    * auth can be signed as the owner pseudonym O (derived from this d tag) before the event exists.
@@ -91,7 +92,7 @@ export async function createGroup(opts: {
   const settings: GroupSettings = { description: opts.description || undefined }
 
   const signed = await buildAndSignGroupEvent({
-    dTag, name: opts.name, epoch, relays: opts.relays, blossomServers: [], minPow: opts.minPow ?? 0,
+    dTag, name: opts.name, epoch, relays: opts.relays, blossomServers: [], minPow: opts.minPow ?? 0, joinMinPow: opts.joinMinPow ?? 0,
     picture: opts.picture, banner: opts.banner, about: opts.about, publishedAt: now,
     version: opts.version, signerScheme: opts.version === 2 ? 'skd:1' : undefined,
     treeText: joinTreeText(tree, roster), history, settings, secret, keys: k,
@@ -157,7 +158,7 @@ export async function removeMember(dTag: string, member: HubMember): Promise<voi
 // ─── Edit / delete (creator only) ───
 
 export async function updateGroup(dTag: string, patch: {
-  name?: string; about?: string; description?: string; picture?: string; banner?: string; relays?: string[]; minPow?: number
+  name?: string; about?: string; description?: string; picture?: string; banner?: string; relays?: string[]; minPow?: number; joinMinPow?: number
 }): Promise<void> {
   const k = keys()
   const { g, secret } = current(dTag)
@@ -171,6 +172,7 @@ export async function updateGroup(dTag: string, patch: {
     banner: patch.banner ?? g.banner,
     relays: patch.relays ?? g.relays,
     minPow: patch.minPow ?? g.minPow,
+    joinMinPow: patch.joinMinPow ?? g.joinMinPow,
     secret, keys: k,
   })
   await publishAndApply(signed, patch.relays ?? g.relays, isGroupV2(g))
