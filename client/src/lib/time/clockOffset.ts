@@ -112,9 +112,11 @@ async function probe(fetchImpl: FetchLike, url: string, init: RequestInit): Prom
     if (!date) return null
     const server = Date.parse(date)
     if (Number.isNaN(server)) return null
-    const age = Number(res.headers.get('age')) || 0
-    // Date is truncated to the second: +500ms centres the error. Age accounts for a cached reply.
-    const serverMs = server + age * 1000 + 500
+    // A cached reply is useless: some CDNs keep the original Date (stale), others regenerate it
+    // (fresh) and report Age either way, so Age can't be used to correct it. Only a miss counts.
+    if ((Number(res.headers.get('age')) || 0) > 0) return null
+    // Date is truncated to the second: +500ms centres the error.
+    const serverMs = server + 500
     return { host: new URL(url).host, offsetMs: serverMs - (t0 + rtt / 2), rtt }
   } catch {
     return null
@@ -146,12 +148,15 @@ async function collectSamples(): Promise<Sample[]> {
   }
   const results = (await Promise.all(jobs)).filter((s): s is Sample => !!s)
 
-  // Web fallback: relays and Blossom servers that don't expose `Date` across origins give nothing.
-  // The app's own origin (never hardcoded; a fork's host works the same) is same-origin, so its
-  // headers are always readable. Probe it twice so a single-source result still has to be stable.
+  // Web fallback: relays and Blossom servers that don't expose `Date` across origins give nothing
+  // (in practice none of the defaults do). The app's own origin (never hardcoded; a fork's host
+  // works the same) is same-origin, so its headers are always readable. A unique path that doesn't
+  // exist is a guaranteed cache miss on any CDN (a 404 still carries a fresh Date), where a query
+  // string on a real file was served from cache by GitHub Pages. Probe twice so a single-source
+  // result still has to be stable.
   if (!native && results.length < 3 && typeof location !== 'undefined' && /^https?:/.test(location.origin)) {
     for (let i = 0; i < 2; i++) {
-      const s = await probe(fetchImpl, `${location.origin}/version.json?clock=${Date.now()}-${i}`, { method: 'GET' })
+      const s = await probe(fetchImpl, `${location.origin}/clock-probe-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, { method: 'GET' })
       if (s) results.push(s)
     }
   }
