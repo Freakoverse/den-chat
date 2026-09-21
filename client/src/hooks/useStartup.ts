@@ -532,10 +532,10 @@ export function useStartup() {
   // Fetch hide message events for the active hub (initial 30-day window)
   useHideMessages(activeHubId)
 
-  // ─── Hub event redundancy (cooperative rebroadcasting) ───
-  // When the user opens a hub, check that its hub event (kind 36942) exists on the
-  // user's relays and rebroadcast to any that are missing it. Any member that opens
-  // a hub helps keep it alive.
+  // ─── Hub / group event redundancy (cooperative rebroadcasting) ───
+  // When the user opens a hub (kind 36942) or a group (kind 36950), check that its container
+  // event exists on at least 3 relays and rebroadcast to any that are missing it. Any member
+  // that opens it helps keep it alive.
   //
   // This MUST run only after the hub event has actually loaded — so we gate on the
   // active hub's creatorPubkey (present once the event is fetched + parsed). Keying
@@ -554,8 +554,11 @@ export function useStartup() {
       const hub = useHubStore.getState().hubs[hubId]
       const knownLatest = hub?.eventCreatedAt
       const hubRelays = hub ? [...hub.generalRelays] : []
+      // A group (NIP-CHAT §21) sits in the hub store too; its container is kind 36950, not 36942.
+      // Same check, same target of 3 relays, same version-aware refusal to spread a stale copy.
+      const kind = hub?.isGroup ? KINDS.GROUP_EVENT : KINDS.HUB_EVENT
       import('@/lib/nostr/eventRedundancy').then(({ ensureAddressableRedundancy }) => {
-        ensureAddressableRedundancy(KINDS.HUB_EVENT, creator, hubId, knownLatest, hubRelays)
+        ensureAddressableRedundancy(kind, creator, hubId, knownLatest, hubRelays)
       })
     }, 5000)
     return () => clearTimeout(timer)
