@@ -20,6 +20,7 @@ import { GroupFaceEditor, type GroupFaceState } from '@/components/group/GroupFa
 import { GroupVersionPill } from '@/components/group/GroupVersionPill'
 import { PowSection } from '@/components/hub/PowSection'
 import { GroupMembersModal } from '@/components/group/GroupMembersModal'
+import { GroupNotificationSettings } from '@/components/group/GroupNotificationSettings'
 import { ConfirmDeleteGroupModal, ConfirmLeaveGroupModal } from '@/components/group/GroupMenu'
 import { updateGroup, removeMember, addMembers } from '@/lib/group/groupOps'
 import { fetchGroupJoinRequests, readGroupJoinNote, type GroupJoinRequest } from '@/lib/group/groupJoin'
@@ -276,6 +277,9 @@ export function GroupDetailsModal({ dTag, isCreator, onClose }: { dTag: string; 
                 </div>
                 {isCreator && <p className="text-[11px] text-muted-foreground/70">Removing someone rotates the group secret. They can't read anything after that point.</p>}
               </div>
+
+              {/* Notifications: the per-hub mute toggles, for this group */}
+              <GroupNotificationSettings dTag={dTag} />
 
               {/* Join requests (creator) */}
               {isCreator && (
