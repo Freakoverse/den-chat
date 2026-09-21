@@ -152,7 +152,11 @@ export function GroupDetailsModal({ dTag, isCreator, onClose }: { dTag: string; 
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div className="relative z-10 w-full max-w-[560px] mx-4 bg-card rounded-xl border border-border shadow-2xl animate-in fade-in-0 zoom-in-95 duration-200 max-h-[90vh] flex flex-col">
         <div className="flex items-center justify-between px-5 py-3 border-b border-border shrink-0">
-          <h3 className="text-sm font-semibold text-foreground">{editing ? 'Edit group' : 'Group details'}</h3>
+          <div className="flex items-center gap-2 min-w-0">
+            <h3 className="text-sm font-semibold text-foreground">{editing ? 'Edit group' : 'Group details'}</h3>
+            <GroupVersionPill version={hub?.version} aboveModal />
+            {(group?.joinMinPow ?? 0) > 0 && <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-amber-500/15 text-amber-400">Join PoW {group?.joinMinPow}</span>}
+          </div>
           <div className="flex items-center gap-1">
             {isCreator && !editing && (
               <button onClick={startEditing} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors cursor-pointer">
@@ -210,10 +214,6 @@ export function GroupDetailsModal({ dTag, isCreator, onClose }: { dTag: string; 
                     {isV2 && <Lock size={14} className="text-emerald-400 shrink-0" />}
                     <span className="truncate">{name}</span>
                   </h2>
-                  <div className="mt-1.5 flex items-center gap-1.5">
-                    <GroupVersionPill version={hub?.version} aboveModal />
-                    {(group?.joinMinPow ?? 0) > 0 && <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-amber-500/15 text-amber-400">Join PoW {group?.joinMinPow}</span>}
-                  </div>
                   {privateDescription && <p className="mt-1 text-sm text-muted-foreground whitespace-pre-wrap break-words leading-relaxed">{privateDescription}</p>}
                 </div>
               </div>
