@@ -12,7 +12,7 @@ import { useEscToClose } from '@/hooks/useEscToClose'
 import { fetchGroupEvent } from '@/hooks/useGroupLoader'
 import { parseGroupEvent, deriveGroupSecret, type GroupData } from '@/lib/group/groupEvent'
 import { acceptInvite } from '@/lib/group/groupOps'
-import { requestJoinGroup, getOwnGroupJoinRequest } from '@/lib/group/groupJoin'
+import { requestJoinGroup, getOwnGroupJoinRequest, withdrawGroupJoinRequest } from '@/lib/group/groupJoin'
 import { JOIN_NOTE_MAX } from '@/lib/hub/joinNote'
 import { useGroupStore } from '@/stores/groupStore'
 import { useUserStore } from '@/stores/userStore'
@@ -74,6 +74,8 @@ export function GroupInviteCard({ identifier, pubkey, relays }: { identifier: st
     setJoining(true); setError(null)
     try {
       await acceptInvite({ coord: { pubkey, dTag: identifier }, relays: relays || [], event: data.event, group, isMember: true })
+      // Now a member: the pending request (if any) is redundant. Best effort, never blocks the join.
+      void withdrawGroupJoinRequest(group, { requireLive: true }).catch(() => {})
       open()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to join')
@@ -132,6 +134,7 @@ export function GroupInviteCard({ identifier, pubkey, relays }: { identifier: st
           alreadyRequested={!!requested}
           onClose={() => setShowRequest(false)}
           onSent={() => { setRequested(true); setShowRequest(false) }}
+          onWithdrawn={() => { setRequested(false); setShowRequest(false) }}
         />
       )}
     </>
@@ -139,12 +142,24 @@ export function GroupInviteCard({ identifier, pubkey, relays }: { identifier: st
 }
 
 /** Note + send for a group join request. Same note rules as hubs (§6.3.1). */
-function GroupJoinRequestModal({ group, alreadyRequested, onClose, onSent }: { group: GroupData; alreadyRequested: boolean; onClose: () => void; onSent: () => void }) {
+function GroupJoinRequestModal({ group, alreadyRequested, onClose, onSent, onWithdrawn }: { group: GroupData; alreadyRequested: boolean; onClose: () => void; onSent: () => void; onWithdrawn: () => void }) {
   useEscToClose(onClose, true)
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
+  const [withdrawing, setWithdrawing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const isV2 = group.version === 2
+
+  const withdraw = async () => {
+    setWithdrawing(true); setError(null)
+    try {
+      await withdrawGroupJoinRequest(group)
+      onWithdrawn()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to withdraw the request')
+      setWithdrawing(false)
+    }
+  }
 
   const send = async () => {
     setBusy(true); setError(null)
@@ -185,11 +200,20 @@ function GroupJoinRequestModal({ group, alreadyRequested, onClose, onSent }: { g
             </div>
           )}
         </div>
-        <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-border">
-          <button onClick={onClose} className="px-3 py-1.5 rounded-lg text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 cursor-pointer">Cancel</button>
-          <button onClick={send} disabled={busy} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-medium bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer disabled:opacity-50">
-            {busy ? <Loader2 size={11} className="animate-spin" /> : <Send size={11} />} Send request
-          </button>
+        <div className="flex items-center justify-between gap-2 px-5 py-3 border-t border-border">
+          <div>
+            {alreadyRequested && (
+              <button onClick={withdraw} disabled={busy || withdrawing} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-medium text-destructive hover:bg-destructive/10 cursor-pointer disabled:opacity-50">
+                {withdrawing && <Loader2 size={11} className="animate-spin" />} Withdraw request
+              </button>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <button onClick={onClose} className="px-3 py-1.5 rounded-lg text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 cursor-pointer">Cancel</button>
+            <button onClick={send} disabled={busy || withdrawing} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-medium bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer disabled:opacity-50">
+              {busy ? <Loader2 size={11} className="animate-spin" /> : <Send size={11} />} {alreadyRequested ? 'Resend request' : 'Send request'}
+            </button>
+          </div>
         </div>
       </div>
     </div>,

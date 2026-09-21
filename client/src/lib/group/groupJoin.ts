@@ -9,13 +9,14 @@
  */
 import type { Event } from 'nostr-tools'
 import { KINDS } from '@/lib/crypto/constants'
-import { createUnsignedEvent, mineAndSign } from '@/lib/nostr'
+import { createUnsignedEvent, mineAndSign, signWithSigner } from '@/lib/nostr'
+import { createDeletedJoinRequest, createDeletionEvent } from '@/lib/nostr/events'
 import { fetchEventsFromRelays, getRelays, publishCriticalWithFailover } from '@/lib/nostr/relay-pool'
-import { getPublishRelays } from '@/stores/postingBehaviourStore'
+import { getPublishRelays, getDeletePublishRelays } from '@/stores/postingBehaviourStore'
 import { useUserStore } from '@/stores/userStore'
 import { countLeadingZeroBits } from '@/lib/pow/pow'
 import { canUseV2, ChatContext } from '@/lib/crypto/skd'
-import { makeSubkeySigner } from '@/lib/nostr/v2send'
+import { makeSubkeySigner, mineAndSignAsSubkey } from '@/lib/nostr/v2send'
 import { buildV2JoinRequest, parseV2JoinRequest, readOwnV2JoinRequest } from '@/lib/hub/v2join'
 import { nip44EncryptTo, nip44DecryptFrom } from '@/lib/hub/hubListPrivacy'
 import { normalizeJoinNote } from '@/lib/hub/joinNote'
@@ -125,4 +126,44 @@ export async function readGroupJoinNote(req: GroupJoinRequest): Promise<string |
   if (!req.noteCipher) return null
   const k = keys()
   try { return await nip44DecryptFrom(req.noteCipher, req.pubkey, k.signer, k.privateKey) } catch { return null }
+}
+
+/**
+ * Withdraw my join request for `g` (§6.3 lifecycle, applied to groups): republish it tombstoned
+ * (`deleted`, created_at + 1, same `a`) and send a NIP-09 deletion for its coordinate. v2 signs both
+ * under the deterministic addr sub-key, never R, and publishes to the group's relays only.
+ * With `requireLive`, no-ops unless a live (non-tombstoned) request exists: used to auto-clean
+ * after the user accepts the invite, without emitting a tombstone for a request never made.
+ */
+export async function withdrawGroupJoinRequest(g: GroupData, opts: { requireLive?: boolean } = {}): Promise<boolean> {
+  const k = keys()
+  const coord = groupCoord(g)
+  const relays = [...g.relays]
+  const v2 = isGroupV2(g)
+  const publishRelays = getDeletePublishRelays(relays, { hubOnly: v2 })
+  const queryRelays = [...new Set([...relays, ...getRelays()])]
+  const live = (e: Event | undefined) => !!e && !e.tags.some((t) => t[0] === 'deleted' && t[1] === 'true')
+
+  if (v2) {
+    if (!canUseV2({ privateKey: k.privateKey, signer: k.signer })) return false
+    const addrSigner = makeSubkeySigner(ChatContext.joinAddr(g.dTag), { privateKey: k.privateKey, signer: k.signer, peerPub: g.creatorPubkey })
+    const addrPub = await addrSigner.getPublicKey()
+    const existing = (await fetchEventsFromRelays(queryRelays, { kinds: [KINDS.JOIN_REQUEST], authors: [addrPub], '#d': [addrPub], limit: 1 }))[0]
+    if (opts.requireLive && !live(existing)) return false
+    const createdAt = existing?.created_at ?? Math.floor(Date.now() / 1000)
+    const deleted = createDeletedJoinRequest(addrPub, g.creatorPubkey, createdAt, coord)
+    await publishCriticalWithFailover(await mineAndSignAsSubkey(deleted, 0, addrSigner), publishRelays, relays)
+    const del = createDeletionEvent([], [`${KINDS.JOIN_REQUEST}:${addrPub}:${addrPub}`], 'withdraw join request')
+    await publishCriticalWithFailover(await mineAndSignAsSubkey(del, 0, addrSigner), publishRelays, relays)
+    return true
+  }
+
+  const existing = (await fetchEventsFromRelays(queryRelays, { kinds: [KINDS.JOIN_REQUEST], authors: [k.me], '#d': [g.dTag], limit: 1 }))[0]
+  if (opts.requireLive && !live(existing)) return false
+  const createdAt = existing?.created_at ?? Math.floor(Date.now() / 1000)
+  const deleted = createDeletedJoinRequest(g.dTag, g.creatorPubkey, createdAt, coord)
+  await publishCriticalWithFailover(await signWithSigner(deleted, k.signer, k.privateKey), publishRelays, relays)
+  const del = createDeletionEvent([], [`${KINDS.JOIN_REQUEST}:${k.me}:${g.dTag}`], 'withdraw join request')
+  await publishCriticalWithFailover(await signWithSigner(del, k.signer, k.privateKey), publishRelays, relays)
+  return true
 }
