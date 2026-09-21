@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { nip19 } from 'nostr-tools'
-import { X, Loader2, Pencil, UserPlus, UserMinus, Search, Crown, Lock, ChevronDown, AlertTriangle, Trash2, LogOut, RotateCw, Check, MessageSquareText, Square, CheckSquare } from 'lucide-react'
+import { X, Loader2, Pencil, UserPlus, UserMinus, Search, Crown, Lock, ChevronDown, AlertTriangle, Trash2, LogOut, RotateCw, Check, MessageSquareText, Square, CheckSquare, Send } from 'lucide-react'
 import { useEscToClose } from '@/hooks/useEscToClose'
 import { useHubStore } from '@/stores/hubStore'
 import { useGroupStore } from '@/stores/groupStore'
@@ -24,6 +24,7 @@ import { GroupNotificationSettings } from '@/components/group/GroupNotificationS
 import { ConfirmDeleteGroupModal, ConfirmLeaveGroupModal } from '@/components/group/GroupMenu'
 import { updateGroup, removeMember, addMembers } from '@/lib/group/groupOps'
 import { fetchGroupJoinRequests, readGroupJoinNote, type GroupJoinRequest } from '@/lib/group/groupJoin'
+import { sendGroupInviteDMs } from '@/lib/group/groupInvite'
 import { GROUP_NAME_MAX, GROUP_ABOUT_MAX, GROUP_DESCRIPTION_MAX, GROUP_MAX_MEMBERS } from '@/lib/group/groupEvent'
 import { HUB_BANNER_PLACEHOLDER } from '@/lib/constants'
 import { cn, truncateNpub } from '@/lib/utils'
@@ -51,6 +52,16 @@ export function GroupDetailsModal({ dTag, isCreator, onClose }: { dTag: string; 
   const [showManage, setShowManage] = useState(false)
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null)
   const [removing, setRemoving] = useState<string | null>(null)
+  const [inviting, setInviting] = useState<string | null>(null)
+  const [invited, setInvited] = useState<Set<string>>(new Set())
+  const invite = async (pubkey: string) => {
+    setInviting(pubkey); setError(null)
+    try {
+      const failed = await sendGroupInviteDMs(dTag, [pubkey])
+      if (failed.length) setError('The invite DM could not be sent.')
+      else setInvited((prev) => new Set(prev).add(pubkey))
+    } finally { setInviting(null) }
+  }
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
     if (!q) return members
@@ -256,6 +267,18 @@ export function GroupDetailsModal({ dTag, isCreator, onClose }: { dTag: string; 
                             </p>
                             <p className="text-[11px] text-muted-foreground font-mono truncate">{truncateNpub(npub, 6)}</p>
                           </div>
+                          {isCreator && !isMe && !isOwner && confirmRemove !== m.pubkey && (
+                            <TooltipProvider delayDuration={200}>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <button onClick={() => invite(m.pubkey)} disabled={inviting === m.pubkey} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors cursor-pointer shrink-0 disabled:opacity-50">
+                                    {inviting === m.pubkey ? <Loader2 size={13} className="animate-spin" /> : invited.has(m.pubkey) ? <Check size={13} className="text-emerald-400" /> : <Send size={13} />} {invited.has(m.pubkey) ? 'Sent' : 'Invite'}
+                                  </button>
+                                </TooltipTrigger>
+                                <TooltipContent side="top" className="z-[300] text-xs">Send them the group address by DM</TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          )}
                           {isCreator && !isMe && !isOwner && (
                             confirmRemove === m.pubkey ? (
                               <div className="flex items-center gap-1 shrink-0">

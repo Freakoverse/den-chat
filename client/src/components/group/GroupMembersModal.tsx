@@ -1,12 +1,13 @@
 /**
  * GroupMembersModal: "Add members" for a group (creator only). Pick from the follow list or paste
  * an npub / NIP-05 / DNN ID, then publish once for the whole batch (lib/group/groupOps.addMembers).
- * Removal lives in GroupDetailsModal's member list.
+ * "Add & invite" also DMs each new member the group address (lib/group/groupInvite), like the hub
+ * invite modal. Removal lives in GroupDetailsModal's member list.
  */
 import { useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { nip19 } from 'nostr-tools'
-import { X, Loader2, UserPlus, Plus, Search, Check, AlertTriangle } from 'lucide-react'
+import { X, Loader2, UserPlus, Plus, Search, Check, AlertTriangle, Send } from 'lucide-react'
 import { useEscToClose } from '@/hooks/useEscToClose'
 import { useHubStore } from '@/stores/hubStore'
 import { useUserStore } from '@/stores/userStore'
@@ -15,6 +16,7 @@ import { useProfileCache } from '@/hooks/useProfileCache'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { cn, truncateNpub } from '@/lib/utils'
 import { addMembers } from '@/lib/group/groupOps'
+import { sendGroupInviteDMs } from '@/lib/group/groupInvite'
 import { resolveIdentifier } from '@/lib/group/resolveIdentifier'
 import { GROUP_MAX_MEMBERS } from '@/lib/group/groupEvent'
 
@@ -31,7 +33,7 @@ export function GroupMembersModal({ dTag, onClose }: { dTag: string; isCreator?:
   const [search, setSearch] = useState('')
   const [customInput, setCustomInput] = useState('')
   const [resolving, setResolving] = useState(false)
-  const [busy, setBusy] = useState(false)
+  const [busy, setBusy] = useState<'add' | 'invite' | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const room = GROUP_MAX_MEMBERS - members.length
@@ -62,16 +64,27 @@ export function GroupMembersModal({ dTag, onClose }: { dTag: string; isCreator?:
       setCustomInput('')
     } finally { setResolving(false) }
   }
-  const submit = async () => {
+  const submit = async (invite: boolean) => {
     if (selected.length === 0) return
-    setBusy(true); setError(null)
+    setBusy(invite ? 'invite' : 'add'); setError(null)
     try {
       await addMembers(dTag, selected)
-      onClose()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to add members')
-      setBusy(false)
+      setBusy(null)
+      return
     }
+    if (invite) {
+      // Members are in the tree now; a DM failure is reported but doesn't undo the add.
+      const failed = await sendGroupInviteDMs(dTag, selected)
+      if (failed.length > 0) {
+        setError(`Added, but the invite DM failed for ${failed.length} of ${selected.length}. You can resend from the member list.`)
+        setBusy(null)
+        setSelected([])
+        return
+      }
+    }
+    onClose()
   }
 
   const field = 'w-full h-9 px-3 rounded-lg bg-secondary/40 border border-border text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:border-primary/40'
@@ -134,7 +147,7 @@ export function GroupMembersModal({ dTag, onClose }: { dTag: string; isCreator?:
               {resolving ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
             </button>
           </div>
-          <p className="text-[11px] text-muted-foreground/70">Adding publishes a new tree with their leaves, no rotation. They see the group once they open its address.</p>
+          <p className="text-[11px] text-muted-foreground/70">Adding publishes a new tree with their leaves, no rotation. They see the group once they open its address, which "Add & invite" sends them as a DM.</p>
           {error && (
             <div className="flex items-start gap-2 rounded-lg bg-destructive/10 border border-destructive/30 px-3 py-2 text-xs text-destructive">
               <AlertTriangle size={13} className="shrink-0 mt-0.5" /> {error}
@@ -146,8 +159,11 @@ export function GroupMembersModal({ dTag, onClose }: { dTag: string; isCreator?:
           <span className="text-xs text-muted-foreground">{selected.length} selected</span>
           <div className="flex items-center gap-2">
             <button onClick={onClose} className="px-3 py-1.5 rounded-lg text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 cursor-pointer">Cancel</button>
-            <button onClick={submit} disabled={busy || selected.length === 0} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-medium bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
-              {busy ? <Loader2 size={11} className="animate-spin" /> : <UserPlus size={11} />} Add {selected.length > 0 ? selected.length : ''}
+            <button onClick={() => submit(false)} disabled={!!busy || selected.length === 0} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-medium border border-border text-foreground hover:bg-secondary/60 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
+              {busy === 'add' ? <Loader2 size={11} className="animate-spin" /> : <UserPlus size={11} />} Add {selected.length > 0 ? selected.length : ''}
+            </button>
+            <button onClick={() => submit(true)} disabled={!!busy || selected.length === 0} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-medium bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
+              {busy === 'invite' ? <Loader2 size={11} className="animate-spin" /> : <Send size={11} />} Add & invite by DM
             </button>
           </div>
         </div>
