@@ -18,6 +18,7 @@ import { useGroupStore } from '@/stores/groupStore'
 import { useUserStore } from '@/stores/userStore'
 import { useNavigationStore } from '@/stores/navigationStore'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { GroupVersionPill } from '@/components/group/GroupVersionPill'
 
 interface Resolved { event: import('nostr-tools').Event; group: GroupData; isMember: boolean }
 
@@ -93,8 +94,10 @@ export function GroupInviteCard({ identifier, pubkey, relays }: { identifier: st
         <div className="px-3 pt-2.5 pb-3 space-y-2">
           <div className="flex items-center gap-1.5">
             <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-primary/10 text-primary text-[10px] font-semibold uppercase tracking-wide">
-              {isV2 ? <Lock size={9} /> : <Users size={9} />} {isV2 ? 'Private group' : 'Group'}
+              {isV2 ? <Lock size={9} /> : <Users size={9} />} Group
             </span>
+            <GroupVersionPill version={group.version} />
+            {group.joinMinPow > 0 && <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-amber-500/15 text-amber-400">Join PoW {group.joinMinPow}</span>}
           </div>
           <div className="flex items-center gap-2.5">
             <Avatar className="h-10 w-10 shrink-0">

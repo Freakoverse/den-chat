@@ -17,6 +17,7 @@ import { useProfileCache } from '@/hooks/useProfileCache'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { GroupFaceEditor, type GroupFaceState } from '@/components/group/GroupFaceEditor'
+import { GroupVersionPill } from '@/components/group/GroupVersionPill'
 import { PowSection } from '@/components/hub/PowSection'
 import { GroupMembersModal } from '@/components/group/GroupMembersModal'
 import { ConfirmDeleteGroupModal, ConfirmLeaveGroupModal } from '@/components/group/GroupMenu'
@@ -209,6 +210,10 @@ export function GroupDetailsModal({ dTag, isCreator, onClose }: { dTag: string; 
                     {isV2 && <Lock size={14} className="text-emerald-400 shrink-0" />}
                     <span className="truncate">{name}</span>
                   </h2>
+                  <div className="mt-1.5 flex items-center gap-1.5">
+                    <GroupVersionPill version={hub?.version} aboveModal />
+                    {(group?.joinMinPow ?? 0) > 0 && <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-amber-500/15 text-amber-400">Join PoW {group?.joinMinPow}</span>}
+                  </div>
                   {privateDescription && <p className="mt-1 text-sm text-muted-foreground whitespace-pre-wrap break-words leading-relaxed">{privateDescription}</p>}
                 </div>
               </div>
