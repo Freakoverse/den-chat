@@ -38,6 +38,37 @@ export interface Attachment {
   }
 }
 
+/**
+ * Enforce "a reply comes after its parent" on ordering timestamps. Nostr timestamps are the sender's
+ * clock, so a skewed clock (or an edit republished without `published_at` by another client) can put
+ * a parent AFTER the reply to it, which reads as replying to the future. Fix the parent, not the
+ * reply: its ordering `createdAt` becomes one second before its earliest reply. Iterates so a
+ * clamped parent that is itself a reply pulls its own parent too. Display uses the same field, so
+ * the row shows the corrected time. `eventCreatedAt` (replacement comparison) is untouched.
+ */
+export function enforceReplyOrder(msgs: ChatMessage[]): ChatMessage[] {
+  const byRef = new Map<string, number>()
+  msgs.forEach((m, i) => byRef.set(`36943:${m.pubkey}:${m.dTag}`, i))
+  let out = msgs
+  for (let pass = 0; pass < 8; pass++) {
+    let changed = false
+    for (let i = 0; i < out.length; i++) {
+      const child = out[i]
+      if (!child.replyTo) continue
+      const pi = byRef.get(child.replyTo)
+      if (pi === undefined) continue
+      const parent = out[pi]
+      if (parent.createdAt >= child.createdAt) {
+        if (out === msgs) out = [...msgs]
+        out[pi] = { ...parent, createdAt: child.createdAt - 1 }
+        changed = true
+      }
+    }
+    if (!changed) break
+  }
+  return out === msgs ? msgs : out.sort((a, b) => a.createdAt - b.createdAt)
+}
+
 export interface ChatMessage {
   id: string            // event id
   dTag: string          // d tag — unique message identifier (addressable)
@@ -161,6 +192,9 @@ export const useMessageStore = create<MessageState>((set, get) => ({
         const updated = [...channelMsgs]
         updated[existingIdx] = {
           ...msg,
+          // An edit never moves a message: keep the earlier ordering time even when the replacement
+          // came from a client that stamped the edit with the wall clock and no published_at.
+          createdAt: Math.min(existing.createdAt, msg.createdAt),
           edited: true, // mark as edited since it replaced an existing version
         }
         return {
@@ -168,7 +202,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
             ...state.messages,
             [msg.hubDTag]: {
               ...hubMsgs,
-              [msg.channelId]: updated,
+              [msg.channelId]: enforceReplyOrder(updated.sort((a, b) => a.createdAt - b.createdAt)),
             },
           },
         }
@@ -177,8 +211,8 @@ export const useMessageStore = create<MessageState>((set, get) => ({
       // Deduplicate by event id (fallback)
       if (channelMsgs.some((m) => m.id === msg.id)) return state
 
-      // Insert sorted by createdAt
-      let updated = [...channelMsgs, msg].sort((a, b) => a.createdAt - b.createdAt)
+      // Insert sorted by createdAt, then make sure no reply precedes its parent
+      let updated = enforceReplyOrder([...channelMsgs, msg].sort((a, b) => a.createdAt - b.createdAt))
 
       // Per-channel FIFO cap
       if (updated.length > MAX_PER_CHANNEL) {
@@ -226,7 +260,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
   setMessages: (hubDTag, channelId, msgs) =>
     set((state) => {
       const hubMsgs = state.messages[hubDTag] || {}
-      let sorted = msgs.sort((a, b) => a.createdAt - b.createdAt)
+      let sorted = enforceReplyOrder(msgs.sort((a, b) => a.createdAt - b.createdAt))
 
       // Per-channel FIFO cap
       if (sorted.length > MAX_PER_CHANNEL) {
