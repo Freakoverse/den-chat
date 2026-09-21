@@ -15,6 +15,7 @@ import { useGroupStore } from '@/stores/groupStore'
 import { useUserStore } from '@/stores/userStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { GroupFaceEditor, type GroupFaceState } from '@/components/group/GroupFaceEditor'
 import { PowSection } from '@/components/hub/PowSection'
 import { GroupMembersModal } from '@/components/group/GroupMembersModal'
@@ -277,9 +278,16 @@ export function GroupDetailsModal({ dTag, isCreator, onClose }: { dTag: string; 
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-medium text-foreground">Join requests {requests && requests.length > 0 && <span className="font-normal font-mono tabular-nums text-muted-foreground/60">{requests.length}</span>}</span>
                     <div className="flex items-center gap-1.5">
-                      <button onClick={loadRequests} disabled={loadingRequests} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors cursor-pointer disabled:opacity-50" title="Refresh">
-                        <RotateCw size={13} className={cn(loadingRequests && 'animate-spin')} />
-                      </button>
+                      <TooltipProvider delayDuration={200}>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button onClick={loadRequests} disabled={loadingRequests} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors cursor-pointer disabled:opacity-50">
+                              <RotateCw size={13} className={cn(loadingRequests && 'animate-spin')} />
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent side="top" className="z-[300] text-xs">Refresh requests</TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
                       <button onClick={approve} disabled={approving || selected.size === 0} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
                         {approving ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />} Add selected{selected.size > 0 ? ` (${selected.size})` : ''}
                       </button>
