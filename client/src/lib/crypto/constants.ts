@@ -81,4 +81,7 @@ export const APP_DATA_DTAGS = {
   /** Hub join requests — per-hub "seen" watermark, creator-only (encrypted: lists moderated hub
    *  d-tags, which would link R → a private v2 hub they own if published in the clear) */
   JOIN_READ_STATE: 'den-join-read-state',
+  /** Groups (NIP-CHAT §21): per-group read timestamp + mute settings, encrypted, capped at the group
+   *  list limit so the event never outgrows relay size limits. Separate from the hub event on purpose. */
+  GROUP_READ_STATE: 'den-group-read-state',
 } as const

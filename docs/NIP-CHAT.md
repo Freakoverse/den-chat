@@ -4229,6 +4229,10 @@ That is the same residual as a v2 hub (§5.2).
 
 ### 21.9 Limits & Warnings
 
+**List size.** A client SHOULD cap the user group list (§21.10) the same way it caps the hub
+list, and keep any per-group state it syncs (read timestamps, mutes) to the groups on that list,
+so those events stay within relay size limits. DEN Chat uses the hub-list limit for both.
+
 | Limit | Value | Why |
 |-------|-------|-----|
 | Members | **100** | A leaf + node pair costs ~370 bytes (v1) or ~505 bytes (v2 with roster). 100 members is ~37 KB / ~50 KB, inside the 64 KiB event ceiling common on relays with room for history and metadata. Depth is 7 for anything from 65 to 128 members, so 100 costs the same per operation as 128 would. |

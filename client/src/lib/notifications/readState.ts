@@ -68,10 +68,17 @@ export interface JoinReadState {
   hubs: Record<string, number>  // hub d-tag → last-seen unix timestamp
 }
 
+/** Group read-state (NIP-CHAT §21): one timestamp per group (a group has one channel) + mutes. */
+export interface GroupReadState {
+  groups: Record<string, number>  // group d-tag → last-read unix timestamp
+  muted?: Record<string, HubMuteSettings>
+}
+
 /** Map of domain → localStorage key */
 const STORAGE_KEYS: Record<string, string> = {
   social: StorageKey.NOTIF_SOCIAL_SEEN_AT,
   hub:    StorageKey.NOTIF_HUB_READ_STATE,
+  group:  StorageKey.NOTIF_GROUP_READ_STATE,
   dm:     StorageKey.NOTIF_DM_READ_STATE,
   pc:     StorageKey.NOTIF_PC_READ_STATE,
   join:   StorageKey.NOTIF_JOIN_READ_STATE,
@@ -81,12 +88,13 @@ const STORAGE_KEYS: Record<string, string> = {
 const DTAGS: Record<string, string> = {
   social: APP_DATA_DTAGS.SOCIAL_SEEN_AT,
   hub:    APP_DATA_DTAGS.HUB_READ_STATE,
+  group:  APP_DATA_DTAGS.GROUP_READ_STATE,
   dm:     APP_DATA_DTAGS.DM_READ_STATE,
   pc:     APP_DATA_DTAGS.PC_READ_STATE,
   join:   APP_DATA_DTAGS.JOIN_READ_STATE,
 }
 
-export type NotifDomain = 'social' | 'hub' | 'dm' | 'pc' | 'join'
+export type NotifDomain = 'social' | 'hub' | 'group' | 'dm' | 'pc' | 'join'
 
 // ── Per-account scoping ──
 // The read-state caches are namespaced by the active account's pubkey, so switching
@@ -220,6 +228,17 @@ export function buildHubReadStateEvent(state: HubReadState, encryptedContent: st
 }
 
 /**
+ * Build a Group read-state event with encrypted content.
+ */
+export function buildGroupReadStateEvent(encryptedContent: string): UnsignedEvent {
+  return createUnsignedEvent(
+    STANDARD_KINDS.APP_DATA,
+    encryptedContent,
+    [['d', DTAGS.group]]
+  )
+}
+
+/**
  * Build a DM read-state event with encrypted content.
  */
 export function buildDmReadStateEvent(state: DmReadState, encryptedContent: string): UnsignedEvent {
@@ -271,6 +290,18 @@ export function parseHubReadState(decryptedContent: string): HubReadState {
     return { hubs: parsed.hubs ?? {} }
   } catch {
     return { hubs: {} }
+  }
+}
+
+/**
+ * Parse group read-state from a NIP-78 event's decrypted content.
+ */
+export function parseGroupReadState(decryptedContent: string): GroupReadState {
+  try {
+    const parsed = JSON.parse(decryptedContent)
+    return { groups: parsed.groups ?? {}, muted: parsed.muted ?? undefined }
+  } catch {
+    return { groups: {} }
   }
 }
 

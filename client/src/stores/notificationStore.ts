@@ -15,6 +15,8 @@
 import { create } from 'zustand'
 import type { ISigner } from '@/stores/userStore'
 import { guardedDecrypt, guardedEncrypt } from '@/lib/auth/signerGuard'
+import { useGroupStore } from '@/stores/groupStore'
+import { MAX_GROUP_LIST_ENTRIES } from '@/lib/hub/hubLimits'
 import type {
   HubReadState,
   HubMuteSettings,
@@ -41,6 +43,9 @@ import {
   loadCachedEvent,
   setReadStateAccount,
   restoreReadStateAccount,
+  parseGroupReadState,
+  buildGroupReadStateEvent,
+  type GroupReadState,
 } from '@/lib/notifications/readState'
 
 // ── Helpers ──
@@ -152,6 +157,7 @@ export interface NotificationState {
 
   // Persistence
   publishHubReadState: (signer: ISigner | null, privateKey: string | null) => Promise<boolean>
+  publishGroupReadState: (signer: ISigner | null, privateKey: string | null) => Promise<boolean>
   publishDmReadState: (signer: ISigner | null, privateKey: string | null) => Promise<boolean>
   publishPcReadState: (signer: ISigner | null, privateKey: string | null) => Promise<boolean>
 }
@@ -203,7 +209,9 @@ function buildHubReadStateFromStore(
   hubMuteSettings: Record<string, HubMuteSettings>
 ): HubReadState {
   const hubs: HubReadState['hubs'] = {}
+  const groups = groupDTagSet()
   for (const [hubDTag, channels] of Object.entries(hubUnreads)) {
+    if (groups.has(hubDTag)) continue
     const hubEntry: Record<string, number> & { _muted?: HubMuteSettings | boolean } = {}
     const settings = hubMuteSettings[hubDTag]
     if (settings && hasAnyMute(settings)) hubEntry._muted = settings
@@ -213,6 +221,51 @@ function buildHubReadStateFromStore(
     hubs[hubDTag] = hubEntry
   }
   return { hubs }
+}
+
+// ── Groups (NIP-CHAT §21) ──
+// Groups live in the same in-memory `hubUnreads` map as hubs (a group is a single-channel hub to
+// the rest of the app: subscriptions, badges, sounds, mark-read all just work). They are split out
+// ONLY at persistence: a separate NIP-78 event (`den-group-read-state`) holds one timestamp per
+// group so the hub event never grows with group count, and only groups in the user's group list
+// are tracked (pruned on every list change, capped at MAX_GROUP_LIST_ENTRIES).
+
+/** d-tags we currently treat as groups: the group list, plus anything the group cache last held
+ *  (covers the window before the list has loaded on this launch). */
+let _cachedGroupDTags = new Set<string>()
+function groupDTagSet(): Set<string> {
+  const set = new Set(_cachedGroupDTags)
+  const gs = useGroupStore.getState()
+  for (const e of gs.entries) set.add(e.dTag)
+  for (const d of Object.keys(gs.groups)) set.add(d)
+  return set
+}
+
+/** Split live state into the hub part (everything that isn't a group) and the group part. */
+function buildGroupReadStateFromStore(
+  hubUnreads: Record<string, Record<string, ChannelUnread>>,
+  hubMuteSettings: Record<string, HubMuteSettings>,
+  groupDTags: Set<string>,
+): GroupReadState {
+  const groups: Record<string, number> = {}
+  const muted: Record<string, HubMuteSettings> = {}
+  // The group list is what's tracked; anything else that looks like a group is dropped here.
+  const listed = new Set(useGroupStore.getState().entries.map((e) => e.dTag))
+  const listLoaded = useGroupStore.getState().listLoaded
+  let n = 0
+  for (const [dTag, channels] of Object.entries(hubUnreads)) {
+    if (!groupDTags.has(dTag)) continue
+    if (listLoaded && !listed.has(dTag)) continue
+    if (n >= MAX_GROUP_LIST_ENTRIES) break
+    // A group has one channel (its own d-tag); take the newest timestamp defensively.
+    let last = 0
+    for (const ch of Object.values(channels)) if (ch.lastRead > last) last = ch.lastRead
+    groups[dTag] = last
+    const settings = hubMuteSettings[dTag]
+    if (settings && hasAnyMute(settings)) muted[dTag] = settings
+    n++
+  }
+  return Object.keys(muted).length ? { groups, muted } : { groups }
 }
 
 /** Build DmReadState from the store's live state for serialization */
@@ -259,6 +312,20 @@ function preloadFromLocalStorage() {
       }
     }
   } catch { /* ignore — will be overwritten by init() */ }
+
+  // Group read-state (same in-memory map; the group's single channel id is its d-tag)
+  try {
+    const groupCached = loadCachedEvent('group')
+    if (groupCached?.content) {
+      const gState = parseGroupReadState(groupCached.content)
+      for (const [dTag, ts] of Object.entries(gState.groups)) {
+        _cachedGroupDTags.add(dTag)
+        hubUnreads[dTag] = { [dTag]: { lastRead: ts, count: 0, hasMention: false } }
+        const mute = gState.muted?.[dTag]
+        if (mute) hubMuteSettings[dTag] = normalizeHubMuteSettings(mute)
+      }
+    }
+  } catch { /* ignore */ }
 
   // DM read-state
   let dm17Unreads: Record<string, ConversationUnread> = {}
@@ -336,11 +403,12 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
     setReadStateAccount(pubkey)
 
     // Load all four domains in parallel
-    const [socialEvent, hubEvent, dmEvent, pcEvent] = await Promise.all([
+    const [socialEvent, hubEvent, dmEvent, pcEvent, groupEvent] = await Promise.all([
       loadReadState(pubkey, 'social'),
       loadReadState(pubkey, 'hub'),
       loadReadState(pubkey, 'dm'),
       loadReadState(pubkey, 'pc'),
+      loadReadState(pubkey, 'group'),
     ])
 
     // Parse social
@@ -435,6 +503,25 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
     // Parse public chat (plaintext)
     const pcState = parsePcReadState(pcEvent)
 
+    // Parse groups: NIP-44 self-encrypted (no legacy formats; the domain is new). The local cache
+    // holds plaintext, the relay copy ciphertext, so try the decrypt and fall back to a plain parse.
+    let groupState: GroupReadState = { groups: {} }
+    if (groupEvent?.content) {
+      let ok = false
+      if (signer) {
+        try { groupState = parseGroupReadState(await guardedDecrypt(groupEvent.content, pubkey, signer, null, 'nip44')); ok = true } catch { /* not ciphertext */ }
+      }
+      if (!ok && privateKey) {
+        try {
+          const { nip44 } = await import('nostr-tools')
+          const convKey = nip44.v2.utils.getConversationKey(hexToBytes(privateKey), pubkey)
+          groupState = parseGroupReadState(nip44.v2.decrypt(groupEvent.content, convKey)); ok = true
+        } catch { /* not ciphertext */ }
+      }
+      if (!ok) groupState = parseGroupReadState(groupEvent.content)
+    }
+    for (const dTag of Object.keys(groupState.groups)) _cachedGroupDTags.add(dTag)
+
     // Hydrate hub unreads from read-state timestamps,
     // merging with any live counts accumulated from the preloaded state
     const liveState = get()
@@ -456,6 +543,13 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
           hubUnreads[hubDTag][key] = { lastRead: relayLastRead, count: 0, hasMention: false }
         }
       }
+    }
+    // Groups: one channel keyed by the group's d-tag, same newer-wins merge as hubs.
+    for (const [dTag, relayLastRead] of Object.entries(groupState.groups)) {
+      const live = liveState.hubUnreads[dTag]?.[dTag]
+      hubUnreads[dTag] = { [dTag]: live && live.lastRead >= relayLastRead ? live : { lastRead: relayLastRead, count: 0, hasMention: false } }
+      const mute = groupState.muted?.[dTag]
+      if (mute) hubMuteSettings[dTag] = normalizeHubMuteSettings(mute)
     }
     // Also include any hub/channel entries from live state not in the relay event
     // (e.g. new channels discovered by subscription before init completes)
@@ -801,6 +895,35 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
     return signAndPublishReadState('hub', event, signer, privateKey)
   },
 
+  publishGroupReadState: async (signer, privateKey) => {
+    const state = get()
+    const content = JSON.stringify(buildGroupReadStateFromStore(state.hubUnreads, state.hubMuteSettings, groupDTagSet()))
+    let encryptedContent: string | null = null
+    if (signer) {
+      try {
+        const pubkey = await signer.getPublicKey()
+        encryptedContent = await guardedEncrypt(content, pubkey, signer, null, 'nip44')
+      } catch (err) {
+        console.warn('[notif] Failed to NIP-44 encrypt group read-state (signer):', err)
+      }
+    } else if (privateKey) {
+      try {
+        const { nip44, getPublicKey } = await import('nostr-tools')
+        const privKeyBytes = hexToBytes(privateKey)
+        const pubkey = getPublicKey(privKeyBytes)
+        encryptedContent = nip44.v2.encrypt(content, nip44.v2.utils.getConversationKey(privKeyBytes, pubkey))
+      } catch (err) {
+        console.warn('[notif] Failed to NIP-44 encrypt group read-state (privateKey):', err)
+      }
+    }
+    // Never plaintext: the content lists every group d-tag (private v2 groups included) on an R-authored event.
+    if (!encryptedContent) {
+      console.warn('[notif] Skipping group read-state publish: could not encrypt')
+      return false
+    }
+    return signAndPublishReadState('group', buildGroupReadStateEvent(encryptedContent), signer, privateKey)
+  },
+
   publishDmReadState: async (signer, privateKey) => {
     const state = get()
     const dmState = buildDmReadStateFromStore(state.dm17Unreads, state.dm04Unreads)
@@ -856,7 +979,7 @@ const PUBLISH_DEBOUNCE_MS = 15_000 // 15 seconds — batches rapid mark-read cli
 /** Schedule a debounced relay publish for a domain.
  *  If the publish is throttled, automatically reschedules for when the
  *  throttle window opens so changes are never silently dropped. */
-function _schedulePublish(domain: 'hub' | 'dm' | 'pc') {
+function _schedulePublish(domain: 'hub' | 'group' | 'dm' | 'pc') {
   if (_publishTimers[domain]) clearTimeout(_publishTimers[domain])
   _publishTimers[domain] = setTimeout(async () => {
     try {
@@ -866,6 +989,7 @@ function _schedulePublish(domain: 'hub' | 'dm' | 'pc') {
       const store = useNotificationStore.getState()
       let published = false
       if (domain === 'hub') published = await store.publishHubReadState(signer, privateKey)
+      else if (domain === 'group') published = await store.publishGroupReadState(signer, privateKey)
       else if (domain === 'dm') published = await store.publishDmReadState(signer, privateKey)
       else if (domain === 'pc') published = await store.publishPcReadState(signer, privateKey)
 
@@ -884,19 +1008,43 @@ function _schedulePublish(domain: 'hub' | 'dm' | 'pc') {
 
 function _saveHubToLocalStorage(get: () => NotificationState, skipPublish = false) {
   const state = get()
-  const hubState = buildHubReadStateFromStore(state.hubUnreads, state.hubMuteSettings)
-  const cached = loadCachedEvent('hub')
   const now = Math.floor(Date.now() / 1000)
+  const groups = groupDTagSet()
 
-  // Build a pseudo-event for localStorage (not signed — just for caching)
-  const cacheEvent = {
-    ...(cached ?? { id: '', sig: '', pubkey: '', kind: 30078, tags: [['d', 'den-hub-read-state']] }),
-    content: JSON.stringify(hubState),
-    created_at: now,
+  // Hubs (everything that isn't a group). Build a pseudo-event for localStorage (not signed, cache only).
+  const hubContent = JSON.stringify(buildHubReadStateFromStore(state.hubUnreads, state.hubMuteSettings))
+  const hubCached = loadCachedEvent('hub')
+  if (hubCached?.content !== hubContent) {
+    saveCachedEvent('hub', { ...(hubCached ?? { id: '', sig: '', pubkey: '', kind: 30078, tags: [['d', 'den-hub-read-state']] }), content: hubContent, created_at: now } as any)
+    if (!skipPublish) _schedulePublish('hub')
   }
-  saveCachedEvent('hub', cacheEvent as any)
-  if (!skipPublish) _schedulePublish('hub')
+
+  // Groups: their own event, only what's in the group list. Publish only when this part changed.
+  const groupContent = JSON.stringify(buildGroupReadStateFromStore(state.hubUnreads, state.hubMuteSettings, groups))
+  const groupCached = loadCachedEvent('group')
+  if (groupCached?.content !== groupContent) {
+    saveCachedEvent('group', { ...(groupCached ?? { id: '', sig: '', pubkey: '', kind: 30078, tags: [['d', 'den-group-read-state']] }), content: groupContent, created_at: now } as any)
+    if (!skipPublish) _schedulePublish('group')
+  }
 }
+
+// Keep the tracked set equal to the group list: when the list loads or an entry leaves it, drop the
+// read state of anything that is a group but isn't listed, and re-save (which republishes the group event).
+useGroupStore.subscribe((gs, prev) => {
+  if (!gs.listLoaded || gs.entries === prev.entries && gs.listLoaded === prev.listLoaded) return
+  const listed = new Set(gs.entries.map((e) => e.dTag))
+  const groups = groupDTagSet()
+  const store = useNotificationStore.getState()
+  const stale = Object.keys(store.hubUnreads).filter((d) => groups.has(d) && !listed.has(d))
+  if (stale.length === 0) return
+  useNotificationStore.setState((state) => {
+    const hubUnreads = { ...state.hubUnreads }
+    const hubMuteSettings = { ...state.hubMuteSettings }
+    for (const d of stale) { delete hubUnreads[d]; delete hubMuteSettings[d]; _cachedGroupDTags.delete(d) }
+    return { hubUnreads, hubMuteSettings, ...recomputeTotals({ ...state, hubUnreads, hubMuteSettings }) }
+  })
+  _saveHubToLocalStorage(useNotificationStore.getState)
+})
 
 function _saveDmToLocalStorage(get: () => NotificationState) {
   const state = get()

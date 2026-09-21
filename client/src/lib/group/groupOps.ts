@@ -20,6 +20,7 @@ import {
   GROUP_MAX_MEMBERS, type GroupData, type GroupSettings, type CreatorKeys,
 } from '@/lib/group/groupEvent'
 import { makeGroupEntry, publishGroupList, parseGroupCoord } from '@/lib/group/groupList'
+import { MAX_GROUP_LIST_ENTRIES } from '@/lib/hub/hubLimits'
 import { applyGroupEvent, fetchGroupEvent } from '@/hooks/useGroupLoader'
 
 function keys(): CreatorKeys & { me: string } {
@@ -79,6 +80,9 @@ export async function createGroup(opts: {
   const k = keys()
   if (opts.version === 2 && !canUseV2({ privateKey: k.privateKey, signer: k.signer })) {
     throw new Error('A private (v2) group needs the DEN Chat client or a NIP-SKD signer.')
+  }
+  if (useGroupStore.getState().entries.length >= MAX_GROUP_LIST_ENTRIES) {
+    throw new Error(`Group limit reached (${MAX_GROUP_LIST_ENTRIES}). Leave or delete a group before creating another.`)
   }
   const dTag = opts.dTag || crypto.randomUUID()
   const secret = newGroupSecret()
@@ -258,6 +262,10 @@ export async function previewInvite(input: string): Promise<InvitePreview | null
 /** Accept: register the group (loader path) and add it to my list. */
 export async function acceptInvite(preview: InvitePreview): Promise<void> {
   const k = keys()
+  const already = useGroupStore.getState().entries.some((e) => e.dTag === preview.group.dTag)
+  if (!already && useGroupStore.getState().entries.length >= MAX_GROUP_LIST_ENTRIES) {
+    throw new Error(`Group limit reached (${MAX_GROUP_LIST_ENTRIES}). Leave or delete a group before joining another.`)
+  }
   await applyGroupEvent(preview.event, k.me, { privateKey: k.privateKey, signer: k.signer })
   const g = preview.group
   const entry = makeGroupEntry({ ...g, relays: g.relays.length ? g.relays : preview.relays }, useGroupStore.getState().entries.length)

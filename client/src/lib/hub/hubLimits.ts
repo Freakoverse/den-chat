@@ -27,5 +27,8 @@ export const MAX_BLOSSOM_SERVERS = 10
 
 // ── User Hub-List Limits ───────────────────────────────────────────
 export const MAX_HUB_LIST_ENTRIES = 200
+/** Groups a user can keep in their group list (kind 16943). Matched to the hub list so the group
+ *  read-state event (one entry per group) stays the same size class as the hub one. */
+export const MAX_GROUP_LIST_ENTRIES = MAX_HUB_LIST_ENTRIES
 export const MAX_HUB_FOLDERS = 50
 export const FOLDER_NAME_MAX = 100
