@@ -1,11 +1,12 @@
 /**
- * GroupMenu: the "…" options for a group. Just "Copy group address" now; editing, deleting and
+ * GroupMenu: the "…" options for a group: copy the address, view the raw event. Editing, deleting and
  * leaving live in GroupDetailsModal (opened from the header). The two confirmation modals are
  * exported from here for it. House dropdown style (rounded-xl, p-1, rounded-md items).
  */
 import { useEffect, useRef, useState, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
-import { Copy, Check, Loader2, AlertTriangle } from 'lucide-react'
+import { Copy, Check, Loader2, AlertTriangle, FileJson } from 'lucide-react'
+import { RawEventModal } from '@/components/hub/ChannelView'
 import { useEscToClose } from '@/hooks/useEscToClose'
 import { useHubStore } from '@/stores/hubStore'
 import { useGroupStore } from '@/stores/groupStore'
@@ -17,10 +18,13 @@ export function GroupMenu({ dTag, anchorRef, onClose }: {
   onClose: () => void
 }) {
   const group = useGroupStore((s) => s.groups[dTag])
+  const rawEvent = useGroupStore((s) => s.rawEvents[dTag])
   const menuRef = useRef<HTMLDivElement>(null)
   const [copied, setCopied] = useState(false)
+  const [showRaw, setShowRaw] = useState(false)
 
   useEffect(() => {
+    if (showRaw) return
     const handler = (e: MouseEvent) => {
       const t = e.target as Node
       if (menuRef.current?.contains(t) || anchorRef.current?.contains(t)) return
@@ -28,7 +32,7 @@ export function GroupMenu({ dTag, anchorRef, onClose }: {
     }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
-  }, [onClose, anchorRef])
+  }, [onClose, anchorRef, showRaw])
 
   const copyInvite = () => {
     if (!group) return
@@ -38,11 +42,21 @@ export function GroupMenu({ dTag, anchorRef, onClose }: {
     }).catch(() => {})
   }
 
+  if (showRaw && rawEvent) {
+    return <RawEventModal rawJson={JSON.stringify(rawEvent)} decryptedContent="" isDecrypted={false} hideDecryptedTab onClose={() => { setShowRaw(false); onClose() }} />
+  }
+
+  const item = 'w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-xs text-left text-foreground hover:bg-secondary/60 transition-colors cursor-pointer'
   return (
     <div ref={menuRef} className="absolute right-3 top-14 z-50 w-52 rounded-xl border border-border bg-popover shadow-xl p-1">
-      <button onClick={copyInvite} className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-xs text-left text-foreground hover:bg-secondary/60 transition-colors cursor-pointer">
+      <button onClick={copyInvite} className={item}>
         {copied ? <Check size={13} className="text-green-500" /> : <Copy size={13} />} {copied ? 'Copied group address' : 'Copy group address'}
       </button>
+      {rawEvent && (
+        <button onClick={() => setShowRaw(true)} className={item}>
+          <FileJson size={13} /> View raw event
+        </button>
+      )}
     </div>
   )
 }

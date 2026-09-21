@@ -47,7 +47,7 @@ export async function applyGroupEvent(
 
   const gs = useGroupStore.getState()
   const hs = useHubStore.getState()
-  gs.setGroup(g.dTag, g)
+  gs.setGroup(g.dTag, g, event)
 
   if (g.deleted) {
     gs.setStatus(g.dTag, 'deleted')

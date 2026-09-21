@@ -48,13 +48,14 @@ export function CreateGroupModal({ onClose, onCreated }: { onClose: () => void; 
 
   // Stable d tag chosen up front so a v2 group's image uploads can be auth-signed as the owner pseudonym O.
   const dTagRef = useRef(crypto.randomUUID())
-  const [face, setFace] = useState<GroupFaceState>({ face: { picture: null, banner: null }, uploading: false, overlayOpen: false })
+  const [face, setFace] = useState<GroupFaceState>({ face: { picture: null, banner: null }, uploading: false, overlayOpen: false, realKeyUploads: [] })
 
   // Private (v2) toggle: OFF by default; ON only after the confirmation password, only when the signer can do NIP-SKD.
   const [createV2, setCreateV2] = useState(false)
   const [showPw, setShowPw] = useState(false)
   const [pw, setPw] = useState('')
   const [pwError, setPwError] = useState(false)
+  const realKeyMedia = createV2 && v2Capable && face.realKeyUploads.length > 0
   useEscToClose(() => setShowPw(false), showPw)
   useEscToClose(onClose, !showPw && !face.overlayOpen)
   const handleV2Toggle = () => {
@@ -145,6 +146,7 @@ export function CreateGroupModal({ onClose, onCreated }: { onClose: () => void; 
     if (selectedRelays.length === 0) { setError('Select at least one relay under Advanced'); return }
     if (selectedRelays.length > MAX_GENERAL_RELAYS) { setError(`At most ${MAX_GENERAL_RELAYS} relays`); return }
     if (face.uploading) { setError('Wait for the image upload to finish'); return }
+    if (realKeyMedia) { setError('Re-upload or remove the image(s) uploaded before Private was turned on.'); return }
     setBusy(true); setError(null)
     try {
       const g = await createGroup({
@@ -210,6 +212,14 @@ export function CreateGroupModal({ onClose, onCreated }: { onClose: () => void; 
 
         <div className="px-5 py-4 space-y-5 overflow-y-auto min-h-0">
           <GroupFaceEditor dTag={dTagRef.current} v2={createV2 && v2Capable} onChange={setFace} onError={setError} />
+          {realKeyMedia && (
+            <div className="flex items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5">
+              <AlertTriangle size={16} className="text-amber-500 shrink-0 mt-0.5" />
+              <p className="text-xs text-amber-600 dark:text-amber-400 leading-relaxed">
+                Your {face.realKeyUploads.length === 2 ? 'picture and banner were' : `${face.realKeyUploads[0]} was`} uploaded before you turned on Private, so the upload is tied to your real identity, not the group's private one. Re-upload or remove {face.realKeyUploads.length === 2 ? 'them' : 'it'} to create a private group.
+              </p>
+            </div>
+          )}
 
           <label className="block space-y-1">
             <span className="text-xs font-medium text-foreground">Name</span>

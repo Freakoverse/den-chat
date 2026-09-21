@@ -41,7 +41,9 @@ interface GroupState {
   addEntry: (entry: GroupEntry) => void
   removeEntry: (dTag: string) => void
   setStatus: (dTag: string, status: GroupStatus) => void
-  setGroup: (dTag: string, group: GroupData) => void
+  setGroup: (dTag: string, group: GroupData, raw?: import('nostr-tools').Event) => void
+  /** The latest raw kind-36950 event per group (for "View raw event"). */
+  rawEvents: Record<string, import('nostr-tools').Event>
   removeGroup: (dTag: string) => void
   setActiveGroup: (dTag: string | null) => void
   addPendingInvite: (a: string) => void
@@ -66,7 +68,8 @@ export const useGroupStore = create<GroupState>((set) => ({
   addEntry: (entry) => set((s) => (s.entries.some((e) => e.dTag === entry.dTag) ? {} : { entries: [...s.entries, entry] })),
   removeEntry: (dTag) => set((s) => ({ entries: s.entries.filter((e) => e.dTag !== dTag) })),
   setStatus: (dTag, status) => set((s) => ({ status: { ...s.status, [dTag]: status } })),
-  setGroup: (dTag, group) => set((s) => ({ groups: { ...s.groups, [dTag]: group } })),
+  rawEvents: {},
+  setGroup: (dTag, group, raw) => set((s) => ({ groups: { ...s.groups, [dTag]: group }, ...(raw ? { rawEvents: { ...s.rawEvents, [dTag]: raw } } : {}) })),
   removeGroup: (dTag) => set((s) => {
     const { [dTag]: _g, ...groups } = s.groups
     const { [dTag]: _st, ...status } = s.status

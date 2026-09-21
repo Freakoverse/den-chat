@@ -104,7 +104,7 @@ export function GroupDetailsModal({ dTag, isCreator, onClose }: { dTag: string; 
   const [editMinPow, setEditMinPow] = useState(15)
   const [editJoinMinPow, setEditJoinMinPow] = useState(15)
   const [showAdvanced, setShowAdvanced] = useState(false)
-  const [face, setFace] = useState<GroupFaceState>({ face: { picture: null, banner: null }, uploading: false, overlayOpen: false })
+  const [face, setFace] = useState<GroupFaceState>({ face: { picture: null, banner: null }, uploading: false, overlayOpen: false, realKeyUploads: [] })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const startEditing = () => {

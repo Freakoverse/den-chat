@@ -38,8 +38,10 @@ interface ImageSlot {
   status: UploadStatus
   progress: UploadProgress | null
   successCount: number
+  /** The Blossom auth was signed as the owner pseudonym O (true) or the real key R (false). */
+  authedAsO: boolean
 }
-const emptySlot: ImageSlot = { preview: null, url: null, status: 'idle', progress: null, successCount: 0 }
+const emptySlot: ImageSlot = { preview: null, url: null, status: 'idle', progress: null, successCount: 0, authedAsO: false }
 const slotFrom = (url?: string | null): ImageSlot => (url ? { ...emptySlot, preview: url, url } : emptySlot)
 
 export interface GroupFace { picture: string | null; banner: string | null }
@@ -49,6 +51,9 @@ export interface GroupFaceState {
   uploading: boolean
   /** A crop editor or the size warning is open; the parent should not close on Escape. */
   overlayOpen: boolean
+  /** Slots whose blob was uploaded under the REAL key (before Private was turned on). A private group
+   *  must not reference them: the upload auth would tie the real key to the O-authored event. */
+  realKeyUploads: ('picture' | 'banner')[]
 }
 
 /** The multi-server upload bar from hub creation: current server, percent, speed, skip. */
@@ -114,6 +119,10 @@ export function GroupFaceEditor({ dTag, v2, initial, onChange, onError }: {
       face: { picture: picture.url, banner: banner.url },
       uploading: picture.status === 'uploading' || banner.status === 'uploading',
       overlayOpen: !!pictureEditFile || !!bannerEditFile || !!fileSizeWarning,
+      realKeyUploads: [
+        ...(picture.url && picture.status === 'success' && !picture.authedAsO ? ['picture' as const] : []),
+        ...(banner.url && banner.status === 'success' && !banner.authedAsO ? ['banner' as const] : []),
+      ],
     })
   }, [picture, banner, pictureEditFile, bannerEditFile, fileSizeWarning])
 
@@ -131,7 +140,7 @@ export function GroupFaceEditor({ dTag, v2, initial, onChange, onError }: {
         ownerAuthSigner,
       )
       const base = (serverUrls[0] ?? '').replace(/\/+$/, '')
-      set((s) => ({ ...s, url: `${base}/${hash}`, successCount, status: 'success', progress: null }))
+      set((s) => ({ ...s, url: `${base}/${hash}`, successCount, status: 'success', progress: null, authedAsO: !!ownerAuthSigner }))
     } catch (err) {
       console.error('[Group] image upload failed:', err)
       set((s) => ({ ...s, status: 'error', progress: null }))
