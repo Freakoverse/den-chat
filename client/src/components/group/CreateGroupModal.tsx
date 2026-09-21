@@ -12,6 +12,7 @@ import { nip19 } from 'nostr-tools'
 import { X, Loader2, Plus, Trash2, AlertTriangle, ChevronDown, Info, Search, Check, Lock } from 'lucide-react'
 import { GroupFaceEditor, type GroupFaceState } from '@/components/group/GroupFaceEditor'
 import { PowSection } from '@/components/hub/PowSection'
+import { BlossomServerPicker } from '@/components/group/BlossomServerPicker'
 import { useEscToClose } from '@/hooks/useEscToClose'
 import { useUserStore } from '@/stores/userStore'
 import { useFollowStore } from '@/stores/followStore'
@@ -22,7 +23,7 @@ import { canUseV2 } from '@/lib/crypto/skd'
 import { createGroup } from '@/lib/group/groupOps'
 import { GROUP_NAME_MAX, GROUP_ABOUT_MAX, GROUP_MAX_MEMBERS } from '@/lib/group/groupEvent'
 import { HUB_DESCRIPTION_MAX } from '@/lib/hub/hubLimits'
-import { MAX_GENERAL_RELAYS } from '@/lib/hub/hubLimits'
+import { MAX_GENERAL_RELAYS, MAX_BLOSSOM_SERVERS } from '@/lib/hub/hubLimits'
 import { resolveIdentifier } from '@/lib/group/resolveIdentifier'
 import { cn, truncateNpub } from '@/lib/utils'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -73,6 +74,7 @@ export function CreateGroupModal({ onClose, onCreated }: { onClose: () => void; 
   // PoW: message (w) and join-request (W) difficulty, both 15 by default like hub creation.
   const [minPow, setMinPow] = useState(15)
   const [joinMinPow, setJoinMinPow] = useState(15)
+  const [blossoms, setBlossoms] = useState<string[]>([])
   const [clientRelays, setClientRelays] = useState<RelayEntry[]>([])
   const [nip65Relays, setNip65Relays] = useState<RelayEntry[]>([])
   const [customRelays, setCustomRelays] = useState<RelayEntry[]>([])
@@ -145,6 +147,8 @@ export function CreateGroupModal({ onClose, onCreated }: { onClose: () => void; 
     if (!name.trim()) { setError('Name is required'); return }
     if (selectedRelays.length === 0) { setError('Select at least one relay under Advanced'); return }
     if (selectedRelays.length > MAX_GENERAL_RELAYS) { setError(`At most ${MAX_GENERAL_RELAYS} relays`); return }
+    if (blossoms.length > MAX_BLOSSOM_SERVERS) { setError(`At most ${MAX_BLOSSOM_SERVERS} Blossom servers`); return }
+    if (createV2 && v2Capable && blossoms.length === 0) { setError('A private group needs at least one Blossom server under Advanced: media in it must never go to your personal servers.'); return }
     if (face.uploading) { setError('Wait for the image upload to finish'); return }
     if (realKeyMedia) { setError('Re-upload or remove the image(s) uploaded before Private was turned on.'); return }
     setBusy(true); setError(null)
@@ -157,6 +161,7 @@ export function CreateGroupModal({ onClose, onCreated }: { onClose: () => void; 
         picture: face.face.picture ?? undefined,
         banner: face.face.banner ?? undefined,
         relays: selectedRelays,
+        blossomServers: blossoms,
         version: createV2 && v2Capable ? 2 : 1,
         members,
         minPow,
@@ -351,6 +356,8 @@ export function CreateGroupModal({ onClose, onCreated }: { onClose: () => void; 
                     <button onClick={addCustomRelay} className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary/60 cursor-pointer"><Plus size={14} /></button>
                   </div>
                 </div>
+                <div className="h-px bg-border" />
+                <BlossomServerPicker onChange={setBlossoms} onError={setError} />
               </div>
             )}
           </div>

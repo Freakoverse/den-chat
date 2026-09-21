@@ -19,6 +19,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { GroupFaceEditor, type GroupFaceState } from '@/components/group/GroupFaceEditor'
 import { GroupVersionPill } from '@/components/group/GroupVersionPill'
 import { PowSection } from '@/components/hub/PowSection'
+import { BlossomServerPicker } from '@/components/group/BlossomServerPicker'
 import { GroupMembersModal } from '@/components/group/GroupMembersModal'
 import { GroupNotificationSettings } from '@/components/group/GroupNotificationSettings'
 import { ConfirmDeleteGroupModal, ConfirmLeaveGroupModal } from '@/components/group/GroupMenu'
@@ -116,6 +117,7 @@ export function GroupDetailsModal({ dTag, isCreator, onClose }: { dTag: string; 
   const [editMinPow, setEditMinPow] = useState(15)
   const [editJoinMinPow, setEditJoinMinPow] = useState(15)
   const [showAdvanced, setShowAdvanced] = useState(false)
+  const [editBlossoms, setEditBlossoms] = useState<string[]>([])
   const [face, setFace] = useState<GroupFaceState>({ face: { picture: null, banner: null }, uploading: false, overlayOpen: false, realKeyUploads: [] })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -125,6 +127,7 @@ export function GroupDetailsModal({ dTag, isCreator, onClose }: { dTag: string; 
     setEditDescription(privateDescription)
     setEditMinPow(group?.minPow ?? 0)
     setEditJoinMinPow(group?.joinMinPow ?? 0)
+    setEditBlossoms(group?.blossomServers ?? [])
     setShowAdvanced(false)
     setError(null)
     setEditing(true)
@@ -132,6 +135,7 @@ export function GroupDetailsModal({ dTag, isCreator, onClose }: { dTag: string; 
   const save = async () => {
     if (!editName.trim()) { setError('Name is required'); return }
     if (face.uploading) { setError('Wait for the image upload to finish'); return }
+    if (isV2 && editBlossoms.length === 0) { setError('A private group needs at least one Blossom server under Advanced.'); return }
     setSaving(true); setError(null)
     try {
       await updateGroup(dTag, {
@@ -142,6 +146,7 @@ export function GroupDetailsModal({ dTag, isCreator, onClose }: { dTag: string; 
         banner: face.face.banner ?? '',
         minPow: editMinPow,
         joinMinPow: editJoinMinPow,
+        blossomServers: editBlossoms,
       })
       setEditing(false)
     } catch (err) {
@@ -202,8 +207,10 @@ export function GroupDetailsModal({ dTag, isCreator, onClose }: { dTag: string; 
                   <ChevronDown size={14} className={cn('transition-transform', showAdvanced && 'rotate-180')} /> Advanced
                 </button>
                 {showAdvanced && (
-                  <div className="mt-3 pl-1">
+                  <div className="mt-3 pl-1 space-y-4">
                     <PowSection editMinPow={editMinPow} setEditMinPow={setEditMinPow} editJoinMinPow={editJoinMinPow} setEditJoinMinPow={setEditJoinMinPow} />
+                    <div className="h-px bg-border" />
+                    <BlossomServerPicker initial={group?.blossomServers ?? []} onChange={setEditBlossoms} onError={setError} />
                   </div>
                 )}
               </div>

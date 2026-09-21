@@ -66,6 +66,8 @@ export async function createGroup(opts: {
   picture?: string
   banner?: string
   relays: string[]
+  /** Media servers (`o` tags). Uploads in the group go here; members fetch from here first. */
+  blossomServers?: string[]
   version: 1 | 2
   /** Initial members' REAL keys (besides the creator, who is always a member). */
   members?: string[]
@@ -96,7 +98,7 @@ export async function createGroup(opts: {
   const settings: GroupSettings = { description: opts.description || undefined }
 
   const signed = await buildAndSignGroupEvent({
-    dTag, name: opts.name, epoch, relays: opts.relays, blossomServers: [], minPow: opts.minPow ?? 0, joinMinPow: opts.joinMinPow ?? 0,
+    dTag, name: opts.name, epoch, relays: opts.relays, blossomServers: opts.blossomServers ?? [], minPow: opts.minPow ?? 0, joinMinPow: opts.joinMinPow ?? 0,
     picture: opts.picture, banner: opts.banner, about: opts.about, publishedAt: now,
     version: opts.version, signerScheme: opts.version === 2 ? 'skd:1' : undefined,
     treeText: joinTreeText(tree, roster), history, settings, secret, keys: k,
@@ -162,7 +164,7 @@ export async function removeMember(dTag: string, member: HubMember): Promise<voi
 // ─── Edit / delete (creator only) ───
 
 export async function updateGroup(dTag: string, patch: {
-  name?: string; about?: string; description?: string; picture?: string; banner?: string; relays?: string[]; minPow?: number; joinMinPow?: number
+  name?: string; about?: string; description?: string; picture?: string; banner?: string; relays?: string[]; blossomServers?: string[]; minPow?: number; joinMinPow?: number
 }): Promise<void> {
   const k = keys()
   const { g, secret } = current(dTag)
@@ -175,6 +177,7 @@ export async function updateGroup(dTag: string, patch: {
     picture: patch.picture ?? g.picture,
     banner: patch.banner ?? g.banner,
     relays: patch.relays ?? g.relays,
+    blossomServers: patch.blossomServers ?? g.blossomServers,
     minPow: patch.minPow ?? g.minPow,
     joinMinPow: patch.joinMinPow ?? g.joinMinPow,
     secret, keys: k,
