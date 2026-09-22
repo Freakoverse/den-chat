@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { saveTextAs } from '@/lib/saveFile'
 import { useEscToClose } from '@/hooks/useEscToClose'
 import { useUserStore, type ISigner } from '@/stores/userStore'
 import { isTauri, isMobileOS } from '@/lib/utils'
@@ -1161,15 +1162,7 @@ export function LoginScreen() {
         ciphertext: btoa(String.fromCharCode(...new Uint8Array(ciphertext))),
       })
       // Trigger download
-      const blob = new Blob([payload], { type: 'application/json' })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `den-seed-backup-${Date.now()}.json`
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(url)
+      await saveTextAs(payload, `den-seed-backup-${Date.now()}.json`, 'application/json', 'Seed backup')
       setShowBackupPinPrompt(false)
       setBackupVerifyPin(backupPin)   // keep the PIN to verify the re-uploaded file
       setBackupPin('')

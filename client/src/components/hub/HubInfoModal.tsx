@@ -6,6 +6,7 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { saveBlobAs } from '@/lib/saveFile'
 import { X, Copy, Check, Tag, MoreVertical, Code, Link2, Radio, Loader2, Archive, AlertTriangle, RefreshCw, Database, ChevronDown } from 'lucide-react'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -99,14 +100,7 @@ export function HubInfoModal({ open, onClose, hub, blurMedia, onCreatorClick }: 
       if (!ev) throw new Error('Hub event not found on any relay or in the local cache.')
       const blob = await buildHubBackup(hub, ev, (done, total, bytes) => setBackupProgress({ done, total, bytes }))
       const safe = hub.name.replace(/[^a-z0-9._-]+/gi, '-').toLowerCase().slice(0, 40) || hub.dTag.slice(0, 8)
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `den-hub-${safe}-backup.json.gz`
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(url)
+      await saveBlobAs(blob, `den-hub-${safe}-backup.json.gz`, 'Hub backup')
     } catch (e) {
       setBackupError(e instanceof Error ? e.message : 'Backup failed')
     } finally {

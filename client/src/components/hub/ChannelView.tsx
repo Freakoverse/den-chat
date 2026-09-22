@@ -1,4 +1,5 @@
 import { useHubStore } from '@/stores/hubStore'
+import { saveBlobAs } from '@/lib/saveFile'
 import { nowSeconds } from '@/lib/time/clockOffset'
 import { getDraft, setDraft, clearDraft, hubDraftKey, hubThreadDraftKey, getFileDraft, setFileDraft, clearFileDraft } from '@/stores/draftStore'
 import { useDnnStore } from '@/stores/dnnStore'
@@ -2517,15 +2518,10 @@ function BlobFile({ servers, hash, ext, name, size, type, encryption }: {
     return `${(bps / (1024 * 1024)).toFixed(1)} MB/s`
   }
 
+  // Ask where to save (File System Access API where available, default folder elsewhere). A cancelled
+  // dialog means nothing was saved: back to the idle button rather than a green "Downloaded" state.
   const triggerBrowserDownload = (blob: Blob) => {
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = name || `${hash.slice(0, 12)}${ext}`
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    setTimeout(() => URL.revokeObjectURL(url), 1000)
+    void saveBlobAs(blob, name || `${hash.slice(0, 12)}${ext}`, 'Attachment').then((r) => { if (r === 'cancelled') setState('idle') })
   }
 
   const handleDownload = async () => {

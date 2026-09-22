@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef, Fragment, type ReactNode } from 'react'
+import { saveBlobAs, saveTextAs } from '@/lib/saveFile'
 import { nowSeconds } from '@/lib/time/clockOffset'
 import { useEscToClose } from '@/hooks/useEscToClose'
 import { createPortal } from 'react-dom'
@@ -4246,12 +4247,7 @@ function SecurityTab() {
     if (backend.promptsInVault) { await revealInVault(); resetExport(); return }
     const payload = await produceEncryptedPayload()
     if (!payload) return
-    const blob = new Blob([payload], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url; a.download = 'den-chat-seed-backup.json'
-    document.body.appendChild(a); a.click(); document.body.removeChild(a)
-    URL.revokeObjectURL(url)
+    await saveTextAs(payload, 'den-chat-seed-backup.json', 'application/json', 'Seed backup')
     resetExport()
   }
 
@@ -6244,14 +6240,7 @@ function formatDlSize(bytes: number) {
 
 function triggerFileSave(data: Uint8Array, filename: string, mimeType: string = 'application/octet-stream') {
   const blob = new Blob([data.slice() as Uint8Array<ArrayBuffer>], { type: mimeType })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  setTimeout(() => URL.revokeObjectURL(url), 1000)
+  void saveBlobAs(blob, filename, 'Build')
 }
 
 function VerifiedDownloadButton({ url, label, filename, icon, fileExt }: {

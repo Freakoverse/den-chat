@@ -3,6 +3,7 @@
  */
 
 import { useState, useCallback, useRef, useEffect, forwardRef } from 'react'
+import { saveTextAs } from '@/lib/saveFile'
 import { nowSeconds } from '@/lib/time/clockOffset'
 import { createPortal } from 'react-dom'
 import { useEscToClose } from '@/hooks/useEscToClose'
@@ -817,15 +818,7 @@ export function RawEventModal({ rawJson, onClose }: { rawJson: string; onClose: 
 
   const handleExport = () => {
     const name = parsed?.id ? `${parsed.kind}-${parsed.id.slice(0, 12)}` : `event-${parsed?.kind ?? 'raw'}`
-    const blob = new Blob([pretty], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `nostr-${name}.json`
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
+    void saveTextAs(pretty, `nostr-${name}.json`, 'application/json', 'Nostr event')
   }
 
   return (

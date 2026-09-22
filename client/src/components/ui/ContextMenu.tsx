@@ -12,55 +12,18 @@
  * - General → Select All (if applicable)
  */
 import { useState, useEffect, useCallback, useRef, createContext, type ReactNode } from 'react'
+import { saveBlobAs } from '@/lib/saveFile'
 import { createPortal } from 'react-dom'
 import {
   Copy, Scissors, ClipboardPaste, MousePointerClick, Link, Image, TextSelect, Bell, CheckCheck, Download, Film, Volume2,
 } from 'lucide-react'
 
-/** Trigger a browser "Save As" dialog for the given URL */
+/** Save the media at `url` with a location picker where available (see lib/saveFile). */
 function downloadMediaUrl(url: string, fallbackName?: string) {
   const filename = fallbackName || url.split('/').pop()?.split('?')[0] || 'download'
-  const ext = filename.includes('.') ? filename.split('.').pop()!.toLowerCase() : ''
-
-  // MIME type map for the save dialog file-type filter
-  const mimeMap: Record<string, string> = {
-    png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
-    webp: 'image/webp', svg: 'image/svg+xml', avif: 'image/avif',
-    mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime', mkv: 'video/x-matroska',
-    mp3: 'audio/mpeg', ogg: 'audio/ogg', wav: 'audio/wav', flac: 'audio/flac', m4a: 'audio/mp4',
-  }
-
   fetch(url)
     .then((r) => r.blob())
-    .then(async (blob) => {
-      // Try the File System Access API for a proper "Save As" dialog
-      if ('showSaveFilePicker' in window) {
-        try {
-          const accept: Record<string, string[]> = {}
-          const mime = mimeMap[ext] || blob.type || 'application/octet-stream'
-          accept[mime] = ext ? [`.${ext}`] : []
-          const handle = await (window as any).showSaveFilePicker({
-            suggestedName: filename,
-            types: [{ description: 'Media file', accept }],
-          })
-          const writable = await handle.createWritable()
-          await writable.write(blob)
-          await writable.close()
-          return
-        } catch (err: any) {
-          // User cancelled the dialog — just bail silently
-          if (err?.name === 'AbortError') return
-          // Otherwise fall through to legacy approach
-        }
-      }
-      // Legacy fallback — auto-downloads to default location
-      const a = document.createElement('a')
-      a.href = URL.createObjectURL(blob)
-      a.download = filename
-      document.body.appendChild(a)
-      a.click()
-      setTimeout(() => { URL.revokeObjectURL(a.href); a.remove() }, 100)
-    })
+    .then((blob) => saveBlobAs(blob, filename, 'Media file'))
     .catch(() => {
       window.open(url, '_blank', 'noopener,noreferrer')
     })

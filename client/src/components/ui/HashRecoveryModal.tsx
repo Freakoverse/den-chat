@@ -7,6 +7,7 @@
  */
 
 import { useState, useEffect, useRef } from 'react'
+import { saveBlobAs } from '@/lib/saveFile'
 import { createPortal } from 'react-dom'
 import { X, Loader2, Check, AlertTriangle, Download, ShieldAlert } from 'lucide-react'
 import { useEscToClose } from '@/hooks/useEscToClose'
@@ -123,14 +124,8 @@ export function HashRecoveryModal({ expectedHash, servers, ext, onClose, onRecov
     const baseUrl = servers[0]?.replace(/\/+$/, '') || ''
     const url = unmatchedBlobRef.current || `${baseUrl}/${expectedHash}${ext}`
 
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `${expectedHash.slice(0, 12)}${ext}`
-    a.target = '_blank'
-    a.rel = 'noopener noreferrer'
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
+    const filename = `${expectedHash.slice(0, 12)}${ext}`
+    fetch(url).then((r) => r.blob()).then((blob) => saveBlobAs(blob, filename, 'File')).catch(() => window.open(url, '_blank', 'noopener,noreferrer'))
     onClose()
   }
 
