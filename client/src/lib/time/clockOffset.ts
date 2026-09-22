@@ -289,8 +289,10 @@ export function initClockSync(): void {
     measure: () => measureClockOffset('manual'),
     now: () => ({ device: new Date().toISOString(), corrected: new Date(nowMs()).toISOString(), createdAt: Math.floor(nowMs() / 1000) }),
   }
-  // Give startup its bandwidth first; the stored offset (if any) already applies.
-  setTimeout(() => { if (navigator.onLine) void measureClockOffset(stale ? 'initial measurement' : 'weekly refresh check') }, stale ? 8_000 : 60_000)
+  // Give startup its bandwidth first; the stored offset (if any) already applies. Confirm it soon
+  // regardless: a clock changed while the app was closed can't be seen by the jump tripwire (the
+  // monotonic clock restarts with the process), and the probes go to servers we connect to anyway.
+  setTimeout(() => { if (navigator.onLine) void measureClockOffset(stale ? 'initial measurement' : 'launch confirmation') }, 8_000)
   const check = () => {
     if (!navigator.onLine) return
     if (clockJumped()) { sessionRef = { wall: Date.now(), mono: performance.now() }; void measureClockOffset('clock jump detected') }
