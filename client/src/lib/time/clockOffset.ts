@@ -73,10 +73,16 @@ export function nowMs(): number { return Date.now() + offsetMs }
  * device within a 10 minute window, so the first events after a correction can't sort behind the
  * ones stamped by the old (wrong) clock.
  */
+let lastStampLog = 0
 export function nowSeconds(): number {
+  const raw = Math.floor(Date.now() / 1000)
   const c = Math.floor(nowMs() / 1000)
   let v = c
   if (c < lastIssued && (lastIssued - c) * 1000 < HOLD_BACK_MAX_MS) v = lastIssued
+  if (v !== raw && Date.now() - lastStampLog > 5_000) {
+    lastStampLog = Date.now()
+    console.log(`[Clock] stamping created_at ${v} (device would say ${raw}; ${v === c ? `offset ${Math.round(offsetMs / 1000)}s` : `held at last issued ${lastIssued} so the clock never runs backwards`})`)
+  }
   if (v > lastIssued) {
     lastIssued = v
     try { localStorage.setItem(LAST_ISSUED_KEY, String(v)) } catch { /* ignore */ }
@@ -114,11 +120,15 @@ async function probeTrace(url: string): Promise<Sample | null> {
     const body = await res.text()
     const t1 = Date.now()
     const rtt = t1 - t0
-    if (rtt > MAX_RTT_MS) return null
+    const host = hostOf(url)
+    if (rtt > MAX_RTT_MS) { console.log(`[Clock]   ${host} (trace): rejected, round trip ${rtt}ms too slow`); return null }
     const ts = Number(body.match(/^ts=([0-9.]+)/m)?.[1])
-    if (!ts || Number.isNaN(ts)) return null
-    return { host: 'cloudflare-trace', offsetMs: ts * 1000 - (t0 + rtt / 2), rtt }
-  } catch {
+    if (!ts || Number.isNaN(ts)) { console.log(`[Clock]   ${host} (trace): rejected, no ts field (status ${res.status})`); return null }
+    const offset = ts * 1000 - (t0 + rtt / 2)
+    console.log(`[Clock]   ${host} (trace): ts ${ts} | rtt ${rtt}ms | offset ${Math.round(offset)}ms`)
+    return { host: 'cloudflare-trace', offsetMs: offset, rtt }
+  } catch (err) {
+    console.log(`[Clock]   ${hostOf(url)} (trace): failed (${err instanceof Error ? err.name : 'error'})`)
     return null
   } finally {
     clearTimeout(timer)
@@ -133,23 +143,30 @@ async function probe(fetchImpl: FetchLike, url: string, init: RequestInit): Prom
     const res = await fetchImpl(url, { ...init, cache: 'no-store', signal: ctrl.signal })
     const t1 = Date.now()
     const rtt = t1 - t0
-    if (rtt > MAX_RTT_MS) return null
+    const host = new URL(url).host
+    if (rtt > MAX_RTT_MS) { console.log(`[Clock]   ${host}: rejected, round trip ${rtt}ms too slow`); return null }
     const date = res.headers.get('date')
-    if (!date) return null
+    if (!date) { console.log(`[Clock]   ${host}: rejected, no Date header visible (status ${res.status})`); return null }
     const server = Date.parse(date)
-    if (Number.isNaN(server)) return null
+    if (Number.isNaN(server)) { console.log(`[Clock]   ${host}: rejected, unparseable Date "${date}"`); return null }
     // A cached reply is useless: some CDNs keep the original Date (stale), others regenerate it
     // (fresh) and report Age either way, so Age can't be used to correct it. Only a miss counts.
-    if ((Number(res.headers.get('age')) || 0) > 0) return null
+    const age = Number(res.headers.get('age')) || 0
+    if (age > 0) { console.log(`[Clock]   ${host}: rejected, served from cache (Age ${age}s)`); return null }
     // Date is truncated to the second: +500ms centres the error.
     const serverMs = server + 500
-    return { host: new URL(url).host, offsetMs: serverMs - (t0 + rtt / 2), rtt }
-  } catch {
+    const offset = serverMs - (t0 + rtt / 2)
+    console.log(`[Clock]   ${host}: server ${date} | status ${res.status} | rtt ${rtt}ms | offset ${Math.round(offset)}ms`)
+    return { host, offsetMs: offset, rtt }
+  } catch (err) {
+    console.log(`[Clock]   ${hostOf(url)}: failed (${err instanceof Error ? err.name : 'error'})`)
     return null
   } finally {
     clearTimeout(timer)
   }
 }
+
+function hostOf(url: string): string { try { return new URL(url).host } catch { return url } }
 
 function relayHttpUrl(ws: string): string | null {
   try {
@@ -163,6 +180,7 @@ async function collectSamples(): Promise<Sample[]> {
   const [{ getRelays }, { blossomServers }] = await Promise.all([import('@/lib/nostr/relay-pool'), import('@/lib/blossom')])
   const native = await nativeFetch()
   const fetchImpl: FetchLike = native ?? ((u, i) => fetch(u, i))
+  console.log(`[Clock] probing via ${native ? 'Tauri native HTTP (all headers visible)' : 'browser fetch (cross-origin headers hidden unless exposed)'}; device time ${new Date().toISOString()}`)
 
   const jobs: Promise<Sample | null>[] = []
   for (const r of getRelays().slice(0, 6)) {
@@ -181,6 +199,7 @@ async function collectSamples(): Promise<Sample[]> {
   // string on a real file was served from cache by GitHub Pages. Probe twice so a single-source
   // result still has to be stable.
   if (!native && results.length < 3) {
+    console.log(`[Clock] only ${results.length} usable sample(s) from relays/Blossom; adding the web pool (Cloudflare trace + own origin ${typeof location !== 'undefined' ? location.origin : 'n/a'})`)
     const extra: Promise<Sample | null>[] = CLOUDFLARE_TRACE.map(probeTrace)
     if (typeof location !== 'undefined' && /^https?:/.test(location.origin)) {
       for (let i = 0; i < 2; i++) {
@@ -212,9 +231,11 @@ export function measureClockOffset(reason: string): Promise<void> {
       const samples = await collectSamples()
       const agg = aggregate(samples)
       if (!agg) {
-        console.log(`[Clock] ${reason}: not enough agreeing sources (${samples.length} samples), leaving the clock as is`)
+        console.log(`[Clock] ${reason}: not enough agreeing sources (${samples.length} sample(s): ${samples.map((x) => `${x.host} ${Math.round(x.offsetMs)}ms`).join(', ') || 'none'}), leaving the clock as is`)
         return
       }
+      const dropped = samples.filter((x) => !agg.kept.includes(x))
+      console.log(`[Clock] ${reason}: median ${Math.round(agg.offsetMs)}ms from ${agg.kept.length} agreeing sample(s)${dropped.length ? `; dropped ${dropped.map((x) => `${x.host} (${Math.round(x.offsetMs)}ms)`).join(', ')}` : ''}`)
       const next = Math.abs(agg.offsetMs) >= APPLY_MIN_MS ? Math.round(agg.offsetMs) : 0
       stored = { offsetMs: next, measuredAt: Date.now(), samples: agg.kept.length, hosts: [...new Set(agg.kept.map((s) => s.host))] }
       save()
@@ -222,7 +243,8 @@ export function measureClockOffset(reason: string): Promise<void> {
       const changed = next !== offsetMs
       offsetMs = next
       applied = next !== 0
-      console.log(`[Clock] ${reason}: device clock is ${describeOffset(agg.offsetMs)} (${agg.kept.length} sources: ${stored.hosts.join(', ')})${applied ? ', correcting outgoing timestamps' : ''}`)
+      console.log(`[Clock] ${reason}: device clock is ${describeOffset(agg.offsetMs)} (${agg.kept.length} sources: ${stored.hosts.join(', ')})${applied ? `, correcting outgoing timestamps by ${next > 0 ? '+' : ''}${Math.round(next / 1000)}s` : ', no correction applied (under 3s)'}`)
+      console.log(`[Clock] now: device ${new Date().toISOString()} | corrected ${new Date(nowMs()).toISOString()} | next created_at would be ${Math.floor(nowMs() / 1000)}`)
       if (changed) notify()
     } finally {
       measuring = null
@@ -255,6 +277,13 @@ export function initClockSync(): void {
   load()
   sessionRef = { wall: Date.now(), mono: performance.now() }
   const stale = !stored || Date.now() - stored.measuredAt > MAX_AGE_MS
+  console.log(`[Clock] init: ${stored ? `stored offset ${stored.offsetMs}ms measured ${new Date(stored.measuredAt).toISOString()} from ${stored.hosts.join(', ')}${stale ? ' (stale)' : ''}` : 'no stored measurement'}; applied=${applied}; lastIssued=${lastIssued || 'none'}`)
+  // Debug handle in the console: denClock.state(), denClock.measure(), denClock.now()
+  ;(window as unknown as { denClock?: unknown }).denClock = {
+    state: getClockState,
+    measure: () => measureClockOffset('manual'),
+    now: () => ({ device: new Date().toISOString(), corrected: new Date(nowMs()).toISOString(), createdAt: Math.floor(nowMs() / 1000) }),
+  }
   // Give startup its bandwidth first; the stored offset (if any) already applies.
   setTimeout(() => { if (navigator.onLine) void measureClockOffset(stale ? 'initial measurement' : 'weekly refresh check') }, stale ? 8_000 : 60_000)
   const check = () => {
