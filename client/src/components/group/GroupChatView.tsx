@@ -109,7 +109,7 @@ export function GroupChatView({ dTag, onBack }: { dTag: string; onBack?: () => v
           </div>
         </div>
       ) : (
-        {/* ChannelView pads itself vertically for the hub page; the DM column already pads this pane, so cancel it here. */}
+        // ChannelView pads itself vertically for the hub page; the DM column already pads this pane, so cancel it here.
         <div className="flex-1 min-h-0 flex flex-col -my-2">
           <ChannelView hideHeader />
         </div>
