@@ -6,6 +6,7 @@
  */
 
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { nowSeconds } from '@/lib/time/clockOffset'
 import { createPortal } from 'react-dom'
 import { useUserStore } from '@/stores/userStore'
 import { useDM04Store, type DM04Message, type DM04Reaction } from '@/stores/dm04Store'
@@ -335,7 +336,7 @@ export function DM04ChatView({ recipientPubkey, onSwitchProtocol, onBack }: { re
   // Safety net: remove stale published optimistic messages after 30s
   useEffect(() => {
     if (optimisticMessages.length === 0) return
-    const now = Math.floor(Date.now() / 1000)
+    const now = nowSeconds()
     const stale = optimisticMessages.filter(
       (opt) => opt.status === 'published' && (now - opt.timestamp) > 30
     )

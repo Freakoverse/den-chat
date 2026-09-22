@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef, Fragment, type ReactNode } from 'react'
+import { nowSeconds } from '@/lib/time/clockOffset'
 import { useEscToClose } from '@/hooks/useEscToClose'
 import { createPortal } from 'react-dom'
 import { useTheme } from '@/providers/ThemeProvider'
@@ -10169,7 +10170,7 @@ function AdminBuildsSection({ pubkey, signer, privateKey }: { pubkey: string | n
     setPublishingId(build.id)
     setPublishStatusMap((prev) => ({ ...prev, [build.id]: '' }))
     try {
-      const publishedAt = build.publishedAt || Math.floor(Date.now() / 1000)
+      const publishedAt = build.publishedAt || nowSeconds()
       const content = JSON.stringify({
         version: build.version,
         body: build.body,

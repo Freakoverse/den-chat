@@ -713,7 +713,7 @@ function MessageList({ hubDTag, channelId, channelName, optimisticMessages, setO
     const id = setInterval(() => setExpiryTick((t) => t + 1), 30000)
     return () => clearInterval(id)
   }, [hubExpirationTimer])
-  const expiryNow = Math.floor(Date.now() / 1000)
+  const expiryNow = nowSeconds()
   const bottomRef = useRef<HTMLDivElement>(null)
   const myPubkey = useUserStore((s) => s.pubkey)
   const myDisplayName = useUserStore((s) => s.displayName)
@@ -879,7 +879,7 @@ function MessageList({ hubDTag, channelId, channelName, optimisticMessages, setO
     // previews AND the ThreadModal (which reads threadRepliesMap[parentRef]) — hides them mid-session, not
     // just on reload. The main message list filters expired at render; these secondary surfaces read this
     // map, so filtering at the source covers them all. Recomputes on the 30s expiryTick (in deps).
-    const now = Math.floor(Date.now() / 1000)
+    const now = nowSeconds()
     for (const msg of messages) {
       if (msg.isThread && msg.rootRef && !msg.deleted) {
         if (msg.expiration && msg.expiration <= now) continue

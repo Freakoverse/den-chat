@@ -12,6 +12,7 @@
  */
 
 import type {
+import { nowSeconds } from '@/lib/time/clockOffset'
   VoiceProvider,
   VoiceProviderCallbacks,
   VoiceParticipant,
@@ -656,7 +657,7 @@ export class LiveKitProvider implements VoiceProvider {
       const jose = await import('jose')
 
       const secret = new TextEncoder().encode(this.config.lkApiSecret)
-      const now = Math.floor(Date.now() / 1000)
+      const now = nowSeconds()
 
       const token = await new jose.SignJWT({
         iss: this.config.lkApiKey,
