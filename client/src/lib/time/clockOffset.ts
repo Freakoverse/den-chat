@@ -6,9 +6,10 @@
  * the future" for everyone else. We measure the offset from `Date` headers of servers the user
  * already uses (relays via NIP-11, Blossom servers), NTP-style (server time against the midpoint of
  * the request), take the median, and only apply it when the sources agree. No third-party time
- * service and nothing hardcoded: on the web, when relays and Blossom servers hide `Date` behind
- * CORS, the app's own origin tops up the pool. In the installed client the native HTTP plugin sees
- * every header, so relays and Blossom servers are enough.
+ * service for the installed client, where the native HTTP plugin sees every header and relays plus
+ * Blossom servers are enough. On the web those servers hide `Date` behind CORS, so the pool is the
+ * app's own origin (never hardcoded) plus Cloudflare's trace endpoint, whose body carries a
+ * millisecond timestamp and is readable cross-origin. Two independent clocks for browser users.
  *
  * Load: one short probe set at launch when there is no usable measurement, then only when the
  * device clock visibly jumps (wall clock vs the monotonic clock) or the measurement is a week old.
@@ -99,6 +100,31 @@ async function nativeFetch(): Promise<FetchLike | null> {
   } catch { return null }
 }
 
+/**
+ * Web-only: Cloudflare's diagnostic endpoint allows any origin and its body has `ts=<epoch.ms>`.
+ * Better than a 1s Date header. Both hosts are one company, so they count as one host for agreement.
+ */
+const CLOUDFLARE_TRACE = ['https://www.cloudflare.com/cdn-cgi/trace', 'https://1.1.1.1/cdn-cgi/trace']
+async function probeTrace(url: string): Promise<Sample | null> {
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), PROBE_TIMEOUT_MS)
+  try {
+    const t0 = Date.now()
+    const res = await fetch(url, { cache: 'no-store', signal: ctrl.signal })
+    const body = await res.text()
+    const t1 = Date.now()
+    const rtt = t1 - t0
+    if (rtt > MAX_RTT_MS) return null
+    const ts = Number(body.match(/^ts=([0-9.]+)/m)?.[1])
+    if (!ts || Number.isNaN(ts)) return null
+    return { host: 'cloudflare-trace', offsetMs: ts * 1000 - (t0 + rtt / 2), rtt }
+  } catch {
+    return null
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 async function probe(fetchImpl: FetchLike, url: string, init: RequestInit): Promise<Sample | null> {
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), PROBE_TIMEOUT_MS)
@@ -154,11 +180,14 @@ async function collectSamples(): Promise<Sample[]> {
   // exist is a guaranteed cache miss on any CDN (a 404 still carries a fresh Date), where a query
   // string on a real file was served from cache by GitHub Pages. Probe twice so a single-source
   // result still has to be stable.
-  if (!native && results.length < 3 && typeof location !== 'undefined' && /^https?:/.test(location.origin)) {
-    for (let i = 0; i < 2; i++) {
-      const s = await probe(fetchImpl, `${location.origin}/clock-probe-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, { method: 'GET' })
-      if (s) results.push(s)
+  if (!native && results.length < 3) {
+    const extra: Promise<Sample | null>[] = CLOUDFLARE_TRACE.map(probeTrace)
+    if (typeof location !== 'undefined' && /^https?:/.test(location.origin)) {
+      for (let i = 0; i < 2; i++) {
+        extra.push(probe(fetchImpl, `${location.origin}/clock-probe-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, { method: 'GET' }))
+      }
     }
+    for (const s of await Promise.all(extra)) if (s) results.push(s)
   }
   return results
 }
