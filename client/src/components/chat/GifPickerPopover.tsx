@@ -9,6 +9,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { refreshSubscribedPacks } from '@/lib/customSets'
 import { createPortal } from 'react-dom'
 import { RenamePackModal } from '@/components/chat/RenamePackModal'
 import {
@@ -90,6 +91,9 @@ export function GifPickerPopover({ anchorRef, onClose, onSelect }: Props) {
 
     setPos({ top, left, width })
   }, [anchorRef])
+
+  // Subscribed packs can have been extended by their authors since startup: re-fetch on open (throttled).
+  useEffect(() => { void refreshSubscribedPacks('gif') }, [])
 
   useEffect(() => {
     computePosition()
@@ -353,7 +357,7 @@ function DiscoverGifTab({ onSelect, onPickerClose }: { onSelect: (g: { name: str
     try {
       const updated = [...subscriptionAddresses, addr]
       await publishGifSubscriptions(updated, signer, privateKey)
-      useGifStore.getState().addSubscription(addr, collection)
+      useGifStore.getState().addSubscription(addr, (await fetchGifCollectionByAddress(addr).catch(() => null)) ?? collection)
     } catch (err) {
       console.error('Failed to subscribe:', err)
     } finally {
@@ -1643,7 +1647,7 @@ export function GifDiscoveryModal({ onClose, initialSearch = '' }: { onClose: ()
     try {
       const updated = [...subscriptionAddresses, addr]
       await publishGifSubscriptions(updated, signer, privateKey)
-      useGifStore.getState().addSubscription(addr, collection)
+      useGifStore.getState().addSubscription(addr, (await fetchGifCollectionByAddress(addr).catch(() => null)) ?? collection)
     } catch (err) {
       console.error('Failed to subscribe:', err)
     } finally {

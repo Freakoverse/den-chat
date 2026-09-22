@@ -20,8 +20,8 @@ import { useUserStore } from '@/stores/userStore'
 import { useEmojiStore, type EmojiSet } from '@/stores/emojiStore'
 import { useStickerStore, type StickerSet } from '@/stores/stickerStore'
 import { useGifStore, type GifCollection } from '@/stores/gifStore'
-import { fetchEmojiSetsByAuthorBatch, publishEmojiSubscriptions } from '@/lib/nostr/customEmoji'
-import { fetchStickerSetsByAuthorBatch, publishStickerSubscriptions } from '@/lib/nostr/customSticker'
+import { fetchEmojiSetsByAuthorBatch, publishEmojiSubscriptions, fetchEmojiSetByAddress } from '@/lib/nostr/customEmoji'
+import { fetchStickerSetsByAuthorBatch, publishStickerSubscriptions, fetchStickerSetByAddress } from '@/lib/nostr/customSticker'
 import { fetchGifCollectionsByAuthorBatch, publishGifSubscriptions } from '@/lib/nostr/customGif'
 import { BlossomImage } from '@/components/ui/BlossomImage'
 import { Pagination } from '@/components/ui/Pagination'
@@ -301,7 +301,7 @@ function EmojiPacks({ pubkey, paged }: { pubkey: string; paged: PagedPacks<Emoji
     setPublishingAddr(addr)
     try {
       await publishEmojiSubscriptions([...subscriptionAddresses, addr], signer, privateKey)
-      addSubscription(addr, set)
+      addSubscription(addr, (await fetchEmojiSetByAddress(addr).catch(() => null)) ?? set)
     } catch (err) {
       console.error('Failed to subscribe to emoji set:', err)
     } finally {
@@ -346,7 +346,7 @@ function StickerPacks({ pubkey, paged }: { pubkey: string; paged: PagedPacks<Sti
     setPublishingAddr(addr)
     try {
       await publishStickerSubscriptions([...subscriptionAddresses, addr], signer, privateKey)
-      addSubscription(addr, set)
+      addSubscription(addr, (await fetchStickerSetByAddress(addr).catch(() => null)) ?? set)
     } catch (err) {
       console.error('Failed to subscribe to sticker set:', err)
     } finally {

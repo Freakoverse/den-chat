@@ -13,6 +13,7 @@
  */
 
 import { fetchEvents, fetchReplaceable, publishToSpecificRelays, fetchEventsFromRelays, getRelays } from '@/lib/nostr/relay-pool'
+import { fetchNewestReplaceable } from '@/lib/nostr/fetchNewestReplaceable'
 import { createUnsignedEvent, signWithSigner, withClientTag } from '@/lib/nostr/events'
 import type { ISigner } from '@/stores/userStore'
 import type { EmojiSet, CustomEmoji } from '@/stores/emojiStore'
@@ -74,21 +75,8 @@ export async function fetchEmojiSetByAddress(address: string): Promise<EmojiSet 
 
   if (kind !== KIND_EMOJI_SET) return null
 
-  // Try client relays first
-  let event = await fetchReplaceable(pubkey, KIND_EMOJI_SET, dTag)
-
-  // If not found, try user NIP-65 relays as fallback
-  if (!event) {
-    const userRelays = useUserListsStore.getState().userRelays
-    const clientRelays = getRelays()
-    const extraRelays = userRelays.filter((r) => !clientRelays.includes(r))
-    if (extraRelays.length > 0) {
-      const filter = { authors: [pubkey], kinds: [KIND_EMOJI_SET], '#d': [dTag], limit: 1 }
-      const events = await fetchEventsFromRelays(extraRelays, filter).catch(() => [])
-      event = events[0] ?? null
-    }
-  }
-
+  // Newest version across client relays, our NIP-65 relays and the author's advertised relays.
+  const event = await fetchNewestReplaceable(pubkey, KIND_EMOJI_SET, dTag)
   if (!event) return null
 
   // Use broad parser — other users' sets may not have ["t", "emoji"]

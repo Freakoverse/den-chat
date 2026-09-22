@@ -8,6 +8,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { refreshSubscribedPacks } from '@/lib/customSets'
 import { createPortal } from 'react-dom'
 import EmojiPickerReact, { EmojiStyle, Theme } from 'emoji-picker-react'
 import { Smile, Sparkles, Users, Plus, Trash2, Loader2, Upload, Search, X, FolderPlus, Image, AlertTriangle, Check, Compass, ShieldQuestion, Pencil } from 'lucide-react'
@@ -88,6 +89,9 @@ export function EmojiPickerPopover({ anchorRef, onClose, onSelect }: Props) {
 
     setPos({ top, left, height, width })
   }, [anchorRef])
+
+  // Subscribed packs can have been extended by their authors since startup: re-fetch on open (throttled).
+  useEffect(() => { void refreshSubscribedPacks('emoji') }, [])
 
   useEffect(() => {
     computePosition()
@@ -1124,7 +1128,7 @@ function DiscoverEmojiTab({ onPickerClose }: { onPickerClose?: () => void }) {
     try {
       const updated = [...subscriptionAddresses, addr]
       await publishEmojiSubscriptions(updated, signer, privateKey)
-      addSubscription(addr, set)
+      addSubscription(addr, (await fetchEmojiSetByAddress(addr).catch(() => null)) ?? set)
     } catch (err) {
       console.error('Failed to subscribe:', err)
     } finally {
@@ -1393,7 +1397,7 @@ export function EmojiDiscoveryModal({ onClose, initialSearch = '', initialAuthor
       } else {
         const newAddrs = [...subscriptionAddresses, addr]
         await publishEmojiSubscriptions(newAddrs, signer, privateKey)
-        addSubscription(addr, set)
+        addSubscription(addr, (await fetchEmojiSetByAddress(addr).catch(() => null)) ?? set)
       }
     } catch (err) {
       console.error('Failed to update subscription:', err)

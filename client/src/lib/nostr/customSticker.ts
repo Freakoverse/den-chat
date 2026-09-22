@@ -11,6 +11,7 @@
  */
 
 import { fetchEvents, fetchReplaceable, publishToSpecificRelays, fetchEventsFromRelays, getRelays } from '@/lib/nostr/relay-pool'
+import { fetchNewestReplaceable } from '@/lib/nostr/fetchNewestReplaceable'
 import { createUnsignedEvent, signWithSigner, withClientTag } from '@/lib/nostr/events'
 import type { ISigner } from '@/stores/userStore'
 import type { StickerSet, CustomSticker } from '@/stores/stickerStore'
@@ -122,21 +123,9 @@ export async function fetchStickerSetByAddress(address: string): Promise<Sticker
 
   if (kind !== KIND_STICKER_SET) return null
 
-  // Try client relays first
-  let event = await fetchReplaceable(pubkey, KIND_STICKER_SET, dTag)
-
-  // If not found, try user NIP-65 relays as fallback
-  if (!event) {
-    const userRelays = useUserListsStore.getState().userRelays
-    const clientRelays = getRelays()
-    const extraRelays = userRelays.filter((r) => !clientRelays.includes(r))
-    if (extraRelays.length > 0) {
-      const filter = { authors: [pubkey], kinds: [KIND_STICKER_SET], '#d': [dTag], limit: 1 }
-      const events = await fetchEventsFromRelays(extraRelays, filter).catch(() => [])
-      event = events[0] ?? null
-    }
-  }
-
+  // Newest version across client relays, our NIP-65 relays and the author's advertised relays: a
+  // subscriber must see the set as the author last published it, not whichever copy answered first.
+  const event = await fetchNewestReplaceable(pubkey, KIND_STICKER_SET, dTag)
   if (!event) return null
 
   return parseStickerSetEventBroad(event)

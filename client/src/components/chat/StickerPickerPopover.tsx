@@ -7,6 +7,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { refreshSubscribedPacks } from '@/lib/customSets'
 import { createPortal } from 'react-dom'
 import { Sparkles, Users, Plus, Trash2, Loader2, Upload, Search, X, FolderPlus, Image, AlertTriangle, Check, Compass, ShieldQuestion, Pencil } from 'lucide-react'
 import { RenamePackModal } from '@/components/chat/RenamePackModal'
@@ -70,6 +71,9 @@ export function StickerPickerPopover({ anchorRef, onClose, onSelect }: Props) {
 
     setPos({ top, left, width })
   }, [anchorRef])
+
+  // Subscribed packs can have been extended by their authors since startup: re-fetch on open (throttled).
+  useEffect(() => { void refreshSubscribedPacks('sticker') }, [])
 
   useEffect(() => {
     computePosition()
@@ -929,7 +933,7 @@ function DiscoverStickerTab({ onPickerClose }: { onPickerClose?: () => void }) {
     try {
       const updated = [...subscriptionAddresses, addr]
       await publishStickerSubscriptions(updated, signer, privateKey)
-      useStickerStore.getState().addSubscription(addr, set)
+      useStickerStore.getState().addSubscription(addr, (await fetchStickerSetByAddress(addr).catch(() => null)) ?? set)
     } catch (err) {
       console.error('Failed to subscribe:', err)
     } finally {
@@ -1141,7 +1145,7 @@ export function StickerDiscoveryModal({ onClose, initialSearch = '', initialAuth
     try {
       const updated = [...subscriptionAddresses, addr]
       await publishStickerSubscriptions(updated, signer, privateKey)
-      useStickerStore.getState().addSubscription(addr, set)
+      useStickerStore.getState().addSubscription(addr, (await fetchStickerSetByAddress(addr).catch(() => null)) ?? set)
     } catch (err) {
       console.error('Failed to subscribe:', err)
     } finally {

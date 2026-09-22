@@ -15,6 +15,7 @@
  */
 
 import { fetchEvents, fetchReplaceable, publishToSpecificRelays } from '@/lib/nostr/relay-pool'
+import { fetchNewestReplaceable } from '@/lib/nostr/fetchNewestReplaceable'
 import { createUnsignedEvent, signWithSigner, withClientTag } from '@/lib/nostr/events'
 import type { ISigner } from '@/stores/userStore'
 import type { GifCollection, GifEntry } from '@/stores/gifStore'
@@ -121,7 +122,8 @@ export async function fetchGifCollectionByAddress(address: string): Promise<GifC
 
   if (kind !== KIND_GIF_SET) return null
 
-  const event = await fetchReplaceable(pubkey, KIND_GIF_SET, dTag)
+  // Newest version across client relays, our NIP-65 relays and the author's advertised relays.
+  const event = await fetchNewestReplaceable(pubkey, KIND_GIF_SET, dTag)
   if (!event) return null
 
   return parseGifCollectionEvent(event)
