@@ -938,9 +938,15 @@ export function useHubLoader() {
   useEffect(() => {
     if (hubEntries.length === 0) return
 
-    // Find entries not yet loaded (or loaded with stub data from discover join)
+    // Find entries whose membership check hasn't run: no record, a discover-join stub (no index hash),
+    // or a COMPLETE record whose secrets were never resolved. The last case is a join from a shared hub
+    // card: it copies the card's fully parsed event (index hash included) into the store, which this
+    // filter used to read as "already processed" and skip, so secretsResolved never got set, the
+    // awaiting-approval screen could never appear, and the user sat behind "Loading hub data" until a
+    // reload. The resolved flag, not the shape of the record, is what says a hub has been checked.
+    const resolved = useHubStore.getState().hubSecretsResolved
     const toLoad = hubEntries.filter(
-      (e) => (!hubs[e.dTag] || !hubs[e.dTag].indexFileHash) && !loadedRef.current.has(e.dTag)
+      (e) => (!hubs[e.dTag] || !hubs[e.dTag].indexFileHash || !resolved[e.dTag]) && !loadedRef.current.has(e.dTag)
     )
 
     if (toLoad.length === 0) return

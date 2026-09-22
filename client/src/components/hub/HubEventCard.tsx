@@ -43,6 +43,7 @@ export function HubEventCard({ identifier, pubkey, relays }: HubEventCardProps) 
   const hubs = useHubStore((s) => s.hubs)
   const hubEntries = useHubStore((s) => s.hubEntries)
   const setHubData = useHubStore((s) => s.setHubData)
+  const setHubStatus = useHubStore((s) => s.setHubStatus)
   const setHubEntries = useHubStore((s) => s.setHubEntries)
   const folders = useHubStore((s) => s.folders)
 
@@ -224,6 +225,9 @@ export function HubEventCard({ identifier, pubkey, relays }: HubEventCardProps) 
         // Store hub data BEFORE updating entries — prevents hub loader
         // from racing with the signer (which can drop extension connections)
         setHubData(hubData.dTag, hubData)
+        // Mark it loaded (we hold the full hub definition), as the Discover join does; otherwise the
+        // sidebar entry renders as a skeleton until the loader's membership check completes.
+        setHubStatus(hubData.dTag, 'loaded')
 
         const relayHint = hubData.generalRelays[0] || ''
         const newEntry = {
