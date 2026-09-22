@@ -10,6 +10,7 @@
  */
 
 import { useEffect, useRef } from 'react'
+import { subscribeSince } from '@/lib/time/clockOffset'
 import { useHubStore } from '@/stores/hubStore'
 import { useUserStore } from '@/stores/userStore'
 import { subscribeToRelays } from '@/lib/nostr/relay-pool'
@@ -167,7 +168,7 @@ export function useModBanSubscription() {
           kinds: [KINDS.JOIN_REQUEST],
           authors: subscribePubkeys,
           '#d': [activeHubId],
-          since: now,
+          since: subscribeSince(),
         },
         (event: Event) => { processJoinRequest(event) },
       )

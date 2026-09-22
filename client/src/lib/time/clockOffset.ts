@@ -91,6 +91,15 @@ export function nowSeconds(): number {
   return v
 }
 
+/**
+ * Lower bound for a "from now on" relay subscription, on the corrected clock with a small margin.
+ * A device clock that runs fast would otherwise put `since` in the future and the relay would send
+ * nothing until real time caught up; a slow one only costs a few duplicate events, which dedupe.
+ */
+export function subscribeSince(marginSeconds = 5): number {
+  return Math.floor(nowMs() / 1000) - marginSeconds
+}
+
 export function getClockState(): { offsetMs: number; applied: boolean; measuredAt: number | null; samples: number; hosts: string[] } {
   return { offsetMs, applied, measuredAt: stored?.measuredAt ?? null, samples: stored?.samples ?? 0, hosts: stored?.hosts ?? [] }
 }

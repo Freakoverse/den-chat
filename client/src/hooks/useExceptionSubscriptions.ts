@@ -17,6 +17,7 @@
  */
 
 import { useEffect, useRef } from 'react'
+import { subscribeSince } from '@/lib/time/clockOffset'
 import { useHubStore } from '@/stores/hubStore'
 import { useMessageStore } from '@/stores/messageStore'
 import { useZapStore } from '@/stores/zapStore'
@@ -156,7 +157,7 @@ export function useExceptionSubscriptions() {
       {
         kinds: EXCEPTION_KINDS,
         '#e': eventIds,
-        since: Math.floor(Date.now() / 1000),
+        since: subscribeSince(),
       },
       handleEvent
     )

@@ -5,12 +5,13 @@
  * 1. On startup: load cached messages from IndexedDB → populate messageStore
  * 2. Create TWO subscription types per relay batch:
  *    a. Initial fetch — limit: INITIAL_LIMIT (latest N messages)
- *    b. Real-time — since: now (catches new messages as they arrive)
+ *    b. Real-time — since: subscribeSince() (catches new messages as they arrive)
  * 3. Incoming events → add to messageStore + write-through to IndexedDB
  * 4. Export fetchOlderMessages() for scroll-triggered history pagination
  */
 
 import { useEffect, useRef, useState } from 'react'
+import { subscribeSince } from '@/lib/time/clockOffset'
 import { useHubStore } from '@/stores/hubStore'
 import { useMessageStore, type ChatMessage } from '@/stores/messageStore'
 import { subscribeToRelays, getRelays } from '@/lib/nostr/relay-pool'
@@ -1280,7 +1281,7 @@ export function useHubSubscriptions() {
                   KINDS.CALENDAR_TIME_EVENT, KINDS.CALENDAR_RSVP, KINDS.HIDE_MESSAGE,
                   KINDS.MESSAGE_EDIT_HINT],
           '#h': batch.hubDTags,
-          since: now,
+          since: subscribeSince(),
         },
         createEventHandler(null) // null = write-through (no buffer)
       )

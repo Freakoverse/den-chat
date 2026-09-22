@@ -1,4 +1,5 @@
 import { useHubStore } from '@/stores/hubStore'
+import { nowSeconds } from '@/lib/time/clockOffset'
 import { getDraft, setDraft, clearDraft, hubDraftKey, hubThreadDraftKey, getFileDraft, setFileDraft, clearFileDraft } from '@/stores/draftStore'
 import { useDnnStore } from '@/stores/dnnStore'
 import { formatDnnId } from '@/lib/dnn/formatDnnId'
@@ -814,7 +815,7 @@ function MessageList({ hubDTag, channelId, channelName, optimisticMessages, setO
         hiderPubkey: signed.pubkey,
         kind: targetKind,
         targetPubkey,
-        createdAt: Math.floor(Date.now() / 1000),
+        createdAt: nowSeconds(),
       })
     } catch (err) {
       console.error('[ChannelView] Failed to hide message:', err)
@@ -1388,7 +1389,7 @@ function MessageList({ hubDTag, channelId, channelName, optimisticMessages, setO
       emoji,
       pubkey: myPubkey!,
       eventId: 'optimistic-' + Date.now(),
-      createdAt: Math.floor(Date.now() / 1000),
+      createdAt: nowSeconds(),
       customUrl,
     })
 
@@ -5337,7 +5338,7 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
         tempId,
         channelId,
         content: text || (attachments.length > 0 ? `\u{1F4CE} ${attachments.length} file${attachments.length > 1 ? 's' : ''}` : ''),
-        timestamp: Math.floor(Date.now() / 1000),
+        timestamp: nowSeconds(),
         status: 'mining' as const,
         replyDisplayName: replyContext?.displayName,
         replyPreview: replyContext?.preview,
@@ -7123,7 +7124,7 @@ function ThreadModal({ parentMsg, threadReplies, hubDTag, channelId, getProfile,
       emoji,
       pubkey: myPubkey!,
       eventId: 'optimistic-' + Date.now(),
-      createdAt: Math.floor(Date.now() / 1000),
+      createdAt: nowSeconds(),
       customUrl,
     })
     publishReaction(emoji, messageId, targetMsg.pubkey, targetMsg.dTag, customUrl).catch(() => { })

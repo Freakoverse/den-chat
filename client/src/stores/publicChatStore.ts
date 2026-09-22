@@ -13,6 +13,7 @@
  */
 
 import { create } from 'zustand'
+import { subscribeSince } from '@/lib/time/clockOffset'
 import { KINDS, STANDARD_KINDS } from '@/lib/crypto/constants'
 import { createPublicChatMessage, createPublicChatList, createPublicChatReaction, createDeletionEvent } from '@/lib/nostr/events'
 import { signWithSigner, mineAndSign } from '@/lib/nostr'
@@ -768,7 +769,7 @@ export const usePublicChatStore = create<PublicChatState>((set, get) => ({
 
     // 2. Real-time — new reactions as they arrive
     const realtimeSub = subscribeEvents(
-      { kinds: [STANDARD_KINDS.REACTION], '#t': [normalizedTopic], since: now },
+      { kinds: [STANDARD_KINDS.REACTION], '#t': [normalizedTopic], since: subscribeSince() },
       handleReactionEvent,
     )
 
@@ -875,7 +876,7 @@ export const usePublicChatStore = create<PublicChatState>((set, get) => ({
 
     // 2. Real-time
     const realtimeSub = subscribeEvents(
-      { kinds: [STANDARD_KINDS.ZAP_RECEIPT], '#e': eventIds, since: now },
+      { kinds: [STANDARD_KINDS.ZAP_RECEIPT], '#e': eventIds, since: subscribeSince() },
       handleZapEvent,
     )
 

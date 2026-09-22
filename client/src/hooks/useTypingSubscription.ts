@@ -11,6 +11,7 @@
  */
 
 import { useEffect, useMemo } from 'react'
+import { subscribeSince } from '@/lib/time/clockOffset'
 import type { Event } from 'nostr-tools'
 import { subscribeToRelays, getRelays } from '@/lib/nostr/relay-pool'
 import { useTypingStore, hubTypingKey, dm04TypingKey } from '@/stores/typingStore'
@@ -89,7 +90,7 @@ export function useTypingSubscription() {
     const now = Math.floor(Date.now() / 1000)
     const sub = subscribeToRelays(
       hubRelays,
-      { kinds: [KINDS.TYPING_INDICATOR], '#h': [activeHubId], since: now },
+      { kinds: [KINDS.TYPING_INDICATOR], '#h': [activeHubId], since: subscribeSince() },
       handleHubTyping,
     )
     return () => sub.close()
@@ -104,7 +105,7 @@ export function useTypingSubscription() {
     const now = Math.floor(Date.now() / 1000)
     const sub = subscribeToRelays(
       relays,
-      { kinds: [KINDS.TYPING_INDICATOR], '#p': [myPubkey], since: now },
+      { kinds: [KINDS.TYPING_INDICATOR], '#p': [myPubkey], since: subscribeSince() },
       (event) => handleDM04Typing(event, myPubkey),
     )
     return () => sub.close()
