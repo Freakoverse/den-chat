@@ -201,7 +201,9 @@ async function collectSamples(): Promise<Sample[]> {
   if (!native && results.length < 3) {
     console.log(`[Clock] only ${results.length} usable sample(s) from relays/Blossom; adding the web pool (Cloudflare trace + own origin ${typeof location !== 'undefined' ? location.origin : 'n/a'})`)
     const extra: Promise<Sample | null>[] = CLOUDFLARE_TRACE.map(probeTrace)
-    if (typeof location !== 'undefined' && /^https?:/.test(location.origin)) {
+    const localOrigin = typeof location !== 'undefined' && /^(localhost|127\.|0\.0\.0\.0|\[::1\]|.*\.local$)/.test(location.hostname)
+    if (localOrigin) console.log(`[Clock] own origin ${location.origin} is this machine (dev server); skipping it, it would only echo the device clock`)
+    if (typeof location !== 'undefined' && /^https?:/.test(location.origin) && !localOrigin) {
       for (let i = 0; i < 2; i++) {
         extra.push(probe(fetchImpl, `${location.origin}/clock-probe-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, { method: 'GET' }))
       }
@@ -217,8 +219,11 @@ function aggregate(samples: Sample[]): { offsetMs: number; kept: Sample[] } | nu
   const median = sorted[Math.floor(sorted.length / 2)].offsetMs
   const kept = sorted.filter((s) => Math.abs(s.offsetMs - median) <= AGREE_MS)
   const hosts = new Set(kept.map((s) => s.host))
-  // Two agreeing hosts, or one host that agreed with itself twice (the origin fallback).
-  if (!(hosts.size >= 2 || kept.length >= 2)) return null
+  const allHosts = new Set(samples.map((s) => s.host))
+  // Two agreeing hosts when more than one host answered (two hosts that disagree is "unsure", not a
+  // coin toss on the median); a single host that agreed with itself twice only when it was the only
+  // host that answered at all (the origin-only web case).
+  if (allHosts.size >= 2 ? hosts.size < 2 : kept.length < 2) return null
   const m = kept[Math.floor(kept.length / 2)].offsetMs
   return { offsetMs: m, kept }
 }
