@@ -75,6 +75,7 @@ export function nowMs(): number { return Date.now() + offsetMs }
  */
 let lastStampLog = 0
 export function nowSeconds(): number {
+  absorbClockJump()
   const raw = Math.floor(Date.now() / 1000)
   const c = Math.floor(nowMs() / 1000)
   let v = c
@@ -267,12 +268,32 @@ export function describeOffset(ms: number): string {
   return `about ${(abs / 3600_000).toFixed(1)} h ${dir}`
 }
 
-/** Has the wall clock moved differently from the monotonic clock since the last measurement? */
-function clockJumped(): boolean {
-  if (!sessionRef) return false
+/** How far the wall clock moved beyond what the monotonic clock says since the last reference (ms). */
+function clockJumpMs(): number {
+  if (!sessionRef) return 0
   const wallDelta = Date.now() - sessionRef.wall
   const monoDelta = performance.now() - sessionRef.mono
-  return Math.abs(wallDelta - monoDelta) > JUMP_MS
+  return wallDelta - monoDelta
+}
+
+/**
+ * If the device clock jumped since the last reference (the user changed it, or the device slept with
+ * the monotonic clock paused), the measured offset is stale by exactly that jump. Apply the inverse at
+ * once so the next stamp is right, then re-measure in the background to confirm. Cheap enough to run
+ * on every stamp: two clock reads and a subtraction.
+ */
+function absorbClockJump(): void {
+  const jump = clockJumpMs()
+  if (Math.abs(jump) <= JUMP_MS) return
+  sessionRef = { wall: Date.now(), mono: performance.now() }
+  const before = offsetMs
+  offsetMs = Math.round(offsetMs - jump)
+  if (Math.abs(offsetMs) < APPLY_MIN_MS) offsetMs = 0
+  applied = offsetMs !== 0
+  if (stored) { stored = { ...stored, offsetMs, measuredAt: Date.now() }; save() }
+  console.log(`[Clock] device clock jumped by ${jump > 0 ? '+' : ''}${Math.round(jump / 1000)}s since the last reference; offset ${Math.round(before / 1000)}s -> ${Math.round(offsetMs / 1000)}s provisionally, re-measuring to confirm`)
+  notify()
+  if (navigator.onLine) void measureClockOffset('clock jump detected')
 }
 
 /** Start the clock sync: load the stored offset, probe when needed, watch for clock jumps. Idempotent. */
@@ -294,10 +315,12 @@ export function initClockSync(): void {
   // monotonic clock restarts with the process), and the probes go to servers we connect to anyway.
   setTimeout(() => { if (navigator.onLine) void measureClockOffset(stale ? 'initial measurement' : 'launch confirmation') }, 8_000)
   const check = () => {
-    if (!navigator.onLine) return
-    if (clockJumped()) { sessionRef = { wall: Date.now(), mono: performance.now() }; void measureClockOffset('clock jump detected') }
-    else if (stored && Date.now() - stored.measuredAt > MAX_AGE_MS) void measureClockOffset('measurement expired')
+    absorbClockJump()
+    if (navigator.onLine && stored && Date.now() - stored.measuredAt > MAX_AGE_MS) void measureClockOffset('measurement expired')
   }
   setInterval(check, CHECK_EVERY_MS)
+  // visibilitychange covers tabs and minimised windows; focus covers switching back to the window
+  // in Tauri, where the page never counts as hidden.
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') check() })
+  window.addEventListener('focus', check)
 }
