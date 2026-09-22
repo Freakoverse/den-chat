@@ -138,11 +138,15 @@ export function ContextMenuProvider({ children }: { children: ReactNode }) {
     }
     const handleScroll = () => close()
 
-    document.addEventListener('mousedown', handleClickOutside)
+    // Capture phase: pickers and popovers stop mousedown propagation on their root (so their own
+    // outside-click logic doesn't fire), which also kept this bubble-phase listener from ever seeing a
+    // click inside them. Right-click an emoji in the picker, click away inside the picker, and the
+    // menu stayed open. Capture runs before any stopPropagation, so any click anywhere closes it.
+    document.addEventListener('mousedown', handleClickOutside, true)
     document.addEventListener('keydown', handleEscape)
     window.addEventListener('scroll', handleScroll, true)
     return () => {
-      document.removeEventListener('mousedown', handleClickOutside)
+      document.removeEventListener('mousedown', handleClickOutside, true)
       document.removeEventListener('keydown', handleEscape)
       window.removeEventListener('scroll', handleScroll, true)
     }
