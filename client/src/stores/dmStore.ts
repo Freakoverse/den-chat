@@ -8,6 +8,7 @@
  */
 
 import { create } from 'zustand'
+import { nowSeconds } from '@/lib/time/clockOffset'
 import { publishToSpecificRelays, publishEventProgressive } from '@/lib/nostr/relay-pool'
 import { fetchDMInbox, subscribeDMInbox, getDMReadRelays } from '@/lib/nostr/readRelays'
 import { getPublishRelays, getDMSelfCopyRelays } from '@/stores/postingBehaviourStore'
@@ -24,7 +25,7 @@ import type { Event } from 'nostr-tools'
 import { discoverRecipientRelays } from '@/lib/nostr/relayDiscovery'
 
 /** Unix timestamp (seconds) of when this session started — sounds only play for messages after this */
-const dmSessionStartTime = Math.floor(Date.now() / 1000)
+const dmSessionStartTime = nowSeconds()
 
 /* ─── Types ─── */
 
@@ -452,7 +453,7 @@ export const useDMStore = create<DMState>((set, get) => ({
 
     try {
       // Use the oldest wrap timestamp as the cursor
-      const until = conv?.oldestWrapTimestamp || Math.floor(Date.now() / 1000)
+      const until = conv?.oldestWrapTimestamp || nowSeconds()
 
       const events = await fetchDMInbox({
         kinds: [STANDARD_KINDS.GIFT_WRAP],
@@ -527,7 +528,7 @@ export const useDMStore = create<DMState>((set, get) => ({
     try {
       // Capture timestamp NOW (before async work) so the local message
       // matches the rumor's created_at and isn't delayed by network latency
-      const sendTime = Math.floor(Date.now() / 1000)
+      const sendTime = nowSeconds()
 
       // Build extra tags for emoji/sticker (plaintext inside the rumor)
       const extraTags: string[][] = []
@@ -700,10 +701,10 @@ export const useDMStore = create<DMState>((set, get) => ({
         const empty: Conversation = {
           pubkey: pk,
           messages: [],
-          lastMessageAt: Math.floor(Date.now() / 1000),
+          lastMessageAt: nowSeconds(),
           lastMessagePreview: '',
           unread: 0,
-          oldestWrapTimestamp: Math.floor(Date.now() / 1000),
+          oldestWrapTimestamp: nowSeconds(),
           hasMore: false,
         }
         if (followList.has(pk)) {

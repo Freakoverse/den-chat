@@ -8,6 +8,7 @@
  * O, drops tombstones, members, and anything mined below `W`.
  */
 import type { Event } from 'nostr-tools'
+import { nowSeconds } from '@/lib/time/clockOffset'
 import { KINDS } from '@/lib/crypto/constants'
 import { createUnsignedEvent, mineAndSign, signWithSigner } from '@/lib/nostr'
 import { createDeletedJoinRequest, createDeletionEvent } from '@/lib/nostr/events'
@@ -150,7 +151,7 @@ export async function withdrawGroupJoinRequest(g: GroupData, opts: { requireLive
     const addrPub = await addrSigner.getPublicKey()
     const existing = (await fetchEventsFromRelays(queryRelays, { kinds: [KINDS.JOIN_REQUEST], authors: [addrPub], '#d': [addrPub], limit: 1 }))[0]
     if (opts.requireLive && !live(existing)) return false
-    const createdAt = existing?.created_at ?? Math.floor(Date.now() / 1000)
+    const createdAt = existing?.created_at ?? nowSeconds()
     const deleted = createDeletedJoinRequest(addrPub, g.creatorPubkey, createdAt, coord)
     await publishCriticalWithFailover(await mineAndSignAsSubkey(deleted, 0, addrSigner), publishRelays, relays)
     const del = createDeletionEvent([], [`${KINDS.JOIN_REQUEST}:${addrPub}:${addrPub}`], 'withdraw join request')
@@ -160,7 +161,7 @@ export async function withdrawGroupJoinRequest(g: GroupData, opts: { requireLive
 
   const existing = (await fetchEventsFromRelays(queryRelays, { kinds: [KINDS.JOIN_REQUEST], authors: [k.me], '#d': [g.dTag], limit: 1 }))[0]
   if (opts.requireLive && !live(existing)) return false
-  const createdAt = existing?.created_at ?? Math.floor(Date.now() / 1000)
+  const createdAt = existing?.created_at ?? nowSeconds()
   const deleted = createDeletedJoinRequest(g.dTag, g.creatorPubkey, createdAt, coord)
   await publishCriticalWithFailover(await signWithSigner(deleted, k.signer, k.privateKey), publishRelays, relays)
   const del = createDeletionEvent([], [`${KINDS.JOIN_REQUEST}:${k.me}:${g.dTag}`], 'withdraw join request')

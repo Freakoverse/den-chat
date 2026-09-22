@@ -12,6 +12,7 @@
  */
 
 import { SimplePool, nip19 } from 'nostr-tools'
+import { nowSeconds } from '@/lib/time/clockOffset'
 import { nip44 } from 'nostr-tools'
 import { hkdf } from '@noble/hashes/hkdf'
 import { sha256 } from '@noble/hashes/sha256'
@@ -263,7 +264,7 @@ class UPV2Service {
     await Promise.all(relays.map((url) => this.pool.ensureRelay(url).catch(() => null)))
     await new Promise((r) => setTimeout(r, 500))
 
-    const requestTime = Math.floor(Date.now() / 1000)
+    const requestTime = nowSeconds()
 
     await this.sendUPV2Event(relays, loginPk, loginSk, signerPubkey, 'request_challenge', sessionId, {
       client: 'den-chat',
@@ -281,7 +282,7 @@ class UPV2Service {
     relays: string[], loginPk: string, loginSk: string, signerPubkey: string,
     sessionId: string, nonce: string, signature: string,
   ): Promise<{ sessionId: string; expiresAt: number } | null> {
-    const requestTime = Math.floor(Date.now() / 1000)
+    const requestTime = nowSeconds()
 
     await this.sendUPV2Event(relays, loginPk, loginSk, signerPubkey, 'login', sessionId, {
       challenge_signature: signature,
@@ -354,7 +355,7 @@ class UPV2Service {
     this.responseStreamPk = loginPk
     this.recentResponses = []
     this.responseMatchers = []
-    const filter: any = { kinds: [UPV2_KIND, 24133], '#p': [loginPk], since: Math.floor(Date.now() / 1000) - 30 }
+    const filter: any = { kinds: [UPV2_KIND, 24133], '#p': [loginPk], since: nowSeconds() - 30 }
     try {
       this.responseSub = this.pool.subscribeMany(relays, filter, {
         onevent: (event: any) => {
@@ -391,7 +392,7 @@ class UPV2Service {
     expectedAction: UPV2Action, timeoutMs: number,
     sessionId?: string, requestTime?: number, nonce?: string,
   ): Promise<any> {
-    const minTime = (requestTime || Math.floor(Date.now() / 1000)) - 15
+    const minTime = (requestTime || nowSeconds()) - 15
     const processedIds = new Set<string>()
 
     // ── Fast path: shared persistent stream (all post-login ops) ──
@@ -424,7 +425,7 @@ class UPV2Service {
     }
 
     // ── Slow path: per-request subscription (pre-session handshake only) ──
-    const startTime = Math.floor(Date.now() / 1000) - 30
+    const startTime = nowSeconds() - 30
     const filter: any = { kinds: [UPV2_KIND, 24133], '#p': [loginPk], since: startTime }
 
     return new Promise<any>((resolve) => {
@@ -476,7 +477,7 @@ class UPV2Service {
 
     const eventTemplate = {
       pubkey: loginPk,
-      created_at: Math.floor(Date.now() / 1000),
+      created_at: nowSeconds(),
       kind: UPV2_KIND,
       tags: [
         ['a', action],
@@ -521,7 +522,7 @@ class UPV2Service {
 
     const nonceBytes = bytesToHex(crypto.getRandomValues(new Uint8Array(16)))
     const signature = this.signChallenge(nonceBytes, this.currentSession.loginSk)
-    const requestTime = Math.floor(Date.now() / 1000)
+    const requestTime = nowSeconds()
 
     await this.sendUPV2Event(
       this.currentSession.relays, this.currentSession.loginPk, this.currentSession.loginSk,
@@ -585,7 +586,7 @@ class UPV2Service {
     const s = this.currentSession
     if (!s) throw new Error('Not logged in via UPV2')
     const nonce = bytesToHex(crypto.getRandomValues(new Uint8Array(16)))
-    const requestTime = Math.floor(Date.now() / 1000)
+    const requestTime = nowSeconds()
     await this.sendUPV2Event(s.relays, s.loginPk, s.loginSk, s.signerPubkey, 'skd_get_self_subkey_pubkey', s.sessionId, { context, nonce })
     const response = await this.pollForResponse(s.relays, s.loginPk, s.loginSk, 'skd_get_self_subkey_pubkey', 30000, s.sessionId, requestTime, nonce)
     if (response?.result) return response.result as string
@@ -595,7 +596,7 @@ class UPV2Service {
     const s = this.currentSession
     if (!s) throw new Error('Not logged in via UPV2')
     const nonce = bytesToHex(crypto.getRandomValues(new Uint8Array(16)))
-    const requestTime = Math.floor(Date.now() / 1000)
+    const requestTime = nowSeconds()
     await this.sendUPV2Event(s.relays, s.loginPk, s.loginSk, s.signerPubkey, 'skd_sign_as_self_subkey', s.sessionId, { context, nonce, event })
     const response = await this.pollForResponse(s.relays, s.loginPk, s.loginSk, 'signed_event', 30000, s.sessionId, requestTime, nonce)
     if (response?.event) return response.event as Record<string, unknown>
@@ -605,7 +606,7 @@ class UPV2Service {
     const s = this.currentSession
     if (!s) throw new Error('Not logged in via UPV2')
     const nonce = bytesToHex(crypto.getRandomValues(new Uint8Array(16)))
-    const requestTime = Math.floor(Date.now() / 1000)
+    const requestTime = nowSeconds()
     await this.sendUPV2Event(s.relays, s.loginPk, s.loginSk, s.signerPubkey, 'skd_nip44_encrypt_as_self_subkey', s.sessionId, { context, nonce, recipientPub, plaintext })
     const response = await this.pollForResponse(s.relays, s.loginPk, s.loginSk, 'skd_nip44_encrypt_as_self_subkey', 30000, s.sessionId, requestTime, nonce)
     if (response?.result) return response.result as string
@@ -615,7 +616,7 @@ class UPV2Service {
     const s = this.currentSession
     if (!s) throw new Error('Not logged in via UPV2')
     const nonce = bytesToHex(crypto.getRandomValues(new Uint8Array(16)))
-    const requestTime = Math.floor(Date.now() / 1000)
+    const requestTime = nowSeconds()
     await this.sendUPV2Event(s.relays, s.loginPk, s.loginSk, s.signerPubkey, 'skd_nip44_decrypt_as_self_subkey', s.sessionId, { context, nonce, senderPub, ciphertext })
     const response = await this.pollForResponse(s.relays, s.loginPk, s.loginSk, 'skd_nip44_decrypt_as_self_subkey', 30000, s.sessionId, requestTime, nonce)
     if (response?.result) return response.result as string
@@ -626,7 +627,7 @@ class UPV2Service {
     const s = this.currentSession
     if (!s) throw new Error('Not logged in via UPV2')
     const nonce = bytesToHex(crypto.getRandomValues(new Uint8Array(16)))
-    const requestTime = Math.floor(Date.now() / 1000)
+    const requestTime = nowSeconds()
     await this.sendUPV2Event(s.relays, s.loginPk, s.loginSk, s.signerPubkey, 'skd_get_shared_subkey_pubkey', s.sessionId, { context, peerPub, nonce })
     const response = await this.pollForResponse(s.relays, s.loginPk, s.loginSk, 'skd_get_shared_subkey_pubkey', 30000, s.sessionId, requestTime, nonce)
     if (response?.result) return response.result as string
@@ -636,7 +637,7 @@ class UPV2Service {
     const s = this.currentSession
     if (!s) throw new Error('Not logged in via UPV2')
     const nonce = bytesToHex(crypto.getRandomValues(new Uint8Array(16)))
-    const requestTime = Math.floor(Date.now() / 1000)
+    const requestTime = nowSeconds()
     await this.sendUPV2Event(s.relays, s.loginPk, s.loginSk, s.signerPubkey, 'skd_sign_as_shared_subkey', s.sessionId, { context, peerPub, nonce, event })
     const response = await this.pollForResponse(s.relays, s.loginPk, s.loginSk, 'signed_event', 30000, s.sessionId, requestTime, nonce)
     if (response?.event) return response.event as Record<string, unknown>
@@ -646,7 +647,7 @@ class UPV2Service {
     const s = this.currentSession
     if (!s) throw new Error('Not logged in via UPV2')
     const nonce = bytesToHex(crypto.getRandomValues(new Uint8Array(16)))
-    const requestTime = Math.floor(Date.now() / 1000)
+    const requestTime = nowSeconds()
     await this.sendUPV2Event(s.relays, s.loginPk, s.loginSk, s.signerPubkey, 'skd_nip44_encrypt_as_shared_subkey', s.sessionId, { context, peerPub, nonce, recipientPub, plaintext })
     const response = await this.pollForResponse(s.relays, s.loginPk, s.loginSk, 'skd_nip44_encrypt_as_shared_subkey', 30000, s.sessionId, requestTime, nonce)
     if (response?.result) return response.result as string
@@ -656,7 +657,7 @@ class UPV2Service {
     const s = this.currentSession
     if (!s) throw new Error('Not logged in via UPV2')
     const nonce = bytesToHex(crypto.getRandomValues(new Uint8Array(16)))
-    const requestTime = Math.floor(Date.now() / 1000)
+    const requestTime = nowSeconds()
     await this.sendUPV2Event(s.relays, s.loginPk, s.loginSk, s.signerPubkey, 'skd_nip44_decrypt_as_shared_subkey', s.sessionId, { context, peerPub, nonce, senderPub, ciphertext })
     const response = await this.pollForResponse(s.relays, s.loginPk, s.loginSk, 'skd_nip44_decrypt_as_shared_subkey', 30000, s.sessionId, requestTime, nonce)
     if (response?.result) return response.result as string
@@ -668,7 +669,7 @@ class UPV2Service {
     const s = this.currentSession
     if (!s) throw new Error('Not logged in via UPV2')
     const nonce = bytesToHex(crypto.getRandomValues(new Uint8Array(16)))
-    const requestTime = Math.floor(Date.now() / 1000)
+    const requestTime = nowSeconds()
     await this.sendUPV2Event(s.relays, s.loginPk, s.loginSk, s.signerPubkey, 'skd_get_blinded_pubkey', s.sessionId, { context, peerPub, nonce })
     const response = await this.pollForResponse(s.relays, s.loginPk, s.loginSk, 'skd_get_blinded_pubkey', 30000, s.sessionId, requestTime, nonce)
     if (response?.result) return response.result as string
@@ -678,7 +679,7 @@ class UPV2Service {
     const s = this.currentSession
     if (!s) throw new Error('Not logged in via UPV2')
     const nonce = bytesToHex(crypto.getRandomValues(new Uint8Array(16)))
-    const requestTime = Math.floor(Date.now() / 1000)
+    const requestTime = nowSeconds()
     await this.sendUPV2Event(s.relays, s.loginPk, s.loginSk, s.signerPubkey, 'skd_get_peer_blinded_pubkey', s.sessionId, { context, peerPub, nonce })
     const response = await this.pollForResponse(s.relays, s.loginPk, s.loginSk, 'skd_get_peer_blinded_pubkey', 30000, s.sessionId, requestTime, nonce)
     if (response?.result) return response.result as string
@@ -689,7 +690,7 @@ class UPV2Service {
     const s = this.currentSession
     if (!s) throw new Error('Not logged in via UPV2')
     const nonce = bytesToHex(crypto.getRandomValues(new Uint8Array(16)))
-    const requestTime = Math.floor(Date.now() / 1000)
+    const requestTime = nowSeconds()
     await this.sendUPV2Event(s.relays, s.loginPk, s.loginSk, s.signerPubkey, 'skd_get_peer_blinded_pubkey_via_self', s.sessionId, { viaContext, context, peerPub, nonce })
     const response = await this.pollForResponse(s.relays, s.loginPk, s.loginSk, 'skd_get_peer_blinded_pubkey_via_self', 30000, s.sessionId, requestTime, nonce)
     if (response?.result) return response.result as string
@@ -699,7 +700,7 @@ class UPV2Service {
     const s = this.currentSession
     if (!s) throw new Error('Not logged in via UPV2')
     const nonce = bytesToHex(crypto.getRandomValues(new Uint8Array(16)))
-    const requestTime = Math.floor(Date.now() / 1000)
+    const requestTime = nowSeconds()
     await this.sendUPV2Event(s.relays, s.loginPk, s.loginSk, s.signerPubkey, 'skd_get_peer_blinded_pubkey_via_blinded', s.sessionId, { viaContext, viaPeerPub, context, peerPub, nonce })
     const response = await this.pollForResponse(s.relays, s.loginPk, s.loginSk, 'skd_get_peer_blinded_pubkey_via_blinded', 30000, s.sessionId, requestTime, nonce)
     if (response?.result) return response.result as string
@@ -709,7 +710,7 @@ class UPV2Service {
     const s = this.currentSession
     if (!s) throw new Error('Not logged in via UPV2')
     const nonce = bytesToHex(crypto.getRandomValues(new Uint8Array(16)))
-    const requestTime = Math.floor(Date.now() / 1000)
+    const requestTime = nowSeconds()
     await this.sendUPV2Event(s.relays, s.loginPk, s.loginSk, s.signerPubkey, 'skd_sign_as_blinded', s.sessionId, { context, peerPub, nonce, event })
     const response = await this.pollForResponse(s.relays, s.loginPk, s.loginSk, 'signed_event', 30000, s.sessionId, requestTime, nonce)
     if (response?.event) return response.event as Record<string, unknown>
@@ -719,7 +720,7 @@ class UPV2Service {
     const s = this.currentSession
     if (!s) throw new Error('Not logged in via UPV2')
     const nonce = bytesToHex(crypto.getRandomValues(new Uint8Array(16)))
-    const requestTime = Math.floor(Date.now() / 1000)
+    const requestTime = nowSeconds()
     await this.sendUPV2Event(s.relays, s.loginPk, s.loginSk, s.signerPubkey, 'skd_nip44_encrypt_as_blinded', s.sessionId, { context, peerPub, nonce, recipientPub, plaintext })
     const response = await this.pollForResponse(s.relays, s.loginPk, s.loginSk, 'skd_nip44_encrypt_as_blinded', 30000, s.sessionId, requestTime, nonce)
     if (response?.result) return response.result as string
@@ -729,7 +730,7 @@ class UPV2Service {
     const s = this.currentSession
     if (!s) throw new Error('Not logged in via UPV2')
     const nonce = bytesToHex(crypto.getRandomValues(new Uint8Array(16)))
-    const requestTime = Math.floor(Date.now() / 1000)
+    const requestTime = nowSeconds()
     await this.sendUPV2Event(s.relays, s.loginPk, s.loginSk, s.signerPubkey, 'skd_nip44_decrypt_as_blinded', s.sessionId, { context, peerPub, nonce, senderPub, ciphertext })
     const response = await this.pollForResponse(s.relays, s.loginPk, s.loginSk, 'skd_nip44_decrypt_as_blinded', 30000, s.sessionId, requestTime, nonce)
     if (response?.result) return response.result as string
@@ -783,7 +784,7 @@ class UPV2Service {
     const nonceVal = bytesToHex(crypto.getRandomValues(new Uint8Array(16)))
     const isEncrypt = action.endsWith('_encrypt')
     const contentKey = isEncrypt ? 'plaintext' : 'ciphertext'
-    const requestTime = Math.floor(Date.now() / 1000)
+    const requestTime = nowSeconds()
 
     await this.sendUPV2Event(
       session.relays, session.loginPk, session.loginSk,

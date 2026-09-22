@@ -15,6 +15,7 @@
  */
 
 import { verifyEvent, type UnsignedEvent, type Event } from 'nostr-tools'
+import { nowSeconds } from '@/lib/time/clockOffset'
 import { getEventHash } from 'nostr-tools/pure'
 import { deriveKey } from '@/lib/crypto/hkdf'
 import { aesEncrypt, aesDecrypt } from '@/lib/crypto/aes'
@@ -63,7 +64,7 @@ export async function buildOwnerAttestation(
   signer: ISigner | null,
   privateKey: string | null,
 ): Promise<OwnerAttestation> {
-  const createdAt = Math.floor(Date.now() / 1000)
+  const createdAt = nowSeconds()
   const signed = await signWithSigner(ownerAttTemplate(rOwnerPubHint, createdAt, coord), signer, privateKey)
   return { rOwnerPub: signed.pubkey, createdAt: signed.created_at, sigOwner: signed.sig }
 }

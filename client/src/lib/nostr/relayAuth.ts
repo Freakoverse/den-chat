@@ -25,6 +25,7 @@
  */
 
 import { verifyEvent, type EventTemplate, type UnsignedEvent, type VerifiedEvent } from 'nostr-tools'
+import { nowSeconds } from '@/lib/time/clockOffset'
 import { useUserStore, type ISigner } from '@/stores/userStore'
 import { useHubStore } from '@/stores/hubStore'
 import { isV2 } from '@/lib/hub/version'
@@ -57,7 +58,7 @@ export function makeRelayAuthSigner(
     }
     const pubkey = useUserStore.getState().pubkey
     if (!pubkey) throw new Error('[NIP-42] not logged in')
-    const unsigned: UnsignedEvent = { ...template, pubkey }
+    const unsigned: UnsignedEvent = { ...template, pubkey, created_at: nowSeconds(22242) }
     const signed = await signWithSigner(unsigned, signer, privateKey)
     if (!verifyEvent(signed)) throw new Error('[NIP-42] signed AUTH event failed verification')
     console.log(`[NIP-42] authenticated to ${relay || 'relay'}`)

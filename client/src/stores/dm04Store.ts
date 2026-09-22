@@ -10,6 +10,7 @@
  */
 
 import { create } from 'zustand'
+import { nowSeconds } from '@/lib/time/clockOffset'
 import { fetchEventsFromRelays, publishEventProgressive, publishToSpecificRelays, subscribeToRelays } from '@/lib/nostr/relay-pool'
 import { fetchEventsWide, subscribeEventsWide, getReadRelays } from '@/lib/nostr/readRelays'
 import { getPublishRelays, publishPersonal, usePostingBehaviourStore } from '@/stores/postingBehaviourStore'
@@ -36,7 +37,7 @@ import { playSoundEffect } from '@/lib/voice/soundEffects'
 import { discoverRecipientRelays } from '@/lib/nostr/relayDiscovery'
 
 /** Unix timestamp (seconds) of when this session started — DM sounds only play for messages after this */
-const dm04SessionStartTime = Math.floor(Date.now() / 1000)
+const dm04SessionStartTime = nowSeconds()
 
 /* ─── Types ─── */
 
@@ -448,7 +449,7 @@ export const useDM04Store = create<DM04State>((set, get) => ({
     set({ loadingOlder: true })
 
     try {
-      const until = conv?.oldestTimestamp || Math.floor(Date.now() / 1000)
+      const until = conv?.oldestTimestamp || nowSeconds()
 
       // Fetch both sent and received
       const [receivedEvents, sentEvents] = await Promise.all([
@@ -502,7 +503,7 @@ export const useDM04Store = create<DM04State>((set, get) => ({
     }
 
     try {
-      const sendTime = Math.floor(Date.now() / 1000)
+      const sendTime = nowSeconds()
 
       // Start relay discovery in parallel with encryption (non-blocking)
       const publishRelays = getPublishRelays()
@@ -797,10 +798,10 @@ export const useDM04Store = create<DM04State>((set, get) => ({
         const empty: DM04Conversation = {
           pubkey: pk,
           messages: [],
-          lastMessageAt: Math.floor(Date.now() / 1000),
+          lastMessageAt: nowSeconds(),
           lastMessagePreview: '',
           unread: 0,
-          oldestTimestamp: Math.floor(Date.now() / 1000),
+          oldestTimestamp: nowSeconds(),
           hasMore: false,
         }
         if (followList.has(pk)) {

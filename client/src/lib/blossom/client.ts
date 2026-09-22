@@ -1,4 +1,5 @@
 import { sha256 } from '@noble/hashes/sha256'
+import { nowSeconds } from '@/lib/time/clockOffset'
 import { bytesToHex } from '@noble/hashes/utils'
 import type { ISigner } from '@/stores/userStore'
 import { signWithSigner, createUnsignedEvent } from '@/lib/nostr'
@@ -193,7 +194,7 @@ async function createAuthHeader(
   privateKey: string | null,
   authSigner?: BlossomAuthSigner,
 ): Promise<string> {
-  const expiration = Math.floor(Date.now() / 1000) + 600 // 10 min
+  const expiration = nowSeconds() + 600 // 10 min
 
   const tags: [string, ...string[]][] = [
     ['t', action],

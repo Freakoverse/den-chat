@@ -3,6 +3,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { nowSeconds } from '@/lib/time/clockOffset'
 import { useSocialStore } from '@/stores/socialStore'
 import { useUserStore } from '@/stores/userStore'
 import { useComposeSettings, ComposeSettingsPanel, ComposeSettingsButton } from '@/components/social/ComposeSettings'
@@ -260,13 +261,13 @@ export function LongFormWritePage() {
       // When promoting a draft to article, published_at = now (first real publication)
       // When re-saving draft or editing existing article, carry forward original published_at
       const publishedAt = (editingDraft && !asDraft)
-        ? Math.floor(Date.now() / 1000)
-        : (editPublishedAt || Math.floor(Date.now() / 1000))
+        ? nowSeconds()
+        : (editPublishedAt || nowSeconds())
       // Editing a published article: created_at = previous + 1 (keeps chronological position)
       // Publishing a draft (or new article): created_at = now
       const createdAt = (editDTag && editCreatedAt && !editingDraft)
         ? editCreatedAt + 1
-        : Math.floor(Date.now() / 1000)
+        : nowSeconds()
 
       const eventTags: string[][] = [
         ['d', identifier],

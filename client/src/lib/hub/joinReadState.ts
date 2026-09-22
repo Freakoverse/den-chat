@@ -17,6 +17,7 @@
  * writes are debounced here and throttled by the shared read-state publisher.
  */
 import type { ISigner } from '@/stores/userStore'
+import { nowSeconds } from '@/lib/time/clockOffset'
 import { APP_DATA_DTAGS, STANDARD_KINDS } from '@/lib/crypto/constants'
 import {
   loadCachedEvent,
@@ -62,7 +63,7 @@ function saveCache(): void {
   const cacheEvent = {
     ...(cached ?? { id: '', sig: '', pubkey: '', kind: STANDARD_KINDS.APP_DATA, tags: [['d', APP_DATA_DTAGS.JOIN_READ_STATE]] }),
     content: JSON.stringify({ hubs: _map } as JoinReadState),
-    created_at: Math.floor(Date.now() / 1000),
+    created_at: nowSeconds(),
   }
   try { saveCachedEvent('join', cacheEvent as never) } catch { /* ignore */ }
 }

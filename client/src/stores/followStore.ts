@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { nowSeconds } from '@/lib/time/clockOffset'
 import { fetchEvents, publishToSpecificRelays } from '@/lib/nostr/relay-pool'
 import { publishPersonal, getPublishRelays } from '@/stores/postingBehaviourStore'
 import { signWithSigner } from '@/lib/nostr/events'
@@ -81,7 +82,7 @@ async function publishFollowList(
   const unsigned = {
     kind: 3,
     pubkey: myPubkey,
-    created_at: Math.floor(Date.now() / 1000),
+    created_at: nowSeconds(),
     tags,
     content,
   }

@@ -13,6 +13,7 @@
  */
 
 import { create } from 'zustand'
+import { nowSeconds } from '@/lib/time/clockOffset'
 import type { ISigner } from '@/stores/userStore'
 import { guardedDecrypt, guardedEncrypt } from '@/lib/auth/signerGuard'
 import { useGroupStore } from '@/stores/groupStore'
@@ -626,7 +627,7 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
   // ── Hub Chat ──
 
   markChannelRead: (hubDTag, channelId) => {
-    const now = Math.floor(Date.now() / 1000)
+    const now = nowSeconds()
     set((state) => {
       const hubChannels = { ...(state.hubUnreads[hubDTag] || {}) }
       hubChannels[channelId] = {
@@ -649,7 +650,7 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
       // attacker-controlled, and a spoofed far-future message in the active channel would otherwise push
       // lastRead into the future, marking every real later message as already-read (unread/mention
       // suppression). Clamp-then-max never lets an untrusted timestamp move the watermark past now.
-      const now = Math.floor(Date.now() / 1000)
+      const now = nowSeconds()
       const ts = Math.max(existing.lastRead, Math.min(messageTimestamp, now))
       if (ts === existing.lastRead && existing.count === 0 && !existing.hasMention) return {}
       hubChannels[channelId] = { lastRead: ts, count: 0, hasMention: false }
@@ -660,7 +661,7 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
   },
 
   markHubRead: (hubDTag) => {
-    const now = Math.floor(Date.now() / 1000)
+    const now = nowSeconds()
     set((state) => {
       const hubChannels = { ...(state.hubUnreads[hubDTag] || {}) }
       for (const channelId of Object.keys(hubChannels)) {
@@ -820,7 +821,7 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
   // ── DMs ──
 
   markDmRead: (conversationId, type) => {
-    const now = Math.floor(Date.now() / 1000)
+    const now = nowSeconds()
     console.log('[notif] markDmRead called:', { conversationId: conversationId.slice(0, 12) + '...', type, now })
     const key = type === 'nip17' ? 'dm17Unreads' : 'dm04Unreads'
     set((state) => {
@@ -846,7 +847,7 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
   // ── Public Chat ──
 
   markTopicRead: (topic) => {
-    const now = Math.floor(Date.now() / 1000)
+    const now = nowSeconds()
     set((state) => ({
       pcReadTimes: { ...state.pcReadTimes, [topic]: now },
     }))
@@ -1008,7 +1009,7 @@ function _schedulePublish(domain: 'hub' | 'group' | 'dm' | 'pc') {
 
 function _saveHubToLocalStorage(get: () => NotificationState, skipPublish = false) {
   const state = get()
-  const now = Math.floor(Date.now() / 1000)
+  const now = nowSeconds()
   const groups = groupDTagSet()
 
   // Hubs (everything that isn't a group). Build a pseudo-event for localStorage (not signed, cache only).
@@ -1050,7 +1051,7 @@ function _saveDmToLocalStorage(get: () => NotificationState) {
   const state = get()
   const dmState = buildDmReadStateFromStore(state.dm17Unreads, state.dm04Unreads)
   const cached = loadCachedEvent('dm')
-  const now = Math.floor(Date.now() / 1000)
+  const now = nowSeconds()
 
   const cacheEvent = {
     ...(cached ?? { id: '', sig: '', pubkey: '', kind: 30078, tags: [['d', 'den-dm-read-state']] }),
@@ -1065,7 +1066,7 @@ function _savePcToLocalStorage(get: () => NotificationState) {
   const state = get()
   const pcState: PcReadState = { topics: state.pcReadTimes }
   const cached = loadCachedEvent('pc')
-  const now = Math.floor(Date.now() / 1000)
+  const now = nowSeconds()
 
   const cacheEvent = {
     ...(cached ?? { id: '', sig: '', pubkey: '', kind: 30078, tags: [['d', 'den-pc-read-state']] }),

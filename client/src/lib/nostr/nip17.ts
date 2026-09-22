@@ -10,6 +10,7 @@
  */
 
 import { nip44, getPublicKey, finalizeEvent } from 'nostr-tools'
+import { nowSeconds } from '@/lib/time/clockOffset'
 import { getEventHash } from 'nostr-tools/pure'
 import { STANDARD_KINDS } from '@/lib/crypto/constants'
 import { guardedDecrypt, guardedEncrypt } from '@/lib/auth/signerGuard'
@@ -60,7 +61,7 @@ function generateRandomPrivateKey(): Uint8Array {
 /** Randomize timestamp within the past 48 hours (per NIP-17 spec).
  *  Only randomizes into the PAST — relays reject future `created_at` as "too late". */
 function randomizedTimestamp(): number {
-  const now = Math.floor(Date.now() / 1000)
+  const now = nowSeconds()
   const twoDays = 2 * 24 * 60 * 60
   const offset = Math.floor(Math.random() * twoDays) // 0 to 48h
   return now - offset // Always in the past
@@ -144,7 +145,7 @@ export async function createGiftWrap(
   const rumor: DMRumor = {
     kind: STANDARD_KINDS.DM_RUMOR,
     pubkey: senderPubkey,
-    created_at: Math.floor(Date.now() / 1000),
+    created_at: nowSeconds(),
     tags: rumorTags,
     content,
   }
@@ -245,7 +246,7 @@ export async function createFileGiftWrap(
   const rumor: DMRumor = {
     kind: STANDARD_KINDS.DM_FILE,
     pubkey: senderPubkey,
-    created_at: Math.floor(Date.now() / 1000),
+    created_at: nowSeconds(),
     tags: rumorTags,
     content: params.fileUrl,
   }
