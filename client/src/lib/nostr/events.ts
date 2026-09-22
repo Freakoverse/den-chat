@@ -33,6 +33,14 @@ export function withClientTag(tags: Tag[]): Tag[] {
 /**
  * Create an unsigned Nostr event.
  */
+/**
+ * TIMESTAMP RULE: every event this app publishes is stamped from the corrected clock
+ * (lib/time/clockOffset.nowSeconds), never from Math.floor(Date.now() / 1000). Devices run minutes
+ * off, and a raw device time puts messages "in the future" for everyone else, breaks relay AUTH and
+ * Blossom auth windows, and misorders replies. This builder does it by default; if you build an
+ * event object by hand, or write a time into a tag (published_at, expiration) or into content, call
+ * nowSeconds() yourself. Edits and tombstones pass the previous event's created_at + 1 instead.
+ */
 export function createUnsignedEvent(
   kind: number,
   content: string,

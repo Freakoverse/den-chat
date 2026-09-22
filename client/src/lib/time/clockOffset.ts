@@ -11,6 +11,11 @@
  * app's own origin (never hardcoded) plus Cloudflare's trace endpoint, whose body carries a
  * millisecond timestamp and is readable cross-origin. Two independent clocks for browser users.
  *
+ * RULE FOR NEW CODE: anything that becomes an event timestamp, a time tag (published_at, expiration),
+ * a server-checked validity window (Blossom 24242, NIP-42 AUTH, LiveKit tokens), a live subscription's
+ * `since`, or is compared against relay timestamps, must use nowSeconds() / nowMs() / subscribeSince()
+ * from this module, never Math.floor(Date.now() / 1000). Plain Date.now() is fine only for UI timing.
+ *
  * Load: one short probe set at launch when there is no usable measurement, then only when the
  * device clock visibly jumps (wall clock vs the monotonic clock) or the measurement is a week old.
  * The result is stored per device so restarts start corrected.
