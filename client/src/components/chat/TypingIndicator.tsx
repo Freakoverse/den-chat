@@ -7,6 +7,7 @@
  */
 
 import { useTypers } from '@/stores/typingStore'
+import { useBlockStore } from '@/stores/blockStore'
 
 export function TypingIndicator({
   convKey,
@@ -17,7 +18,9 @@ export function TypingIndicator({
   resolveName: (pubkey: string) => string
   className?: string
 }) {
-  const typers = useTypers(convKey)
+  const allTypers = useTypers(convKey)
+  const blocked = useBlockStore((s) => s.blockedPubkeys)
+  const typers = allTypers.filter((pk) => !blocked.has(pk))
   if (typers.length === 0) return null
 
   const names = typers.map(resolveName)

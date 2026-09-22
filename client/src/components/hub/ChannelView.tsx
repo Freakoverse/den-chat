@@ -220,6 +220,7 @@ export function useDecryptedReactions(hubDTag: string, getChannelKey: (epoch?: n
   // Convert StoredReaction[] to Reaction[] (skip undecrypted + filter by add_reactions permission + banned)
   const modBanLists = useHubStore((s) => hub ? s.modBanLists[hub.dTag] : undefined)
   const hubBanListForReactions = useHubStore((s) => hub ? s.hubBanLists[hub.dTag] : undefined)
+  const blockedPubkeysForReactions = useBlockStore((s) => s.blockedPubkeys)
   const reactions = useMemo(() => {
     // Build set of banned pubkeys (mod-banned excluding whitelisted + creator-banned)
     const bannedSet = new Set<string>()
@@ -242,8 +243,9 @@ export function useDecryptedReactions(hubDTag: string, getChannelKey: (epoch?: n
         if (r.decrypted === false) continue
         // v2: the reactor's true key is realPubkey (decoded from the identity tag); in v1 pubkey IS R.
         const rKey = r.realPubkey ?? r.pubkey
-        // Filter out reactions from banned users
+        // Filter out reactions from banned users, and from users this viewer has blocked
         if (bannedSet.has(rKey)) continue
+        if (blockedPubkeysForReactions.has(rKey)) continue
         // Enforce add_reactions permission — suppress reactions from users
         // whose role lacks add_reactions (even if published via modified client)
         if (hub && rKey !== hub.creatorPubkey) {
@@ -1572,6 +1574,7 @@ function MessageList({ hubDTag, channelId, channelName, optimisticMessages, setO
 
                   return (
                     <Fragment key={`poll-${pollData.id}`}>
+                      <BlockedGate pubkey={(pollData as { realPubkey?: string }).realPubkey ?? pollData.pubkey} label="Poll from a user you have blocked">
                       <PollCard
                         poll={pollData}
                         hubDTag={hubDTag}
@@ -1667,6 +1670,7 @@ function MessageList({ hubDTag, channelId, channelName, optimisticMessages, setO
                           </button>
                         )
                       })()}
+                      </BlockedGate>
                     </Fragment>
                   )
                 }
@@ -3246,6 +3250,50 @@ function ReactorAvatar({ picture, initial }: { picture?: string; initial: string
   )
 }
 
+/**
+ * The one slab a blocked user's message collapses to: no name, no avatar, no content. "Peek" shows the
+ * message as normal with an "Unpeek" pill; peeking is per message and per session.
+ */
+export function BlockedSlab({ grouped, onPeek, label = 'Message from a user you have blocked' }: { grouped?: boolean; onPeek: () => void; label?: string }) {
+  return (
+    <div className={`${grouped ? 'mt-0.5' : 'mt-4'} py-2 px-3 -mx-2 rounded-lg border border-border/40 bg-muted/30`}>
+      <div className="flex items-center gap-2.5">
+        <div className="flex items-center justify-center w-6 h-6 rounded-full bg-muted/60 shrink-0">
+          <ShieldBan size={12} className="text-muted-foreground/70" />
+        </div>
+        <span className="text-xs font-medium text-muted-foreground/70">{label}</span>
+        <button
+          onClick={(e) => { e.stopPropagation(); onPeek() }}
+          className="flex items-center gap-1 ml-auto text-xs font-medium text-muted-foreground hover:text-foreground bg-muted/40 hover:bg-muted/60 px-2.5 py-1 rounded-full transition-colors cursor-pointer"
+        >
+          <Eye size={12} /> Peek
+        </button>
+      </div>
+    </div>
+  )
+}
+
+/** Wraps any block (a poll, a card) authored by a blocked user in the same slab / peek / unpeek treatment. */
+export function BlockedGate({ pubkey, grouped, label, children }: { pubkey: string; grouped?: boolean; label?: string; children: React.ReactNode }) {
+  const isBlocked = useBlockStore((s) => s.isBlocked)(pubkey)
+  const hideCompletely = useBlockStore((s) => s.hideBlockedCompletely)
+  const [peeked, setPeeked] = useState(false)
+  if (!isBlocked) return <>{children}</>
+  if (hideCompletely) return null
+  if (!peeked) return <BlockedSlab grouped={grouped} onPeek={() => setPeeked(true)} label={label} />
+  return (
+    <div className="relative">
+      {children}
+      <button
+        onClick={() => setPeeked(false)}
+        className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground bg-muted/40 hover:bg-muted/60 px-2 py-0.5 rounded-full transition-colors cursor-pointer mt-1 w-fit"
+      >
+        <EyeOff size={11} /> Unpeek
+      </button>
+    </div>
+  )
+}
+
 export function ReactionBar({ reactions, messageId, onAddReaction, rawReactions, onOpenProfile, children, disableCustomEmojis }: {
   reactions: Reaction[]
   messageId: string
@@ -3263,10 +3311,12 @@ export function ReactionBar({ reactions, messageId, onAddReaction, rawReactions,
 
   // Convert StoredReaction[] to ReactionInfo[] for the modal
   // NOTE: Must be above the early return to preserve hook ordering
+  const blockedPubkeys = useBlockStore((s) => s.blockedPubkeys)
   const reactionInfos: ReactionInfo[] = useMemo(() => {
     if (!rawReactions) return []
     return rawReactions
       .filter((r) => r.decrypted !== false)
+      .filter((r) => !blockedPubkeys.has(r.realPubkey ?? r.pubkey))
       .map((r) => ({
         eventId: r.eventId,
         pubkey: r.realPubkey ?? r.pubkey, // v2: display the real reactor R (wire author is P)
@@ -3275,7 +3325,7 @@ export function ReactionBar({ reactions, messageId, onAddReaction, rawReactions,
         createdAt: r.createdAt || 0,
         rawEvent: r.rawEvent,
       }))
-  }, [rawReactions])
+  }, [rawReactions, blockedPubkeys])
 
   const totalCount = reactionInfos.length
 
@@ -3469,7 +3519,6 @@ export function ChatMessageRow({
   const hideBlockedCompletely = useBlockStore((s) => s.hideBlockedCompletely)
   const mutedWords = useBlockStore((s) => s.mutedWords)
 
-  const shouldBlurBlocked = isBlockedUser && !blockedRevealed
 
   // Relay progress — dim own messages that haven't been accepted by any relay yet
   const relayPending = useMessageStore((s) => {
@@ -3482,8 +3531,8 @@ export function ChatMessageRow({
     ? msg.content.split('\n').filter((l: string) => !msg.gifTags!.some(([, u]: [string, string, string]) => l.trim() === u)).join('\n').trim()
     : msg.content
   const { groups: contentMediaGroups, strippedContent: contentForRender } = useMemo(
-    () => (msg.decrypted && !msg.deleted && !shouldBlurBlocked && !shouldBlurMsg) ? extractContentMediaGroups(baseContent) : { groups: [], strippedContent: baseContent },
-    [baseContent, msg.decrypted, msg.deleted, shouldBlurBlocked, shouldBlurMsg]
+    () => (msg.decrypted && !msg.deleted && !shouldBlurMsg) ? extractContentMediaGroups(baseContent) : { groups: [], strippedContent: baseContent },
+    [baseContent, msg.decrypted, msg.deleted, shouldBlurMsg]
   )
   const allContentImages = useMemo(() => contentMediaGroups.flatMap(g => g.urls), [contentMediaGroups])
   const [contentGalleryIndex, setContentGalleryIndex] = useState<number | null>(null)
@@ -3582,6 +3631,8 @@ export function ChatMessageRow({
 
   // Completely hide blocked users if setting enabled
   if (isBlockedUser && hideBlockedCompletely) return null
+  // Blocked user: one slab replaces the entire row (name, avatar, content, reactions) until peeked.
+  if (isBlockedUser && !blockedRevealed) return <BlockedSlab grouped={isGrouped} onPeek={() => setBlockedRevealed(true)} />
 
   // WoT filter — hide if score below threshold
   const wotHidden = useWotStore.getState().shouldHide(authorKey, 'hubChat')
@@ -3654,17 +3705,6 @@ export function ChatMessageRow({
             <EditField text={editText} onChange={setEditText} onCancel={() => { cancelEdit(); setRemovedAttachmentHashes(new Set()) }} unchanged={editUnchanged} onSave={async () => { await onSaveEdit(msg, editText, removedAttachmentHashes); setRemovedAttachmentHashes(new Set()) }} hubDTag={hubDTag} channelId={channelId} />
           ) : !msg.decrypted && !msg.deleted ? (
             <EncryptedMessageCard hubDTag={hubDTag} />
-          ) : shouldBlurBlocked ? (
-            <div className="flex items-center gap-2.5 py-1.5 px-3 my-1 rounded-lg bg-muted/50 border border-border/50">
-              <ShieldBan size={14} className="text-destructive/70 shrink-0" />
-              <span className="text-xs text-muted-foreground">Message hidden — blocked user</span>
-              <button
-                onClick={() => setBlockedRevealed(true)}
-                className="flex items-center gap-1 ml-auto text-xs font-medium text-primary hover:text-primary/80 bg-primary/10 hover:bg-primary/15 px-2.5 py-1 rounded-full transition-colors cursor-pointer"
-              >
-                <Eye size={12} /> Show
-              </button>
-            </div>
           ) : shouldBlurMsg ? (
             <div className="flex items-center gap-2.5 py-1.5 px-3 my-1 rounded-lg bg-muted/50 border border-border/50">
               <AlertTriangle size={14} className="text-amber-500 shrink-0" />
@@ -3818,7 +3858,7 @@ export function ChatMessageRow({
               onClick={() => setBlockedRevealed(false)}
               className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground bg-muted/40 hover:bg-muted/60 px-2 py-0.5 rounded-full transition-colors cursor-pointer mt-1 w-fit"
             >
-              <EyeOff size={11} /> Hide
+              <EyeOff size={11} /> Unpeek
             </button>
           )}
         </div>
@@ -4131,6 +4171,14 @@ export function ChatMessageRow({
               className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground bg-muted/40 hover:bg-muted/60 px-2 py-0.5 rounded-full transition-colors cursor-pointer mt-1 w-fit"
             >
               <EyeOff size={11} /> Hide
+            </button>
+          )}
+          {isBlockedUser && blockedRevealed && (
+            <button
+              onClick={() => setBlockedRevealed(false)}
+              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground bg-muted/40 hover:bg-muted/60 px-2 py-0.5 rounded-full transition-colors cursor-pointer mt-1 w-fit"
+            >
+              <EyeOff size={11} /> Unpeek
             </button>
           )}
         </div>
