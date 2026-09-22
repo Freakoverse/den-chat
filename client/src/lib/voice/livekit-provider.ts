@@ -12,7 +12,6 @@
  */
 
 import type {
-import { nowSeconds } from '@/lib/time/clockOffset'
   VoiceProvider,
   VoiceProviderCallbacks,
   VoiceParticipant,
@@ -23,6 +22,7 @@ import { nowSeconds } from '@/lib/time/clockOffset'
   DataChannelMessage,
 } from './types'
 import { supportsE2EE } from './e2ee-crypto'
+import { nowSeconds } from '@/lib/time/clockOffset'
 
 // LiveKit SDK types — these will resolve when livekit-client is installed.
 // For now we use dynamic imports so the app doesn't break without the dep.
