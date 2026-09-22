@@ -13,6 +13,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { useEscToClose, useEscBlock } from '@/hooks/useEscToClose'
+import { resetSignerGuard } from '@/lib/auth/signerGuard'
 import { useHubStore, type HubData, type HubMember } from '@/stores/hubStore'
 import { useUserStore } from '@/stores/userStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
@@ -1134,10 +1135,14 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
             {addError && (
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => {
+                  onClick={async () => {
                     setAddError(null)
                     setAddStep(null)
                     setAddSteps([])
+                    // A genuine retry: forget cached decrypt failures and give a remote signer the
+                    // chance to reconnect before the run, instead of re-hitting the cache instantly.
+                    resetSignerGuard()
+                    try { if (signer && typeof signer.reconnect === 'function') await signer.reconnect() } catch { /* best-effort */ }
                     handleAddMembers()
                   }}
                   className="flex-1 flex items-center justify-center gap-1.5 h-8 text-xs rounded-lg font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors cursor-pointer"

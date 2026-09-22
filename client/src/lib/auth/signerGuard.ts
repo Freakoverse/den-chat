@@ -279,13 +279,17 @@ export async function guardedDecrypt(
       onSuccess(domain)
       return result
     } catch (err) {
-      addToFailureCache(domain, ciphertext)
-
       // Only trip circuit for true signer rejections (user denied, timeout, connection lost).
       // All other errors (crypto failures, bad ciphertext, extension-specific errors)
       // mean the signer DID process the request — it was responsive.
       if (isSignerRejection(err)) {
+        // A rejection or timeout says nothing about the ciphertext: a stalled Android signer app or a
+        // dropped relay link must not brand it "known bad", or every later retry fails instantly at
+        // the same step without asking the signer again (the "Failed to Add Members" report).
         onFailure(domain, protocol)
+      } else {
+        // The signer answered and could not decrypt: that IS about the ciphertext. Remember it.
+        addToFailureCache(domain, ciphertext)
       }
       throw err
     }
