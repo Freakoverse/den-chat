@@ -43,7 +43,7 @@ export function createUnsignedEvent(
     kind,
     content,
     tags,
-    created_at: createdAt ?? nowSeconds(),
+    created_at: createdAt ?? nowSeconds(kind),
     pubkey: '', // Placeholder — real pubkey is set by signEvent or signWithSigner
   }
 }

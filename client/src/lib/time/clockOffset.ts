@@ -73,16 +73,17 @@ export function nowMs(): number { return Date.now() + offsetMs }
  * device within a 10 minute window, so the first events after a correction can't sort behind the
  * ones stamped by the old (wrong) clock.
  */
-let lastStampLog = 0
-export function nowSeconds(): number {
+/** Ephemeral kinds (typing, edit hints) are stamped constantly; keep them out of the log. */
+const QUIET_KINDS = new Set([26943, 26950])
+export function nowSeconds(kind?: number): number {
   absorbClockJump()
   const raw = Math.floor(Date.now() / 1000)
   const c = Math.floor(nowMs() / 1000)
   let v = c
-  if (c < lastIssued && (lastIssued - c) * 1000 < HOLD_BACK_MAX_MS) v = lastIssued
-  if (v !== raw && Date.now() - lastStampLog > 5_000) {
-    lastStampLog = Date.now()
-    console.log(`[Clock] stamping created_at ${v} (device would say ${raw}; ${v === c ? `offset ${Math.round(offsetMs / 1000)}s` : `held at last issued ${lastIssued} so the clock never runs backwards`})`)
+  const held = c < lastIssued && (lastIssued - c) * 1000 < HOLD_BACK_MAX_MS
+  if (held) v = lastIssued
+  if (kind === undefined || !QUIET_KINDS.has(kind)) {
+    console.log(`[Clock] stamping${kind !== undefined ? ` kind ${kind}` : ''} created_at ${v} (${new Date(v * 1000).toISOString()}) | device ${raw} | offset ${Math.round(offsetMs / 1000)}s${held ? ` | held at last issued ${lastIssued}` : ''}`)
   }
   if (v > lastIssued) {
     lastIssued = v
@@ -300,7 +301,7 @@ function absorbClockJump(): void {
   if (Math.abs(offsetMs) < APPLY_MIN_MS) offsetMs = 0
   applied = offsetMs !== 0
   if (stored) { stored = { ...stored, offsetMs, measuredAt: Date.now() }; save() }
-  console.log(`[Clock] device clock jumped by ${jump > 0 ? '+' : ''}${Math.round(jump / 1000)}s since the last reference; offset ${Math.round(before / 1000)}s -> ${Math.round(offsetMs / 1000)}s provisionally, re-measuring to confirm`)
+  console.log(`[Clock] device clock jumped by ${jump > 0 ? '+' : ''}${Math.round(jump / 1000)}s since the last reference; offset ${Math.round(before / 1000)}s -> ${Math.round(offsetMs / 1000)}s provisionally (device now ${new Date().toISOString()}, corrected ${new Date(nowMs()).toISOString()}), re-measuring to confirm`)
   notify()
   if (navigator.onLine) void measureClockOffset('clock jump detected')
 }
