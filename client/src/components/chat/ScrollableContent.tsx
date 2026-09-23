@@ -32,10 +32,12 @@ export function ScrollableContent({ children }: { children: ReactNode }) {
   }
 
   return (
-    <>
-      {/* min-w-0 w-full: inside a flex row (grouped message rows) a bare block would shrink-wrap its
-          content, and a w-full textarea inside it then collapses to the browser's intrinsic ~20 columns
-          (the "edit box shrinks to the left" report). Giving the box a definite width fixes that. */}
+    // flex-col: some callers place this inside a flex ROW (the compact grouped-message variant). A bare
+    // fragment would make the content box and the "Show all" button siblings in that row, so the button
+    // floated to the right of the text instead of below it. A column wrapper keeps them stacked anywhere.
+    // min-w-0 w-full: inside a flex row a bare block would shrink-wrap its content, and a w-full textarea
+    // inside it then collapses to the browser's intrinsic ~20 columns (the "edit box shrinks left" report).
+    <div className="flex flex-col min-w-0 w-full">
       <div className="relative min-w-0 w-full">
         <div
           ref={contentRef}
@@ -61,6 +63,6 @@ export function ScrollableContent({ children }: { children: ReactNode }) {
           )}
         </button>
       )}
-    </>
+    </div>
   )
 }
