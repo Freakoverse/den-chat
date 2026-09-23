@@ -469,6 +469,8 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
   // appear"); and when the "show facilitated messages" pref toggles (else the toggle does nothing).
   const hubMembersReactive = useHubStore((s) => (hubDTag ? s.hubMembers[hubDTag] : undefined))
   const showFacilitatedReactive = useHubStore((s) => (hubDTag ? s.hubPrefs[hubDTag]?.showFacilitatedMessages : undefined))
+  // Reactive so toggling "hide messages below the PoW requirement" re-runs the filter immediately.
+  const hideBelowPowReactive = useHubStore((s) => (hubDTag ? s.hubPrefs[hubDTag]?.hideBelowPow : undefined))
   useEffect(() => {
     if (rawMessages.length === 0) {
       // Even with no raw messages, show any self-decrypted cache entries
@@ -484,7 +486,10 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
     // Read from snapshot to avoid adding `hubs` as a reactive dependency
     const hubSnapshot = hubDTag ? useHubStore.getState().hubs[hubDTag] : null
     const minPow = hubSnapshot?.minPow || 0
-    const filtered = minPow > 0
+    // Per-hub, per-user pref (default on): hide messages mined below the hub's difficulty. A member can
+    // turn it off to see every message, including low-effort posts that skipped the hub's PoW.
+    const hideBelowPow = (hubDTag ? useHubStore.getState().hubPrefs[hubDTag]?.hideBelowPow : undefined) ?? true
+    const filtered = minPow > 0 && hideBelowPow
       ? rawMessages.filter((m) => countLeadingZeroBits(m.id) >= minPow)
       : rawMessages
 
@@ -604,7 +609,7 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
     })
 
     return () => { cancelled = true }
-  }, [rawMessages, decryptContent, hubDTag, pubkey, facilitatorMembersReactive, hubMembersReactive, showFacilitatedReactive])
+  }, [rawMessages, decryptContent, hubDTag, pubkey, facilitatorMembersReactive, hubMembersReactive, showFacilitatedReactive, hideBelowPowReactive])
 
   // Durable-cache re-sweep for v2 (companion to the verify-before-cache gate).
   // The cache-admission gate (verifyMessageForCache) refuses to persist a v2 message whose channel key

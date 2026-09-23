@@ -18,6 +18,10 @@ export interface HubEntry {
 
 export interface HubPrefs {
   showFacilitatedMessages: boolean // default true
+  /** default true — hide messages whose proof-of-work is below the hub's message difficulty (`w` /
+   *  minPow). A member who wants to see every message (including low-effort / spam posts that skip the
+   *  hub's PoW) turns this off. No effect on hubs that set no message PoW (minPow === 0). */
+  hideBelowPow?: boolean
   facilitator?: string             // facilitator npub (also stored in HubEntry for persistence)
   facilitatorSecret?: string       // hub secret obtained via facilitator's tree (hex)
 }
@@ -273,6 +277,7 @@ function loadPersistedHubPrefs(account: string | null): Record<string, HubPrefs>
     for (const [dTag, p] of Object.entries(parsed)) {
       out[dTag] = {
         showFacilitatedMessages: p.showFacilitatedMessages ?? true,
+        hideBelowPow: p.hideBelowPow ?? true,
         ...(p.facilitator ? { facilitator: p.facilitator } : {}),
       }
     }
@@ -285,12 +290,14 @@ function loadPersistedHubPrefs(account: string | null): Record<string, HubPrefs>
 function persistHubPrefs(prefs: Record<string, HubPrefs>): void {
   if (!_currentAccount) return
   try {
-    const slim: Record<string, { showFacilitatedMessages: boolean; facilitator?: string }> = {}
+    const slim: Record<string, { showFacilitatedMessages: boolean; hideBelowPow?: boolean; facilitator?: string }> = {}
     for (const [dTag, p] of Object.entries(prefs)) {
-      // Skip default-only entries to keep storage tidy; drop the secret.
-      if (p.showFacilitatedMessages === false || p.facilitator) {
+      // Skip default-only entries to keep storage tidy; drop the secret. hideBelowPow defaults true,
+      // so only its OFF state is worth persisting.
+      if (p.showFacilitatedMessages === false || p.hideBelowPow === false || p.facilitator) {
         slim[dTag] = {
           showFacilitatedMessages: p.showFacilitatedMessages,
+          ...(p.hideBelowPow === false ? { hideBelowPow: false } : {}),
           ...(p.facilitator ? { facilitator: p.facilitator } : {}),
         }
       }

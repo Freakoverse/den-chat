@@ -22,7 +22,7 @@ import { nip19 } from 'nostr-tools'
 import {
   X, Search, Loader2, Check, Copy, AlertTriangle, SlidersHorizontal, UserCheck, Shield, ShieldOff, ShieldBan, Lock, LockOpen,
   Users, Plus, Trash2, Volume2, Globe, Server, Wifi, WifiOff, Flag, MessagesSquare, Undo2, EyeOff, RefreshCw, Bell,
-  BellOff, AtSign, UsersRound, Radio, Tag, ChevronLeft, ChevronRight, BookOpen,
+  BellOff, AtSign, UsersRound, Radio, Tag, ChevronLeft, ChevronRight, BookOpen, Gauge,
 } from 'lucide-react'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
 import { UserProfileModal } from '@/components/hub/UserProfileModal'
@@ -1445,6 +1445,23 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
                         onChange={(v) => setHubPref(hub.dTag, 'showFacilitatedMessages', v)}
                       />
                     </label>
+                    {/* Only meaningful when the hub sets a message PoW (`w`). Default on: sub-threshold
+                        posts (spam / clients that skip the PoW) are hidden. */}
+                    {hub.minPow > 0 && (
+                      <label className="flex items-start justify-between cursor-pointer group gap-3">
+                        <div className="flex items-start gap-2">
+                          <Gauge size={14} className="text-muted-foreground group-hover:text-foreground transition-colors mt-0.5" />
+                          <div>
+                            <span className="text-sm text-foreground">Hide low proof-of-work messages</span>
+                            <p className="text-[11px] text-muted-foreground">Only show messages mined to this hub's difficulty (w = {hub.minPow}). Hides low-effort and spam posts.</p>
+                          </div>
+                        </div>
+                        <ToggleSwitch
+                          checked={hubPrefs.hideBelowPow ?? true}
+                          onChange={(v) => setHubPref(hub.dTag, 'hideBelowPow', v)}
+                        />
+                      </label>
+                    )}
                   </div>
                 </section>
 
