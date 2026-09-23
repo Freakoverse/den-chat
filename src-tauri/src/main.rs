@@ -7,6 +7,14 @@ fn main() {
     // Must be set before ANY WebKit/GTK code loads — main() is the earliest point.
     #[cfg(target_os = "linux")]
     {
+        // NVIDIA + Wayland: the driver's explicit-sync path can crash WebKitGTK's web process ("Error
+        // 71"), one cause of the blank window (menus render, the web view stays white). This variable is
+        // read ONLY by the NVIDIA driver, so it's a no-op on Intel/AMD and on X11, and it carries no
+        // performance cost — safe to set unconditionally. Official Tauri guidance
+        // (https://v2.tauri.app/develop/debug/linux-graphics/). We never override a user-set value.
+        if std::env::var("__NV_DISABLE_EXPLICIT_SYNC").is_err() {
+            unsafe { std::env::set_var("__NV_DISABLE_EXPLICIT_SYNC", "1") };
+        }
         // Disable the WebKitGTK DMA-BUF renderer — the targeted fix for the blank-window-after-alt-tab
         // bug on many GPUs/drivers (WebKitGTK 2.42+). Crucially this KEEPS accelerated compositing on,
         // so scrolling stays GPU-composited and smooth.
