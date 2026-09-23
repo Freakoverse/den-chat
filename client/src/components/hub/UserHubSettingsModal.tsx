@@ -1445,31 +1445,39 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
                         onChange={(v) => setHubPref(hub.dTag, 'showFacilitatedMessages', v)}
                       />
                     </label>
-                    {/* Only meaningful when the hub sets a message PoW (`w`). Default on: sub-threshold
-                        posts (spam / clients that skip the PoW) are hidden. */}
-                    {hub.minPow > 0 && (
-                      <label className="flex items-start justify-between cursor-pointer group gap-3">
-                        <div className="flex items-start gap-2">
-                          <Gauge size={14} className="text-muted-foreground group-hover:text-foreground transition-colors mt-0.5" />
-                          <div>
-                            <span className="text-sm text-foreground">Hide low proof-of-work messages</span>
-                            <p className="text-[11px] text-muted-foreground">Only show messages mined to this hub's difficulty (w = {hub.minPow}). Hides low-effort and spam posts.</p>
-                          </div>
+                    {/* Shown for every hub. It only actually filters when the hub sets a message PoW
+                        (minPow > 0); default on, so sub-threshold spam posts are hidden. */}
+                    <label className="flex items-start justify-between cursor-pointer group gap-3">
+                      <div className="flex items-start gap-2">
+                        <Gauge size={14} className="text-muted-foreground group-hover:text-foreground transition-colors mt-0.5" />
+                        <div>
+                          <span className="text-sm text-foreground">Hide low proof-of-work messages</span>
+                          <p className="text-[11px] text-muted-foreground">Only show messages mined to this hub's difficulty ({hub.minPow}). Hides low-effort and spam posts.</p>
                         </div>
-                        <ToggleSwitch
-                          checked={hubPrefs.hideBelowPow ?? true}
-                          onChange={(v) => setHubPref(hub.dTag, 'hideBelowPow', v)}
-                        />
-                      </label>
-                    )}
+                      </div>
+                      <ToggleSwitch
+                        checked={hubPrefs.hideBelowPow ?? true}
+                        onChange={(v) => setHubPref(hub.dTag, 'hideBelowPow', v)}
+                      />
+                    </label>
                   </div>
                 </section>
 
-                {/* Section 2: Facilitator */}
-                {!isMember && (
-                  <section>
-                    <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Facilitator</h4>
+                {/* Facilitation: its own section, separated from Message Visibility above */}
+                <section className="mt-6 pt-5 border-t border-border space-y-4">
+                  <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Facilitation</h4>
 
+                  {/* Member: encryption status */}
+                  {isMember && (
+                    <div className="flex items-center gap-2 p-3 rounded-lg bg-emerald-500/5 border border-emerald-500/10">
+                      <Lock size={14} className="text-emerald-400" />
+                      <span className="text-sm text-emerald-400">You are a member, encryption active</span>
+                    </div>
+                  )}
+
+                  {/* Non-member: pick a member who added you to their list */}
+                  {!isMember && (
+                  <div>
                     {currentFacilitator ? (
                       /* Already has a facilitator */
                       <div className="space-y-2">
@@ -1607,22 +1615,12 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
                         )}
                       </div>
                     )}
-                  </section>
-                )}
+                  </div>
+                  )}
 
-                {/* Info when user IS a member */}
-                {isMember && (
-                  <section className="mb-2">
-                    <div className="flex items-center gap-2 p-3 rounded-lg bg-emerald-500/5 border border-emerald-500/10">
-                      <Lock size={14} className="text-emerald-400" />
-                      <span className="text-sm text-emerald-400">You are a member — encryption active</span>
-                    </div>
-                  </section>
-                )}
-
-                {/* Section 3: My Facilitation List (members with the `facilitate` permission only) */}
-                {isMember && hub.creatorPubkey !== pubkey && hub.ownerRealPubkey !== pubkey && canFacilitate && (
-                  <section>
+                  {/* Member with the `facilitate` permission: manage the people they vouch for */}
+                  {isMember && hub.creatorPubkey !== pubkey && hub.ownerRealPubkey !== pubkey && canFacilitate && (
+                  <div>
                     <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-1.5">
                       <Users size={12} />
                       My Facilitation List
@@ -1754,8 +1752,9 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
 
                       </div>
                     )}
-                  </section>
-                )}
+                  </div>
+                  )}
+                </section>
               </>)}
 
               {activeTab === 'voice' && (<>
