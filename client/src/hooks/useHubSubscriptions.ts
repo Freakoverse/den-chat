@@ -803,8 +803,13 @@ export function useHubSubscriptions() {
       const channels = messagesByHub[hubDTag]
       if (!channels) continue
       const hub = allHubs[hubDTag]
+      // Only backfill channels the hub still defines. A deleted channel keeps its cached messages, and
+      // counting them raised an unread the user could never open a channel to clear (the "hub always
+      // shows N unread but every channel is empty" report). Filter only when the channel list is known.
+      const validChannelIds = new Set((hub?.channels ?? []).map((c) => c.channelId))
       const perChannel: Record<string, number> = {}
       for (const [channelId, msgs] of Object.entries(channels)) {
+        if (validChannelIds.size > 0 && !validChannelIds.has(channelId)) continue // channel no longer in the hub
         if (hubDTag === activeHub && channelId === activeChannel) continue // currently viewing → don't badge
         if (!canReceiveChannelNotification(hubDTag, channelId, myPubkey)) continue
         const lastRead = notif.hubUnreads[hubDTag]?.[channelId]?.lastRead ?? 0
