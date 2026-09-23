@@ -7332,7 +7332,7 @@ function GuideReaderModal({ guide, onClose }: { guide: ResolvedGuide; onClose: (
                     h4: ({ children }) => <h4 className="text-sm font-semibold text-foreground mt-4 mb-1.5">{children}</h4>,
                     p: ({ children }) => <p className="text-sm leading-relaxed text-foreground/90 mb-4">{children}</p>,
                     ul: ({ children }) => <ul className="list-disc list-inside text-sm text-foreground/90 mb-4 space-y-1">{children}</ul>,
-                    ol: ({ children }) => <ol className="list-decimal list-inside text-sm text-foreground/90 mb-4 space-y-1">{children}</ol>,
+                    ol: ({ children, start }) => <ol start={start} className="list-decimal list-inside text-sm text-foreground/90 mb-4 space-y-1">{children}</ol>,
                     table: ({ children }) => (
                       <div className="overflow-x-auto my-4 rounded-lg border border-border">
                         <table className="w-full text-xs">{children}</table>

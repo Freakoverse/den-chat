@@ -997,7 +997,8 @@ export const MessageContent = memo(function MessageContent({ content, suffix, on
       )
     },
     ul: ({ children }) => <ul className="list-disc list-outside pl-5 mb-3 last:mb-0">{children}</ul>,
-    ol: ({ children }) => <ol className="list-decimal list-outside pl-5 mb-3 last:mb-0">{children}</ol>,
+    // Forward `start` so a list written as `3. …` renders from 3, not reset to 1 (remark-gfm parses the start number).
+    ol: ({ children, start }) => <ol start={start} className="list-decimal list-outside pl-5 mb-3 last:mb-0">{children}</ol>,
     li: ({ children }) => <li>{children}</li>,
     pre: ({ children }) => <>{children}</>,
     code: ({ className, children }) => {
