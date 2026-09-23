@@ -1448,12 +1448,12 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
                     {/* Shown for every hub. It only actually filters when the hub sets a message PoW
                         (minPow > 0); default on, so sub-threshold spam posts are hidden. */}
                     <label className="flex items-start justify-between cursor-pointer group gap-3">
-                      <div className="flex items-start gap-2">
-                        <Gauge size={14} className="text-muted-foreground group-hover:text-foreground transition-colors mt-0.5" />
-                        <div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <Gauge size={14} className="text-muted-foreground group-hover:text-foreground transition-colors shrink-0" />
                           <span className="text-sm text-foreground">Hide low proof-of-work messages</span>
-                          <p className="text-[11px] text-muted-foreground">Only show messages mined to this hub's difficulty ({hub.minPow}). Hides low-effort and spam posts.</p>
                         </div>
+                        <p className="text-[11px] text-muted-foreground mt-0.5">Only show messages mined to this hub's difficulty ({hub.minPow}). Hides low-effort and spam posts.</p>
                       </div>
                       <ToggleSwitch
                         checked={hubPrefs.hideBelowPow ?? true}
