@@ -1,11 +1,14 @@
 /**
- * UserHubSettingsModal — Per-hub settings for message visibility and facilitator management
+ * UserHubSettingsModal: per-hub settings for message visibility and facilitation.
  *
  * Sections:
- * 1. Message Visibility: "Show facilitated messages" toggle
- * 2. Facilitator: Search member list, check status, set facilitator (non-members)
- * 3. My Facilitation List: Create/manage own mesh tree for adding non-members (members only)
- * 4. Secret Mismatch Warning: when facilitator's secret differs from hub epoch
+ * 1. Message Visibility: "Show facilitated messages" and "Hide low proof-of-work messages" toggles.
+ * 2. Facilitation (members only): encryption status, plus "My Facilitation List" for members holding
+ *    the `facilitate` permission (create/manage their own mesh tree to vouch non-members in).
+ *
+ * A non-member unlocks a hub through the awaiting-approval overlay's Set Facilitator flow
+ * (SetFacilitatorModal), which is the only path that actually reaches a non-member. So this modal no
+ * longer carries a facilitator picker of its own.
  */
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
@@ -20,7 +23,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { truncateNpub, cn } from '@/lib/utils'
 import { nip19 } from 'nostr-tools'
 import {
-  X, Search, Loader2, Check, Copy, AlertTriangle, SlidersHorizontal, UserCheck, Shield, ShieldOff, ShieldBan, Lock, LockOpen,
+  X, Loader2, Check, Copy, AlertTriangle, SlidersHorizontal, UserCheck, Shield, ShieldOff, ShieldBan, Lock, LockOpen,
   Users, Plus, Trash2, Volume2, Globe, Server, Wifi, WifiOff, Flag, MessagesSquare, Undo2, EyeOff, RefreshCw, Bell,
   BellOff, AtSign, UsersRound, Radio, Tag, ChevronLeft, ChevronRight, BookOpen, Gauge,
 } from 'lucide-react'
@@ -88,22 +91,13 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
   const hubSecrets = useHubStore((s) => s.hubSecrets)
   const hubPrefs = useHubStore((s) => s.hubPrefs[hub.dTag]) || DEFAULT_PREFS
   const setHubPref = useHubStore((s) => s.setHubPref)
-  const setHubSecret = useHubStore((s) => s.setHubSecret)
   const hubMuteSettings = useNotificationStore((s) => s.hubMuteSettings[hub.dTag] ?? EMPTY_MUTE_SETTINGS)
   const setHubMuteSettings = useNotificationStore((s) => s.setHubMuteSettings)
   const publishHubReadState = useNotificationStore((s) => s.publishHubReadState)
   const { getProfile } = useProfileCache()
 
-  const [search, setSearch] = useState('')
   const [activeTab, setActiveTab] = useState<UserHubTab>(initialTab ?? 'messages')
   const [mobileShowNav, setMobileShowNav] = useState(true)
-  const [checkingStatus, setCheckingStatus] = useState(false)
-  const [checkResult, setCheckResult] = useState<'found' | 'not-found' | null>(null)
-  const [selectedFacilitator, setSelectedFacilitator] = useState<string | null>(
-    hubPrefs.facilitator || null
-  )
-  const [settingFacilitator, setSettingFacilitator] = useState(false)
-  const [facilitatorError, setFacilitatorError] = useState<string | null>(null)
 
   // ── My Facilitation List state ──
   const [meshMembers, setMeshMembers] = useState<string[]>([])
@@ -312,27 +306,9 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
 
   const hasSecret = !!(hub.dTag && hubSecrets[hub.dTag])
 
-  // Filter members for facilitator search
-  const filteredMembers = useMemo(() => {
-    if (!search.trim()) return hubMembers.filter((m) => m.pubkey !== pubkey)
-    const q = search.toLowerCase().trim()
-    return hubMembers
-      .filter((m) => m.pubkey !== pubkey)
-      .filter((m) => {
-        const profile = getProfile(m.pubkey)
-        const name = (profile?.display_name || profile?.name || '').toLowerCase()
-        const npub = nip19.npubEncode(m.pubkey).toLowerCase()
-        return name.includes(q) || npub.includes(q)
-      })
-  }, [hubMembers, search, getProfile, pubkey])
-
   // Reset state when modal opens
   useEffect(() => {
     if (open) {
-      setSearch('')
-      setCheckResult(null)
-      setFacilitatorError(null)
-      setSelectedFacilitator(hubPrefs.facilitator || null)
       setMeshError(null)
       setAddNpub('')
       setActiveTab(initialTab ?? 'messages')
@@ -345,7 +321,7 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
       setMuteSaveResult(null)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, hubPrefs.facilitator])
+  }, [open])
 
   // Load own mod ban list when moderation tab is selected
   useEffect(() => {
@@ -561,181 +537,6 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
 
     return () => { cancelled = true }
   }, [open, isMember, pubkey, hub.dTag, hub.blossomServers])
-
-  /** Check if current user's pubkey is in the selected member's mesh tree */
-  const handleCheckStatus = useCallback(async () => {
-    if (!selectedFacilitator || !pubkey) return
-    setCheckingStatus(true)
-    setCheckResult(null)
-    setFacilitatorError(null)
-
-    try {
-      const { isV2 } = await import('@/lib/hub/version')
-      if (isV2(hub)) {
-        // v2: the facilitator's list is authored by, and keyed on, pseudonyms P. Resolve the
-        // facilitator's P (from our roster, same-page) and check whether OUR P is in their tree.
-        const { makeSubkeySigner } = await import('@/lib/nostr/v2send')
-        const { ChatContext } = await import('@/lib/crypto/skd')
-        const { downloadTextFromBlossom, parseIndexFile } = await import('@/lib/blossom')
-        const { deserializeTree } = await import('@/lib/crypto/lkh')
-        const { fetchEvents } = await import('@/lib/nostr/relay-pool')
-        const { KINDS } = await import('@/lib/crypto/constants')
-        const members = useHubStore.getState().hubMembers[hub.dTag] || []
-        const facRow = members.find(m => m.pubkey === selectedFacilitator || m.p === selectedFacilitator)
-        const facP = facRow?.p || (/^[0-9a-f]{64}$/i.test(selectedFacilitator) ? selectedFacilitator : '')
-        if (!facP) { setCheckResult('not-found'); setFacilitatorError('Could not resolve the facilitator\'s hub pseudonym (they may be on another page).'); setCheckingStatus(false); return }
-        // Derive OUR facilitated pseudonym `Pf` (peer = the facilitator's `P_fac`) and check their tree.
-        const myPfSigner = makeSubkeySigner(ChatContext.facilitated(hub.dTag), { privateKey, signer, peerPub: facP })
-        const myPf = await myPfSigner.getPublicKey()
-        const jrs = await fetchEvents({ kinds: [KINDS.JOIN_REQUEST], authors: [facP], '#d': [hub.dTag], limit: 1 })
-        if (jrs.length === 0) { setCheckResult('not-found'); setFacilitatorError('This member has no facilitation list for this hub.'); setCheckingStatus(false); return }
-        const lt = jrs[0].tags.find((t: string[]) => t[0] === 'list')
-        if (!lt?.[1]) { setCheckResult('not-found'); setFacilitatorError('This member does not maintain a facilitation list for this hub.'); setCheckingStatus(false); return }
-        const idx = parseIndexFile(await downloadTextFromBlossom(lt[1], hub.blossomServers))
-        if (!idx.treeHash) { setCheckResult('not-found'); setFacilitatorError('No tree hash in facilitator\'s index file.'); setCheckingStatus(false); return }
-        const tree = deserializeTree(await downloadTextFromBlossom(idx.treeHash, hub.blossomServers))
-        if (tree.leaves.some((l: any) => l.pubkey === myPf)) setCheckResult('found')
-        else { setCheckResult('not-found'); setFacilitatorError('You are not in this member\'s list — ask them to add your npub.') }
-        setCheckingStatus(false)
-        return
-      }
-      const { downloadTextFromBlossom, parseIndexFile } = await import('@/lib/blossom')
-      const { deserializeTree } = await import('@/lib/crypto/lkh')
-      const { fetchEvents } = await import('@/lib/nostr/relay-pool')
-      const { KINDS } = await import('@/lib/crypto/constants')
-
-      // Fetch the facilitator's join request (kind 36944) to get their `list` tag
-      const joinRequests = await fetchEvents({
-        kinds: [KINDS.JOIN_REQUEST],
-        authors: [selectedFacilitator],
-        '#d': [hub.dTag],
-        limit: 1,
-      })
-
-      if (joinRequests.length === 0) {
-        setCheckResult('not-found')
-        setFacilitatorError('This member has no join request for this hub.')
-        setCheckingStatus(false)
-        return
-      }
-
-      const listTag = joinRequests[0].tags.find((t: string[]) => t[0] === 'list')
-      if (!listTag || !listTag[1]) {
-        setCheckResult('not-found')
-        setFacilitatorError('This member does not maintain a facilitation list for this hub.')
-        setCheckingStatus(false)
-        return
-      }
-
-      // Download their index → tree
-      const indexContent = await downloadTextFromBlossom(listTag[1], hub.blossomServers)
-      const index = parseIndexFile(indexContent)
-      if (!index.treeHash) {
-        setCheckResult('not-found')
-        setFacilitatorError('No tree hash in facilitator\'s index file.')
-        setCheckingStatus(false)
-        return
-      }
-
-      const treeContent = await downloadTextFromBlossom(index.treeHash, hub.blossomServers)
-      const tree = deserializeTree(treeContent)
-
-      // Check if current user is a leaf in their tree
-      const isInTree = tree.leaves.some((leaf: any) => leaf.pubkey === pubkey)
-
-      if (isInTree) {
-        setCheckResult('found')
-      } else {
-        setCheckResult('not-found')
-        setFacilitatorError('You are not in this member\'s list.')
-      }
-    } catch (err: any) {
-      console.error('Check status failed:', err)
-      setCheckResult('not-found')
-      setFacilitatorError(err?.message || 'Failed to check status')
-    } finally {
-      setCheckingStatus(false)
-    }
-  }, [selectedFacilitator, pubkey, hub, privateKey, signer])
-
-  /** Set the selected member as facilitator and decrypt secret from their tree */
-  const handleSetFacilitator = useCallback(async () => {
-    if (!selectedFacilitator || !pubkey || checkResult !== 'found') return
-    setSettingFacilitator(true)
-    setFacilitatorError(null)
-
-    try {
-      const { isV2 } = await import('@/lib/hub/version')
-      if (isV2(hub)) {
-        // v2: resolve the facilitator's member pseudonym `P_fac`, then delegate to loadFacilitatorSecret
-        // — it derives our own `Pf` (peer = P_fac), unwraps our leaf, and parses the epoch history.
-        const members = useHubStore.getState().hubMembers[hub.dTag] || []
-        const facRow = members.find(m => m.pubkey === selectedFacilitator || m.p === selectedFacilitator)
-        const facP = facRow?.p || (/^[0-9a-f]{64}$/i.test(selectedFacilitator) ? selectedFacilitator : '')
-        if (!facP) throw new Error('Could not resolve the facilitator\'s hub pseudonym (they may be on another page).')
-        const { loadFacilitatorSecret } = await import('@/hooks/useHubLoader')
-        const result = await loadFacilitatorSecret(hub, facP, pubkey, privateKey, signer)
-        if (!result?.secretHex) throw new Error('Could not decrypt hub secret — the facilitator may not have added your npub')
-        if (result.epochSecrets && Object.keys(result.epochSecrets).length > 0) useHubStore.getState().setEpochSecrets(hub.dTag, result.epochSecrets)
-        setHubSecret(hub.dTag, result.secretHex)
-        // Store the facilitator's pseudonym P (not R) so the loader can re-fetch on reload.
-        setHubPref(hub.dTag, 'facilitator', facP)
-        setHubPref(hub.dTag, 'facilitatorSecret', result.secretHex)
-        return
-      }
-      const { downloadTextFromBlossom, parseIndexFile } = await import('@/lib/blossom')
-      const { decryptHubSecret } = await import('@/lib/blossom/members')
-      const { toHex } = await import('@/lib/crypto/lkh')
-      const { fetchEvents } = await import('@/lib/nostr/relay-pool')
-      const { KINDS } = await import('@/lib/crypto/constants')
-
-      // Fetch the facilitator's join request to get their `list` tag (§6.3)
-      const joinRequests = await fetchEvents({
-        kinds: [KINDS.JOIN_REQUEST],
-        authors: [selectedFacilitator],
-        '#d': [hub.dTag],
-        limit: 1,
-      })
-
-      if (joinRequests.length === 0) throw new Error('Facilitator join request not found')
-
-      const listTag = joinRequests[0].tags.find((t: string[]) => t[0] === 'list')
-      if (!listTag?.[1]) throw new Error('Facilitator has no mesh list published')
-
-      const indexHash = listTag[1]
-
-      const indexContent = await downloadTextFromBlossom(indexHash, hub.blossomServers)
-      const index = parseIndexFile(indexContent)
-      if (!index.treeHash) throw new Error('No tree hash in facilitator index')
-
-      const treeContent = await downloadTextFromBlossom(index.treeHash, hub.blossomServers)
-
-      // Decrypt the hub secret from the facilitator's tree
-      // Note: the tree was encrypted with the FACILITATOR's key, so creatorPubkey = facilitator
-      const hubSecretBytes = await decryptHubSecret(
-        pubkey,
-        privateKey,
-        signer,
-        selectedFacilitator,
-        treeContent
-      )
-
-      if (!hubSecretBytes) throw new Error('Could not decrypt hub secret — you may not be in the tree')
-
-      const secretHex = toHex(hubSecretBytes)
-
-      // Save to store
-      setHubSecret(hub.dTag, secretHex)
-      setHubPref(hub.dTag, 'facilitator', selectedFacilitator)
-      setHubPref(hub.dTag, 'facilitatorSecret', secretHex)
-
-    } catch (err: any) {
-      console.error('Set facilitator failed:', err)
-      setFacilitatorError(err?.message || 'Failed to set facilitator')
-    } finally {
-      setSettingFacilitator(false)
-    }
-  }, [selectedFacilitator, pubkey, checkResult, hub, signer, privateKey, setHubSecret, setHubPref])
 
   // ── Mesh List Handlers ──
 
@@ -1232,10 +1033,6 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
 
   if (!open) return null
 
-  const currentFacilitator = hubPrefs.facilitator
-  const facProfile = currentFacilitator ? getProfile(currentFacilitator) : null
-  const facName = facProfile?.display_name || facProfile?.name || (currentFacilitator ? truncateNpub(nip19.npubEncode(currentFacilitator), 12) : '')
-
   // Check if current user has ban_members permission
   const myPerms = (() => {
     if (!pubkey) return { ban_members: false }
@@ -1463,160 +1260,17 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
                   </div>
                 </section>
 
-                {/* Facilitation: its own section, separated from Message Visibility above */}
+                {/* Facilitation: members only. A non-member unlocks via the awaiting-approval overlay's
+                    Set Facilitator flow, not here (it never reaches this modal). */}
+                {isMember && (
                 <section className="mt-6 pt-5 border-t border-border space-y-4">
                   <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Facilitation</h4>
 
-                  {/* Member: encryption status */}
-                  {isMember && (
-                    <div className="flex items-center gap-2 p-3 rounded-lg bg-emerald-500/5 border border-emerald-500/10">
-                      <Lock size={14} className="text-emerald-400" />
-                      <span className="text-sm text-emerald-400">You are a member, encryption active</span>
-                    </div>
-                  )}
-
-                  {/* Non-member: pick a member who added you to their list */}
-                  {!isMember && (
-                  <div>
-                    {currentFacilitator ? (
-                      /* Already has a facilitator */
-                      <div className="space-y-2">
-                        <div className="flex items-center gap-3 p-3 rounded-lg bg-secondary/30 border border-border">
-                          <Avatar className="h-8 w-8">
-                            {facProfile?.picture && <AvatarImage src={facProfile.picture} />}
-                            <AvatarFallback className="text-xs bg-emerald-500/20 text-emerald-400">
-                              {facName.slice(0, 2).toUpperCase()}
-                            </AvatarFallback>
-                          </Avatar>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-foreground truncate">{facName}</p>
-                            <p className="text-xs text-emerald-400">Facilitator active</p>
-                          </div>
-                          <button
-                            onClick={() => {
-                              setHubPref(hub.dTag, 'facilitator', undefined)
-                              setSelectedFacilitator(null)
-                              setCheckResult(null)
-                            }}
-                            className="text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded-md hover:bg-accent/50 transition-colors cursor-pointer"
-                          >
-                            Change
-                          </button>
-                        </div>
-
-                        {/* Secret mismatch warning */}
-                        {hubPrefs.facilitatorSecret && hubSecrets[hub.dTag] &&
-                          hubPrefs.facilitatorSecret !== hubSecrets[hub.dTag] && (
-                            <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20">
-                              <AlertTriangle size={14} className="text-amber-400 shrink-0 mt-0.5" />
-                              <div className="text-xs text-amber-200">
-                                <p className="font-medium">Secret mismatch</p>
-                                <p className="text-amber-300/70 mt-0.5">Your facilitator's secret differs from the hub's current secret. The hub may have rotated keys.</p>
-                              </div>
-                            </div>
-                          )}
-                      </div>
-                    ) : (
-                      /* No facilitator — show search + selection */
-                      <div className="space-y-2">
-                        <p className="text-xs text-muted-foreground leading-relaxed">
-                          You are not a direct member. Select a member who has added you to their list as your facilitator to get encryption access.
-                        </p>
-
-                        {/* Member search */}
-                        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-secondary/50 border border-border">
-                          <Search size={14} className="text-muted-foreground shrink-0" />
-                          <input
-                            type="text"
-                            placeholder="Search members..."
-                            value={search}
-                            onChange={(e) => setSearch(e.target.value)}
-                            className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none"
-                          />
-                        </div>
-
-                        {/* Member list */}
-                        <div className="max-h-[200px] overflow-y-auto space-y-0.5 rounded-lg border border-border">
-                          {filteredMembers.length === 0 ? (
-                            <p className="text-xs text-muted-foreground text-center py-4">No members found</p>
-                          ) : (
-                            filteredMembers.map((m) => {
-                              const profile = getProfile(m.pubkey)
-                              const npubStr = nip19.npubEncode(m.pubkey)
-                              const name = profile?.display_name || profile?.name || truncateNpub(npubStr, 10)
-                              const isSelected = selectedFacilitator === m.pubkey
-
-                              return (
-                                <button
-                                  key={m.pubkey}
-                                  onClick={() => {
-                                    setSelectedFacilitator(m.pubkey)
-                                    setCheckResult(null)
-                                    setFacilitatorError(null)
-                                  }}
-                                  className={`flex items-center gap-2 w-full px-3 py-2 text-left transition-colors cursor-pointer
-                              ${isSelected ? 'bg-primary/10' : 'hover:bg-secondary/50'}`}
-                                >
-                                  <Avatar className="h-7 w-7">
-                                    {profile?.picture && <AvatarImage src={profile.picture} />}
-                                    <AvatarFallback className="text-[10px] bg-primary/20 text-primary">
-                                      {name.slice(0, 2).toUpperCase()}
-                                    </AvatarFallback>
-                                  </Avatar>
-                                  <div className="flex-1 min-w-0">
-                                    <p className="text-sm text-foreground truncate">{name}</p>
-                                  </div>
-                                  {isSelected && <Check size={14} className="text-primary shrink-0" />}
-                                </button>
-                              )
-                            })
-                          )}
-                        </div>
-
-                        {/* Check Status + Set as Facilitator */}
-                        {selectedFacilitator && (
-                          <div className="flex items-center gap-2 pt-1">
-                            <button
-                              onClick={handleCheckStatus}
-                              disabled={checkingStatus}
-                              className="flex items-center gap-1.5 flex-1 py-2 rounded-lg bg-secondary border border-border text-sm text-foreground hover:bg-accent/50 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed justify-center"
-                            >
-                              {checkingStatus ? (
-                                <><Loader2 size={14} className="animate-spin" /> Checking...</>
-                              ) : (
-                                <><Search size={14} /> Check Status</>
-                              )}
-                            </button>
-
-                            <button
-                              onClick={handleSetFacilitator}
-                              disabled={checkResult !== 'found' || settingFacilitator}
-                              className="flex items-center gap-1.5 flex-1 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed justify-center"
-                            >
-                              {settingFacilitator ? (
-                                <><Loader2 size={14} className="animate-spin" /> Setting...</>
-                              ) : (
-                                <><UserCheck size={14} /> Set as Facilitator</>
-                              )}
-                            </button>
-                          </div>
-                        )}
-
-                        {/* Status result */}
-                        {checkResult === 'found' && (
-                          <div className="flex items-center gap-2 text-xs text-emerald-400">
-                            <Check size={12} /> You are in this member's list
-                          </div>
-                        )}
-                        {facilitatorError && (
-                          <div className="flex items-center gap-2 text-xs text-destructive">
-                            <AlertTriangle size={12} /> {facilitatorError}
-                          </div>
-                        )}
-                      </div>
-                    )}
+                  {/* Encryption status */}
+                  <div className="flex items-center gap-2 p-3 rounded-lg bg-emerald-500/5 border border-emerald-500/10">
+                    <Lock size={14} className="text-emerald-400" />
+                    <span className="text-sm text-emerald-400">You are a member, encryption active</span>
                   </div>
-                  )}
 
                   {/* Member with the `facilitate` permission: manage the people they vouch for */}
                   {isMember && hub.creatorPubkey !== pubkey && hub.ownerRealPubkey !== pubkey && canFacilitate && (
@@ -1755,6 +1409,7 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
                   </div>
                   )}
                 </section>
+                )}
               </>)}
 
               {activeTab === 'voice' && (<>
