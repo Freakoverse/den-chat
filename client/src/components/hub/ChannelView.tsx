@@ -1330,9 +1330,12 @@ function MessageList({ hubDTag, channelId, channelName, optimisticMessages, setO
     setEditText('')
   }, [])
 
-  const saveEdit = useCallback(async (originalMsg: ChatMessage, newText: string, removedHashes?: Set<string>) => {
+  const saveEdit = useCallback(async (originalMsg: ChatMessage, newText: string, removedHashes?: Set<string>, nsfw?: boolean) => {
     const attachmentsChanged = removedHashes && removedHashes.size > 0
-    if (!newText.trim() || (newText === originalMsg.content && !attachmentsChanged)) return
+    // nsfw is undefined when the caller doesn't manage the flag; fall back to the message's current value.
+    const nextNsfw = nsfw ?? originalMsg.nsfw ?? false
+    const nsfwChanged = !!nextNsfw !== !!originalMsg.nsfw
+    if (!newText.trim() || (newText === originalMsg.content && !attachmentsChanged && !nsfwChanged)) return
     // Filter out removed attachments
     const remainingAttachments = attachmentsChanged && originalMsg.attachments
       ? originalMsg.attachments.filter(a => !removedHashes.has(a.hash))
@@ -1340,7 +1343,7 @@ function MessageList({ hubDTag, channelId, channelName, optimisticMessages, setO
     // Pass replyTo, rootRef, attachments, and nsfw to preserve them on edit.
     // Let errors (e.g. signer unavailable / wrong account) propagate so the edit
     // field can show them instead of closing as if the edit succeeded.
-    await editMessage(originalMsg.dTag, newText, originalMsg.replyTo, originalMsg.rootRef, undefined, remainingAttachments, originalMsg.nsfw || undefined, originalMsg.isThread || undefined)
+    await editMessage(originalMsg.dTag, newText, originalMsg.replyTo, originalMsg.rootRef, undefined, remainingAttachments, nextNsfw || undefined, originalMsg.isThread || undefined)
     setEditingId(null)
     setEditText('')
   }, [editMessage])
@@ -3448,7 +3451,7 @@ export interface ChatMessageRowProps {
   onEdit: (msg: ChatMessage) => void
   onReply: (msg: ChatMessage) => void
   onThreadReply: (msg: ChatMessage) => void
-  onSaveEdit: (msg: ChatMessage, newText: string, removedAttachmentHashes?: Set<string>) => void
+  onSaveEdit: (msg: ChatMessage, newText: string, removedAttachmentHashes?: Set<string>, nsfw?: boolean) => void
   editingId: string | null
   editText: string
   setEditText: (t: string) => void
@@ -3698,7 +3701,7 @@ export function ChatMessageRow({
         <div className="min-w-0 flex-1 flex">
           <ScrollableContent>
           {isEditing ? (
-            <EditField text={editText} onChange={setEditText} onCancel={() => { cancelEdit(); setRemovedAttachmentHashes(new Set()) }} unchanged={editUnchanged} onSave={async () => { await onSaveEdit(msg, editText, removedAttachmentHashes); setRemovedAttachmentHashes(new Set()) }} hubDTag={hubDTag} channelId={channelId} />
+            <EditField text={editText} onChange={setEditText} onCancel={() => { cancelEdit(); setRemovedAttachmentHashes(new Set()) }} unchanged={editUnchanged} initialNsfw={msg.nsfw} onSave={async ({ nsfw }) => { await onSaveEdit(msg, editText, removedAttachmentHashes, nsfw); setRemovedAttachmentHashes(new Set()) }} hubDTag={hubDTag} channelId={channelId} />
           ) : !msg.decrypted && !msg.deleted ? (
             <EncryptedMessageCard hubDTag={hubDTag} />
           ) : shouldBlurMsg ? (
@@ -4018,7 +4021,7 @@ export function ChatMessageRow({
           </div>
           <ScrollableContent>
           {isEditing ? (
-            <EditField text={editText} onChange={setEditText} onCancel={() => { cancelEdit(); setRemovedAttachmentHashes(new Set()) }} unchanged={editUnchanged} onSave={async () => { await onSaveEdit(msg, editText, removedAttachmentHashes); setRemovedAttachmentHashes(new Set()) }} hubDTag={hubDTag} channelId={channelId} />
+            <EditField text={editText} onChange={setEditText} onCancel={() => { cancelEdit(); setRemovedAttachmentHashes(new Set()) }} unchanged={editUnchanged} initialNsfw={msg.nsfw} onSave={async ({ nsfw }) => { await onSaveEdit(msg, editText, removedAttachmentHashes, nsfw); setRemovedAttachmentHashes(new Set()) }} hubDTag={hubDTag} channelId={channelId} />
           ) : !msg.decrypted && !msg.deleted ? (
             <EncryptedMessageCard hubDTag={hubDTag} />
           ) : shouldBlurMsg ? (
@@ -4619,18 +4622,23 @@ export function DeleteConfirmDialog({ onConfirm, onCancel, title, description, p
 
 /* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Inline Edit Field â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
-function EditField({ text, onChange, onCancel, unchanged, onSave, hubDTag, channelId }: {
+function EditField({ text, onChange, onCancel, unchanged, onSave, hubDTag, channelId, initialNsfw }: {
   text: string
   onChange: (v: string) => void
   onCancel: () => void
   unchanged: boolean
-  onSave: () => void
+  onSave: (opts: { nsfw: boolean }) => void | Promise<void>
   hubDTag: string
   channelId: string
+  initialNsfw?: boolean
 }) {
   const ref = useRef<HTMLTextAreaElement>(null)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
+  // Let an edit flip the NSFW flag on an already-published message. "dirty" folds this in so Save
+  // enables (and Enter saves) when only the flag changed, even if the text is untouched.
+  const [nsfw, setNsfw] = useState(!!initialNsfw)
+  const dirty = !unchanged || nsfw !== !!initialNsfw
   const autoResize = useCallback((el: HTMLTextAreaElement) => {
     el.style.height = 'auto'
     el.style.height = `${Math.min(el.scrollHeight, 300)}px`
@@ -4655,11 +4663,11 @@ function EditField({ text, onChange, onCancel, unchanged, onSave, hubDTag, chann
   const showEditCharCounter = editCharsRemaining <= MESSAGE_CHAR_WARN_THRESHOLD
 
   const handleSave = async () => {
-    if (saving || unchanged || !text.trim() || isEditOverLimit) return
+    if (saving || !dirty || !text.trim() || isEditOverLimit) return
     setSaving(true)
     setSaveError(null)
     try {
-      await onSave()
+      await onSave({ nsfw })
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : 'Failed to save your edit. Please try again.')
     } finally {
@@ -4700,7 +4708,7 @@ function EditField({ text, onChange, onCancel, unchanged, onSave, hubDTag, chann
             }
             return
           }
-          if (e.key === 'Enter' && !e.shiftKey && !unchanged && text.trim() && !saving && !isEditOverLimit) {
+          if (e.key === 'Enter' && !e.shiftKey && dirty && text.trim() && !saving && !isEditOverLimit) {
             e.preventDefault()
             handleSave()
           }
@@ -4725,6 +4733,18 @@ function EditField({ text, onChange, onCancel, unchanged, onSave, hubDTag, chann
         >
           Cancel
         </button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              onClick={() => setNsfw((v) => !v)}
+              disabled={saving}
+              className={`px-1.5 py-0.5 cursor-pointer transition-colors text-[11px] font-bold rounded disabled:opacity-40 disabled:cursor-not-allowed ${nsfw ? 'text-red-400 bg-red-400/10' : 'text-muted-foreground hover:text-foreground'}`}
+            >
+              NSFW
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="top" className="text-xs">{nsfw ? 'Marked NSFW, click to unmark' : 'Mark as NSFW'}</TooltipContent>
+        </Tooltip>
         {showEditCharCounter && (
           <span className={`text-[11px] font-mono tabular-nums select-none transition-colors ${
             isEditOverLimit ? 'text-red-400 font-semibold' : editCharsRemaining <= 100 ? 'text-amber-400' : 'text-muted-foreground/60'
@@ -4734,7 +4754,7 @@ function EditField({ text, onChange, onCancel, unchanged, onSave, hubDTag, chann
         )}
         <button
           onClick={handleSave}
-          disabled={unchanged || !text.trim() || saving || isEditOverLimit}
+          disabled={!dirty || !text.trim() || saving || isEditOverLimit}
           className="px-3 py-0.5 rounded bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/80 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
         >
           {saving ? (
@@ -7210,14 +7230,15 @@ function ThreadModal({ parentMsg, threadReplies, hubDTag, channelId, getProfile,
     setEditText('')
   }, [])
 
-  const saveEdit = useCallback(async (msg: ChatMessage, newText: string, removedHashes?: Set<string>) => {
+  const saveEdit = useCallback(async (msg: ChatMessage, newText: string, removedHashes?: Set<string>, nsfw?: boolean) => {
     try {
       // Filter out removed attachments
       const remainingAttachments = removedHashes && removedHashes.size > 0 && msg.attachments
         ? msg.attachments.filter(a => !removedHashes.has(a.hash))
         : msg.attachments
-      // Pass replyTo, rootRef, attachments, and nsfw to preserve them on edit
-      await editMessage(msg.dTag, newText, msg.replyTo, msg.rootRef, undefined, remainingAttachments, msg.nsfw || undefined, msg.isThread || undefined)
+      // Pass replyTo, rootRef, attachments, and nsfw to preserve them on edit (nsfw falls back to the
+      // message's current flag when the edit UI doesn't override it).
+      await editMessage(msg.dTag, newText, msg.replyTo, msg.rootRef, undefined, remainingAttachments, (nsfw ?? msg.nsfw) || undefined, msg.isThread || undefined)
       setEditingId(null)
       setEditText('')
     } catch (err) {
