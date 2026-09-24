@@ -794,7 +794,7 @@ function OthersGifTab({ onSelect, onPickerClose }: { onSelect: (g: { name: strin
   const privateKey = useUserStore((s) => s.privateKey)
   const [search, setSearch] = useState('')
   const [searchMode, setSearchMode] = useState<'items' | 'sets'>('items')
-  const [unsubscribing, setUnsubscribing] = useState<string | null>(null)
+  // Unsubscribing lives in the Manage modal (Subscribed section); this tab only browses + inserts.
   const [showManage, setShowManage] = useState(false)
   const { getProfile } = useProfileCache()
 
@@ -827,20 +827,6 @@ function OthersGifTab({ onSelect, onPickerClose }: { onSelect: (g: { name: strin
       c.dTag.toLowerCase().includes(search.toLowerCase())
     )
     : visibleCollections
-
-  const handleUnsubscribe = async (collection: GifCollection) => {
-    const addr = `30032:${collection.pubkey}:${collection.dTag}`
-    setUnsubscribing(addr)
-    try {
-      const updated = subscriptionAddresses.filter((a) => a !== addr)
-      await publishGifSubscriptions(updated, signer, privateKey)
-      useGifStore.getState().removeSubscription(addr)
-    } catch (err) {
-      console.error('Failed to unsubscribe:', err)
-    } finally {
-      setUnsubscribing(null)
-    }
-  }
 
   return (
     <>
@@ -914,7 +900,6 @@ function OthersGifTab({ onSelect, onPickerClose }: { onSelect: (g: { name: strin
                 const addr = `30032:${col.pubkey}:${col.dTag}`
                 const profile = getProfile(col.pubkey)
                 const authorName = profile?.display_name || profile?.name || truncateNpub(nip19.npubEncode(col.pubkey))
-                const isUnsub = unsubscribing === addr
                 const visibleGifs = filterNsfwGifs(col.gifs)
                 return (
                   <div key={addr} className="rounded-lg border border-border bg-secondary/20 p-2.5">
@@ -957,7 +942,6 @@ function OthersGifTab({ onSelect, onPickerClose }: { onSelect: (g: { name: strin
               const addr = `30032:${col.pubkey}:${col.dTag}`
               const profile = getProfile(col.pubkey)
               const authorName = profile?.display_name || profile?.name || truncateNpub(nip19.npubEncode(col.pubkey))
-              const isUnsub = unsubscribing === addr
               const visibleGifs = filterNsfwGifs(col.gifs)
               return (
                 <div key={addr} className="rounded-lg border border-border bg-secondary/20 p-2.5">

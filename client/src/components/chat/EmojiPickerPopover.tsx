@@ -622,33 +622,13 @@ export function EmojiUploadForm({ sets, targetSet, onTargetChange, onDone }: {
 
 function OthersTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcode: string; url: string }) => void }) {
   const subscribedSets = useEmojiStore((s) => s.subscribedSets)
-  const subscriptionAddresses = useEmojiStore((s) => s.subscriptionAddresses)
-  const removeSubscription = useEmojiStore((s) => s.removeSubscription)
   const nsfwEnabled = useEmojiStore((s) => s.nsfwEnabled)
   const untaggedAsNsfw = useEmojiStore((s) => s.untaggedAsNsfw)
-  const signer = useUserStore((s) => s.signer)
-  const privateKey = useUserStore((s) => s.privateKey)
   const [search, setSearch] = useState('')
   const [searchMode, setSearchMode] = useState<'items' | 'sets'>('items')
-  const [unsubscribing, setUnsubscribing] = useState<string | null>(null)
+  // Unsubscribing lives in the Manage modal (Subscribed section); this tab only browses + inserts.
   const [showManage, setShowManage] = useState(false)
   const { getProfile } = useProfileCache()
-
-
-
-  const handleUnsubscribe = async (set: EmojiSet) => {
-    const addr = `30030:${set.pubkey}:${set.dTag}`
-    setUnsubscribing(addr)
-    try {
-      const newAddrs = subscriptionAddresses.filter((a) => a !== addr)
-      await publishEmojiSubscriptions(newAddrs, signer, privateKey)
-      removeSubscription(addr)
-    } catch (err) {
-      console.error('Failed to unsubscribe:', err)
-    } finally {
-      setUnsubscribing(null)
-    }
-  }
 
   // Flatten all subscribed emojis for item search (with NSFW filtering)
   const allEmojis = useMemo(() => {
@@ -743,7 +723,6 @@ function OthersTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcod
               const profile = getProfile(set.pubkey)
               const authorName = profile?.display_name || profile?.name || truncateNpub(nip19.npubEncode(set.pubkey))
               const addr = `30030:${set.pubkey}:${set.dTag}`
-              const isUnsubscribing = unsubscribing === addr
               return (
                 <div key={`${set.pubkey}:${set.dTag}`} className="mb-2.5">
                   <div className="flex items-center gap-1 px-0.5 mb-1">
@@ -778,7 +757,6 @@ function OthersTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcod
             const profile = getProfile(set.pubkey)
             const authorName = profile?.display_name || profile?.name || truncateNpub(nip19.npubEncode(set.pubkey))
             const addr = `30030:${set.pubkey}:${set.dTag}`
-            const isUnsubscribing = unsubscribing === addr
             return (
               <div key={`${set.pubkey}:${set.dTag}`} className="mb-2.5">
                 <div className="flex items-center gap-1 px-0.5 mb-1">
