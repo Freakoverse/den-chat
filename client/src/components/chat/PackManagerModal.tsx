@@ -125,13 +125,16 @@ function NewSetControl({ onCreate }: { onCreate: (name: string) => Promise<void>
   )
 }
 
-/** Rename / Add / Delete action row inside an expanded pack. */
+/** Rename / Add / Delete action row inside an expanded pack. On mobile the three buttons grow to fill
+ *  the row; on desktop Delete is pushed to the right. */
 function PackActionRow({ addLabel, onRename, onAdd, onDelete }: { addLabel: string; onRename: () => void; onAdd: () => void; onDelete: () => void }) {
+  const isMobile = useMobile()
+  const grow = isMobile ? 'flex-1 justify-center' : ''
   return (
-    <div className="flex flex-wrap gap-2 px-3.5 py-2.5">
-      <button onClick={onRename} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border text-xs text-foreground hover:bg-secondary/60 transition-colors cursor-pointer"><Pencil size={14} /> Rename</button>
-      <button onClick={onAdd} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-primary/40 text-xs text-primary hover:bg-primary/10 transition-colors cursor-pointer"><Plus size={14} /> {addLabel}</button>
-      <button onClick={onDelete} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-destructive/40 text-xs text-destructive hover:bg-destructive/10 transition-colors cursor-pointer"><Trash2 size={14} /> Delete</button>
+    <div className="flex items-center gap-2 px-3.5 py-2.5">
+      <button onClick={onRename} className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border text-xs text-foreground hover:bg-secondary/60 transition-colors cursor-pointer ${grow}`}><Pencil size={14} /> Rename</button>
+      <button onClick={onAdd} className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-primary/40 text-xs text-primary hover:bg-primary/10 transition-colors cursor-pointer ${grow}`}><Plus size={14} /> {addLabel}</button>
+      <button onClick={onDelete} className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-destructive/40 text-xs text-destructive hover:bg-destructive/10 transition-colors cursor-pointer ${isMobile ? 'flex-1 justify-center' : 'ml-auto'}`}><Trash2 size={14} /> Delete</button>
     </div>
   )
 }
@@ -212,7 +215,7 @@ function PackAddForm({ limitBytes, namePlaceholder, sanitize, onUpload, onDone }
             {preview && <img src={preview} alt="" className="max-w-full max-h-full object-contain" />}
           </div>
           <input value={name} onChange={(e) => setName(sanitize ? sanitize(e.target.value) : e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') upload() }} placeholder={namePlaceholder} className="flex-1 h-9 px-3 rounded-lg bg-background border border-border text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary/40" />
-          <button onClick={() => setNsfw((v) => !v)} className={`px-2 py-1.5 rounded-lg text-[11px] font-bold transition-colors cursor-pointer shrink-0 ${nsfw ? 'text-red-400 bg-red-400/10' : 'text-muted-foreground hover:text-foreground border border-border'}`}>NSFW</button>
+          <button onClick={() => setNsfw((v) => !v)} className={`px-2 py-1.5 rounded-lg text-[11px] font-bold border transition-colors cursor-pointer shrink-0 ${nsfw ? 'text-red-400 bg-red-400/10 border-red-400/40' : 'text-muted-foreground hover:text-foreground border-border'}`}>NSFW</button>
         </div>
       )}
       {error && <p className="text-xs text-destructive">{error}</p>}
