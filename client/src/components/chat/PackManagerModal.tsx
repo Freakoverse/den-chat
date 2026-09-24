@@ -11,6 +11,7 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { X, Smile, Sticker, Film, FolderPlus, Plus, Pencil, Trash2, ChevronDown, ChevronUp, Loader2, AlertTriangle, Upload } from 'lucide-react'
 import { useEscToClose } from '@/hooks/useEscToClose'
+import { useMobile } from '@/hooks/useMobile'
 import { BlossomImage } from '@/components/ui/BlossomImage'
 import { RenamePackModal } from '@/components/chat/RenamePackModal'
 import { EmojiUploadForm } from '@/components/chat/EmojiPickerPopover'
@@ -40,34 +41,37 @@ export function PackManagerModal({ open, onClose, initialSection = 'emoji' }: {
   initialSection?: PackKind
 }) {
   useEscToClose(onClose, open)
+  const isMobile = useMobile()
   const [section, setSection] = useState<PackKind>(initialSection)
   useEffect(() => { if (open) setSection(initialSection) }, [open, initialSection])
 
   if (!open) return null
 
   return createPortal(
-    <div className="fixed inset-0 z-[320] flex items-center justify-center p-4" onClick={onClose}>
+    <div className={`fixed inset-0 z-[320] flex ${isMobile ? '' : 'items-center justify-center p-4'}`} onClick={onClose}>
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
       <div
-        className="relative z-10 w-full max-w-[640px] max-h-[85vh] bg-card rounded-2xl border border-border shadow-2xl animate-in fade-in-0 zoom-in-95 duration-200 flex flex-col overflow-hidden"
+        className={`relative z-10 bg-card shadow-2xl animate-in fade-in-0 flex flex-col overflow-hidden ${
+          isMobile ? 'w-full h-full rounded-none' : 'w-full max-w-[640px] max-h-[85vh] rounded-2xl border border-border zoom-in-95 duration-200'
+        }`}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
+        <div className="flex items-center justify-between px-4 sm:px-5 py-4 border-b border-border shrink-0">
           <h3 className="text-base font-semibold text-foreground">Manage packs</h3>
           <button onClick={onClose} className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors cursor-pointer">
             <X size={18} />
           </button>
         </div>
 
-        <div className="flex flex-1 min-h-0">
-          {/* Left nav */}
-          <div className="w-32 shrink-0 border-r border-border p-2 flex flex-col gap-1">
+        <div className={`flex flex-1 min-h-0 ${isMobile ? 'flex-col' : ''}`}>
+          {/* Nav — left rail on desktop, top bar on mobile */}
+          <div className={`shrink-0 flex gap-1 ${isMobile ? 'flex-row border-b border-border px-2 py-1.5' : 'w-32 flex-col border-r border-border p-2'}`}>
             {NAV.map(({ id, label, icon: Icon }) => (
               <button
                 key={id}
                 onClick={() => setSection(id)}
-                className={`flex items-center gap-2 px-2.5 py-2 rounded-lg text-sm transition-colors cursor-pointer ${
+                className={`flex items-center gap-2 px-2.5 py-2 rounded-lg text-sm transition-colors cursor-pointer ${isMobile ? 'flex-1 justify-center' : ''} ${
                   section === id ? 'bg-secondary text-foreground font-medium' : 'text-muted-foreground hover:text-foreground hover:bg-secondary/50'
                 }`}
               >
@@ -77,7 +81,7 @@ export function PackManagerModal({ open, onClose, initialSection = 'emoji' }: {
           </div>
 
           {/* Content */}
-          <div className="flex-1 min-w-0 overflow-y-auto p-4">
+          <div className="flex-1 min-w-0 overflow-y-auto p-3 sm:p-4">
             {section === 'emoji' && <EmojiManageSection />}
             {section === 'sticker' && <StickerManageSection />}
             {section === 'gif' && <GifManageSection />}
@@ -310,8 +314,8 @@ function StickerManageSection() {
                         </div>
                         <span className="flex-1 text-sm text-foreground truncate min-w-0">:{s.shortcode}:</span>
                         <div className="flex flex-col gap-1.5 shrink-0">
-                          <button onClick={() => setRenameItem({ dTag: set.dTag, shortcode: s.shortcode })} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border text-xs text-foreground hover:bg-secondary/60 transition-colors cursor-pointer"><Pencil size={13} /> Edit</button>
-                          <button onClick={() => onDeleteItem(set.dTag, s.shortcode)} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-destructive/40 text-xs text-destructive hover:bg-destructive/10 transition-colors cursor-pointer"><Trash2 size={13} /> Delete</button>
+                          <button onClick={() => setRenameItem({ dTag: set.dTag, shortcode: s.shortcode })} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border text-xs text-foreground hover:bg-secondary/60 transition-colors cursor-pointer"><Pencil size={13} /> <span className="hidden sm:inline">Edit</span></button>
+                          <button onClick={() => onDeleteItem(set.dTag, s.shortcode)} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-destructive/40 text-xs text-destructive hover:bg-destructive/10 transition-colors cursor-pointer"><Trash2 size={13} /> <span className="hidden sm:inline">Delete</span></button>
                         </div>
                       </div>
                     ))}
@@ -417,8 +421,8 @@ function GifManageSection() {
                         </div>
                         <span className="flex-1 text-sm text-foreground truncate min-w-0">{g.name || 'Unnamed GIF'}</span>
                         <div className="flex flex-col gap-1.5 shrink-0">
-                          <button onClick={() => setRenameGifUrl({ dTag: col.dTag, url: g.url })} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border text-xs text-foreground hover:bg-secondary/60 transition-colors cursor-pointer"><Pencil size={13} /> Edit</button>
-                          <button onClick={() => onDeleteGif(col.dTag, g.url)} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-destructive/40 text-xs text-destructive hover:bg-destructive/10 transition-colors cursor-pointer"><Trash2 size={13} /> Delete</button>
+                          <button onClick={() => setRenameGifUrl({ dTag: col.dTag, url: g.url })} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border text-xs text-foreground hover:bg-secondary/60 transition-colors cursor-pointer"><Pencil size={13} /> <span className="hidden sm:inline">Edit</span></button>
+                          <button onClick={() => onDeleteGif(col.dTag, g.url)} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-destructive/40 text-xs text-destructive hover:bg-destructive/10 transition-colors cursor-pointer"><Trash2 size={13} /> <span className="hidden sm:inline">Delete</span></button>
                         </div>
                       </div>
                     ))}
@@ -621,10 +625,10 @@ function EmojiManageSection() {
                         </div>
                         <span className="flex-1 text-sm text-foreground truncate min-w-0">:{e.shortcode}:</span>
                         <button onClick={() => setRenameEmoji({ setDTag: set.dTag, shortcode: e.shortcode })} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border text-xs text-foreground hover:bg-secondary/60 transition-colors cursor-pointer shrink-0">
-                          <Pencil size={13} /> Edit
+                          <Pencil size={13} /> <span className="hidden sm:inline">Edit</span>
                         </button>
                         <button onClick={() => handleDeleteEmoji(set.dTag, e.shortcode)} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-destructive/40 text-xs text-destructive hover:bg-destructive/10 transition-colors cursor-pointer shrink-0">
-                          <Trash2 size={13} /> Delete
+                          <Trash2 size={13} /> <span className="hidden sm:inline">Delete</span>
                         </button>
                       </div>
                     ))}
