@@ -216,6 +216,10 @@ interface HubSettingsModalProps {
   open: boolean
   onClose: () => void
   hub: HubData
+  /** Open straight to this page (e.g. 'members' from a profile's "edit roles" button). */
+  initialPage?: SettingsPage
+  /** On the Members page, expand and highlight this member (owner editing one person's roles). */
+  focusMemberPubkey?: string
 }
 
 
@@ -236,10 +240,19 @@ const PAGES: { id: SettingsPage; label: string; icon: React.ElementType; danger?
 
 // ── Main Modal ──
 
-export function HubSettingsModal({ open, onClose, hub }: HubSettingsModalProps) {
+export function HubSettingsModal({ open, onClose, hub, initialPage, focusMemberPubkey }: HubSettingsModalProps) {
   useEscToClose(onClose, open)
   const [activePage, setActivePage] = useState<SettingsPage>('general')
   const [mobileShowNav, setMobileShowNav] = useState(true)
+
+  // When opened with a target page (e.g. Members from a profile's "edit roles"), jump there and, on
+  // mobile, drill into the page rather than showing the nav list first.
+  useEffect(() => {
+    if (open && initialPage) {
+      setActivePage(initialPage)
+      setMobileShowNav(false)
+    }
+  }, [open, initialPage])
 
   // Editable state — cloned from hub on open
   const [editName, setEditName] = useState(hub.name)
@@ -975,7 +988,7 @@ export function HubSettingsModal({ open, onClose, hub }: HubSettingsModalProps) 
                   )}
                   {activePage === 'roles' && <RolesPage hub={hub} editRoles={editRoles} setEditRoles={setEditRoles} editChannels={editChannels} editCategories={editCategories} isCreator={isCreator} />}
                   {activePage === 'members' && isCreator && (
-                    <MembersPage hub={hub} onFooterState={setMemberFooterState} />
+                    <MembersPage hub={hub} onFooterState={setMemberFooterState} focusPubkey={focusMemberPubkey} />
                   )}
                   {activePage === 'security' && isCreator && (
                     <SecurityPage hub={hub} />
@@ -5946,7 +5959,7 @@ function ReportCard({ report, getProfile, hub, onClose }: { report: HubReport; g
 
 // ── Members Page (creator-only) ──
 
-function MembersPage({ hub, onFooterState }: { hub: HubData; onFooterState: (state: any) => void }) {
+function MembersPage({ hub, onFooterState, focusPubkey }: { hub: HubData; onFooterState: (state: any) => void; focusPubkey?: string }) {
   const hubMembers = useHubStore((s) => s.hubMembers[hub.dTag]) || []
   const setHubMembers = useHubStore((s) => s.setHubMembers)
   const setHubData = useHubStore((s) => s.setHubData)
@@ -5956,6 +5969,19 @@ function MembersPage({ hub, onFooterState }: { hub: HubData; onFooterState: (sta
 
   const [search, setSearch] = useState('')
   const [expandedPubkey, setExpandedPubkey] = useState<string | null>(null)
+  // When arriving from a profile's "edit roles" button, jump to that member: clear the search so they
+  // show, open their accordion, scroll them into view, and pulse a highlight so they're easy to find.
+  const rowRefs = useRef<Record<string, HTMLDivElement | null>>({})
+  const [highlightPubkey, setHighlightPubkey] = useState<string | null>(null)
+  useEffect(() => {
+    if (!focusPubkey) return
+    setSearch('')
+    setExpandedPubkey(focusPubkey)
+    setHighlightPubkey(focusPubkey)
+    const scroll = setTimeout(() => rowRefs.current[focusPubkey]?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 60)
+    const unhighlight = setTimeout(() => setHighlightPubkey(null), 2200)
+    return () => { clearTimeout(scroll); clearTimeout(unhighlight) }
+  }, [focusPubkey])
   const [profilePubkey, setProfilePubkey] = useState<string | null>(null)
   const [stagedChanges, setStagedChanges] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
@@ -6670,7 +6696,7 @@ function MembersPage({ hub, onFooterState }: { hub: HubData; onFooterState: (sta
           const roleIds = currentRoles.split('|').map(s => s.trim()).filter(Boolean)
           const isChanged = !!stagedChanges[member.pubkey]
           return (
-            <div key={member.pubkey} className={cn('rounded-lg border transition-colors', isChanged ? 'border-primary/30 bg-primary/5' : 'border-transparent hover:bg-secondary/30')}>
+            <div key={member.pubkey} ref={(el) => { rowRefs.current[member.pubkey] = el }} className={cn('rounded-lg border transition-colors', highlightPubkey === member.pubkey ? 'border-primary ring-2 ring-primary/50 bg-primary/5' : isChanged ? 'border-primary/30 bg-primary/5' : 'border-transparent hover:bg-secondary/30')}>
               <button onClick={() => setExpandedPubkey(isExpanded ? null : member.pubkey)}
                 className="flex items-center gap-3 w-full px-3 py-2.5 text-left cursor-pointer">
                 <Tooltip>

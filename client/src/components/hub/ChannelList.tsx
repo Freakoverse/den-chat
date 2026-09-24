@@ -53,6 +53,9 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
   const hubMembers = useHubStore((s) => activeHubId ? s.hubMembers[activeHubId] : undefined)
   const channelScrollRef = useRef<HTMLDivElement>(null)
   const [showSettings, setShowSettings] = useState(false)
+  // When opening settings to edit one member's roles (from their profile modal): jump to Members and
+  // focus this pubkey. Cleared on close so the next plain gear-open lands on the default page.
+  const [settingsFocusMember, setSettingsFocusMember] = useState<string | undefined>(undefined)
   const [showInfo, setShowInfo] = useState(false)
   const [showInvite, setShowInvite] = useState(false)
   const [showJoinRequests, setShowJoinRequests] = useState(false)
@@ -141,6 +144,19 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
 
   const isCreator = !!(hub && pubkey && (hub.creatorPubkey === pubkey || hub.ownerRealPubkey === pubkey))
   const isMember = !!(pubkey && hubMembers?.some((m) => m.pubkey === pubkey))
+
+  // Watch for a pending "edit this member's roles" request (from a member's profile modal). Owner only:
+  // the Members page is creator-gated, so a non-owner request is ignored.
+  const pendingHubMemberRoles = useNavigationStore((s) => s.pendingHubMemberRoles)
+  const clearPendingMemberRoles = useNavigationStore((s) => s.setPendingHubMemberRoles)
+  useEffect(() => {
+    if (pendingHubMemberRoles && hub && hub.dTag === pendingHubMemberRoles.dTag && isCreator) {
+      const pk = pendingHubMemberRoles.pubkey
+      clearPendingMemberRoles(null)
+      setSettingsFocusMember(pk)
+      setShowSettings(true)
+    }
+  }, [pendingHubMemberRoles, hub, isCreator, clearPendingMemberRoles])
   const secretsResolved = useHubStore((s) => activeHubId ? !!s.hubSecretsResolved[activeHubId] : false)
 
   // Reset the optimistic "withdrawn" flag whenever the hub is (re-)present in the user's list.
@@ -861,8 +877,10 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
       {isCreator && (
         <HubSettingsModal
           open={showSettings}
-          onClose={() => setShowSettings(false)}
+          onClose={() => { setShowSettings(false); setSettingsFocusMember(undefined) }}
           hub={hub}
+          initialPage={settingsFocusMember ? 'members' : undefined}
+          focusMemberPubkey={settingsFocusMember}
         />
       )}
 

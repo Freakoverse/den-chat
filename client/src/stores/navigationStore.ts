@@ -38,6 +38,11 @@ interface NavigationStore {
   /** Pending hub dTag for opening the Voice Hosting tab in User Hub Settings (consumed by ChannelList) */
   pendingHubVoiceHostingDTag: string | null
   setPendingHubVoiceHostingDTag: (dTag: string | null) => void
+
+  /** Pending request to open owner Hub Settings → Members with one member expanded, to edit their
+   *  roles (set from a member's profile modal, consumed by ChannelList; owner-only). */
+  pendingHubMemberRoles: { dTag: string; pubkey: string } | null
+  setPendingHubMemberRoles: (v: { dTag: string; pubkey: string } | null) => void
 }
 
 export const useNavigationStore = create<NavigationStore>((set) => ({
@@ -59,5 +64,7 @@ export const useNavigationStore = create<NavigationStore>((set) => ({
   setPendingHubNotifDTag: (dTag) => set({ pendingHubNotifDTag: dTag }),
   pendingHubVoiceHostingDTag: null,
   setPendingHubVoiceHostingDTag: (dTag) => set({ pendingHubVoiceHostingDTag: dTag }),
+  pendingHubMemberRoles: null,
+  setPendingHubMemberRoles: (v) => set({ pendingHubMemberRoles: v }),
 }))
 

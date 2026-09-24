@@ -2114,9 +2114,17 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
                 </div>
               )}
 
-              {/* ── Roles (read-only display) ── */}
+              {/* ── Roles (owner gets an Edit button → Hub Settings › Members) ── */}
               {hubContext && displayPubkey && (
-                <RoleAssignmentPanel hubDTag={hubContext.dTag} memberPubkey={displayPubkey} />
+                <RoleAssignmentPanel
+                  hubDTag={hubContext.dTag}
+                  memberPubkey={displayPubkey}
+                  canEdit={!!isHubCreator && displayPubkey !== hubContext.creatorPubkey && displayPubkey !== hubContext.ownerRealPubkey}
+                  onEdit={() => {
+                    useNavigationStore.getState().setPendingHubMemberRoles({ dTag: hubContext.dTag, pubkey: displayPubkey })
+                    onClose()
+                  }}
+                />
               )}
 
               {/* ── Packs (emoji / sticker / GIF sets) — every profile, fetched on open like the profile itself.
@@ -2471,8 +2479,9 @@ function ProfileUploadProgressBar({ progress, abortRef, small }: {
   )
 }
 
-/** Read-only role display — shows which roles a member has in this hub */
-function RoleAssignmentPanel({ hubDTag, memberPubkey }: { hubDTag: string; memberPubkey: string }) {
+/** Shows a member's roles in this hub. The owner gets an Edit button that jumps to Hub Settings →
+ *  Members with this person expanded, where role assignment already lives. */
+function RoleAssignmentPanel({ hubDTag, memberPubkey, canEdit, onEdit }: { hubDTag: string; memberPubkey: string; canEdit?: boolean; onEdit?: () => void }) {
   const hubData = useHubStore((s) => s.hubs[hubDTag])
   const hubMembers = useHubStore((s) => s.hubMembers[hubDTag])
   const member = hubMembers?.find(m => m.pubkey === memberPubkey)
@@ -2487,12 +2496,32 @@ function RoleAssignmentPanel({ hubDTag, memberPubkey }: { hubDTag: string; membe
     return currentRoleIds.includes(r.roleId)
   })
 
-  if (assignedRoles.length === 0) return null
+  // Read-only viewers with nothing to show get nothing; the owner always gets the panel so the Edit
+  // affordance is reachable even for a member who only has the default role.
+  if (assignedRoles.length === 0 && !canEdit) return null
 
   return (
     <div className="mt-3 rounded-xl bg-secondary/30 border border-border/50 p-3">
-      <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Roles</div>
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Roles</div>
+        {canEdit && onEdit && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={onEdit}
+                className="inline-flex items-center gap-1 text-[11px] font-medium text-primary hover:text-primary/80 px-1.5 py-0.5 rounded-md hover:bg-primary/10 transition-colors cursor-pointer"
+              >
+                <Pencil size={11} /> Edit
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="text-xs">Manage this member's roles in Hub Settings</TooltipContent>
+          </Tooltip>
+        )}
+      </div>
       <div className="flex flex-wrap gap-1.5">
+        {assignedRoles.length === 0 && (
+          <span className="text-[11px] text-muted-foreground">No roles assigned yet.</span>
+        )}
         {assignedRoles.map(role => (
           <span
             key={role.roleId}
