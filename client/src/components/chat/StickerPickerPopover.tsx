@@ -615,6 +615,19 @@ function StickerSetCard({
     useStickerStore.getState().updateMyStickerSet(set.dTag, updated)
   }
 
+  // Rename ONE sticker: change its shortcode, republish the set (same d-tag). Already-sent stickers and
+  // reactions embed their own URL, so they keep rendering; only new uses pick up the new name.
+  const sanitizeShortcode = (v: string) => v.replace(/[^a-zA-Z0-9_-]/g, '_').toLowerCase()
+  const [renameStickerShortcode, setRenameStickerShortcode] = useState<string | null>(null)
+  const handleRenameSticker = async (newShortcode: string) => {
+    if (!renameStickerShortcode) return
+    const sc = sanitizeShortcode(newShortcode).slice(0, 60)
+    if (!sc) throw new Error('Enter a name')
+    const updated = set.stickers.map((s) => s.shortcode === renameStickerShortcode ? { ...s, shortcode: sc } : s)
+    await publishStickerSet(set.dTag, set.name, updated, signer, privateKey)
+    useStickerStore.getState().updateMyStickerSet(set.dTag, updated)
+  }
+
   const [showDeleteModal, setShowDeleteModal] = useState(false)
 
   // Esc closes the "Request Delete Sticker Set" confirmation like its Cancel/backdrop.
@@ -773,7 +786,15 @@ function StickerSetCard({
                         className="w-14 h-14 rounded"
                         contain
                       />
-                      {/* Delete overlay (mine only, visible on hover) */}
+                      {/* Rename + delete overlays (mine only, visible on hover) */}
+                      {isMine && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setRenameStickerShortcode(sticker.shortcode) }}
+                          className="absolute -top-1 -left-1 w-4 h-4 rounded-full bg-primary text-primary-foreground flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                        >
+                          <Pencil size={7} />
+                        </button>
+                      )}
                       {isMine && (
                         <button
                           onClick={(e) => { e.stopPropagation(); removeSticker(sticker.shortcode) }}
@@ -793,6 +814,17 @@ function StickerSetCard({
       </div>
       {/* Delete confirmation modal */}
       <RenamePackModal open={showRename} currentName={set.name} kindLabel="sticker set" onClose={() => setShowRename(false)} onSave={handleRename} />
+      <RenamePackModal
+        open={!!renameStickerShortcode}
+        currentName={renameStickerShortcode ?? ''}
+        kindLabel="sticker"
+        title="Rename sticker"
+        hint="Already-sent stickers keep working; only new uses take the new name."
+        transform={sanitizeShortcode}
+        validate={(v) => (set.stickers.some((s) => s.shortcode === v && s.shortcode !== renameStickerShortcode) ? 'That name is already used in this set' : null)}
+        onClose={() => setRenameStickerShortcode(null)}
+        onSave={handleRenameSticker}
+      />
       {showDeleteModal && createPortal(
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[320]" onClick={() => setShowDeleteModal(false)}>
           <div className="bg-card border border-border rounded-lg p-6 max-w-md w-full mx-4 shadow-xl" onClick={(e) => e.stopPropagation()}>

@@ -361,6 +361,20 @@ function MineTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcode:
     const st = useEmojiStore.getState()
     st.setMyEmojiSets(st.myEmojiSets.map((s) => (s.dTag === renameSet.dTag ? { ...s, name } : s)))
   }
+
+  // Rename ONE emoji: change its shortcode and republish the set (same d-tag). Already-published
+  // reactions embed their own shortcode + URL, so they keep rendering; only new reactions use the new name.
+  const sanitizeShortcode = (v: string) => v.replace(/[^a-zA-Z0-9_-]/g, '_').toLowerCase()
+  const [renameEmojiTarget, setRenameEmojiTarget] = useState<{ setDTag: string; shortcode: string } | null>(null)
+  const renameEmojiSet = renameEmojiTarget ? myEmojiSets.find((s) => s.dTag === renameEmojiTarget.setDTag) : null
+  const handleRenameEmoji = async (newShortcode: string) => {
+    if (!renameEmojiTarget || !renameEmojiSet) return
+    const sc = sanitizeShortcode(newShortcode).slice(0, 60)
+    if (!sc) throw new Error('Enter a name')
+    const newEmojis = renameEmojiSet.emojis.map((e) => e.shortcode === renameEmojiTarget.shortcode ? { ...e, shortcode: sc } : e)
+    await publishEmojiSet(renameEmojiTarget.setDTag, renameEmojiSet.name, newEmojis, signer, privateKey)
+    updateMyEmojiSet(renameEmojiTarget.setDTag, newEmojis)
+  }
   const [deleteSetDTag, setDeleteSetDTag] = useState<string | null>(null)
   const [deletingSet, setDeletingSet] = useState(false)
   const deleteSet = myEmojiSets.find((s) => s.dTag === deleteSetDTag)
@@ -485,6 +499,7 @@ function MineTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcode:
                     emoji={e}
                     onClick={() => onSelect(`:${e.shortcode}:`, { shortcode: e.shortcode, url: e.url })}
                     onDelete={() => handleDeleteEmoji(e.setDTag, e.shortcode)}
+                    onRename={() => setRenameEmojiTarget({ setDTag: e.setDTag, shortcode: e.shortcode })}
                   />
                 ))}
               </div>
@@ -532,6 +547,7 @@ function MineTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcode:
                           emoji={e}
                           onClick={() => onSelect(`:${e.shortcode}:`, { shortcode: e.shortcode, url: e.url })}
                           onDelete={() => handleDeleteEmoji(set.dTag, e.shortcode)}
+                          onRename={() => setRenameEmojiTarget({ setDTag: set.dTag, shortcode: e.shortcode })}
                         />
                       ))}
                     </div>
@@ -550,6 +566,17 @@ function MineTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcode:
         kindLabel="emoji set"
         onClose={() => setRenameSetDTag(null)}
         onSave={handleRenameSet}
+      />
+      <RenamePackModal
+        open={!!renameEmojiTarget}
+        currentName={renameEmojiTarget?.shortcode ?? ''}
+        kindLabel="emoji"
+        title="Rename emoji"
+        hint="Existing reactions keep their old name; only new ones use this."
+        transform={sanitizeShortcode}
+        validate={(v) => (renameEmojiSet?.emojis.some((e) => e.shortcode === v && e.shortcode !== renameEmojiTarget?.shortcode) ? 'That name is already used in this set' : null)}
+        onClose={() => setRenameEmojiTarget(null)}
+        onSave={handleRenameEmoji}
       />
       {deleteSetDTag && createPortal(
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[320]" onClick={() => !deletingSet && setDeleteSetDTag(null)}>
@@ -582,10 +609,11 @@ function MineTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcode:
 
 // ─── Emoji Button ───
 
-function EmojiButton({ emoji, onClick, onDelete }: {
+function EmojiButton({ emoji, onClick, onDelete, onRename }: {
   emoji: CustomEmoji
   onClick: () => void
   onDelete: () => void
+  onRename?: () => void
 }) {
   return (
     <div className="relative group">
@@ -607,6 +635,14 @@ function EmojiButton({ emoji, onClick, onDelete }: {
           <TooltipContent side="bottom" className="text-xs z-[310]">:{emoji.shortcode}:</TooltipContent>
         </Tooltip>
       </TooltipProvider>
+      {onRename && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onRename() }}
+          className="absolute -top-1 -left-1 w-4 h-4 rounded-full bg-primary text-primary-foreground flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer z-10"
+        >
+          <Pencil size={7} />
+        </button>
+      )}
       <button
         onClick={(e) => { e.stopPropagation(); onDelete() }}
         className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-destructive text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer z-10"

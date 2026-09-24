@@ -1283,6 +1283,19 @@ function GifCollectionCard({
     useGifStore.getState().updateMyGifCollection(collection.dTag, updated)
   }
 
+  // Rename ONE GIF: change its free-text name and republish the collection (same d-tag). GIFs already
+  // sent in messages embed their own name + URL, so they're unaffected; only new uses take the new name.
+  const [renameGifUrl, setRenameGifUrl] = useState<string | null>(null)
+  const renameGifItem = renameGifUrl ? collection.gifs.find((g) => g.url === renameGifUrl) : null
+  const handleRenameGif = async (newName: string) => {
+    if (!renameGifUrl) return
+    const nm = newName.trim().slice(0, 60)
+    if (!nm) throw new Error('Enter a name')
+    const updated = collection.gifs.map((g) => g.url === renameGifUrl ? { ...g, name: nm } : g)
+    await publishGifCollection(collection.dTag, collection.name, updated, signer, privateKey)
+    useGifStore.getState().updateMyGifCollection(collection.dTag, updated)
+  }
+
   // Rename: republish the same collection (same d-tag, same GIFs) with a new `title` — subscriptions survive.
   const [showRename, setShowRename] = useState(false)
   const handleRename = async (name: string) => {
@@ -1463,6 +1476,14 @@ function GifCollectionCard({
                       </button>
                       {isMine && (
                         <button
+                          onClick={(e) => { e.stopPropagation(); setRenameGifUrl(gif.url) }}
+                          className="absolute -bottom-1 -left-1 w-4 h-4 rounded-full bg-primary text-primary-foreground flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                        >
+                          <Pencil size={7} />
+                        </button>
+                      )}
+                      {isMine && (
+                        <button
                           onClick={(e) => { e.stopPropagation(); removeGif(gif.url) }}
                           className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-destructive text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
                         >
@@ -1484,6 +1505,15 @@ function GifCollectionCard({
 
       {/* Delete confirmation modal */}
       <RenamePackModal open={showRename} currentName={collection.name} kindLabel="GIF collection" onClose={() => setShowRename(false)} onSave={handleRename} />
+      <RenamePackModal
+        open={!!renameGifUrl}
+        currentName={renameGifItem?.name ?? ''}
+        kindLabel="GIF"
+        title="Rename GIF"
+        hint="GIFs already sent keep their name; only new uses take the new one."
+        onClose={() => setRenameGifUrl(null)}
+        onSave={handleRenameGif}
+      />
       {showDeleteModal && createPortal(
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[320]" onClick={() => setShowDeleteModal(false)}>
           <div className="bg-card border border-border rounded-lg p-6 max-w-md w-full mx-4 shadow-xl" onClick={(e) => e.stopPropagation()}>
