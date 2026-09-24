@@ -9,7 +9,8 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { refreshSubscribedPacks } from '@/lib/customSets'
 import { createPortal } from 'react-dom'
-import { Sparkles, Users, Plus, Trash2, Loader2, Upload, Search, X, FolderPlus, Image, AlertTriangle, Check, Compass, ShieldQuestion, Pencil } from 'lucide-react'
+import { Sparkles, Users, Plus, Trash2, Loader2, Upload, Search, X, FolderPlus, Image, AlertTriangle, Check, Compass, ShieldQuestion, Pencil, Settings2 } from 'lucide-react'
+import { PackManagerModal } from '@/components/chat/PackManagerModal'
 import { RenamePackModal } from '@/components/chat/RenamePackModal'
 import { Button } from '@/components/ui/button'
 import { BlossomImage } from '@/components/ui/BlossomImage'
@@ -216,16 +217,10 @@ function MineStickerTab({ onSelect }: { onSelect: (s: { shortcode: string; url: 
   const mySets = useStickerStore((s) => s.myStickerSets)
   const nsfwEnabled = useStickerStore((s) => s.nsfwEnabled)
   const untaggedAsNsfw = useStickerStore((s) => s.untaggedAsNsfw)
-  const pubkey = useUserStore((s) => s.pubkey)
-  const signer = useUserStore((s) => s.signer)
-  const privateKey = useUserStore((s) => s.privateKey)
 
-  const [showCreateInput, setShowCreateInput] = useState(false)
-  const [newSetName, setNewSetName] = useState('')
-  const [creating, setCreating] = useState(false)
-  const [expandedSet, setExpandedSet] = useState<string | null>(null)
   const [search, setSearch] = useState('')
-  const [showAddSticker, setShowAddSticker] = useState(false)
+  // Creating/adding/renaming/deleting now lives in the Manage modal; this tab only browses + inserts.
+  const [showManage, setShowManage] = useState(false)
 
   // Flatten all stickers for search (with NSFW filtering)
   const allStickers = useMemo(() => {
@@ -242,33 +237,9 @@ function MineStickerTab({ onSelect }: { onSelect: (s: { shortcode: string; url: 
     )
     : allStickers
 
-  const createSet = async () => {
-    if (!newSetName.trim() || !pubkey) return
-    const name = newSetName.trim()
-    // Unique d-tag so two sets with the same name never overwrite each other on relays.
-    const dTag = crypto.randomUUID()
-    setCreating(true)
-    try {
-      await publishStickerSet(dTag, name, [], signer, privateKey)
-      useStickerStore.getState().addMyStickerSet({
-        pubkey,
-        dTag,
-        name,
-        stickers: [],
-      })
-      setNewSetName('')
-      setShowCreateInput(false)
-      setExpandedSet(dTag)
-    } catch (err) {
-      console.error('Failed to create sticker set:', err)
-    } finally {
-      setCreating(false)
-    }
-  }
-
   return (
     <div className="h-full flex flex-col">
-      {/* Search + actions bar */}
+      {/* Search + Manage */}
       <div className="flex items-center gap-1.5 px-2 py-1.5 border-b border-border">
         <div className="flex-1 relative">
           <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
@@ -279,75 +250,25 @@ function MineStickerTab({ onSelect }: { onSelect: (s: { shortcode: string; url: 
             className="w-full h-9 pl-8 pr-2 rounded-md text-sm bg-muted/30 border border-border text-foreground placeholder:text-muted-foreground focus:outline-none"
           />
         </div>
-        <TooltipProvider delayDuration={300}>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={() => { setShowCreateInput(!showCreateInput); if (!showCreateInput) setShowAddSticker(false) }}
-                className="p-2 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors cursor-pointer"
-              >
-                <FolderPlus size={14} />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" className="text-xs z-[310]">New Set</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                disabled={mySets.length === 0}
-                onClick={() => {
-                  const next = !showAddSticker
-                  setShowAddSticker(next)
-                  if (next) {
-                    setShowCreateInput(false)
-                    if (mySets.length > 0 && !expandedSet) setExpandedSet(mySets[0].dTag)
-                  }
-                }}
-                className={`p-2 rounded-md transition-colors ${mySets.length === 0 ? 'text-muted-foreground/30 cursor-not-allowed' : 'text-muted-foreground hover:text-foreground hover:bg-muted/50 cursor-pointer'}`}
-              >
-                <Plus size={14} />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" className="text-xs z-[310]">Add Sticker</TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
+        <button
+          onClick={() => setShowManage(true)}
+          className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md text-sm font-medium text-foreground bg-muted/40 hover:bg-muted/70 transition-colors cursor-pointer shrink-0"
+        >
+          <Settings2 size={14} /> Manage
+        </button>
       </div>
 
-      {/* Create set form */}
-      {showCreateInput && (
-        <div className="px-2 py-2 border-b border-border bg-muted/20">
-          <p className="text-xs text-muted-foreground mb-1.5">Create a new sticker set</p>
-          <div className="flex gap-1.5">
-            <input
-              autoFocus
-              value={newSetName}
-              onChange={(e) => setNewSetName(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') createSet(); if (e.key === 'Escape') setShowCreateInput(false) }}
-              placeholder="Set name..."
-              className="flex-1 h-9 px-3 rounded-md text-sm bg-background border border-border text-foreground placeholder:text-muted-foreground focus:outline-none"
-            />
-            <button
-              onClick={createSet}
-              disabled={!newSetName.trim() || creating}
-              className="h-9 px-3 rounded-md bg-primary text-primary-foreground text-xs font-medium hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50"
-            >
-              {creating ? <Loader2 size={12} className="animate-spin" /> : 'Create'}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Sticker grid */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-2">
+      {/* Sticker grid (browse + insert only) */}
+      <div className="flex-1 overflow-y-auto p-3 space-y-3">
         {mySets.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full gap-2 text-muted-foreground">
             <Image size={24} className="opacity-40" />
-            <p className="text-xs text-center">No sticker sets yet.<br />Create one to get started!</p>
+            <p className="text-xs text-center">No sticker sets yet.</p>
             <button
-              onClick={() => setShowCreateInput(true)}
-              className="mt-1 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:opacity-90 transition-opacity cursor-pointer"
+              onClick={() => setShowManage(true)}
+              className="mt-1 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:opacity-90 transition-opacity cursor-pointer"
             >
-              Create Set
+              <Settings2 size={13} /> Manage packs
             </button>
           </div>
         ) : search ? (
@@ -376,17 +297,35 @@ function MineStickerTab({ onSelect }: { onSelect: (s: { shortcode: string; url: 
           )
         ) : (
           mySets.map((set) => (
-            <StickerSetCard
-              key={set.dTag}
-              set={set}
-              isMine
-              expanded={expandedSet === set.dTag || showAddSticker}
-              onToggle={() => setExpandedSet(expandedSet === set.dTag ? null : set.dTag)}
-              onSelect={(shortcode, url) => onSelect({ shortcode, url, setAddress: `30031:${set.pubkey}:${set.dTag}` })}
-            />
+            <div key={set.dTag}>
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-0.5 mb-1.5 truncate">{set.name}</p>
+              {set.stickers.length === 0 ? (
+                <p className="text-xs text-muted-foreground/60 italic px-0.5">Empty set</p>
+              ) : (
+                <div className="flex flex-wrap gap-1.5">
+                  <TooltipProvider delayDuration={200}>
+                    {set.stickers.map((st) => (
+                      <Tooltip key={st.shortcode}>
+                        <TooltipTrigger asChild>
+                          <button
+                            onClick={() => onSelect({ shortcode: st.shortcode, url: st.url, setAddress: `30031:${set.pubkey}:${set.dTag}` })}
+                            className="rounded-md border border-transparent hover:border-primary/40 hover:bg-primary/10 transition-colors cursor-pointer"
+                          >
+                            <BlossomImage src={st.url} alt={`:${st.shortcode}:`} className="w-14 h-14 rounded" contain />
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="text-xs z-[310]">:{st.shortcode}:</TooltipContent>
+                      </Tooltip>
+                    ))}
+                  </TooltipProvider>
+                </div>
+              )}
+            </div>
           ))
         )}
       </div>
+
+      <PackManagerModal open={showManage} onClose={() => setShowManage(false)} initialSection="sticker" />
     </div>
   )
 }
