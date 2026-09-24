@@ -750,14 +750,7 @@ function OthersTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcod
                     <p className="text-xs font-semibold text-[hsl(var(--muted-foreground))] uppercase tracking-wider truncate">
                       {set.name}
                     </p>
-                    <span className="text-[9px] text-[hsl(var(--muted-foreground)/0.6)]">by {authorName}</span>
-                    <button
-                      onClick={() => handleUnsubscribe(set)}
-                      disabled={isUnsubscribing}
-                      className="ml-auto px-1.5 py-0.5 rounded text-[9px] text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors cursor-pointer disabled:opacity-50 shrink-0"
-                    >
-                      {isUnsubscribing ? <Loader2 size={10} className="animate-spin" /> : 'Unsub'}
-                    </button>
+                    <span className="text-[9px] text-[hsl(var(--muted-foreground)/0.6)] truncate">by {authorName}</span>
                   </div>
                   <div className="grid grid-cols-7 gap-1.5">
                     {set.emojis.map((e) => (
@@ -792,14 +785,7 @@ function OthersTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcod
                   <p className="text-xs font-semibold text-[hsl(var(--muted-foreground))] uppercase tracking-wider truncate">
                     {set.name}
                   </p>
-                  <span className="text-[9px] text-[hsl(var(--muted-foreground)/0.6)]">by {authorName}</span>
-                  <button
-                    onClick={() => handleUnsubscribe(set)}
-                    disabled={isUnsubscribing}
-                    className="ml-auto px-1.5 py-0.5 rounded text-[9px] text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors cursor-pointer disabled:opacity-50 shrink-0"
-                  >
-                    {isUnsubscribing ? <Loader2 size={10} className="animate-spin" /> : 'Unsub'}
-                  </button>
+                  <span className="text-[9px] text-[hsl(var(--muted-foreground)/0.6)] truncate">by {authorName}</span>
                 </div>
                 <div className="grid grid-cols-7 gap-1.5">
                   {set.emojis.map((e) => (

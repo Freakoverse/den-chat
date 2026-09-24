@@ -63,7 +63,7 @@ export function PackManagerModal({ open, onClose, initialSection = 'mine-emoji' 
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
       <div
         className={`relative z-10 bg-card shadow-2xl animate-in fade-in-0 flex flex-col overflow-hidden ${
-          isMobile ? 'w-full h-full rounded-none' : 'w-full max-w-[640px] max-h-[85vh] rounded-2xl border border-border zoom-in-95 duration-200'
+          isMobile ? 'w-full h-full rounded-none' : 'w-full max-w-[820px] max-h-[85vh] rounded-2xl border border-border zoom-in-95 duration-200'
         }`}
         onClick={(e) => e.stopPropagation()}
       >

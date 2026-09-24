@@ -925,13 +925,6 @@ function OthersGifTab({ onSelect, onPickerClose }: { onSelect: (g: { name: strin
                           by <button onClick={() => { window.dispatchEvent(new CustomEvent('open-profile-modal', { detail: col.pubkey })); onPickerClose?.() }} className="text-primary hover:underline cursor-pointer">{authorName}</button> · {col.gifs.length} GIF{col.gifs.length !== 1 ? 's' : ''}
                         </p>
                       </div>
-                      <button
-                        onClick={() => handleUnsubscribe(col)}
-                        disabled={isUnsub}
-                        className="px-1.5 py-0.5 rounded text-[9px] text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors cursor-pointer disabled:opacity-50 shrink-0"
-                      >
-                        {isUnsub ? <Loader2 size={10} className="animate-spin" /> : 'Unsub'}
-                      </button>
                     </div>
                     <TooltipProvider delayDuration={200}>
                       <div className="flex flex-wrap gap-1">
@@ -975,13 +968,6 @@ function OthersGifTab({ onSelect, onPickerClose }: { onSelect: (g: { name: strin
                         by <button onClick={() => setProfilePubkey(col.pubkey)} className="text-primary hover:underline cursor-pointer">{authorName}</button> · {col.gifs.length} GIF{col.gifs.length !== 1 ? 's' : ''}
                       </p>
                     </div>
-                    <button
-                      onClick={() => handleUnsubscribe(col)}
-                      disabled={isUnsub}
-                      className="px-1.5 py-0.5 rounded text-[9px] text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors cursor-pointer disabled:opacity-50 shrink-0"
-                    >
-                      {isUnsub ? <Loader2 size={10} className="animate-spin" /> : 'Unsub'}
-                    </button>
                   </div>
                   <TooltipProvider delayDuration={200}>
                     <div className="flex flex-wrap gap-1">
