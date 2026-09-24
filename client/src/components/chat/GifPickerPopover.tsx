@@ -795,6 +795,7 @@ function OthersGifTab({ onSelect, onPickerClose }: { onSelect: (g: { name: strin
   const [search, setSearch] = useState('')
   const [searchMode, setSearchMode] = useState<'items' | 'sets'>('items')
   const [unsubscribing, setUnsubscribing] = useState<string | null>(null)
+  const [showManage, setShowManage] = useState(false)
   const { getProfile } = useProfileCache()
 
   const blockedPubkeys = useBlockStore((s) => s.blockedPubkeys)
@@ -844,7 +845,7 @@ function OthersGifTab({ onSelect, onPickerClose }: { onSelect: (g: { name: strin
   return (
     <>
       <div className="h-full flex flex-col">
-        {/* Search + mode toggle + discover bar */}
+        {/* Search (with the Items/Sets toggle inside, right) + Manage */}
         <div className="flex items-center gap-1.5 px-2 py-1.5 border-b border-border">
           <div className="flex-1 relative">
             <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
@@ -852,27 +853,24 @@ function OthersGifTab({ onSelect, onPickerClose }: { onSelect: (g: { name: strin
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder={searchMode === 'items' ? 'Search GIFs...' : 'Search sets...'}
-              className="w-full h-9 pl-8 pr-2 rounded-md text-sm bg-muted/30 border border-border text-foreground placeholder:text-muted-foreground focus:outline-none"
+              className="w-full h-9 pl-8 pr-16 rounded-md text-sm bg-muted/30 border border-border text-foreground placeholder:text-muted-foreground focus:outline-none"
             />
+            <button
+              onClick={() => setSearchMode(searchMode === 'items' ? 'sets' : 'items')}
+              className={`absolute right-1.5 top-1/2 -translate-y-1/2 px-1.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer ${searchMode === 'sets'
+                  ? 'bg-primary/15 text-primary'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+                }`}
+            >
+              {searchMode === 'items' ? 'Items' : 'Sets'}
+            </button>
           </div>
-          <TooltipProvider delayDuration={300}>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  onClick={() => setSearchMode(searchMode === 'items' ? 'sets' : 'items')}
-                  className={`px-1.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer ${searchMode === 'sets'
-                      ? 'bg-primary/15 text-primary'
-                      : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
-                    }`}
-                >
-                  {searchMode === 'items' ? 'Items' : 'Sets'}
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom" className="text-xs z-[310]">
-                {searchMode === 'items' ? 'Switch to set search' : 'Switch to item search'}
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+          <button
+            onClick={() => setShowManage(true)}
+            className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md text-sm font-medium text-foreground bg-muted/40 hover:bg-muted/70 transition-colors cursor-pointer shrink-0"
+          >
+            <Settings2 size={14} /> Manage
+          </button>
         </div>
 
         {/* Content */}
@@ -1019,6 +1017,7 @@ function OthersGifTab({ onSelect, onPickerClose }: { onSelect: (g: { name: strin
         <UserProfileModal open={!!profilePubkey} onClose={() => setProfilePubkey(null)} targetPubkey={profilePubkey} />,
         document.body,
       )}
+      <PackManagerModal open={showManage} onClose={() => setShowManage(false)} initialSection="sub-gif" />
     </>
   )
 }
@@ -1033,7 +1032,7 @@ function FavoritesGifTab({ onSelect }: { onSelect: (g: { name: string; url: stri
   const privateKey = useUserStore((s) => s.privateKey)
 
   const [search, setSearch] = useState('')
-  const [removingUrl, setRemovingUrl] = useState<string | null>(null)
+  const [showManage, setShowManage] = useState(false)
 
   const filtered = useMemo(() => {
     let result = filterNsfwGifs(favorites)
@@ -1044,22 +1043,9 @@ function FavoritesGifTab({ onSelect }: { onSelect: (g: { name: string; url: stri
     return result
   }, [favorites, nsfwEnabled, untaggedAsNsfw, search])
 
-  const removeFavorite = async (url: string) => {
-    setRemovingUrl(url)
-    try {
-      const updated = favorites.filter((f) => f.url !== url)
-      await publishGifFavorites(updated, signer, privateKey)
-      useGifStore.getState().setFavorites(updated)
-    } catch (err) {
-      console.error('Failed to remove favorite:', err)
-    } finally {
-      setRemovingUrl(null)
-    }
-  }
-
   return (
     <div className="h-full flex flex-col">
-      {/* Search */}
+      {/* Search + Manage (favorites are managed in the pack modal) */}
       <div className="flex items-center gap-1.5 px-2 py-1.5 border-b border-border">
         <div className="flex-1 relative">
           <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
@@ -1070,6 +1056,12 @@ function FavoritesGifTab({ onSelect }: { onSelect: (g: { name: string; url: stri
             className="w-full h-9 pl-8 pr-2 rounded-md text-sm bg-muted/30 border border-border text-foreground placeholder:text-muted-foreground focus:outline-none"
           />
         </div>
+        <button
+          onClick={() => setShowManage(true)}
+          className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md text-sm font-medium text-foreground bg-muted/40 hover:bg-muted/70 transition-colors cursor-pointer shrink-0"
+        >
+          <Settings2 size={14} /> Manage
+        </button>
       </div>
 
       <div className="flex-1 overflow-y-auto p-3 space-y-2">
@@ -1083,7 +1075,6 @@ function FavoritesGifTab({ onSelect }: { onSelect: (g: { name: string; url: stri
           <TooltipProvider delayDuration={200}>
             <div className="grid grid-cols-3 gap-1.5">
               {filtered.map((gif, i) => {
-                const removing = removingUrl === gif.url
                 return (
                   <Tooltip key={`${gif.url}-${i}`}>
                     <TooltipTrigger asChild>
@@ -1097,14 +1088,6 @@ function FavoritesGifTab({ onSelect }: { onSelect: (g: { name: string; url: stri
                             alt={gif.name}
                             className="w-full h-full"
                           />
-                        </button>
-                        {/* Unfavorite button */}
-                        <button
-                          onClick={(e) => { e.stopPropagation(); removeFavorite(gif.url) }}
-                          disabled={removing}
-                          className="absolute top-1 right-1 w-5 h-5 rounded-full bg-yellow-500/90 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
-                        >
-                          {removing ? <Loader2 size={10} className="animate-spin" /> : <StarOff size={10} />}
                         </button>
                         {gif.nsfw && (
                           <span className="absolute top-1 left-1 px-1 py-0.5 rounded text-[8px] bg-red-500/80 text-white font-bold">NSFW</span>
@@ -1121,6 +1104,8 @@ function FavoritesGifTab({ onSelect }: { onSelect: (g: { name: string; url: stri
           </TooltipProvider>
         )}
       </div>
+
+      <PackManagerModal open={showManage} onClose={() => setShowManage(false)} initialSection="fav-gif" />
     </div>
   )
 }

@@ -631,6 +631,7 @@ function OthersTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcod
   const [search, setSearch] = useState('')
   const [searchMode, setSearchMode] = useState<'items' | 'sets'>('items')
   const [unsubscribing, setUnsubscribing] = useState<string | null>(null)
+  const [showManage, setShowManage] = useState(false)
   const { getProfile } = useProfileCache()
 
 
@@ -672,7 +673,7 @@ function OthersTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcod
 
   return (
     <div className="h-full flex flex-col">
-      {/* Search + mode toggle + discover bar */}
+      {/* Search (with the Items/Sets toggle inside, right) + Manage */}
       <div className="flex items-center gap-1.5 px-2 py-1.5 border-b border-[hsl(var(--border))]">
         <div className="flex-1 relative">
           <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[hsl(var(--muted-foreground))]" />
@@ -680,28 +681,25 @@ function OthersTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcod
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder={searchMode === 'items' ? 'Search emojis...' : 'Search sets...'}
-            className="w-full h-9 pl-8 pr-2 rounded-md text-sm bg-[hsl(var(--muted)/0.3)] border border-[hsl(var(--border))] text-[hsl(var(--foreground))] placeholder:text-[hsl(var(--muted-foreground))] focus:outline-none"
+            className="w-full h-9 pl-8 pr-16 rounded-md text-sm bg-[hsl(var(--muted)/0.3)] border border-[hsl(var(--border))] text-[hsl(var(--foreground))] placeholder:text-[hsl(var(--muted-foreground))] focus:outline-none"
           />
+          <button
+            onClick={() => setSearchMode(searchMode === 'items' ? 'sets' : 'items')}
+            className={`absolute right-1.5 top-1/2 -translate-y-1/2 px-1.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer ${
+              searchMode === 'sets'
+                ? 'bg-[hsl(var(--primary)/0.15)] text-[hsl(var(--primary))]'
+                : 'text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--muted)/0.5)]'
+            }`}
+          >
+            {searchMode === 'items' ? 'Items' : 'Sets'}
+          </button>
         </div>
-        <TooltipProvider delayDuration={300}>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={() => setSearchMode(searchMode === 'items' ? 'sets' : 'items')}
-                className={`px-1.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer ${
-                  searchMode === 'sets'
-                    ? 'bg-[hsl(var(--primary)/0.15)] text-[hsl(var(--primary))]'
-                    : 'text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--muted)/0.5)]'
-                }`}
-              >
-                {searchMode === 'items' ? 'Items' : 'Sets'}
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" className="text-xs z-[310]">
-              {searchMode === 'items' ? 'Switch to set search' : 'Switch to item search'}
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
+        <button
+          onClick={() => setShowManage(true)}
+          className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md text-sm font-medium text-[hsl(var(--foreground))] bg-[hsl(var(--muted)/0.4)] hover:bg-[hsl(var(--muted)/0.7)] transition-colors cursor-pointer shrink-0"
+        >
+          <Settings2 size={14} /> Manage
+        </button>
       </div>
 
       {/* Content */}
@@ -825,6 +823,8 @@ function OthersTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcod
           })
         )}
       </div>
+
+      <PackManagerModal open={showManage} onClose={() => setShowManage(false)} initialSection="sub-emoji" />
     </div>
   )
 }
