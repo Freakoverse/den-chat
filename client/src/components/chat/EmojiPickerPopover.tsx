@@ -11,10 +11,10 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { refreshSubscribedPacks } from '@/lib/customSets'
 import { createPortal } from 'react-dom'
 import EmojiPickerReact, { EmojiStyle, Theme } from 'emoji-picker-react'
-import { Smile, Sparkles, Users, Plus, Trash2, Loader2, Upload, Search, X, FolderPlus, Image, AlertTriangle, Check, Compass, ShieldQuestion, Pencil } from 'lucide-react'
-import { RenamePackModal } from '@/components/chat/RenamePackModal'
+import { Smile, Sparkles, Users, Plus, Trash2, Loader2, Upload, Search, X, Image, AlertTriangle, Check, Compass, ShieldQuestion, Pencil, Settings2 } from 'lucide-react'
+import { PackManagerModal } from '@/components/chat/PackManagerModal'
 import { useEmojiStore, getEmojiUploadLimitBytes, hasOversizedEmoji, type CustomEmoji, type EmojiSet } from '@/stores/emojiStore'
-import { publishEmojiSet, publishEmojiSubscriptions, discoverEmojiSets, fetchEmojiSetByAddress, deleteEmojiSet, fetchEmojiSetsByAuthor } from '@/lib/nostr/customEmoji'
+import { publishEmojiSet, publishEmojiSubscriptions, discoverEmojiSets, fetchEmojiSetByAddress, fetchEmojiSetsByAuthor } from '@/lib/nostr/customEmoji'
 import { uploadToBlossomServers, computeHash } from '@/lib/blossom'
 import { getUploadBlossoms } from '@/stores/postingBehaviourStore'
 import { useUserStore } from '@/stores/userStore'
@@ -22,7 +22,7 @@ import { useBlockStore } from '@/stores/blockStore'
 import { useFollowStore } from '@/stores/followStore'
 import { UserProfileModal } from '@/components/hub/UserProfileModal'
 import { useProfileCache } from '@/hooks/useProfileCache'
-import { useEscToClose, useEscBlock } from '@/hooks/useEscToClose'
+import { useEscToClose } from '@/hooks/useEscToClose'
 import { truncateNpub, resolvePubkeyInput } from '@/lib/utils'
 import { nip19 } from 'nostr-tools'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
@@ -296,20 +296,12 @@ function filterNsfwEmojis(emojis: CustomEmoji[]): CustomEmoji[] {
 
 function MineTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcode: string; url: string }) => void }) {
   const myEmojiSets = useEmojiStore((s) => s.myEmojiSets)
-  const updateMyEmojiSet = useEmojiStore((s) => s.updateMyEmojiSet)
-  const addMyEmojiSet = useEmojiStore((s) => s.addMyEmojiSet)
-  const removeMyEmojiSet = useEmojiStore((s) => s.removeMyEmojiSet)
-  const signer = useUserStore((s) => s.signer)
-  const privateKey = useUserStore((s) => s.privateKey)
-  const pubkey = useUserStore((s) => s.pubkey)
   const nsfwEnabled = useEmojiStore((s) => s.nsfwEnabled)
   const untaggedAsNsfw = useEmojiStore((s) => s.untaggedAsNsfw)
 
-  const [showUpload, setShowUpload] = useState(false)
-  const [showNewSet, setShowNewSet] = useState(false)
-  const [newSetName, setNewSetName] = useState('')
-  const [uploadTargetSet, setUploadTargetSet] = useState<string | null>(null)
   const [search, setSearch] = useState('')
+  // All creating/adding/renaming/deleting now lives in the Manage modal; this tab only browses + inserts.
+  const [showManage, setShowManage] = useState(false)
 
   // Flatten all emojis for search (with NSFW filtering)
   const allEmojis = useMemo(() => {
@@ -322,85 +314,9 @@ function MineTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcode:
     ? allEmojis.filter((e) => e.shortcode.toLowerCase().includes(search.toLowerCase()))
     : allEmojis
 
-  const handleCreateSet = async () => {
-    const name = newSetName.trim()
-    if (!name || !pubkey) return
-    // Unique d-tag (not the slugified name) so two sets with the same name never overwrite each other.
-    const dTag = crypto.randomUUID()
-    try {
-      await publishEmojiSet(dTag, name, [], signer, privateKey)
-      addMyEmojiSet({ pubkey, dTag, name, emojis: [] })
-      setNewSetName('')
-      setShowNewSet(false)
-      setUploadTargetSet(dTag)
-      setShowUpload(true)
-    } catch (err) {
-      console.error('Failed to create emoji set:', err)
-    }
-  }
-
-  const handleDeleteEmoji = async (setDTag: string, shortcode: string) => {
-    const set = myEmojiSets.find((s) => s.dTag === setDTag)
-    if (!set) return
-    const newEmojis = set.emojis.filter((e) => e.shortcode !== shortcode)
-    try {
-      await publishEmojiSet(setDTag, set.name, newEmojis, signer, privateKey)
-      updateMyEmojiSet(setDTag, newEmojis)
-    } catch (err) {
-      console.error('Failed to delete emoji:', err)
-    }
-  }
-
-  // Delete set state
-  // Rename: republish the same set (same d-tag, same emojis) with a new `title` — subscriptions survive.
-  const [renameSetDTag, setRenameSetDTag] = useState<string | null>(null)
-  const renameSet = myEmojiSets.find((s) => s.dTag === renameSetDTag)
-  const handleRenameSet = async (name: string) => {
-    if (!renameSet) return
-    await publishEmojiSet(renameSet.dTag, name, renameSet.emojis, signer, privateKey)
-    const st = useEmojiStore.getState()
-    st.setMyEmojiSets(st.myEmojiSets.map((s) => (s.dTag === renameSet.dTag ? { ...s, name } : s)))
-  }
-
-  // Rename ONE emoji: change its shortcode and republish the set (same d-tag). Already-published
-  // reactions embed their own shortcode + URL, so they keep rendering; only new reactions use the new name.
-  const sanitizeShortcode = (v: string) => v.replace(/[^a-zA-Z0-9_-]/g, '_').toLowerCase()
-  const [renameEmojiTarget, setRenameEmojiTarget] = useState<{ setDTag: string; shortcode: string } | null>(null)
-  const renameEmojiSet = renameEmojiTarget ? myEmojiSets.find((s) => s.dTag === renameEmojiTarget.setDTag) : null
-  const handleRenameEmoji = async (newShortcode: string) => {
-    if (!renameEmojiTarget || !renameEmojiSet) return
-    const sc = sanitizeShortcode(newShortcode).slice(0, 60)
-    if (!sc) throw new Error('Enter a name')
-    const newEmojis = renameEmojiSet.emojis.map((e) => e.shortcode === renameEmojiTarget.shortcode ? { ...e, shortcode: sc } : e)
-    await publishEmojiSet(renameEmojiTarget.setDTag, renameEmojiSet.name, newEmojis, signer, privateKey)
-    updateMyEmojiSet(renameEmojiTarget.setDTag, newEmojis)
-  }
-  const [deleteSetDTag, setDeleteSetDTag] = useState<string | null>(null)
-  const [deletingSet, setDeletingSet] = useState(false)
-  const deleteSet = myEmojiSets.find((s) => s.dTag === deleteSetDTag)
-
-  const handleDeleteSet = async () => {
-    if (!deleteSetDTag) return
-    setDeletingSet(true)
-    try {
-      await deleteEmojiSet(deleteSetDTag, signer, privateKey)
-      removeMyEmojiSet(deleteSetDTag)
-    } catch (err) {
-      console.error('Failed to delete emoji set:', err)
-    } finally {
-      setDeletingSet(false)
-      setDeleteSetDTag(null)
-    }
-  }
-
-  // Esc on the "Request Delete Emoji Set" confirmation behaves like its Cancel/backdrop
-  // (dismiss when not mid-request), and is absorbed while the deletion request is in flight.
-  useEscToClose(() => setDeleteSetDTag(null), !!deleteSetDTag && !deletingSet)
-  useEscBlock(!!deleteSetDTag && deletingSet)
-
   return (
     <div className="h-full flex flex-col">
-      {/* Search + actions bar */}
+      {/* Search + Manage */}
       <div className="flex items-center gap-1.5 px-2 py-1.5 border-b border-[hsl(var(--border))]">
         <div className="flex-1 relative">
           <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[hsl(var(--muted-foreground))]" />
@@ -411,78 +327,25 @@ function MineTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcode:
             className="w-full h-9 pl-8 pr-2 rounded-md text-sm bg-[hsl(var(--muted)/0.3)] border border-[hsl(var(--border))] text-[hsl(var(--foreground))] placeholder:text-[hsl(var(--muted-foreground))] focus:outline-none"
           />
         </div>
-        <TooltipProvider delayDuration={300}>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={() => { setShowNewSet(!showNewSet); if (!showNewSet) setShowUpload(false) }}
-                className="p-2 rounded-md text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--muted)/0.5)] transition-colors cursor-pointer"
-              >
-                <FolderPlus size={14} />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" className="text-xs z-[310]">New Set</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                disabled={myEmojiSets.length === 0}
-                onClick={() => { const next = !showUpload; setShowUpload(next); if (next) { setShowNewSet(false); if (!uploadTargetSet && myEmojiSets.length > 0) setUploadTargetSet(myEmojiSets[0].dTag) } }}
-                className={`p-2 rounded-md transition-colors ${myEmojiSets.length === 0 ? 'text-[hsl(var(--muted-foreground)/0.3)] cursor-not-allowed' : 'text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--muted)/0.5)] cursor-pointer'}`}
-              >
-                <Plus size={14} />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" className="text-xs z-[310]">Add Emoji</TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
+        <button
+          onClick={() => setShowManage(true)}
+          className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md text-sm font-medium text-[hsl(var(--foreground))] bg-[hsl(var(--muted)/0.4)] hover:bg-[hsl(var(--muted)/0.7)] transition-colors cursor-pointer shrink-0"
+        >
+          <Settings2 size={14} /> Manage
+        </button>
       </div>
 
-      {/* New set form */}
-      {showNewSet && (
-        <div className="px-2 py-2 border-b border-[hsl(var(--border))] bg-[hsl(var(--muted)/0.2)]">
-          <p className="text-xs text-[hsl(var(--muted-foreground))] mb-1.5">Create a new emoji set</p>
-          <div className="flex gap-1.5">
-            <input
-              value={newSetName}
-              onChange={(e) => setNewSetName(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleCreateSet()}
-              placeholder="Set name..."
-              className="flex-1 h-9 px-3 rounded-md text-sm bg-[hsl(var(--background))] border border-[hsl(var(--border))] text-[hsl(var(--foreground))] placeholder:text-[hsl(var(--muted-foreground))] focus:outline-none"
-              autoFocus
-            />
-            <button
-              onClick={handleCreateSet}
-              disabled={!newSetName.trim()}
-              className="h-9 px-3 rounded-md bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] text-xs font-medium hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50"
-            >
-              Create
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Upload form */}
-      {showUpload && myEmojiSets.length > 0 && (
-        <EmojiUploadForm
-          sets={myEmojiSets}
-          targetSet={uploadTargetSet || myEmojiSets[0].dTag}
-          onTargetChange={setUploadTargetSet}
-          onDone={() => setShowUpload(false)}
-        />
-      )}
-
-      {/* Emoji grid */}
+      {/* Emoji grid (browse + insert only) */}
       <div className="flex-1 overflow-y-auto px-2 py-1.5">
         {myEmojiSets.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full gap-2 text-[hsl(var(--muted-foreground))]">
             <Image size={24} className="opacity-40" />
-            <p className="text-xs text-center">No emoji sets yet.<br />Create one to get started!</p>
+            <p className="text-xs text-center">No emoji sets yet.</p>
             <button
-              onClick={() => setShowNewSet(true)}
-              className="mt-1 px-3 py-1.5 rounded-lg bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] text-xs font-medium hover:opacity-90 transition-opacity cursor-pointer"
+              onClick={() => setShowManage(true)}
+              className="mt-1 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] text-xs font-medium hover:opacity-90 transition-opacity cursor-pointer"
             >
-              Create Set
+              <Settings2 size={13} /> Manage packs
             </button>
           </div>
         ) : filtered.length === 0 && search ? (
@@ -498,47 +361,15 @@ function MineTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcode:
                     key={`${e.setDTag}-${e.shortcode}`}
                     emoji={e}
                     onClick={() => onSelect(`:${e.shortcode}:`, { shortcode: e.shortcode, url: e.url })}
-                    onDelete={() => handleDeleteEmoji(e.setDTag, e.shortcode)}
-                    onRename={() => setRenameEmojiTarget({ setDTag: e.setDTag, shortcode: e.shortcode })}
                   />
                 ))}
               </div>
             ) : (
               myEmojiSets.map((set) => (
                 <div key={set.dTag} className="mb-2">
-                  <div className="flex items-center justify-between px-0.5 mb-1">
-                    <p className="text-xs font-semibold text-[hsl(var(--muted-foreground))] uppercase tracking-wider">
-                      {set.name}
-                    </p>
-                    <div className="flex items-center gap-1">
-                    <TooltipProvider delayDuration={200}>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <button
-                            onClick={() => setRenameSetDTag(set.dTag)}
-                            className="p-0.5 rounded hover:bg-accent/50 text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-                          >
-                            <Pencil size={10} />
-                          </button>
-                        </TooltipTrigger>
-                        <TooltipContent side="top" className="text-xs z-[310]">Rename</TooltipContent>
-                      </Tooltip>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <button
-                            onClick={() => setDeleteSetDTag(set.dTag)}
-                            className="p-0.5 rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-colors cursor-pointer"
-                          >
-                            <Trash2 size={10} />
-                          </button>
-                        </TooltipTrigger>
-                        <TooltipContent side="top" className="text-xs z-[310]">Request Delete</TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
-                    </div>
-                  </div>
+                  <p className="text-xs font-semibold text-[hsl(var(--muted-foreground))] uppercase tracking-wider px-0.5 mb-1 truncate">{set.name}</p>
                   {set.emojis.length === 0 ? (
-                    <p className="text-xs text-[hsl(var(--muted-foreground)/0.6)] italic px-0.5">Empty set — add emojis above</p>
+                    <p className="text-xs text-[hsl(var(--muted-foreground)/0.6)] italic px-0.5">Empty set</p>
                   ) : (
                     <div className="grid grid-cols-7 gap-1.5">
                       {set.emojis.map((e) => (
@@ -546,8 +377,6 @@ function MineTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcode:
                           key={e.shortcode}
                           emoji={e}
                           onClick={() => onSelect(`:${e.shortcode}:`, { shortcode: e.shortcode, url: e.url })}
-                          onDelete={() => handleDeleteEmoji(set.dTag, e.shortcode)}
-                          onRename={() => setRenameEmojiTarget({ setDTag: set.dTag, shortcode: e.shortcode })}
                         />
                       ))}
                     </div>
@@ -559,50 +388,7 @@ function MineTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcode:
         )}
       </div>
 
-      {/* Delete set confirmation modal */}
-      <RenamePackModal
-        open={!!renameSet}
-        currentName={renameSet?.name ?? ''}
-        kindLabel="emoji set"
-        onClose={() => setRenameSetDTag(null)}
-        onSave={handleRenameSet}
-      />
-      <RenamePackModal
-        open={!!renameEmojiTarget}
-        currentName={renameEmojiTarget?.shortcode ?? ''}
-        kindLabel="emoji"
-        title="Rename emoji"
-        hint="Existing reactions keep their old name; only new ones use this."
-        transform={sanitizeShortcode}
-        validate={(v) => (renameEmojiSet?.emojis.some((e) => e.shortcode === v && e.shortcode !== renameEmojiTarget?.shortcode) ? 'That name is already used in this set' : null)}
-        onClose={() => setRenameEmojiTarget(null)}
-        onSave={handleRenameEmoji}
-      />
-      {deleteSetDTag && createPortal(
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[320]" onClick={() => !deletingSet && setDeleteSetDTag(null)}>
-          <div className="bg-card border border-border rounded-lg p-6 max-w-md w-full mx-4 shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-lg font-semibold text-foreground mb-2">Request Delete Emoji Set</h3>
-            {!deletingSet ? (
-              <>
-                <p className="text-sm text-muted-foreground mb-4">
-                  This will send a deletion request for the emoji set <strong>"{deleteSet?.name || deleteSetDTag}"</strong> to the relays. Deletion is <strong>not guaranteed</strong> —
-                  some relays may not honor the request, and other clients may have already cached the set.
-                </p>
-                <div className="flex justify-end gap-2">
-                  <Button variant="outline" onClick={() => setDeleteSetDTag(null)}>Cancel</Button>
-                  <Button variant="destructive" onClick={handleDeleteSet}>Yes, Request Delete</Button>
-                </div>
-              </>
-            ) : (
-              <div className="flex items-center gap-2 py-4">
-                <Loader2 size={16} className="animate-spin text-primary" />
-                <span className="text-sm text-muted-foreground">Sending deletion request...</span>
-              </div>
-            )}
-          </div>
-        </div>,
-        document.body
-      )}
+      <PackManagerModal open={showManage} onClose={() => setShowManage(false)} initialSection="emoji" />
     </div>
   )
 }
@@ -612,7 +398,7 @@ function MineTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcode:
 function EmojiButton({ emoji, onClick, onDelete, onRename }: {
   emoji: CustomEmoji
   onClick: () => void
-  onDelete: () => void
+  onDelete?: () => void
   onRename?: () => void
 }) {
   return (
@@ -643,19 +429,21 @@ function EmojiButton({ emoji, onClick, onDelete, onRename }: {
           <Pencil size={7} />
         </button>
       )}
-      <button
-        onClick={(e) => { e.stopPropagation(); onDelete() }}
-        className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-destructive text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer z-10"
-      >
-        <Trash2 size={7} />
-      </button>
+      {onDelete && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onDelete() }}
+          className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-destructive text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer z-10"
+        >
+          <Trash2 size={7} />
+        </button>
+      )}
     </div>
   )
 }
 
 // ─── Upload Form ───
 
-function EmojiUploadForm({ sets, targetSet, onTargetChange, onDone }: {
+export function EmojiUploadForm({ sets, targetSet, onTargetChange, onDone }: {
   sets: EmojiSet[]
   targetSet: string
   onTargetChange: (dTag: string) => void
