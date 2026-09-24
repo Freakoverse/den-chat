@@ -325,7 +325,7 @@ function MineStickerTab({ onSelect }: { onSelect: (s: { shortcode: string; url: 
         )}
       </div>
 
-      <PackManagerModal open={showManage} onClose={() => setShowManage(false)} initialSection="sticker" />
+      <PackManagerModal open={showManage} onClose={() => setShowManage(false)} initialSection="mine-sticker" />
     </div>
   )
 }

@@ -9,7 +9,7 @@
  */
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { X, Smile, Sticker, Film, FolderPlus, Plus, Pencil, Trash2, ChevronDown, ChevronUp, Loader2, AlertTriangle, Upload } from 'lucide-react'
+import { X, Smile, Sticker, Film, FolderPlus, Plus, Pencil, Trash2, ChevronDown, ChevronUp, Loader2, AlertTriangle, Upload, Star, StarOff } from 'lucide-react'
 import { useEscToClose } from '@/hooks/useEscToClose'
 import { useMobile } from '@/hooks/useMobile'
 import { BlossomImage } from '@/components/ui/BlossomImage'
@@ -19,30 +19,41 @@ import { useUserStore } from '@/stores/userStore'
 import { useEmojiStore } from '@/stores/emojiStore'
 import { useStickerStore, getStickerUploadLimitBytes } from '@/stores/stickerStore'
 import { useGifStore, getGifUploadLimitBytes } from '@/stores/gifStore'
-import { publishEmojiSet, deleteEmojiSet } from '@/lib/nostr/customEmoji'
-import { publishStickerSet, deleteStickerSet } from '@/lib/nostr/customSticker'
-import { publishGifCollection, deleteGifCollection } from '@/lib/nostr/customGif'
+import { publishEmojiSet, deleteEmojiSet, publishEmojiSubscriptions } from '@/lib/nostr/customEmoji'
+import { publishStickerSet, deleteStickerSet, publishStickerSubscriptions } from '@/lib/nostr/customSticker'
+import { publishGifCollection, deleteGifCollection, publishGifSubscriptions, publishGifFavorites } from '@/lib/nostr/customGif'
 import { uploadToBlossomServers } from '@/lib/blossom'
 import { getUploadBlossoms } from '@/stores/postingBehaviourStore'
 
 export type PackKind = 'emoji' | 'sticker' | 'gif'
+export type PackSection = 'mine-emoji' | 'mine-sticker' | 'mine-gif' | 'sub-emoji' | 'sub-sticker' | 'sub-gif' | 'fav-gif'
 
-const NAV: { id: PackKind; label: string; icon: typeof Smile }[] = [
-  { id: 'emoji', label: 'Emojis', icon: Smile },
-  { id: 'sticker', label: 'Stickers', icon: Sticker },
-  { id: 'gif', label: 'GIFs', icon: Film },
+const NAV_GROUPS: { header: string; items: { id: PackSection; label: string; icon: typeof Smile }[] }[] = [
+  { header: 'Mine', items: [
+    { id: 'mine-emoji', label: 'Emojis', icon: Smile },
+    { id: 'mine-sticker', label: 'Stickers', icon: Sticker },
+    { id: 'mine-gif', label: 'GIFs', icon: Film },
+  ] },
+  { header: 'Subscribed', items: [
+    { id: 'sub-emoji', label: 'Emojis', icon: Smile },
+    { id: 'sub-sticker', label: 'Stickers', icon: Sticker },
+    { id: 'sub-gif', label: 'GIFs', icon: Film },
+  ] },
+  { header: 'Favorites', items: [
+    { id: 'fav-gif', label: 'GIFs', icon: Star },
+  ] },
 ]
 
 const sanitizeShortcode = (v: string) => v.replace(/[^a-zA-Z0-9_-]/g, '_').toLowerCase()
 
-export function PackManagerModal({ open, onClose, initialSection = 'emoji' }: {
+export function PackManagerModal({ open, onClose, initialSection = 'mine-emoji' }: {
   open: boolean
   onClose: () => void
-  initialSection?: PackKind
+  initialSection?: PackSection
 }) {
   useEscToClose(onClose, open)
   const isMobile = useMobile()
-  const [section, setSection] = useState<PackKind>(initialSection)
+  const [section, setSection] = useState<PackSection>(initialSection)
   useEffect(() => { if (open) setSection(initialSection) }, [open, initialSection])
 
   if (!open) return null
@@ -65,26 +76,35 @@ export function PackManagerModal({ open, onClose, initialSection = 'emoji' }: {
         </div>
 
         <div className={`flex flex-1 min-h-0 ${isMobile ? 'flex-col' : ''}`}>
-          {/* Nav — left rail on desktop, top bar on mobile */}
-          <div className={`shrink-0 flex gap-1 ${isMobile ? 'flex-row border-b border-border px-2 py-1.5' : 'w-32 flex-col border-r border-border p-2'}`}>
-            {NAV.map(({ id, label, icon: Icon }) => (
-              <button
-                key={id}
-                onClick={() => setSection(id)}
-                className={`flex items-center gap-2 px-2.5 py-2 rounded-lg text-sm transition-colors cursor-pointer ${isMobile ? 'flex-1 justify-center' : ''} ${
-                  section === id ? 'bg-secondary text-foreground font-medium' : 'text-muted-foreground hover:text-foreground hover:bg-secondary/50'
-                }`}
-              >
-                <Icon size={16} /> {label}
-              </button>
+          {/* Nav — grouped left rail on desktop, grouped horizontal scroller on mobile */}
+          <nav className={`shrink-0 ${isMobile ? 'flex flex-row items-center border-b border-border px-2 py-1.5 gap-2 overflow-x-auto' : 'w-36 flex flex-col border-r border-border p-2 gap-3 overflow-y-auto'}`}>
+            {NAV_GROUPS.map((group) => (
+              <div key={group.header} className={isMobile ? 'flex items-center gap-1.5 shrink-0' : 'flex flex-col gap-0.5'}>
+                <span className={`text-[10px] font-semibold uppercase tracking-wider text-muted-foreground shrink-0 ${isMobile ? 'px-1' : 'px-2.5 pt-1 pb-0.5'}`}>{group.header}</span>
+                {group.items.map(({ id, label, icon: Icon }) => (
+                  <button
+                    key={id}
+                    onClick={() => setSection(id)}
+                    className={`flex items-center gap-2 px-2.5 py-2 rounded-lg text-sm transition-colors cursor-pointer shrink-0 ${
+                      section === id ? 'bg-secondary text-foreground font-medium' : 'text-muted-foreground hover:text-foreground hover:bg-secondary/50'
+                    }`}
+                  >
+                    <Icon size={16} /> {label}
+                  </button>
+                ))}
+              </div>
             ))}
-          </div>
+          </nav>
 
           {/* Content */}
           <div className="flex-1 min-w-0 overflow-y-auto p-3 sm:p-4">
-            {section === 'emoji' && <EmojiManageSection />}
-            {section === 'sticker' && <StickerManageSection />}
-            {section === 'gif' && <GifManageSection />}
+            {section === 'mine-emoji' && <EmojiManageSection />}
+            {section === 'mine-sticker' && <StickerManageSection />}
+            {section === 'mine-gif' && <GifManageSection />}
+            {section === 'sub-emoji' && <SubscriptionsSection kind="emoji" />}
+            {section === 'sub-sticker' && <SubscriptionsSection kind="sticker" />}
+            {section === 'sub-gif' && <SubscriptionsSection kind="gif" />}
+            {section === 'fav-gif' && <FavoritesSection />}
           </div>
         </div>
       </div>
@@ -685,6 +705,102 @@ function EmojiManageSection() {
         </div>,
         document.body,
       )}
+    </div>
+  )
+}
+
+// ─── Subscriptions section (view + unsubscribe, per kind) ───
+
+function SubscriptionsSection({ kind }: { kind: PackKind }) {
+  const signer = useUserStore((s) => s.signer)
+  const privateKey = useUserStore((s) => s.privateKey)
+  const emojiSets = useEmojiStore((s) => s.subscribedSets)
+  const emojiAddrs = useEmojiStore((s) => s.subscriptionAddresses)
+  const stickerSets = useStickerStore((s) => s.subscribedSets)
+  const stickerAddrs = useStickerStore((s) => s.subscriptionAddresses)
+  const gifCols = useGifStore((s) => s.subscribedCollections)
+  const gifAddrs = useGifStore((s) => s.subscriptionAddresses)
+  const [busy, setBusy] = useState<string | null>(null)
+
+  const cfg = kind === 'emoji'
+    ? { sets: emojiSets as any[], addrs: emojiAddrs, prefix: '30030', label: 'emoji sets', items: (s: any) => s.emojis, publish: publishEmojiSubscriptions, remove: (a: string) => useEmojiStore.getState().removeSubscription(a) }
+    : kind === 'sticker'
+    ? { sets: stickerSets as any[], addrs: stickerAddrs, prefix: '30031', label: 'sticker sets', items: (s: any) => s.stickers, publish: publishStickerSubscriptions, remove: (a: string) => useStickerStore.getState().removeSubscription(a) }
+    : { sets: gifCols as any[], addrs: gifAddrs, prefix: '30032', label: 'GIF collections', items: (s: any) => s.gifs, publish: publishGifSubscriptions, remove: (a: string) => useGifStore.getState().removeSubscription(a) }
+
+  const unsubscribe = async (set: any) => {
+    const addr = `${cfg.prefix}:${set.pubkey}:${set.dTag}`
+    setBusy(addr)
+    try {
+      await cfg.publish(cfg.addrs.filter((a) => a !== addr), signer, privateKey)
+      cfg.remove(addr)
+    } catch (err) { console.error(err) } finally { setBusy(null) }
+  }
+
+  return (
+    <div className="space-y-3">
+      <span className="text-sm text-muted-foreground">Subscribed {cfg.label}</span>
+      {cfg.sets.length === 0 ? (
+        <p className="text-sm text-muted-foreground text-center py-8">You have not subscribed to any {cfg.label} yet.</p>
+      ) : cfg.sets.map((set) => {
+        const addr = `${cfg.prefix}:${set.pubkey}:${set.dTag}`
+        const items = cfg.items(set)
+        return (
+          <div key={addr} className="flex items-center gap-3 rounded-xl border border-border p-3">
+            <div className="flex -space-x-1.5 shrink-0">
+              {items.slice(0, 3).map((it: any, i: number) => (
+                <div key={i} className="w-8 h-8 rounded-md bg-secondary/40 border border-card flex items-center justify-center overflow-hidden">
+                  <BlossomImage src={it.url} alt="" className="w-7 h-7" contain />
+                </div>
+              ))}
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-medium text-foreground truncate">{set.name}</div>
+              <div className="text-xs text-muted-foreground">{items.length} item{items.length !== 1 ? 's' : ''}</div>
+            </div>
+            <button onClick={() => unsubscribe(set)} disabled={busy === addr} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-xs text-foreground hover:bg-secondary/60 transition-colors cursor-pointer disabled:opacity-50 shrink-0">
+              {busy === addr ? <Loader2 size={13} className="animate-spin" /> : <X size={13} />} Unsubscribe
+            </button>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// ─── Favorites section (GIF favorites: view + remove) ───
+
+function FavoritesSection() {
+  const favorites = useGifStore((s) => s.favorites)
+  const signer = useUserStore((s) => s.signer)
+  const privateKey = useUserStore((s) => s.privateKey)
+  const [busy, setBusy] = useState<string | null>(null)
+
+  const remove = async (url: string) => {
+    setBusy(url)
+    try {
+      const updated = useGifStore.getState().favorites.filter((f) => f.url !== url)
+      await publishGifFavorites(updated, signer, privateKey)
+      useGifStore.getState().setFavorites(updated)
+    } catch (err) { console.error(err) } finally { setBusy(null) }
+  }
+
+  return (
+    <div className="space-y-3">
+      <span className="text-sm text-muted-foreground">Favorite GIFs</span>
+      {favorites.length === 0 ? (
+        <p className="text-sm text-muted-foreground text-center py-8">No favorite GIFs yet. Star a GIF from the GIF picker to save it here.</p>
+      ) : favorites.map((g) => (
+        <div key={g.url} className="flex items-center gap-3 rounded-xl border border-border p-3">
+          <div className="w-24 h-16 rounded-md bg-secondary/40 flex items-center justify-center shrink-0 overflow-hidden">
+            <BlossomImage src={g.url} alt={g.name} className="max-w-full max-h-full" contain />
+          </div>
+          <span className="flex-1 text-sm text-foreground truncate min-w-0">{g.name || 'Unnamed GIF'}</span>
+          <button onClick={() => remove(g.url)} disabled={busy === g.url} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-destructive/40 text-xs text-destructive hover:bg-destructive/10 transition-colors cursor-pointer disabled:opacity-50 shrink-0">
+            {busy === g.url ? <Loader2 size={13} className="animate-spin" /> : <StarOff size={13} />} Remove
+          </button>
+        </div>
+      ))}
     </div>
   )
 }

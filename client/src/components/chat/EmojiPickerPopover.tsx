@@ -388,7 +388,7 @@ function MineTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcode:
         )}
       </div>
 
-      <PackManagerModal open={showManage} onClose={() => setShowManage(false)} initialSection="emoji" />
+      <PackManagerModal open={showManage} onClose={() => setShowManage(false)} initialSection="mine-emoji" />
     </div>
   )
 }

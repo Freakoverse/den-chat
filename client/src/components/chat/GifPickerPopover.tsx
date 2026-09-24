@@ -777,7 +777,7 @@ function MineGifTab({ onSelect }: { onSelect: (g: { name: string; url: string; n
         )}
       </div>
 
-      <PackManagerModal open={showManage} onClose={() => setShowManage(false)} initialSection="gif" />
+      <PackManagerModal open={showManage} onClose={() => setShowManage(false)} initialSection="mine-gif" />
     </div>
   )
 }
