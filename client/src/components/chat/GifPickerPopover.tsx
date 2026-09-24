@@ -12,9 +12,10 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { refreshSubscribedPacks } from '@/lib/customSets'
 import { createPortal } from 'react-dom'
 import { RenamePackModal } from '@/components/chat/RenamePackModal'
+import { PackManagerModal } from '@/components/chat/PackManagerModal'
 import {
   Compass, Sparkles, Star, StarOff, Plus, Trash2, Loader2, Upload, Pencil,
-  Search, X, FolderPlus, Image, Check, Users, ImagePlay, Eye, EyeOff, ShieldQuestion,
+  Search, X, FolderPlus, Image, Check, Users, ImagePlay, Eye, EyeOff, ShieldQuestion, Settings2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { BlossomImage } from '@/components/ui/BlossomImage'
@@ -667,16 +668,10 @@ function MineGifTab({ onSelect }: { onSelect: (g: { name: string; url: string; n
   const myCollections = useGifStore((s) => s.myGifCollections)
   const nsfwEnabled = useGifStore((s) => s.nsfwEnabled)
   const untaggedAsNsfw = useGifStore((s) => s.untaggedAsNsfw)
-  const pubkey = useUserStore((s) => s.pubkey)
-  const signer = useUserStore((s) => s.signer)
-  const privateKey = useUserStore((s) => s.privateKey)
 
-  const [showCreateInput, setShowCreateInput] = useState(false)
-  const [newCollectionName, setNewCollectionName] = useState('')
-  const [creating, setCreating] = useState(false)
-  const [expandedCollection, setExpandedCollection] = useState<string | null>(null)
   const [search, setSearch] = useState('')
-  const [showAddGif, setShowAddGif] = useState(false)
+  // Creating/adding/renaming/deleting now lives in the Manage modal; this tab only browses + inserts.
+  const [showManage, setShowManage] = useState(false)
 
   // Flatten all GIFs for search
   const allGifs = useMemo(() => {
@@ -694,33 +689,9 @@ function MineGifTab({ onSelect }: { onSelect: (g: { name: string; url: string; n
     )
     : allGifs
 
-  const createCollection = async () => {
-    if (!newCollectionName.trim() || !pubkey) return
-    const name = newCollectionName.trim()
-    // Unique d-tag so two collections with the same name never overwrite each other on relays.
-    const dTag = crypto.randomUUID()
-    setCreating(true)
-    try {
-      await publishGifCollection(dTag, name, [], signer, privateKey)
-      useGifStore.getState().addMyGifCollection({
-        pubkey,
-        dTag,
-        name,
-        gifs: [],
-      })
-      setNewCollectionName('')
-      setShowCreateInput(false)
-      setExpandedCollection(dTag)
-    } catch (err) {
-      console.error('Failed to create GIF collection:', err)
-    } finally {
-      setCreating(false)
-    }
-  }
-
   return (
     <div className="h-full flex flex-col">
-      {/* Search + actions bar */}
+      {/* Search + Manage */}
       <div className="flex items-center gap-1.5 px-2 py-1.5 border-b border-border">
         <div className="flex-1 relative">
           <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
@@ -731,75 +702,25 @@ function MineGifTab({ onSelect }: { onSelect: (g: { name: string; url: string; n
             className="w-full h-9 pl-8 pr-2 rounded-md text-sm bg-muted/30 border border-border text-foreground placeholder:text-muted-foreground focus:outline-none"
           />
         </div>
-        <TooltipProvider delayDuration={300}>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={() => { setShowCreateInput(!showCreateInput); if (!showCreateInput) setShowAddGif(false) }}
-                className="p-2 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors cursor-pointer"
-              >
-                <FolderPlus size={14} />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" className="text-xs z-[310]">New Collection</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                disabled={myCollections.length === 0}
-                onClick={() => {
-                  const next = !showAddGif
-                  setShowAddGif(next)
-                  if (next) {
-                    setShowCreateInput(false)
-                    if (myCollections.length > 0 && !expandedCollection) setExpandedCollection(myCollections[0].dTag)
-                  }
-                }}
-                className={`p-2 rounded-md transition-colors ${myCollections.length === 0 ? 'text-muted-foreground/30 cursor-not-allowed' : 'text-muted-foreground hover:text-foreground hover:bg-muted/50 cursor-pointer'}`}
-              >
-                <Plus size={14} />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" className="text-xs z-[310]">Add GIF</TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
+        <button
+          onClick={() => setShowManage(true)}
+          className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md text-sm font-medium text-foreground bg-muted/40 hover:bg-muted/70 transition-colors cursor-pointer shrink-0"
+        >
+          <Settings2 size={14} /> Manage
+        </button>
       </div>
 
-      {/* Create collection form */}
-      {showCreateInput && (
-        <div className="px-2 py-2 border-b border-border bg-muted/20">
-          <p className="text-xs text-muted-foreground mb-1.5">Create a new GIF collection</p>
-          <div className="flex gap-1.5">
-            <input
-              autoFocus
-              value={newCollectionName}
-              onChange={(e) => setNewCollectionName(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') createCollection(); if (e.key === 'Escape') setShowCreateInput(false) }}
-              placeholder="Collection name..."
-              className="flex-1 h-9 px-3 rounded-md text-sm bg-background border border-border text-foreground placeholder:text-muted-foreground focus:outline-none"
-            />
-            <button
-              onClick={createCollection}
-              disabled={!newCollectionName.trim() || creating}
-              className="h-9 px-3 rounded-md bg-primary text-primary-foreground text-xs font-medium hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50"
-            >
-              {creating ? <Loader2 size={12} className="animate-spin" /> : 'Create'}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* GIF grid */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-2">
+      {/* GIF grid (browse + insert only) */}
+      <div className="flex-1 overflow-y-auto p-3 space-y-3">
         {myCollections.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full gap-2 text-muted-foreground">
             <ImagePlay size={24} className="opacity-40" />
-            <p className="text-xs text-center">No GIF collections yet.<br />Create one to get started!</p>
+            <p className="text-xs text-center">No GIF collections yet.</p>
             <button
-              onClick={() => setShowCreateInput(true)}
-              className="mt-1 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:opacity-90 transition-opacity cursor-pointer"
+              onClick={() => setShowManage(true)}
+              className="mt-1 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:opacity-90 transition-opacity cursor-pointer"
             >
-              Create Collection
+              <Settings2 size={13} /> Manage packs
             </button>
           </div>
         ) : search ? (
@@ -828,18 +749,35 @@ function MineGifTab({ onSelect }: { onSelect: (g: { name: string; url: string; n
           )
         ) : (
           myCollections.map((col) => (
-            <GifCollectionCard
-              key={`${col.pubkey}:${col.dTag}`}
-              collection={col}
-              isMine
-              expanded={expandedCollection === col.dTag || showAddGif}
-              onToggle={() => setExpandedCollection(expandedCollection === col.dTag ? null : col.dTag)}
-              onSelect={(g) => onSelect(g)}
-              nsfwEnabled={nsfwEnabled}
-            />
+            <div key={`${col.pubkey}:${col.dTag}`}>
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-0.5 mb-1.5 truncate">{col.name}</p>
+              {col.gifs.length === 0 ? (
+                <p className="text-xs text-muted-foreground/60 italic px-0.5">Empty collection</p>
+              ) : (
+                <div className="grid grid-cols-3 gap-1.5">
+                  <TooltipProvider delayDuration={200}>
+                    {col.gifs.map((g) => (
+                      <Tooltip key={g.url}>
+                        <TooltipTrigger asChild>
+                          <button
+                            onClick={() => onSelect({ name: g.name, url: g.url, nsfw: g.nsfw })}
+                            className="w-full aspect-square rounded-lg border border-border/30 overflow-hidden hover:border-primary/40 hover:ring-1 hover:ring-primary/20 transition-all cursor-pointer bg-secondary/20"
+                          >
+                            <BlossomImage src={g.url} alt={g.name} className="w-full h-full" />
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="text-xs z-[310]">{g.name || 'Unnamed GIF'}</TooltipContent>
+                      </Tooltip>
+                    ))}
+                  </TooltipProvider>
+                </div>
+              )}
+            </div>
           ))
         )}
       </div>
+
+      <PackManagerModal open={showManage} onClose={() => setShowManage(false)} initialSection="gif" />
     </div>
   )
 }
