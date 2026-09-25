@@ -2268,7 +2268,7 @@ Published by a member to report another user within a hub. Reports are private โ
     ["p", "<reported_user_pubkey>"],
     ["report", "36943:<msg_author_pubkey>:<msg_d_tag>"],
     ["y", "<report_type>"],
-    ["s", "open"],
+    ["S", "open"],
     ["epoch", "<epoch_number>"],
     ["nonce", "<random>", "<difficulty_bits>"]
   ],
@@ -2285,7 +2285,7 @@ Published by a member to report another user within a hub. Reports are private โ
 | `identity` | v2 only | The reporter's `R` identity attestation, encrypted with the `reports_key` (ยง4.6). Lets a mod resolve the real reporter while keeping `R` off the wire. Absent in v1. |
 | `report` | No | Addressable reference to the reported message: `"36943:<author>:<d_tag>"`. Present when reporting a specific message; absent for general user reports. |
 | `y` | Yes | Report type/classification. Predefined values: `"spam"`, `"nudity"`, `"profanity"`, `"illegal"`, `"malware"`, `"impersonation"`, `"other"` (NIP-56 vocabulary). Custom freeform strings are also valid โ€” clients SHOULD present predefined types as suggestions and allow custom input. |
-| `s` | Yes | Report status: `"open"` (active) or `"retracted"` (withdrawn by reporter). |
+| `S` | Yes | Report status: `"open"` (active) or `"retracted"` (withdrawn by reporter). |
 | `epoch` | Yes | Epoch number of the hub secret used for encryption. |
 | `nonce` | Conditional | PoW nonce (NIP-13). Required if hub has a `w` tag with difficulty > 0. |
 
@@ -2340,7 +2340,7 @@ To fetch a user's own reports:
 
 To retract a report, the reporter re-publishes the event with:
 - The **same `d` tag** (relay replaces the original)
-- `["s", "retracted"]` instead of `["s", "open"]`
+- `["S", "retracted"]` instead of `["S", "open"]`
 - Optionally updated encrypted content
 
 #### Client Behavior
@@ -3288,7 +3288,7 @@ Clients MUST hide any hub carrying a `new_hub` tag from search/browse/discovery.
 | `sphere` | Voice Presence | Voice sphere radius for spatial audio attenuation. |
 | `report` | Report | Reported message addressable reference: `["report", "36943:<author>:<d_tag>"]`. Present when reporting a specific message. |
 | `y` | Report | Report type classification. Predefined: `spam`, `nudity`, `profanity`, `illegal`, `malware`, `impersonation`, `other`. Custom freeform strings also valid. |
-| `s` | Report | Report status: `open` (active) or `retracted` (withdrawn by reporter). |
+| `S` | Report | Report status: `open` (active) or `retracted` (withdrawn by reporter). |
 | `a` | Report, Message, Calendar RSVP | Addressable event reference. In reports: hub scope `["a", "36942:<creator>:<d_tag>"]`. In messages: reply/thread root reference. In RSVPs: calendar event reference `["a", "31923:<pubkey>:<d_tag>"]`. |
 | `p` | Report, Message | Pubkey reference. In reports: the reported user (violator). In messages: mention or reply target. |
 | `title` | Calendar Event | AES-encrypted event title. |

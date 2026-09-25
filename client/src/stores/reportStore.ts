@@ -4,7 +4,7 @@
  * Reports are hub-scoped, encrypted, addressable replaceable events.
  * Each report has a unique d-tag (UUID), a reported user (p tag),
  * an optional reported message (report tag), a type (y tag), and
- * a status (s tag: open | retracted).
+ * a status (S tag: open | retracted).
  *
  * Encryption uses HKDF-SHA256 with "reports" domain separation.
  */
@@ -140,7 +140,7 @@ function parseReportEvent(event: any): Omit<HubReport, 'reasonText'> & { reasonT
   const reportedPubkey = event.tags.find((t: string[]) => t[0] === 'p')?.[1] || ''
   const reportTag = event.tags.find((t: string[]) => t[0] === 'report')
   const reportType = (event.tags.find((t: string[]) => t[0] === 'y')?.[1] || 'other') as ReportType
-  const status = (event.tags.find((t: string[]) => t[0] === 's')?.[1] || 'open') as 'open' | 'retracted'
+  const status = (event.tags.find((t: string[]) => t[0] === 'S')?.[1] || 'open') as 'open' | 'retracted'
   const epoch = parseInt(event.tags.find((t: string[]) => t[0] === 'epoch')?.[1] || '1', 10)
 
   return {

@@ -680,7 +680,7 @@ export function createReportEvent(
     ['a', `${KINDS.HUB_EVENT}:${hubCreatorPubkey}:${hubDTag}`],
     ['p', reportedPubkey],
     ['y', reportType],
-    ['s', 'open'],
+    ['S', 'open'],
     ['epoch', epoch.toString()],
   ]
 
@@ -719,7 +719,7 @@ export function createRetractedReportEvent(
     ['a', `${KINDS.HUB_EVENT}:${hubCreatorPubkey}:${hubDTag}`],
     ['p', reportedPubkey],
     ['y', reportType],
-    ['s', 'retracted'],
+    ['S', 'retracted'],
     ['epoch', epoch.toString()],
   ]
 
