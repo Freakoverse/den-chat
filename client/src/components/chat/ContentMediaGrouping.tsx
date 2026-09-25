@@ -135,9 +135,10 @@ export function ContentMediaImage({ src, className, style, onClick, enableFavori
   const [favModalOpen, setFavModalOpen] = useState(false)
   const [publishing, setPublishing] = useState(false)
 
-  // Inspect the bytes to confirm the image actually animates (static gif/webp gets no star). If the
-  // bytes can't be fetched (e.g. a cross-origin host without CORS), fall back to showing the star by
-  // extension rather than hiding it. Blossom-hosted images send CORS headers, so detection is exact.
+  // Inspect the bytes to confirm the image actually animates (static gif/webp gets no star). The star
+  // shows ONLY on positive confirmation: if the bytes can't be read (a cross-origin host that omits
+  // CORS headers), leave it off rather than guessing, so static links don't get a star. Blossom-hosted
+  // images (in-app uploads) and CORS-enabled hosts send the headers, so detection there is exact.
   const detectSrc = blossom.src || src
   useEffect(() => {
     if (!isFavCandidate) return
@@ -150,7 +151,7 @@ export function ContentMediaImage({ src, className, style, onClick, enableFavori
         if (cancelled) return
         setIsAnimated(await isAnimatedImageBlob(blob))
       } catch {
-        if (!cancelled) setIsAnimated(true)
+        if (!cancelled) setIsAnimated(false)
       }
     })()
     return () => { cancelled = true }
