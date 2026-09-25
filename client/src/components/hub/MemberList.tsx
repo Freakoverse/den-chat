@@ -9,15 +9,17 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { truncateNpub, cn } from '@/lib/utils'
 import { nip19 } from 'nostr-tools'
 import { useState, useMemo } from 'react'
-import { Crown, Search, ChevronDown, Info } from 'lucide-react'
+import { Crown, Search, ChevronDown, Info, Hash, Users } from 'lucide-react'
 import { useDnnStore } from '@/stores/dnnStore'
 import { formatDnnId } from '@/lib/dnn/formatDnnId'
+import { getEffectivePermissions } from '@/lib/hub/permissions'
 
 /** PAGE_SIZE matches the constant in lkh.ts — used for approximate total count display */
 const PAGE_SIZE = 10_000
 
 export function MemberList() {
   const activeHubId = useHubStore((s) => s.activeHubId)
+  const activeChannelId = useHubStore((s) => s.activeChannelId)
   const hub = useHubStore((s) => (activeHubId ? s.hubs[activeHubId] : null))
   const hubMembers = useHubStore((s) => (activeHubId ? s.hubMembers[activeHubId] : undefined))
   const pageCount = useHubStore((s) => (activeHubId ? s.hubPageCounts[activeHubId] : undefined))
@@ -28,6 +30,10 @@ export function MemberList() {
   const [searchQuery, setSearchQuery] = useState('')
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set())
   const [showInfoTooltip, setShowInfoTooltip] = useState(false)
+  // 'all' = every hub member (default, keeps the classic view); 'channel' = only members whose roles
+  // can view the active channel (Discord-style), shown as a toggle only when the channel actually hides
+  // someone. Not persisted — a per-session view preference.
+  const [scope, setScope] = useState<'all' | 'channel'>('all')
 
   if (!hub) return null
 
@@ -66,11 +72,33 @@ export function MemberList() {
     return members
   }, [hub.creatorPubkey, hub.ownerRealPubkey, hubMembers])
 
+  // Channel-scoped subset: members whose roles grant view_channel on the active channel (creator
+  // always). Role-based like Discord, so it works for other members without knowing their group secrets.
+  // view_channel depends only on the member's role set, so resolve once per distinct role string.
+  const channelVisible = useMemo(() => {
+    if (!activeChannelId) return allMembers
+    const cache = new Map<string, boolean>()
+    return allMembers.filter((m) => {
+      if (m.isCreator) return true
+      let vis = cache.get(m.roles)
+      if (vis === undefined) {
+        vis = getEffectivePermissions(hub, m.roles, activeChannelId, false).view_channel
+        cache.set(m.roles, vis)
+      }
+      return vis
+    })
+  }, [allMembers, hub, activeChannelId])
+
+  // Only offer the toggle when the active channel actually restricts visibility (hides someone).
+  const channelRestricts = !!activeChannelId && channelVisible.length < allMembers.length
+  const channelScoped = scope === 'channel' && channelRestricts
+  const baseMembers = channelScoped ? channelVisible : allMembers
+
   // Filter by search
   const filtered = useMemo(() => {
-    if (!searchQuery.trim()) return allMembers
+    if (!searchQuery.trim()) return baseMembers
     const q = searchQuery.toLowerCase()
-    return allMembers.filter((m) => {
+    return baseMembers.filter((m) => {
       const profile = getProfile(m.pubkey)
       const npub = nip19.npubEncode(m.pubkey)
       return (
@@ -79,7 +107,7 @@ export function MemberList() {
         (profile?.name || '').toLowerCase().includes(q)
       )
     })
-  }, [allMembers, searchQuery, getProfile])
+  }, [baseMembers, searchQuery, getProfile])
 
   // Group members by hoisted roles
   const groupedMembers = useMemo(() => {
@@ -114,7 +142,7 @@ export function MemberList() {
 
   const hasHoistedGroups = groupedMembers.length > 1
 
-  const totalCount = allMembers.length
+  const totalCount = baseMembers.length
 
   const toggleSection = (label: string) => {
     setCollapsedSections(prev => {
@@ -138,9 +166,9 @@ export function MemberList() {
       <div className="px-4 pt-3 pb-2 border-b border-border/50">
         <div className="flex items-center gap-1.5">
           <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Active Members — {totalCount}
+            {channelScoped ? 'In This Channel' : 'Active Members'} — {totalCount}
           </span>
-          {isLargeHub && (
+          {isLargeHub && !channelScoped && (
             <div className="relative">
               <button
                 onClick={() => setShowInfoTooltip(!showInfoTooltip)}
@@ -159,6 +187,30 @@ export function MemberList() {
             </div>
           )}
         </div>
+
+        {/* Scope toggle — only when the active channel hides some members (private/restricted channel) */}
+        {channelRestricts && (
+          <div className="mt-2 flex items-center gap-0.5 p-0.5 rounded-md bg-background/60 border border-border/50">
+            <button
+              onClick={() => setScope('all')}
+              className={cn(
+                'flex-1 flex items-center justify-center gap-1 px-2 py-1 rounded-[5px] text-[10px] font-medium transition-colors cursor-pointer',
+                scope === 'all' ? 'bg-secondary text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              <Users size={11} /> All members
+            </button>
+            <button
+              onClick={() => setScope('channel')}
+              className={cn(
+                'flex-1 flex items-center justify-center gap-1 px-2 py-1 rounded-[5px] text-[10px] font-medium transition-colors cursor-pointer',
+                scope === 'channel' ? 'bg-secondary text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              <Hash size={11} /> This channel
+            </button>
+          </div>
+        )}
 
         {/* Search (show only when 6+ members) */}
         {totalCount >= 6 && (
