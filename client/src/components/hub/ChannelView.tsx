@@ -2412,6 +2412,7 @@ function BlobImage({ servers, hash, ext, type, className, wrapperClassName, alt,
   useEffect(() => {
     cancelRef.current = false
     let hadTampered = false
+    let blobDelivered = false
 
     const verify = async () => {
       for (let i = 0; i < servers.length; i++) {
@@ -2429,12 +2430,16 @@ function BlobImage({ servers, hash, ext, type, className, wrapperClassName, alt,
           const blob = await res.blob()
           if (cancelRef.current) return
 
+          // Hand the served bytes to onBlob regardless of hash match: consumers (animated-gif/webp
+          // detection) want to inspect what's actually rendered, and some servers re-encode a blob
+          // so its hash no longer matches. Deliver the first blob we successfully fetch, once.
+          if (onBlob && !blobDelivered) { blobDelivered = true; onBlob(blob) }
+
           const actualHash = await hashBlob(blob)
           if (actualHash === hash) {
             if (!cancelRef.current) {
               if (i !== currentIdx) setCurrentIdx(i)
               setVerified('verified')
-              onBlob?.(blob)
             }
             return
           } else {
