@@ -14,8 +14,11 @@ import { useProfileCache } from '@/hooks/useProfileCache'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { truncateNpub } from '@/lib/utils'
 import { nip19 } from 'nostr-tools'
-import { X, Search, Copy, Check, Send, Link, Loader2 } from 'lucide-react'
-import type { HubData } from '@/stores/hubStore'
+import { X, Search, Copy, Check, Send, Link, Loader2, Sparkles } from 'lucide-react'
+import { type HubData, useHubStore } from '@/stores/hubStore'
+import { useDnnStore } from '@/stores/dnnStore'
+import { formatShortAddress, coordinateShortTag } from '@/lib/nostr/nipShort'
+import { KINDS } from '@/lib/crypto/constants'
 import { useEscToClose } from '@/hooks/useEscToClose'
 
 interface InviteModalProps {
@@ -36,8 +39,9 @@ export function InviteModal({ open, onClose, hub }: InviteModalProps) {
 
   const [search, setSearch] = useState('')
   const [selected, setSelected] = useState<string | null>(null)
-  const [copied, setCopied] = useState(false)
-  const [copiedLink, setCopiedLink] = useState(false)
+  const [creatingShort, setCreatingShort] = useState(false)
+  const [createShortErr, setCreateShortErr] = useState<string | null>(null)
+  const setHubData = useHubStore((s) => s.setHubData)
   const [sending, setSending] = useState(false)
   const [sent, setSent] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
@@ -49,6 +53,51 @@ export function InviteModal({ open, onClose, hub }: InviteModalProps) {
     kind: 36942,
     relays: hub.generalRelays.slice(0, 3),
   }), [hub.dTag, hub.creatorPubkey, hub.generalRelays])
+
+  // ── NIP-SHORT addresses ──
+  // The hub's short address exists once its event carries the `s` tag (hub.shortCode). The address is
+  // `s<authority><code>`: authority is the creator's npub, or their DNN id when they have a verified one
+  // (dramatically shorter). A hub whose event predates short addresses shows a "create one" action.
+  const creatorNpub = useMemo(() => nip19.npubEncode(hub.creatorPubkey), [hub.creatorPubkey])
+  const verifiedDnn = useDnnStore((s) => s.verified)
+  const dnnId = useMemo(() => useDnnStore.getState().getVerifiedDnnId(hub.creatorPubkey), [hub.creatorPubkey, verifiedDnn])
+  const shortCode = hub.shortCode
+  const shortAddr = shortCode ? formatShortAddress(creatorNpub, shortCode) : null
+  const shortDnnAddr = shortCode && dnnId ? formatShortAddress(dnnId, shortCode) : null
+  const hubLink = (addr: string) => `https://denchat.top/#hub/${addr}`
+  // Only the owner can republish the hub event to mint the short address.
+  const isOwner = !!myPubkey && (myPubkey === hub.creatorPubkey || myPubkey === hub.ownerRealPubkey)
+
+  const handleCreateShort = async () => {
+    if (creatingShort || !myPubkey) return
+    setCreatingShort(true); setCreateShortErr(null)
+    try {
+      const { signHubEventForPublish } = await import('@/lib/hub/buildHubEvent')
+      const { publishCriticalWithFailover } = await import('@/lib/nostr/relay-pool')
+      const { getPublishRelays } = await import('@/stores/postingBehaviourStore')
+      const { isV2 } = await import('@/lib/hub/version')
+      const signed = await signHubEventForPublish(hub, {
+        dTag: hub.dTag, name: hub.name, description: hub.description || undefined,
+        epoch: hub.epoch, icon: hub.icon || undefined, banner: hub.banner || undefined,
+        tags: hub.tags && hub.tags.length ? hub.tags : undefined,
+        relays: [...hub.generalRelays],
+        blossomServers: hub.blossomServers, indexFileHash: hub.indexFileHash,
+        channels: hub.channels, categories: hub.categories, roles: hub.roles,
+        minPow: hub.minPow > 0 ? hub.minPow : undefined, joinMinPow: hub.joinMinPow > 0 ? hub.joinMinPow : undefined,
+        nsfw: hub.nsfw || undefined, messageExpiration: hub.messageExpiration || undefined,
+        joinNote: hub.joinNote, discoverable: hub.discoverable,
+        groupedRoles: hub.groupedRoles && hub.groupedRoles.length ? hub.groupedRoles : undefined,
+        publishedAt: hub.publishedAt, eventCreatedAt: hub.eventCreatedAt,
+      }, { pubkey: myPubkey, privateKey, signer, minPow: hub.minPow })
+      await publishCriticalWithFailover(signed, getPublishRelays([...hub.generalRelays], { hubOnly: isV2(hub) }), [...hub.generalRelays])
+      const code = coordinateShortTag(KINDS.HUB_EVENT, hub.creatorPubkey, hub.dTag)[1]
+      setHubData(hub.dTag, { ...hub, eventCreatedAt: signed.created_at, shortCode: code })
+    } catch (err: any) {
+      setCreateShortErr(err?.message || 'Failed to create short address')
+    } finally {
+      setCreatingShort(false)
+    }
+  }
 
   // Filter follows by search
   const follows = useMemo(() => {
@@ -67,23 +116,6 @@ export function InviteModal({ open, onClose, hub }: InviteModalProps) {
 
   if (!open) return null
 
-  const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(hubAddress)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    } catch {
-      // Fallback
-      const el = document.createElement('textarea')
-      el.value = hubAddress
-      document.body.appendChild(el)
-      el.select()
-      document.execCommand('copy')
-      document.body.removeChild(el)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    }
-  }
 
   const handleSendInvite = async () => {
     if (!selected || !myPubkey || sending) return
@@ -118,56 +150,27 @@ export function InviteModal({ open, onClose, hub }: InviteModalProps) {
           </button>
         </div>
 
-        {/* Copy Hub Address */}
-        <div className="px-4 pt-4 pb-3 border-b border-border space-y-2">
-          <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
-            <Link size={12} />
-            Hub Address
-          </label>
-          <div className="flex items-center gap-2">
-            <div className="flex-1 text-xs text-muted-foreground font-mono bg-secondary/50 px-3 py-2 rounded-lg truncate select-all">
-              {hubAddress}
+        {/* Share the hub: address + link, each with short and (when available) DNN variants */}
+        <div className="px-4 pt-4 pb-3 border-b border-border space-y-3 max-h-[42vh] overflow-y-auto">
+          <CopyRow label="Hub Address" value={hubAddress} />
+          {shortAddr && <CopyRow label="Hub Address (short)" value={shortAddr} />}
+          {shortDnnAddr && <CopyRow label="Hub Address (DNN)" value={shortDnnAddr} />}
+          <CopyRow label="Hub Link" value={hubLink(hubAddress)} />
+          {shortAddr && <CopyRow label="Hub Link (short)" value={hubLink(shortAddr)} />}
+          {shortDnnAddr && <CopyRow label="Hub Link (DNN)" value={hubLink(shortDnnAddr)} />}
+          {!shortCode && isOwner && (
+            <div className="flex items-center justify-between gap-2 rounded-lg border border-border bg-secondary/30 px-3 py-2">
+              <span className="text-xs text-muted-foreground">Short address not detected</span>
+              <button
+                onClick={handleCreateShort}
+                disabled={creatingShort}
+                className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors cursor-pointer disabled:opacity-50"
+              >
+                {creatingShort ? <><Loader2 size={12} className="animate-spin" /> Creating</> : <><Sparkles size={12} /> Create one</>}
+              </button>
             </div>
-            <button
-              onClick={handleCopy}
-              className="shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-lg bg-primary/10 text-primary text-xs font-medium hover:bg-primary/20 transition-colors cursor-pointer"
-            >
-              {copied ? <><Check size={12} /> Copied</> : <><Copy size={12} /> Copy</>}
-            </button>
-          </div>
-        </div>
-
-        {/* Copy Hub Link */}
-        <div className="px-4 pt-3 pb-3 border-b border-border space-y-2">
-          <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
-            <Link size={12} />
-            Hub Link
-          </label>
-          <div className="flex items-center gap-2">
-            <div className="flex-1 text-xs text-muted-foreground font-mono bg-secondary/50 px-3 py-2 rounded-lg truncate select-all">
-              {`https://denchat.top/#hub/${hubAddress}`}
-            </div>
-            <button
-              onClick={async () => {
-                const link = `https://denchat.top/#hub/${hubAddress}`
-                try {
-                  await navigator.clipboard.writeText(link)
-                } catch {
-                  const el = document.createElement('textarea')
-                  el.value = link
-                  document.body.appendChild(el)
-                  el.select()
-                  document.execCommand('copy')
-                  document.body.removeChild(el)
-                }
-                setCopiedLink(true)
-                setTimeout(() => setCopiedLink(false), 2000)
-              }}
-              className="shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-lg bg-primary/10 text-primary text-xs font-medium hover:bg-primary/20 transition-colors cursor-pointer"
-            >
-              {copiedLink ? <><Check size={12} /> Copied</> : <><Copy size={12} /> Copy</>}
-            </button>
-          </div>
+          )}
+          {createShortErr && <p className="text-xs text-destructive">{createShortErr}</p>}
         </div>
 
         {/* DM Invite Section */}
@@ -258,6 +261,41 @@ export function InviteModal({ open, onClose, hub }: InviteModalProps) {
             )}
           </button>
         </div>
+      </div>
+    </div>
+  )
+}
+
+/** One labelled, copyable value row (naddr, link, short address, DNN address). */
+function CopyRow({ label, value }: { label: string; value: string }) {
+  const [copied, setCopied] = useState(false)
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(value)
+    } catch {
+      const el = document.createElement('textarea')
+      el.value = value
+      document.body.appendChild(el)
+      el.select()
+      document.execCommand('copy')
+      document.body.removeChild(el)
+    }
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+  return (
+    <div className="space-y-1.5">
+      <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
+        <Link size={12} /> {label}
+      </label>
+      <div className="flex items-center gap-2">
+        <div className="flex-1 text-xs text-muted-foreground font-mono bg-secondary/50 px-3 py-2 rounded-lg truncate select-all">{value}</div>
+        <button
+          onClick={copy}
+          className="shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-lg bg-primary/10 text-primary text-xs font-medium hover:bg-primary/20 transition-colors cursor-pointer"
+        >
+          {copied ? <><Check size={12} /> Copied</> : <><Copy size={12} /> Copy</>}
+        </button>
       </div>
     </div>
   )

@@ -93,6 +93,8 @@ export function parseHubEvent(event: Event, contentOverride?: string): (HubData 
     // NIP-SKD scheme: ['signer_scheme', family, version] ⇒ 'family:version'.
     const ssTag = event.tags.find(t => t[0] === 'signer_scheme')
     const signerScheme = ssTag && ssTag[1] ? `${ssTag[1]}:${ssTag[2] || '1'}` : undefined
+    // NIP-SHORT: the ['s', code] tag, present once the hub has published a short address.
+    const shortCode = event.tags.find(t => t[0] === 's')?.[1]
 
     // Parse NSFW from content-warning tag (source of truth)
     const nsfw = event.tags.some(t => t[0] === 'content-warning')
@@ -263,6 +265,7 @@ export function parseHubEvent(event: Event, contentOverride?: string): (HubData 
       messageExpiration,
       version,
       signerScheme,
+      shortCode,
       nsfw,
       creatorPubkey: event.pubkey,
       deleted: isDeleted || undefined,

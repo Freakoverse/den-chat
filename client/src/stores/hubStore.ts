@@ -55,6 +55,9 @@ export interface HubData {
   /** NIP-SKD derivation scheme from the `signer_scheme` tag, as "family:version"
    *  (v2 only). undefined ⇒ default "skd:1". */
   signerScheme?: string
+  /** NIP-SHORT code from the hub event's `s` tag (the 6-hex short-address code). Present once the hub
+   *  has published a short address; absent on older hubs until they republish (see the invite modal). */
+  shortCode?: string
   /** v2 only: the owner's REAL key R_owner (from the decrypted owner attestation). Members-only;
    *  used to authorize the owner's pseudonymous moderation actions (hide/unhide). */
   ownerRealPubkey?: string
