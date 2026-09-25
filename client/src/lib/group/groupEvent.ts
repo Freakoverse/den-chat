@@ -26,6 +26,7 @@ import { aesEncrypt, aesDecrypt } from '@/lib/crypto/aes'
 import { ChatContext, resolveMemberPseudonymForOwner, canUseV2 } from '@/lib/crypto/skd'
 import { makeSubkeySigner, mineAndSignAsSubkey } from '@/lib/nostr/v2send'
 import { createUnsignedEvent, mineAndSign } from '@/lib/nostr/events'
+import { coordinateShortTag } from '@/lib/nostr/nipShort'
 import { DEFAULT_EVERYONE_PERMISSIONS } from '@/lib/hub/permissions'
 import type { HubData, HubMember } from '@/stores/hubStore'
 import type { ISigner } from '@/stores/userStore'
@@ -378,6 +379,9 @@ export interface BuildGroupEventOptions {
   eventCreatedAt?: number
   version: 1 | 2
   signerScheme?: string
+  /** The event author (v1: creator R; v2: owner pseudonym O). When set, a coordinate-derived
+   *  NIP-SHORT ['s', code] tag is added. buildAndSignGroupEvent fills this in. */
+  authorPubkey?: string
   /** Tree text INCLUDING the roster line (use joinTreeText). */
   treeText: string
   history: string
@@ -391,6 +395,9 @@ function groupTags(o: BuildGroupEventOptions): [string, ...string[]][] {
     ['n', o.name.slice(0, GROUP_NAME_MAX)],
     ['epoch', String(o.epoch)],
   ]
+  // NIP-SHORT short address — coordinate-derived over the event author (v1: R, v2: O). Published on
+  // every group event (incl. tombstones) so a short `36950:…` address is available if ever surfaced.
+  if (o.authorPubkey) tags.push(coordinateShortTag(KINDS.GROUP_EVENT, o.authorPubkey, o.dTag))
   if (o.deleted) { tags.push(['deleted', 'true']); return tags }
   for (const r of o.relays) tags.push(['r', r, 'general'])
   for (const s of o.blossomServers ?? []) tags.push(['o', s])
@@ -426,7 +433,13 @@ export async function buildAndSignGroupEvent(opts: BuildGroupEventOptions & {
 }): Promise<Event> {
   const { secret, keys } = opts
   const createdAt = opts.eventCreatedAt != null ? opts.eventCreatedAt + 1 : undefined
-  const tags = groupTags(opts)
+  // Resolve the event author up front (v1: R; v2: owner pseudonym O) so groupTags can add the
+  // coordinate-derived NIP-SHORT tag. Reuse the owner signer for the v2 signing path below.
+  const ownerSigner = opts.version === 2
+    ? makeSubkeySigner(ChatContext.owner(opts.dTag), { privateKey: keys.privateKey, signer: keys.signer })
+    : null
+  const authorPubkey = ownerSigner ? await ownerSigner.getPublicKey() : keys.pubkey
+  const tags = groupTags({ ...opts, authorPubkey })
 
   if (opts.deleted) {
     const unsigned = createUnsignedEvent(KINDS.GROUP_EVENT, '', tags, createdAt)
@@ -434,8 +447,7 @@ export async function buildAndSignGroupEvent(opts: BuildGroupEventOptions & {
   }
 
   if (opts.version === 2) {
-    const ownerSigner = makeSubkeySigner(ChatContext.owner(opts.dTag), { privateKey: keys.privateKey, signer: keys.signer })
-    const ownerPub = await ownerSigner.getPublicKey()
+    const ownerPub = authorPubkey
     const coord = `${KINDS.GROUP_EVENT}:${ownerPub}:${opts.dTag}`
     const att = await buildOwnerAttestation(coord, keys.pubkey, keys.signer, keys.privateKey)
     const content = JSON.stringify({
@@ -446,7 +458,7 @@ export async function buildAndSignGroupEvent(opts: BuildGroupEventOptions & {
     })
     const unsigned = createUnsignedEvent(KINDS.GROUP_EVENT, content, tags, createdAt)
     assertGroupEventSize(unsigned)
-    return mineAndSignAsSubkey(unsigned, opts.minPow ?? 0, ownerSigner)
+    return mineAndSignAsSubkey(unsigned, opts.minPow ?? 0, ownerSigner!)
   }
 
   const content = JSON.stringify({ tree: opts.treeText, history: opts.history, settings: opts.settings })
