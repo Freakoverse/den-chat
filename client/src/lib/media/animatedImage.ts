@@ -69,3 +69,37 @@ export async function isAnimatedImageBlob(blob: Blob, maxBytes = 16384): Promise
     return false
   }
 }
+
+/**
+ * Fetch the leading bytes of an image URL and report whether it animates.
+ *
+ * On the desktop app the Tauri HTTP plugin runs the request in Rust, which is not bound by browser
+ * CORS, so ANY host is readable and detection is exact. On the web the browser fetch is CORS-bound:
+ * Blossom and CORS-enabled hosts are read fine, but a cross-origin host that omits CORS headers can't
+ * be read at all. Returns true/false when the bytes were read, or null when they could not be
+ * (caller decides how to treat "unknown").
+ */
+export async function detectAnimatedFromUrl(url: string, maxBytes = 16384): Promise<boolean | null> {
+  const range = { Range: `bytes=0-${maxBytes - 1}` }
+
+  // Desktop: CORS-free native fetch.
+  try {
+    if (typeof window !== 'undefined' && '__TAURI__' in window) {
+      const mod = await import('@tauri-apps/plugin-http')
+      const res = await mod.fetch(url, { headers: range })
+      if (res.ok || res.status === 206) {
+        const buf = new Uint8Array(await res.arrayBuffer())
+        return isAnimatedImageBytes(buf.length > maxBytes ? buf.slice(0, maxBytes) : buf)
+      }
+    }
+  } catch { /* fall through to the browser fetch */ }
+
+  // Web (or if native fetch failed): browser fetch, subject to CORS.
+  try {
+    const res = await fetch(url, { headers: range })
+    if (!res.ok && res.status !== 206) return null
+    return await isAnimatedImageBlob(await res.blob(), maxBytes)
+  } catch {
+    return null
+  }
+}

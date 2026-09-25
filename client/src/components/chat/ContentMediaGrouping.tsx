@@ -16,7 +16,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { useGifStore } from '@/stores/gifStore'
 import { useUserStore } from '@/stores/userStore'
 import { publishGifFavorites } from '@/lib/nostr/customGif'
-import { isAnimatedImageBlob } from '@/lib/media/animatedImage'
+import { detectAnimatedFromUrl } from '@/lib/media/animatedImage'
 import { GifFavoriteModal } from '@/components/chat/GifPickerPopover'
 
 /** gif/webp URL (ignoring query/hash) — the only inline content images that can be animated favorites. */
@@ -135,25 +135,15 @@ export function ContentMediaImage({ src, className, style, onClick, enableFavori
   const [favModalOpen, setFavModalOpen] = useState(false)
   const [publishing, setPublishing] = useState(false)
 
-  // Inspect the bytes to confirm the image actually animates (static gif/webp gets no star). The star
-  // shows ONLY on positive confirmation: if the bytes can't be read (a cross-origin host that omits
-  // CORS headers), leave it off rather than guessing, so static links don't get a star. Blossom-hosted
-  // images (in-app uploads) and CORS-enabled hosts send the headers, so detection there is exact.
+  // Inspect the bytes to confirm the image actually animates (static gif/webp gets no star). On the
+  // desktop app this is exact for every host (native fetch ignores CORS); on the web a cross-origin
+  // host without CORS headers can't be read, so detection returns null and we leave the star off rather
+  // than guess. The star shows ONLY on a positive animated result.
   const detectSrc = blossom.src || src
   useEffect(() => {
     if (!isFavCandidate) return
     let cancelled = false
-    ;(async () => {
-      try {
-        const res = await fetch(detectSrc, { headers: { Range: 'bytes=0-16383' } })
-        if (!res.ok && res.status !== 206) throw new Error('fetch failed')
-        const blob = await res.blob()
-        if (cancelled) return
-        setIsAnimated(await isAnimatedImageBlob(blob))
-      } catch {
-        if (!cancelled) setIsAnimated(false)
-      }
-    })()
+    detectAnimatedFromUrl(detectSrc).then((r) => { if (!cancelled && r !== null) setIsAnimated(r) })
     return () => { cancelled = true }
   }, [isFavCandidate, detectSrc])
 
