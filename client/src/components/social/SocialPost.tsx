@@ -32,6 +32,8 @@ import {
 } from 'lucide-react'
 import { nip19 } from 'nostr-tools'
 import { decryptNip04, encryptNip04 } from '@/lib/nostr/nip04dm'
+import { shortCodeOf, verifiedShortAddress } from '@/lib/nostr/nipShort'
+import { useDnnStore } from '@/stores/dnnStore'
 import type { Event } from 'nostr-tools'
 import { ZapModal } from '@/components/hub/ZapModal'
 import { DeleteConfirmDialog } from '@/components/hub/ChannelView'
@@ -256,6 +258,18 @@ export function SocialPost({ event, onOpenProfile, onOpenThread, compact, isBook
   const isOwnPost = !!myPubkey && event.pubkey === myPubkey
   const reactionBtnRef = useRef<HTMLButtonElement>(null)
   const dotMenuRef = useRef<HTMLDivElement>(null)
+
+  // NIP-SHORT: the author's verified DNN id (shorter authority), and a copy handler. Feedback flag
+  // distinguishes the two menu items. Addresses themselves are computed lazily in the open menu.
+  const authorDnn = useDnnStore((s) => (s.status[event.pubkey] === 'verified' ? s.verified[event.pubkey]?.dnnId : undefined))
+  const [shortCopied, setShortCopied] = useState<null | 'short' | 'shorter'>(null)
+  const copyShortAddr = (useDnn: boolean) => {
+    const addr = verifiedShortAddress(event, useDnn ? authorDnn : undefined)
+    if (!addr) return
+    navigator.clipboard.writeText(addr)
+    setShortCopied(useDnn ? 'shorter' : 'short')
+    setTimeout(() => setShortCopied(null), 1500)
+  }
 
   // Close dot menu on outside click
   useEffect(() => {
@@ -482,6 +496,22 @@ export function SocialPost({ event, onOpenProfile, onOpenThread, compact, isBook
                 >
                   <Copy size={13} /> {copyFeedback ? 'Copied!' : 'Copy Event ID'}
                 </button>
+                {shortCodeOf(event) && (
+                  <button
+                    onClick={() => copyShortAddr(false)}
+                    className="flex items-center gap-2 w-full px-3 py-1.5 text-sm text-foreground/80 hover:bg-accent/50 cursor-pointer transition-colors rounded-md"
+                  >
+                    <Copy size={13} /> {shortCopied === 'short' ? 'Copied!' : 'Copy short address'}
+                  </button>
+                )}
+                {shortCodeOf(event) && authorDnn && (
+                  <button
+                    onClick={() => copyShortAddr(true)}
+                    className="flex items-center gap-2 w-full px-3 py-1.5 text-sm text-foreground/80 hover:bg-accent/50 cursor-pointer transition-colors rounded-md"
+                  >
+                    <Copy size={13} /> {shortCopied === 'shorter' ? 'Copied!' : 'Copy shorter address'}
+                  </button>
+                )}
                 <button
                   onClick={() => { setRawEventJson(JSON.stringify(event)); setShowDotMenu(false) }}
                   className="flex items-center gap-2 w-full px-3 py-1.5 text-sm text-foreground/80 hover:bg-accent/50 cursor-pointer transition-colors rounded-md"

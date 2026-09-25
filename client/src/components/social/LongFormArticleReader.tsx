@@ -36,6 +36,8 @@ import { ArticleComments } from '@/components/social/ArticleComments'
 import { cn, truncateNpub, formatTimestamp } from '@/lib/utils'
 import { nip19 } from 'nostr-tools'
 import { decryptNip04, encryptNip04 } from '@/lib/nostr/nip04dm'
+import { shortCodeOf, verifiedShortAddress } from '@/lib/nostr/nipShort'
+import { useDnnStore } from '@/stores/dnnStore'
 import type { Event } from 'nostr-tools'
 import { getRenderLimit } from '@/lib/imageSizeGuard'
 import { ImageTooLarge } from '@/components/ui/ImageTooLarge'
@@ -298,6 +300,19 @@ export function LongFormArticleReader() {
     setTimeout(() => setCopied(false), 2000)
   }, [activeArticleNaddr])
 
+  // NIP-SHORT: the author's verified DNN id (shorter authority) + a copy handler for the article's
+  // short address. Long-form is a coordinate kind, so the code is stable across edits.
+  const authorDnn = useDnnStore((s) => (event && s.status[event.pubkey] === 'verified' ? s.verified[event.pubkey]?.dnnId : undefined))
+  const [shortCopied, setShortCopied] = useState<null | 'short' | 'shorter'>(null)
+  const copyShortAddr = useCallback((useDnn: boolean) => {
+    if (!event) return
+    const addr = verifiedShortAddress(event, useDnn ? authorDnn : undefined)
+    if (!addr) return
+    navigator.clipboard.writeText(addr)
+    setShortCopied(useDnn ? 'shorter' : 'short')
+    setTimeout(() => setShortCopied(null), 2000)
+  }, [event, authorDnn])
+
   const handleDeleteConfirm = useCallback(async () => {
     if (!event || !myPubkey) return
     const { signer, privateKey } = useUserStore.getState()
@@ -377,6 +392,28 @@ export function LongFormArticleReader() {
                   {copied ? <Check size={14} className="text-emerald-400 shrink-0" /> : <Copy size={14} className="shrink-0" />}
                   {copied ? 'Copied!' : 'Copy Event Address'}
                 </button>
+
+                {/* Copy short address (NIP-SHORT) */}
+                {event && shortCodeOf(event) && (
+                  <button
+                    onClick={() => { copyShortAddr(false); setShowDropdown(false) }}
+                    className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-foreground/80 hover:bg-accent/50 transition-colors cursor-pointer rounded-md"
+                  >
+                    {shortCopied === 'short' ? <Check size={14} className="text-emerald-400 shrink-0" /> : <Copy size={14} className="shrink-0" />}
+                    {shortCopied === 'short' ? 'Copied!' : 'Copy short address'}
+                  </button>
+                )}
+
+                {/* Copy shorter (DNN-authority) address */}
+                {event && shortCodeOf(event) && authorDnn && (
+                  <button
+                    onClick={() => { copyShortAddr(true); setShowDropdown(false) }}
+                    className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-foreground/80 hover:bg-accent/50 transition-colors cursor-pointer rounded-md"
+                  >
+                    {shortCopied === 'shorter' ? <Check size={14} className="text-emerald-400 shrink-0" /> : <Copy size={14} className="shrink-0" />}
+                    {shortCopied === 'shorter' ? 'Copied!' : 'Copy shorter address'}
+                  </button>
+                )}
 
                 {/* View Raw Event */}
                 <button
