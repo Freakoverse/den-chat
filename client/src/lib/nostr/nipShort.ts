@@ -66,6 +66,15 @@ export function computeShortCode(source: CodeSource): string {
   return computeFullHash(source).slice(0, SHORT_CODE_LENGTH)
 }
 
+/**
+ * The `["s", code]` tag to attach to a replaceable/addressable (coordinate) event so it carries a
+ * short address. The code is derived only from `a:kind:pubkey:d`, so it is stable across edits and
+ * can be computed before signing from just the author pubkey and the `d` tag.
+ */
+export function coordinateShortTag(kind: number, pubkey: string, dTag: string): [string, string] {
+  return ['s', computeShortCode({ kind, pubkey, created_at: 0, content: '', tags: [['d', dTag]] })]
+}
+
 /** The `s` tag an event carries, if any. */
 export function shortCodeOf(event: Event): string | null {
   const v = event.tags.find((t) => t[0] === 's')?.[1]

@@ -8,6 +8,7 @@ import { joinNoteTag, type JoinNotePolicy } from '@/lib/hub/joinNote'
 import type { GroupedRole } from '@/lib/hub/groupEncryption'
 import { createUnsignedEvent } from '@/lib/nostr'
 import { KINDS } from '@/lib/crypto/constants'
+import { coordinateShortTag } from '@/lib/nostr/nipShort'
 import { encryptHubContent, deriveHubContentKey, buildOwnerAttestation, type OwnerAttestation } from './hubContent'
 import type { UnsignedEvent, Event } from 'nostr-tools'
 import type { ISigner } from '@/stores/userStore'
@@ -45,6 +46,9 @@ interface BuildHubEventOptions {
   /** Previous event's created_at — used for +1 replacement so edits don't
    *  bump the hub to the top of discover feeds (same pattern as message edits) */
   eventCreatedAt?: number
+  /** The hub event's author pubkey (v1: creator R, v2: owner pseudonym O — i.e. hub.creatorPubkey).
+   *  When set, the event gets a NIP-SHORT `["s", code]` tag (coordinate-derived, stable across edits). */
+  authorPubkey?: string
 }
 
 /** Validate hub event data against relay size limits. Throws on violation. */
@@ -145,6 +149,8 @@ export function buildHubEvent(opts: BuildHubEventOptions) {
   } else {
     eventTags.push(['f', 'on'])
   }
+  // NIP-SHORT short address (coordinate-derived, so stable across edits).
+  if (opts.authorPubkey) eventTags.push(coordinateShortTag(KINDS.HUB_EVENT, opts.authorPubkey, dTag))
 
   // Build JSON content per NIP-CHAT spec §6.1
   const contentObj = {
@@ -245,6 +251,8 @@ export async function buildHubEventV2(
   { const jn = joinNoteTag(joinNote); if (jn) eventTags.push(jn) }
   if (messageExpiration && messageExpiration > 0) eventTags.push(['message_expiration', Math.floor(messageExpiration).toString()])
   eventTags.push(['f', discoverable === false ? 'off' : 'on'])
+  // NIP-SHORT short address — plaintext tag (relay-indexed), coordinate-derived over the O pseudonym.
+  if (opts.authorPubkey) eventTags.push(coordinateShortTag(KINDS.HUB_EVENT, opts.authorPubkey, dTag))
 
   // v2 public face — plaintext so non-members can preview the join/Discover card.
   if (icon) eventTags.push(['picture', icon])
@@ -311,7 +319,8 @@ export async function buildAndSignV2HubEvent(
   const contentKey = deriveHubContentKey(opts.hubSecret, opts.epoch)
   const coord = `${KINDS.HUB_EVENT}:${opts.ownerPub}:${opts.dTag}`
   const ownerAttestation = await buildOwnerAttestation(coord, opts.ownerRealPub, opts.signer, opts.privateKey)
-  const unsigned = await buildHubEventV2({ ...opts, contentKey, ownerAttestation, signerScheme: opts.signerScheme })
+  // The v2 hub event is authored by O (ownerPub); its short code derives from that coordinate.
+  const unsigned = await buildHubEventV2({ ...opts, authorPubkey: opts.ownerPub, contentKey, ownerAttestation, signerScheme: opts.signerScheme })
   const ownerSigner = makeSubkeySigner(ChatContext.owner(opts.dTag), { privateKey: opts.privateKey, signer: opts.signer })
   return mineAndSignAsSubkey(unsigned, opts.minPow && opts.minPow > 0 ? opts.minPow : 0, ownerSigner)
 }
@@ -344,5 +353,6 @@ export async function signHubEventForPublish(
     })
   }
   const { mineAndSign } = await import('@/lib/nostr/events')
-  return mineAndSign(buildHubEvent(params), opts.minPow ?? params.minPow ?? 0, opts.pubkey, opts.signer, opts.privateKey)
+  // v1 author is the creator's real key (== hub.creatorPubkey) — give it the NIP-SHORT tag.
+  return mineAndSign(buildHubEvent({ ...params, authorPubkey: hub.creatorPubkey }), opts.minPow ?? params.minPow ?? 0, opts.pubkey, opts.signer, opts.privateKey)
 }

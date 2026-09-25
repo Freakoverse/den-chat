@@ -820,6 +820,7 @@ export function HubSettingsModal({ open, onClose, hub, initialPage, focusMemberP
         groupedRoles: newGroupedRoles.length > 0 ? newGroupedRoles : undefined,
         publishedAt: hub.publishedAt,
         eventCreatedAt: hub.eventCreatedAt,
+        authorPubkey: hub.creatorPubkey,
       }
 
       let signedEvent
@@ -3557,6 +3558,7 @@ function SecurityPage({ hub }: { hub: HubData }) {
         messageExpiration: hub.messageExpiration || undefined, // carry the disappearing-messages timer forward
         publishedAt: hub.publishedAt,
         eventCreatedAt: hub.eventCreatedAt,
+        authorPubkey: hub.creatorPubkey,
       })
       const signedEvent = await mineAndSign(unsignedEvent, hub.minPow, pubkey, signer, privateKey)
       await casCheckIndex(hub.dTag, hub.creatorPubkey, hub.indexFileHash) // abort if another writer moved the index

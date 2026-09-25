@@ -26,6 +26,7 @@ import { publishToSpecificRelays, publishWithFailover, getRelayList } from '@/li
 import { getPublishRelays } from '@/stores/postingBehaviourStore'
 import { getRelays } from '@/lib/nostr/relay-pool'
 import { KINDS } from '@/lib/crypto/constants'
+import { coordinateShortTag } from '@/lib/nostr/nipShort'
 import { createAndUploadMemberFiles, createAndUploadMemberFilesV2, blossomServers as blossomServerManager, uploadToBlossomServers } from '@/lib/blossom'
 import { makeSubkeySigner, mineAndSignAsSubkey } from '@/lib/nostr/v2send'
 import { ChatContext, canUseV2 } from '@/lib/crypto/skd'
@@ -665,6 +666,8 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
         const contentKey = deriveHubContentKey(hubSecret, epoch)
         eventContent = await encryptHubContent(contentKey, { ...contentObj, owner_attestation: ownerAtt })
       }
+      // NIP-SHORT short address — coordinate-derived over the hub event's author (v1: R, v2: O).
+      tags.push(coordinateShortTag(KINDS.HUB_EVENT, wantV2 ? ownerPub : pubkey!, dTag))
       const unsigned = createUnsignedEvent(KINDS.HUB_EVENT, eventContent, tags)
       // Set published_at to match created_at on first creation (per NIP-CHAT spec §6.1)
       unsigned.tags = [...unsigned.tags, ['published_at', unsigned.created_at.toString()]]
