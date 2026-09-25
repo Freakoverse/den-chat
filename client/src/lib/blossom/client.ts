@@ -187,7 +187,7 @@ export type BlossomAuthSigner = (unsigned: import('nostr-tools').UnsignedEvent) 
  * Create a Nostr kind 24242 auth event for Blossom requests.
  * Per BUD-01: the event authorizes a specific action on a specific file.
  */
-async function createAuthHeader(
+export async function createAuthHeader(
   action: 'upload' | 'get' | 'delete',
   fileHash: string,
   signer: ISigner | null,
@@ -427,9 +427,13 @@ export async function uploadToBlossomServers(
   onProgress?: (progress: UploadProgress) => void,
   getAbortSignal?: () => AbortSignal | undefined,
   authSigner?: BlossomAuthSigner,
+  /** A pre-signed `Nostr <base64>` upload auth (from createAuthHeader). Lets a caller sign N auths
+   *  sequentially then upload the N blobs in parallel without firing N concurrent signer requests.
+   *  The auth is per-hash, so it is valid for every server and the client-server fallback below. */
+  preSignedAuth?: string,
 ): Promise<{ hash: string; successCount: number; serverUrls: string[] }> {
   try {
-    return await uploadToBlossomServersOnce(data, signer, privateKey, servers, contentType, onProgress, getAbortSignal, authSigner)
+    return await uploadToBlossomServersOnce(data, signer, privateKey, servers, contentType, onProgress, getAbortSignal, authSigner, preSignedAuth)
   } catch (primaryErr) {
     // Fall back to the client's curated servers ONLY when the caller pinned an explicit list (e.g. a
     // hub's baked-in `hub.blossomServers`) and NONE of it accepted. A hub's list is frozen at creation
@@ -449,7 +453,7 @@ export async function uploadToBlossomServers(
     if (fallback.length === 0) throw primaryErr
     console.warn(`Blossom: none of the ${servers.length} target server(s) accepted the upload — falling back to ${fallback.length} client server(s).`, primaryErr)
     try {
-      return await uploadToBlossomServersOnce(data, signer, privateKey, fallback, contentType, onProgress, getAbortSignal, authSigner)
+      return await uploadToBlossomServersOnce(data, signer, privateKey, fallback, contentType, onProgress, getAbortSignal, authSigner, preSignedAuth)
     } catch (fallbackErr) {
       // Keep BOTH rounds' per-server reasons — the whole point of the diagnostic message.
       const reason = (e: unknown) => (e instanceof Error ? e.message : String(e)).replace(/^Upload failed: no Blossom servers accepted the file\s*/, '')
@@ -473,6 +477,7 @@ export async function uploadToBlossomServersOnce(
   onProgress?: (progress: UploadProgress) => void,
   getAbortSignal?: () => AbortSignal | undefined,
   authSigner?: BlossomAuthSigner,
+  preSignedAuth?: string,
 ): Promise<{ hash: string; successCount: number; serverUrls: string[] }> {
   const allServers = servers || blossomServers.getServers()
   // When the caller passes an explicit list, it's already in a deterministic,
@@ -488,7 +493,7 @@ export async function uploadToBlossomServersOnce(
   // Only the default-pool fallback keeps the "3 copies is enough" heuristic.
   const targetCount = servers && servers.length > 0 ? ordered.length : 3
   const hash = computeHash(data)
-  const authHeader = await createAuthHeader('upload', hash, signer, privateKey, authSigner)
+  const authHeader = preSignedAuth ?? await createAuthHeader('upload', hash, signer, privateKey, authSigner)
 
   // ── Parallel mode (no progress callback) — fire all servers at once ──
   // Used by tree/index metadata uploads where files are tiny and we just

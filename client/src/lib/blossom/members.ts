@@ -41,7 +41,7 @@ import {
   type LeafPage,
   type SpineTree,
 } from '@/lib/crypto/lkh'
-import { computeHash, uploadToBlossomServers } from './client'
+import { computeHash, uploadToBlossomServers, createAuthHeader } from './client'
 import type { ISigner } from '@/stores/userStore'
 import { makeSubkeySigner, type SubkeySigner } from '@/lib/nostr/v2send'
 import { ChatContext } from '@/lib/crypto/skd'
@@ -310,50 +310,45 @@ export async function createAndUploadMemberFiles(
   // 3. Build a single leaf page (1 leaf → page-root above it)
   const page = await buildLeafPage([creatorLeaf], 0)
 
-  // 4. Serialize and upload leaf page
-  onFileProgress?.({ fileIndex: 0, totalFiles, label: 'Leaf page' })
-  const pageContent = serializeLeafPage(page)
-  const pageBytes = new TextEncoder().encode(pageContent)
-  const { hash: pageHash } = await uploadToBlossomServers(
-    pageBytes, signer, privateKey, blossomServerUrls, 'text/plain',
-  )
+  // These four blobs are independent at upload time: the index only references the others by hash,
+  // and a Blossom hash is the SHA-256 of the content (computed locally, no upload needed). So build all
+  // four, compute their hashes, then sign the upload auths SEQUENTIALLY (one signer request at a time —
+  // remote signers may choke on concurrent signs) and upload the four blobs in PARALLEL. This turns four
+  // sequential round-trips into one, which dominates the time for these tiny (latency-bound) files.
+  const pageBytes = new TextEncoder().encode(serializeLeafPage(page))
+  const pageHash = computeHash(pageBytes)
 
-  // 5. Build spine (1 page root → spine root with encHubSecret)
-  const spine = await buildSpine(
-    [{ nodeId: page.pageRoot.nodeId, rawKey: page.pageRoot.rawKey! }],
-    hubSecret,
-  )
+  const spine = await buildSpine([{ nodeId: page.pageRoot.nodeId, rawKey: page.pageRoot.rawKey! }], hubSecret)
+  const spineBytes = new TextEncoder().encode(serializeSpine(spine))
+  const spineHash = computeHash(spineBytes)
 
-  // 6. Serialize and upload spine
-  onFileProgress?.({ fileIndex: 1, totalFiles, label: 'Spine tree' })
-  const spineContent = serializeSpine(spine)
-  const spineBytes = new TextEncoder().encode(spineContent)
-  const { hash: spineHash } = await uploadToBlossomServers(
-    spineBytes, signer, privateKey, blossomServerUrls, 'text/plain',
-  )
-
-  // 7. Create epoch history file
-  onFileProgress?.({ fileIndex: 2, totalFiles, label: 'Epoch history' })
-  const hubSecretHex = toHex(hubSecret)
-  const historyPlaintext = `hub:1:${hubSecretHex}`
-  const historyBlob = await aesEncrypt(hubSecret, historyPlaintext)
+  const historyBlob = await aesEncrypt(hubSecret, `hub:1:${toHex(hubSecret)}`)
   const historyBytes = new TextEncoder().encode(historyBlob)
-  const { hash: historyHash } = await uploadToBlossomServers(
-    historyBytes, signer, privateKey, blossomServerUrls, 'text/plain',
-  )
+  const historyHash = computeHash(historyBytes)
 
-  // 8. Create and upload paginated index file
-  onFileProgress?.({ fileIndex: 3, totalFiles, label: 'Index file' })
-  const indexContent = createPaginatedIndexFile(
+  const indexBytes = new TextEncoder().encode(createPaginatedIndexFile(
     spineHash,
     [{ pageIndex: 0, firstPubkey: creatorPubkey, hash: pageHash }],
     [],
     historyHash,
-  )
-  const indexBytes = new TextEncoder().encode(indexContent)
-  const { hash: indexHash } = await uploadToBlossomServers(
-    indexBytes, signer, privateKey, blossomServerUrls, 'text/plain',
-  )
+  ))
+  const indexHash = computeHash(indexBytes)
+
+  // Pre-sign the four upload auths one at a time (never N concurrent signer requests).
+  const authPage = await createAuthHeader('upload', pageHash, signer, privateKey)
+  const authSpine = await createAuthHeader('upload', spineHash, signer, privateKey)
+  const authHistory = await createAuthHeader('upload', historyHash, signer, privateKey)
+  const authIndex = await createAuthHeader('upload', indexHash, signer, privateKey)
+
+  let done = 0
+  const tick = () => onFileProgress?.({ fileIndex: Math.min(done++, totalFiles - 1), totalFiles, label: 'Uploading files' })
+  tick()
+  await Promise.all([
+    uploadToBlossomServers(pageBytes, signer, privateKey, blossomServerUrls, 'text/plain', undefined, undefined, undefined, authPage).then((r) => { tick(); return r }),
+    uploadToBlossomServers(spineBytes, signer, privateKey, blossomServerUrls, 'text/plain', undefined, undefined, undefined, authSpine).then((r) => { tick(); return r }),
+    uploadToBlossomServers(historyBytes, signer, privateKey, blossomServerUrls, 'text/plain', undefined, undefined, undefined, authHistory).then((r) => { tick(); return r }),
+    uploadToBlossomServers(indexBytes, signer, privateKey, blossomServerUrls, 'text/plain', undefined, undefined, undefined, authIndex).then((r) => { tick(); return r }),
+  ])
 
   console.log(`Paginated LKH tree built with 1 leaf. Page: ${pageHash}, Spine: ${spineHash}, Index: ${indexHash}`)
 
@@ -408,38 +403,51 @@ export async function createAndUploadMemberFilesV2(
   const page = await buildLeafPage([leaf], 0)
   page.rosterEpoch = 1
   page.rosterBlob = await encryptRoster(hubSecret, { [memberP]: creatorRPub }, 1)
-  onFileProgress?.({ fileIndex: 0, totalFiles, label: 'Leaf page' })
+  // Build all four blobs + hashes, then sign auths sequentially and upload in parallel (see the note in
+  // createAndUploadMemberFiles). The index only references the others by hash, computable locally.
   const pageBytes = new TextEncoder().encode(serializeLeafPage(page))
-  const { hash: pageHash } = await uploadToBlossomServers(pageBytes, signer, privateKey, blossomServerUrls, 'text/plain', undefined, undefined, ownerAuth)
-  // Retain every tree blob locally — the source of truth that lets us re-upload after a public
-  // Blossom server GCs a blob uploaded under the throwaway owner pseudonym O. See hubBlobStore.
-  await cacheHubBlob(pageHash, pageBytes, hubDTag)
+  const pageHash = computeHash(pageBytes)
 
-  // 5-6. Spine (encrypts the hub secret at the root) + upload
   const spine = await buildSpine([{ nodeId: page.pageRoot.nodeId, rawKey: page.pageRoot.rawKey! }], hubSecret)
-  onFileProgress?.({ fileIndex: 1, totalFiles, label: 'Spine tree' })
   const spineBytes = new TextEncoder().encode(serializeSpine(spine))
-  const { hash: spineHash } = await uploadToBlossomServers(spineBytes, signer, privateKey, blossomServerUrls, 'text/plain', undefined, undefined, ownerAuth)
-  await cacheHubBlob(spineHash, spineBytes, hubDTag)
+  const spineHash = computeHash(spineBytes)
 
-  // 7. Epoch history (unchanged — encrypted with the hub secret)
-  onFileProgress?.({ fileIndex: 2, totalFiles, label: 'Epoch history' })
   const historyBlob = await aesEncrypt(hubSecret, `hub:1:${toHex(hubSecret)}`)
   const historyBytes = new TextEncoder().encode(historyBlob)
-  const { hash: historyHash } = await uploadToBlossomServers(historyBytes, signer, privateKey, blossomServerUrls, 'text/plain', undefined, undefined, ownerAuth)
-  await cacheHubBlob(historyHash, historyBytes, hubDTag)
+  const historyHash = computeHash(historyBytes)
 
-  // 8. Paginated index — first_pubkey is P
-  onFileProgress?.({ fileIndex: 3, totalFiles, label: 'Index file' })
-  const indexContent = createPaginatedIndexFile(
+  const indexBytes = new TextEncoder().encode(createPaginatedIndexFile(
     spineHash,
     [{ pageIndex: 0, firstPubkey: memberP, hash: pageHash }],
     [],
     historyHash,
-  )
-  const indexBytes = new TextEncoder().encode(indexContent)
-  const { hash: indexHash } = await uploadToBlossomServers(indexBytes, signer, privateKey, blossomServerUrls, 'text/plain', undefined, undefined, ownerAuth)
-  await cacheHubBlob(indexHash, indexBytes, hubDTag)
+  ))
+  const indexHash = computeHash(indexBytes)
+
+  // Auth signed as the owner pseudonym O (never R_owner), one at a time.
+  const authPage = await createAuthHeader('upload', pageHash, signer, privateKey, ownerAuth)
+  const authSpine = await createAuthHeader('upload', spineHash, signer, privateKey, ownerAuth)
+  const authHistory = await createAuthHeader('upload', historyHash, signer, privateKey, ownerAuth)
+  const authIndex = await createAuthHeader('upload', indexHash, signer, privateKey, ownerAuth)
+
+  // Retain every tree blob locally — the source of truth that lets us re-upload after a public Blossom
+  // server GCs a blob uploaded under the throwaway owner pseudonym O. See hubBlobStore.
+  await Promise.all([
+    cacheHubBlob(pageHash, pageBytes, hubDTag),
+    cacheHubBlob(spineHash, spineBytes, hubDTag),
+    cacheHubBlob(historyHash, historyBytes, hubDTag),
+    cacheHubBlob(indexHash, indexBytes, hubDTag),
+  ])
+
+  let done = 0
+  const tick = () => onFileProgress?.({ fileIndex: Math.min(done++, totalFiles - 1), totalFiles, label: 'Uploading files' })
+  tick()
+  await Promise.all([
+    uploadToBlossomServers(pageBytes, signer, privateKey, blossomServerUrls, 'text/plain', undefined, undefined, ownerAuth, authPage).then((r) => { tick(); return r }),
+    uploadToBlossomServers(spineBytes, signer, privateKey, blossomServerUrls, 'text/plain', undefined, undefined, ownerAuth, authSpine).then((r) => { tick(); return r }),
+    uploadToBlossomServers(historyBytes, signer, privateKey, blossomServerUrls, 'text/plain', undefined, undefined, ownerAuth, authHistory).then((r) => { tick(); return r }),
+    uploadToBlossomServers(indexBytes, signer, privateKey, blossomServerUrls, 'text/plain', undefined, undefined, ownerAuth, authIndex).then((r) => { tick(); return r }),
+  ])
 
   return { indexHash, blossomServers: blossomServerUrls, ownerPub, memberP }
 }
