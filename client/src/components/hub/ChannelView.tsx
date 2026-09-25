@@ -2918,7 +2918,7 @@ function GifStarOverlay({ att, ext, url, imgIdx, matchingGTag, allServers, setGa
   }
 
   return (
-    <div className={inGrid ? "relative group/gif w-full h-full" : "relative group/gif inline-block w-fit"}>
+    <div className={inGrid ? "relative group/gif w-full h-full" : "relative group/gif inline-block w-fit max-w-[min(400px,100%)]"}>
       <BlobImage
         servers={allServers}
         hash={att.hash}

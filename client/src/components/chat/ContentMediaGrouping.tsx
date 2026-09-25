@@ -193,7 +193,7 @@ export function ContentMediaImage({ src, className, style, onClick, enableFavori
   // not at the far right of the full-width message column. The skeleton gets a placeholder width so an
   // inline-block wrapper doesn't collapse before the image loads. Grid keeps its w-full/h-full fill.
   return (
-    <div className={`relative group/cimg ${hugForBadge ? 'inline-block max-w-full align-top mt-2 [&>img]:!mt-0' : 'w-full h-full'}`} style={style}>
+    <div className={`relative group/cimg ${hugForBadge ? 'inline-block max-w-[400px] max-[1080px]:max-w-full align-top mt-2 [&>img]:!mt-0' : 'w-full h-full'}`} style={style}>
       {isLoading && (
         <div className={`media-skeleton ${hugForBadge ? '' : 'w-full h-full'}`} style={hugForBadge ? { width: 240, height: 160 } : { minHeight: 160 }} />
       )}
