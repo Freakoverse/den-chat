@@ -1755,7 +1755,7 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
                             className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-amber-400 hover:bg-amber-500/10 transition-colors cursor-pointer rounded-md"
                           >
                             <Flag size={14} />
-                            Report User
+                            Report to Hub Admin
                           </button>
                         )}
                       </div>,

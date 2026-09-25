@@ -129,7 +129,7 @@ export function ReportModal({
         <div className="flex items-center justify-between px-5 py-4 border-b border-border">
           <div className="flex items-center gap-2.5">
             <Flag size={16} className="text-amber-400" />
-            <h3 className="text-base font-semibold text-foreground">Report User</h3>
+            <h3 className="text-base font-semibold text-foreground">Report to Hub Admin</h3>
           </div>
           <button onClick={onClose} className="p-1 rounded-full hover:bg-accent/50 transition-colors cursor-pointer">
             <X size={16} className="text-muted-foreground" />
@@ -152,6 +152,13 @@ export function ReportModal({
               </p>
             </div>
           </div>
+
+          {/* Where the report goes */}
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            This report goes to the moderators and admins of
+            {hub?.name ? <span className="text-foreground font-medium"> {hub.name}</span> : ' this hub'}
+            {' '}for them to review. The reason you write below is encrypted so only they can read it.
+          </p>
 
           {/* Reported message preview (if reporting a specific message) */}
           {reportedMessagePreview && (
