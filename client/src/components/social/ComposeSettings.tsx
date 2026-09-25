@@ -6,7 +6,7 @@ import { getRelays, fetchReplaceable, publishToSpecificRelays, assertPublished }
 import { publishPersonal } from '@/stores/postingBehaviourStore'
 import { benchmarkHashRate, estimateSolveTime } from '@/lib/pow/pow'
 import { mineAndSign } from '@/lib/nostr/events'
-import { computeShortCode, coordinateShortTag, isCoordinateKind } from '@/lib/nostr/nipShort'
+import { attachShortCode } from '@/lib/nostr/nipShort'
 import { Settings, Minus, Plus, RotateCcw } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
@@ -36,19 +36,9 @@ export function useComposeSettings(initialPow = 15): ComposeSettings {
     }
 
     // NIP-SHORT: attach a short-address code so the post carries one for later use. Coordinate kinds
-    // (long-form 30023/30024) derive from a:kind:pubkey:d (stable across edits); a kind-1 note derives
-    // from its own fields (kind:pubkey:created_at:content — tags are excluded, so the tag itself
-    // doesn't change the code). The `s` tag is relay-indexed, so the address resolves with no side map.
-    const pk = unsigned.pubkey || pubkey
-    if (pk && !unsigned.tags?.some((t: string[]) => t[0] === 's')) {
-      if (isCoordinateKind(unsigned.kind)) {
-        const d = unsigned.tags?.find((t: string[]) => t[0] === 'd')?.[1]
-        if (d) unsigned.tags = [...(unsigned.tags || []), coordinateShortTag(unsigned.kind, pk, d)]
-      } else if (unsigned.created_at != null) {
-        const code = computeShortCode({ kind: unsigned.kind, pubkey: pk, created_at: unsigned.created_at, content: unsigned.content ?? '', tags: [] })
-        unsigned.tags = [...(unsigned.tags || []), ['s', code]]
-      }
-    }
+    // (long-form 30023/30024) derive from the stable coordinate; a kind-1 note from its own fields.
+    // Relay-indexed, so the address resolves with no side map.
+    attachShortCode(unsigned, pubkey)
 
     // Mine PoW + sign (with automatic retry if signer invalidates PoW)
     const signed = await mineAndSign(unsigned, powDifficulty, pubkey, signer, privateKey)

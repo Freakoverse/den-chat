@@ -75,6 +75,30 @@ export function coordinateShortTag(kind: number, pubkey: string, dTag: string): 
   return ['s', computeShortCode({ kind, pubkey, created_at: 0, content: '', tags: [['d', dTag]] })]
 }
 
+/**
+ * Attach a NIP-SHORT `["s", code]` tag to an unsigned event so it carries a short address. Coordinate
+ * kinds derive the stable coordinate code (needs a `d` tag); other kinds derive from the event fields
+ * (needs `created_at`). Idempotent (no-op if an `s` tag is already present) and a no-op when the author
+ * or the needed field is missing. Pass the author `pubkey` when the unsigned event's own is still a
+ * placeholder (createUnsignedEvent leaves it ''). Mutates and returns the same object.
+ */
+export function attachShortCode<T extends { kind: number; content?: string; created_at?: number; tags?: string[][]; pubkey?: string }>(
+  unsigned: T,
+  pubkey?: string | null,
+): T {
+  const pk = unsigned.pubkey || pubkey
+  const tags = unsigned.tags ?? []
+  if (!pk || tags.some((t) => t[0] === 's')) return unsigned
+  if (isCoordinateKind(unsigned.kind)) {
+    const d = tags.find((t) => t[0] === 'd')?.[1]
+    if (d != null) unsigned.tags = [...tags, coordinateShortTag(unsigned.kind, pk, d)]
+  } else if (unsigned.created_at != null) {
+    const code = computeShortCode({ kind: unsigned.kind, pubkey: pk, created_at: unsigned.created_at, content: unsigned.content ?? '', tags: [] })
+    unsigned.tags = [...tags, ['s', code]]
+  }
+  return unsigned
+}
+
 /** The `s` tag an event carries, if any. */
 export function shortCodeOf(event: Event): string | null {
   const v = event.tags.find((t) => t[0] === 's')?.[1]

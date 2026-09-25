@@ -12,6 +12,7 @@ import type { Event } from 'nostr-tools'
 import { fetchEvents, fetchReplaceable, fetchEventById, publishEvent, publishToSpecificRelays, assertPublished } from '@/lib/nostr/relay-pool'
 import { signWithSigner, mineAndSign } from '@/lib/nostr'
 import { createDeletionEvent } from '@/lib/nostr/events'
+import { attachShortCode } from '@/lib/nostr/nipShort'
 import { getDeletePublishRelays, publishPersonal } from '@/stores/postingBehaviourStore'
 import { useUserStore } from '@/stores/userStore'
 import { useFollowStore } from '@/stores/followStore'
@@ -342,10 +343,10 @@ export const useForumStore = create<ForumState>((set, get) => ({
     } catch { /* ignore */ }
   },
   publishWordProfile: async (word, p) => {
-    const { signer, privateKey } = auth()
+    const { signer, privateKey, pubkey } = auth()
     if (!signer && !privateKey) return
     const norm = normalizeWord(word)
-    const signed = await signWithSigner(createWordProfile(norm, p), signer, privateKey)
+    const signed = await signWithSigner(attachShortCode(createWordProfile(norm, p), pubkey), signer, privateKey)
     await publishPersonal(signed)
     const mine = parseWordProfile(signed)
     set({
@@ -354,10 +355,10 @@ export const useForumStore = create<ForumState>((set, get) => ({
     })
   },
   setWordDelegation: async (word, delegate) => {
-    const { signer, privateKey } = auth()
+    const { signer, privateKey, pubkey } = auth()
     if (!signer && !privateKey) return
     const norm = normalizeWord(word)
-    const signed = await signWithSigner(createWordDelegation(norm, delegate), signer, privateKey)
+    const signed = await signWithSigner(attachShortCode(createWordDelegation(norm, delegate), pubkey), signer, privateKey)
     await publishPersonal(signed)
     const mine = parseWordProfile(signed)
     let resolved: WordProfile | null = null
@@ -543,6 +544,7 @@ export const useForumStore = create<ForumState>((set, get) => ({
     const slug = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
     const dTag = slug || `c-${Date.now().toString(36)}`
     const unsigned = createCommunityDefinition({ dTag, name, description, image, banner, nsfw, moderators })
+    attachShortCode(unsigned, pubkey)
     const signed = await signWithSigner(unsigned, signer, privateKey)
     await publishPersonal(signed)
     const def = parseCommunityDefinition(signed)
@@ -568,6 +570,7 @@ export const useForumStore = create<ForumState>((set, get) => ({
       moderators: mods,
       relays: def.relays,
     })
+    attachShortCode(unsigned, pubkey)
     const signed = await signWithSigner(unsigned, signer, privateKey)
     await publishPersonal(signed)
     const updated = parseCommunityDefinition(signed)
@@ -579,6 +582,7 @@ export const useForumStore = create<ForumState>((set, get) => ({
     const { signer, privateKey, pubkey } = auth()
     if ((!signer && !privateKey) || !title.trim()) return null
     const unsigned = createCommunityPost({ address: community.address, pubkey: community.pubkey }, title, body, opts)
+    attachShortCode(unsigned, pubkey)
     const signed = await mineAndSign(unsigned, get().publishPow, pubkey, signer, privateKey)
     assertPublished(await publishPersonal(signed))
     const post = parseCommunityPost(signed)
@@ -732,6 +736,7 @@ export const useForumStore = create<ForumState>((set, get) => ({
     const { signer, privateKey, pubkey } = auth()
     if ((!signer && !privateKey) || !title.trim() || !word.trim()) return null
     const unsigned = createForumWordPost(word, title, body, opts)
+    attachShortCode(unsigned, pubkey)
     const signed = await mineAndSign(unsigned, get().publishPow, pubkey, signer, privateKey)
     assertPublished(await publishPersonal(signed))
     const post = parseForumWordPost(signed)
@@ -748,6 +753,7 @@ export const useForumStore = create<ForumState>((set, get) => ({
     const { signer, privateKey, pubkey } = auth()
     if ((!signer && !privateKey) || !body.trim()) return null
     const unsigned = createForumComment({ root, parent, body })
+    attachShortCode(unsigned, pubkey)
     const signed = await mineAndSign(unsigned, get().publishPow, pubkey, signer, privateKey)
     assertPublished(await publishPersonal(signed))
     const comment = parseForumComment(signed)
