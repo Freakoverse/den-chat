@@ -109,11 +109,15 @@ export function extractContentMediaGroups(content: string): { groups: ContentMed
 /* ────────────── Components ────────────── */
 
 /** Simple inline image with blossom fallback + skeleton (for content URLs) */
-export function ContentMediaImage({ src, className, style, onClick }: {
+export function ContentMediaImage({ src, className, style, onClick, enableFavorite, hugForBadge }: {
   src: string
   className?: string
   style?: React.CSSProperties
   onClick?: () => void
+  /** Show the "add to GIF favorites" star on animated gif/webp URLs (chat only, not search). */
+  enableFavorite?: boolean
+  /** Shrink the wrapper to the image so the star sits on the image corner (single, non-grid layout). */
+  hugForBadge?: boolean
 }) {
   const chatLimitMB = getRenderLimit('chat')
   const blossom = useBlossomMedia(src, chatLimitMB)
@@ -125,7 +129,7 @@ export function ContentMediaImage({ src, className, style, onClick }: {
   useEffect(() => { setLoaded(false); setError(false); setOverridden(false) }, [src, blossom.src])
 
   // ── Favorite star for animated gif/webp URLs ──
-  const isFavCandidate = ANIMATABLE_URL_RE.test(src)
+  const isFavCandidate = !!enableFavorite && ANIMATABLE_URL_RE.test(src)
   const isFav = useGifStore((s) => isFavCandidate && s.favorites.some((f) => f.url === src))
   const [isAnimated, setIsAnimated] = useState(false)
   const [favModalOpen, setFavModalOpen] = useState(false)
@@ -194,10 +198,13 @@ export function ContentMediaImage({ src, className, style, onClick }: {
   const resolvedSrc = blossom.src || src
   const isLoading = blossom.loading || (!loaded && !error)
 
+  // hugForBadge: wrap tightly around the image (single layout) so the corner star sits on the image,
+  // not at the far right of the full-width message column. The skeleton gets a placeholder width so an
+  // inline-block wrapper doesn't collapse before the image loads. Grid keeps its w-full/h-full fill.
   return (
-    <div className="relative w-full h-full group/cimg" style={style}>
+    <div className={`relative group/cimg ${hugForBadge ? 'inline-block max-w-full align-top mt-2 [&>img]:!mt-0' : 'w-full h-full'}`} style={style}>
       {isLoading && (
-        <div className="media-skeleton w-full h-full" style={{ minHeight: 160 }} />
+        <div className={`media-skeleton ${hugForBadge ? '' : 'w-full h-full'}`} style={hugForBadge ? { width: 240, height: 160 } : { minHeight: 160 }} />
       )}
       {error && !blossom.loading && (
         <div className="rounded-lg bg-secondary/40 border border-border/50 flex items-center justify-center text-xs text-muted-foreground/60 w-full h-full" style={{ minHeight: 80 }}>
@@ -272,6 +279,8 @@ export function ContentMediaGroups({ groups, galleryImages, onGalleryOpen }: {
               src={url}
               className="rounded-lg mt-2 max-w-[400px] max-[1080px]:max-w-full max-h-[300px] object-contain cursor-pointer transition-all border border-transparent hover:border-border"
               onClick={() => onGalleryOpen(url)}
+              enableFavorite
+              hugForBadge
             />
           )
         }
@@ -284,6 +293,7 @@ export function ContentMediaGroups({ groups, galleryImages, onGalleryOpen }: {
                   src={url}
                   className="w-full h-full object-cover cursor-pointer transition-all"
                   onClick={() => onGalleryOpen(url)}
+                  enableFavorite
                 />
               </div>
             ))}
