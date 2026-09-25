@@ -702,7 +702,7 @@ instantly on the next start, with a once-per-session background revalidation for
 **Epoch rotation (the subtle part).** Because a facilitated member's *only* source of the secret is
 the facilitator's tree, the tree must track the **current epoch**, or the member would encrypt with
 a stale secret under a new-epoch tag (undecryptable) — and re-using an old secret would also let a
-just-kicked member read new messages, breaking forward secrecy. So:
+just-kicked member read new messages, breaking post-removal secrecy. So:
 - The facilitation tree carries the **epoch history** (the byte-identical owner-tree history blob,
   `AES(currentSecret, "hub:<epoch>:<hex>…")`) so a vouched member can decrypt every past epoch.
 - After a rotation the **facilitator rebuilds** their tree under the new secret + updated history and
@@ -1066,7 +1066,7 @@ Referenced via the `m` field in the `grouped_roles` entry in the hub event conte
 
 - Because the wrap is to `leaf.pubkey` (`P`), the **owner can rehydrate the whole tree from the tree alone** — decrypting each leaf against its own `P`, with **no roster / `P→R` lookup**. That in turn enables **incremental** add/remove (`addMemberToGroupTreeV2` / `removeMemberFromGroupTreeV2`): patch the one changed leaf and re-key its path, preserving every other member.
 - This is what keeps group re-keying correct once the roster spans **more than one leaf page**. A full rebuild driven by the in-memory roster only sees the owner's own page, so it would silently drop group members on other pages; reading membership from the *tree* (via incremental ops) avoids that. Kicks and role changes take the incremental path; a full "fix-encryption" rebuild (which already holds the complete roster) rebuilds from scratch and doubles as the `O↔R → O↔P` migration.
-- A removal **rotates** the group secret (forward secrecy) and bumps the group epoch; a pure addition reuses the current secret.
+- A removal **rotates** the group secret (post-removal secrecy) and bumps the group epoch; a pure addition reuses the current secret.
 
 ### 5.6 Mesh Lists (Facilitation)
 
@@ -1140,7 +1140,8 @@ Deleting a role does NOT trigger a tree update. The hub event is the authority f
     ["o", "https://blossom3.example.com"],
     ["m", "<sha256_of_index_file>", "<epoch>"],
     ["published_at", "<original_creation_timestamp>"],
-    ["client", "<client_app_name>"]
+    ["client", "<client_app_name>"],
+    ["s", "<short_address_code>"]
   ],
   "content": "<JSON string>",
   "sig": "<signature>"
@@ -1174,6 +1175,15 @@ Deleting a role does NOT trigger a tree update. The hub event is the authority f
 | `picture` | No (**v2**) | Plaintext hub icon URL for the join/Discover card. In v2 the icon moves out of the (encrypted) `content.settings` into this tag so non-members can preview it. |
 | `banner` | No (**v2**) | Plaintext hub banner URL for the join/Discover card. Moved out of `content.settings` in v2. |
 | `about` | No (**v2**) | Plaintext public description/blurb for the join/Discover card. Moved out of `content.settings` in v2. Member-only prose belongs in a pinned message or channel, not here. |
+| `s` | No | Optional NIP-SHORT short-address code (6 lowercase hex). Lets the hub be referenced by a compact `s<authority><code>` address instead of the long `naddr`. See the note below. |
+
+> **Short addresses (NIP-SHORT): a convenience, not core.** NIP-CHAT does not require the `s` tag; a hub
+> without it works exactly the same, just without the shorter address. It is there only to make hubs easier
+> to share: the code is derived from the hub's coordinate (`a:36942:<author_pubkey>:<d>`), so it is stable
+> across edits, and a client attaches it once and carries it forward on every republish. The address's
+> authority is the hub event's author as an `npub` — or the creator's DNN ID when they have a verified one,
+> which is much shorter. (On a v2 hub the author is the owner pseudonym `O`, so a DNN-authority address does
+> not apply.) A hub whose event predates the tag can mint one by simply republishing.
 
 #### Updating Hub Events (`created_at` Increment)
 

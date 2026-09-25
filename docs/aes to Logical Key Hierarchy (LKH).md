@@ -209,7 +209,7 @@ When removing multiple members at once, the client SHOULD:
 > [!CAUTION]
 > This is a **breaking change** to the Blossom file format. Old-format member files (flat CSV rows with ECDH-encrypted secrets) are not compatible with the LKH tree format.
 
-Since DEN Chat has not been publicly released, this is acceptable. No migration path is needed for existing data.
+The LKH format was adopted before any public release, so this is acceptable: no migration path is needed for existing data.
 
 ---
 
@@ -270,4 +270,4 @@ LKH uses **Blossom** (file hosting) for distribution — members download the tr
 | Dependencies | MLS library required | NIP-04 + AES (already present) |
 | Distribution | Ordered delivery service | Blossom file download |
 | Complexity | Very high | Medium |
-| Forward secrecy | ✅ Per-epoch | ✅ Per-epoch (via secret rotation) |
+| Post-removal secrecy | ✅ Per-epoch | ✅ Per-epoch (via secret rotation) |
