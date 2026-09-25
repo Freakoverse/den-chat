@@ -61,6 +61,7 @@ import { getStickerMap } from '@/stores/stickerStore'
 import { BlossomImg } from '@/components/ui/BlossomImg'
 import { useGifStore } from '@/stores/gifStore'
 import { publishGifFavorites } from '@/lib/nostr/customGif'
+import { isAnimatedImageBlob } from '@/lib/media/animatedImage'
 import { UserHubSettingsModal } from '@/components/hub/UserHubSettingsModal'
 import { VerificationBadge } from '@/components/ui/VerificationBadge'
 import { HashRecoveryModal } from '@/components/ui/HashRecoveryModal'
@@ -2332,14 +2333,24 @@ function BlobMedia({ servers, hash, ext, type, className, tag, encryption }: {
 }
 
 /** BlobImage — image with optimistic render + background SHA-256 hash verification */
-function BlobImage({ servers, hash, ext, type, className, wrapperClassName, alt, onClick, encryption }: {
+function BlobImage({ servers, hash, ext, type, className, wrapperClassName, alt, onClick, encryption, onBlob }: {
   servers: string[]; hash: string; ext: string; type: string; className?: string; wrapperClassName?: string; alt?: string
   onClick?: () => void
   encryption?: { algorithm: string; key: string; nonce: string; originalHash: string }
+  /** Called once with the verified/decrypted image bytes (reuses the background fetch — no extra download). */
+  onBlob?: (blob: Blob) => void
 }) {
   // ── Encrypted path: download → decrypt → blob URL ──
   const fakeAtt = useMemo(() => ({ hash, type, name: '', size: 0, encryption }), [hash, type, encryption])
   const decrypted = useDecryptedMedia(fakeAtt, servers)
+
+  // Hand the decrypted bytes to onBlob (cheap local read of the blob: URL) so callers can inspect them.
+  useEffect(() => {
+    if (!encryption || !onBlob || !decrypted.src) return
+    let cancelled = false
+    fetch(decrypted.src).then((r) => r.blob()).then((b) => { if (!cancelled) onBlob(b) }).catch(() => {})
+    return () => { cancelled = true }
+  }, [encryption, onBlob, decrypted.src])
 
   if (encryption) {
     if (decrypted.loading) {
@@ -2423,6 +2434,7 @@ function BlobImage({ servers, hash, ext, type, className, wrapperClassName, alt,
             if (!cancelRef.current) {
               if (i !== currentIdx) setCurrentIdx(i)
               setVerified('verified')
+              onBlob?.(blob)
             }
             return
           } else {
@@ -2859,6 +2871,14 @@ function GifStarOverlay({ att, ext, url, imgIdx, matchingGTag, allServers, setGa
   const isFav = useGifStore((s) => s.favorites.some((f) => f.url.includes(att.hash)))
   const [publishing, setPublishing] = useState(false)
 
+  // Only offer "add to favorites" when the image actually animates. A picker GIF (matchingGTag) is
+  // known animated up front; an uploaded gif/webp is inspected once its bytes arrive (see onBlob) —
+  // static gifs/webps get no star. Verification is undefined → treated as not-yet-known (no star).
+  const [isAnimated, setIsAnimated] = useState<boolean>(!!matchingGTag)
+  const handleBlob = useCallback((blob: Blob) => {
+    isAnimatedImageBlob(blob).then(setIsAnimated).catch(() => {})
+  }, [])
+
   const handleToggleFav = async (e: React.MouseEvent) => {
     e.stopPropagation()
     if (publishing) return
@@ -2906,7 +2926,10 @@ function GifStarOverlay({ att, ext, url, imgIdx, matchingGTag, allServers, setGa
           : "max-w-[min(400px,100%)] max-h-[300px] rounded-lg border border-transparent hover:border-border object-contain cursor-pointer transition-all"
         }
         onClick={() => setGalleryIndex(imgIdx >= 0 ? imgIdx : 0)}
+        encryption={att.encryption}
+        onBlob={matchingGTag ? undefined : handleBlob}
       />
+      {isAnimated && (
       <TooltipProvider delayDuration={200}>
         <Tooltip>
           <TooltipTrigger asChild>
@@ -2929,6 +2952,7 @@ function GifStarOverlay({ att, ext, url, imgIdx, matchingGTag, allServers, setGa
           <TooltipContent side="bottom" className="text-xs">{publishing ? 'Publishing…' : isFav ? 'Remove from favorites' : 'Add to favorites'}</TooltipContent>
         </Tooltip>
       </TooltipProvider>
+      )}
     </div>
   )
 }
@@ -2940,7 +2964,7 @@ function GifStarOverlay({ att, ext, url, imgIdx, matchingGTag, allServers, setGa
 
 /** Groups consecutive image/GIF attachments together, breaking on video/audio/file */
 type AttachmentBlock =
-  | { kind: 'image-group'; items: { att: Attachment; ext: string; url: string; imgIdx: number; isGif: boolean; matchingGTag?: [string, string, string] }[] }
+  | { kind: 'image-group'; items: { att: Attachment; ext: string; url: string; imgIdx: number; favCandidate: boolean; matchingGTag?: [string, string, string] }[] }
   | { kind: 'video'; att: Attachment; ext: string }
   | { kind: 'audio'; att: Attachment; ext: string }
   | { kind: 'file'; att: Attachment; ext: string }
@@ -2967,10 +2991,14 @@ function groupAttachments(attachments: Attachment[], baseUrl: string, imageUrls:
       const imgIdx = imageCounter
       imageCounter++
       const isGif = att.type === 'image/gif'
+      // gif OR webp can be animated → eligible for the "add to GIF favorites" star. Whether the star
+      // actually shows is decided later from the bytes (animated only). matchingGTag stays gif-only
+      // since the GIF picker only ever emits gif URLs.
+      const favCandidate = isGif || att.type === 'image/webp'
       const matchingGTag = isGif && gifTags
         ? gifTags.find(([, gUrl]) => gUrl.includes(att.hash))
         : undefined
-      currentImages.push({ att, ext, url, imgIdx, isGif, matchingGTag })
+      currentImages.push({ att, ext, url, imgIdx, favCandidate, matchingGTag })
     } else if (att.type.startsWith('video/')) {
       flushImages()
       blocks.push({ kind: 'video', att, ext })
@@ -3041,8 +3069,8 @@ function AttachmentRenderer({ attachments, hubDTag, gifTags }: { attachments: At
 
           // Single image — render full-width
           if (items.length === 1) {
-            const { att, ext, url, imgIdx, isGif, matchingGTag } = items[0]
-            if (isGif) {
+            const { att, ext, url, imgIdx, favCandidate, matchingGTag } = items[0]
+            if (favCandidate) {
               return (
                 <GifStarOverlay
                   key={att.hash}
@@ -3075,8 +3103,8 @@ function AttachmentRenderer({ attachments, hubDTag, gifTags }: { attachments: At
           // Multiple images — 2-column grid with equal row heights
           return (
             <div key={`img-group-${blockIdx}`} className="grid grid-cols-2 gap-1 rounded-lg overflow-hidden max-w-[min(500px,100%)]" style={{ gridAutoRows: '200px' }}>
-              {items.map(({ att, ext, url, imgIdx, isGif, matchingGTag }) => {
-                if (isGif) {
+              {items.map(({ att, ext, url, imgIdx, favCandidate, matchingGTag }) => {
+                if (favCandidate) {
                   return (
                     <div key={att.hash} className="relative overflow-hidden">
                       <GifStarOverlay
