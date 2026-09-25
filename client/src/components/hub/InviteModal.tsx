@@ -39,6 +39,7 @@ export function InviteModal({ open, onClose, hub }: InviteModalProps) {
 
   const [search, setSearch] = useState('')
   const [selected, setSelected] = useState<string | null>(null)
+  const [shareTab, setShareTab] = useState<'normal' | 'short' | 'dnn'>('normal')
   const [creatingShort, setCreatingShort] = useState(false)
   const [createShortErr, setCreateShortErr] = useState<string | null>(null)
   const setHubData = useHubStore((s) => s.setHubData)
@@ -150,27 +151,56 @@ export function InviteModal({ open, onClose, hub }: InviteModalProps) {
           </button>
         </div>
 
-        {/* Share the hub: address + link, each with short and (when available) DNN variants */}
-        <div className="px-4 pt-4 pb-3 border-b border-border space-y-3 max-h-[42vh] overflow-y-auto">
-          <CopyRow label="Hub Address" value={hubAddress} />
-          {shortAddr && <CopyRow label="Hub Address (short)" value={shortAddr} />}
-          {shortDnnAddr && <CopyRow label="Hub Address (DNN)" value={shortDnnAddr} />}
-          <CopyRow label="Hub Link" value={hubLink(hubAddress)} />
-          {shortAddr && <CopyRow label="Hub Link (short)" value={hubLink(shortAddr)} />}
-          {shortDnnAddr && <CopyRow label="Hub Link (DNN)" value={hubLink(shortDnnAddr)} />}
-          {!shortCode && isOwner && (
-            <div className="flex items-center justify-between gap-2 rounded-lg border border-border bg-secondary/30 px-3 py-2">
-              <span className="text-xs text-muted-foreground">Short address not detected</span>
+        {/* Share the hub — Normal / Short / DNN Short tabs (only two fields visible at once) */}
+        <div className="px-4 pt-3 pb-3 border-b border-border shrink-0">
+          <div className="flex items-center gap-1 mb-3 p-0.5 rounded-lg bg-secondary/40">
+            {([{ id: 'normal', label: 'Normal' }, { id: 'short', label: 'Short' }, ...(shortDnnAddr ? [{ id: 'dnn' as const, label: 'DNN Short' }] : [])] as { id: 'normal' | 'short' | 'dnn'; label: string }[]).map((t) => (
               <button
-                onClick={handleCreateShort}
-                disabled={creatingShort}
-                className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors cursor-pointer disabled:opacity-50"
+                key={t.id}
+                onClick={() => setShareTab(t.id)}
+                className={`flex-1 px-2 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer ${shareTab === t.id ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
               >
-                {creatingShort ? <><Loader2 size={12} className="animate-spin" /> Creating</> : <><Sparkles size={12} /> Create one</>}
+                {t.label}
               </button>
-            </div>
-          )}
-          {createShortErr && <p className="text-xs text-destructive">{createShortErr}</p>}
+            ))}
+          </div>
+
+          <div className="space-y-3">
+            {shareTab === 'normal' && (
+              <>
+                <CopyRow label="Hub Address" value={hubAddress} />
+                <CopyRow label="Hub Link" value={hubLink(hubAddress)} />
+              </>
+            )}
+            {shareTab === 'short' && (
+              shortAddr ? (
+                <>
+                  <CopyRow label="Hub Address (short)" value={shortAddr} />
+                  <CopyRow label="Hub Link (short)" value={hubLink(shortAddr)} />
+                </>
+              ) : isOwner ? (
+                <div className="flex items-center justify-between gap-2 rounded-lg border border-border bg-secondary/30 px-3 py-2.5">
+                  <span className="text-xs text-muted-foreground">Short address not detected</span>
+                  <button
+                    onClick={handleCreateShort}
+                    disabled={creatingShort}
+                    className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    {creatingShort ? <><Loader2 size={12} className="animate-spin" /> Creating</> : <><Sparkles size={12} /> Create one</>}
+                  </button>
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground text-center py-4">This hub has no short address yet. Its owner can create one.</p>
+              )
+            )}
+            {shareTab === 'dnn' && shortDnnAddr && (
+              <>
+                <CopyRow label="Hub Address (DNN)" value={shortDnnAddr} />
+                <CopyRow label="Hub Link (DNN)" value={hubLink(shortDnnAddr)} />
+              </>
+            )}
+            {createShortErr && <p className="text-xs text-destructive">{createShortErr}</p>}
+          </div>
         </div>
 
         {/* DM Invite Section */}
