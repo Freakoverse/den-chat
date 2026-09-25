@@ -20,10 +20,12 @@ import { EmojiPickerPopover } from '@/components/chat/EmojiPickerPopover'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { DnnBadge } from '@/components/ui/DnnBadge'
 import {
-  MessageSquare, Send, Smile, Loader2, ArrowLeft, CornerDownRight, X, MessageCircle
+  MessageSquare, Send, Smile, Loader2, ArrowLeft, CornerDownRight, X, MessageCircle, MoreVertical, Copy, Check
 } from 'lucide-react'
 import { cn, truncateNpub, formatTimestamp } from '@/lib/utils'
 import { nip19 } from 'nostr-tools'
+import { shortCodeOf, verifiedShortAddress } from '@/lib/nostr/nipShort'
+import { useDnnStore } from '@/stores/dnnStore'
 import type { Event } from 'nostr-tools'
 
 /* ─── Types ─── */
@@ -193,6 +195,64 @@ export function ArticleComments({ articleEvent }: ArticleCommentsProps) {
 
 /* ─── Flat Comment Row (top-level, on article page) ─── */
 
+/* ─── Per-comment 3-dots menu: copy the comment's NIP-SHORT address ─── */
+
+function CommentDotMenu({ comment }: { comment: Event }) {
+  const [open, setOpen] = useState(false)
+  const [copied, setCopied] = useState<null | 'short' | 'shorter'>(null)
+  const ref = useRef<HTMLDivElement>(null)
+  const authorDnn = useDnnStore((s) => (s.status[comment.pubkey] === 'verified' ? s.verified[comment.pubkey]?.dnnId : undefined))
+
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  // Only a comment carrying a verified `s` code has a resolvable short address.
+  if (!shortCodeOf(comment)) return null
+
+  const copy = (useDnn: boolean) => {
+    const addr = verifiedShortAddress(comment, useDnn ? authorDnn : undefined)
+    if (!addr) return
+    navigator.clipboard.writeText(addr)
+    setCopied(useDnn ? 'shorter' : 'short')
+    setTimeout(() => setCopied(null), 1500)
+  }
+
+  return (
+    <div className="relative ml-auto shrink-0" ref={ref}>
+      <button
+        onClick={(e) => { e.stopPropagation(); setOpen(!open) }}
+        className="p-0.5 rounded text-muted-foreground/50 hover:text-muted-foreground hover:bg-accent/50 transition-colors cursor-pointer opacity-0 group-hover:opacity-100"
+      >
+        <MoreVertical size={13} />
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full mt-1 w-44 bg-popover/95 backdrop-blur-md border border-border rounded-xl shadow-xl p-1 flex flex-col gap-1 z-50 animate-in fade-in-0 zoom-in-95">
+          <button
+            onClick={(e) => { e.stopPropagation(); copy(false) }}
+            className="flex items-center gap-2 w-full px-3 py-1.5 text-sm text-foreground/80 hover:bg-accent/50 cursor-pointer transition-colors rounded-md"
+          >
+            {copied === 'short' ? <Check size={13} className="text-emerald-400" /> : <Copy size={13} />}
+            {copied === 'short' ? 'Copied!' : 'Copy short address'}
+          </button>
+          {authorDnn && (
+            <button
+              onClick={(e) => { e.stopPropagation(); copy(true) }}
+              className="flex items-center gap-2 w-full px-3 py-1.5 text-sm text-foreground/80 hover:bg-accent/50 cursor-pointer transition-colors rounded-md"
+            >
+              {copied === 'shorter' ? <Check size={13} className="text-emerald-400" /> : <Copy size={13} />}
+              {copied === 'shorter' ? 'Copied!' : 'Copy shorter address'}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function CommentRow({ comment, replyCount, onReply }: {
   comment: Event
   replyCount: number
@@ -215,6 +275,7 @@ function CommentRow({ comment, replyCount, onReply }: {
         <span className="text-xs font-semibold text-foreground truncate">{displayName}</span>
         <DnnBadge pubkey={comment.pubkey} />
         <span className="text-[10px] text-muted-foreground">{formatTimestamp(comment.created_at)}</span>
+        <CommentDotMenu comment={comment} />
       </div>
 
       {/* Body */}
@@ -304,7 +365,7 @@ function CommentModal({ comment, canGoBack, onGoBack, onClose, onDrillInto, repl
         {/* Scrollable content */}
         <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
           {/* Featured / focused comment */}
-          <div className="rounded-lg bg-primary/5 border border-primary/15 p-3">
+          <div className="group rounded-lg bg-primary/5 border border-primary/15 p-3">
             <div className="flex items-center gap-2 mb-1.5">
               <Avatar className="w-7 h-7 shrink-0">
                 {profile?.picture && <AvatarImage src={profile.picture} />}
@@ -315,6 +376,7 @@ function CommentModal({ comment, canGoBack, onGoBack, onClose, onDrillInto, repl
               <span className="text-xs font-semibold text-foreground truncate">{displayName}</span>
               <DnnBadge pubkey={comment.pubkey} />
               <span className="text-[10px] text-muted-foreground">{formatTimestamp(comment.created_at)}</span>
+              <CommentDotMenu comment={comment} />
             </div>
             <div className="text-sm text-foreground/90 whitespace-pre-wrap break-words leading-relaxed pl-9">
               {comment.content}
@@ -376,7 +438,7 @@ function ModalReplyRow({ comment, replyCount, onDrillInto }: {
   const displayName = profile?.display_name || profile?.name || truncateNpub(nip19.npubEncode(comment.pubkey), 8)
 
   return (
-    <div className="rounded-lg bg-secondary/20 hover:bg-secondary/30 transition-colors p-3">
+    <div className="group rounded-lg bg-secondary/20 hover:bg-secondary/30 transition-colors p-3">
       <div className="flex items-center gap-2 mb-1.5">
         <Avatar className="w-5 h-5 shrink-0">
           {profile?.picture && <AvatarImage src={profile.picture} />}
@@ -387,6 +449,7 @@ function ModalReplyRow({ comment, replyCount, onDrillInto }: {
         <span className="text-xs font-semibold text-foreground truncate">{displayName}</span>
         <DnnBadge pubkey={comment.pubkey} />
         <span className="text-[10px] text-muted-foreground">{formatTimestamp(comment.created_at)}</span>
+        <CommentDotMenu comment={comment} />
       </div>
 
       <div className="text-[13px] text-foreground/90 whitespace-pre-wrap break-words leading-relaxed pl-7 mb-1.5">
