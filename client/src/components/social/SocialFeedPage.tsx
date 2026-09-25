@@ -371,6 +371,12 @@ export function SocialFeedPage() {
       const handle = fetchEventsProgressive(
         { kinds: [1, 6], authors, since, limit: 40 },
         (events) => {
+          // Ignore empty emits: fetchEventsProgressive fires the callback with [] on EOSE/timeout
+          // even when nothing arrived (common while read relays are still connecting on first load).
+          // Painting [] would both wipe the feed AND mark it "painted", defeating the retry-on-empty
+          // below — leaving a permanently blank feed until something else repopulates posts (e.g. the
+          // user posting, which adds a local post). Only paint on real events; let empty fall through.
+          if (events.length === 0) return
           setPosts(events)
           if (!painted) { painted = true; setLoading(false) }
         },
