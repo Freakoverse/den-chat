@@ -10,8 +10,8 @@ import { useSocialStore } from '@/stores/socialStore'
 import { useFollowStore } from '@/stores/followStore'
 import { useUserStore } from '@/stores/userStore'
 import { useNotificationStore } from '@/stores/notificationStore'
-import { fetchEventsProgressive } from '@/lib/nostr/relay-pool'
-import { fetchEventsWide, getReadRelays } from '@/lib/nostr/readRelays'
+import { fetchEventsWide, subscribeEventsWide } from '@/lib/nostr/readRelays'
+import { nowSeconds } from '@/lib/time/clockOffset'
 import { nip19 } from 'nostr-tools'
 import { decryptNip04 } from '@/lib/nostr/nip04dm'
 import { ComposeBox } from '@/components/social/ComposeBox'
@@ -213,7 +213,6 @@ function SocialNav({ activeTab, activePage, onTabChange, onOpenProfile, onPageCh
 export function SocialFeedPage() {
   const activePage = useSocialStore((s) => s.activePage)
   const posts = useSocialStore((s) => s.posts)
-  const setPosts = useSocialStore((s) => s.setPosts)
   const prependPosts = useSocialStore((s) => s.prependPosts)
   const follows = useFollowStore((s) => s.followedPubkeys)
   const followsLoaded = useFollowStore((s) => s.loaded)
@@ -234,6 +233,7 @@ export function SocialFeedPage() {
 
   const [feedTab, setFeedTab] = useState<FeedTab>('home')
   const [loading, setLoading] = useState(false)
+  const [refreshKey, setRefreshKey] = useState(0)
   const [loadingMore, setLoadingMore] = useState(false)
   const loadingMoreRef = useRef(false)
   const feedFetchRef = useRef<{ close: () => void } | null>(null)
@@ -348,56 +348,50 @@ export function SocialFeedPage() {
     fetchZapBatches()
   }, [posts])
 
-  // Load feed when follows are ready (or immediately for self-posts)
+  // Live feed subscription. Kept OPEN (not a one-shot fetch) so new posts stream in as they're
+  // published, and so relays that connect late on first load still deliver their backlog when they
+  // connect — the feed fills in on its own instead of staying blank until the user does something.
+  // Re-subscribes when the follow set, the user, or the manual refresh key changes (never on every
+  // incoming post — `posts` is deliberately not a dependency).
   useEffect(() => {
-    if (!followsLoaded || posts.length > 0) return
-    if (follows.size === 0 && !pubkey) return
-    loadFeed()
-  }, [followsLoaded, follows, pubkey])
-
-  const loadFeed = useCallback(async (attempt = 0) => {
-    setLoading(true)
+    if (!followsLoaded) return
     const authorSet = new Set(follows)
     if (pubkey) authorSet.add(pubkey)
     const authors = Array.from(authorSet).slice(0, 500)
     if (authors.length === 0) { setLoading(false); return }
-    const since = Math.floor(Date.now() / 1000) - 86400
+    // Corrected clock (nowSeconds), so a skewed device clock doesn't shift the window into the
+    // future and hide every post the relays actually hold.
+    const since = nowSeconds() - 86400
 
-    // Progressive: paint posts as they stream from the fastest relays instead of
-    // waiting for the whole batch. Abort any previous in-flight feed fetch first.
     feedFetchRef.current?.close()
-    let painted = false
-    try {
-      const handle = fetchEventsProgressive(
-        { kinds: [1, 6], authors, since, limit: 40 },
-        (events) => {
-          // Ignore empty emits: fetchEventsProgressive fires the callback with [] on EOSE/timeout
-          // even when nothing arrived (common while read relays are still connecting on first load).
-          // Painting [] would both wipe the feed AND mark it "painted", defeating the retry-on-empty
-          // below — leaving a permanently blank feed until something else repopulates posts (e.g. the
-          // user posting, which adds a local post). Only paint on real events; let empty fall through.
-          if (events.length === 0) return
-          setPosts(events)
-          if (!painted) { painted = true; setLoading(false) }
-        },
-        { relays: getReadRelays() },
-      )
-      feedFetchRef.current = handle
-      await handle.done
-    } catch (err) {
-      console.error('Failed to load feed:', err)
+    let gotAny = useSocialStore.getState().posts.length > 0
+    setLoading(!gotAny)
+    const buffer: Event[] = []
+    let flushTimer: ReturnType<typeof setTimeout> | null = null
+    const flush = () => {
+      flushTimer = null
+      if (buffer.length > 0) prependPosts(buffer.splice(0))
     }
-    // Nothing arrived — the user follows people, so an empty result is almost always a
-    // relay hiccup, not a genuinely empty feed. Retry with backoff (keeping the spinner
-    // up) instead of leaving the feed blank until a manual refresh.
-    if (!painted) {
-      if (attempt < 2) {
-        setTimeout(() => loadFeed(attempt + 1), 1500 * (attempt + 1))
-      } else {
-        setLoading(false)
-      }
+    // Safety net: never spin forever if no relay responds.
+    const spinnerTimer = setTimeout(() => setLoading(false), 6000)
+
+    const handle = subscribeEventsWide(
+      { kinds: [1, 6], authors, since, limit: 80 },
+      (ev) => {
+        buffer.push(ev)
+        if (!gotAny) { gotAny = true; setLoading(false) }
+        if (flushTimer == null) flushTimer = setTimeout(flush, 200)
+      },
+      () => { flush(); setLoading(false) }, // EOSE: backlog delivered (stops the spinner even if empty)
+    )
+    feedFetchRef.current = handle
+
+    return () => {
+      handle.close()
+      if (flushTimer) clearTimeout(flushTimer)
+      clearTimeout(spinnerTimer)
     }
-  }, [follows, pubkey, setPosts])
+  }, [followsLoaded, follows, pubkey, refreshKey, prependPosts])
 
   const loadMore = useCallback(async () => {
     if (posts.length === 0 || loadingMoreRef.current) return
@@ -447,10 +441,10 @@ export function SocialFeedPage() {
   }, [loadMore, posts.length])
 
   const handleRefresh = useCallback(() => {
-    // Don't clear first: loadFeed replaces posts as fresh ones stream in, so a hiccup
-    // during refresh keeps the existing feed instead of wiping it to an empty state.
-    loadFeed()
-  }, [loadFeed])
+    // Re-arm the live subscription (bump the key). Existing posts are kept — the fresh backlog is
+    // merged in via prependPosts — so a hiccup during refresh never wipes the feed to empty.
+    setRefreshKey((k) => k + 1)
+  }, [])
 
   // Load reactions when switching to reactions tab
   useEffect(() => {
