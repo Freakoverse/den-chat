@@ -667,7 +667,8 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
         eventContent = await encryptHubContent(contentKey, { ...contentObj, owner_attestation: ownerAtt })
       }
       // NIP-SHORT short address — coordinate-derived over the hub event's author (v1: R, v2: O).
-      tags.push(coordinateShortTag(KINDS.HUB_EVENT, wantV2 ? ownerPub : pubkey!, dTag))
+      const shortTag = coordinateShortTag(KINDS.HUB_EVENT, wantV2 ? ownerPub : pubkey!, dTag)
+      tags.push(shortTag)
       const unsigned = createUnsignedEvent(KINDS.HUB_EVENT, eventContent, tags)
       // Set published_at to match created_at on first creation (per NIP-CHAT spec §6.1)
       unsigned.tags = [...unsigned.tags, ['published_at', unsigned.created_at.toString()]]
@@ -756,6 +757,7 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
         discoverable,
         version: wantV2 ? 2 : undefined,
         signerScheme: wantV2 ? 'skd:1' : undefined,
+        shortCode: shortTag[1],
       })
       setHubSecret(dTag, secretHexStr)
       setHubStatus(dTag, 'loaded')
