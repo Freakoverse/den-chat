@@ -6,11 +6,21 @@
  */
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
+import { Star, Loader2 } from 'lucide-react'
 import { useBlossomMedia } from '@/hooks/useBlossomMedia'
 import { VerificationBadge } from '@/components/ui/VerificationBadge'
 import { ImageGallery } from '@/components/social/RichContent'
 import { getRenderLimit } from '@/lib/imageSizeGuard'
 import { ImageTooLarge } from '@/components/ui/ImageTooLarge'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
+import { useGifStore } from '@/stores/gifStore'
+import { useUserStore } from '@/stores/userStore'
+import { publishGifFavorites } from '@/lib/nostr/customGif'
+import { isAnimatedImageBlob } from '@/lib/media/animatedImage'
+import { GifFavoriteModal } from '@/components/chat/GifPickerPopover'
+
+/** gif/webp URL (ignoring query/hash) — the only inline content images that can be animated favorites. */
+const ANIMATABLE_URL_RE = /\.(gif|webp)(\?[^\s#]*)?(#[^\s]*)?$/i
 
 /* ────────────── URL detection helpers ────────────── */
 
@@ -114,6 +124,50 @@ export function ContentMediaImage({ src, className, style, onClick }: {
   // Reset on src prop change or blossom server failover
   useEffect(() => { setLoaded(false); setError(false); setOverridden(false) }, [src, blossom.src])
 
+  // ── Favorite star for animated gif/webp URLs ──
+  const isFavCandidate = ANIMATABLE_URL_RE.test(src)
+  const isFav = useGifStore((s) => isFavCandidate && s.favorites.some((f) => f.url === src))
+  const [isAnimated, setIsAnimated] = useState(false)
+  const [favModalOpen, setFavModalOpen] = useState(false)
+  const [publishing, setPublishing] = useState(false)
+
+  // Inspect the bytes to confirm the image actually animates (static gif/webp gets no star). If the
+  // bytes can't be fetched (e.g. a cross-origin host without CORS), fall back to showing the star by
+  // extension rather than hiding it. Blossom-hosted images send CORS headers, so detection is exact.
+  const detectSrc = blossom.src || src
+  useEffect(() => {
+    if (!isFavCandidate) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await fetch(detectSrc, { headers: { Range: 'bytes=0-16383' } })
+        if (!res.ok && res.status !== 206) throw new Error('fetch failed')
+        const blob = await res.blob()
+        if (cancelled) return
+        setIsAnimated(await isAnimatedImageBlob(blob))
+      } catch {
+        if (!cancelled) setIsAnimated(true)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [isFavCandidate, detectSrc])
+
+  const handleToggleFav = useCallback(async (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (publishing) return
+    const store = useGifStore.getState()
+    const already = store.favorites.some((f) => f.url === src)
+    if (!already) { setFavModalOpen(true); return }
+    setPublishing(true)
+    try {
+      const { signer, privateKey } = useUserStore.getState()
+      const updated = store.favorites.filter((f) => f.url !== src)
+      store.setFavorites(updated)
+      await publishGifFavorites(updated, signer, privateKey)
+    } catch { /* ignore publish failure */ }
+    setPublishing(false)
+  }, [publishing, src])
+
   // Size limit exceeded
   if (blossom.sizeExceeded && !overridden) {
     return (
@@ -141,7 +195,7 @@ export function ContentMediaImage({ src, className, style, onClick }: {
   const isLoading = blossom.loading || (!loaded && !error)
 
   return (
-    <div className="relative w-full h-full" style={style}>
+    <div className="relative w-full h-full group/cimg" style={style}>
       {isLoading && (
         <div className="media-skeleton w-full h-full" style={{ minHeight: 160 }} />
       )}
@@ -170,6 +224,31 @@ export function ContentMediaImage({ src, className, style, onClick }: {
           onRecovered={blossom.acceptVerifiedUrl}
         />
       )}
+      {loaded && isFavCandidate && isAnimated && (
+        <TooltipProvider delayDuration={200}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={handleToggleFav}
+                disabled={publishing}
+                className={`absolute top-1 right-1 w-6 h-6 rounded-full flex items-center justify-center transition-all cursor-pointer ${publishing
+                  ? 'bg-yellow-500/70 text-white opacity-100 animate-pulse'
+                  : isFav
+                    ? 'bg-yellow-500/90 text-white opacity-80 hover:opacity-100'
+                    : 'bg-black/50 text-white/80 opacity-0 group-hover/cimg:opacity-100 hover:bg-black/70'
+                  }`}
+              >
+                {publishing
+                  ? <Loader2 size={12} className="animate-spin" />
+                  : <Star size={12} fill={isFav ? 'currentColor' : 'none'} />
+                }
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="text-xs">{publishing ? 'Publishing…' : isFav ? 'Remove from favorites' : 'Add to favorites'}</TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      )}
+      {favModalOpen && <GifFavoriteModal gifUrl={src} onClose={() => setFavModalOpen(false)} />}
     </div>
   )
 }
