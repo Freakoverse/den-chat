@@ -246,3 +246,33 @@ export function getCachedProfile(pubkey: string): NostrProfile | undefined {
 export function updateCachedProfile(pubkey: string, profile: NostrProfile) {
   setCachedEntry(pubkey, profile)
 }
+
+/**
+ * Non-hook: ensure a background kind-0 fetch is scheduled for `pubkey` (with the same retry-on-empty
+ * as the hook). No-op when a real, non-stale profile is already cached. Lets non-component code (e.g.
+ * startup) drive the SAME shared cache the message cards read, so there's a single source of truth.
+ */
+export function ensureProfile(pubkey: string): void {
+  const cached = profileCache.get(pubkey)
+  if (cached && !cached.empty && Date.now() - cached.fetchedAt <= PROFILE_TTL_MS) return
+  scheduleFetchProfile(pubkey)
+}
+
+/**
+ * Seed a profile that displays immediately but is marked STALE (fetchedAt 0), so a background refresh
+ * still runs. Used to hydrate the OWN profile from localStorage at launch — the name shows instantly
+ * (no npub flash while relays are slow/down) yet is refreshed from relays. Won't clobber a live entry.
+ */
+export function seedProfile(pubkey: string, profile: NostrProfile): void {
+  if (profileCache.has(pubkey)) return
+  profileCache.set(pubkey, { profile, fetchedAt: 0 })
+  notifyListeners(pubkey)
+  if (profile.picture) preCacheImage(profile.picture)
+}
+
+/** Subscribe to cache updates for `pubkey`; returns an unsubscribe fn. */
+export function subscribeProfile(pubkey: string, cb: () => void): () => void {
+  if (!listeners.has(pubkey)) listeners.set(pubkey, new Set())
+  listeners.get(pubkey)!.add(cb)
+  return () => { listeners.get(pubkey)?.delete(cb) }
+}

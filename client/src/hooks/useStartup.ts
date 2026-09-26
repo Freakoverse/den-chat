@@ -14,6 +14,7 @@ import { useHubStore, type HubEntry, type HubFolder } from '@/stores/hubStore'
 import { resetSignerGuard } from '@/lib/auth/signerGuard'
 import { discover } from '@/lib/auth/pc55'
 import { fetchReplaceable, fetchEvents } from '@/lib/nostr/relay-pool'
+import { getCachedProfile, ensureProfile, subscribeProfile, seedProfile } from '@/hooks/useProfileCache'
 import { KINDS } from '@/lib/crypto/constants'
 import { useVoiceStore } from '@/stores/voiceStore'
 import { useHubLoader } from './useHubLoader'
@@ -74,6 +75,35 @@ export function useStartup() {
       .catch(() => { /* non-fatal */ })
   }, [])
 
+  // Own profile (kind 0) → single source of truth. The sidebar (userStore) and every chat/DM/hub author
+  // name both resolve from the SHARED profile cache: we mirror the cache into userStore, seed it instantly
+  // from last session (so the name never flashes to the npub placeholder while relays are slow/down), and
+  // let the cache's retry-on-empty refresh it. This removes the old split-brain where the sidebar and chat
+  // fetched the same profile independently and one could show the real name while the other showed npub.
+  useEffect(() => {
+    if (!isAuthenticated || !pubkey) return
+    const persistKey = `den-profile-${pubkey}`
+
+    const apply = () => {
+      const p = getCachedProfile(pubkey)
+      if (p && (p.display_name || p.name || p.picture)) {
+        setProfile({ displayName: p.display_name || p.name, avatar: p.picture })
+        try { localStorage.setItem(persistKey, JSON.stringify(p)) } catch { /* ignore */ }
+      }
+    }
+
+    // Instant hydrate from the last session (marked stale → displays now, still refreshed below).
+    try {
+      const raw = localStorage.getItem(persistKey)
+      if (raw) seedProfile(pubkey, JSON.parse(raw))
+    } catch { /* ignore */ }
+
+    const unsub = subscribeProfile(pubkey, apply)
+    apply()                 // reflect anything already cached
+    ensureProfile(pubkey)   // fetch/refresh via the retrying shared-cache path
+    return () => unsub()
+  }, [isAuthenticated, pubkey, setProfile])
+
   // After login: fetch profile + hub list
   useEffect(() => {
     if (!isAuthenticated || !pubkey) return
@@ -84,18 +114,9 @@ export function useStartup() {
     useHubStore.getState().hydratePersistedForAccount(pubkey)
     useGroupStore.getState().reset()
 
-    // Fetch user profile (kind 0)
-    fetchReplaceable(pubkey, 0).then((event) => {
-      if (event) {
-        try {
-          const profile = JSON.parse(event.content)
-          setProfile({
-            displayName: profile.display_name || profile.name,
-            avatar: profile.picture,
-          })
-        } catch { /* ignore parse errors */ }
-      }
-    })
+    // Own profile (kind 0) is loaded by the dedicated own-profile sync effect below — it routes through
+    // the SHARED profile cache (single source of truth) so the sidebar and chat/DM/hub author names
+    // can't diverge into an npub split-brain, and self-heals via the cache's retries.
 
     // Fetch user hub list (kind 16942). Wait longer than the 4s default so a relay
     // holding the newest list isn't cut off — otherwise we'd show a stale hub list

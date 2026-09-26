@@ -47,11 +47,13 @@ export function UserPanel() {
   const cachedAvatar = useCachedImageUrl(avatar ?? undefined)
   const [profileOpen, setProfileOpen] = useState(false)
 
-  // Trigger profile fetch + DNN verification for own pubkey on mount
+  // Trigger profile fetch + DNN verification for own pubkey on mount. Also used as a fallback name
+  // source so the sidebar matches chat/DMs (same shared cache) even before userStore.displayName lands.
   const { getProfile } = useProfileCache()
   useEffect(() => {
     if (pubkey) getProfile(pubkey)
   }, [pubkey, getProfile])
+  const cachedProfile = pubkey ? getProfile(pubkey) : undefined
 
   // Voice state
   const connectionState = useVoiceStore((s) => s.connectionState)
@@ -91,7 +93,7 @@ export function UserPanel() {
   }, [joinedAt, isInVoice])
 
   const npub = pubkey ? nip19.npubEncode(pubkey) : ''
-  const name = displayName || (npub ? truncateNpub(npub) : 'Anonymous')
+  const name = displayName || cachedProfile?.display_name || cachedProfile?.name || (npub ? truncateNpub(npub) : 'Anonymous')
 
   return (
     <>
