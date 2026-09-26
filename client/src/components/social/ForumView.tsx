@@ -152,7 +152,7 @@ function communityShortLabel(def: CommunityDef | undefined, address: string): st
 
 function ModalShell({ title, onClose, children, maxW = 'max-w-sm' }: { title: string; onClose: () => void; children: React.ReactNode; maxW?: string }) {
   return createPortal(
-    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
       <div className={cn('w-full rounded-xl border border-border bg-card shadow-2xl', maxW)} onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between px-4 py-3 border-b border-border">
           <h3 className="text-sm font-semibold text-foreground">{title}</h3>
@@ -1135,7 +1135,7 @@ function ClassifierFilterModal({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
       <div className="w-full max-w-md rounded-xl border border-border bg-card p-4 space-y-4" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-semibold text-foreground">Filter feed</h3>

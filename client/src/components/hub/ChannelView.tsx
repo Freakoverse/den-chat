@@ -608,7 +608,7 @@ export function ChannelDescriptionModal({ channelId, channelName, description, i
   const liveDesc = hub?.channels.find(c => c.channelId === channelId)?.description
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
       <div className="bg-card border border-border rounded-lg p-6 max-w-lg w-full mx-4 shadow-xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-semibold text-foreground">#{channelName}</h3>
@@ -6718,7 +6718,7 @@ export function RawEventModal({ rawJson, decryptedContent, isDecrypted, onClose,
   }
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
       <div
         className="bg-secondary border border-border rounded-lg shadow-xl w-full max-w-2xl max-h-[80vh] flex flex-col mx-4"
         onClick={(e) => e.stopPropagation()}
@@ -6945,7 +6945,7 @@ export function MessageHistoryModal({ pubkey, dTag, hubDTag, channelId, onClose 
   }
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
       <div
         className="bg-secondary border border-border rounded-lg shadow-xl w-full max-w-lg max-h-[80vh] flex flex-col mx-4"
         onClick={(e) => e.stopPropagation()}
@@ -7359,7 +7359,7 @@ function ThreadModal({ parentMsg, threadReplies, hubDTag, channelId, getProfile,
   }, [])
 
   return createPortal(
-    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
+    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
       <div
         ref={modalContainerRef}
         className="w-full max-w-3xl h-[90vh] flex flex-col bg-background rounded-xl border border-border shadow-2xl overflow-hidden"

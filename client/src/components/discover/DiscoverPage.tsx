@@ -463,7 +463,7 @@ function FilterModal({ open, onClose, showNsfw, setShowNsfw, powMin, setPowMin, 
   const hasChanges = localNsfw !== false || localPowMin !== 15 || localPowMax !== 25 || localRequireMessagePow !== false || localJoinPowMin !== 15 || localJoinPowMax !== 25 || localRequireJoinPow !== false || localTags.length > 0 || localClientTags.length > 0
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center px-2" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-2" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
       <div className="absolute inset-0 bg-black/60" />
       <div
         className="relative z-10 w-full max-w-md max-h-[85vh] flex flex-col rounded-xl border border-border bg-background shadow-2xl animate-in fade-in-0 zoom-in-95"

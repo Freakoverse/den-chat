@@ -858,7 +858,7 @@ function ReceiveModal({
   const qrValue = chain === 'bitcoin' ? `bitcoin:${address}` : address
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[200]" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[200]" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
       <div
         className="bg-card border border-border rounded-2xl p-6 max-w-sm w-full mx-4 shadow-2xl animate-in fade-in-0 zoom-in-95 duration-200"
         onClick={(e) => e.stopPropagation()}
@@ -916,7 +916,7 @@ function ReceiveModal({
 function HowToSendModal({ onClose }: { onClose: () => void }) {
   useEscToClose(onClose)
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[200]" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[200]" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
       <div
         className="bg-card border border-border rounded-2xl p-6 max-w-md w-full mx-4 shadow-2xl animate-in fade-in-0 zoom-in-95 duration-200"
         onClick={(e) => e.stopPropagation()}
@@ -984,7 +984,7 @@ function HowToSendModal({ onClose }: { onClose: () => void }) {
 function WalletInfoModal({ onClose }: { onClose: () => void }) {
   useEscToClose(onClose)
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[200]" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[200]" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
       <div
         className="bg-card border border-border rounded-2xl p-6 max-w-md w-full mx-4 shadow-2xl animate-in fade-in-0 zoom-in-95 duration-200"
         onClick={(e) => e.stopPropagation()}

@@ -1707,7 +1707,7 @@ function DM04ThreadModal({ parentMsg, threadReplies, recipientPubkey, getProfile
   }, [message, myPubkey, recipientPubkey, signer, privateKey, sendMessage, sending, parentMsg.id, inThreadReply])
 
   return createPortal(
-    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
+    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
       <div
         ref={modalContainerRef}
         className="w-full max-w-3xl h-[90vh] flex flex-col bg-background rounded-xl border border-border shadow-2xl overflow-hidden"

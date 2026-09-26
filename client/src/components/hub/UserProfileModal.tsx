@@ -1597,7 +1597,7 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
   const displayName = profile.display_name || profile.name || truncateNpub(npub)
 
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm p-2" onClick={onClose}>
+    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm p-2" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
       <div
         className={`bg-card rounded-2xl w-full max-h-[85vh] overflow-hidden shadow-2xl border border-border/50 flex flex-col animate-in fade-in-0 zoom-in-95 duration-200 transition-[max-width] ${editing ? 'max-w-[540px]' : 'max-w-lg'}`}
         onClick={(e) => e.stopPropagation()}
@@ -2575,7 +2575,7 @@ function FollowingListModal({ open, onClose, pubkeys }: { open: boolean; onClose
   })
 
   return (
-    <div className="fixed inset-0 z-[250] flex items-center justify-center bg-black/60 backdrop-blur-sm p-2" onClick={onClose}>
+    <div className="fixed inset-0 z-[250] flex items-center justify-center bg-black/60 backdrop-blur-sm p-2" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
       <div
         className="bg-card rounded-2xl w-full max-w-[400px] max-h-[70vh] overflow-hidden shadow-2xl border border-border/50 animate-in fade-in-0 zoom-in-95 duration-200 flex flex-col"
         onClick={(e) => e.stopPropagation()}

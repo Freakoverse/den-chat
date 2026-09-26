@@ -235,7 +235,7 @@ export function NewDMModal({ open, onClose, onStartConversation }: Props) {
     : (search ? (publicSearching ? '' : 'No users found.') : 'Search by npub or NIP-05 (user@domain.com)')
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center px-2 bg-black/60" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-2 bg-black/60" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
       <div
         className="bg-background rounded-xl w-full max-w-md max-h-[70vh] overflow-hidden shadow-2xl flex flex-col"
         onClick={(e) => e.stopPropagation()}

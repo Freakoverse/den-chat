@@ -1127,7 +1127,7 @@ export function StickerDiscoveryModal({ onClose, initialSearch = '', initialAuth
   return (
     <>
       {createPortal(
-        <div className="fixed inset-0 z-[320] flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
+        <div className="fixed inset-0 z-[320] flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
           <div className="w-full max-w-lg max-h-[80vh] flex flex-col bg-background rounded-xl border border-border shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-secondary/30 shrink-0">
               <div className="flex items-center gap-2">

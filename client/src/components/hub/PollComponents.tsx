@@ -64,7 +64,7 @@ function VotersModal({ optionLabel, voters, onClose }: VotersModalProps) {
   const { getProfile } = useProfileCache()
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center px-2 bg-black/60 backdrop-blur-sm" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-2 bg-black/60 backdrop-blur-sm" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
       <div className="w-[360px] max-h-[400px] bg-card border border-border rounded-xl shadow-2xl overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between px-4 py-3 border-b border-border">
           <div className="min-w-0 flex-1">
@@ -163,7 +163,7 @@ export function CreatePollModal({ hubDTag, channelId, onClose }: CreatePollModal
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center px-2 bg-black/60 backdrop-blur-sm" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-2 bg-black/60 backdrop-blur-sm" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
       <div className="w-[480px] max-h-[90vh] bg-card border border-border rounded-xl shadow-2xl overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-border">

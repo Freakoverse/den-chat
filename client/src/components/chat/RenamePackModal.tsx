@@ -61,7 +61,7 @@ export function RenamePackModal({ open, currentName, kindLabel, onClose, onSave,
   }
 
   return createPortal(
-    <div className="fixed inset-0 z-[320] flex items-center justify-center" onClick={onClose}>
+    <div className="fixed inset-0 z-[320] flex items-center justify-center" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
       <div
         className="relative z-10 w-full max-w-[380px] mx-4 bg-card rounded-xl border border-border shadow-2xl animate-in fade-in-0 zoom-in-95 duration-200"

@@ -59,7 +59,7 @@ export function PackManagerModal({ open, onClose, initialSection = 'mine-emoji' 
   if (!open) return null
 
   return createPortal(
-    <div className={`fixed inset-0 z-[320] flex ${isMobile ? '' : 'items-center justify-center p-4'}`} onClick={onClose}>
+    <div className={`fixed inset-0 z-[320] flex ${isMobile ? '' : 'items-center justify-center p-4'}`} onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
       <div
         className={`relative z-10 bg-card shadow-2xl animate-in fade-in-0 flex flex-col overflow-hidden ${

@@ -242,7 +242,7 @@ export function ModOpenModal({ mod, onClose }: { mod: Mod; onClose: () => void }
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center px-3" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-3" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
       <div className="absolute inset-0 bg-black/70" />
       <div className="relative z-10 w-full max-w-md rounded-xl border border-border bg-background shadow-lg p-4 space-y-3" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between">
@@ -312,7 +312,7 @@ function ModFiltersModal({ availableClients, onClose }: { availableClients: stri
   const s = useModFiltersStore()
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center px-3" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-3" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
       <div className="absolute inset-0 bg-black/70" />
       <div className="relative z-10 w-full max-w-md rounded-xl border border-border bg-background shadow-lg flex flex-col max-h-[85vh]" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">

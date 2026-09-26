@@ -551,7 +551,7 @@ function AddTopicModal({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center px-2" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-2" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
       <div className="absolute inset-0 bg-black/60" />
       <div className="relative z-10 w-full max-w-sm rounded-xl border border-border bg-background shadow-2xl p-6" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-1">
@@ -607,7 +607,7 @@ function AddTopicModal({ onClose }: { onClose: () => void }) {
 function InfoModal({ onClose }: { onClose: () => void }) {
   useEscToClose(onClose)
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center px-2" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-2" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
       <div className="absolute inset-0 bg-black/60" />
       <div className="relative z-10 w-full max-w-md rounded-xl border border-border bg-background shadow-2xl p-6" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
@@ -1965,7 +1965,7 @@ function PublicChatSettingsModal({ onClose }: { onClose: () => void }) {
   )
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center px-2" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-2" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
       <div className="absolute inset-0 bg-black/60" />
       <div className="relative z-10 w-full max-w-md rounded-xl border border-border bg-background shadow-2xl p-6 flex flex-col gap-4" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between">

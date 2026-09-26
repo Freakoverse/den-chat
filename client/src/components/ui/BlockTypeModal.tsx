@@ -23,7 +23,7 @@ export function BlockTypeModal({ open, onClose, onSelect, displayName }: BlockTy
   if (!open) return null
 
   return (
-    <div className="fixed inset-0 z-[250] flex items-center justify-center" onClick={onClose}>
+    <div className="fixed inset-0 z-[250] flex items-center justify-center" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
       {/* Backdrop */}
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
 

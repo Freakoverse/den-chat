@@ -3631,7 +3631,7 @@ function NoLocalSignerModal({ open, onClose, isDesktop }: { open: boolean; onClo
   if (!open) return null
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
       <div
         className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-md mx-4 flex flex-col overflow-hidden"
         style={{ maxHeight: '85vh' }}

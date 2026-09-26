@@ -99,7 +99,7 @@ export function SetFacilitatorModal({ hub, onClose }: { hub: HubData; onClose: (
   }
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center px-3" onClick={onClose}>
+    <div className="fixed inset-0 z-[60] flex items-center justify-center px-3" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
       <div
         className="relative z-10 w-full max-w-md rounded-xl border border-border bg-background shadow-2xl animate-in fade-in-0 zoom-in-95"
