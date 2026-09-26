@@ -3269,7 +3269,21 @@ function ReplyPreview({ repliedMessage, getProfile, onScrollTo }: {
 /** A custom-emoji reaction at ~20px: a device-resolution static thumbnail, never a live downscale. */
 function ReactionEmojiImg({ url, alt }: { url: string; alt: string }) {
   const src = useThumbnail(url, 20, 'contain')
-  return <img src={src ?? url} alt={alt} className="h-5 w-5 object-contain inline" />
+  // Tag as a custom emoji so the global right-click menu (ContextMenu) can offer "View emoji pack".
+  // data-emoji-url carries the full-size URL (src may be a resized thumbnail); the set address is
+  // resolved from the local emoji map by shortcode, matching the inline-emoji click path.
+  const shortcode = alt.match(/^:([a-zA-Z0-9_-]+):$/)?.[1] ?? alt
+  const setAddress = getEmojiMap().get(shortcode)?.setAddress
+  return (
+    <img
+      src={src ?? url}
+      alt={alt}
+      data-emoji-shortcode={shortcode}
+      data-emoji-url={url}
+      data-set-address={setAddress || undefined}
+      className="h-5 w-5 object-contain inline"
+    />
+  )
 }
 
 /** A reactor's avatar at 20px, same thumbnail treatment (huge or animated avatars looked blurry on phones). */
@@ -3340,18 +3354,6 @@ export function ReactionBar({ reactions, messageId, onAddReaction, rawReactions,
   const [showReactionList, setShowReactionList] = useState(false)
   const addReactionBtnRef = useRef<HTMLButtonElement>(null)
   const { getProfile } = useProfileCache()
-
-  // Right-click context menu on a custom-emoji reaction pill → "View emoji pack". Resolves the emoji's
-  // set from the local emoji map (same source as clicking an inline custom emoji) and re-uses the
-  // existing pack modal by dispatching the 'emoji-click' event the view already listens for.
-  const [emojiCtx, setEmojiCtx] = useState<{ x: number; y: number; shortcode: string; url: string; setAddress: string | null } | null>(null)
-  const resolveReactionEmoji = (r: Reaction) => {
-    const shortcode = r.emoji.match(/^:([a-zA-Z0-9_-]+):$/)?.[1] ?? r.emoji
-    const entry = getEmojiMap().get(shortcode)
-    const url = r.customUrl || entry?.url
-    if (!url) return null // a plain unicode emoji — no pack to view
-    return { shortcode, url, setAddress: entry?.setAddress ?? null }
-  }
 
   // Convert StoredReaction[] to ReactionInfo[] for the modal
   // NOTE: Must be above the early return to preserve hook ordering
@@ -3427,12 +3429,6 @@ export function ReactionBar({ reactions, messageId, onAddReaction, rawReactions,
           <TooltipTrigger asChild>
           <button
             onClick={() => onAddReaction(messageId, r.emoji, r.customUrl)}
-            onContextMenu={(e) => {
-              const info = resolveReactionEmoji(r)
-              if (!info) return // plain unicode reaction: leave the native menu
-              e.preventDefault()
-              setEmojiCtx({ x: e.clientX, y: e.clientY, ...info })
-            }}
             className={`inline-flex items-center gap-1 h-7 px-2.5 rounded-full text-base cursor-pointer transition-colors border ${r.reacted
               ? 'bg-primary/20 border-primary/40 text-foreground'
               : 'bg-secondary/50 border-border text-muted-foreground hover:bg-secondary'
@@ -3485,27 +3481,6 @@ export function ReactionBar({ reactions, messageId, onAddReaction, rawReactions,
           onOpenProfile={onOpenProfile}
           disableCustomEmojis={disableCustomEmojis}
         />
-      )}
-      {/* Right-click context menu for a custom-emoji reaction */}
-      {emojiCtx && createPortal(
-        <>
-          <div className="fixed inset-0 z-[210]" onClick={() => setEmojiCtx(null)} onContextMenu={(e) => { e.preventDefault(); setEmojiCtx(null) }} />
-          <div
-            className="fixed z-[211] w-44 bg-popover/95 backdrop-blur-md border border-border rounded-xl shadow-xl p-1 animate-in fade-in-0 zoom-in-95"
-            style={{ left: Math.min(emojiCtx.x, window.innerWidth - 190), top: Math.min(emojiCtx.y, window.innerHeight - 60) }}
-          >
-            <button
-              onClick={() => {
-                window.dispatchEvent(new CustomEvent('emoji-click', { detail: { shortcode: emojiCtx.shortcode, url: emojiCtx.url, setAddress: emojiCtx.setAddress } }))
-                setEmojiCtx(null)
-              }}
-              className="flex items-center gap-2 w-full px-3 py-1.5 text-sm text-foreground/80 hover:bg-accent/50 cursor-pointer transition-colors rounded-md"
-            >
-              <Smile size={13} /> View emoji pack
-            </button>
-          </div>
-        </>,
-        document.body,
       )}
     </div>
     </TooltipProvider>

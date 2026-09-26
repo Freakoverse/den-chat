@@ -15,7 +15,7 @@ import { useState, useEffect, useCallback, useRef, createContext, type ReactNode
 import { saveBlobAs } from '@/lib/saveFile'
 import { createPortal } from 'react-dom'
 import {
-  Copy, Scissors, ClipboardPaste, MousePointerClick, Link, Image, TextSelect, Bell, CheckCheck, Download, Film, Volume2,
+  Copy, Scissors, ClipboardPaste, MousePointerClick, Link, Image, TextSelect, Bell, CheckCheck, Download, Film, Volume2, Smile,
 } from 'lucide-react'
 
 /** Save the media at `url` with a location picker where available (see lib/saveFile). */
@@ -294,6 +294,24 @@ export function ContextMenuProvider({ children }: { children: ReactNode }) {
           icon: <Volume2 size={14} />,
           action: () => {
             navigator.clipboard.writeText(audioSrc).catch(() => {})
+            close()
+          },
+        })
+      }
+
+      // --- Custom emoji actions (e.g. a reaction pill's emoji) ---
+      const emojiEl = target.closest('[data-emoji-shortcode]') as HTMLElement | null
+      if (emojiEl) {
+        const shortcode = emojiEl.getAttribute('data-emoji-shortcode') || ''
+        const emojiUrl = emojiEl.getAttribute('data-emoji-url') || emojiEl.getAttribute('data-media-src') || (emojiEl as HTMLImageElement).src || ''
+        const setAddress = emojiEl.getAttribute('data-set-address') || null
+        if (items.length > 0) items.push({ separator: true })
+        items.push({
+          label: 'View Emoji Pack',
+          icon: <Smile size={14} />,
+          action: () => {
+            // Reuse the existing pack modal (each view listens for 'emoji-click').
+            window.dispatchEvent(new CustomEvent('emoji-click', { detail: { shortcode, url: emojiUrl, setAddress } }))
             close()
           },
         })
