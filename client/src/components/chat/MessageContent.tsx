@@ -189,14 +189,54 @@ export function MutedWordPill({ children }: { children: React.ReactNode }) {
   )
 }
 
-/** Split content by ||spoiler|| markers into typed segments */
+/**
+ * Ranges of `text` that live inside markdown code — fenced ``` blocks and inline `spans`. Everything
+ * inside them is literal: no cards, previews, emoji, mentions, timestamps, channels or spoilers.
+ */
+export function codeSpans(text: string): Array<[number, number]> {
+  const spans: Array<[number, number]> = []
+  // Fenced first: 3+ backticks or tildes, closed by the same run. Non-greedy across lines. Blank each
+  // fenced region (same length, indices preserved) so the inline pass can't pair with fence backticks.
+  const fence = /(`{3,}|~{3,})[\s\S]*?\1/g
+  let masked = text
+  let m: RegExpExecArray | null
+  while ((m = fence.exec(text)) !== null) {
+    spans.push([m.index, m.index + m[0].length])
+    masked = masked.slice(0, m.index) + ' '.repeat(m[0].length) + masked.slice(m.index + m[0].length)
+  }
+  // Inline `code` (single backtick, no newline), on the fence-masked copy.
+  const inline = /`[^`\n]+`/g
+  while ((m = inline.exec(masked)) !== null) spans.push([m.index, m.index + m[0].length])
+  return spans
+}
+
+/** Apply a string transform only to the parts of `text` OUTSIDE code (fenced/inline); code stays verbatim. */
+function outsideCode(text: string, fn: (s: string) => string): string {
+  if (!text.includes('`')) return fn(text)
+  const spans = codeSpans(text).sort((a, b) => a[0] - b[0])
+  if (spans.length === 0) return fn(text)
+  let out = ''
+  let last = 0
+  for (const [s, e] of spans) {
+    if (s > last) out += fn(text.slice(last, s))
+    out += text.slice(s, e) // code region, verbatim
+    last = e
+  }
+  if (last < text.length) out += fn(text.slice(last))
+  return out
+}
+
+/** Split content by ||spoiler|| markers into typed segments (markers inside code are ignored). */
 export function splitSpoilerSegments(text: string): { type: 'text' | 'spoiler'; value: string }[] {
   const segments: { type: 'text' | 'spoiler'; value: string }[] = []
   const regex = /\|\|(.+?)\|\|/gs
+  const codes = text.includes('`') ? codeSpans(text) : []
+  const inCode = (i: number) => codes.some(([s, e]) => i >= s && i < e)
   let lastIndex = 0
   let match: RegExpExecArray | null
 
   while ((match = regex.exec(text)) !== null) {
+    if (inCode(match.index)) continue // a ||…|| inside code is literal text
     if (match.index > lastIndex) {
       segments.push({ type: 'text', value: text.slice(lastIndex, match.index) })
     }
@@ -1116,14 +1156,12 @@ export const MessageContent = memo(function MessageContent({ content, suffix, on
   const renderMarkdown = (text: string) => {
     // Clear the deferred embeds collector before each render pass
     collectedEmbedsRef.current = []
-    // Pre-process: replace @everyone, @here, @roleName with markdown image syntax for inline rendering
-    const mentioned = preMentionMarkdown(text, hubRoleNames)
-    // Pre-process: replace <t:unix> with markdown image syntax for inline rendering
-    const timestamped = preTimestampMarkdown(mentioned)
-    // Pre-process: replace :shortcode: with markdown image syntax for NIP-30 emojis
-    const emojified = effectiveDisableEmojis ? timestamped : preEmojifyMarkdown(timestamped, emojiTags)
-    // Pre-process: replace #channel-name (matching a real hub channel) with a clickable pill
-    const channeled = preChannelMarkdown(emojified, hubChannels)
+    // Pre-process, but only OUTSIDE code — inside a ``` block or an inline `span` these tokens are
+    // literal (no mention pill, timestamp, emoji or channel). react-markdown keeps the code itself literal.
+    const mentioned = outsideCode(text, (t) => preMentionMarkdown(t, hubRoleNames))
+    const timestamped = outsideCode(mentioned, preTimestampMarkdown)
+    const emojified = effectiveDisableEmojis ? timestamped : outsideCode(timestamped, (t) => preEmojifyMarkdown(t, emojiTags))
+    const channeled = outsideCode(emojified, (t) => preChannelMarkdown(t, hubChannels))
     const proc = channeled.replace(/\n{3,}/g, (m) => {
       const spacers = Array(m.length - 2).fill('\u00a0').join('\n\n')
       return '\n\n' + spacers + '\n\n'
@@ -1172,7 +1210,10 @@ export const MessageContent = memo(function MessageContent({ content, suffix, on
           // linkify) — otherwise a link after an @mention renders as plain text.
           const hasBlockSyntax = /^(\s*(#{1,6}\s|[-*]\s|\d+\.\s|>|```|---|\|))|\n\n/m.test(seg.value)
           const hasUrl = /(https?:\/\/|www\.)\S/i.test(seg.value)
-          if (!hasBlockSyntax && !hasUrl) {
+          // A backtick means inline/fenced code — route through markdown so it renders as literal code
+          // (the inline path below has no code handling and would emojify/mention inside it).
+          const hasCode = seg.value.includes('`')
+          if (!hasBlockSyntax && !hasUrl && !hasCode) {
             return <span key={i}>{emojifyTimestampAndMention(seg.value, emojiTags, hubRoleNames, hubChannels)}</span>
           }
           return <span key={i}>{renderMarkdown(seg.value)}</span>
@@ -1553,27 +1594,6 @@ type NostrSegment =
   | { type: 'text'; value: string }
   /** `href` is set when the address was found INSIDE a URL — the card then opens that URL, not its own chooser. */
   | { type: 'nostr'; value: string; href?: string }
-
-/**
- * Ranges of `content` that live inside markdown code — fenced ``` blocks and inline `spans`. A nostr
- * reference / URL inside one is literal code and must NOT be turned into a card or preview.
- */
-function codeSpans(content: string): Array<[number, number]> {
-  const spans: Array<[number, number]> = []
-  // Fenced first: 3+ backticks or tildes, closed by the same run. Non-greedy across lines. Blank each
-  // fenced region (same length, indices preserved) so the inline pass can't pair with fence backticks.
-  const fence = /(`{3,}|~{3,})[\s\S]*?\1/g
-  let masked = content
-  let m: RegExpExecArray | null
-  while ((m = fence.exec(content)) !== null) {
-    spans.push([m.index, m.index + m[0].length])
-    masked = masked.slice(0, m.index) + ' '.repeat(m[0].length) + masked.slice(m.index + m[0].length)
-  }
-  // Inline `code` (single backtick, no newline), on the fence-masked copy.
-  const inline = /`[^`\n]+`/g
-  while ((m = inline.exec(masked)) !== null) spans.push([m.index, m.index + m[0].length])
-  return spans
-}
 
 function splitNostr(content: string): NostrSegment[] {
   const segments: NostrSegment[] = []
