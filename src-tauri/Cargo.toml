@@ -33,7 +33,10 @@ tracing = "0.1"
 futures-util = "0.3"
 tauri-plugin-opener = "2"
 tauri-plugin-deep-link = "2"
-tauri-plugin-http = "2"
+# Pin to 2.6.x: the tauri build enforces that the Rust crate and the NPM @tauri-apps/plugin-http share
+# a major.minor, and the npm package tops out at 2.6.1 (no 2.7 published), so a bare "2" that resolved
+# to the 2.7 crate broke the release build.
+tauri-plugin-http = "~2.6"
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 
 [target.'cfg(windows)'.dependencies]
