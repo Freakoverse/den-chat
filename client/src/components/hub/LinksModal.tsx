@@ -9,7 +9,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { nowSeconds } from '@/lib/time/clockOffset'
 import {
   X, Plus, Trash2, ExternalLink, Loader2,
-  Globe, Link2, Pencil, ImageIcon, XCircle, ChevronDown, ChevronUp, Check,
+  Globe, TreePine, Pencil, ImageIcon, XCircle, ChevronDown, ChevronUp, Check,
   ArrowUp, ArrowDown,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -121,8 +121,8 @@ export function LinksViewerModal({ open, onClose, pubkey, onEdit, isSelf }: Link
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-3.5 border-b border-border shrink-0">
           <div className="flex items-center gap-2">
-            <Link2 size={16} className="text-primary" />
-            <h2 className="font-semibold text-foreground text-sm">Links</h2>
+            <TreePine size={16} className="text-primary" />
+            <h2 className="font-semibold text-foreground text-sm">Link tree</h2>
           </div>
           <div className="flex items-center gap-1.5">
             {isSelf && onEdit && (
@@ -145,7 +145,7 @@ export function LinksViewerModal({ open, onClose, pubkey, onEdit, isSelf }: Link
           ) : linkSets.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 gap-3 text-center">
               <div className="w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center">
-                <Link2 size={22} className="text-primary" />
+                <TreePine size={22} className="text-primary" />
               </div>
               <div>
                 <p className="text-sm font-medium text-foreground">No link sets published</p>
@@ -517,8 +517,8 @@ export function LinksEditorModal({ open, onClose, onSaved }: LinksEditorModalPro
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-3.5 border-b border-border shrink-0">
           <div className="flex items-center gap-2">
-            <Link2 size={16} className="text-primary" />
-            <h2 className="font-semibold text-foreground text-sm">Edit Links</h2>
+            <TreePine size={16} className="text-primary" />
+            <h2 className="font-semibold text-foreground text-sm">Edit link tree</h2>
           </div>
           <div className="flex items-center gap-1.5">
             <Button size="sm" onClick={addNewLinkSet} className="h-7 px-2.5 text-xs gap-1">
@@ -539,7 +539,7 @@ export function LinksEditorModal({ open, onClose, onSaved }: LinksEditorModalPro
           ) : linkSets.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 gap-3 text-center">
               <div className="w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center">
-                <Link2 size={22} className="text-primary" />
+                <TreePine size={22} className="text-primary" />
               </div>
               <p className="text-sm font-medium text-foreground">No link sets yet</p>
               <p className="text-xs text-muted-foreground">Create a link set to share your links on your profile.</p>
