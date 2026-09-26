@@ -53,6 +53,7 @@ export const STANDARD_KINDS = {
   RELAY_LIST: 10002,
   DM_RELAY_LIST: 10050,
   BLOSSOM_SERVER_LIST: 10063,
+  PAYTO: 10133, // NIP-A3 payment targets (replaceable, one per author)
   APP_DATA: 30078,
   UPV2: 24134,
   DNN_NODE: 64600,

@@ -26,7 +26,7 @@ import {
   X, Copy, Check, Pencil, UserPlus, UserMinus, ExternalLink,
   MoreVertical, ShieldBan, ShieldCheck, MessageCircle,
   Globe, Zap, AtSign, Camera, ImageIcon, Loader2, XCircle, AlertTriangle,
-  Link2, Flag, BadgeCheck, RotateCw, Users,
+  Flag, BadgeCheck, RotateCw, Users, TreePine, HandCoins,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
@@ -44,6 +44,9 @@ import { publishPersonal, getPublishRelays } from '@/stores/postingBehaviourStor
 import { signWithSigner } from '@/lib/nostr/events'
 import { nip19 } from 'nostr-tools'
 import { LinksViewerModal, LinksEditorModal } from '@/components/hub/LinksModal'
+import { PaytoModal } from '@/components/hub/PaytoModal'
+import { extractPaymentTargets } from '@/lib/nostr/payto'
+import { STANDARD_KINDS } from '@/lib/crypto/constants'
 import { ReportModal } from '@/components/hub/ReportModal'
 import { DnnBadge } from '@/components/ui/DnnBadge'
 import { useDnnStore } from '@/stores/dnnStore'
@@ -143,6 +146,9 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
   const [showLinksViewer, setShowLinksViewer] = useState(false)
   const [showLinksEditor, setShowLinksEditor] = useState(false)
   const [hasLinks, setHasLinks] = useState(false)
+  // Payment targets (NIP-A3, kind 10133)
+  const [showPayto, setShowPayto] = useState(false)
+  const [hasPayto, setHasPayto] = useState(false)
 
   // Upload state for profile picture
   type UploadStatus = 'idle' | 'uploading' | 'success' | 'error'
@@ -312,6 +318,12 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
       setHasLinks(linkSets.some((ev) => ev.tags.some((t) => t[0] === 'r' && t[1])))
     })
 
+    // Fetch payment targets (kind 10133) to know if the "Payment targets" button should show
+    fetchEvents({ kinds: [STANDARD_KINDS.PAYTO], authors: [displayPubkey], limit: 1 }).then((events) => {
+      const latest = events.sort((a, b) => b.created_at - a.created_at)[0]
+      setHasPayto(extractPaymentTargets(latest).length > 0)
+    }).catch(() => { /* non-critical */ })
+
     // Fetch target user's follow list (kind 3) for the "Following" button
     fetchEvents({ kinds: [3], authors: [displayPubkey], limit: 1 }).then((events) => {
       if (events.length > 0) {
@@ -337,6 +349,8 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
       setShowLinksViewer(false)
       setShowLinksEditor(false)
       setHasLinks(false)
+      setShowPayto(false)
+      setHasPayto(false)
       setShowFollowingList(false)
       setFollowingPubkeys([])
       setFollowingLoaded(false)
@@ -2071,30 +2085,25 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
                 <p className="text-sm text-foreground/85 whitespace-pre-wrap break-words leading-relaxed mb-2">{profile.about}</p>
               )}
 
-              {/* Links button */}
-              {(hasLinks || isSelf) && (
+              {/* Link tree + Payment targets — side by side. Editing each lives inside its own modal, so
+                  there's no separate edit pencil here. */}
+              {(hasLinks || hasPayto || isSelf) && (
                 <div className="flex items-center gap-1.5 mb-2">
-                  <button
-                    onClick={() => setShowLinksViewer(true)}
-                    className="w-full flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/10 hover:bg-primary/15 border border-primary/20 text-xs font-medium text-primary transition-colors cursor-pointer justify-center items-center"
-                  >
-                    <Link2 size={13} />
-                    Links
-                  </button>
-                  {isSelf && (
-                    <TooltipProvider delayDuration={300}>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <button
-                            onClick={() => setShowLinksEditor(true)}
-                            className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors cursor-pointer"
-                          >
-                            <Pencil size={12} />
-                          </button>
-                        </TooltipTrigger>
-                        <TooltipContent side="top" className="text-xs">Edit links</TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
+                  {(hasLinks || isSelf) && (
+                    <button
+                      onClick={() => setShowLinksViewer(true)}
+                      className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/10 hover:bg-primary/15 border border-primary/20 text-xs font-medium text-primary transition-colors cursor-pointer"
+                    >
+                      <TreePine size={13} /> Link tree
+                    </button>
+                  )}
+                  {(hasPayto || isSelf) && (
+                    <button
+                      onClick={() => setShowPayto(true)}
+                      className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/10 hover:bg-primary/15 border border-primary/20 text-xs font-medium text-primary transition-colors cursor-pointer"
+                    >
+                      <HandCoins size={13} /> Payment targets
+                    </button>
                   )}
                 </div>
               )}
@@ -2171,6 +2180,13 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
               }}
             />
           )}
+          <PaytoModal
+            open={showPayto}
+            onClose={() => setShowPayto(false)}
+            pubkey={displayPubkey}
+            displayName={displayName}
+            isSelf={isSelf}
+          />
         </>
       )}
       {/* Report modal */}
