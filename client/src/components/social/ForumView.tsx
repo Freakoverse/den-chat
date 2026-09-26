@@ -21,6 +21,7 @@ import { useBlockStore } from '@/stores/blockStore'
 import { usePreferencesStore } from '@/stores/preferencesStore'
 import { useWotStore } from '@/stores/wotStore'
 import { useDnnStore } from '@/stores/dnnStore'
+import { shortCodeOf, verifiedShortAddress } from '@/lib/nostr/nipShort'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import {
   sortPosts, encodeCommunityNaddr, decodeCommunityNaddr, parseCommunityAddress, communityAddress,
@@ -77,7 +78,9 @@ function ForumEventMenu({ event, className }: { event: Event; className?: string
   const [open, setOpen] = useState(false)
   const [showRaw, setShowRaw] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [shortCopied, setShortCopied] = useState<null | 'short' | 'shorter'>(null)
   const ref = useRef<HTMLDivElement>(null)
+  const authorDnn = useDnnStore((s) => (s.status[event.pubkey] === 'verified' ? s.verified[event.pubkey]?.dnnId : undefined))
 
   useEffect(() => {
     if (!open) return
@@ -91,6 +94,15 @@ function ForumEventMenu({ event, className }: { event: Event; className?: string
     navigator.clipboard.writeText(nip19.neventEncode({ id: event.id, author: event.pubkey, kind: event.kind }))
     setCopied(true)
     setTimeout(() => setCopied(false), 1500)
+  }
+
+  const copyShort = (e: React.MouseEvent, useDnn: boolean) => {
+    e.stopPropagation()
+    const addr = verifiedShortAddress(event, useDnn ? authorDnn : undefined)
+    if (!addr) return
+    navigator.clipboard.writeText(addr)
+    setShortCopied(useDnn ? 'shorter' : 'short')
+    setTimeout(() => setShortCopied(null), 1500)
   }
 
   return (
@@ -109,6 +121,16 @@ function ForumEventMenu({ event, className }: { event: Event; className?: string
           <button onClick={copyAddress} className="flex items-center gap-2 w-full px-3 py-1.5 text-sm text-foreground/80 hover:bg-accent/50 cursor-pointer transition-colors rounded-md">
             <Copy size={13} /> {copied ? 'Copied!' : 'Copy Event Address'}
           </button>
+          {shortCodeOf(event) && (
+            <button onClick={(e) => copyShort(e, false)} className="flex items-center gap-2 w-full px-3 py-1.5 text-sm text-foreground/80 hover:bg-accent/50 cursor-pointer transition-colors rounded-md">
+              {shortCopied === 'short' ? <Check size={13} className="text-emerald-400" /> : <Copy size={13} />} {shortCopied === 'short' ? 'Copied!' : 'Copy short address'}
+            </button>
+          )}
+          {shortCodeOf(event) && authorDnn && (
+            <button onClick={(e) => copyShort(e, true)} className="flex items-center gap-2 w-full px-3 py-1.5 text-sm text-foreground/80 hover:bg-accent/50 cursor-pointer transition-colors rounded-md">
+              {shortCopied === 'shorter' ? <Check size={13} className="text-emerald-400" /> : <Copy size={13} />} {shortCopied === 'shorter' ? 'Copied!' : 'Copy shorter address'}
+            </button>
+          )}
           <button onClick={(e) => { e.stopPropagation(); setShowRaw(true); setOpen(false) }} className="flex items-center gap-2 w-full px-3 py-1.5 text-sm text-foreground/80 hover:bg-accent/50 cursor-pointer transition-colors rounded-md">
             <Code size={13} /> View Raw Event
           </button>
