@@ -2092,7 +2092,7 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
                   {(hasLinks || isSelf) && (
                     <button
                       onClick={() => setShowLinksViewer(true)}
-                      className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/10 hover:bg-primary/15 border border-primary/20 text-xs font-medium text-primary transition-colors cursor-pointer"
+                      className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-secondary/60 hover:bg-secondary border border-border text-xs font-medium text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
                     >
                       <TreePine size={13} /> Link tree
                     </button>
@@ -2100,7 +2100,7 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
                   {(hasPayto || isSelf) && (
                     <button
                       onClick={() => setShowPayto(true)}
-                      className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/10 hover:bg-primary/15 border border-primary/20 text-xs font-medium text-primary transition-colors cursor-pointer"
+                      className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-secondary/60 hover:bg-secondary border border-border text-xs font-medium text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
                     >
                       <HandCoins size={13} /> Payment targets
                     </button>

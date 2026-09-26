@@ -9,6 +9,7 @@ import { createPortal } from 'react-dom'
 import { HandCoins, Loader2, Plus, Pencil, Trash2, X, Save, Copy, Check } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { useUserStore } from '@/stores/userStore'
 import { fetchReplaceable } from '@/lib/nostr/relay-pool'
 import { signWithSigner } from '@/lib/nostr/events'
@@ -294,19 +295,31 @@ export function PaytoModal({
               </p>
             </div>
           ) : (
-            <ul className="space-y-2">
-              {targets.map((t, i) => (
-                <li key={`${t.type}-${i}`} className="flex items-center gap-3 rounded-lg border border-border bg-secondary/30 px-3 py-2">
-                  <span className="w-24 shrink-0 truncate text-sm font-medium text-foreground" title={t.type}>
-                    {paymentTypeLabel(t.type)}
-                  </span>
-                  <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground" title={t.authority}>
-                    {t.authority}
-                  </span>
-                  <CopyAuthority value={t.authority} />
-                </li>
-              ))}
-            </ul>
+            <TooltipProvider delayDuration={300}>
+              <ul className="space-y-2">
+                {targets.map((t, i) => (
+                  <li key={`${t.type}-${i}`} className="flex items-center gap-3 rounded-lg border border-border bg-secondary/30 px-3 py-2">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="w-24 shrink-0 truncate text-sm font-medium text-foreground">
+                          {paymentTypeLabel(t.type)}
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" className="text-xs">{t.type}</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
+                          {t.authority}
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" className="text-xs break-all max-w-[280px]">{t.authority}</TooltipContent>
+                    </Tooltip>
+                    <CopyAuthority value={t.authority} />
+                  </li>
+                ))}
+              </ul>
+            </TooltipProvider>
           )}
         </div>
       </div>
