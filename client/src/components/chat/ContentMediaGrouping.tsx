@@ -55,39 +55,46 @@ export interface ContentMediaGroup {
  */
 export function extractContentMediaGroups(content: string): { groups: ContentMediaGroup[]; strippedContent: string } {
   const groups: ContentMediaGroup[] = []
-  const urlsToStrip = new Set<string>()
+  const linesToStrip = new Set<number>() // indices of lines pulled into an image group
 
   // Split content into lines and process each
   const lines = content.split('\n')
-  let currentImageUrls: string[] = []
+  let currentImages: { url: string; index: number }[] = []
+  // A URL sitting inside a fenced ``` code block is literal — never extract it as an inline image.
+  let inFence = false
+  const fenceRe = /^\s*(`{3,}|~{3,})/
 
   const flushImages = () => {
-    if (currentImageUrls.length >= 1) {
-      groups.push({ kind: 'image-group', urls: [...currentImageUrls] })
-      for (const u of currentImageUrls) urlsToStrip.add(u)
+    if (currentImages.length >= 1) {
+      groups.push({ kind: 'image-group', urls: currentImages.map((x) => x.url) })
+      for (const x of currentImages) linesToStrip.add(x.index)
     }
-    currentImageUrls = []
+    currentImages = []
   }
 
-  for (const line of lines) {
+  lines.forEach((line, i) => {
     const trimmed = line.trim()
+
+    // A fence marker toggles code state and breaks any current group; its content is left untouched.
+    if (fenceRe.test(trimmed)) { flushImages(); inFence = !inFence; return }
+    if (inFence) return
 
     // Empty/whitespace line — keep collecting if we have images
     if (trimmed === '') {
-      if (currentImageUrls.length > 0) continue
+      if (currentImages.length > 0) return
       flushImages()
-      continue
+      return
     }
 
     // Check if this line is ONLY a single URL pointing to an image
     if (isSingleUrl(trimmed) && isImageUrl(trimmed)) {
-      currentImageUrls.push(trimmed)
-      continue
+      currentImages.push({ url: trimmed, index: i })
+      return
     }
 
     // Non-image line — flush any current image group
     flushImages()
-  }
+  })
 
   flushImages()
 
@@ -96,11 +103,9 @@ export function extractContentMediaGroups(content: string): { groups: ContentMed
     return { groups: [], strippedContent: content }
   }
 
-  // Build stripped content by removing grouped image URLs
-  const strippedLines = lines.filter(line => {
-    const trimmed = line.trim()
-    return !urlsToStrip.has(trimmed)
-  })
+  // Build stripped content by removing only the specific grouped lines (by index, so an identical image
+  // URL sitting inside a code block is never removed).
+  const strippedLines = lines.filter((_, i) => !linesToStrip.has(i))
   const strippedContent = strippedLines.join('\n').trim()
 
   return { groups, strippedContent }
