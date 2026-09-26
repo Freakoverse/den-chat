@@ -18,6 +18,7 @@ export interface ReactionInfo {
   pubkey: string
   emoji: string        // the raw emoji content (could be ':shortcode:' or unicode or '+')
   emojiUrl?: string    // resolved URL for custom emojis
+  setAddress?: string  // custom emoji's set address (30030:pubkey:dTag), for "View emoji pack"
   createdAt: number
   /** Full raw Nostr event JSON — powers the per-reaction "View raw event". */
   rawEvent?: string
@@ -131,7 +132,7 @@ export function ReactionListModal({ open, onClose, reactions, onOpenProfile, dis
                 >
                   {/* Emoji */}
                   <div className="w-8 flex items-center justify-center shrink-0">
-                    <ResolvedEmoji emoji={displayEmoji} url={reaction.emojiUrl} size={20} disableCustomEmojis={disableCustomEmojis} />
+                    <ResolvedEmoji emoji={displayEmoji} url={reaction.emojiUrl} size={20} disableCustomEmojis={disableCustomEmojis} setAddress={reaction.setAddress} />
                   </div>
 
                   {/* Avatar */}
@@ -180,20 +181,27 @@ export function ReactionListModal({ open, onClose, reactions, onOpenProfile, dis
 }
 
 /** Renders an emoji — resolves custom shortcodes from the emoji map */
-function ResolvedEmoji({ emoji, url, size = 16, disableCustomEmojis }: { emoji: string; url?: string; size?: number; disableCustomEmojis?: boolean }) {
+function ResolvedEmoji({ emoji, url, size = 16, disableCustomEmojis, setAddress }: { emoji: string; url?: string; size?: number; disableCustomEmojis?: boolean; setAddress?: string }) {
   if (!disableCustomEmojis) {
-    // If a direct URL was provided (from emoji tag)
-    if (url) {
-      return <img src={url} alt={emoji} className="object-contain inline" style={{ width: size, height: size }} />
-    }
-
-    // Check for custom emoji shortcode pattern :name:
+    // Resolve the display URL + set address (from the reaction, else the local emoji map) and tag the
+    // image with data-emoji-* so the global right-click menu (ContextMenu) can offer "View emoji pack".
     const scMatch = emoji.match(/^:([a-zA-Z0-9_-]+):$/)
-    if (scMatch) {
-      const entry = getEmojiMap().get(scMatch[1])
-      if (entry) {
-        return <img src={entry.url} alt={emoji} className="object-contain inline" style={{ width: size, height: size }} />
-      }
+    const shortcode = scMatch?.[1] ?? emoji
+    const entry = !url && scMatch ? getEmojiMap().get(scMatch[1]) : undefined
+    const resolvedUrl = url || entry?.url
+    const resolvedSet = setAddress || entry?.setAddress
+    if (resolvedUrl) {
+      return (
+        <img
+          src={resolvedUrl}
+          alt={emoji}
+          data-emoji-shortcode={shortcode}
+          data-emoji-url={resolvedUrl}
+          data-set-address={resolvedSet || undefined}
+          className="object-contain inline"
+          style={{ width: size, height: size }}
+        />
+      )
     }
   }
   // When disabled, show 'n/a' for custom emojis instead of raw :shortcode:

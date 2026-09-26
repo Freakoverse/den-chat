@@ -3376,6 +3376,7 @@ export function ReactionBar({ reactions, messageId, onAddReaction, rawReactions,
         pubkey: r.realPubkey ?? r.pubkey, // v2: display the real reactor R (wire author is P)
         emoji: r.emoji,
         emojiUrl: r.customUrl,
+        setAddress: r.setAddress,
         createdAt: r.createdAt || 0,
         rawEvent: r.rawEvent,
       }))
