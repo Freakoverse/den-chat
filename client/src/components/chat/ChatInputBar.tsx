@@ -1305,7 +1305,7 @@ export function ChatInputBar({
 
 /* ─── TimestampPickerPopover ─── */
 
-function TimestampPickerPopover({
+export function TimestampPickerPopover({
   triggerRef,
   onClose,
   onInsert,

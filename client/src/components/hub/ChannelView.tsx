@@ -39,6 +39,7 @@ import { publishToSpecificRelays, publishCriticalWithFailover, fetchEvents, fetc
 import { getPublishRelays } from '@/stores/postingBehaviourStore'
 import { useTypingHeartbeat } from '@/hooks/useTypingHeartbeat'
 import { TypingIndicator } from '@/components/chat/TypingIndicator'
+import { MarkdownToolbar } from '@/components/chat/MarkdownToolbar'
 import { hubTypingKey } from '@/stores/typingStore'
 import { setNameFromAddress } from '@/lib/customSets'
 import type { Channel, HubData, HubMember } from '@/stores/hubStore'
@@ -4733,6 +4734,8 @@ function EditField({ text, onChange, onCancel, unchanged, onSave, hubDTag, chann
 
   return (
     <div className="flex flex-col gap-2 mt-1">
+      {/* Same formatting bar as the composer, above the edit box */}
+      <MarkdownToolbar textareaRef={ref} value={text} onChange={onChange} autoResize={autoResize} />
       <textarea
         ref={ref}
         value={text}
