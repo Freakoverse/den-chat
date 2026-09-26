@@ -1200,7 +1200,8 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
     targetEventId: string,
     targetPubkey: string,
     targetDTag?: string,
-    customUrl?: string
+    customUrl?: string,
+    setAddress?: string,
   ) => {
     if (!hubDTag || !channelId || (!signer && !privateKey)) return
 
@@ -1223,9 +1224,12 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
         if (key) {
           const encSc = await aesEncrypt(key, scMatch[1])
           const encUrl = await aesEncrypt(key, customUrl)
-          unsigned = { ...unsigned, tags: [...unsigned.tags, ['emoji', encSc, encUrl]] }
+          // Carry the set address (encrypted) so viewers without the pack can still open it.
+          const emojiTag = setAddress ? ['emoji', encSc, encUrl, await aesEncrypt(key, setAddress)] : ['emoji', encSc, encUrl]
+          unsigned = { ...unsigned, tags: [...unsigned.tags, emojiTag] }
         } else {
-          unsigned = { ...unsigned, tags: [...unsigned.tags, ['emoji', scMatch[1], customUrl]] }
+          const emojiTag = setAddress ? ['emoji', scMatch[1], customUrl, setAddress] : ['emoji', scMatch[1], customUrl]
+          unsigned = { ...unsigned, tags: [...unsigned.tags, emojiTag] }
         }
       }
     }

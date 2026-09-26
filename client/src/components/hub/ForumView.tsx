@@ -610,7 +610,7 @@ interface ForumPostDetailProps {
   hub: any
   hubDTag: string
   channelId: string
-  publishReaction: (emoji: string, targetEventId: string, targetPubkey: string, targetDTag: string, customUrl?: string) => Promise<void>
+  publishReaction: (emoji: string, targetEventId: string, targetPubkey: string, targetDTag: string, customUrl?: string, setAddress?: string) => Promise<void>
   unreactReaction: (reactionEventId: string) => Promise<void>
   getChannelKey: (epoch?: number) => Uint8Array | null
 }
@@ -740,7 +740,7 @@ function ForumPostDetail({
   const hubChannels = useMemo(() => forumHub?.channels?.map((c: any) => ({ channelId: c.channelId, name: c.name, type: c.type })) || [], [forumHub])
   const allForumMessages = useMemo(() => [post as ChatMessage, ...replies], [post, replies])
 
-  const addReaction = useCallback((messageId: string, emoji: string, customUrl?: string) => {
+  const addReaction = useCallback((messageId: string, emoji: string, customUrl?: string, setAddress?: string) => {
     const targetMsg = allForumMessages.find((m) => m.id === messageId)
     if (!targetMsg) return
 
@@ -757,8 +757,9 @@ function ForumPostDetail({
       eventId: 'optimistic-' + Date.now(),
       createdAt: Math.floor(Date.now() / 1000),
       customUrl,
+      setAddress,
     })
-    publishReaction(emoji, messageId, targetMsg.pubkey, targetMsg.dTag, customUrl).catch(() => {})
+    publishReaction(emoji, messageId, targetMsg.pubkey, targetMsg.dTag, customUrl, setAddress).catch(() => {})
   }, [allForumMessages, storeReactions, myPubkey, hubDTag, publishReaction, unreactReaction])
 
   // Thread root ref for this forum post

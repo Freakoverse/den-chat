@@ -362,7 +362,7 @@ interface PollCardProps {
   onThreadReply?: (msg: { id: string; pubkey: string; content: string }) => void
   onRequestDelete?: (eventId: string) => void
   onViewRaw?: (raw: string) => void
-  onAddReaction?: (messageId: string, emoji: string, customUrl?: string) => void
+  onAddReaction?: (messageId: string, emoji: string, customUrl?: string, setAddress?: string) => void
   reactions?: Reaction[]
   canPublish?: boolean
   highlighted?: boolean
@@ -975,7 +975,7 @@ export function PollCard({ poll, hubDTag, channelId, onOpenProfile, onReply, onT
           <EmojiPickerPopover
             anchorRef={emojiButtonRef}
             onClose={() => setShowEmoji(false)}
-            onSelect={(emoji, custom) => { onAddReaction(poll.id, emoji, custom?.url); setShowEmoji(false); setShowActions(false) }}
+            onSelect={(emoji, custom) => { onAddReaction(poll.id, emoji, custom?.url, custom?.setAddress); setShowEmoji(false); setShowActions(false) }}
           />
         )}
       </div>

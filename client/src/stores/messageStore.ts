@@ -97,6 +97,8 @@ export interface StoredReaction {
   pubkey: string
   eventId: string
   customUrl?: string
+  /** Custom emoji's set address (`30030:pubkey:dTag`) so viewers without the pack can still view it. */
+  setAddress?: string
   /** Unix timestamp (seconds) of the reaction event */
   createdAt?: number
   /** Epoch the reaction was encrypted under (its `epoch` tag) — a reaction is always encrypted+stamped
@@ -105,8 +107,8 @@ export interface StoredReaction {
   epoch?: number
   /** Raw encrypted content from the event (for lazy decryption) */
   rawContent?: string
-  /** Raw encrypted emoji tag [shortcode, url] (for lazy decryption) */
-  rawEmojiTag?: [string, string]
+  /** Raw encrypted emoji tag [shortcode, url, setAddress?] (for lazy decryption) */
+  rawEmojiTag?: [string, string, string?]
   /** Whether this reaction has been decrypted */
   decrypted?: boolean
   /** v2: encrypted identity tag (`enc(channelKey, R‖sig)`) — decoded to `realPubkey` lazily. */

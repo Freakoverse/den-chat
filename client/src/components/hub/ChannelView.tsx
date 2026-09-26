@@ -136,6 +136,7 @@ export interface Reaction {
   count: number
   reacted: boolean // did current user react with this
   customUrl?: string // URL for custom emoji (NIP-30)
+  setAddress?: string // custom emoji's set address (30030:pubkey:dTag), for "View emoji pack"
   pubkeys?: string[] // who reacted with this emoji (filtered set, for avatar previews)
 }
 
@@ -169,13 +170,16 @@ export function useDecryptedReactions(hubDTag: string, getChannelKey: (epoch?: n
               const { aesDecrypt } = await import('@/lib/crypto/aes')
               let emoji = await aesDecrypt(key, r.rawContent!)
               let customUrl: string | undefined
+              let setAddress: string | undefined
               if (r.rawEmojiTag) {
                 try {
                   const shortcode = await aesDecrypt(key, r.rawEmojiTag[0])
                   customUrl = await aesDecrypt(key, r.rawEmojiTag[1])
+                  if (r.rawEmojiTag[2]) setAddress = await aesDecrypt(key, r.rawEmojiTag[2])
                   emoji = `:${shortcode}:`
                 } catch {
                   if (r.rawEmojiTag[1]?.startsWith('http')) customUrl = r.rawEmojiTag[1]
+                  if (r.rawEmojiTag[2]?.startsWith('30030:')) setAddress = r.rawEmojiTag[2]
                 }
               }
               // v2: resolve the reactor's real key R from the identity tag — but VERIFY the per-
@@ -206,7 +210,7 @@ export function useDecryptedReactions(hubDTag: string, getChannelKey: (epoch?: n
                 if (idx >= 0) {
                   const updated = [...arr]
                   if (identityForged) updated.splice(idx, 1) // forged identity attestation → drop
-                  else updated[idx] = { ...updated[idx], emoji, customUrl, decrypted: true, realPubkey }
+                  else updated[idx] = { ...updated[idx], emoji, customUrl, setAddress, decrypted: true, realPubkey }
                   store.reactions[hubDTag] = { ...hubReactions, [msgId]: updated }
                   useMessageStore.setState({ reactions: { ...store.reactions } })
                   break
@@ -240,7 +244,7 @@ export function useDecryptedReactions(hubDTag: string, getChannelKey: (epoch?: n
 
     const result: Record<string, Reaction[]> = {}
     for (const [msgId, stored] of Object.entries(storeReactions)) {
-      const grouped = new Map<string, { count: number; reacted: boolean; customUrl?: string; pubkeys: string[] }>()
+      const grouped = new Map<string, { count: number; reacted: boolean; customUrl?: string; setAddress?: string; pubkeys: string[] }>()
       for (const r of stored) {
         if (r.decrypted === false) continue
         // v2: the reactor's true key is realPubkey (decoded from the identity tag); in v1 pubkey IS R.
@@ -261,7 +265,7 @@ export function useDecryptedReactions(hubDTag: string, getChannelKey: (epoch?: n
           if (!g.pubkeys.includes(rKey)) g.pubkeys.push(rKey)
           if (rKey === myPubkey) g.reacted = true
         } else {
-          grouped.set(key, { count: 1, reacted: rKey === myPubkey, customUrl: r.customUrl, pubkeys: [rKey] })
+          grouped.set(key, { count: 1, reacted: rKey === myPubkey, customUrl: r.customUrl, setAddress: r.setAddress, pubkeys: [rKey] })
         }
       }
       const arr = Array.from(grouped.entries()).map(([emoji, data]) => ({
@@ -269,6 +273,7 @@ export function useDecryptedReactions(hubDTag: string, getChannelKey: (epoch?: n
         count: data.count,
         reacted: data.reacted,
         customUrl: data.customUrl,
+        setAddress: data.setAddress,
         pubkeys: data.pubkeys,
       }))
       if (arr.length > 0) result[msgId] = arr
@@ -1371,7 +1376,7 @@ function MessageList({ hubDTag, channelId, channelName, optimisticMessages, setO
     setThreadModalParent(msg)
   }, [])
 
-  const addReaction = useCallback((messageId: string, emoji: string, customUrl?: string) => {
+  const addReaction = useCallback((messageId: string, emoji: string, customUrl?: string, setAddress?: string) => {
     // Gate on add_reactions permission
     if (hub && myPubkey) {
       const myPerms = getPermissionsForUser(hub, myPubkey, hubMembers, channelId)
@@ -1398,10 +1403,11 @@ function MessageList({ hubDTag, channelId, channelName, optimisticMessages, setO
       eventId: 'optimistic-' + Date.now(),
       createdAt: nowSeconds(),
       customUrl,
+      setAddress,
     })
 
     // Publish to relay
-    publishReaction(emoji, messageId, targetMsg.pubkey, targetMsg.dTag, customUrl).catch(() => { })
+    publishReaction(emoji, messageId, targetMsg.pubkey, targetMsg.dTag, customUrl, setAddress).catch(() => { })
   }, [messages, storeReactions, myPubkey, hubDTag, publishReaction, unreactReaction, hub, hubMembers, channelId])
 
   // Look up a message by ID -- used for reply previews
@@ -1616,7 +1622,7 @@ function MessageList({ hubDTag, channelId, channelName, optimisticMessages, setO
                         onViewRaw={(raw) => {
                           setRawEventData({ rawJson: raw, decryptedContent: '', isDecrypted: false })
                         }}
-                        onAddReaction={(messageId, emoji, customUrl) => {
+                        onAddReaction={(messageId, emoji, customUrl, setAddress) => {
                           // Unreact check
                           const existing = storeReactions[messageId] || []
                           const myExisting = existing.find((r) => r.emoji === emoji && (r.realPubkey ?? r.pubkey) === myPubkey)
@@ -1631,9 +1637,10 @@ function MessageList({ hubDTag, channelId, channelName, optimisticMessages, setO
                             eventId: 'optimistic-' + Date.now(),
                             createdAt: Math.floor(Date.now() / 1000),
                             customUrl,
+                            setAddress,
                           })
                           // Publish — no dTag for polls (non-addressable)
-                          publishReaction(emoji, messageId, pollData.pubkey, undefined, customUrl).catch(() => { })
+                          publishReaction(emoji, messageId, pollData.pubkey, undefined, customUrl, setAddress).catch(() => { })
                         }}
                         reactions={reactions[pollData.id] || []}
                         canPublish={canPublish}
@@ -3267,13 +3274,14 @@ function ReplyPreview({ repliedMessage, getProfile, onScrollTo }: {
 /* ──────────────── Reaction Pills ──────────────── */
 
 /** A custom-emoji reaction at ~20px: a device-resolution static thumbnail, never a live downscale. */
-function ReactionEmojiImg({ url, alt }: { url: string; alt: string }) {
+function ReactionEmojiImg({ url, alt, setAddress: setAddressProp }: { url: string; alt: string; setAddress?: string }) {
   const src = useThumbnail(url, 20, 'contain')
   // Tag as a custom emoji so the global right-click menu (ContextMenu) can offer "View emoji pack".
-  // data-emoji-url carries the full-size URL (src may be a resized thumbnail); the set address is
-  // resolved from the local emoji map by shortcode, matching the inline-emoji click path.
+  // data-emoji-url carries the full-size URL (src may be a resized thumbnail). Prefer the set address
+  // carried on the reaction itself (works for packs the viewer doesn't own); fall back to the local
+  // emoji map by shortcode for older reactions that don't carry it.
   const shortcode = alt.match(/^:([a-zA-Z0-9_-]+):$/)?.[1] ?? alt
-  const setAddress = getEmojiMap().get(shortcode)?.setAddress
+  const setAddress = setAddressProp || getEmojiMap().get(shortcode)?.setAddress
   return (
     <img
       src={src ?? url}
@@ -3343,7 +3351,7 @@ export function BlockedGate({ pubkey, grouped, label, children }: { pubkey: stri
 export function ReactionBar({ reactions, messageId, onAddReaction, rawReactions, onOpenProfile, children, disableCustomEmojis }: {
   reactions: Reaction[]
   messageId: string
-  onAddReaction: (messageId: string, emoji: string, customUrl?: string) => void
+  onAddReaction: (messageId: string, emoji: string, customUrl?: string, setAddress?: string) => void
   rawReactions?: import('@/stores/messageStore').StoredReaction[]
   onOpenProfile?: (pubkey: string) => void
   children?: React.ReactNode
@@ -3400,7 +3408,7 @@ export function ReactionBar({ reactions, messageId, onAddReaction, rawReactions,
               anchorRef={addReactionBtnRef}
               onClose={() => setShowPicker(false)}
               onSelect={(emoji, custom) => {
-                onAddReaction(messageId, emoji, custom?.url)
+                onAddReaction(messageId, emoji, custom?.url, custom?.setAddress)
                 setShowPicker(false)
               }}
             />
@@ -3435,12 +3443,12 @@ export function ReactionBar({ reactions, messageId, onAddReaction, rawReactions,
               }`}
           >
           <span>{(() => {
-            if (!disableCustomEmojis && r.customUrl) return <ReactionEmojiImg url={r.customUrl} alt={r.emoji} />
+            if (!disableCustomEmojis && r.customUrl) return <ReactionEmojiImg url={r.customUrl} alt={r.emoji} setAddress={r.setAddress} />
             if (!disableCustomEmojis) {
               const scMatch = r.emoji.match(/^:([a-zA-Z0-9_-]+):$/)
               if (scMatch) {
                 const entry = getEmojiMap().get(scMatch[1])
-                if (entry) return <ReactionEmojiImg url={entry.url} alt={r.emoji} />
+                if (entry) return <ReactionEmojiImg url={entry.url} alt={r.emoji} setAddress={r.setAddress || entry.setAddress} />
               }
             }
             // When disabled, show 'n/a' for custom emojis instead of raw :shortcode:
@@ -3506,7 +3514,7 @@ export interface ChatMessageRowProps {
   getProfile: (pubkey: string) => any
   reactions: Reaction[]
   rawReactions?: import('@/stores/messageStore').StoredReaction[]
-  onAddReaction: (messageId: string, emoji: string, customUrl?: string) => void
+  onAddReaction: (messageId: string, emoji: string, customUrl?: string, setAddress?: string) => void
   repliedMessage?: ChatMessage
   replyStatus?: 'not-found' | 'deleted'
   getProfileForReply: (pubkey: string) => any
@@ -7135,7 +7143,7 @@ function ThreadModal({ parentMsg, threadReplies, hubDTag, channelId, getProfile,
   ) => Promise<void>
   editMessage: (dTag: string, newContent: string, replyTo?: string, rootRef?: string, forumFields?: { title: string; featuredImage?: string; tags?: string[] }, attachments?: Attachment[], nsfw?: boolean, isThread?: boolean) => Promise<void>
   deleteMessage: (dTag: string) => Promise<void>
-  publishReaction: (emoji: string, targetEventId: string, targetPubkey: string, targetDTag: string, customUrl?: string) => Promise<void>
+  publishReaction: (emoji: string, targetEventId: string, targetPubkey: string, targetDTag: string, customUrl?: string, setAddress?: string) => Promise<void>
   unreactReaction: (reactionEventId: string) => Promise<void>
   getChannelKey: (epoch?: number) => Uint8Array | null
   onClose: () => void
@@ -7220,7 +7228,7 @@ function ThreadModal({ parentMsg, threadReplies, hubDTag, channelId, getProfile,
   // Active reply context: specific in-thread reply or default thread parent
   const activeReplyContext = inThreadReply || defaultThreadContext
 
-  const addReaction = useCallback((messageId: string, emoji: string, customUrl?: string) => {
+  const addReaction = useCallback((messageId: string, emoji: string, customUrl?: string, setAddress?: string) => {
     const targetMsg = allMessages.find((m) => m.id === messageId)
     if (!targetMsg) return
 
@@ -7237,8 +7245,9 @@ function ThreadModal({ parentMsg, threadReplies, hubDTag, channelId, getProfile,
       eventId: 'optimistic-' + Date.now(),
       createdAt: nowSeconds(),
       customUrl,
+      setAddress,
     })
-    publishReaction(emoji, messageId, targetMsg.pubkey, targetMsg.dTag, customUrl).catch(() => { })
+    publishReaction(emoji, messageId, targetMsg.pubkey, targetMsg.dTag, customUrl, setAddress).catch(() => { })
   }, [allMessages, storeReactions, myPubkey, hubDTag, publishReaction, unreactReaction])
 
   // Auto-scroll to bottom when replies change or optimistic messages change

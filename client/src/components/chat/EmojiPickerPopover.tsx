@@ -44,7 +44,7 @@ type Tab = 'discover' | 'basic' | 'mine' | 'others'
 interface Props {
   anchorRef: React.RefObject<HTMLButtonElement | null>
   onClose: () => void
-  onSelect: (emoji: string, customEmoji?: { shortcode: string; url: string }) => void
+  onSelect: (emoji: string, customEmoji?: { shortcode: string; url: string; setAddress?: string }) => void
 }
 
 export function EmojiPickerPopover({ anchorRef, onClose, onSelect }: Props) {
@@ -294,7 +294,7 @@ function filterNsfwEmojis(emojis: CustomEmoji[]): CustomEmoji[] {
 
 // ─── Mine Tab ───
 
-function MineTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcode: string; url: string }) => void }) {
+function MineTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcode: string; url: string; setAddress?: string }) => void }) {
   const myEmojiSets = useEmojiStore((s) => s.myEmojiSets)
   const nsfwEnabled = useEmojiStore((s) => s.nsfwEnabled)
   const untaggedAsNsfw = useEmojiStore((s) => s.untaggedAsNsfw)
@@ -360,7 +360,7 @@ function MineTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcode:
                   <EmojiButton
                     key={`${e.setDTag}-${e.shortcode}`}
                     emoji={e}
-                    onClick={() => onSelect(`:${e.shortcode}:`, { shortcode: e.shortcode, url: e.url })}
+                    onClick={() => onSelect(`:${e.shortcode}:`, { shortcode: e.shortcode, url: e.url, setAddress: `30030:${e.setPubkey}:${e.setDTag}` })}
                   />
                 ))}
               </div>
@@ -376,7 +376,7 @@ function MineTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcode:
                         <EmojiButton
                           key={e.shortcode}
                           emoji={e}
-                          onClick={() => onSelect(`:${e.shortcode}:`, { shortcode: e.shortcode, url: e.url })}
+                          onClick={() => onSelect(`:${e.shortcode}:`, { shortcode: e.shortcode, url: e.url, setAddress: `30030:${set.pubkey}:${set.dTag}` })}
                         />
                       ))}
                     </div>
@@ -620,7 +620,7 @@ export function EmojiUploadForm({ sets, targetSet, onTargetChange, onDone }: {
 
 // ─── Others Tab ───
 
-function OthersTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcode: string; url: string }) => void }) {
+function OthersTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcode: string; url: string; setAddress?: string }) => void }) {
   const subscribedSets = useEmojiStore((s) => s.subscribedSets)
   const nsfwEnabled = useEmojiStore((s) => s.nsfwEnabled)
   const untaggedAsNsfw = useEmojiStore((s) => s.untaggedAsNsfw)
@@ -633,7 +633,7 @@ function OthersTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcod
   // Flatten all subscribed emojis for item search (with NSFW filtering)
   const allEmojis = useMemo(() => {
     return subscribedSets.flatMap((s) =>
-      filterNsfwEmojis(s.emojis).map((e) => ({ ...e, setName: s.name, setDTag: s.dTag }))
+      filterNsfwEmojis(s.emojis).map((e) => ({ ...e, setName: s.name, setDTag: s.dTag, setPubkey: s.pubkey }))
     )
   }, [subscribedSets, nsfwEnabled, untaggedAsNsfw])
 
@@ -701,7 +701,7 @@ function OthersTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcod
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
-                        onClick={() => onSelect(`:${e.shortcode}:`, { shortcode: e.shortcode, url: e.url })}
+                        onClick={() => onSelect(`:${e.shortcode}:`, { shortcode: e.shortcode, url: e.url, setAddress: `30030:${e.setPubkey}:${e.setDTag}` })}
                         className="w-11 h-11 flex items-center justify-center rounded-md hover:bg-[hsl(var(--muted)/0.5)] transition-colors cursor-pointer"
                       >
                         <BlossomImage src={e.url} alt={`:${e.shortcode}:`} className="w-6 h-6" contain />
@@ -737,7 +737,7 @@ function OthersTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcod
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <button
-                              onClick={() => onSelect(`:${e.shortcode}:`, { shortcode: e.shortcode, url: e.url })}
+                              onClick={() => onSelect(`:${e.shortcode}:`, { shortcode: e.shortcode, url: e.url, setAddress: addr })}
                               className="w-11 h-11 flex items-center justify-center rounded-md hover:bg-[hsl(var(--muted)/0.5)] transition-colors cursor-pointer"
                             >
                               <BlossomImage src={e.url} alt={`:${e.shortcode}:`} className="w-6 h-6" contain />
@@ -771,7 +771,7 @@ function OthersTab({ onSelect }: { onSelect: (emoji: string, custom?: { shortcod
                       <Tooltip>
                         <TooltipTrigger asChild>
                           <button
-                            onClick={() => onSelect(`:${e.shortcode}:`, { shortcode: e.shortcode, url: e.url })}
+                            onClick={() => onSelect(`:${e.shortcode}:`, { shortcode: e.shortcode, url: e.url, setAddress: addr })}
                             className="w-11 h-11 flex items-center justify-center rounded-md hover:bg-[hsl(var(--muted)/0.5)] transition-colors cursor-pointer"
                           >
                             <BlossomImage src={e.url} alt={`:${e.shortcode}:`} className="w-6 h-6" contain />

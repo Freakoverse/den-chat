@@ -571,7 +571,7 @@ function processReactionEvent(event: Event) {
     createdAt: event.created_at,
     epoch: reactionEpoch, // the epoch this reaction was encrypted under (may predate the current one)
     rawContent: event.content,
-    rawEmojiTag: emojiTag ? [emojiTag[1], emojiTag[2]] : undefined,
+    rawEmojiTag: emojiTag ? [emojiTag[1], emojiTag[2], emojiTag[3]] : undefined,
     identityTag,
     rawEvent: JSON.stringify(event),
     decrypted: false,
