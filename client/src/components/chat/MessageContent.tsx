@@ -1554,10 +1554,35 @@ type NostrSegment =
   /** `href` is set when the address was found INSIDE a URL — the card then opens that URL, not its own chooser. */
   | { type: 'nostr'; value: string; href?: string }
 
+/**
+ * Ranges of `content` that live inside markdown code — fenced ``` blocks and inline `spans`. A nostr
+ * reference / URL inside one is literal code and must NOT be turned into a card or preview.
+ */
+function codeSpans(content: string): Array<[number, number]> {
+  const spans: Array<[number, number]> = []
+  // Fenced first: 3+ backticks or tildes, closed by the same run. Non-greedy across lines. Blank each
+  // fenced region (same length, indices preserved) so the inline pass can't pair with fence backticks.
+  const fence = /(`{3,}|~{3,})[\s\S]*?\1/g
+  let masked = content
+  let m: RegExpExecArray | null
+  while ((m = fence.exec(content)) !== null) {
+    spans.push([m.index, m.index + m[0].length])
+    masked = masked.slice(0, m.index) + ' '.repeat(m[0].length) + masked.slice(m.index + m[0].length)
+  }
+  // Inline `code` (single backtick, no newline), on the fence-masked copy.
+  const inline = /`[^`\n]+`/g
+  while ((m = inline.exec(masked)) !== null) spans.push([m.index, m.index + m[0].length])
+  return spans
+}
+
 function splitNostr(content: string): NostrSegment[] {
   const segments: NostrSegment[] = []
   let lastIndex = 0
   let match: RegExpExecArray | null
+
+  // Code regions (fenced/inline) — references inside them stay literal, never a card.
+  const codes = codeSpans(content)
+  const inCode = (i: number) => codes.some(([s, e]) => i >= s && i < e)
 
   // URLs are kept whole. A bech32 inside one (https://degmods.com/mod/naddr1…) used to be cut out
   // of the link — leaving a dead "https://degmods.com/mod/" — and rendered as a standalone card.
@@ -1571,6 +1596,8 @@ function splitNostr(content: string): NostrSegment[] {
   REFERENCE_PATTERN.lastIndex = 0
 
   while ((match = REFERENCE_PATTERN.exec(content)) !== null) {
+    // Inside a code block/span → literal, leave it in the text (rendered as code, no card).
+    if (inCode(match.index)) continue
     // Strip nostr: and @ prefixes if present
     const raw = match[0].replace('nostr:', '').replace(/^@/, '')
     // A "sn…" hit is only a NIP-SHORT address if its code and authority check out; otherwise it's
