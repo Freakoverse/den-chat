@@ -6,6 +6,38 @@
 
 ---
 
+## Contents
+
+**Part I: Hub Protocol** · §0-15 · the hub spec plus its cryptographic and Blossom-storage foundation
+
+- [0. Hub Format Versions (v1 & v2)](#0-hub-format-versions-v1--v2)
+- [1. Overview](#1-overview)
+- [2. Core Concepts](#2-core-concepts)
+- [3. Relay & Storage Architecture](#3-relay--storage-architecture)
+- [4. Cryptographic Model](#4-cryptographic-model)
+- [5. Blossom File System](#5-blossom-file-system)
+- [6. Event Kinds](#6-event-kinds)
+- [7. Member List Mechanics](#7-member-list-mechanics)
+- [8. Permissions](#8-permissions)
+- [9. Client Behavior](#9-client-behavior)
+- [10. Security Model & Tradeoffs](#10-security-model--tradeoffs)
+- [11. Join Flow](#11-join-flow)
+- [12. Optional v1 to v2 Copy (Fork Model)](#12-optional-v1--v2-copy-fork-model)
+- [13. Event Kind Summary](#13-event-kind-summary) · master index, all systems
+- [14. Tag Reference](#14-tag-reference) · master index, all systems
+- [15. Implementation Notes](#15-implementation-notes)
+
+**Part II: Companion Systems** · §16-21 · independent systems that reuse NIP-CHAT's conventions
+
+- [16. Public Chat (Kind 1312)](#16-public-chat--kind-1312)
+- [17. Direct Messages (NIP-17 Gift Wrap)](#17-direct-messages--nip-17-gift-wrap)
+- [18. Future Extensions](#18-future-extensions)
+- [19. Custom Emoji, Sticker & GIF Sets](#19-custom-emoji-sticker--gif-sets)
+- [20. Forum (Communities)](#20-forum--communities)
+- [21. Groups (Kind 36950)](#21-groups--kind-36950)
+
+---
+
 ## 0. Hub Format Versions (v1 & v2)
 
 NIP-CHAT hubs come in two **formats**, distinguished by a `["version", "N"]` tag on the
@@ -3361,6 +3393,10 @@ Clients MUST sort lexicographically and join with `,` before hashing.
 - If one server fails hash check, try next server before rejecting
 
 ---
+
+> **Part II: Companion Systems** · end of the hub protocol (Part I, §0-15).
+>
+> Everything below reuses NIP-CHAT's event, relay, and Blossom conventions but is an **independent system** that can be implemented on its own: Public Chat (§16), Direct Messages (§17), Custom Emoji/Sticker/GIF Sets (§19), Forum (§20), and Groups (§21). Groups additionally inherit the §4 cryptographic core. The §13 kind summary and §14 tag reference above are master indexes that already cover these systems.
 
 ## 16. Public Chat — Kind `1312`
 
