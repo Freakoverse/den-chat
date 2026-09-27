@@ -8,7 +8,7 @@
 
 ## Contents
 
-**Part I: Hub Protocol** · §0-15 · the hub spec plus its cryptographic and Blossom-storage foundation
+**Part I: Hub & Group Protocol** · §0-16 · the encrypted systems on the shared crypto and Blossom core
 
 - [0. Hub Format Versions (v1 & v2)](#0-hub-format-versions-v1--v2)
 - [1. Overview](#1-overview)
@@ -26,15 +26,15 @@
 - [13. Event Kind Summary](#13-event-kind-summary) · master index, all systems
 - [14. Tag Reference](#14-tag-reference) · master index, all systems
 - [15. Implementation Notes](#15-implementation-notes)
+- [16. Groups (Kind 36950)](#16-groups--kind-36950)
 
-**Part II: Companion Systems** · §16-21 · independent systems that reuse NIP-CHAT's conventions
+**Part II: Additional Systems** · §17-21 · systems that reuse NIP-CHAT's conventions but stand alone
 
-- [16. Public Chat (Kind 1312)](#16-public-chat--kind-1312)
-- [17. Direct Messages (NIP-17 Gift Wrap)](#17-direct-messages--nip-17-gift-wrap)
-- [18. Future Extensions](#18-future-extensions)
-- [19. Custom Emoji, Sticker & GIF Sets](#19-custom-emoji-sticker--gif-sets)
-- [20. Forum (Communities)](#20-forum--communities)
-- [21. Groups (Kind 36950)](#21-groups--kind-36950)
+- [17. Public Chat (Kind 1312)](#17-public-chat--kind-1312) · also NIP-TC
+- [18. Direct Messages (NIP-17 Gift Wrap)](#18-direct-messages--nip-17-gift-wrap)
+- [19. Future Extensions](#19-future-extensions)
+- [20. Custom Emoji, Sticker & GIF Sets](#20-custom-emoji-sticker--gif-sets)
+- [21. Forum (Communities)](#21-forum--communities) · open/word communities also NIP-WC
 
 ---
 
@@ -1070,7 +1070,7 @@ This provides Discord-like UX where members see the full conversation history fr
 - **The history is unbounded by design.** Each epoch adds one line of roughly 74 bytes, so even
   ten thousand rotations stay under a megabyte. Blossom has no event-size ceiling, so hubs never
   prune. (Contrast the inline history of a **group**, which lives inside a relay event and is
-  capped at 100 epochs — see §21.9.)
+  capped at 100 epochs — see §16.9.)
 - **A rotation MUST NOT proceed without the prior history.** On every re-key (kick, manual
   rotation, grouped-role rotation) the client decrypts the *current* blob, appends, and re-encrypts.
   If the current blob cannot be fetched or decrypted at that moment, the client MUST abort the
@@ -3266,27 +3266,27 @@ Clients MUST hide any hub carrying a `new_hub` tag from search/browse/discovery.
 | `1067` | Poll | Regular | Hub general relays |
 | `1017` | Vote | Regular | Hub general relays |
 | `16942` | User Hub List | Replaceable | User's own relays |
-| `36950` | Group Event (tree inline, §21) | Addressable Replaceable | Group `r` relays |
-| `16943` | User Group List (NIP-44 self-encrypted, §21.10) | Replaceable | User's own relays |
-| `1312` | Public Chat Message | Regular | User's relays (§16) |
-| `30078` | Public Chat Topic List (NIP-78) | Addressable Replaceable | User's own relays (§16) |
+| `36950` | Group Event (tree inline, §16) | Addressable Replaceable | Group `r` relays |
+| `16943` | User Group List (NIP-44 self-encrypted, §16.10) | Replaceable | User's own relays |
+| `1312` | Public Chat Message | Regular | User's relays (§17) |
+| `30078` | Public Chat Topic List (NIP-78) | Addressable Replaceable | User's own relays (§17) |
 | `30078` | Join Read-State (`den-join-read-state`, NIP-78, self-encrypted) | Addressable Replaceable | Creator's own relays (§6.3) |
-| `14` | DM Rumor (NIP-17) | Unsigned (inside seal) | Never published directly (§17) |
-| `15` | DM File (NIP-17) | Unsigned (inside seal) | Never published directly (§17) |
+| `14` | DM Rumor (NIP-17) | Unsigned (inside seal) | Never published directly (§18) |
+| `15` | DM File (NIP-17) | Unsigned (inside seal) | Never published directly (§18) |
 | `13` | Seal (NIP-17) | Signed | Never published directly (inside gift wrap) |
-| `1059` | Gift Wrap (NIP-17) | Signed (throwaway key) | Sender's + recipient's relays (§17) |
+| `1059` | Gift Wrap (NIP-17) | Signed (throwaway key) | Sender's + recipient's relays (§18) |
 | `10050` | DM Relay List (NIP-17) | Replaceable | User's own relays |
-| `30030` | Emoji Set (NIP-30) | Addressable Replaceable | User's relays (§19) |
-| `30031` | Sticker Set | Addressable Replaceable | User's relays (§19) |
-| `30032` | GIF Collection | Addressable Replaceable | User's relays (§19) |
-| `30000` | Emoji/Sticker/GIF Subscription Lists (NIP-51) | Addressable Replaceable | User's relays (§19) |
-| `1111` | Forum Post & Comment (NIP-22) | Regular | User/community relays (§20) |
-| `7` | Forum Reaction (NIP-25) | Regular | User/community relays (§20) |
-| `34550` | Community Definition (NIP-72) | Addressable Replaceable | Community/user relays (§20) |
-| `4550` | Community Post Approval (NIP-72) | Regular | Community relays (§20) |
-| `10004` | Followed Communities (NIP-51) | Replaceable | User's relays (§20) |
-| `30044` | Word Community Profile (DEN) | Addressable (`d`=word) | Public relays (§20) |
-| `10044` | Followed Word Communities (DEN) | Replaceable | User's relays (§20) |
+| `30030` | Emoji Set (NIP-30) | Addressable Replaceable | User's relays (§20) |
+| `30031` | Sticker Set | Addressable Replaceable | User's relays (§20) |
+| `30032` | GIF Collection | Addressable Replaceable | User's relays (§20) |
+| `30000` | Emoji/Sticker/GIF Subscription Lists (NIP-51) | Addressable Replaceable | User's relays (§20) |
+| `1111` | Forum Post & Comment (NIP-22) | Regular | User/community relays (§21) |
+| `7` | Forum Reaction (NIP-25) | Regular | User/community relays (§21) |
+| `34550` | Community Definition (NIP-72) | Addressable Replaceable | Community/user relays (§21) |
+| `4550` | Community Post Approval (NIP-72) | Regular | Community relays (§21) |
+| `10004` | Followed Communities (NIP-51) | Replaceable | User's relays (§21) |
+| `30044` | Word Community Profile (DEN) | Addressable (`d`=word) | Public relays (§21) |
+| `10044` | Followed Word Communities (DEN) | Replaceable | User's relays (§21) |
 
 ---
 
@@ -3394,13 +3394,390 @@ Clients MUST sort lexicographically and join with `,` before hashing.
 
 ---
 
-> **Part II: Companion Systems** · end of the hub protocol (Part I, §0-15).
+## 16. Groups — Kind `36950`
+
+A **group** is the small, flat sibling of a hub: one conversation, no channels, no categories,
+no roles, no moderators, no discovery, and **no Blossom in the membership pipeline** (media
+may still live on Blossom, §16.12). It is what Discord calls a *group DM* —
+a handful of people talking in one place — scaled to **100 members**. The whole group lives in
+**one relay event**: identity, member tree, epoch history and settings. Everything cryptographic
+is inherited unchanged from hubs (§4): the LKH tree distributes a group secret, removal rotates
+it, and v2 layers NIP-SKD pseudonyms on top exactly as it does for hubs.
+
+### 16.1 Scope
+
+| | Hub (§6.1) | Group |
+|---|---|---|
+| Container | kind `36942` + Blossom tree files | kind `36950`, **tree inline** (Blossom only for media, via optional `o`) |
+| Channels / categories / roles | yes | **none** — one conversation |
+| Who adds members | creator, join requests, facilitators | **creator only** |
+| Join requests (`36944`) | yes, processed by creator and mods | **yes, creator-only** (§16.6.1); a request only asks |
+| Ban list | Blossom ban pages | **none** — removal is the only tool |
+| Discovery (`t`, `f`, Discover UI) | yes | **never listed** — the address is the invite |
+| Member cap | unbounded (paginated tree) | **100** |
+| Epoch history | unbounded blob on Blossom (§5.4) | **inline, capped at 100 epochs** |
+| Messages | kind `36943` with `h` + `c` | kind `36943` with `h` + `c`, both = the group `d` (§16.3) |
+| v1 / v2 | both | both (same meaning, §16.8) |
+
+A group is **creator-centric**, unlike Discord's group DMs where any member may add others.
+Only the creator publishes the group event; members only publish messages. There are no
+moderators: the creator removes whom they choose, and a removed member can be re-added later
+by the same action. A join request (§16.6.1) only asks; ignoring it is the whole ban list.
+
+### 16.2 Group Event — Kind `36950`
+
+**Type**: Addressable Replaceable Event, published to the group's `r` relays.
+
+```json
+{
+  "kind": 36950,
+  "pubkey": "<creator_hex_pubkey (v1)  |  O_pub (v2, §4.5)>",
+  "created_at": "<timestamp>",
+  "tags": [
+    ["d", "<group_uuid>"],
+    ["n", "<group_name>"],
+    ["epoch", "<epoch_number>"],
+    ["r", "wss://relay1.example.com", "general"],
+    ["r", "wss://relay2.example.com", "general"],
+    ["o", "https://blossom1.example.com"],
+    ["o", "https://blossom2.example.com"],
+    ["w", "<pow_difficulty>"],
+    ["W", "<join_pow_difficulty>"],
+    ["picture", "<icon_url>"],
+    ["banner", "<banner_url>"],
+    ["about", "<short description>"],
+    ["published_at", "<original_creation_timestamp>"],
+    ["client", "<client_app_name>"],
+    ["version", "2"],
+    ["signer_scheme", "skd", "1"]
+  ],
+  "content": "<JSON string — see below>",
+  "sig": "<signature>"
+}
+```
+
+#### Tags
+
+| Tag | Required | Description |
+|-----|----------|-------------|
+| `d` | Yes | UUID v4. Group identifier. The coordinate is `36950:<pubkey>:<d>` — with `O_pub` as the pubkey in v2. |
+| `n` | Yes | Group name. Plaintext in both versions so an invitee can see what they were invited to. |
+| `epoch` | Yes | Current group-secret epoch, starting at `1`, incremented on every removal (§16.5). |
+| `r` | Yes | Relay, third value `general`. Messages and the group event live here. At least one. |
+| `o` | No | Blossom server URL for **media** (attachments, voice notes), exactly as the hub `o` (§6.1). Zero or more; recommend ≥2 when the group shares files. Never used for membership — the tree and history are inline. When absent, senders fall back to their own servers and name them per attachment (§16.12). |
+| `w` | No | Minimum **message** PoW (NIP-13), same semantics as the hub `w` (§6.1): messages need a `nonce`, and the group event itself MUST be mined to `w` on every publish. |
+| `W` | No | Minimum **join-request** PoW (NIP-13), same semantics as the hub `W` (§6.1): a kind-36944 request for this group (§16.6.1) MUST carry a `nonce` meeting it, and creators drop under-`W` requests before any decrypt. |
+| `nonce` | Conditional | The group event's own PoW nonce when `w` > 0. |
+| `message_expiration` | No | Disappearing-messages duration in seconds, as for hubs (§6.1, §9.10). |
+| `picture` / `banner` / `about` | No | The group's public face — icon, banner, short description — **plaintext in both versions** for the same reason as `n`: the person holding an invite has no secret yet. Member-only prose belongs in `settings.description` (below). |
+| `content-warning` / `L` | No | NIP-36 / NIP-32 sensitive-content marking, as for hubs. |
+| `published_at` | Yes | Original creation timestamp, carried forward unchanged on every republish. |
+| `client` | No | Publishing client name. |
+| `version` | No | Group **format** version. Absent ⇒ v1. `"2"` ⇒ v2 (§16.8). Unknown ⇒ prompt to update, do not render. |
+| `signer_scheme` | Conditional (**v2**) | NIP-SKD scheme, exactly as on the hub event (§6.1). |
+| `deleted` | Conditional | `["deleted", "true"]` on the tombstone republish (§16.7). |
+
+There is deliberately **no `t`, no `f`, no `m`, no `b`**: nothing is discoverable, no
+membership file is on Blossom, and only the creator adds members. A join request (§16.6.1) is
+a way to *ask*; it never changes membership by itself.
+
+#### `created_at` increment
+
+The group event is republished on every membership change. As for hubs (§6.1) the client
+MUST set `created_at` to the previous event's `created_at + 1`, never the wall clock, and
+order by `published_at` for display.
+
+#### Content (JSON)
+
+```json
+{
+  "tree":     "<monolithic LKH tree, §5.2.3 line format — plaintext>",
+  "history":  "<base64 AES-GCM blob under the CURRENT group secret — §5.4 plaintext format, ≤100 lines>",
+  "settings": { "description": "<text>" },
+  "owner":    "<v2 only — encrypted owner attestation, exactly as in the v2 hub content (§4.5)>"
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `tree` | The **whole** member tree, inline, in the monolithic file format of §5.2.3: `leaf`, `node` and `root` lines, where `root` carries `aes_encrypted_group_secret`. **Always plaintext** — it is the tree that distributes the secret, so it cannot be encrypted with it (the same bootstrap argument as v2 leaf pages, §5.2). In v1 the leaf `member_pubkey` is the real key `R`; in v2 it is the pseudonym `P`, and the tree carries one `roster:<epoch>:<enc({P:R})>` line (§5.2.1). No pagination, no spine: at most 100 leaves and 99 internal nodes. |
+| `history` | The epoch-secret history, in the §5.4 plaintext format (`hub:<epoch>:<secret_hex>` lines — the `hub:` prefix is kept so the parser is shared), AES-GCM encrypted with the **current** group secret. **Capped at 100 epochs** (§16.9). |
+| `settings` | Member-only settings. **v1:** plaintext object. **v2:** the JSON serialized and encrypted as `base64(IV || AES-GCM(group_content_key, json) || tag)` under `group_content_key = HKDF(group_secret, domain_salt, "hub-content:epoch:<epoch>")` — the hub-content derivation of §4.2, unchanged. Currently holds the full `description`; the public `about` tag is the short form. |
+| `owner` | **v2 only.** The creator's real-key attestation binding `R_owner` to the coordinate, encrypted with the group secret, identical to the hub's (§4.5). Members learn who really runs the group; outsiders see `O`. |
+
+**Why the face is plaintext in v2 too.** A v2 hub puts `picture`/`banner`/`about` in plaintext
+so the Discover card renders for non-members. A group has no Discover, but it has an
+**invitee** in exactly the same position: holding an address, no secret yet, deciding whether to
+accept. The same three tags serve that moment.
+
+### 16.3 Messages
+
+Group messages are ordinary kind `36943` events (§6.2). A group behaves as a hub with exactly
+**one channel whose id is the group's own `d` tag**:
+
+- `["h", "<group_d_tag>"]` **and** `["c", "<group_d_tag>"]` — the same value in both slots. A
+  message event is therefore byte-for-byte a hub message; what makes it a *group* message is that
+  its `h` resolves to a kind-`36950` container, never the message shape. A client ignores a
+  `36943` whose `h` it doesn't know.
+- The message key is the hub channel key of §4.2 with the **group's `d` tag in the channel
+  slot**: `HKDF(group_secret, domain_salt, "channel:<group_d_tag>:epoch:<epoch>")`. This reuses
+  the existing derivation verbatim; nothing new to implement.
+
+Carrying `c` (rather than omitting it) is deliberate: every hub message path — send, receive,
+cache admission, replies/threads, reactions, pins, typing, edit hints, polls — keys on
+`(h, c)`, so a group needs no parallel pipeline.
+
+It also leaves room for a future revision without a format break: the channel whose id equals
+the group's `d` tag is the group's **default conversation** and always exists; a later version
+MAY let a group declare additional channels (as some messengers do), each with its own `c`, while
+messages with `c = d` remain valid and unchanged. This revision defines exactly one channel and
+clients MUST ignore `c` values that are not the group's `d`.
+
+Everything else carries over unchanged: `epoch`, `published_at`, `nonce` under `w`, edits by
+`d`-tag republish with the `+1` rule, `a`-tag replies and threads, reactions, the `identity`
+tag in v2 (§4.5), edit hints (`26943`), typing (`26950`), polls, `content-warning`.
+Subscribing to a group is one filter: `{"kinds": [36943], "#h": ["<group_d_tag>"]}` on its `r`
+relays.
+
+### 16.4 Adding a Member
+
+Only the creator adds members, by the member's **real public key** `R` — an npub, a DNN ID,
+a profile pick, or by approving a join request (§16.6.1). No consent from the member is
+involved at this step; they consent by **accepting the invite** (§16.6). The creator:
+
+1. Refuses if the tree already holds **100** leaves.
+2. Adds a leaf (§4.4 add path — one NIP-04/ECDH encryption of the leaf key to the member's key
+   and `log₂(N)` symmetric re-wraps up the path; **no epoch bump**).
+   - **v1:** the leaf is `R`.
+   - **v2:** the creator derives the member's pseudonym public key `P_pub` from `R_pub` with the
+     blinded verifier op of §4.5 (`getPeerBlindedPubkey(context = "nip-chat:v2:member-pseudonym:" + d_tag, peer = R_pub)`),
+     places `P` as the leaf, and rewrites the tree's `roster` line to include `{P: R}`. The
+     creator never obtains `P_priv`. Because this needs only `R_pub`, **v2 adds work exactly
+     like v1** — no round-trip with the member.
+3. Republishes the group event with the new `tree` (`created_at + 1`), then delivers the
+   invite (§16.6).
+
+A member being added again after removal is the same operation; there is no memory of the
+removal beyond the epoch history.
+
+### 16.5 Removing a Member
+
+Removal is the LKH kick of §4.4, applied to the inline tree:
+
+1. Delete the member's leaf; rotate the group secret (`epoch + 1`); re-key the `log₂(N)` nodes
+   on the removed path.
+2. Update `history`: decrypt the current blob, append the outgoing epoch's secret, re-encrypt
+   under the new secret, **prune to the newest 100 epochs** (§16.9).
+3. **v2:** rewrite the `roster` line under the new epoch (§5.2.1), dropping the removed `{P: R}`.
+4. Re-encrypt `settings` (v2) under the new epoch's content key; republish the group event.
+
+**A removal MUST NOT proceed if the current `history` cannot be decrypted** — the same rule
+as §5.4: never rebuild the history from only the old and new epochs. (For a group this can
+only mean a corrupt event, since the blob is inline; the rule still holds.)
+
+Messages the removed member sent stay in the conversation; they can no longer read anything
+encrypted under the new or any later epoch. There is no ban list and no `w` whitelist flag:
+"banned" simply means "not re-added".
+
+### 16.6 Invitation & Acceptance
+
+The group event is not discoverable, so the invitee must be **handed the address** —
+`naddr` for `36950:<pubkey>:<d>` with the group's `r` relays as hints. **How it is handed over
+is not specified.** A client MAY use any direct-message protocol it supports (NIP-04, NIP-17,
+or whatever succeeds them) or simply present the string for the creator to paste into any
+other channel. The address is not secret — membership is gated by the tree, not by knowing
+the address — so no particular transport is required for security.
+
+**Accepting** an invite means the client:
+
+1. Fetches the group event by coordinate from the hinted relays; verifies `version` (§16.8),
+   PoW under `w`, and (v2) that the event is signed by the `O_pub` in the coordinate.
+2. Confirms the user is actually in the tree — a leaf for `R` (v1) or for the user's own
+   derived `P` (v2, computed from their `R` and the group's `O_pub`); decrypts the leaf key and
+   walks to the root to obtain the group secret; decrypts `history`.
+3. Adds the group to the **user group list** (§16.10) and subscribes to its messages.
+
+Until step 3 the user is a member from the creator's point of view but not from their own —
+a client SHOULD show the invite with the group's name and face tags and let the user decline,
+which simply means not adding it to their list. Declining does not remove their leaf; only the
+creator can do that.
+
+#### 21.6.1 Join Request
+
+Someone holding the address who is **not** in the tree has no in-band way to ask for a leaf
+other than this. A group MAY accept the hub join request, kind `36944`, **exactly as §6.3**
+(including the join note, §6.3.1, and the withdraw / resend lifecycle), with three differences:
+
+- **`a` is the group coordinate**: `["a", "36950:<pubkey>:<d>"]` (v1: the creator's `R`; v2:
+  `O_pub`). Creators list requests by `#a`; a v1 request also carries `["d", "<d>"]` and
+  `["p", "<creator>"]` as in §6.3.
+- **`W` on the group event is the join difficulty** (§16.2). When absent, no PoW is required.
+  As in hubs, an under-`W` request is discarded before any ECDH, which is what keeps a v2
+  creator's decrypt cost from being an amplification target.
+- **Only the creator processes them.** There are no moderators, no member files, and no
+  facilitators (§5.6), so the `list` tag is meaningless on a group request and is ignored.
+  Approving means running §16.4 for the requester's `R`; nothing else is published.
+
+The v2 sealing is unchanged: the request is authored by the deterministic `addr` sub-key
+(context `nip-chat:v2:join-addr:<d>`, peer `O_pub`), sealed to `O`, and opened by the creator as
+`O` with the squat check of §6.3. The public sees an unlinkable key posting an opaque blob
+under the group coordinate. A v1 request names the requester and the group in plaintext, as a
+v1 hub join does; the note stays encrypted to the creator.
+
+### 16.7 Deletion
+
+Mirrors hub deletion (§6.5): a NIP-09 kind `5` with `["a", "36950:<pubkey>:<d>"]`, **and** a
+tombstone republish of the group event carrying only `d`, `n`, `epoch` and `["deleted", "true"]`
+with empty `content` — which also blanks the tree, so the event stops distributing the secret.
+Clients mark the group deleted in the sidebar and ignore deletions from any other pubkey.
+
+### 16.8 v2 — Private Groups (NIP-SKD)
+
+v2 applies the hub v2 model (§0, §4.5–§4.6) to groups without modification:
+
+- The creator authors the group as the owner pseudonym **`O`** derived with
+  `context = "nip-chat:v2:owner-pseudonym:" + d_tag`; the coordinate is `36950:O_pub:d`.
+  `R_owner` is revealed to members only through the encrypted `owner` attestation.
+- Leaves are member pseudonyms **`P`** (`context = "nip-chat:v2:member-pseudonym:" + d_tag`,
+  peer `O_pub`); the tree carries the group-encrypted `roster` segment.
+- Every member message carries the per-message **`identity`** signature by `R` (§4.5) and is
+  dropped without it (§9.9).
+- `settings` and `owner` are encrypted; `n`, `picture`, `banner`, `about` stay plaintext (§16.2).
+- `version = "2"` and `signer_scheme` are set at creation and pinned; the user group list records
+  the format at accept time and is the authoritative fail-safe, exactly as for hubs (§0).
+- Requires the NIP-SKD capability (§0.5). A client without it cannot join or create a v2 group.
+
+What the public learns about a v2 group from relays: its name and face, its member **count**
+(number of leaves) and churn (epoch), and pseudonymous message traffic — never a real key.
+That is the same residual as a v2 hub (§5.2).
+
+### 16.9 Limits & Warnings
+
+**List size.** A client SHOULD cap the user group list (§16.10) the same way it caps the hub
+list, and keep any per-group state it syncs (read timestamps, mutes) to the groups on that list,
+so those events stay within relay size limits. DEN Chat uses the hub-list limit for both.
+
+| Limit | Value | Why |
+|-------|-------|-----|
+| Members | **100** | A leaf + node pair costs ~370 bytes (v1) or ~505 bytes (v2 with roster). 100 members is ~37 KB / ~50 KB, inside the 64 KiB event ceiling common on relays with room for history and metadata. Depth is 7 for anything from 65 to 128 members, so 100 costs the same per operation as 128 would. |
+| Epoch history | **100 epochs** | ~100 bytes per epoch inline. At the cap the **oldest epoch is pruned** on the next rotation. |
+| Event size | **60 KB** serialized | Client-side guard on every publish, so a long description or URL can never push a full group past a relay's limit. |
+
+**Pruning warning.** Clients MUST warn the creator, at least once and again when the history
+is near the cap, that **after 100 removals the oldest messages become undecryptable for anyone
+who joins later**: a member added after epoch *k* was pruned cannot read messages encrypted
+under epochs ≤ *k*. Existing members are unaffected (they already hold those secrets locally).
+The warning is the whole mitigation; a group that expects heavy churn should be a hub.
+
+### 16.10 User Group List — Kind `16943`
+
+**Type**: Replaceable Event, published to the **user's own relays**. The group counterpart of the
+User Hub List (§6.4); one per user, latest wins.
+
+```json
+{
+  "kind": 16943,
+  "pubkey": "<user_pubkey>",
+  "created_at": "<timestamp>",
+  "tags": [
+    ["client", "<client_app_name>"]
+  ],
+  "content": "<NIP-44 self-encrypted JSON — see below>",
+  "sig": "<signature>"
+}
+```
+
+Unlike the hub list, **every entry is in the encrypted `content`** — there is no plaintext
+`v` tag form. Groups are invite-only; which groups a user belongs to is nobody else's business,
+and a v1/v2 split would only leak the v1 ones. The `content` decrypts to:
+
+```json
+{
+  "groups": [
+    { "a": "36950:<creator_or_O_pubkey>:<group_d>", "relay": "wss://…", "position": 0, "format": "1" },
+    { "a": "36950:<O_pubkey>:<group_d>", "relay": "wss://…", "position": 1, "format": "2", "signer_scheme": "skd:1" }
+  ]
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `a` | Full coordinate. A group needs the creator's (or `O`'s) pubkey to be resolved, so the bare `d` tag is not enough. |
+| `relay` | Relay hint. |
+| `position` | Sidebar order; integers need not be contiguous. |
+| `format` | `"1"` or `"2"` — the group's format **at accept time**, the authoritative version fail-safe (§0). |
+| `signer_scheme` | v2 only — `"family:version"`, so `O`/`P` can be re-derived on a new device. |
+
+Clients fetch `{"kinds": [16942, 16943], "authors": ["<me>"]}` on startup in one filter, load
+each group by coordinate, and drop entries whose event is deleted or no longer contains the
+user's leaf (the user was removed) — showing a distinct indicator for each case, as §6.5 does
+for hubs.
+
+### 16.11 Client Behavior
+
+- **Membership is checked from the tree, on every group event update.** If the user's leaf is
+  gone, the client treats the user as removed: stop the subscription, keep the local history
+  read-only, mark the entry.
+- **Creator-side size guard** before every publish (§16.9) and the **history rule** (§16.5).
+- **Never fetch `36950` events speculatively.** There is no discovery; a client loads exactly
+  the coordinates in the user's group list plus any invite the user is currently looking at.
+- **Member list UI** is the tree's leaves (v2: resolved through the `roster` line), the same
+  rendering as a hub roster minus roles.
+
+### 16.12 Feature Parity — What Carries Over
+
+A group reuses the hub **event kinds and structures unchanged**; the only systematic difference
+is that every per-channel event carries the group's own `d` tag in its channel slot (`c = d`,
+§16.3). Nothing gets a new kind.
+
+| Feature | In a group | Notes |
+|---------|-----------|-------|
+| Message (`36943`) | **Yes** | Same structure, encryption, `epoch`, PoW, `identity` (v2). `c = d`. |
+| Edit / delete (`d`-tag republish, tombstone, `26943` hint) | **Yes** | Identical, including the `created_at + 1` rule. |
+| Reply & threads (`a` `reply` / `root`) | **Yes, as hubs** | Same tags, same code path, same thread pane — scoped to the group instead of a channel (Matrix and WhatsApp group chats have threads too). |
+| Mentions | **People and `@everyone`** | `@<npub>` / `@<DNN>` and `@everyone` (all members) work as in hubs. `@here` and `@<role>` are **not defined** for a group: there is no presence and there are no roles. `#channel` is not defined either. Clients SHOULD NOT suggest them and SHOULD treat them as plain text. |
+| Reactions, edit hint (`26943`), typing (`26950`) | **Yes** | Unchanged; `c = d`. |
+| Polls (`1067` / `1017`) | **Yes** | `c = d`; encrypted under the group message key. |
+| Attachments & **voice notes** (§6.2.1) | **Yes** | Stored on the group's `o` servers when it has them, else the sender's own — see below. |
+| Pin list (`36945`) | **Yes, as hubs** | One pin event per member per group, `d` = group `d`, `["pin", "<group_d>", "36943:<author>:<d>"]` with the group's `d` in the channel slot. Rendered as §6.6: the creator's pins first and expanded, other members' pins in collapsible sections grouped by pinner. |
+| Join requests (`36944`) | **Yes, creator-only** | §16.6.1: same event as §6.3 with the group coordinate in `a` and `W` as the difficulty. Approving = §16.4. |
+| Ban list, facilitation, reports (§5.3, §5.6, `36948`) | **No** | No moderators and no member files: the creator's add/remove is the whole model. |
+| Calendar (`31923` / `31925`), voice hosts & presence (`36946` / `36947`) | **No** | Hub-scale features; not part of groups. A later revision may add them with `h` only. |
+
+**Attachments and voice notes.** A group MAY declare Blossom servers with `o` tags (§16.2),
+and when it does, media works exactly as in a hub: uploaded to and fetched from the group's
+servers, referenced by hash (§6.2.1). A group without `o` tags still supports media: the sender
+uploads to their **own** configured servers and names them in the attachment entry, which gains
+one optional field for the purpose:
+
+```json
+{ "hash": "…", "type": "audio/webm", "name": "voice.webm", "size": 12345,
+  "servers": ["https://blossom.example.com", "https://blossom2.example.com"],
+  "encryption": { "algorithm": "aes-gcm", "key": "…", "nonce": "…" } }
+```
+
+| Field | Description |
+|-------|-------------|
+| `servers` | Blossom servers the sender uploaded to. Readers try the group's `o` servers, then these, then their own client servers. Optional everywhere; expected when the group has no `o` tags. Also valid in hubs. |
+
+Attachment encryption is the **sender's choice**, exactly as in hubs (§6.2.1): a client
+SHOULD expose the per-upload toggle and MAY remember the user's preference. The trade-off is
+the usual one: an encrypted blob is opaque to the server operator but must be fully downloaded
+before it can be shown, while a plaintext blob streams but is readable by whoever runs the
+server. In a **v2 group** the client SHOULD make the privacy side of that trade-off visible,
+because a plaintext blob on a personal server ties a real Blossom account to pseudonymous
+traffic; it remains the user's call. The file key lives inside the already-encrypted message,
+as in hubs. Voice notes are audio attachments and need nothing further.
+
+---
+
+> **Part II: Additional Systems** · end of the encrypted hub and group protocol (Part I, §0-16).
 >
-> Everything below reuses NIP-CHAT's event, relay, and Blossom conventions but is an **independent system** that can be implemented on its own: Public Chat (§16), Direct Messages (§17), Custom Emoji/Sticker/GIF Sets (§19), Forum (§20), and Groups (§21). Groups additionally inherit the §4 cryptographic core. The §13 kind summary and §14 tag reference above are master indexes that already cover these systems.
+> Everything above (§0-16) is built on the shared §4 cryptographic core and §5 Blossom storage: hubs and their flat sibling, groups. Everything below is an additional system that reuses NIP-CHAT's event, relay, and Blossom conventions but stands on its own: Public Chat (§17), Direct Messages (§18), Sets (§20), and Forum (§21). Public Chat and the open/word communities within §21 are also specified standalone in NIP-TC and NIP-WC. The §13 kind summary and §14 tag reference above are master indexes that cover these too.
 
-## 16. Public Chat — Kind `1312`
+## 17. Public Chat — Kind `1312`
 
-### 16.1 Overview
+### 17.1 Overview
 
 Public Chat is a **permissionless, topic-based** chat system that operates independently from the hub-based encrypted messaging (§6). It requires no hub membership, no encryption, and no authority — anyone can post, and messages are public plaintext. Spam prevention relies on **Proof-of-Work** (NIP-13).
 
@@ -3416,7 +3793,7 @@ This is a separate protocol layer that shares the same client but has completely
 | Editing | Re-publish same d-tag | Not supported |
 | Structure | Hub → Channel hierarchy | Flat topics |
 
-### 16.2 Message Event — Kind `1312`
+### 17.2 Message Event — Kind `1312`
 
 **Type**: Regular Event
 
@@ -3462,7 +3839,7 @@ Public Chat uses a **coupled PoW model** — the same difficulty value serves as
 
 This means higher PoW = harder to spam AND stricter filtering. There is no separate "read difficulty" vs "write difficulty".
 
-### 16.3 Topic List — NIP-78 (Kind `30078`)
+### 17.3 Topic List — NIP-78 (Kind `30078`)
 
 Each user's subscribed topic list is persisted via a **NIP-78 Application Specific Data** event:
 
@@ -3488,7 +3865,7 @@ Each user's subscribed topic list is persisted via a **NIP-78 Application Specif
 
 The topic list is fetched on startup and updated when topics are added or removed.
 
-### 16.4 Subscriptions
+### 17.4 Subscriptions
 
 **Active topic subscription:**
 ```json
@@ -3502,7 +3879,7 @@ The topic list is fetched on startup and updated when topics are added or remove
 
 Clients maintain a single active subscription for the currently viewed topic. Switching topics closes the old subscription and opens a new one.
 
-### 16.5 Content Tags
+### 17.5 Content Tags
 
 Public Chat messages support the same rich content tags as hub chat and DMs, but **unencrypted**:
 
@@ -3512,7 +3889,7 @@ Public Chat messages support the same rich content tags as hub chat and DMs, but
 
 Since Public Chat is plaintext, these tags are stored as-is on relays (no encryption layer).
 
-### 16.6 Content Filters
+### 17.6 Content Filters
 
 Because Public Chat is permissionless, clients SHOULD provide fine-grained content filtering controls (all default OFF except muted words):
 
@@ -3526,7 +3903,7 @@ Because Public Chat is permissionless, clients SHOULD provide fine-grained conte
 
 These are **client-side filters** — all messages are still received from relays, but hidden or redacted based on user preferences.
 
-### 16.7 Client Behavior
+### 17.7 Client Behavior
 
 #### Joining a Topic
 
@@ -3561,9 +3938,9 @@ These are **client-side filters** — all messages are still received from relay
 
 ---
 
-## 17. Direct Messages — NIP-17 Gift Wrap
+## 18. Direct Messages — NIP-17 Gift Wrap
 
-### 17.1 Overview
+### 18.1 Overview
 
 DEN Chat implements NIP-17 for private direct messages. Unlike hub chat (which uses a shared hub secret), DMs use **per-conversation NIP-44 encryption** with a three-layer wrapping protocol that hides both message content and metadata (who is messaging whom) from relays.
 
@@ -3575,7 +3952,7 @@ DEN Chat implements NIP-17 for private direct messages. Unlike hub chat (which u
 | Editing | Re-publish same d-tag | Not supported (rumors are unsigned, no d-tag) |
 | Deniability | No (signed events) | Yes (rumors are unsigned — deniable) |
 
-### 17.2 Protocol Layers
+### 18.2 Protocol Layers
 
 NIP-17 uses three nested event kinds:
 
@@ -3589,7 +3966,7 @@ Kind 14/15 (Rumor, unsigned)  →  Kind 13 (Seal, NIP-44 encrypted)  →  Kind 1
 
 The throwaway key ensures the relay cannot determine the real sender — it sees only the throwaway pubkey and the recipient's pubkey (from the `p` tag).
 
-### 17.3 Text Message — Kind 14 (Rumor)
+### 18.3 Text Message — Kind 14 (Rumor)
 
 A standard text DM. The rumor is unsigned and contains the plaintext message.
 
@@ -3617,7 +3994,7 @@ A standard text DM. The rumor is unsigned and contains the plaintext message.
 
 **Important:** The rumor has **no signature** — it cannot be proven to have been authored by `pubkey`. This provides cryptographic deniability.
 
-### 17.4 File Attachment — Kind 15 (DM File)
+### 18.4 File Attachment — Kind 15 (DM File)
 
 Encrypted file attachments use a **separate event kind** (kind 15) rather than embedding files in the kind 14 content. The file is encrypted client-side with AES-256-GCM before uploading to Blossom, and the decryption metadata is placed in the rumor's tags.
 
@@ -3675,7 +4052,7 @@ The `content` field contains the **Blossom URL** of the encrypted file (e.g., `h
 5. Verify: `SHA-256(plaintext) == ox` tag value
 6. Create blob URL for rendering
 
-### 17.5 Seal — Kind 13
+### 18.5 Seal — Kind 13
 
 The seal encrypts the serialized rumor JSON to the target pubkey using NIP-44.
 
@@ -3695,7 +4072,7 @@ The seal encrypts the serialized rumor JSON to the target pubkey using NIP-44.
 - The seal is signed by the sender's real key
 - Two seals are created per message: one encrypted to the recipient, one encrypted to the sender (so the sender can read their own DMs)
 
-### 17.6 Gift Wrap — Kind 1059
+### 18.6 Gift Wrap — Kind 1059
 
 The outermost layer, published to relays.
 
@@ -3718,14 +4095,14 @@ The outermost layer, published to relays.
 - `content` is NIP-44 encrypted using the throwaway private key + recipient pubkey
 - Each message produces **two gift wraps**: one for the recipient, one for the sender (self-copy)
 
-### 17.7 Publishing Rules
+### 18.7 Publishing Rules
 
 - Gift wraps MUST be published to the **recipient's DM relays** (kind `10050` relay list) and the **sender's DM relays**
 - If the recipient has no kind `10050` event, fall back to their kind `10002` relay list
 - The self-copy gift wrap is published to the sender's own DM relays
 - **Two gift wraps per message**: one addressed to the recipient, one addressed to the sender
 
-### 17.8 DM Relay List — Kind 10050
+### 18.8 DM Relay List — Kind 10050
 
 Users advertise their preferred DM relays via a kind `10050` replaceable event (NIP-17 spec):
 
@@ -3743,7 +4120,7 @@ Users advertise their preferred DM relays via a kind `10050` replaceable event (
 
 Clients fetch the counterparty's `10050` event to determine where to publish gift wraps. For self-copies, the client publishes to its own `10050` relays.
 
-### 17.9 Subscription
+### 18.9 Subscription
 
 ```json
 {"kinds": [1059], "#p": ["<my_pubkey>"], "limit": 100}
@@ -3751,7 +4128,7 @@ Clients fetch the counterparty's `10050` event to determine where to publish gif
 
 **Critical:** Subscriptions use `limit` only — **never `since`**. Gift wrap timestamps are intentionally randomized per the NIP-17 spec, so `since`-based pagination produces unreliable results. Clients SHOULD fetch a large initial batch and then maintain a real-time subscription for new events.
 
-### 17.10 Unwrapping Flow
+### 18.10 Unwrapping Flow
 
 ```
 Receive kind 1059 gift wrap event
@@ -3764,7 +4141,7 @@ Receive kind 1059 gift wrap event
   → If kind 15: download file from content URL, decrypt with tags metadata
 ```
 
-### 17.11 Comparison: Hub Chat vs DM File Encryption
+### 18.11 Comparison: Hub Chat vs DM File Encryption
 
 Both systems use the same `AES-256-GCM` primitives from `fileEncryption.ts`, but the metadata delivery differs:
 
@@ -3780,7 +4157,7 @@ Both systems use the same `AES-256-GCM` primitives from `fileEncryption.ts`, but
 
 ---
 
-## 18. Future Extensions
+## 19. Future Extensions
 
 - **Hub discovery protocol** — search by tags, PoW, member count
 - **Automated join approval** — bot-driven member file management
@@ -3789,7 +4166,7 @@ Both systems use the same `AES-256-GCM` primitives from `fileEncryption.ts`, but
 
 ---
 
-## 19. Custom Emoji, Sticker & GIF Sets
+## 20. Custom Emoji, Sticker & GIF Sets
 
 DEN Chat lets users publish and subscribe to reusable sets of custom emoji, stickers, and GIFs. Each set is an **addressable replaceable** event identified by `(pubkey, kind, d-tag)`. Three distinct kinds keep the types from sharing a relay slot:
 
@@ -3878,7 +4255,7 @@ Each `a` tag is an addressable reference to a subscribed set; clients fetch thos
 
 ---
 
-## 20. Forum — Communities
+## 21. Forum — Communities
 
 The Forum is a Reddit-style threaded-discussion surface in the social area. It supports **two distinct community types** that look the same in the UI but differ fundamentally in ownership and addressing. **They are intentionally separate** — posts in one type never appear in the other.
 
@@ -3894,11 +4271,11 @@ The Forum is a Reddit-style threaded-discussion surface in the social area. It s
 
 Both types use **kind `1111`** (NIP-22) for posts and comments, and **kind `7`** (NIP-25) for reactions. A post and its comments are distinguished by the parent-reference rules below (mirrors §6.x message/reply separation).
 
-### 20.1 Word Communities (Open)
+### 21.1 Word Communities (Open)
 
 A word community is not a created object — there is **no definition event, no creator, and no central moderation**. The "community" is simply the set of all top-level kind-`1111` posts carrying `["t", "<word>"]`. There is exactly **one** community per word, globally. Its handle is **`w/<word>`** (a copy-able identifier, not a URL).
 
-This is the [Public Chat (§16)](#16-public-chat--kind-1312) topic model applied to threaded posts. **It does not collide with public chat:** public chat is kind `1312`, forum posts are kind `1111`, so every fetch is kind-pinned and the two never cross-populate even though they share the `t:<word>` namespace.
+This is the [Public Chat (§17)](#17-public-chat--kind-1312) topic model applied to threaded posts. **It does not collide with public chat:** public chat is kind `1312`, forum posts are kind `1111`, so every fetch is kind-pinned and the two never cross-populate even though they share the `t:<word>` namespace.
 
 #### Top-level post
 
@@ -3942,11 +4319,11 @@ Comments follow NIP-22 with the **post as the thread root**:
 
 - **Top-level posts for a word:** `{ "kinds": [1111], "#t": ["gaming"] }` — returns only top-level posts (comments lack `t`).
 - **A post's full comment tree:** `{ "kinds": [1111], "#E": ["<post-id>"] }` — the whole subtree in one query; build nesting from the lowercase `e` parent tags.
-- **Reactions:** `{ "kinds": [7], "#e": ["<post-id>"] }` (see §20.3).
+- **Reactions:** `{ "kinds": [7], "#e": ["<post-id>"] }` (see §21.3).
 
 #### Moderation
 
-Word communities have **no central moderation**. Filtering is purely client-side and reuses the exact stack used for Public Chat (§16):
+Word communities have **no central moderation**. Filtering is purely client-side and reuses the exact stack used for Public Chat (§17):
 - **Proof of Work** threshold (per client setting),
 - **Web of Trust** scoring (a `forum` context, mirroring the `publicChat` context),
 - **Muted words**, and **blocked pubkeys** (NIP-51 kind `10000`).
@@ -3970,7 +4347,7 @@ A user's subscribed word communities are stored in a **replaceable kind `10044`*
 
 **List size cap.** Both follow/join lists are capped at **400 entries**. The binding constraint is the created-community list (kind `10004`): each `["a","34550:<64-hex>:<dtag>"]` entry is ~110 bytes, so 400 ≈ 44 KB of tags — safely inside a 64 KB relay event limit. The same count is applied to the word list (kind `10044`, ~30 bytes/entry), which is far smaller at that size.
 
-### 20.2 Created Communities (NIP-72)
+### 21.2 Created Communities (NIP-72)
 
 Standard [NIP-72](https://github.com/nostr-protocol/nips/blob/master/72.md):
 - **Definition:** kind `34550` — `d` (identifier), `name`, `description`, `image` (icon), `banner` (wide image), `["content-warning","nsfw"]` (optional adult flag), `["p", pubkey, "", "moderator"]`, `["relay", url]`. Address `34550:<creator>:<id>` → naddr → handle **`c/<naddr>`**. The creator is always an implicit moderator.
@@ -3983,7 +4360,7 @@ Standard [NIP-72](https://github.com/nostr-protocol/nips/blob/master/72.md):
 
 Because creation is owned, multiple communities can share a name (`c/<naddr-A>` and `c/<naddr-B>` both named "gaming"), each with its own creator and moderators.
 
-### 20.3 Reaction Sentiment & Sorting
+### 21.3 Reaction Sentiment & Sorting
 
 Forum reactions are kind `7` (NIP-25). To support up/down style sorting while remaining compatible with reactions from other clients, each reaction's `content` is classified into a **positive** or **negative** bucket. A fixed set of contents is treated as negative; **everything else (including `+`, empty, and unknown emoji) is positive**:
 
@@ -3999,7 +4376,7 @@ Sort modes (all **best-effort**, reordering only what was fetched):
 - **Top** — by `(positive − negative)` reaction count, descending.
 - **Hot** — by `(positive + negative)` total reaction count, descending.
 
-### 20.4 Client UI
+### 21.4 Client UI
 
 - **Left rail (Forum section):** `Feed` and `Notifications` nav items (mirrors Short Form). `Feed` opens the forum home.
 - **Notifications** (forum and long-form each have their own page, scoped to their own type so they never cross-notify): replies on your posts/comments shown individually, and reactions **aggregated into 24-hour buckets** (one summary card per day) so a vote burst doesn't flood the page. The forum page is split by the *Open* / *Moderated* tabs; the long-form page is a single list.
@@ -4014,383 +4391,6 @@ Sort modes (all **best-effort**, reordering only what was fetched):
 - **Reply boxes** are multi-line text areas.
 - **Live updates:** the active feed subscribes to new posts, and a thread subscribes to new comments and reactions, ingesting them in real time.
 - **Render filter:** every post/comment passes the same gate as public chat: view-PoW threshold, blocked pubkeys, Web-of-Trust (`forum` context), and muted words. The same WoT threshold also drops below-threshold authors from **created-community discovery** (by creator) and from the **notification** pages (by actor). Word communities have no creator, so only their posts are WoT-filtered.
-
----
-
-## 21. Groups — Kind `36950`
-
-A **group** is the small, flat sibling of a hub: one conversation, no channels, no categories,
-no roles, no moderators, no discovery, and **no Blossom in the membership pipeline** (media
-may still live on Blossom, §21.12). It is what Discord calls a *group DM* —
-a handful of people talking in one place — scaled to **100 members**. The whole group lives in
-**one relay event**: identity, member tree, epoch history and settings. Everything cryptographic
-is inherited unchanged from hubs (§4): the LKH tree distributes a group secret, removal rotates
-it, and v2 layers NIP-SKD pseudonyms on top exactly as it does for hubs.
-
-### 21.1 Scope
-
-| | Hub (§6.1) | Group |
-|---|---|---|
-| Container | kind `36942` + Blossom tree files | kind `36950`, **tree inline** (Blossom only for media, via optional `o`) |
-| Channels / categories / roles | yes | **none** — one conversation |
-| Who adds members | creator, join requests, facilitators | **creator only** |
-| Join requests (`36944`) | yes, processed by creator and mods | **yes, creator-only** (§21.6.1); a request only asks |
-| Ban list | Blossom ban pages | **none** — removal is the only tool |
-| Discovery (`t`, `f`, Discover UI) | yes | **never listed** — the address is the invite |
-| Member cap | unbounded (paginated tree) | **100** |
-| Epoch history | unbounded blob on Blossom (§5.4) | **inline, capped at 100 epochs** |
-| Messages | kind `36943` with `h` + `c` | kind `36943` with `h` + `c`, both = the group `d` (§21.3) |
-| v1 / v2 | both | both (same meaning, §21.8) |
-
-A group is **creator-centric**, unlike Discord's group DMs where any member may add others.
-Only the creator publishes the group event; members only publish messages. There are no
-moderators: the creator removes whom they choose, and a removed member can be re-added later
-by the same action. A join request (§21.6.1) only asks; ignoring it is the whole ban list.
-
-### 21.2 Group Event — Kind `36950`
-
-**Type**: Addressable Replaceable Event, published to the group's `r` relays.
-
-```json
-{
-  "kind": 36950,
-  "pubkey": "<creator_hex_pubkey (v1)  |  O_pub (v2, §4.5)>",
-  "created_at": "<timestamp>",
-  "tags": [
-    ["d", "<group_uuid>"],
-    ["n", "<group_name>"],
-    ["epoch", "<epoch_number>"],
-    ["r", "wss://relay1.example.com", "general"],
-    ["r", "wss://relay2.example.com", "general"],
-    ["o", "https://blossom1.example.com"],
-    ["o", "https://blossom2.example.com"],
-    ["w", "<pow_difficulty>"],
-    ["W", "<join_pow_difficulty>"],
-    ["picture", "<icon_url>"],
-    ["banner", "<banner_url>"],
-    ["about", "<short description>"],
-    ["published_at", "<original_creation_timestamp>"],
-    ["client", "<client_app_name>"],
-    ["version", "2"],
-    ["signer_scheme", "skd", "1"]
-  ],
-  "content": "<JSON string — see below>",
-  "sig": "<signature>"
-}
-```
-
-#### Tags
-
-| Tag | Required | Description |
-|-----|----------|-------------|
-| `d` | Yes | UUID v4. Group identifier. The coordinate is `36950:<pubkey>:<d>` — with `O_pub` as the pubkey in v2. |
-| `n` | Yes | Group name. Plaintext in both versions so an invitee can see what they were invited to. |
-| `epoch` | Yes | Current group-secret epoch, starting at `1`, incremented on every removal (§21.5). |
-| `r` | Yes | Relay, third value `general`. Messages and the group event live here. At least one. |
-| `o` | No | Blossom server URL for **media** (attachments, voice notes), exactly as the hub `o` (§6.1). Zero or more; recommend ≥2 when the group shares files. Never used for membership — the tree and history are inline. When absent, senders fall back to their own servers and name them per attachment (§21.12). |
-| `w` | No | Minimum **message** PoW (NIP-13), same semantics as the hub `w` (§6.1): messages need a `nonce`, and the group event itself MUST be mined to `w` on every publish. |
-| `W` | No | Minimum **join-request** PoW (NIP-13), same semantics as the hub `W` (§6.1): a kind-36944 request for this group (§21.6.1) MUST carry a `nonce` meeting it, and creators drop under-`W` requests before any decrypt. |
-| `nonce` | Conditional | The group event's own PoW nonce when `w` > 0. |
-| `message_expiration` | No | Disappearing-messages duration in seconds, as for hubs (§6.1, §9.10). |
-| `picture` / `banner` / `about` | No | The group's public face — icon, banner, short description — **plaintext in both versions** for the same reason as `n`: the person holding an invite has no secret yet. Member-only prose belongs in `settings.description` (below). |
-| `content-warning` / `L` | No | NIP-36 / NIP-32 sensitive-content marking, as for hubs. |
-| `published_at` | Yes | Original creation timestamp, carried forward unchanged on every republish. |
-| `client` | No | Publishing client name. |
-| `version` | No | Group **format** version. Absent ⇒ v1. `"2"` ⇒ v2 (§21.8). Unknown ⇒ prompt to update, do not render. |
-| `signer_scheme` | Conditional (**v2**) | NIP-SKD scheme, exactly as on the hub event (§6.1). |
-| `deleted` | Conditional | `["deleted", "true"]` on the tombstone republish (§21.7). |
-
-There is deliberately **no `t`, no `f`, no `m`, no `b`**: nothing is discoverable, no
-membership file is on Blossom, and only the creator adds members. A join request (§21.6.1) is
-a way to *ask*; it never changes membership by itself.
-
-#### `created_at` increment
-
-The group event is republished on every membership change. As for hubs (§6.1) the client
-MUST set `created_at` to the previous event's `created_at + 1`, never the wall clock, and
-order by `published_at` for display.
-
-#### Content (JSON)
-
-```json
-{
-  "tree":     "<monolithic LKH tree, §5.2.3 line format — plaintext>",
-  "history":  "<base64 AES-GCM blob under the CURRENT group secret — §5.4 plaintext format, ≤100 lines>",
-  "settings": { "description": "<text>" },
-  "owner":    "<v2 only — encrypted owner attestation, exactly as in the v2 hub content (§4.5)>"
-}
-```
-
-| Field | Description |
-|-------|-------------|
-| `tree` | The **whole** member tree, inline, in the monolithic file format of §5.2.3: `leaf`, `node` and `root` lines, where `root` carries `aes_encrypted_group_secret`. **Always plaintext** — it is the tree that distributes the secret, so it cannot be encrypted with it (the same bootstrap argument as v2 leaf pages, §5.2). In v1 the leaf `member_pubkey` is the real key `R`; in v2 it is the pseudonym `P`, and the tree carries one `roster:<epoch>:<enc({P:R})>` line (§5.2.1). No pagination, no spine: at most 100 leaves and 99 internal nodes. |
-| `history` | The epoch-secret history, in the §5.4 plaintext format (`hub:<epoch>:<secret_hex>` lines — the `hub:` prefix is kept so the parser is shared), AES-GCM encrypted with the **current** group secret. **Capped at 100 epochs** (§21.9). |
-| `settings` | Member-only settings. **v1:** plaintext object. **v2:** the JSON serialized and encrypted as `base64(IV || AES-GCM(group_content_key, json) || tag)` under `group_content_key = HKDF(group_secret, domain_salt, "hub-content:epoch:<epoch>")` — the hub-content derivation of §4.2, unchanged. Currently holds the full `description`; the public `about` tag is the short form. |
-| `owner` | **v2 only.** The creator's real-key attestation binding `R_owner` to the coordinate, encrypted with the group secret, identical to the hub's (§4.5). Members learn who really runs the group; outsiders see `O`. |
-
-**Why the face is plaintext in v2 too.** A v2 hub puts `picture`/`banner`/`about` in plaintext
-so the Discover card renders for non-members. A group has no Discover, but it has an
-**invitee** in exactly the same position: holding an address, no secret yet, deciding whether to
-accept. The same three tags serve that moment.
-
-### 21.3 Messages
-
-Group messages are ordinary kind `36943` events (§6.2). A group behaves as a hub with exactly
-**one channel whose id is the group's own `d` tag**:
-
-- `["h", "<group_d_tag>"]` **and** `["c", "<group_d_tag>"]` — the same value in both slots. A
-  message event is therefore byte-for-byte a hub message; what makes it a *group* message is that
-  its `h` resolves to a kind-`36950` container, never the message shape. A client ignores a
-  `36943` whose `h` it doesn't know.
-- The message key is the hub channel key of §4.2 with the **group's `d` tag in the channel
-  slot**: `HKDF(group_secret, domain_salt, "channel:<group_d_tag>:epoch:<epoch>")`. This reuses
-  the existing derivation verbatim; nothing new to implement.
-
-Carrying `c` (rather than omitting it) is deliberate: every hub message path — send, receive,
-cache admission, replies/threads, reactions, pins, typing, edit hints, polls — keys on
-`(h, c)`, so a group needs no parallel pipeline.
-
-It also leaves room for a future revision without a format break: the channel whose id equals
-the group's `d` tag is the group's **default conversation** and always exists; a later version
-MAY let a group declare additional channels (as some messengers do), each with its own `c`, while
-messages with `c = d` remain valid and unchanged. This revision defines exactly one channel and
-clients MUST ignore `c` values that are not the group's `d`.
-
-Everything else carries over unchanged: `epoch`, `published_at`, `nonce` under `w`, edits by
-`d`-tag republish with the `+1` rule, `a`-tag replies and threads, reactions, the `identity`
-tag in v2 (§4.5), edit hints (`26943`), typing (`26950`), polls, `content-warning`.
-Subscribing to a group is one filter: `{"kinds": [36943], "#h": ["<group_d_tag>"]}` on its `r`
-relays.
-
-### 21.4 Adding a Member
-
-Only the creator adds members, by the member's **real public key** `R` — an npub, a DNN ID,
-a profile pick, or by approving a join request (§21.6.1). No consent from the member is
-involved at this step; they consent by **accepting the invite** (§21.6). The creator:
-
-1. Refuses if the tree already holds **100** leaves.
-2. Adds a leaf (§4.4 add path — one NIP-04/ECDH encryption of the leaf key to the member's key
-   and `log₂(N)` symmetric re-wraps up the path; **no epoch bump**).
-   - **v1:** the leaf is `R`.
-   - **v2:** the creator derives the member's pseudonym public key `P_pub` from `R_pub` with the
-     blinded verifier op of §4.5 (`getPeerBlindedPubkey(context = "nip-chat:v2:member-pseudonym:" + d_tag, peer = R_pub)`),
-     places `P` as the leaf, and rewrites the tree's `roster` line to include `{P: R}`. The
-     creator never obtains `P_priv`. Because this needs only `R_pub`, **v2 adds work exactly
-     like v1** — no round-trip with the member.
-3. Republishes the group event with the new `tree` (`created_at + 1`), then delivers the
-   invite (§21.6).
-
-A member being added again after removal is the same operation; there is no memory of the
-removal beyond the epoch history.
-
-### 21.5 Removing a Member
-
-Removal is the LKH kick of §4.4, applied to the inline tree:
-
-1. Delete the member's leaf; rotate the group secret (`epoch + 1`); re-key the `log₂(N)` nodes
-   on the removed path.
-2. Update `history`: decrypt the current blob, append the outgoing epoch's secret, re-encrypt
-   under the new secret, **prune to the newest 100 epochs** (§21.9).
-3. **v2:** rewrite the `roster` line under the new epoch (§5.2.1), dropping the removed `{P: R}`.
-4. Re-encrypt `settings` (v2) under the new epoch's content key; republish the group event.
-
-**A removal MUST NOT proceed if the current `history` cannot be decrypted** — the same rule
-as §5.4: never rebuild the history from only the old and new epochs. (For a group this can
-only mean a corrupt event, since the blob is inline; the rule still holds.)
-
-Messages the removed member sent stay in the conversation; they can no longer read anything
-encrypted under the new or any later epoch. There is no ban list and no `w` whitelist flag:
-"banned" simply means "not re-added".
-
-### 21.6 Invitation & Acceptance
-
-The group event is not discoverable, so the invitee must be **handed the address** —
-`naddr` for `36950:<pubkey>:<d>` with the group's `r` relays as hints. **How it is handed over
-is not specified.** A client MAY use any direct-message protocol it supports (NIP-04, NIP-17,
-or whatever succeeds them) or simply present the string for the creator to paste into any
-other channel. The address is not secret — membership is gated by the tree, not by knowing
-the address — so no particular transport is required for security.
-
-**Accepting** an invite means the client:
-
-1. Fetches the group event by coordinate from the hinted relays; verifies `version` (§21.8),
-   PoW under `w`, and (v2) that the event is signed by the `O_pub` in the coordinate.
-2. Confirms the user is actually in the tree — a leaf for `R` (v1) or for the user's own
-   derived `P` (v2, computed from their `R` and the group's `O_pub`); decrypts the leaf key and
-   walks to the root to obtain the group secret; decrypts `history`.
-3. Adds the group to the **user group list** (§21.10) and subscribes to its messages.
-
-Until step 3 the user is a member from the creator's point of view but not from their own —
-a client SHOULD show the invite with the group's name and face tags and let the user decline,
-which simply means not adding it to their list. Declining does not remove their leaf; only the
-creator can do that.
-
-#### 21.6.1 Join Request
-
-Someone holding the address who is **not** in the tree has no in-band way to ask for a leaf
-other than this. A group MAY accept the hub join request, kind `36944`, **exactly as §6.3**
-(including the join note, §6.3.1, and the withdraw / resend lifecycle), with three differences:
-
-- **`a` is the group coordinate**: `["a", "36950:<pubkey>:<d>"]` (v1: the creator's `R`; v2:
-  `O_pub`). Creators list requests by `#a`; a v1 request also carries `["d", "<d>"]` and
-  `["p", "<creator>"]` as in §6.3.
-- **`W` on the group event is the join difficulty** (§21.2). When absent, no PoW is required.
-  As in hubs, an under-`W` request is discarded before any ECDH, which is what keeps a v2
-  creator's decrypt cost from being an amplification target.
-- **Only the creator processes them.** There are no moderators, no member files, and no
-  facilitators (§5.6), so the `list` tag is meaningless on a group request and is ignored.
-  Approving means running §21.4 for the requester's `R`; nothing else is published.
-
-The v2 sealing is unchanged: the request is authored by the deterministic `addr` sub-key
-(context `nip-chat:v2:join-addr:<d>`, peer `O_pub`), sealed to `O`, and opened by the creator as
-`O` with the squat check of §6.3. The public sees an unlinkable key posting an opaque blob
-under the group coordinate. A v1 request names the requester and the group in plaintext, as a
-v1 hub join does; the note stays encrypted to the creator.
-
-### 21.7 Deletion
-
-Mirrors hub deletion (§6.5): a NIP-09 kind `5` with `["a", "36950:<pubkey>:<d>"]`, **and** a
-tombstone republish of the group event carrying only `d`, `n`, `epoch` and `["deleted", "true"]`
-with empty `content` — which also blanks the tree, so the event stops distributing the secret.
-Clients mark the group deleted in the sidebar and ignore deletions from any other pubkey.
-
-### 21.8 v2 — Private Groups (NIP-SKD)
-
-v2 applies the hub v2 model (§0, §4.5–§4.6) to groups without modification:
-
-- The creator authors the group as the owner pseudonym **`O`** derived with
-  `context = "nip-chat:v2:owner-pseudonym:" + d_tag`; the coordinate is `36950:O_pub:d`.
-  `R_owner` is revealed to members only through the encrypted `owner` attestation.
-- Leaves are member pseudonyms **`P`** (`context = "nip-chat:v2:member-pseudonym:" + d_tag`,
-  peer `O_pub`); the tree carries the group-encrypted `roster` segment.
-- Every member message carries the per-message **`identity`** signature by `R` (§4.5) and is
-  dropped without it (§9.9).
-- `settings` and `owner` are encrypted; `n`, `picture`, `banner`, `about` stay plaintext (§21.2).
-- `version = "2"` and `signer_scheme` are set at creation and pinned; the user group list records
-  the format at accept time and is the authoritative fail-safe, exactly as for hubs (§0).
-- Requires the NIP-SKD capability (§0.5). A client without it cannot join or create a v2 group.
-
-What the public learns about a v2 group from relays: its name and face, its member **count**
-(number of leaves) and churn (epoch), and pseudonymous message traffic — never a real key.
-That is the same residual as a v2 hub (§5.2).
-
-### 21.9 Limits & Warnings
-
-**List size.** A client SHOULD cap the user group list (§21.10) the same way it caps the hub
-list, and keep any per-group state it syncs (read timestamps, mutes) to the groups on that list,
-so those events stay within relay size limits. DEN Chat uses the hub-list limit for both.
-
-| Limit | Value | Why |
-|-------|-------|-----|
-| Members | **100** | A leaf + node pair costs ~370 bytes (v1) or ~505 bytes (v2 with roster). 100 members is ~37 KB / ~50 KB, inside the 64 KiB event ceiling common on relays with room for history and metadata. Depth is 7 for anything from 65 to 128 members, so 100 costs the same per operation as 128 would. |
-| Epoch history | **100 epochs** | ~100 bytes per epoch inline. At the cap the **oldest epoch is pruned** on the next rotation. |
-| Event size | **60 KB** serialized | Client-side guard on every publish, so a long description or URL can never push a full group past a relay's limit. |
-
-**Pruning warning.** Clients MUST warn the creator, at least once and again when the history
-is near the cap, that **after 100 removals the oldest messages become undecryptable for anyone
-who joins later**: a member added after epoch *k* was pruned cannot read messages encrypted
-under epochs ≤ *k*. Existing members are unaffected (they already hold those secrets locally).
-The warning is the whole mitigation; a group that expects heavy churn should be a hub.
-
-### 21.10 User Group List — Kind `16943`
-
-**Type**: Replaceable Event, published to the **user's own relays**. The group counterpart of the
-User Hub List (§6.4); one per user, latest wins.
-
-```json
-{
-  "kind": 16943,
-  "pubkey": "<user_pubkey>",
-  "created_at": "<timestamp>",
-  "tags": [
-    ["client", "<client_app_name>"]
-  ],
-  "content": "<NIP-44 self-encrypted JSON — see below>",
-  "sig": "<signature>"
-}
-```
-
-Unlike the hub list, **every entry is in the encrypted `content`** — there is no plaintext
-`v` tag form. Groups are invite-only; which groups a user belongs to is nobody else's business,
-and a v1/v2 split would only leak the v1 ones. The `content` decrypts to:
-
-```json
-{
-  "groups": [
-    { "a": "36950:<creator_or_O_pubkey>:<group_d>", "relay": "wss://…", "position": 0, "format": "1" },
-    { "a": "36950:<O_pubkey>:<group_d>", "relay": "wss://…", "position": 1, "format": "2", "signer_scheme": "skd:1" }
-  ]
-}
-```
-
-| Field | Description |
-|-------|-------------|
-| `a` | Full coordinate. A group needs the creator's (or `O`'s) pubkey to be resolved, so the bare `d` tag is not enough. |
-| `relay` | Relay hint. |
-| `position` | Sidebar order; integers need not be contiguous. |
-| `format` | `"1"` or `"2"` — the group's format **at accept time**, the authoritative version fail-safe (§0). |
-| `signer_scheme` | v2 only — `"family:version"`, so `O`/`P` can be re-derived on a new device. |
-
-Clients fetch `{"kinds": [16942, 16943], "authors": ["<me>"]}` on startup in one filter, load
-each group by coordinate, and drop entries whose event is deleted or no longer contains the
-user's leaf (the user was removed) — showing a distinct indicator for each case, as §6.5 does
-for hubs.
-
-### 21.11 Client Behavior
-
-- **Membership is checked from the tree, on every group event update.** If the user's leaf is
-  gone, the client treats the user as removed: stop the subscription, keep the local history
-  read-only, mark the entry.
-- **Creator-side size guard** before every publish (§21.9) and the **history rule** (§21.5).
-- **Never fetch `36950` events speculatively.** There is no discovery; a client loads exactly
-  the coordinates in the user's group list plus any invite the user is currently looking at.
-- **Member list UI** is the tree's leaves (v2: resolved through the `roster` line), the same
-  rendering as a hub roster minus roles.
-
-### 21.12 Feature Parity — What Carries Over
-
-A group reuses the hub **event kinds and structures unchanged**; the only systematic difference
-is that every per-channel event carries the group's own `d` tag in its channel slot (`c = d`,
-§21.3). Nothing gets a new kind.
-
-| Feature | In a group | Notes |
-|---------|-----------|-------|
-| Message (`36943`) | **Yes** | Same structure, encryption, `epoch`, PoW, `identity` (v2). `c = d`. |
-| Edit / delete (`d`-tag republish, tombstone, `26943` hint) | **Yes** | Identical, including the `created_at + 1` rule. |
-| Reply & threads (`a` `reply` / `root`) | **Yes, as hubs** | Same tags, same code path, same thread pane — scoped to the group instead of a channel (Matrix and WhatsApp group chats have threads too). |
-| Mentions | **People and `@everyone`** | `@<npub>` / `@<DNN>` and `@everyone` (all members) work as in hubs. `@here` and `@<role>` are **not defined** for a group: there is no presence and there are no roles. `#channel` is not defined either. Clients SHOULD NOT suggest them and SHOULD treat them as plain text. |
-| Reactions, edit hint (`26943`), typing (`26950`) | **Yes** | Unchanged; `c = d`. |
-| Polls (`1067` / `1017`) | **Yes** | `c = d`; encrypted under the group message key. |
-| Attachments & **voice notes** (§6.2.1) | **Yes** | Stored on the group's `o` servers when it has them, else the sender's own — see below. |
-| Pin list (`36945`) | **Yes, as hubs** | One pin event per member per group, `d` = group `d`, `["pin", "<group_d>", "36943:<author>:<d>"]` with the group's `d` in the channel slot. Rendered as §6.6: the creator's pins first and expanded, other members' pins in collapsible sections grouped by pinner. |
-| Join requests (`36944`) | **Yes, creator-only** | §21.6.1: same event as §6.3 with the group coordinate in `a` and `W` as the difficulty. Approving = §21.4. |
-| Ban list, facilitation, reports (§5.3, §5.6, `36948`) | **No** | No moderators and no member files: the creator's add/remove is the whole model. |
-| Calendar (`31923` / `31925`), voice hosts & presence (`36946` / `36947`) | **No** | Hub-scale features; not part of groups. A later revision may add them with `h` only. |
-
-**Attachments and voice notes.** A group MAY declare Blossom servers with `o` tags (§21.2),
-and when it does, media works exactly as in a hub: uploaded to and fetched from the group's
-servers, referenced by hash (§6.2.1). A group without `o` tags still supports media: the sender
-uploads to their **own** configured servers and names them in the attachment entry, which gains
-one optional field for the purpose:
-
-```json
-{ "hash": "…", "type": "audio/webm", "name": "voice.webm", "size": 12345,
-  "servers": ["https://blossom.example.com", "https://blossom2.example.com"],
-  "encryption": { "algorithm": "aes-gcm", "key": "…", "nonce": "…" } }
-```
-
-| Field | Description |
-|-------|-------------|
-| `servers` | Blossom servers the sender uploaded to. Readers try the group's `o` servers, then these, then their own client servers. Optional everywhere; expected when the group has no `o` tags. Also valid in hubs. |
-
-Attachment encryption is the **sender's choice**, exactly as in hubs (§6.2.1): a client
-SHOULD expose the per-upload toggle and MAY remember the user's preference. The trade-off is
-the usual one: an encrypted blob is opaque to the server operator but must be fully downloaded
-before it can be shown, while a plaintext blob streams but is readable by whoever runs the
-server. In a **v2 group** the client SHOULD make the privacy side of that trade-off visible,
-because a plaintext blob on a personal server ties a real Blossom account to pseudonymous
-traffic; it remains the user's call. The file key lives inside the already-encrypted message,
-as in hubs. Voice notes are audio attachments and need nothing further.
 
 ---
 
