@@ -2128,7 +2128,7 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
                 <RoleAssignmentPanel
                   hubDTag={hubContext.dTag}
                   memberPubkey={displayPubkey}
-                  canEdit={!!isHubCreator && displayPubkey !== hubContext.creatorPubkey && displayPubkey !== hubContext.ownerRealPubkey}
+                  canEdit={!!isHubCreator}
                   onEdit={() => {
                     useNavigationStore.getState().setPendingHubMemberRoles({ dTag: hubContext.dTag, pubkey: displayPubkey })
                     onClose()
