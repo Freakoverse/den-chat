@@ -2680,7 +2680,7 @@ function BlobFile({ servers, hash, ext, name, size, type, encryption }: {
     return (
       <button
         onClick={handleDownload}
-        className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-border bg-secondary/50 hover:bg-secondary transition-colors max-w-[min(300px,100%)] group cursor-pointer"
+        className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-border bg-secondary/50 hover:bg-secondary transition-colors max-w-[min(340px,100%)] min-h-[52px] group cursor-pointer"
       >
         {encryption ? <Lock size={16} className="text-emerald-400 shrink-0" /> : <FileIcon size={18} className="text-muted-foreground shrink-0" />}
         <div className="min-w-0 flex-1 text-left">
@@ -2694,10 +2694,10 @@ function BlobFile({ servers, hash, ext, name, size, type, encryption }: {
 
   if (state === 'downloading' || state === 'verifying' || state === 'decrypting') {
     return (
-      <div className="inline-flex items-center gap-3 px-3 py-2.5 rounded-lg border border-border bg-secondary/50 max-w-[min(340px,100%)]">
+      <div className="inline-flex items-center gap-3 px-3 py-2 rounded-lg border border-border bg-secondary/50 max-w-[min(340px,100%)] min-h-[52px]">
         {/* Circular progress */}
         <div className="relative shrink-0">
-          <svg width="44" height="44" viewBox="0 0 44 44" className="transform -rotate-90">
+          <svg width="36" height="36" viewBox="0 0 44 44" className="transform -rotate-90">
             {/* Background circle */}
             <circle cx="22" cy="22" r={circleR} fill="none" stroke="currentColor" strokeWidth="3"
               className="text-border" />
@@ -2743,7 +2743,7 @@ function BlobFile({ servers, hash, ext, name, size, type, encryption }: {
 
   if (state === 'complete') {
     return (
-      <div className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 max-w-[min(300px,100%)]">
+      <div className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 max-w-[min(340px,100%)] min-h-[52px]">
         <Check size={16} className="text-emerald-400 shrink-0" />
         <div className="min-w-0 flex-1">
           <p className="text-sm text-foreground truncate">{name}</p>
@@ -2805,7 +2805,7 @@ function BlobFile({ servers, hash, ext, name, size, type, encryption }: {
 
   // error
   return (
-    <div className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-border bg-secondary/50 max-w-[min(300px,100%)]">
+    <div className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-border bg-secondary/50 max-w-[min(340px,100%)] min-h-[52px]">
       <AlertTriangle size={16} className="text-muted-foreground shrink-0" />
       <div className="min-w-0 flex-1">
         <p className="text-sm text-foreground truncate">{name}</p>
