@@ -48,7 +48,7 @@ import { ScrollableContent } from '../chat/ScrollableContent'
 import { ContentMediaGroupsWithGallery, extractContentMediaGroups } from '@/components/chat/ContentMediaGrouping'
 import { ImageGallery } from '@/components/social/RichContent'
 import { DnnBadge } from '@/components/ui/DnnBadge'
-import { useBlossomMedia } from '@/hooks/useBlossomMedia'
+import { useBlossomMedia, shareableMediaUrl } from '@/hooks/useBlossomMedia'
 import { VerificationBadge } from '@/components/ui/VerificationBadge'
 import { useGifStore } from '@/stores/gifStore'
 import { publishGifFavorites } from '@/lib/nostr/customGif'
@@ -101,6 +101,8 @@ export function DMGifStarOverlay({ name, url, nsfw }: { name: string; url: strin
   }
 
   const [loaded, setLoaded] = useState(false)
+  // Reset the skeleton on failover so a stalled load can't spin forever; when servers are exhausted the not-found block shows.
+  useEffect(() => { setLoaded(false) }, [blossom.src])
 
   if (blossom.loading) {
     return (
@@ -129,9 +131,11 @@ export function DMGifStarOverlay({ name, url, nsfw }: { name: string; url: strin
       )}
       <img
         src={blossom.src || url}
+        data-media-src={shareableMediaUrl(blossom, url)}
         alt={name || 'GIF'}
         className={`max-w-[400px] max-[1080px]:max-w-full max-h-[300px] rounded-lg border border-transparent hover:border-border transition-colors object-contain hover:brightness-110 transition-all ${nsfw === 'nsfw' ? 'blur-lg hover:blur-none' : ''} ${!loaded ? 'opacity-0 h-0 overflow-hidden block' : ''}`}
         onLoad={() => setLoaded(true)}
+        onError={() => blossom.onImgError()}
       />
       {loaded && blossom.verified !== 'verified' && blossom.expectedHash && (
         <VerificationBadge
