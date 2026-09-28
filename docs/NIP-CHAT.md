@@ -2,7 +2,7 @@
 
 > **Status**: Draft v4 (hub format **v2** — privacy)
 > **Depends on**: NIP-01, NIP-13, NIP-44
-> **Companion**: [`NIP-SKD.md`](./NIP-SKD.md) (sub-key derivation for v2 pseudonyms), [`NIP-TC.md`](./NIP-TC.md) (Topic Chat, the standalone §17 spec), [`NIP-WC.md`](./NIP-WC.md) (Word Communities, the standalone open-community spec within §21).
+> **Companion**: [`NIP-SKD.md`](./NIP-SKD.md) (sub-key derivation for v2 pseudonyms), [`NIP-SHORT.md`](./NIP-SHORT.md) (the short-address scheme the `s` tag uses), [`NIP-TC.md`](./NIP-TC.md) (Topic Chat, the standalone §17 spec), [`NIP-WC.md`](./NIP-WC.md) (Word Communities, the standalone open-community spec within §21).
 
 ---
 
@@ -1215,7 +1215,7 @@ Deleting a role does NOT trigger a tree update. The hub event is the authority f
 > across edits, and a client attaches it once and carries it forward on every republish. The address's
 > authority is the hub event's author as an `npub` — or the creator's DNN ID when they have a verified one,
 > which is much shorter. (On a v2 hub the author is the owner pseudonym `O`, so a DNN-authority address does
-> not apply.) A hub whose event predates the tag can mint one by simply republishing.
+> not apply.) A hub whose event predates the tag can mint one by simply republishing. See **[NIP-SHORT](./NIP-SHORT.md)** for the full scheme: authority forms, code derivation, resolution, and collision handling.
 
 #### Updating Hub Events (`created_at` Increment)
 
@@ -4113,6 +4113,15 @@ A user's subscriptions to *other* people's sets are stored as NIP-51 lists (kind
 | `gif-favorites` | `["j", "<name>", "<url>", "sfw"\|"nsfw"]` for individually favorited GIFs |
 
 Each `a` tag is an addressable reference to a subscribed set; clients fetch those sets by their `(kind, pubkey, d-tag)` coordinate.
+
+### Referencing the source set (reactions & sent items)
+
+When a custom emoji from a set is used in a **reaction** (kind `7`), or a sticker is **sent** in a message, the item tag carries an extra element pointing back at its source set, so any viewer can open and subscribe to the pack even if they do not already have it (the client's "View Emoji Pack" action):
+
+- **Emoji reaction:** `["emoji", "<shortcode>", "<url>", "<set_address>"]`, where `<set_address>` is the emoji's set coordinate `30030:<pubkey>:<d>`.
+- **Sent sticker:** `["sticker", "<shortcode>", "<url>", "<set_address>"]`, with the sticker set coordinate `30031:<pubkey>:<d>`.
+
+The set-address element is optional: an emoji or sticker not drawn from a published set omits it. In an encrypted channel it is encrypted with the channel key alongside the shortcode and URL, so the pack reference stays member-only. Note this is a different use of the 4th element than in a set *definition* above, where the 4th element is the SFW/NSFW flag.
 
 ---
 
