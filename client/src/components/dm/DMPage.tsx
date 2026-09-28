@@ -1702,7 +1702,7 @@ function DMMessageRow({ msg, showDateSep, isGrouped, senderProfile, displayName,
             <>
               {(() => {
                 // Extract GIF URLs from content, render them via DMGifStarOverlay (with star + blossom failover)
-                const gifUrlRegex = /https?:\/\/\S+\.gif(?:\?\S*)?/gi
+                const gifUrlRegex = /https?:\/\/\S+\.gif(?:[?#]\S*)?/gi
                 const contentGifUrls = msg.content.match(gifUrlRegex) || []
                 const afterGifStrip = contentGifUrls.length > 0
                   ? msg.content.split('\n').filter((l: string) => !contentGifUrls.some((u) => l.trim() === u)).join('\n').trim()
@@ -1859,7 +1859,7 @@ function DMMessageContent({ msg, showDateSep, isGrouped, senderProfile, displayN
           <ScrollableContent>
           {(() => {
             // Extract GIF URLs from content, render them via DMGifStarOverlay (with star + blossom failover)
-            const gifUrlRegex = /https?:\/\/\S+\.gif(?:\?\S*)?/gi
+            const gifUrlRegex = /https?:\/\/\S+\.gif(?:[?#]\S*)?/gi
             const contentGifUrls = msg.content.match(gifUrlRegex) || []
             const afterGifStrip = contentGifUrls.length > 0
               ? msg.content.split('\n').filter((l: string) => !contentGifUrls.some((u) => l.trim() === u)).join('\n').trim()

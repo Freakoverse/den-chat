@@ -1248,7 +1248,7 @@ function DM04MessageRow({
           <>
             {(() => {
               // Extract GIF URLs from content — render them via DMGifStarOverlay (with star + blossom failover)
-              const gifUrlRegex = /https?:\/\/\S+\.gif(?:\?\S*)?/gi
+              const gifUrlRegex = /https?:\/\/\S+\.gif(?:[?#]\S*)?/gi
               const contentGifUrls = msg.content.match(gifUrlRegex) || []
               const afterGifStrip = contentGifUrls.length > 0
                 ? msg.content.split('\n').filter((l: string) => !contentGifUrls.some((u) => l.trim() === u)).join('\n').trim()
