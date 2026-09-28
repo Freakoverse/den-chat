@@ -2,7 +2,7 @@
 
 > **Status**: Draft v4 (hub format **v2** — privacy)
 > **Depends on**: NIP-01, NIP-13, NIP-44
-> **Companion**: [`NIP-SKD.md`](./NIP-SKD.md) (the sub-key derivation scheme v2 pseudonyms use).
+> **Companion**: [`NIP-SKD.md`](./NIP-SKD.md) (sub-key derivation for v2 pseudonyms), [`NIP-TC.md`](./NIP-TC.md) (Topic Chat, the standalone §17 spec), [`NIP-WC.md`](./NIP-WC.md) (Word Communities, the standalone open-community spec within §21).
 
 ---
 
@@ -3602,7 +3602,7 @@ a client SHOULD show the invite with the group's name and face tags and let the 
 which simply means not adding it to their list. Declining does not remove their leaf; only the
 creator can do that.
 
-#### 21.6.1 Join Request
+#### 16.6.1 Join Request
 
 Someone holding the address who is **not** in the tree has no in-band way to ask for a leaf
 other than this. A group MAY accept the hub join request, kind `36944`, **exactly as §6.3**
@@ -3777,166 +3777,27 @@ as in hubs. Voice notes are audio attachments and need nothing further.
 
 ## 17. Public Chat — Kind `1312`
 
-### 17.1 Overview
+Public Chat is a permissionless, topic-based chat system: no hub, no encryption, no authority. The room is a `["t", "<topic>"]` tag (not an owned channel event), messages are plaintext kind `1312`, and spam is gated by proof-of-work (NIP-13). It shares no event kinds with the hub protocol.
 
-Public Chat is a **permissionless, topic-based** chat system that operates independently from the hub-based encrypted messaging (§6). It requires no hub membership, no encryption, and no authority — anyone can post, and messages are public plaintext. Spam prevention relies on **Proof-of-Work** (NIP-13).
-
-This is a separate protocol layer that shares the same client but has completely different trust assumptions from hub chat:
-
-| Property | Hub Chat (§6) | Public Chat |
-|----------|--------------|-------------|
-| Event Kind | `36943` | `1312` |
-| Encryption | AES-256-GCM (hub secret) | None (plaintext) |
-| Access Control | Client-side (identity drop rule, §9.9) | Open to all |
-| Identity | Hub member lists | Any Nostr keypair |
-| Spam Prevention | Message PoW + join PoW | PoW only |
-| Editing | Re-publish same d-tag | Not supported |
-| Structure | Hub → Channel hierarchy | Flat topics |
-
-### 17.2 Message Event — Kind `1312`
-
-**Type**: Regular Event
+**Full specification: [NIP-TC (Topic Chat)](./NIP-TC.md).** The message shape:
 
 ```json
 {
   "kind": 1312,
   "pubkey": "<sender_pubkey>",
-  "created_at": "<timestamp>",
+  "created_at": 1893456000,
   "tags": [
-    ["t", "<topic>"],
-    ["nonce", "<counter>", "<difficulty>"],
-    ["e", "<reply_event_id>", "", "root"],
-    ["e", "<reply_event_id>", "", "reply"]
+    ["t", "gaming"],
+    ["nonce", "42", "15"],
+    ["e", "<root_event_id>", "", "root"],
+    ["e", "<parent_event_id>", "", "reply"]
   ],
-  "content": "Hello, world!",
+  "content": "anyone on the new co-op mode tonight?",
   "sig": "<signature>"
 }
 ```
 
-Messages are **plaintext** — the `content` field contains the raw message text (Markdown supported).
-
-#### Tags
-
-| Tag | Required | Description |
-|-----|----------|-------------|
-| `t` | Yes | Topic string (normalized to lowercase). Used for relay subscription filtering (`#t`). |
-| `nonce` | Conditional | PoW nonce (NIP-13 format: `["nonce", "<counter>", "<target_difficulty>"]`). Required if the client enforces a minimum PoW difficulty. |
-| `e` | No | Reply threading (NIP-10). Two `e` tags per reply: one with `root` marker (thread root event ID), one with `reply` marker (direct parent event ID). When replying to a top-level message, both reference the same event. |
-| `emoji` | No | NIP-30 custom emoji tags: `["emoji", "<shortcode>", "<url>"]`. |
-| `sticker` | No | Custom sticker: `["sticker", "<shortcode>", "<url>", "<set_address>"]`. |
-| `j` | No | GIF attachment: `["j", "<name>", "<url>", "sfw"\|"nsfw"]`. (`j` is used because `g` is the standard Nostr geohash tag per NIP-52.) |
-| `content-warning` | No | NIP-36: marks message as sensitive/NSFW. |
-| `L` | Conditional | NIP-32: label namespace. Set to `"content-warning"` when the `content-warning` tag is present. |
-| `client` | No | Client identification tag (e.g., `["client", "DEN Chat"]`). |
-
-#### PoW Filtering (Coupled Model)
-
-Public Chat uses a **coupled PoW model** — the same difficulty value serves as both the post requirement and the filter threshold:
-
-- When posting: the client mines the event ID to meet the configured difficulty before signing
-- When filtering: the client verifies `countLeadingZeroBits(event.id) >= difficulty` and hides messages below the threshold
-- Default difficulty: `15` bits (configurable per client, range 0–40)
-
-This means higher PoW = harder to spam AND stricter filtering. There is no separate "read difficulty" vs "write difficulty".
-
-### 17.3 Topic List — NIP-78 (Kind `30078`)
-
-Each user's subscribed topic list is persisted via a **NIP-78 Application Specific Data** event:
-
-```json
-{
-  "kind": 30078,
-  "pubkey": "<user_pubkey>",
-  "tags": [
-    ["d", "public-chat-list"],
-    ["t", "nostr"],
-    ["t", "bitcoin"],
-    ["t", "dev"]
-  ],
-  "content": "",
-  "sig": "<signature>"
-}
-```
-
-| Tag | Description |
-|-----|-------------|
-| `d` | Fixed value: `"public-chat-list"`. Makes this an addressable replaceable event (one per user). |
-| `t` | One tag per subscribed topic (lowercase). |
-
-The topic list is fetched on startup and updated when topics are added or removed.
-
-### 17.4 Subscriptions
-
-**Active topic subscription:**
-```json
-{"kinds": [1312], "#t": ["<topic>"], "limit": 50}
-```
-
-**Pagination (older messages):**
-```json
-{"kinds": [1312], "#t": ["<topic>"], "until": <oldest_timestamp>, "limit": 50}
-```
-
-Clients maintain a single active subscription for the currently viewed topic. Switching topics closes the old subscription and opens a new one.
-
-### 17.5 Content Tags
-
-Public Chat messages support the same rich content tags as hub chat and DMs, but **unencrypted**:
-
-- **Custom Emoji** (NIP-30): `["emoji", "<shortcode>", "<url>"]` — rendered inline as images
-- **Stickers**: `["sticker", "<shortcode>", "<url>", "<set_address>"]` — rendered as large standalone images
-- **GIFs**: `["j", "<name>", "<url>", "sfw"|"nsfw"]` — rendered as inline animated images
-
-Since Public Chat is plaintext, these tags are stored as-is on relays (no encryption layer).
-
-### 17.6 Content Filters
-
-Because Public Chat is permissionless, clients SHOULD provide fine-grained content filtering controls (all default OFF except muted words):
-
-| Filter | Default | Description |
-|--------|---------|-------------|
-| Show media | OFF | Display embedded images, videos, stickers, GIFs |
-| Show link previews | OFF | Render URL previews |
-| Show custom emojis | OFF | Render NIP-30 custom emoji shortcodes as images |
-| Hide muted words | ON | Redact messages containing muted words |
-| DNN ID only | OFF | Only show messages from users with verified DNN IDs |
-
-These are **client-side filters** — all messages are still received from relays, but hidden or redacted based on user preferences.
-
-### 17.7 Client Behavior
-
-#### Joining a Topic
-
-1. User enters a topic name or selects from suggestions
-2. Client normalizes the topic to lowercase and trims whitespace
-3. Topic is added to the local topic list
-4. Client publishes updated NIP-78 topic list (Kind `30078`)
-5. Client opens a subscription for the new topic
-
-#### Leaving a Topic
-
-1. Client removes the topic from the local topic list
-2. Client clears cached messages for the topic
-3. Client publishes updated NIP-78 topic list
-4. If the removed topic was active, the view returns to the topic list
-
-#### Sending a Message
-
-1. Client builds an unsigned Kind `1312` event with `t` tag, optional reply `e` tags, and any content tags (emoji, sticker, GIF)
-2. If NSFW: append `["content-warning", ""]` and `["L", "content-warning"]` tags
-3. If client tag enabled: append `["client", "DEN Chat"]`
-4. If PoW difficulty > 0: mine the event using a Web Worker until the event ID has the required leading zero bits
-5. Sign the event
-6. Publish with progressive relay tracking (show relay confirmation count)
-7. Optimistically add the message to the local view
-
-#### PoW Rendering
-
-- Each message displays its computed PoW difficulty
-- Messages below the user's configured threshold are hidden (not deleted — lowering the threshold reveals them)
-- The PoW badge shows the number of leading zero bits in the event ID
-
----
+Rooms are `t:<topic>` (normalized lowercase), replies use NIP-10 `e` tags, the subscribed-topic list is a NIP-78 `30078` event, and clients keep one live subscription per active topic. See NIP-TC for topics, proof-of-work, subscriptions, content tags, filters, and client behavior.
 
 ## 18. Direct Messages — NIP-17 Gift Wrap
 
@@ -4273,17 +4134,15 @@ Both types use **kind `1111`** (NIP-22) for posts and comments, and **kind `7`**
 
 ### 21.1 Word Communities (Open)
 
-A word community is not a created object — there is **no definition event, no creator, and no central moderation**. The "community" is simply the set of all top-level kind-`1111` posts carrying `["t", "<word>"]`. There is exactly **one** community per word, globally. Its handle is **`w/<word>`** (a copy-able identifier, not a URL).
+A word community is ownerless and permissionless: no definition event, no creator. The community for a word is every top-level kind-`1111` post carrying `["t", "<word>"]`, exactly one per word globally, handle `w/<word>`. This is the [Public Chat (§17)](#17-public-chat--kind-1312) topic model applied to threaded posts; it does not collide with public chat (kind `1312` vs `1111`, kind-pinned).
 
-This is the [Public Chat (§17)](#17-public-chat--kind-1312) topic model applied to threaded posts. **It does not collide with public chat:** public chat is kind `1312`, forum posts are kind `1111`, so every fetch is kind-pinned and the two never cross-populate even though they share the `t:<word>` namespace.
-
-#### Top-level post
+**Full specification: [NIP-WC (Word Communities)](./NIP-WC.md).** It reuses NIP-72's `1111` post + comment + `7` reaction layer (§21.2) and drops the `34550` definition and `4550` approval. A top-level post:
 
 ```json
 {
   "kind": 1111,
   "pubkey": "<author>",
-  "created_at": "<timestamp>",
+  "created_at": 1893456000,
   "tags": [
     ["t", "gaming"],
     ["subject", "Best co-op games of 2026?"]
@@ -4293,59 +4152,7 @@ This is the [Public Chat (§17)](#17-public-chat--kind-1312) topic model applied
 }
 ```
 
-- `["t", "<word>"]` — the word community (lowercase, relay-filterable). Normalized lowercase.
-- `["subject", "<title>"]` — the post title (NIP-14).
-- A top-level post carries **no parent reference** (no `e`/`E` tag). It is the root of its own thread.
-
-#### Comment
-
-Comments follow NIP-22 with the **post as the thread root**:
-
-```json
-{
-  "kind": 1111,
-  "tags": [
-    ["E", "<post-id>"], ["K", "1111"], ["P", "<post-author>"],
-    ["e", "<parent-id>"], ["k", "1111"], ["p", "<parent-author>"]
-  ],
-  "content": "<comment markdown>"
-}
-```
-
-- Uppercase `E`/`K`/`P` = root scope (the top-level post). Lowercase `e`/`k`/`p` = immediate parent (the post or a parent comment).
-- Comments **do not** carry the `["t", "<word>"]` tag — only the top-level post does.
-
-#### Fetching
-
-- **Top-level posts for a word:** `{ "kinds": [1111], "#t": ["gaming"] }` — returns only top-level posts (comments lack `t`).
-- **A post's full comment tree:** `{ "kinds": [1111], "#E": ["<post-id>"] }` — the whole subtree in one query; build nesting from the lowercase `e` parent tags.
-- **Reactions:** `{ "kinds": [7], "#e": ["<post-id>"] }` (see §21.3).
-
-#### Moderation
-
-Word communities have **no central moderation**. Filtering is purely client-side and reuses the exact stack used for Public Chat (§17):
-- **Proof of Work** threshold (per client setting),
-- **Web of Trust** scoring (a `forum` context, mirroring the `publicChat` context),
-- **Muted words**, and **blocked pubkeys** (NIP-51 kind `10000`).
-
-#### Followed words
-
-A user's subscribed word communities are stored in a **replaceable kind `10044`** event (DEN-specific; mirrors the shape of NIP-51 kind `10004`), one `["t", "<word>"]` tag per subscription. Latest-wins, no `d` tag.
-
-```json
-{ "kind": 10044, "tags": [["t", "gaming"], ["t", "nostr"], ["t", "bitcoin"]], "content": "" }
-```
-
-**Optional appearance (kind `30044`).** Word communities have no owner, so an appearance (picture / banner / description; the word itself is the name) is an **addressable** event keyed by `d = <word>`, one per author per word. Resolution is explicit, not automatic: a client renders **the viewer's own** 30044 for the word. That event either carries the appearance directly, or **delegates** to another author's via an `["a", "30044:<author>:<word>"]` tag (the editor's "From follows" tab lets you adopt and re-share an appearance published by someone you follow). With no 30044 for a word, nothing extra renders. This keeps metadata owner-free and fully under each viewer's control, without bloating the follow list. Picture/banner upload through the same Blossom flow as the rest of the app (size limit, progress, multiple servers), and every forum image renders through the shared failover + hash-verification component.
-
-```json
-// own appearance
-{ "kind": 30044, "tags": [["d","gaming"], ["picture","https://…"], ["banner","https://…"], ["description","All things gaming"]], "content": "" }
-// delegate to another author's appearance for "gaming"
-{ "kind": 30044, "tags": [["d","gaming"], ["a","30044:<author-pubkey>:gaming"]], "content": "" }
-```
-
-**List size cap.** Both follow/join lists are capped at **400 entries**. The binding constraint is the created-community list (kind `10004`): each `["a","34550:<64-hex>:<dtag>"]` entry is ~110 bytes, so 400 ≈ 44 KB of tags — safely inside a 64 KB relay event limit. The same count is applied to the word list (kind `10044`, ~30 bytes/entry), which is far smaller at that size.
+Comments are standard NIP-22 (`E`/`e` scope, rooted at the post) and carry no `t` tag. See NIP-WC for fetching, reaction sentiment sorting, the `30044` appearance, `10044` followed words, and client-side moderation.
 
 ### 21.2 Created Communities (NIP-72)
 
