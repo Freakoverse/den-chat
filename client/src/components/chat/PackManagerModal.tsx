@@ -9,7 +9,7 @@
  */
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { X, Smile, Sticker, Film, FolderPlus, Plus, Pencil, Trash2, ChevronDown, ChevronUp, Loader2, AlertTriangle, Upload, Star, StarOff } from 'lucide-react'
+import { X, Smile, Sticker, Film, FolderPlus, Plus, Pencil, Trash2, ChevronDown, ChevronUp, Loader2, AlertTriangle, Upload, Star, StarOff, ImageOff } from 'lucide-react'
 import { useEscToClose } from '@/hooks/useEscToClose'
 import { useMobile } from '@/hooks/useMobile'
 import { BlossomImage } from '@/components/ui/BlossomImage'
@@ -793,7 +793,12 @@ function FavoritesSection() {
       ) : favorites.map((g) => (
         <div key={g.url} className="flex items-center gap-3 rounded-xl border border-border p-3">
           <div className="w-24 h-16 rounded-md bg-secondary/40 flex items-center justify-center shrink-0 overflow-hidden">
-            <BlossomImage src={g.url} alt={g.name} className="max-w-full max-h-full" contain />
+            <BlossomImage src={g.url} alt={g.name} className="max-w-full max-h-full" contain fallback={
+              <div className="w-full h-full flex flex-col items-center justify-center gap-0.5 bg-secondary/40 text-muted-foreground/50">
+                <ImageOff size={16} />
+                <span className="text-[9px] leading-none">Failed</span>
+              </div>
+            } />
           </div>
           <span className="flex-1 text-sm text-foreground truncate min-w-0">{g.name || 'Unnamed GIF'}</span>
           <button onClick={() => remove(g.url)} disabled={busy === g.url} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-destructive/40 text-xs text-destructive hover:bg-destructive/10 transition-colors cursor-pointer disabled:opacity-50 shrink-0">

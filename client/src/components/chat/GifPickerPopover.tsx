@@ -15,7 +15,7 @@ import { RenamePackModal } from '@/components/chat/RenamePackModal'
 import { PackManagerModal } from '@/components/chat/PackManagerModal'
 import {
   Compass, Sparkles, Star, StarOff, Plus, Trash2, Loader2, Upload, Pencil,
-  Search, X, FolderPlus, Image, Check, Users, ImagePlay, Eye, EyeOff, ShieldQuestion, Settings2,
+  Search, X, FolderPlus, Image, Check, Users, ImagePlay, Eye, EyeOff, ShieldQuestion, Settings2, ImageOff,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { BlossomImage } from '@/components/ui/BlossomImage'
@@ -1057,6 +1057,12 @@ function FavoritesGifTab({ onSelect }: { onSelect: (g: { name: string; url: stri
                             src={gif.url}
                             alt={gif.name}
                             className="w-full h-full"
+                            fallback={
+                              <div className="w-full h-full flex flex-col items-center justify-center gap-0.5 bg-secondary/40 text-muted-foreground/50">
+                                <ImageOff size={16} />
+                                <span className="text-[9px] leading-none">Failed</span>
+                              </div>
+                            }
                           />
                         </button>
                         {gif.nsfw && (
