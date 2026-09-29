@@ -87,7 +87,7 @@ export function ChannelPill({ channelId, name, voice }: { channelId: string; nam
       <TooltipProvider delayDuration={200}>
         <Tooltip>
           <TooltipTrigger asChild>
-            <span className="inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-xs font-medium bg-muted text-muted-foreground align-baseline cursor-default select-none">
+            <span className="inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-sm font-medium bg-muted text-muted-foreground align-baseline cursor-default select-none">
               <Lock size={10} className="opacity-70" />No access
             </span>
           </TooltipTrigger>
@@ -105,7 +105,7 @@ export function ChannelPill({ channelId, name, voice }: { channelId: string; nam
         <TooltipTrigger asChild>
           <button
             onClick={(e) => { e.stopPropagation(); openChannel(channelId, !!voice) }}
-            className="inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-xs font-medium bg-primary/15 text-primary hover:bg-primary/25 transition-colors cursor-pointer align-baseline"
+            className="inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-sm font-medium bg-primary/15 text-primary hover:bg-primary/25 transition-colors cursor-pointer align-baseline"
           >
             <Hash size={11} className="opacity-80" />{name}
             {ambiguous && position != null && <span className="opacity-50">·{position}</span>}
