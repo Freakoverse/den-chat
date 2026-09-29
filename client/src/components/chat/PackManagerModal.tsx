@@ -789,8 +789,10 @@ function FavoritesSection() {
   const onRenameFav = async (newName: string) => {
     if (!renameFavUrl) return
     const updated = useGifStore.getState().favorites.map((g) => g.url === renameFavUrl ? { ...g, name: newName.trim() } : g)
-    useGifStore.getState().setFavorites(updated)
+    // Publish first, THEN update the store: an optimistic setFavorites would change the modal's
+    // currentName mid-save, tripping its reset effect and clearing the Save spinner instantly.
     await publishGifFavorites(updated, signer, privateKey)
+    useGifStore.getState().setFavorites(updated)
   }
 
   return (
