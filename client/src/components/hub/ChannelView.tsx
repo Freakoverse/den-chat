@@ -2942,7 +2942,7 @@ function GifStarOverlay({ att, ext, url, imgIdx, matchingGTag, allServers, setGa
         encryption={att.encryption}
         onBlob={matchingGTag ? undefined : handleBlob}
       />
-      {isAnimated && (
+      {isAnimated && !att.encryption && (
       <TooltipProvider delayDuration={200}>
         <Tooltip>
           <TooltipTrigger asChild>

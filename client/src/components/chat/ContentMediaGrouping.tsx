@@ -18,6 +18,7 @@ import { useUserStore } from '@/stores/userStore'
 import { publishGifFavorites } from '@/lib/nostr/customGif'
 import { detectAnimatedFromUrl } from '@/lib/media/animatedImage'
 import { GifFavoriteModal } from '@/components/chat/GifPickerPopover'
+import { isEncryptedMediaUrl } from '@/lib/blossom/encMediaUrl'
 
 /** gif/webp URL (ignoring query/hash) — the only inline content images that can be animated favorites. */
 const ANIMATABLE_URL_RE = /\.(gif|webp)(\?[^\s#]*)?(#[^\s]*)?$/i
@@ -134,7 +135,7 @@ export function ContentMediaImage({ src, className, style, onClick, enableFavori
   useEffect(() => { setLoaded(false); setError(false); setOverridden(false) }, [src, blossom.src])
 
   // ── Favorite star for animated gif/webp URLs ──
-  const isFavCandidate = !!enableFavorite && ANIMATABLE_URL_RE.test(src)
+  const isFavCandidate = !!enableFavorite && ANIMATABLE_URL_RE.test(src) && !isEncryptedMediaUrl(src)
   const isFav = useGifStore((s) => isFavCandidate && s.favorites.some((f) => f.url === src))
   const [isAnimated, setIsAnimated] = useState(false)
   const [favModalOpen, setFavModalOpen] = useState(false)

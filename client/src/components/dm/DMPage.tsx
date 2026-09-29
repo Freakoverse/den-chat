@@ -49,6 +49,7 @@ import { ContentMediaGroupsWithGallery, extractContentMediaGroups } from '@/comp
 import { ImageGallery } from '@/components/social/RichContent'
 import { DnnBadge } from '@/components/ui/DnnBadge'
 import { useBlossomMedia, shareableMediaUrl } from '@/hooks/useBlossomMedia'
+import { isEncryptedMediaUrl } from '@/lib/blossom/encMediaUrl'
 import { VerificationBadge } from '@/components/ui/VerificationBadge'
 import { useGifStore } from '@/stores/gifStore'
 import { publishGifFavorites } from '@/lib/nostr/customGif'
@@ -146,6 +147,7 @@ export function DMGifStarOverlay({ name, url, nsfw }: { name: string; url: strin
           onRecovered={blossom.acceptVerifiedUrl}
         />
       )}
+      {!isEncryptedMediaUrl(url) && (
       <TooltipProvider delayDuration={200}>
         <Tooltip>
           <TooltipTrigger asChild>
@@ -169,6 +171,7 @@ export function DMGifStarOverlay({ name, url, nsfw }: { name: string; url: strin
           <TooltipContent side="bottom" className="text-xs">{publishing ? 'Publishing…' : isFav ? 'Remove from favorites' : 'Add to favorites'}</TooltipContent>
         </Tooltip>
       </TooltipProvider>
+      )}
     </div>
   )
 }

@@ -29,6 +29,18 @@ export function appendDecryptionFragment(url: string, enc: FileDecryptionInfo): 
 }
 
 /**
+ * True when a media URL carries AES-GCM decryption params in its fragment, i.e. it is an
+ * encrypted upload. Such URLs embed the per-file decryption key, so they must never be stored
+ * in a shareable list (e.g. GIF favorites) — that would both leak the key and fail to render
+ * outside the original conversation.
+ */
+export function isEncryptedMediaUrl(url: string): boolean {
+  const hashIdx = url.indexOf('#')
+  if (hashIdx === -1) return false
+  return parseDecryptionFragment(url.slice(hashIdx)) !== null
+}
+
+/**
  * Parse decryption params from a URL fragment (with or without the leading '#').
  * Returns null if the key/nonce are absent or malformed.
  */
