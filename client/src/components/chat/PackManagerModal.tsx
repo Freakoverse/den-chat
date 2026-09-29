@@ -775,6 +775,7 @@ function FavoritesSection() {
   const signer = useUserStore((s) => s.signer)
   const privateKey = useUserStore((s) => s.privateKey)
   const [busy, setBusy] = useState<string | null>(null)
+  const [renameFavUrl, setRenameFavUrl] = useState<string | null>(null)
 
   const remove = async (url: string) => {
     setBusy(url)
@@ -783,6 +784,13 @@ function FavoritesSection() {
       await publishGifFavorites(updated, signer, privateKey)
       useGifStore.getState().setFavorites(updated)
     } catch (err) { console.error(err) } finally { setBusy(null) }
+  }
+
+  const onRenameFav = async (newName: string) => {
+    if (!renameFavUrl) return
+    const updated = useGifStore.getState().favorites.map((g) => g.url === renameFavUrl ? { ...g, name: newName.trim() } : g)
+    useGifStore.getState().setFavorites(updated)
+    await publishGifFavorites(updated, signer, privateKey)
   }
 
   return (
@@ -801,11 +809,13 @@ function FavoritesSection() {
             } />
           </div>
           <span className="flex-1 text-sm text-foreground truncate min-w-0">{g.name || 'Unnamed GIF'}</span>
+          <button onClick={() => setRenameFavUrl(g.url)} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-xs text-foreground hover:bg-secondary/60 transition-colors cursor-pointer shrink-0"><Pencil size={13} /> Edit</button>
           <button onClick={() => remove(g.url)} disabled={busy === g.url} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-destructive/40 text-xs text-destructive hover:bg-destructive/10 transition-colors cursor-pointer disabled:opacity-50 shrink-0">
             {busy === g.url ? <Loader2 size={13} className="animate-spin" /> : <StarOff size={13} />} Remove
           </button>
         </div>
       ))}
+      <RenamePackModal open={!!renameFavUrl} currentName={favorites.find((g) => g.url === renameFavUrl)?.name ?? ''} kindLabel="GIF" title="Rename favorite" hint="This name is a personal label for finding and sending the favorite." onClose={() => setRenameFavUrl(null)} onSave={onRenameFav} />
     </div>
   )
 }
