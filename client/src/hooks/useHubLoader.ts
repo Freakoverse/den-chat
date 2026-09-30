@@ -1008,7 +1008,9 @@ export function useHubLoader() {
       let best: Event | undefined
       for (const e of byAuthor.values()) {
         if (skipTried && tried?.has(e.pubkey)) continue
-        if (!best || e.created_at > best.created_at) best = e
+        // NIP-01 replaceable tie-break: newest created_at, then LOWEST id (must match casCheckIndex,
+        // else a same-created_at collision picks different events here vs the CAS → permanent mismatch).
+        if (!best || e.created_at > best.created_at || (e.created_at === best.created_at && e.id < best.id)) best = e
       }
       return best
     }
@@ -1079,7 +1081,8 @@ export function useHubLoader() {
         const byAuthor = candidatesByDTag.get(dTag) ?? new Map<string, Event>()
         if (byAuthor.has(event.pubkey) || byAuthor.size < MAX_CANDIDATE_AUTHORS) {
           const prev = byAuthor.get(event.pubkey)
-          if (!prev || event.created_at > prev.created_at) byAuthor.set(event.pubkey, event)
+          // Same NIP-01 tie-break as newestCandidate/casCheckIndex: newest created_at, then lowest id.
+          if (!prev || event.created_at > prev.created_at || (event.created_at === prev.created_at && event.id < prev.id)) byAuthor.set(event.pubkey, event)
           candidatesByDTag.set(dTag, byAuthor)
         }
         const selected = newestCandidate(dTag, true) ?? newestCandidate(dTag, false)

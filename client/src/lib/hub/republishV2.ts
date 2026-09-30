@@ -45,7 +45,9 @@ export async function republishV2HubIndex(opts: {
     '#d': [hub.dTag],
     limit: 4,
   })
-  const current = events.sort((a, b) => b.created_at - a.created_at)[0]
+  // NIP-01 replaceable tie-break (newest created_at, then lowest id) — same as the loader + casCheckIndex,
+  // so a same-created_at collision can't make this pick a different base than the store/CAS.
+  const current = events.sort((a, b) => (b.created_at - a.created_at) || a.id.localeCompare(b.id))[0]
   if (!current) throw new Error('republishV2HubIndex: current hub event not found on relays')
 
   // CAS: abort if another writer moved the index pointer since this op read it (lost-update guard).
@@ -123,7 +125,9 @@ export async function republishV2HubRotate(opts: {
     '#d': [hub.dTag],
     limit: 4,
   })
-  const current = events.sort((a, b) => b.created_at - a.created_at)[0]
+  // NIP-01 replaceable tie-break (newest created_at, then lowest id) — same as the loader + casCheckIndex,
+  // so a same-created_at collision can't make this pick a different base than the store/CAS.
+  const current = events.sort((a, b) => (b.created_at - a.created_at) || a.id.localeCompare(b.id))[0]
   if (!current) throw new Error('republishV2HubRotate: current hub event not found on relays')
 
   // CAS: abort if another writer moved the index pointer since this op read it. Critical for a rotation

@@ -93,7 +93,10 @@ export async function casCheckIndex(dTag: string, authorPubkey: string, baseInde
       const { fetchEvents } = await import('@/lib/nostr/relay-pool')
       const { KINDS } = await import('@/lib/crypto/constants')
       current = (await fetchEvents({ kinds: [KINDS.HUB_EVENT], authors: [authorPubkey], '#d': [dTag], limit: 4 }))
-        .sort((a, b) => b.created_at - a.created_at)[0] ?? null
+        // NIP-01 replaceable tie-break: newest created_at, then LOWEST id. Must match the hub loader's
+        // selection (useHubLoader newestCandidate/ingest) or the store's base index and this live pointer
+        // pick different colliding events at the same created_at → a permanent, unretryable CAS mismatch.
+        .sort((a, b) => (b.created_at - a.created_at) || a.id.localeCompare(b.id))[0] ?? null
     } catch { /* transient — retry once */ }
   }
   if (!current) {
