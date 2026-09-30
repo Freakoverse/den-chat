@@ -64,10 +64,20 @@ export async function acquireHubMutationLock(dTag: string): Promise<() => void> 
  * since this op read it — throw so the caller aborts (its uploaded blobs are orphaned/harmless) rather
  * than blindly overwriting the other change or publishing an inconsistent event.
  */
-export function assertIndexUnchanged(current: { tags: string[][] }, baseIndexHash: string | undefined): void {
+export function assertIndexUnchanged(current: { tags: string[][] }, baseIndexHash: string | undefined, dTag?: string): void {
   if (!baseIndexHash) return // op had no known base (fresh hub) — nothing to compare
   const currentIndexHash = current.tags.find((t) => t[0] === 'm')?.[1]
   if (currentIndexHash && currentIndexHash !== baseIndexHash) {
+    // A genuine pointer move: another writer (another device) advanced the hub while this op was in
+    // flight. Kick off a fresh reload of this hub NOW (best-effort, non-blocking) so the store's base
+    // catches up to the live pointer immediately, instead of leaving it to the background loader to
+    // notice. That way the user's next "try again" rebuilds on the current state and succeeds, rather
+    // than re-hitting the same stale-base mismatch until the loader happens to refresh. Only fires on a
+    // real move — the relays-unreachable abort in casCheckIndex never reaches here, so a transient
+    // outage won't trigger a needless reload flash.
+    if (dTag) {
+      import('@/stores/hubStore').then(({ useHubStore }) => useHubStore.getState().retryHub(dTag)).catch(() => {})
+    }
     throw new HubConcurrencyError(
       `This hub was changed by another action while your change was in progress (index ${currentIndexHash.slice(0, 8)}… ≠ ${baseIndexHash.slice(0, 8)}…). Please try again.`,
     )
@@ -105,7 +115,7 @@ export async function casCheckIndex(dTag: string, authorPubkey: string, baseInde
     // outage is acceptable: it would fail at the publish step anyway. The owner retries when relays recover.
     throw new HubConcurrencyError('Could not confirm the hub’s current state (relays unreachable). Please try again.')
   }
-  assertIndexUnchanged(current, baseIndexHash) // throws HubConcurrencyError on a real pointer move
+  assertIndexUnchanged(current, baseIndexHash, dTag) // throws HubConcurrencyError on a real pointer move (and kicks off a reload)
 }
 
 /**

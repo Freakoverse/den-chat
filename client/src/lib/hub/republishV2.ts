@@ -51,7 +51,7 @@ export async function republishV2HubIndex(opts: {
   if (!current) throw new Error('republishV2HubIndex: current hub event not found on relays')
 
   // CAS: abort if another writer moved the index pointer since this op read it (lost-update guard).
-  assertIndexUnchanged(current, hub.indexFileHash)
+  assertIndexUnchanged(current, hub.indexFileHash, hub.dTag)
 
   const epochStr = String(hub.epoch)
   // Clone tags and swap only the `m` (index) tag — leave published_at, version,
@@ -133,7 +133,7 @@ export async function republishV2HubRotate(opts: {
   // CAS: abort if another writer moved the index pointer since this op read it. Critical for a rotation
   // racing a non-rotating op (or another rotation) — without it we could publish an event whose epoch,
   // content secret, and pointed-to tree disagree, making the hub undecryptable for everyone.
-  assertIndexUnchanged(current, hub.indexFileHash)
+  assertIndexUnchanged(current, hub.indexFileHash, hub.dTag)
 
   // Rotate the content key: decrypt with the old epoch key, re-encrypt with the new one.
   const oldKey = deriveHubContentKey(oldHubSecret, hub.epoch)
