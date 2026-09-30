@@ -1195,6 +1195,7 @@ Deleting a role does NOT trigger a tree update. The hub event is the authority f
 | `r` | Yes | Relay. Third value is `general`. At least one `general` MUST be defined. |
 | `o` | Yes | Blossom server URL. Recommend ≥3 for redundancy. Used for member files and media. |
 | `m` | Yes | Index file reference: `["m", "<sha256>", "<epoch>"]`. |
+| `updated_at` | No | Real wall-clock time of the last edit, `["updated_at", "<unix_seconds>"]` (corrected clock). `created_at` is a logical counter (see below), so this is the actual "last edited" time: used for display and tie resolution, never for relay filtering or client-side selection. |
 | `t` | No | Discoverable topic tag (e.g., `["t", "gaming"]`). Multiple `t` tags allowed. Clients can query hubs via `#t` filters for hub discovery. |
 | `content-warning` | No | NIP-36: marks the hub as containing sensitive/NSFW content. Value is an optional reason string (may be empty). Clients SHOULD blur or hide NSFW hubs unless the user has opted in. |
 | `L` | Conditional | NIP-32: label namespace. Set to `"content-warning"` when the `content-warning` tag is present, enabling relay-side querying via `#L` filters. Required if `content-warning` is present. |
@@ -1217,11 +1218,17 @@ Deleting a role does NOT trigger a tree update. The hub event is the authority f
 > which is much shorter. (On a v2 hub the author is the owner pseudonym `O`, so a DNN-authority address does
 > not apply.) A hub whose event predates the tag can mint one by simply republishing. See **[NIP-SHORT](./NIP-SHORT.md)** for the full scheme: authority forms, code derivation, resolution, and collision handling.
 
-#### Updating Hub Events (`created_at` Increment)
+#### Updating Hub Events (`created_at`, `updated_at`, and selecting the current event)
 
-Hub events are addressable replaceable events that get updated frequently (settings changes, member list rotation, epoch bumps, etc.). When publishing an updated hub event, the client MUST set `created_at` to the **previous event's `created_at` + 1** — the same increment rule used for message edits (see §6.2, Editing Messages).
+Hub events are addressable replaceable events that get updated frequently (settings changes, member list rotation, epoch bumps, etc.). Three rules keep updates monotonic, consistent across clients, and honest about when an edit happened:
 
-This prevents the hub event from jumping to the current wall-clock time on every update, which would cause discovery UIs that sort by `created_at` to incorrectly show old hubs as "recently created." Clients and discovery aggregators SHOULD sort hubs by `published_at` for display ordering, not `created_at`.
+**1. `created_at` is a monotonic counter, not wall-clock.** When publishing an updated hub event, the client MUST set `created_at` to **`max(previous created_at, all currently-visible events' created_at) + 1`**: a short (about 2s, bounded) fetch of the visible hub events, then one past the highest. This is a strictly-monotonic extension of the older "previous + 1" rule (which it still satisfies): it keeps the new event newer than a stale local view and supersedes a lingering split, while never jumping to wall-clock time. Because `created_at` is therefore a logical version counter (roughly creation time plus edit count), it does NOT reflect real edit time, and discovery UIs MUST sort by `published_at` for display, not `created_at`.
+
+**2. `updated_at` is the real edit time.** Every edit carries `["updated_at", "<corrected unix seconds>"]` (§6.1 tag table): the actual wall-clock moment of the edit, for a "last updated" display. It is NOT relay-filterable and MUST NOT drive client-side selection (relays ignore it).
+
+**3. Selecting THE current event (NIP-01 + tie resolution).** When more than one hub event exists for a `(kind, pubkey, d)` (a collision can put two at the **same** `created_at`), every client MUST select the canonical one deterministically per NIP-01: **highest `created_at`, then the LOWEST event `id`**. This matches what relays retain, so clients and relays converge. Selection MUST NOT prefer a higher `updated_at` (that diverges from relay GC and can oscillate). To still let the most-recent real edit win, the **owner** (only they can sign the hub event) MAY, on load, detect that the lowest-id winner is not the highest-`updated_at` event at that `created_at` and republish the higher-`updated_at` event **verbatim at `max+1`**, so it wins by `created_at` (which relays honor). This is idempotent (two owner devices produce identical bytes, hence the same id) and a no-op when there is no tie, no `updated_at` advantage, or no `updated_at` at all (fall back to lowest id). The cooperative rebroadcast (redundancy) and every other place a live hub event is chosen MUST use the same lowest-id tie-break, so they all propagate the same canonical event.
+
+Concurrent edits from two devices still last-write-win on a replaceable event (one change supersedes the other, they are never merged); these rules make the outcome converge deterministically and favor the later edit.
 
 #### Content (JSON)
 
@@ -3303,6 +3310,7 @@ Clients MUST hide any hub carrying a `new_hub` tag from search/browse/discovery.
 | `r` | Hub | Relay (`general`) |
 | `o` | Hub | Blossom server URL |
 | `m` | Hub | Index file reference: `["m", "<sha256>", "<epoch>"]` |
+| `updated_at` | Hub | Real wall-clock time of the last edit: `["updated_at", "<unix_seconds>"]` (corrected clock). Display-only and for owner-side tie resolution; never used for relay filtering or client-side event selection (§6.1). Absent on older events: fall back to the lowest-id rule. |
 | `h` | Message | Hub `d` tag reference |
 | `c` | Message, Voice Presence | Channel UUID |
 | `e` | Message | Reply reference |
