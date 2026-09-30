@@ -585,6 +585,21 @@ export function useStartup() {
       import('@/lib/nostr/eventRedundancy').then(({ ensureAddressableRedundancy }) => {
         ensureAddressableRedundancy(kind, creator, hubId, knownLatest, hubRelays)
       })
+      // Owner-only: if two hub events tied on created_at and the canonical (lowest-id) one isn't the
+      // most-recent edit, republish the higher-updated_at event at max+1 so it wins by created_at.
+      // No-op when there's no tie, no updated_at advantage, or we're not the owner.
+      if (hub && !hub.isGroup) {
+        const us = useUserStore.getState()
+        if (us.pubkey && (us.signer || us.privateKey)) {
+          import('@/lib/hub/permissions').then(({ isHubOwner }) => {
+            if (us.pubkey && isHubOwner(hub, us.pubkey)) {
+              import('@/lib/hub/hubTieResolve').then(({ resolveHubEventUpdatedAtTie }) => {
+                resolveHubEventUpdatedAtTie(hub, us.signer, us.privateKey).catch(() => {})
+              })
+            }
+          })
+        }
+      }
     }, 5000)
     return () => clearTimeout(timer)
   }, [isAuthenticated, activeHubId, activeHubCreator])

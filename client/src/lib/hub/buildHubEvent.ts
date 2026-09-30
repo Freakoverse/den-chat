@@ -10,6 +10,7 @@ import { createUnsignedEvent } from '@/lib/nostr'
 import { KINDS } from '@/lib/crypto/constants'
 import { coordinateShortTag } from '@/lib/nostr/nipShort'
 import { encryptHubContent, deriveHubContentKey, buildOwnerAttestation, type OwnerAttestation } from './hubContent'
+import { nowSeconds } from '@/lib/time/clockOffset'
 import type { UnsignedEvent, Event } from 'nostr-tools'
 import type { ISigner } from '@/stores/userStore'
 import {
@@ -115,6 +116,9 @@ export function buildHubEvent(opts: BuildHubEventOptions) {
   if (indexFileHash) {
     eventTags.push(['m', indexFileHash, epoch.toString()])
   }
+  // Real wall-clock time of THIS edit (corrected clock). created_at is a logical counter (prev+1),
+  // so it isn't the actual edit time; updated_at is, for display and for tie resolution (§6.1).
+  eventTags.push(['updated_at', nowSeconds().toString()])
   // Topic tags for discoverability
   if (tags && tags.length > 0) {
     for (const t of tags) {
@@ -244,6 +248,7 @@ export async function buildHubEventV2(
   for (const relay of relays) eventTags.push(['r', relay, 'general'])
   for (const server of blossomServers) eventTags.push(['o', server])
   if (indexFileHash) eventTags.push(['m', indexFileHash, epoch.toString()])
+  eventTags.push(['updated_at', nowSeconds().toString()]) // real edit time (see v1 path / §6.1)
   if (tags) for (const t of tags) eventTags.push(['t', t])
   if (nsfw) { eventTags.push(['content-warning', '']); eventTags.push(['L', 'content-warning']) }
   if (minPow && minPow > 0) eventTags.push(['w', minPow.toString()])
