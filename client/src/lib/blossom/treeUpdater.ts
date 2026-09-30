@@ -225,6 +225,10 @@ export async function safeTreeUpdate(params: SafeTreeUpdateParams): Promise<Safe
     // against a future v2 caller forgetting it — that would leak R_owner AND destroy content encryption.
     const { isV2 } = await import('@/lib/hub/version')
     if (isV2(hub)) throw new Error('safeTreeUpdate: refusing to publish a v2 hub event under the root key — pass skipPublish and republish as O')
+    // Base created_at on max(local, all visible events) + 1 (via buildHubEvent's +1) so a stale local view
+    // or a lingering same-timestamp split can't make this event tie/undershoot. Bounded at 2s.
+    const { maxHubEventCreatedAt } = await import('@/lib/hub/hubMutationGuard')
+    const baseCreatedAt = await maxHubEventCreatedAt(hub.dTag, hub.creatorPubkey, hub.eventCreatedAt)
     const unsignedEvent = buildHubEvent({
       dTag: hub.dTag,
       name: hub.name,
@@ -247,7 +251,7 @@ export async function safeTreeUpdate(params: SafeTreeUpdateParams): Promise<Safe
       discoverable: hub.discoverable,
       groupedRoles: hub.groupedRoles,
       publishedAt: hub.publishedAt,
-      eventCreatedAt: hub.eventCreatedAt,
+      eventCreatedAt: baseCreatedAt,
     })
     const signedEvent = await mineAndSign(unsignedEvent, hub.minPow, hub.creatorPubkey, signer, privateKey)
     publishedCreatedAt = signedEvent.created_at
@@ -600,6 +604,9 @@ export async function safePaginatedTreeUpdate(params: SafePaginatedTreeUpdatePar
     // Fail-closed (see safeTreeUpdate): v2 must republish as O with encrypted content, never here under R.
     if (v2Hub) throw new Error('safePaginatedTreeUpdate: refusing to publish a v2 hub event under the root key — pass skipPublish and republish as O')
     onStep?.('Signing hub event')
+    // Base created_at on max(local, all visible events) + 1 (via buildHubEvent's +1); bounded at 2s.
+    const { maxHubEventCreatedAt } = await import('@/lib/hub/hubMutationGuard')
+    const baseCreatedAt = await maxHubEventCreatedAt(hub.dTag, hub.creatorPubkey, hub.eventCreatedAt)
     const unsignedEvent = buildHubEvent({
       dTag: hub.dTag,
       name: hub.name,
@@ -622,7 +629,7 @@ export async function safePaginatedTreeUpdate(params: SafePaginatedTreeUpdatePar
       discoverable: hub.discoverable,
       groupedRoles: hub.groupedRoles,
       publishedAt: hub.publishedAt,
-      eventCreatedAt: hub.eventCreatedAt,
+      eventCreatedAt: baseCreatedAt,
     })
     const signedEvent = await mineAndSign(unsignedEvent, hub.minPow, hub.creatorPubkey, signer, privateKey)
     publishedCreatedAt = signedEvent.created_at

@@ -107,3 +107,33 @@ export async function casCheckIndex(dTag: string, authorPubkey: string, baseInde
   }
   assertIndexUnchanged(current, baseIndexHash) // throws HubConcurrencyError on a real pointer move
 }
+
+/**
+ * Base `created_at` for the next hub-event publish: `max(localEventCreatedAt, all visible events' created_at)`.
+ * The caller's `+1` rule then makes the new event STRICTLY newer than anything currently visible, so it
+ * supersedes a stale local view or a lingering same-timestamp split instead of tying/undershooting.
+ *
+ * Bounded by a short timeout (default 2s) so a publish never stalls on slow relays — on timeout/failure we
+ * fall back to the local base (never go BELOW it, preserving the monotonic +1 guarantee).
+ */
+export async function maxHubEventCreatedAt(
+  dTag: string,
+  authorPubkey: string,
+  localEventCreatedAt: number | undefined,
+  timeoutMs = 2000,
+): Promise<number | undefined> {
+  if (localEventCreatedAt == null) return localEventCreatedAt // first publish — leave undefined (wall-clock)
+  try {
+    const { fetchEvents } = await import('@/lib/nostr/relay-pool')
+    const { KINDS } = await import('@/lib/crypto/constants')
+    const events = await fetchEvents(
+      { kinds: [KINDS.HUB_EVENT], authors: [authorPubkey], '#d': [dTag], limit: 4 },
+      timeoutMs,
+    )
+    let max = localEventCreatedAt
+    for (const e of events) if (e.created_at > max) max = e.created_at
+    return max
+  } catch {
+    return localEventCreatedAt // relays unreachable within the window — keep the local base
+  }
+}
