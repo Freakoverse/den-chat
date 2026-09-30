@@ -124,9 +124,12 @@ async function queryPresence(relays: string[], filter: Filter): Promise<{ have: 
   )
   for (const r of results) {
     if (r.status === 'fulfilled' && r.value.events.length > 0) {
-      const ev = r.value.events.reduce((a, b) => (b.created_at > a.created_at ? b : a))
+      // NIP-01 replaceable tie-break (newest created_at, then LOWEST id) — same as the loader + CAS.
+      // Without it the rebroadcast could re-publish a higher-id event at the same created_at, which
+      // NIP-01 relays reject in favour of the lowest-id one, so it just spreads the split.
+      const ev = r.value.events.reduce((a, b) => ((b.created_at > a.created_at || (b.created_at === a.created_at && b.id < a.id)) ? b : a))
       have.set(normalizeRelay(r.value.relay), ev.created_at)
-      if (!best || ev.created_at > best.created_at) best = ev
+      if (!best || ev.created_at > best.created_at || (ev.created_at === best.created_at && ev.id < best.id)) best = ev
     }
   }
   return { have, event: best }
