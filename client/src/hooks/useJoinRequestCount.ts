@@ -17,6 +17,7 @@ import { KINDS } from '@/lib/crypto/constants'
 import { countLeadingZeroBits } from '@/lib/pow/pow'
 import { isV2 } from '@/lib/hub/version'
 import { getJoinSeen, setJoinSeen, refreshJoinSeenFromCache } from '@/lib/hub/joinReadState'
+import { nowSeconds } from '@/lib/time/clockOffset'
 import { StorageKey } from '@/lib/constants'
 import type { HubData, HubMember } from '@/stores/hubStore'
 
@@ -33,7 +34,7 @@ function getLastSeen(hubDTag: string): number {
  * same-tab hooks reset immediately.
  */
 export function markJoinRequestsSeen(hubDTag: string) {
-  setJoinSeen(hubDTag, Math.floor(Date.now() / 1000))
+  setJoinSeen(hubDTag, nowSeconds())
   // Notify same-tab listeners
   window.dispatchEvent(new CustomEvent(SEEN_EVENT, { detail: hubDTag }))
 }

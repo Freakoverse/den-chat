@@ -22,7 +22,7 @@ import { HubSettingsModal } from '@/components/hub/HubSettingsModal'
 import { HubInfoModal } from '@/components/hub/HubInfoModal'
 import { InviteModal } from '@/components/hub/InviteModal'
 import { JoinRequestsModal } from '@/components/hub/JoinRequestsModal'
-import { useJoinRequestCount, markJoinRequestsSeen } from '@/hooks/useJoinRequestCount'
+import { useJoinRequestCount } from '@/hooks/useJoinRequestCount'
 import { UserHubSettingsModal } from '@/components/hub/UserHubSettingsModal'
 import { UserPanel } from '@/components/ui/UserPanel'
 import { ResizablePanel } from '@/components/ui/ResizablePanel'
@@ -635,7 +635,7 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
                 <span>Hub Settings</span>
               </button>
               <button
-                onClick={() => { markJoinRequestsSeen(hub!.dTag); setShowJoinRequests(true) }}
+                onClick={() => setShowJoinRequests(true)}
                 className="flex-1 flex items-center gap-2 px-2 py-1 rounded-md text-left text-sm whitespace-nowrap text-muted-foreground hover:text-foreground hover:bg-accent transition-colors cursor-pointer"
               >
                 <Inbox size={16} />
