@@ -380,6 +380,18 @@ export function ContextMenuProvider({ children }: { children: ReactNode }) {
             close()
           },
         })
+        items.push({
+          label: 'Notification Setting',
+          icon: <Bell size={14} />,
+          action: async () => {
+            const { useNavigationStore } = await import('@/stores/navigationStore')
+            const { useHubStore } = await import('@/stores/hubStore')
+            useNavigationStore.getState().setActivePage('hubs')
+            useHubStore.getState().setActiveHub(channelHub)
+            useNavigationStore.getState().setPendingHubChannelNotif({ dTag: channelHub, channelId })
+            close()
+          },
+        })
       }
 
       // If no actions, show a minimal "no actions" or fallback to native

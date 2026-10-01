@@ -40,11 +40,18 @@ export interface HubMuteSettings {
  * "Notification read-state".
  */
 export interface HubReadState {
-  hubs: Record<string, Record<string, number> & { _muted?: HubMuteSettings | boolean; _seenTo?: number }>
+  hubs: Record<string, Record<string, number> & {
+    _muted?: HubMuteSettings | boolean
+    _seenTo?: number
+    /** Per-channel notification mutes (only channels with at least one flag set are stored). The effective
+     *  mute for a channel is the UNION of the hub's `_muted` and its `_channelMutes` entry: a hub-level mute
+     *  always wins, a channel can additionally mute on top. See NIP-CHAT "Hub Read-State and the Seen Mark". */
+    _channelMutes?: Record<string, HubMuteSettings>
+  }>
 }
 
 /** Meta keys inside a per-hub read-state object that are NOT channel ids. */
-export const HUB_READ_STATE_META_KEYS = new Set(['_muted', '_seenTo'])
+export const HUB_READ_STATE_META_KEYS = new Set(['_muted', '_seenTo', '_channelMutes'])
 
 /**
  * Normalize a legacy boolean _muted value to HubMuteSettings.
@@ -447,9 +454,24 @@ export function pruneHubReadState(
 
     const hubChannels = { ...pruned.hubs[hubDTag] }
     for (const key of Object.keys(hubChannels)) {
-      if (HUB_READ_STATE_META_KEYS.has(key)) continue // preserve meta keys (_muted, _seenTo)
+      if (HUB_READ_STATE_META_KEYS.has(key)) continue // preserve meta keys (_muted, _seenTo, _channelMutes)
       if (!visibleChannels.has(key)) {
         delete hubChannels[key]
+        changed = true
+      }
+    }
+    // Drop per-channel mutes for channels that are no longer visible.
+    const chMutes = hubChannels._channelMutes
+    if (chMutes) {
+      const kept: Record<string, HubMuteSettings> = {}
+      let muteChanged = false
+      for (const [chId, settings] of Object.entries(chMutes)) {
+        if (visibleChannels.has(chId)) kept[chId] = settings
+        else muteChanged = true
+      }
+      if (muteChanged) {
+        if (Object.keys(kept).length > 0) hubChannels._channelMutes = kept
+        else delete hubChannels._channelMutes
         changed = true
       }
     }

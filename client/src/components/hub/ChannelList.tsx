@@ -90,6 +90,8 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
     }
   }, [activeHubId])
   const [userSettingsInitialTab, setUserSettingsInitialTab] = useState<'messages' | 'notifications' | 'voice' | undefined>(undefined)
+  // When opening notification settings scoped to a single channel (channel context menu), the channel to focus.
+  const [userSettingsChannelId, setUserSettingsChannelId] = useState<string | null>(null)
 
   // ── Creator-only channel/category reordering (drag & drop, desktop) ──
   const signer = useUserStore((s) => s.signer)
@@ -125,9 +127,24 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
     if (pendingHubNotifDTag && hub && hub.dTag === pendingHubNotifDTag) {
       clearPendingNotif(null)
       setUserSettingsInitialTab('notifications')
+      setUserSettingsChannelId(null)
       setShowUserSettings(true)
     }
   }, [pendingHubNotifDTag, hub, clearPendingNotif])
+
+  // Channel-scoped notification settings (from the channel context menu): open Notifications → Channels
+  // focused on the requested channel.
+  const pendingHubChannelNotif = useNavigationStore((s) => s.pendingHubChannelNotif)
+  const clearPendingChannelNotif = useNavigationStore((s) => s.setPendingHubChannelNotif)
+  useEffect(() => {
+    if (pendingHubChannelNotif && hub && hub.dTag === pendingHubChannelNotif.dTag) {
+      const chId = pendingHubChannelNotif.channelId
+      clearPendingChannelNotif(null)
+      setUserSettingsInitialTab('notifications')
+      setUserSettingsChannelId(chId)
+      setShowUserSettings(true)
+    }
+  }, [pendingHubChannelNotif, hub, clearPendingChannelNotif])
 
   // Watch for pending voice-hosting settings action (from the voice channel view)
   const pendingHubVoiceHostingDTag = useNavigationStore((s) => s.pendingHubVoiceHostingDTag)
@@ -925,9 +942,10 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
         <UserHubSettingsModal
           key={hub.dTag}
           open
-          onClose={() => { setShowUserSettings(false); setUserSettingsInitialTab(undefined) }}
+          onClose={() => { setShowUserSettings(false); setUserSettingsInitialTab(undefined); setUserSettingsChannelId(null) }}
           hub={hub}
           initialTab={userSettingsInitialTab}
+          initialChannelId={userSettingsChannelId}
         />
       )}
 

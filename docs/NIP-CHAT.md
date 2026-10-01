@@ -1849,6 +1849,9 @@ member's devices.
       "<hub d-tag>": {
         "_seenTo": 1700000000,          // optional: the hub's "seen mark" (see below)
         "_muted":  { /* HubMuteSettings */ },  // optional: per-hub notification mutes
+        "_channelMutes": {              // optional: per-channel notification mutes (see below)
+          "<channelId>": { /* HubMuteSettings */ }
+        },
         "<channelId>": 1700000500        // per-channel read timestamp (override of the seen mark)
       }
     }
@@ -1880,6 +1883,14 @@ back into their hub's `_seenTo`**, smallest-gap-first. Dropping an override only
 slightly **more** unread (a self-healing dot cleared on next open), **never less**, so pruning can never
 hide a genuine unread. Only hubs that have a `_seenTo` can be pruned this way (there must be a baseline to
 fall back to).
+
+**Per-hub and per-channel mutes.** `_muted` holds the hub-wide notification mute flags (`all`, `normal`,
+`mentions`, `everyone`, `here`, `roles`); `_channelMutes` holds the same flag set per channel, and only
+channels with at least one flag set are stored. The **effective** mute for a message in a channel is the
+**union** of the hub flags and that channel's flags: a hub-level mute always applies, and a channel may mute
+further on top. Both the unread-count gate and the notification-sound gate honor this union, and the
+cold-start recount skips channels muted for normal messages so a muted channel does not re-accumulate
+unread after a restart. Only visible channels keep mutes (pruned with their read timestamps, above).
 
 > **Groups** (§21) keep their own `den-group-read-state` event (one timestamp per group) and do not use a
 > seen mark, so group read-state is unaffected by the above.

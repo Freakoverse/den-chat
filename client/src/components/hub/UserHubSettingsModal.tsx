@@ -26,6 +26,7 @@ import {
   X, Loader2, Check, Copy, AlertTriangle, SlidersHorizontal, UserCheck, Shield, ShieldOff, ShieldBan, Lock, LockOpen,
   Users, Plus, Trash2, Volume2, Globe, Server, Wifi, WifiOff, Flag, MessagesSquare, Undo2, EyeOff, RefreshCw, Bell,
   BellOff, AtSign, UsersRound, Radio, Tag, ChevronLeft, ChevronRight, BookOpen, Gauge,
+  Hash, Megaphone, ChevronDown,
 } from 'lucide-react'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
 import { UserProfileModal } from '@/components/hub/UserProfileModal'
@@ -37,7 +38,7 @@ import { useNavigationStore } from '@/stores/navigationStore'
 import type { HubMuteSettings } from '@/lib/notifications/readState'
 import { useReportStore, type HubReport } from '@/stores/reportStore'
 import type { VoiceProviderType, CloudflareConfig, LiveKitConfig } from '@/lib/voice/types'
-import { getPermissionsForUser } from '@/lib/hub/permissions'
+import { getPermissionsForUser, canReceiveChannelNotification } from '@/lib/hub/permissions'
 import { isV2 } from '@/lib/hub/version'
 import { Pagination } from '@/components/ui/Pagination'
 import { CustomSelect } from '@/components/ui/custom-select'
@@ -47,12 +48,16 @@ interface UserHubSettingsModalProps {
   onClose: () => void
   hub: HubData
   initialTab?: UserHubTab
+  /** When opening the Notifications tab, focus its Channels sub-tab on this channel (from the channel
+   *  context menu's "Notification Setting"). */
+  initialChannelId?: string | null
 }
 
 const EMPTY_MEMBERS: HubMember[] = []
 const EMPTY_GROUP_SECRETS: Record<string, string> = {}
 const EMPTY_MY_REPORTS: HubReport[] = []
 const EMPTY_MUTE_SETTINGS: HubMuteSettings = {}
+const EMPTY_CHANNEL_MUTES: Record<string, HubMuteSettings> = {}
 
 const DEFAULT_PREFS: HubPrefs = {
   showFacilitatedMessages: true,
@@ -83,7 +88,78 @@ function saveVouchedRs(dTag: string, rs: string[], account: string | null): void
   try { const m = JSON.parse(localStorage.getItem(vouchedKey(account)) || '{}'); m[dTag] = rs; localStorage.setItem(vouchedKey(account), JSON.stringify(m)) } catch { /* non-fatal */ }
 }
 
-export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHubSettingsModalProps) {
+/** The 5 sub-toggles under "Mute all", shared by the hub-wide and per-channel notification settings. */
+const MUTE_SUBTOGGLES = [
+  { key: 'normal' as const, icon: MessagesSquare, label: 'Mute normal messages', desc: 'Suppress regular (non-mention) messages' },
+  { key: 'mentions' as const, icon: AtSign, label: 'Mute @mentions', desc: 'Suppress personal @npub and @DNN mentions' },
+  { key: 'everyone' as const, icon: UsersRound, label: 'Mute @everyone', desc: 'Suppress @everyone mentions' },
+  { key: 'here' as const, icon: Radio, label: 'Mute @here', desc: 'Suppress @here mentions' },
+  { key: 'roles' as const, icon: Tag, label: 'Mute @roles', desc: 'Suppress @role mentions' },
+]
+
+/** The master "Mute all" + 5 sub-toggles. Shared by the hub-wide and the per-channel notification UIs so
+ *  they stay in lockstep. The master auto-syncs: on when every sub-toggle is on. */
+function MuteToggles({ settings, onChange, allLabel, allDesc }: {
+  settings: HubMuteSettings
+  onChange: (next: HubMuteSettings) => void
+  allLabel: string
+  allDesc: string
+}) {
+  return (
+    <div className="space-y-1">
+      <label className="flex items-center justify-between cursor-pointer group p-3 rounded-lg hover:bg-secondary/40 transition-colors">
+        <div className="flex items-center gap-3">
+          <BellOff size={16} className="text-muted-foreground group-hover:text-foreground transition-colors" />
+          <div>
+            <span className="text-sm font-medium text-foreground">{allLabel}</span>
+            <p className="text-xs text-muted-foreground mt-0.5">{allDesc}</p>
+          </div>
+        </div>
+        <ToggleSwitch
+          checked={settings.all ?? false}
+          onChange={(v) => onChange({ all: v, normal: v, mentions: v, everyone: v, here: v, roles: v })}
+        />
+      </label>
+      <div className="w-full h-px bg-border my-2" />
+      {MUTE_SUBTOGGLES.map(({ key, icon: Icon, label, desc }) => (
+        <label key={key} className="flex items-center justify-between cursor-pointer group p-3 rounded-lg hover:bg-secondary/40 transition-colors">
+          <div className="flex items-center gap-3">
+            <Icon size={16} className="text-muted-foreground group-hover:text-foreground transition-colors" />
+            <div>
+              <span className="text-sm text-foreground">{label}</span>
+              <p className="text-xs text-muted-foreground mt-0.5">{desc}</p>
+            </div>
+          </div>
+          <ToggleSwitch
+            checked={settings[key] ?? false}
+            onChange={(v) => {
+              const updated: HubMuteSettings = { ...settings, [key]: v }
+              updated.all = !!(updated.normal && updated.mentions && updated.everyone && updated.here && updated.roles)
+              onChange(updated)
+            }}
+          />
+        </label>
+      ))}
+    </div>
+  )
+}
+
+/** Icon for a channel by type, used in the per-channel notification list. */
+function channelTypeIcon(type: string) {
+  if (type === 'announcement') return Megaphone
+  if (type === 'forum') return MessagesSquare
+  return Hash
+}
+
+/** Short status label for a channel's mute state in the list row. */
+function channelMuteSummary(s: HubMuteSettings | undefined): string | null {
+  if (!s) return null
+  if (s.all) return 'All muted'
+  const on = (['normal', 'mentions', 'everyone', 'here', 'roles'] as const).filter((k) => s[k])
+  return on.length > 0 ? 'Some muted' : null
+}
+
+export function UserHubSettingsModal({ open, onClose, hub, initialTab, initialChannelId }: UserHubSettingsModalProps) {
   const pubkey = useUserStore((s) => s.pubkey)
   const signer = useUserStore((s) => s.signer)
   const privateKey = useUserStore((s) => s.privateKey)
@@ -93,6 +169,8 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
   const setHubPref = useHubStore((s) => s.setHubPref)
   const hubMuteSettings = useNotificationStore((s) => s.hubMuteSettings[hub.dTag] ?? EMPTY_MUTE_SETTINGS)
   const setHubMuteSettings = useNotificationStore((s) => s.setHubMuteSettings)
+  const channelMuteSettings = useNotificationStore((s) => s.channelMuteSettings[hub.dTag] ?? EMPTY_CHANNEL_MUTES)
+  const setChannelMuteSettings = useNotificationStore((s) => s.setChannelMuteSettings)
   const publishHubReadState = useNotificationStore((s) => s.publishHubReadState)
   const { getProfile } = useProfileCache()
 
@@ -133,8 +211,24 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
 
   // ── Notification save state ──
   const initialMuteRef = useRef<HubMuteSettings>(EMPTY_MUTE_SETTINGS)
+  // Snapshot of per-channel mutes on open (JSON), so the Save button can detect channel-level changes too.
+  const initialChannelMutesRef = useRef<string>('{}')
   const [muteSaving, setMuteSaving] = useState(false)
   const [muteSaveResult, setMuteSaveResult] = useState<'saved' | 'error' | null>(null)
+  // Notifications tab sub-view: hub-wide settings vs per-channel settings.
+  const [notifSubTab, setNotifSubTab] = useState<'hub' | 'channels'>('hub')
+  // Which channel row is expanded in the Channels sub-tab (accordion; one at a time).
+  const [expandedChannelId, setExpandedChannelId] = useState<string | null>(null)
+  // Channels the user can actually receive notifications for (owner sees all; members see accessible ones),
+  // excluding voice channels (no unread/notifications). These are the rows in the per-channel settings list.
+  const notifChannels = useMemo(() => {
+    if (!pubkey) return []
+    return (hub.channels ?? [])
+      .filter((c) => c.type !== 'voice' && canReceiveChannelNotification(hub.dTag, c.channelId, pubkey))
+      .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+    // hubSecrets is a dep so the list re-resolves once the membership secret loads.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hub.dTag, hub.channels, pubkey, hubSecrets])
 
   // ── Voice Hosting state ──
   const [voiceProviderType, setVoiceProviderType] = useState<VoiceProviderType>('cloudflare')
@@ -315,10 +409,15 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
       // On mobile: if opened straight to a tab (e.g. from the voice channel view),
       // drill into that page; otherwise show the nav list first.
       setMobileShowNav(!initialTab)
-      // Snapshot the current mute settings so we can detect changes
-      const currentMute = useNotificationStore.getState().hubMuteSettings[hub.dTag] ?? EMPTY_MUTE_SETTINGS
+      // Snapshot the current mute settings (hub + per-channel) so we can detect changes
+      const notifState = useNotificationStore.getState()
+      const currentMute = notifState.hubMuteSettings[hub.dTag] ?? EMPTY_MUTE_SETTINGS
       initialMuteRef.current = { ...currentMute }
+      initialChannelMutesRef.current = JSON.stringify(notifState.channelMuteSettings[hub.dTag] ?? {})
       setMuteSaveResult(null)
+      // If opened to a specific channel (channel context menu), land on the Channels sub-tab with it expanded.
+      setNotifSubTab(initialChannelId ? 'channels' : 'hub')
+      setExpandedChannelId(initialChannelId ?? null)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
@@ -1118,66 +1217,87 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
               {activeTab === 'notifications' && (
                 <section>
                   <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-4">Notification Settings</h4>
-                  <p className="text-xs text-muted-foreground mb-4">Control which messages trigger unread badges and notifications for this hub.</p>
-                  <div className="space-y-1">
-                    {/* Master toggle */}
-                    <label className="flex items-center justify-between cursor-pointer group p-3 rounded-lg hover:bg-secondary/40 transition-colors">
-                      <div className="flex items-center gap-3">
-                        <BellOff size={16} className="text-muted-foreground group-hover:text-foreground transition-colors" />
-                        <div>
-                          <span className="text-sm font-medium text-foreground">Mute all messages</span>
-                          <p className="text-xs text-muted-foreground mt-0.5">Suppress all notifications from this hub</p>
-                        </div>
-                      </div>
-                      <ToggleSwitch
-                        checked={hubMuteSettings.all ?? false}
-                        onChange={(v) => {
-                          // Master toggle: set all flags together
-                          setHubMuteSettings(hub.dTag, {
-                            all: v, normal: v, mentions: v, everyone: v, here: v, roles: v,
-                          })
-                        }}
-                      />
-                    </label>
 
-                    <div className="w-full h-px bg-border my-2" />
-
-                    {/* Sub-toggles */}
-                    {[
-                      { key: 'normal' as const, icon: MessagesSquare, label: 'Mute normal messages', desc: 'Suppress regular (non-mention) messages' },
-                      { key: 'mentions' as const, icon: AtSign, label: 'Mute @mentions', desc: 'Suppress personal @npub and @DNN mentions' },
-                      { key: 'everyone' as const, icon: UsersRound, label: 'Mute @everyone', desc: 'Suppress @everyone mentions' },
-                      { key: 'here' as const, icon: Radio, label: 'Mute @here', desc: 'Suppress @here mentions' },
-                      { key: 'roles' as const, icon: Tag, label: 'Mute @roles', desc: 'Suppress @role mentions' },
-                    ].map(({ key, icon: Icon, label, desc }) => (
-                      <label key={key} className="flex items-center justify-between cursor-pointer group p-3 rounded-lg hover:bg-secondary/40 transition-colors">
-                        <div className="flex items-center gap-3">
-                          <Icon size={16} className="text-muted-foreground group-hover:text-foreground transition-colors" />
-                          <div>
-                            <span className="text-sm text-foreground">{label}</span>
-                            <p className="text-xs text-muted-foreground mt-0.5">{desc}</p>
-                          </div>
-                        </div>
-                        <ToggleSwitch
-                          checked={hubMuteSettings[key] ?? false}
-                          onChange={(v) => {
-                            const updated: HubMuteSettings = { ...hubMuteSettings, [key]: v }
-                            // Auto-sync master toggle
-                            const allSubsOn = !!(updated.normal && updated.mentions && updated.everyone && updated.here && updated.roles)
-                            updated.all = allSubsOn
-                            setHubMuteSettings(hub.dTag, updated)
-                          }}
-                        />
-                      </label>
+                  {/* Hub / Channels sub-tab switcher */}
+                  <div className="flex gap-1 p-1 bg-secondary/40 rounded-lg mb-4 w-fit">
+                    {([
+                      { id: 'hub' as const, label: 'Hub' },
+                      { id: 'channels' as const, label: 'Channels' },
+                    ]).map((t) => (
+                      <button
+                        key={t.id}
+                        onClick={() => setNotifSubTab(t.id)}
+                        className={cn(
+                          'px-4 h-8 rounded-md text-sm font-medium transition-colors',
+                          notifSubTab === t.id ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+                        )}
+                      >
+                        {t.label}
+                      </button>
                     ))}
                   </div>
 
-                  {/* Save button — only active when settings differ from the snapshot */}
+                  {notifSubTab === 'hub' && (<>
+                    <p className="text-xs text-muted-foreground mb-4">Control which messages trigger unread badges and notifications for this hub.</p>
+                    <MuteToggles
+                      settings={hubMuteSettings}
+                      onChange={(s) => setHubMuteSettings(hub.dTag, s)}
+                      allLabel="Mute all messages"
+                      allDesc="Suppress all notifications from this hub"
+                    />
+                  </>)}
+
+                  {notifSubTab === 'channels' && (<>
+                    <p className="text-xs text-muted-foreground mb-4">Override notifications per channel. A hub-level mute above always applies on top of these.</p>
+                    {notifChannels.length === 0 ? (
+                      <p className="text-xs text-muted-foreground py-4">No channels to configure.</p>
+                    ) : (
+                      <div className="space-y-1">
+                        {notifChannels.map((c) => {
+                          const Icon = channelTypeIcon(c.type)
+                          const chSettings = channelMuteSettings[c.channelId] ?? EMPTY_MUTE_SETTINGS
+                          const summary = channelMuteSummary(chSettings)
+                          const expanded = expandedChannelId === c.channelId
+                          return (
+                            <div key={c.channelId} className="rounded-lg border border-border/60 overflow-hidden">
+                              <button
+                                onClick={() => setExpandedChannelId(expanded ? null : c.channelId)}
+                                className="w-full flex items-center justify-between gap-2 p-3 hover:bg-secondary/40 transition-colors"
+                              >
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <Icon size={15} className="text-muted-foreground shrink-0" />
+                                  <span className="text-sm text-foreground truncate">{c.name}</span>
+                                </div>
+                                <div className="flex items-center gap-2 shrink-0">
+                                  {summary && <span className="text-[11px] text-muted-foreground">{summary}</span>}
+                                  <ChevronDown size={15} className={cn('text-muted-foreground transition-transform', expanded && 'rotate-180')} />
+                                </div>
+                              </button>
+                              {expanded && (
+                                <div className="px-2 pb-2 pt-1 border-t border-border/60">
+                                  <MuteToggles
+                                    settings={chSettings}
+                                    onChange={(s) => setChannelMuteSettings(hub.dTag, c.channelId, s)}
+                                    allLabel="Mute this channel"
+                                    allDesc="Suppress all notifications from this channel"
+                                  />
+                                </div>
+                              )}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </>)}
+
+                  {/* Save button — active when hub OR channel mute settings differ from the snapshot */}
                   {(() => {
                     const ini = initialMuteRef.current
-                    const isDirty = (['all', 'normal', 'mentions', 'everyone', 'here', 'roles'] as const).some(
+                    const hubDirty = (['all', 'normal', 'mentions', 'everyone', 'here', 'roles'] as const).some(
                       (k) => (hubMuteSettings[k] ?? false) !== (ini[k] ?? false)
                     )
+                    const channelsDirty = JSON.stringify(channelMuteSettings) !== initialChannelMutesRef.current
+                    const isDirty = hubDirty || channelsDirty
                     return (
                       <div className="flex items-center gap-3 mt-4 pt-4 border-t border-border">
                         <button
@@ -1189,6 +1309,7 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab }: UserHub
                               const ok = await publishHubReadState(signer, privateKey)
                               if (ok) {
                                 initialMuteRef.current = { ...hubMuteSettings }
+                                initialChannelMutesRef.current = JSON.stringify(channelMuteSettings)
                                 setMuteSaveResult('saved')
                               } else {
                                 setMuteSaveResult('error')

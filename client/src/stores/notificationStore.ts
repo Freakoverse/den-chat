@@ -93,6 +93,9 @@ export interface NotificationState {
   hubSeenTo: Record<string, number>
   /** Per-hub granular mute settings */
   hubMuteSettings: Record<string, HubMuteSettings>
+  /** Per-hub, per-channel granular mute settings. The effective mute for a channel is the UNION of the
+   *  hub's settings and the channel's (a hub-level mute always wins; a channel can mute further on top). */
+  channelMuteSettings: Record<string, Record<string, HubMuteSettings>>
   /** "Fresh general notification" flash (ephemeral, in-memory only). A hub badge is BLUE while the
    *  hub's entry here is in the future (10s from arrival), then reverts to white. */
   hubFlashUntil: Record<string, number>
@@ -142,6 +145,9 @@ export interface NotificationState {
    *  messages once the hub secret is available (never lowers a live count). Keyed channelId → count. */
   raiseHubUnreadCounts: (hubDTag: string, perChannel: Record<string, number>) => void
   setHubMuteSettings: (hubDTag: string, settings: HubMuteSettings) => void
+  /** Set a single channel's mute settings within a hub (empty/all-false clears the entry). Saves locally;
+   *  publishing to relay is explicit (the UI "Save" button), matching setHubMuteSettings. */
+  setChannelMuteSettings: (hubDTag: string, channelId: string, settings: HubMuteSettings) => void
   pruneHubs: (activeHubDTags: Set<string>, channelsByHub: Record<string, Set<string>>) => void
 
   // Notification "freshness" flash (blue badge) — see hubFlashUntil / channelFlash.
@@ -218,17 +224,29 @@ function recomputeTotals(state: {
 function buildHubReadStateFromStore(
   hubUnreads: Record<string, Record<string, ChannelUnread>>,
   hubMuteSettings: Record<string, HubMuteSettings>,
-  hubSeenTo: Record<string, number>
+  hubSeenTo: Record<string, number>,
+  channelMuteSettings: Record<string, Record<string, HubMuteSettings>>
 ): HubReadState {
   const hubs: HubReadState['hubs'] = {}
   const groups = groupDTagSet()
   for (const [hubDTag, channels] of Object.entries(hubUnreads)) {
     if (groups.has(hubDTag)) continue
-    const hubEntry: Record<string, number> & { _muted?: HubMuteSettings | boolean; _seenTo?: number } = {}
+    const hubEntry: Record<string, number> & {
+      _muted?: HubMuteSettings | boolean
+      _seenTo?: number
+      _channelMutes?: Record<string, HubMuteSettings>
+    } = {}
     const settings = hubMuteSettings[hubDTag]
     if (settings && hasAnyMute(settings)) hubEntry._muted = settings
     const seenTo = hubSeenTo[hubDTag] ?? 0
     if (seenTo > 0) hubEntry._seenTo = seenTo
+    // Per-channel mutes: only channels with at least one flag set are stored.
+    const chMutes = channelMuteSettings[hubDTag]
+    if (chMutes) {
+      const stored: Record<string, HubMuteSettings> = {}
+      for (const [chId, s] of Object.entries(chMutes)) if (s && hasAnyMute(s)) stored[chId] = s
+      if (Object.keys(stored).length > 0) hubEntry._channelMutes = stored
+    }
     for (const [channelId, ch] of Object.entries(channels)) {
       // Drop channels that sit exactly at the seen mark (they inherit it); keep every channel that diverges
       // (read ahead, or the rare below-mark case) as an explicit override so no read state is lost.
@@ -314,6 +332,7 @@ function preloadFromLocalStorage() {
   let hubUnreads: Record<string, Record<string, ChannelUnread>> = {}
   let hubMuteSettings: Record<string, HubMuteSettings> = {}
   let hubSeenTo: Record<string, number> = {}
+  let channelMuteSettings: Record<string, Record<string, HubMuteSettings>> = {}
   try {
     const hubCached = loadCachedEvent('hub')
     if (hubCached?.content) {
@@ -323,6 +342,7 @@ function preloadFromLocalStorage() {
         const muteRaw = hubData._muted
         if (muteRaw) hubMuteSettings[hubDTag] = normalizeHubMuteSettings(muteRaw)
         if (typeof hubData._seenTo === 'number' && hubData._seenTo > 0) hubSeenTo[hubDTag] = hubData._seenTo
+        if (hubData._channelMutes) channelMuteSettings[hubDTag] = parseChannelMutes(hubData._channelMutes)
         for (const [key, value] of Object.entries(hubData)) {
           if (HUB_READ_STATE_META_KEYS.has(key)) continue
           hubUnreads[hubDTag][key] = { lastRead: value as number, count: 0, hasMention: false }
@@ -378,7 +398,37 @@ function preloadFromLocalStorage() {
     }
   } catch { /* ignore */ }
 
-  return { hubUnreads, hubMuteSettings, hubSeenTo, dm17Unreads, dm04Unreads, socialSeenAt, pcReadTimes }
+  return { hubUnreads, hubMuteSettings, hubSeenTo, channelMuteSettings, dm17Unreads, dm04Unreads, socialSeenAt, pcReadTimes }
+}
+
+/**
+ * Effective mute decision for a (hub, channel, message-type): the UNION of the hub's settings and the
+ * channel's. A hub-level mute always wins; a channel can mute further on top. Shared by the unread-count
+ * gate and the notification-sound gate so both honor per-channel mutes identically.
+ */
+export function isNotificationMuted(
+  hubMute: HubMuteSettings | undefined,
+  channelMute: HubMuteSettings | undefined,
+  mentionType: 'personal' | 'everyone' | 'here' | 'role' | undefined,
+): boolean {
+  const on = (k: keyof HubMuteSettings) => !!(hubMute?.[k] || channelMute?.[k])
+  if (on('all')) return true
+  if (!mentionType) return on('normal')
+  if (mentionType === 'personal') return on('mentions')
+  if (mentionType === 'everyone') return on('everyone')
+  if (mentionType === 'here') return on('here')
+  if (mentionType === 'role') return on('roles')
+  return false
+}
+
+/** Normalize a serialized `_channelMutes` map (channelId → mute settings), dropping empty entries. */
+function parseChannelMutes(raw: Record<string, HubMuteSettings>): Record<string, HubMuteSettings> {
+  const out: Record<string, HubMuteSettings> = {}
+  for (const [chId, settings] of Object.entries(raw)) {
+    const normalized = normalizeHubMuteSettings(settings)
+    if (hasAnyMute(normalized)) out[chId] = normalized
+  }
+  return out
 }
 
 const _preloaded = preloadFromLocalStorage()
@@ -398,6 +448,7 @@ const initialState = {
   hubUnreads: _preloaded.hubUnreads,
   hubSeenTo: _preloaded.hubSeenTo,
   hubMuteSettings: _preloaded.hubMuteSettings,
+  channelMuteSettings: _preloaded.channelMuteSettings,
   hubFlashUntil: {} as Record<string, number>,
   channelFlash: {} as Record<string, Record<string, number>>,
   dm17Unreads: _preloaded.dm17Unreads,
@@ -546,6 +597,7 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
     const liveState = get()
     const hubUnreads: Record<string, Record<string, ChannelUnread>> = {}
     const hubMuteSettings: Record<string, HubMuteSettings> = {}
+    const channelMuteSettings: Record<string, Record<string, HubMuteSettings>> = {}
     // Seen mark: take the max of the event's value and any live (preloaded) value so a watermark set this
     // session before init completes is never lowered. It only ever moves forward.
     const hubSeenTo: Record<string, number> = { ...liveState.hubSeenTo }
@@ -553,6 +605,7 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
       hubUnreads[hubDTag] = {}
       const muteRaw = hubData._muted
       if (muteRaw) hubMuteSettings[hubDTag] = normalizeHubMuteSettings(muteRaw)
+      if (hubData._channelMutes) channelMuteSettings[hubDTag] = parseChannelMutes(hubData._channelMutes)
       if (typeof hubData._seenTo === 'number' && hubData._seenTo > (hubSeenTo[hubDTag] ?? 0)) {
         hubSeenTo[hubDTag] = hubData._seenTo
       }
@@ -612,6 +665,7 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
       hubUnreads,
       hubSeenTo,
       hubMuteSettings,
+      channelMuteSettings,
       dm17Unreads,
       dm04Unreads,
       pcReadTimes: pcState.topics,
@@ -632,6 +686,7 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
     hubUnreads: {},
     hubSeenTo: {},
     hubMuteSettings: {},
+    channelMuteSettings: {},
     dm17Unreads: {},
     dm04Unreads: {},
     pcReadTimes: {},
@@ -711,16 +766,8 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
   incrementChannelUnread: (hubDTag, channelId, messageTimestamp, mentionType) => {
     let applied = false
     set((state) => {
-      // Check granular mute settings — skip increment if muted for this type
-      const muteSettings = state.hubMuteSettings[hubDTag]
-      if (muteSettings) {
-        if (muteSettings.all) return {}
-        if (!mentionType && muteSettings.normal) return {}
-        if (mentionType === 'personal' && muteSettings.mentions) return {}
-        if (mentionType === 'everyone' && muteSettings.everyone) return {}
-        if (mentionType === 'here' && muteSettings.here) return {}
-        if (mentionType === 'role' && muteSettings.roles) return {}
-      }
+      // Skip increment if muted for this type — the UNION of hub-level and per-channel mute settings.
+      if (isNotificationMuted(state.hubMuteSettings[hubDTag], state.channelMuteSettings[hubDTag]?.[channelId], mentionType)) return {}
       const hubChannels = { ...(state.hubUnreads[hubDTag] || {}) }
       const existing = hubChannels[channelId] || { lastRead: 0, count: 0, hasMention: false }
       // Only count messages newer than the effective read point: the channel's own lastRead, or the hub's
@@ -826,22 +873,36 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
     _saveHubToLocalStorage(get, true)
   },
 
+  setChannelMuteSettings: (hubDTag, channelId, settings) => {
+    set((state) => {
+      const hubChannels = { ...(state.channelMuteSettings[hubDTag] || {}) }
+      if (hasAnyMute(settings)) hubChannels[channelId] = settings
+      else delete hubChannels[channelId] // no flags set → drop the entry entirely
+      const channelMuteSettings = { ...state.channelMuteSettings, [hubDTag]: hubChannels }
+      return { channelMuteSettings }
+    })
+    // Local-only like setHubMuteSettings; the UI "Save" button publishes.
+    _saveHubToLocalStorage(get, true)
+  },
+
   pruneHubs: (activeHubDTags, channelsByHub) => {
     set((state) => {
-      const currentState = buildHubReadStateFromStore(state.hubUnreads, state.hubMuteSettings, state.hubSeenTo)
+      const currentState = buildHubReadStateFromStore(state.hubUnreads, state.hubMuteSettings, state.hubSeenTo, state.channelMuteSettings)
       const pruned = pruneHubReadState(currentState, activeHubDTags, channelsByHub)
 
       if (pruned === currentState) return {} // nothing changed
 
-      // Rebuild hubUnreads + hubSeenTo from pruned state (hubs no longer in the list are dropped entirely).
+      // Rebuild hubUnreads + hubSeenTo + channelMutes from pruned state (hubs no longer in the list dropped).
       const hubUnreads: Record<string, Record<string, ChannelUnread>> = {}
       const hubMuteSettings: Record<string, HubMuteSettings> = {}
       const hubSeenTo: Record<string, number> = {}
+      const channelMuteSettings: Record<string, Record<string, HubMuteSettings>> = {}
       for (const [hubDTag, hubData] of Object.entries(pruned.hubs)) {
         hubUnreads[hubDTag] = {}
         const muteRaw = hubData._muted
         if (muteRaw) hubMuteSettings[hubDTag] = normalizeHubMuteSettings(muteRaw)
         if (typeof hubData._seenTo === 'number' && hubData._seenTo > 0) hubSeenTo[hubDTag] = hubData._seenTo
+        if (hubData._channelMutes) channelMuteSettings[hubDTag] = parseChannelMutes(hubData._channelMutes)
         for (const [key, value] of Object.entries(hubData)) {
           if (HUB_READ_STATE_META_KEYS.has(key)) continue
           const existing = state.hubUnreads[hubDTag]?.[key]
@@ -853,7 +914,7 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
         }
       }
 
-      return { hubUnreads, hubSeenTo, hubMuteSettings, ...recomputeTotals({ hubUnreads, hubMuteSettings, dm17Unreads: state.dm17Unreads, dm04Unreads: state.dm04Unreads }) }
+      return { hubUnreads, hubSeenTo, hubMuteSettings, channelMuteSettings, ...recomputeTotals({ hubUnreads, hubMuteSettings, dm17Unreads: state.dm17Unreads, dm04Unreads: state.dm04Unreads }) }
     })
     _saveHubToLocalStorage(get)
   },
@@ -902,7 +963,7 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
 
   publishHubReadState: async (signer, privateKey) => {
     const state = get()
-    const hubState = compactHubReadStateToFit(buildHubReadStateFromStore(state.hubUnreads, state.hubMuteSettings, state.hubSeenTo))
+    const hubState = compactHubReadStateToFit(buildHubReadStateFromStore(state.hubUnreads, state.hubMuteSettings, state.hubSeenTo, state.channelMuteSettings))
     const content = JSON.stringify(hubState)
 
     let encryptedContent: string | null = null
@@ -1053,7 +1114,7 @@ function _saveHubToLocalStorage(get: () => NotificationState, skipPublish = fals
   const groups = groupDTagSet()
 
   // Hubs (everything that isn't a group). Build a pseudo-event for localStorage (not signed, cache only).
-  const hubContent = JSON.stringify(compactHubReadStateToFit(buildHubReadStateFromStore(state.hubUnreads, state.hubMuteSettings, state.hubSeenTo)))
+  const hubContent = JSON.stringify(compactHubReadStateToFit(buildHubReadStateFromStore(state.hubUnreads, state.hubMuteSettings, state.hubSeenTo, state.channelMuteSettings)))
   const hubCached = loadCachedEvent('hub')
   if (hubCached?.content !== hubContent) {
     saveCachedEvent('hub', { ...(hubCached ?? { id: '', sig: '', pubkey: '', kind: 30078, tags: [['d', 'den-hub-read-state']] }), content: hubContent, created_at: now } as any)

@@ -29,7 +29,7 @@ import { countLeadingZeroBits } from '@/lib/pow/pow'
 import { usePollStore, parsePollEvent, parseVoteEvent } from '@/stores/pollStore'
 import { useCalendarStore, parseCalendarEvent, parseCalendarRsvp } from '@/stores/calendarStore'
 import { processHideEvent } from '@/hooks/useHideMessages'
-import { useNotificationStore } from '@/stores/notificationStore'
+import { useNotificationStore, isNotificationMuted } from '@/stores/notificationStore'
 import { useUserStore } from '@/stores/userStore'
 import { canReceiveChannelNotification } from '@/lib/hub/permissions'
 import { aesDecrypt } from '@/lib/crypto/aes'
@@ -53,35 +53,16 @@ const sessionStartTime = Math.floor(Date.now() / 1000)
  */
 function playMessageSoundIfAllowed(
   hubDTag: string,
+  channelId: string,
   mentionType: 'personal' | 'everyone' | 'here' | 'role' | undefined,
   createdAt: number
 ) {
   // Only play sounds for messages that arrived after this session started
   if (createdAt < sessionStartTime) return
 
-  const muteSettings = useNotificationStore.getState().hubMuteSettings[hubDTag]
-  if (!muteSettings) {
-    // No mute settings — play sound
-    playSoundEffect('message')
-    return
-  }
-
-  // Master mute — suppress all
-  if (muteSettings.all) return
-
-  // Check specific mute flags based on mention type
-  if (!mentionType) {
-    // Normal message — check 'normal' mute flag
-    if (muteSettings.normal) return
-  } else if (mentionType === 'personal') {
-    if (muteSettings.mentions) return
-  } else if (mentionType === 'everyone') {
-    if (muteSettings.everyone) return
-  } else if (mentionType === 'here') {
-    if (muteSettings.here) return
-  } else if (mentionType === 'role') {
-    if (muteSettings.roles) return
-  }
+  // Suppress if muted for this type — the UNION of hub-level and per-channel mute settings.
+  const notif = useNotificationStore.getState()
+  if (isNotificationMuted(notif.hubMuteSettings[hubDTag], notif.channelMuteSettings[hubDTag]?.[channelId], mentionType)) return
 
   playSoundEffect('message')
 }
@@ -812,6 +793,10 @@ export function useHubSubscriptions() {
         if (validChannelIds.size > 0 && !validChannelIds.has(channelId)) continue // channel no longer in the hub
         if (hubDTag === activeHub && channelId === activeChannel) continue // currently viewing → don't badge
         if (!canReceiveChannelNotification(hubDTag, channelId, myPubkey)) continue
+        // Skip channels muted for normal messages (hub OR channel level) so a muted channel does not
+        // re-accumulate a general unread count on cold start. The backfill count is a general-message count;
+        // mention flags are owned by the live handler + reclassifier, which gate mentions separately.
+        if (isNotificationMuted(notif.hubMuteSettings[hubDTag], notif.channelMuteSettings[hubDTag]?.[channelId], undefined)) continue
         // Effective read point: the channel's own lastRead, or the hub's seen mark when it has no entry
         // (a channel covered only by a hub-wide "mark all read" has no per-channel entry).
         const lastRead = notif.hubUnreads[hubDTag]?.[channelId]?.lastRead ?? (notif.hubSeenTo[hubDTag] ?? 0)
@@ -1101,7 +1086,7 @@ export function useHubSubscriptions() {
               msg.hubDTag, msg.channelId, msg.createdAt, mentionType
             )
             // Play message sound if not muted for this hub/mention type
-            playMessageSoundIfAllowed(msg.hubDTag, mentionType, msg.createdAt)
+            playMessageSoundIfAllowed(msg.hubDTag, msg.channelId, mentionType, msg.createdAt)
             // Also bump the legacy per-hub counter for the old sidebar badge
             if (msg.hubDTag !== activeHubIdRef.current) {
               incrementUnreadRef.current(msg.hubDTag)
@@ -1122,7 +1107,7 @@ export function useHubSubscriptions() {
         if (!document.hasFocus() || document.visibilityState !== 'visible') {
           detectMentionType(msg.hubDTag, msg.channelId, msg.epoch, event.content, event.pubkey)
             .then(({ decrypted, mentionType }) => {
-              if (decrypted) playMessageSoundIfAllowed(msg.hubDTag, mentionType, msg.createdAt)
+              if (decrypted) playMessageSoundIfAllowed(msg.hubDTag, msg.channelId, mentionType, msg.createdAt)
             })
             .catch(() => { /* detectMentionType never throws; nothing to do */ })
         }

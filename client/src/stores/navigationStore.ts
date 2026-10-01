@@ -35,6 +35,11 @@ interface NavigationStore {
   pendingHubNotifDTag: string | null
   setPendingHubNotifDTag: (dTag: string | null) => void
 
+  /** Pending request to open notification settings → Channels tab focused on one channel (set by the
+   *  channel context menu, consumed by ChannelList). */
+  pendingHubChannelNotif: { dTag: string; channelId: string } | null
+  setPendingHubChannelNotif: (v: { dTag: string; channelId: string } | null) => void
+
   /** Pending hub dTag for opening the Voice Hosting tab in User Hub Settings (consumed by ChannelList) */
   pendingHubVoiceHostingDTag: string | null
   setPendingHubVoiceHostingDTag: (dTag: string | null) => void
@@ -62,6 +67,8 @@ export const useNavigationStore = create<NavigationStore>((set) => ({
   setShowMobileMembers: (show) => set({ showMobileMembers: show }),
   pendingHubNotifDTag: null,
   setPendingHubNotifDTag: (dTag) => set({ pendingHubNotifDTag: dTag }),
+  pendingHubChannelNotif: null,
+  setPendingHubChannelNotif: (v) => set({ pendingHubChannelNotif: v }),
   pendingHubVoiceHostingDTag: null,
   setPendingHubVoiceHostingDTag: (dTag) => set({ pendingHubVoiceHostingDTag: dTag }),
   pendingHubMemberRoles: null,
