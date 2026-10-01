@@ -4775,7 +4775,7 @@ function EditField({ text, onChange, onCancel, unchanged, onSave, hubDTag, chann
           }
         }}
         disabled={saving}
-        className="w-full bg-secondary rounded-md px-2 py-1 text-sm resize-none outline-none border border-border focus:border-primary transition-colors text-foreground disabled:opacity-50"
+        className="w-full bg-secondary rounded-md px-2 py-1 text-base resize-none outline-none border border-border focus:border-primary transition-colors text-foreground disabled:opacity-50"
         style={{ maxHeight: '300px', overflowY: 'auto' }}
         rows={1}
       />
@@ -6421,7 +6421,7 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
               updateEmojiQuery(message, (e.target as HTMLTextAreaElement).selectionStart)
             }}
             placeholder={`Message #${channelName}`}
-            className="flex-1 p-2 bg-transparent resize-none outline-none text-sm min-h-[32px] text-foreground placeholder:text-muted-foreground rounded-sm max-[1080px]:order-[2]"
+            className="flex-1 p-2 bg-transparent resize-none outline-none text-base min-h-[32px] text-foreground placeholder:text-muted-foreground rounded-sm max-[1080px]:order-[2]"
             style={{ maxHeight: '500px', overflowY: 'auto' }}
             rows={1}
           />
