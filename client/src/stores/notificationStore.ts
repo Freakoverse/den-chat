@@ -38,6 +38,8 @@ import {
   signAndPublishReadState,
   getRemainingThrottleTime,
   pruneHubReadState,
+  compactHubReadStateToFit,
+  HUB_READ_STATE_META_KEYS,
   normalizeHubMuteSettings,
   hasAnyMute,
   saveCachedEvent,
@@ -85,6 +87,10 @@ export interface NotificationState {
   // ── Hub Chat ──
   /** Per-hub, per-channel unread state */
   hubUnreads: Record<string, Record<string, ChannelUnread>>
+  /** Per-hub "seen mark": a single baseline read timestamp every channel without its own entry inherits
+   *  (effective read = channel lastRead ?? hubSeenTo ?? 0). Only ever raised by a hub-wide "mark all read";
+   *  a missing entry (0) behaves exactly like the pre-`_seenTo` format. See HubReadState._seenTo. */
+  hubSeenTo: Record<string, number>
   /** Per-hub granular mute settings */
   hubMuteSettings: Record<string, HubMuteSettings>
   /** "Fresh general notification" flash (ephemeral, in-memory only). A hub badge is BLUE while the
@@ -204,20 +210,29 @@ function recomputeTotals(state: {
   }
 }
 
-/** Build HubReadState from the store's live state for serialization */
+/** Build HubReadState from the store's live state for serialization.
+ *
+ * Writes the hub's `_seenTo` seen mark (when set) and then only the channel entries that DIFFER from it;
+ * channels equal to the seen mark are dropped and inherit it on read. A hub with no seen mark (0) serializes
+ * exactly like the pre-`_seenTo` format (every channel explicit), so migration is a no-op. */
 function buildHubReadStateFromStore(
   hubUnreads: Record<string, Record<string, ChannelUnread>>,
-  hubMuteSettings: Record<string, HubMuteSettings>
+  hubMuteSettings: Record<string, HubMuteSettings>,
+  hubSeenTo: Record<string, number>
 ): HubReadState {
   const hubs: HubReadState['hubs'] = {}
   const groups = groupDTagSet()
   for (const [hubDTag, channels] of Object.entries(hubUnreads)) {
     if (groups.has(hubDTag)) continue
-    const hubEntry: Record<string, number> & { _muted?: HubMuteSettings | boolean } = {}
+    const hubEntry: Record<string, number> & { _muted?: HubMuteSettings | boolean; _seenTo?: number } = {}
     const settings = hubMuteSettings[hubDTag]
     if (settings && hasAnyMute(settings)) hubEntry._muted = settings
+    const seenTo = hubSeenTo[hubDTag] ?? 0
+    if (seenTo > 0) hubEntry._seenTo = seenTo
     for (const [channelId, ch] of Object.entries(channels)) {
-      hubEntry[channelId] = ch.lastRead
+      // Drop channels that sit exactly at the seen mark (they inherit it); keep every channel that diverges
+      // (read ahead, or the rare below-mark case) as an explicit override so no read state is lost.
+      if (ch.lastRead !== seenTo) hubEntry[channelId] = ch.lastRead
     }
     hubs[hubDTag] = hubEntry
   }
@@ -298,6 +313,7 @@ function preloadFromLocalStorage() {
   // Hub read-state
   let hubUnreads: Record<string, Record<string, ChannelUnread>> = {}
   let hubMuteSettings: Record<string, HubMuteSettings> = {}
+  let hubSeenTo: Record<string, number> = {}
   try {
     const hubCached = loadCachedEvent('hub')
     if (hubCached?.content) {
@@ -306,8 +322,9 @@ function preloadFromLocalStorage() {
         hubUnreads[hubDTag] = {}
         const muteRaw = hubData._muted
         if (muteRaw) hubMuteSettings[hubDTag] = normalizeHubMuteSettings(muteRaw)
+        if (typeof hubData._seenTo === 'number' && hubData._seenTo > 0) hubSeenTo[hubDTag] = hubData._seenTo
         for (const [key, value] of Object.entries(hubData)) {
-          if (key === '_muted') continue
+          if (HUB_READ_STATE_META_KEYS.has(key)) continue
           hubUnreads[hubDTag][key] = { lastRead: value as number, count: 0, hasMention: false }
         }
       }
@@ -361,7 +378,7 @@ function preloadFromLocalStorage() {
     }
   } catch { /* ignore */ }
 
-  return { hubUnreads, hubMuteSettings, dm17Unreads, dm04Unreads, socialSeenAt, pcReadTimes }
+  return { hubUnreads, hubMuteSettings, hubSeenTo, dm17Unreads, dm04Unreads, socialSeenAt, pcReadTimes }
 }
 
 const _preloaded = preloadFromLocalStorage()
@@ -379,6 +396,7 @@ const initialState = {
   socialSeenAt: _preloaded.socialSeenAt,
   hasSocialNotification: false,
   hubUnreads: _preloaded.hubUnreads,
+  hubSeenTo: _preloaded.hubSeenTo,
   hubMuteSettings: _preloaded.hubMuteSettings,
   hubFlashUntil: {} as Record<string, number>,
   channelFlash: {} as Record<string, Record<string, number>>,
@@ -528,12 +546,18 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
     const liveState = get()
     const hubUnreads: Record<string, Record<string, ChannelUnread>> = {}
     const hubMuteSettings: Record<string, HubMuteSettings> = {}
+    // Seen mark: take the max of the event's value and any live (preloaded) value so a watermark set this
+    // session before init completes is never lowered. It only ever moves forward.
+    const hubSeenTo: Record<string, number> = { ...liveState.hubSeenTo }
     for (const [hubDTag, hubData] of Object.entries(hubState.hubs)) {
       hubUnreads[hubDTag] = {}
       const muteRaw = hubData._muted
       if (muteRaw) hubMuteSettings[hubDTag] = normalizeHubMuteSettings(muteRaw)
+      if (typeof hubData._seenTo === 'number' && hubData._seenTo > (hubSeenTo[hubDTag] ?? 0)) {
+        hubSeenTo[hubDTag] = hubData._seenTo
+      }
       for (const [key, value] of Object.entries(hubData)) {
-        if (key === '_muted') continue
+        if (HUB_READ_STATE_META_KEYS.has(key)) continue
         const relayLastRead = value as number
         const live = liveState.hubUnreads[hubDTag]?.[key]
         if (live && live.lastRead >= relayLastRead) {
@@ -586,6 +610,7 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
       initialized: true,
       socialSeenAt,
       hubUnreads,
+      hubSeenTo,
       hubMuteSettings,
       dm17Unreads,
       dm04Unreads,
@@ -605,6 +630,7 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
     socialSeenAt: 0,
     hasSocialNotification: false,
     hubUnreads: {},
+    hubSeenTo: {},
     hubMuteSettings: {},
     dm17Unreads: {},
     dm04Unreads: {},
@@ -646,13 +672,15 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
     set((state) => {
       const hubChannels = { ...(state.hubUnreads[hubDTag] || {}) }
       const existing = hubChannels[channelId] || { lastRead: 0, count: 0, hasMention: false }
+      // Effective starting point is the channel's own lastRead, or the hub's seen mark when it has none.
+      const base = existing.lastRead || (state.hubSeenTo[hubDTag] ?? 0)
       // Advance the read watermark to this message's time, but CLAMP it to now first: created_at is
       // attacker-controlled, and a spoofed far-future message in the active channel would otherwise push
       // lastRead into the future, marking every real later message as already-read (unread/mention
       // suppression). Clamp-then-max never lets an untrusted timestamp move the watermark past now.
       const now = nowSeconds()
-      const ts = Math.max(existing.lastRead, Math.min(messageTimestamp, now))
-      if (ts === existing.lastRead && existing.count === 0 && !existing.hasMention) return {}
+      const ts = Math.max(base, Math.min(messageTimestamp, now))
+      if (ts === base && existing.count === 0 && !existing.hasMention) return {}
       hubChannels[channelId] = { lastRead: ts, count: 0, hasMention: false }
       const hubUnreads = { ...state.hubUnreads, [hubDTag]: hubChannels }
       return { hubUnreads, ...recomputeTotals({ ...state, hubUnreads }) }
@@ -663,12 +691,19 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
   markHubRead: (hubDTag) => {
     const now = nowSeconds()
     set((state) => {
+      // Raise the hub's seen mark to now. This is the ONE place `_seenTo` is set: a true hub-wide catch-up
+      // that genuinely covers every channel, including ones the user never opened (they inherit the mark).
+      // It's also what compacts the serialized form — every existing channel entry now equals the mark, so
+      // buildHubReadStateFromStore drops them all and the hub serializes to a single `_seenTo`.
+      const hubSeenTo = { ...state.hubSeenTo, [hubDTag]: now }
       const hubChannels = { ...(state.hubUnreads[hubDTag] || {}) }
+      // Still reset the live per-channel entries to now (keeps group serialization correct — a group takes
+      // the newest of its channel timestamps, not the hub seen mark — and clears in-memory counts).
       for (const channelId of Object.keys(hubChannels)) {
         hubChannels[channelId] = { ...hubChannels[channelId], lastRead: now, count: 0, hasMention: false }
       }
       const hubUnreads = { ...state.hubUnreads, [hubDTag]: hubChannels }
-      return { hubUnreads, ...recomputeTotals({ ...state, hubUnreads }) }
+      return { hubUnreads, hubSeenTo, ...recomputeTotals({ ...state, hubUnreads }) }
     })
     _saveHubToLocalStorage(get)
   },
@@ -688,8 +723,11 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
       }
       const hubChannels = { ...(state.hubUnreads[hubDTag] || {}) }
       const existing = hubChannels[channelId] || { lastRead: 0, count: 0, hasMention: false }
-      // Only count messages newer than the last read timestamp
-      if (existing.lastRead > 0 && messageTimestamp <= existing.lastRead) return {}
+      // Only count messages newer than the effective read point: the channel's own lastRead, or the hub's
+      // seen mark when the channel has no entry of its own (so a message already covered by a hub-wide
+      // "mark all read" is not re-counted as unread).
+      const effectiveRead = existing.lastRead > 0 ? existing.lastRead : (state.hubSeenTo[hubDTag] ?? 0)
+      if (effectiveRead > 0 && messageTimestamp <= effectiveRead) return {}
       hubChannels[channelId] = {
         ...existing,
         count: existing.count + 1,
@@ -790,20 +828,22 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
 
   pruneHubs: (activeHubDTags, channelsByHub) => {
     set((state) => {
-      const currentState = buildHubReadStateFromStore(state.hubUnreads, state.hubMuteSettings)
+      const currentState = buildHubReadStateFromStore(state.hubUnreads, state.hubMuteSettings, state.hubSeenTo)
       const pruned = pruneHubReadState(currentState, activeHubDTags, channelsByHub)
 
       if (pruned === currentState) return {} // nothing changed
 
-      // Rebuild hubUnreads from pruned state
+      // Rebuild hubUnreads + hubSeenTo from pruned state (hubs no longer in the list are dropped entirely).
       const hubUnreads: Record<string, Record<string, ChannelUnread>> = {}
       const hubMuteSettings: Record<string, HubMuteSettings> = {}
+      const hubSeenTo: Record<string, number> = {}
       for (const [hubDTag, hubData] of Object.entries(pruned.hubs)) {
         hubUnreads[hubDTag] = {}
         const muteRaw = hubData._muted
         if (muteRaw) hubMuteSettings[hubDTag] = normalizeHubMuteSettings(muteRaw)
+        if (typeof hubData._seenTo === 'number' && hubData._seenTo > 0) hubSeenTo[hubDTag] = hubData._seenTo
         for (const [key, value] of Object.entries(hubData)) {
-          if (key === '_muted') continue
+          if (HUB_READ_STATE_META_KEYS.has(key)) continue
           const existing = state.hubUnreads[hubDTag]?.[key]
           hubUnreads[hubDTag][key] = existing ?? {
             lastRead: value as number,
@@ -813,7 +853,7 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
         }
       }
 
-      return { hubUnreads, hubMuteSettings, ...recomputeTotals({ hubUnreads, hubMuteSettings, dm17Unreads: state.dm17Unreads, dm04Unreads: state.dm04Unreads }) }
+      return { hubUnreads, hubSeenTo, hubMuteSettings, ...recomputeTotals({ hubUnreads, hubMuteSettings, dm17Unreads: state.dm17Unreads, dm04Unreads: state.dm04Unreads }) }
     })
     _saveHubToLocalStorage(get)
   },
@@ -862,7 +902,7 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
 
   publishHubReadState: async (signer, privateKey) => {
     const state = get()
-    const hubState = buildHubReadStateFromStore(state.hubUnreads, state.hubMuteSettings)
+    const hubState = compactHubReadStateToFit(buildHubReadStateFromStore(state.hubUnreads, state.hubMuteSettings, state.hubSeenTo))
     const content = JSON.stringify(hubState)
 
     let encryptedContent: string | null = null
@@ -1013,7 +1053,7 @@ function _saveHubToLocalStorage(get: () => NotificationState, skipPublish = fals
   const groups = groupDTagSet()
 
   // Hubs (everything that isn't a group). Build a pseudo-event for localStorage (not signed, cache only).
-  const hubContent = JSON.stringify(buildHubReadStateFromStore(state.hubUnreads, state.hubMuteSettings))
+  const hubContent = JSON.stringify(compactHubReadStateToFit(buildHubReadStateFromStore(state.hubUnreads, state.hubMuteSettings, state.hubSeenTo)))
   const hubCached = loadCachedEvent('hub')
   if (hubCached?.content !== hubContent) {
     saveCachedEvent('hub', { ...(hubCached ?? { id: '', sig: '', pubkey: '', kind: 30078, tags: [['d', 'den-hub-read-state']] }), content: hubContent, created_at: now } as any)
@@ -1082,7 +1122,8 @@ function _savePcToLocalStorage(get: () => NotificationState) {
 /** Get unread count for a specific channel */
 export function getChannelUnread(hubDTag: string, channelId: string): ChannelUnread {
   const state = useNotificationStore.getState()
-  return state.hubUnreads[hubDTag]?.[channelId] ?? { lastRead: 0, count: 0, hasMention: false }
+  // A channel with no entry of its own inherits the hub's seen mark as its effective read point.
+  return state.hubUnreads[hubDTag]?.[channelId] ?? { lastRead: state.hubSeenTo[hubDTag] ?? 0, count: 0, hasMention: false }
 }
 
 /** Get total unread count for a hub (excluding muted) */

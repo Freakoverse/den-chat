@@ -793,7 +793,9 @@ function MessageList({ hubDTag, channelId, channelName, optimisticMessages, setO
   const canHide = isCreator || permsForHide.hide_messages
 
   // ── New-messages divider ──
-  const channelLastRead = useNotificationStore((s) => s.hubUnreads[hubDTag]?.[channelId]?.lastRead ?? 0)
+  // Effective read point for the unread divider: the channel's own lastRead, or the hub's seen mark when
+  // the channel has no entry of its own (covered only by a hub-wide "mark all read").
+  const channelLastRead = useNotificationStore((s) => s.hubUnreads[hubDTag]?.[channelId]?.lastRead ?? (s.hubSeenTo[hubDTag] ?? 0))
   const {
     dividerRef: newMsgDividerRef,
     dividerTimestamp: newMsgSnapshot,

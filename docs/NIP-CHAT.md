@@ -1833,6 +1833,57 @@ client's other read-states (`den-hub-read-state`, `den-dm-read-state`). This is
 The join-request view shows only requests **newer than this watermark** by default (with a "Show
 all" toggle), and advances the watermark **best-effort** when the view is opened.
 
+#### Hub Read-State and the Seen Mark (`den-hub-read-state`, NIP-78)
+
+A member's per-hub, per-channel **read-state** (what drives channel/hub unread dots) is persisted as a
+single **NIP-78 Application-Specific Data** event (kind `30078`), so "read up to here" syncs across the
+member's devices.
+
+- **`d` tag**: the generic `"den-hub-read-state"` (never hub-specific).
+- **`content`**: **NIP-44 self-encrypted** (it enumerates the hubs the member belongs to, which would
+  otherwise link the member to private v2 hubs). Published to the member's **own relays**, not hub relays.
+- **Payload shape**:
+  ```json
+  {
+    "hubs": {
+      "<hub d-tag>": {
+        "_seenTo": 1700000000,          // optional: the hub's "seen mark" (see below)
+        "_muted":  { /* HubMuteSettings */ },  // optional: per-hub notification mutes
+        "<channelId>": 1700000500        // per-channel read timestamp (override of the seen mark)
+      }
+    }
+  }
+  ```
+
+**Effective read point.** For any channel, the effective "read up to" time is `channel entry ?? _seenTo ?? 0`.
+A channel with no entry of its own inherits the hub's seen mark; a message is unread only when its
+`created_at` is strictly greater than this effective time.
+
+**The seen mark (`_seenTo`).** A single baseline read timestamp for the whole hub. It lets a fully
+caught-up hub store **one number** instead of a timestamp per channel, keeping the event well under the
+NIP-44 **65,535-byte** plaintext cap even at the maximum hub and channel counts (where a flat per-channel
+map would overflow it). Rules:
+
+1. **Only ever raised by a hub-wide "mark all read."** That action genuinely covers every channel,
+   including ones the member never opened, so inheriting the mark is correct. `_seenTo` is **never**
+   synthesized from partial per-channel data, because doing so could mark a never-opened channel read and
+   hide a real unread.
+2. **Serialization drops channels equal to the mark** (they inherit it) and keeps only channels that
+   diverge (read ahead of it). After a "mark all read" a hub collapses to just `{ "_seenTo": <t> }`.
+3. **Absent `_seenTo` means 0**, which is byte-for-byte identical to the pre-seen-mark format, so older
+   events load with no behavior change. Migration is a no-op; a hub compacts the first time it is marked
+   fully read.
+
+**Size guard (cap-prune).** If the serialized event would still approach the cap (only possible when
+thousands of channels diverge from their seen marks at once), the client **collapses channel overrides
+back into their hub's `_seenTo`**, smallest-gap-first. Dropping an override only makes a channel look
+slightly **more** unread (a self-healing dot cleared on next open), **never less**, so pruning can never
+hide a genuine unread. Only hubs that have a `_seenTo` can be pruned this way (there must be a baseline to
+fall back to).
+
+> **Groups** (§21) keep their own `den-group-read-state` event (one timestamp per group) and do not use a
+> seen mark, so group read-state is unaffected by the above.
+
 ---
 
 #### 6.3.1 Join Note

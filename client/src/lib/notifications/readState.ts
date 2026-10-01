@@ -28,10 +28,23 @@ export interface HubMuteSettings {
   roles?: boolean     // Mute @role mentions
 }
 
-/** Hub chat read-state: per-hub, per-channel timestamps + optional mute settings */
+/**
+ * Hub chat read-state: per-hub, per-channel read timestamps + optional meta keys.
+ *
+ * `_seenTo` is the hub's "seen mark": a single baseline read timestamp that every channel WITHOUT its
+ * own entry inherits (effective read = channel override ?? `_seenTo` ?? 0). It lets a fully-caught-up hub
+ * store one number instead of a timestamp per channel, so the event stays well under the NIP-44 size cap
+ * even at the max hub/channel counts. It is only ever RAISED by a hub-wide "mark all read" (which truly
+ * covers every channel); it is never fabricated from partial per-channel data, so a missing `_seenTo`
+ * falls back to 0 (identical to the pre-`_seenTo` format) and never hides a genuine unread. See NIP-CHAT
+ * "Notification read-state".
+ */
 export interface HubReadState {
-  hubs: Record<string, Record<string, number> & { _muted?: HubMuteSettings | boolean }>
+  hubs: Record<string, Record<string, number> & { _muted?: HubMuteSettings | boolean; _seenTo?: number }>
 }
+
+/** Meta keys inside a per-hub read-state object that are NOT channel ids. */
+export const HUB_READ_STATE_META_KEYS = new Set(['_muted', '_seenTo'])
 
 /**
  * Normalize a legacy boolean _muted value to HubMuteSettings.
@@ -434,7 +447,7 @@ export function pruneHubReadState(
 
     const hubChannels = { ...pruned.hubs[hubDTag] }
     for (const key of Object.keys(hubChannels)) {
-      if (key === '_muted') continue // preserve meta keys
+      if (HUB_READ_STATE_META_KEYS.has(key)) continue // preserve meta keys (_muted, _seenTo)
       if (!visibleChannels.has(key)) {
         delete hubChannels[key]
         changed = true
@@ -444,4 +457,51 @@ export function pruneHubReadState(
   }
 
   return changed ? pruned : state
+}
+
+/**
+ * Keep the serialized hub read-state under a byte budget (insurance for the NIP-44 65,535-byte plaintext
+ * cap). The `_seenTo` scheme already makes caught-up hubs almost free, so this only ever engages in the
+ * pathological case of thousands of channels diverging from their hub's seen mark at once. When it does,
+ * it COLLAPSES channel overrides into their hub's `_seenTo` (drops the override, so the channel falls back
+ * to the seen mark), smallest-gap-above-`_seenTo` first, so the least-recently-advanced overrides go first
+ * and the user-visible cost is minimal. Dropping an override only ever makes a channel look slightly MORE
+ * unread (a self-healing stale dot cleared on next open), never less, so it can never hide a real unread.
+ *
+ * Only hubs that HAVE a `_seenTo` can collapse (there must be a baseline to fall back to). The default
+ * budget leaves headroom below the hard cap for encryption/encoding overhead.
+ */
+export function compactHubReadStateToFit(state: HubReadState, maxBytes = 60_000): HubReadState {
+  const measure = (s: HubReadState) => JSON.stringify(s).length
+  if (measure(state) <= maxBytes) return state
+
+  // Collect every droppable override (channels in hubs that have a seen mark to fall back to), tagged with
+  // how far they sit above the mark. Smallest gap = least information lost when collapsed.
+  type Drop = { hubDTag: string; channelId: string; gap: number }
+  const drops: Drop[] = []
+  for (const [hubDTag, hubData] of Object.entries(state.hubs)) {
+    const seenTo = typeof hubData._seenTo === 'number' ? hubData._seenTo : undefined
+    if (seenTo === undefined) continue // no baseline → collapsing would fall to 0 (whole channel unread); skip
+    for (const [key, value] of Object.entries(hubData)) {
+      if (HUB_READ_STATE_META_KEYS.has(key)) continue
+      drops.push({ hubDTag, channelId: key, gap: (value as number) - seenTo })
+    }
+  }
+  if (drops.length === 0) return state // nothing we can safely collapse
+  drops.sort((a, b) => a.gap - b.gap)
+
+  const out: HubReadState = { hubs: {} }
+  for (const [d, h] of Object.entries(state.hubs)) out.hubs[d] = { ...h }
+
+  // Drop smallest-gap overrides until under budget. Re-measure in small batches to avoid O(n^2) on huge sets.
+  let i = 0
+  const BATCH = 64
+  while (i < drops.length && measure(out) > maxBytes) {
+    const end = Math.min(i + BATCH, drops.length)
+    for (; i < end; i++) {
+      const { hubDTag, channelId } = drops[i]
+      delete (out.hubs[hubDTag] as Record<string, number>)[channelId]
+    }
+  }
+  return out
 }

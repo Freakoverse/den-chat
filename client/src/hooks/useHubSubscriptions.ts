@@ -812,7 +812,9 @@ export function useHubSubscriptions() {
         if (validChannelIds.size > 0 && !validChannelIds.has(channelId)) continue // channel no longer in the hub
         if (hubDTag === activeHub && channelId === activeChannel) continue // currently viewing → don't badge
         if (!canReceiveChannelNotification(hubDTag, channelId, myPubkey)) continue
-        const lastRead = notif.hubUnreads[hubDTag]?.[channelId]?.lastRead ?? 0
+        // Effective read point: the channel's own lastRead, or the hub's seen mark when it has no entry
+        // (a channel covered only by a hub-wide "mark all read" has no per-channel entry).
+        const lastRead = notif.hubUnreads[hubDTag]?.[channelId]?.lastRead ?? (notif.hubSeenTo[hubDTag] ?? 0)
         const targetChannel = hub?.channels?.find((c) => c.channelId === channelId)
         const isForum = targetChannel?.type === 'forum'
         let count = 0
