@@ -4741,6 +4741,7 @@ function EditField({ text, onChange, onCancel, unchanged, onSave, hubDTag, chann
       <textarea
         ref={ref}
         value={text}
+        spellCheck={true}
         onChange={(e) => {
           onChange(e.target.value)
           autoResize(e.target)
@@ -6421,6 +6422,7 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
               updateEmojiQuery(message, (e.target as HTMLTextAreaElement).selectionStart)
             }}
             placeholder={`Message #${channelName}`}
+            spellCheck={true}
             className="flex-1 p-2 bg-transparent resize-none outline-none text-base min-h-[32px] text-foreground placeholder:text-muted-foreground rounded-sm max-[1080px]:order-[2]"
             style={{ maxHeight: '500px', overflowY: 'auto' }}
             rows={1}
