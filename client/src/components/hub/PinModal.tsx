@@ -6,8 +6,9 @@
  * each in a collapsible accordion section grouped by pinner.
  */
 
-import { useState, useMemo, useCallback, useEffect } from 'react'
-import { X, Pin, ChevronDown, ChevronRight, ArrowRight, PinOff } from 'lucide-react'
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
+import { X, Pin, ChevronDown, ChevronRight, ArrowRight, PinOff, Loader2 } from 'lucide-react'
+import { fetchSingleMessage } from '@/hooks/useHubSubscriptions'
 import { usePinStore } from '@/stores/pinStore'
 import { useHubStore } from '@/stores/hubStore'
 import { useUserStore } from '@/stores/userStore'
@@ -73,6 +74,20 @@ export function PinModal({ hubDTag, channelId, onClose, onJumpToMessage }: PinMo
   const [showOthers, setShowOthers] = useState(false)
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set())
 
+  // On-demand fetch of pinned messages that aren't in the local store yet (the user hasn't scrolled to
+  // them). Pins reference messages by aRef; if the message isn't loaded we fetch it by coordinate, show a
+  // spinner, and let useMessages decrypt + render it. `loadingRefs` = in-flight; `failedRefs` = fetch
+  // returned nothing (genuinely unavailable). `attemptedRef` dedupes so we fetch each ref at most once.
+  const [loadingRefs, setLoadingRefs] = useState<Set<string>>(new Set())
+  const [failedRefs, setFailedRefs] = useState<Set<string>>(new Set())
+  const attemptedRef = useRef<Set<string>>(new Set())
+  // Reset the fetch bookkeeping if the channel changes while the modal stays mounted.
+  useEffect(() => {
+    attemptedRef.current = new Set()
+    setLoadingRefs(new Set())
+    setFailedRefs(new Set())
+  }, [channelId])
+
   // Build message lookup by addressable ref (kind:pubkey:dTag)
   const msgByRef = useMemo(() => {
     const map = new Map<string, ChatMessage>()
@@ -82,6 +97,27 @@ export function PinModal({ hubDTag, channelId, onClose, onJumpToMessage }: PinMo
     }
     return map
   }, [messages])
+
+  // Fetch any pinned message for this channel that isn't loaded yet (at most once per aRef).
+  useEffect(() => {
+    if (!hubPins) return
+    const refs = new Set<string>()
+    for (const pe of hubPins) for (const p of pe.pins) if (p.channelId === channelId) refs.add(p.aRef)
+    const toFetch = [...refs].filter((ref) => !msgByRef.has(ref) && !attemptedRef.current.has(ref))
+    if (toFetch.length === 0) return
+    for (const ref of toFetch) attemptedRef.current.add(ref)
+    setLoadingRefs((prev) => new Set([...prev, ...toFetch]))
+    for (const ref of toFetch) {
+      fetchSingleMessage(hubDTag, ref)
+        .catch(() => null)
+        .then((found) => {
+          setLoadingRefs((prev) => { const next = new Set(prev); next.delete(ref); return next })
+          // No event found on relays => genuinely unavailable. If found, it's added to the store and
+          // useMessages will decrypt it, flowing into msgByRef on the next render.
+          if (!found) setFailedRefs((prev) => new Set(prev).add(ref))
+        })
+    }
+  }, [hubPins, channelId, msgByRef, hubDTag])
 
   // Filter pins for this channel and build sections grouped by pinner
   const { creatorSection, mySection, otherSections, totalOtherPins } = useMemo(() => {
@@ -184,9 +220,14 @@ export function PinModal({ hubDTag, channelId, onClose, onJumpToMessage }: PinMo
               </p>
             </div>
           </>
-        ) : (
+        ) : failedRefs.has(pin.aRef) ? (
           <div className="flex-1 min-w-0">
             <p className="text-xs text-muted-foreground italic">Message not loaded</p>
+          </div>
+        ) : (
+          <div className="flex-1 min-w-0 flex items-center gap-2">
+            <Loader2 size={14} className="animate-spin text-muted-foreground shrink-0" />
+            <p className="text-xs text-muted-foreground italic">Loading message…</p>
           </div>
         )}
         <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
