@@ -15,7 +15,7 @@ import type { UnsignedEvent, Event } from 'nostr-tools'
 import type { ISigner } from '@/stores/userStore'
 import {
   HUB_NAME_MAX, HUB_DESCRIPTION_MAX, CHANNEL_NAME_MAX, CHANNEL_DESCRIPTION_MAX,
-  CATEGORY_NAME_MAX, ROLE_NAME_MAX, TOPIC_TAG_MAX,
+  CATEGORY_NAME_MAX, ROLE_NAME_MAX, TOPIC_TAG_MAX, MEDIA_URL_MAX,
   MAX_CHANNELS, MAX_CATEGORIES, MAX_ROLES, MAX_TOPIC_TAGS, MAX_GENERAL_RELAYS, MAX_BLOSSOM_SERVERS,
 } from '@/lib/hub/hubLimits'
 
@@ -59,6 +59,8 @@ function validateHubLimits(opts: BuildHubEventOptions) {
   // String limits
   if (opts.name.length > HUB_NAME_MAX) errors.push(`Hub name exceeds ${HUB_NAME_MAX} characters`)
   if (opts.description && opts.description.length > HUB_DESCRIPTION_MAX) errors.push(`Hub description exceeds ${HUB_DESCRIPTION_MAX} characters`)
+  if (opts.icon && opts.icon.length > MEDIA_URL_MAX) errors.push(`Hub icon URL exceeds ${MEDIA_URL_MAX} characters`)
+  if (opts.banner && opts.banner.length > MEDIA_URL_MAX) errors.push(`Hub banner URL exceeds ${MEDIA_URL_MAX} characters`)
 
   // Array limits
   if (opts.channels.length > MAX_CHANNELS) errors.push(`Too many channels (max ${MAX_CHANNELS})`)

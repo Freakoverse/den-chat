@@ -16,6 +16,9 @@ export const CHANNEL_DESCRIPTION_MAX = 256
 export const CATEGORY_NAME_MAX = 100
 export const ROLE_NAME_MAX = 100
 export const TOPIC_TAG_MAX = 32
+/** Max length for a hub media URL (icon / banner). Covers https:// + a 253-char domain + a 64-char
+ *  sha256 Blossom path with headroom; bounds these otherwise-uncapped fields in the hub event. */
+export const MEDIA_URL_MAX = 512
 
 // ── Array Limits ───────────────────────────────────────────────────
 export const MAX_CHANNELS = 100
