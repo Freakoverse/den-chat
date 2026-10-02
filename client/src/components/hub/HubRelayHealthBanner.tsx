@@ -13,12 +13,13 @@
  * Nothing publishes without the owner's explicit click. The banner only informs; the modal does the work.
  */
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { AlertTriangle, Loader2, Check, X, RefreshCw, Radio } from 'lucide-react'
 import { useEscToClose } from '@/hooks/useEscToClose'
-import { useHubStore, type HubData } from '@/stores/hubStore'
+import { type HubData } from '@/stores/hubStore'
 import { useUserStore } from '@/stores/userStore'
+import { useRelayHealthStore } from '@/lib/nostr/relayHealthProbe'
 import {
   probeRelays, fetchHubProbeEvent, replacementRelayCandidates, republishHubWithRelays, type RelayCheck,
 } from '@/lib/hub/hubRelayHealth'
@@ -26,12 +27,27 @@ import {
 const short = (u: string) => u.replace(/^wss?:\/\//, '')
 const norm = (u: string) => u.replace(/\/+$/, '')
 
+/**
+ * The hub's advertised relays that currently read 'broken' in the shared relay-health store, auto-probing
+ * them on mount. This is the single source for the banner/notice, so a broken relay surfaces the moment
+ * the channel view (where the banner lives) or Hub Settings opens, without a separate startup probe.
+ */
+function useHubBrokenRelays(hub: HubData): string[] {
+  const status = useRelayHealthStore((s) => s.status)
+  const probe = useRelayHealthStore((s) => s.probe)
+  const relaysKey = hub.generalRelays.map(norm).join(',')
+  useEffect(() => {
+    for (const r of relaysKey.split(',').filter(Boolean)) probe(r)
+  }, [relaysKey, probe])
+  return hub.generalRelays.filter((r) => status[norm(r)] === 'broken')
+}
+
 /** Non-closable banner for the channel view: the hub has broken advertised relays; opens the fix modal. */
 export function HubRelayHealthBanner({ hub }: { hub: HubData }) {
-  const broken = useHubStore((s) => s.relayHealth[hub.dTag])
+  const broken = useHubBrokenRelays(hub)
   const [open, setOpen] = useState(false)
 
-  if (!broken || broken.length === 0) return null
+  if (broken.length === 0) return null
 
   return (
     <>
@@ -57,10 +73,10 @@ export function HubRelayHealthBanner({ hub }: { hub: HubData }) {
  * Renders nothing when there are no known-broken relays.
  */
 export function HubRelayHealthNotice({ hub }: { hub: HubData }) {
-  const broken = useHubStore((s) => s.relayHealth[hub.dTag])
+  const broken = useHubBrokenRelays(hub)
   const [open, setOpen] = useState(false)
 
-  if (!broken || broken.length === 0) return null
+  if (broken.length === 0) return null
 
   return (
     <>
@@ -119,9 +135,11 @@ export function HubRelayHealthModal({ hub, onClose }: { hub: HubData; onClose: (
       // Fetch the hub event once and reuse it across every candidate probe.
       const probeEvent = await fetchHubProbeEvent(hub)
       if (!probeEvent) throw new Error('Could not find this hub\'s event on any relay to test with.')
-      const res = await probeRelays(hub, candidates, (r) => setResults((prev) => [...prev, r]), probeEvent)
-      // Keep the persisted broken-advertised set in sync with this fresh probe.
-      useHubStore.getState().setRelayHealth(hub.dTag, res.filter((r) => !r.ok && advertised.has(r.relay)).map((r) => r.relay))
+      const res = await probeRelays(hub, candidates, (r) => {
+        setResults((prev) => [...prev, r])
+        // Push each deeper hub-event result into the shared store so the banner + labels reflect it.
+        useRelayHealthStore.getState().setStatus(r.relay, r.ok ? 'working' : 'broken')
+      }, probeEvent)
       // Preselect the working relays: keep the advertised ones that still work, then add working
       // replacements up to a small default so the hub keeps a few copies.
       const working = res.filter((r) => r.ok).map((r) => r.relay)

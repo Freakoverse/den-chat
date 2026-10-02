@@ -1,0 +1,134 @@
+/**
+ * relayHealthProbe: a universal, cached "does this relay actually work for me" check.
+ *
+ * The reachability dot (SettingsPage RelayHealthDot) only proves a WebSocket connects. That's not the
+ * failure that breaks hubs/DMs: a relay can connect fine yet reject writes or refuse to serve events
+ * back (degmods was exactly this). This store does the REAL test, everywhere, as a labeled badge beside
+ * the dot: publish one of the USER'S OWN already-signed events to a single relay, then fetch it straight
+ * back from that same relay by id. Accepted + served back => working; otherwise => broken.
+ *
+ * Probe payload (what the user "published related to hubs"): their own most recent hub message if we hold
+ * one locally (v1 messages are authored by their real key, so identifiable), else their own relay list
+ * (kind 10002) or profile (kind 0). Any of these is the user's own event and belongs on a relay, so
+ * re-publishing it to test is harmless (and doubles as redundancy).
+ *
+ * Results are cached per relay URL with a TTL and shared across the whole UI, so the labels are auto-
+ * filled on open and shown instantly next time. In-flight probes are deduped per URL.
+ */
+
+import { create } from 'zustand'
+import type { Event } from 'nostr-tools'
+import { publishToSpecificRelays, fetchEventsFromRelays, fetchReplaceable } from './relay-pool'
+import { useUserStore } from '@/stores/userStore'
+import { useMessageStore } from '@/stores/messageStore'
+import { STANDARD_KINDS } from '@/lib/crypto/constants'
+
+export type RelayHealth = 'checking' | 'working' | 'broken'
+
+/** How long a cached result stays fresh before an auto-probe re-checks it. */
+const TTL_MS = 5 * 60_000
+
+const norm = (u: string) => u.replace(/\/+$/, '')
+
+interface RelayHealthState {
+  status: Record<string, RelayHealth>
+  checkedAt: Record<string, number>
+  /** Auto-probe a relay (no-op if fresh or already in flight). Updates `status` when it resolves. */
+  probe: (url: string) => void
+  /** Force a re-probe regardless of the TTL (used by an explicit re-test). */
+  refresh: (url: string) => void
+  /** Record a known result directly (e.g. the hub-event probe in the relay fix modal). */
+  setStatus: (url: string, health: 'working' | 'broken') => void
+}
+
+// The probe event is the same for every relay in a session, so fetch/find it once and reuse.
+let probeEventPromise: Promise<Event | null> | null = null
+function resetProbeEvent() { probeEventPromise = null }
+
+async function resolveProbeEvent(): Promise<Event | null> {
+  const me = useUserStore.getState().pubkey
+  if (!me) return null
+
+  // 1. One of the user's OWN hub messages we already hold (v1: authored by their real key).
+  const byHub = useMessageStore.getState().messages
+  for (const byChannel of Object.values(byHub)) {
+    for (const list of Object.values(byChannel)) {
+      for (const m of list) {
+        if (m.pubkey === me && m.rawEvent) {
+          try { return JSON.parse(m.rawEvent) as Event } catch { /* keep looking */ }
+        }
+      }
+    }
+  }
+
+  // 2. Fall back to the user's own relay list (10002), then profile (0): always theirs, always
+  //    belongs on relays, and works for v2-only users whose hub messages are pseudonym-authored.
+  return (await fetchReplaceable(me, STANDARD_KINDS.RELAY_LIST).catch(() => null))
+    ?? (await fetchReplaceable(me, STANDARD_KINDS.USER_METADATA).catch(() => null))
+}
+
+function getProbeEvent(): Promise<Event | null> {
+  if (!probeEventPromise) probeEventPromise = resolveProbeEvent()
+  return probeEventPromise
+}
+
+const inFlight = new Set<string>()
+
+export const useRelayHealthStore = create<RelayHealthState>((set, get) => {
+  const run = (url: string) => {
+    const n = norm(url)
+    if (!n || inFlight.has(n)) return
+    inFlight.add(n)
+    set((s) => ({ status: { ...s.status, [n]: 'checking' } }))
+    ;(async () => {
+      let result: RelayHealth | null = 'broken'
+      try {
+        const ev = await getProbeEvent()
+        if (!ev) {
+          result = null // no probe event available (e.g. logged-out) => show no label, keep the dot
+        } else {
+          const accepted = await publishToSpecificRelays([url], ev)
+          if (accepted.length > 0) {
+            const back = await fetchEventsFromRelays([url], { ids: [ev.id] })
+            result = back.some((e) => e.id === ev.id) ? 'working' : 'broken'
+          } else {
+            result = 'broken'
+          }
+        }
+      } catch {
+        result = 'broken'
+      }
+      inFlight.delete(n)
+      set((s) => {
+        const status = { ...s.status }
+        const checkedAt = { ...s.checkedAt }
+        if (result === null) { delete status[n]; delete checkedAt[n] }
+        else { status[n] = result; checkedAt[n] = Date.now() }
+        return { status, checkedAt }
+      })
+    })()
+  }
+
+  return {
+    status: {},
+    checkedAt: {},
+    probe: (url) => {
+      const n = norm(url)
+      const st = get()
+      const cached = st.status[n]
+      if (cached && cached !== 'checking' && Date.now() - (st.checkedAt[n] ?? 0) < TTL_MS) return
+      run(url)
+    },
+    refresh: (url) => { resetProbeEvent(); run(url) },
+    setStatus: (url, health) => {
+      const n = norm(url)
+      if (!n) return
+      set((s) => ({ status: { ...s.status, [n]: health }, checkedAt: { ...s.checkedAt, [n]: Date.now() } }))
+    },
+  }
+})
+
+/** Convenience: the current health of a relay (for non-component callers, e.g. the hub banner). */
+export function relayHealthOf(url: string): RelayHealth | undefined {
+  return useRelayHealthStore.getState().status[norm(url)]
+}

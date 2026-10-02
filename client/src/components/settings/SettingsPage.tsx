@@ -45,6 +45,7 @@ import {
   type SoundEffectName as SfxName,
 } from '@/lib/voice/soundEffects'
 import { DenChatLogo } from '@/components/ui/DenChatLogo'
+import { RelayHealthLabel } from '@/components/nostr/RelayHealthLabel'
 import {
   Settings, Palette, Globe, Shield, ShieldCheck, Info, Keyboard, MessageSquare, Users, ChevronsUpDown,
   Sun, Moon, Monitor, Plus, Minus, Trash2, Eye, EyeOff, Search,
@@ -2040,6 +2041,7 @@ function NetworkTab() {
                     const copy = [...clientRelays]; copy[i] = { ...r, enabled: v }; saveClientRelays(copy)
                   }} />
                   <span className="text-sm text-foreground flex-1 font-mono truncate">{r.url}</span>
+                  <RelayHealthLabel url={r.url} />
                   <RelayHealthDot url={r.url} />
                   {!getDefaultRelays().includes(r.url) && (
                     <button onClick={() => saveClientRelays(clientRelays.filter((_, j) => j !== i))} className="text-muted-foreground hover:text-destructive transition-colors cursor-pointer">
@@ -3231,6 +3233,7 @@ function UserRelayListSection() {
             {relays.map((url) => (
               <div key={url} className="flex items-center gap-3 px-3 py-2 rounded-lg bg-secondary/30 border border-border">
                 <span className="text-sm text-foreground flex-1 font-mono truncate">{url}</span>
+                <RelayHealthLabel url={url} />
                 <RelayHealthDot url={url} />
                 <button onClick={() => removeRelay(url)} className="text-muted-foreground hover:text-destructive transition-colors cursor-pointer">
                   <Trash2 size={14} />

@@ -1,5 +1,5 @@
 /**
- * hubRelayHealth — creator-side health check for a hub's ADVERTISED relays.
+ * hubRelayHealth: creator-side health check for a hub's ADVERTISED relays.
  *
  * A hub's `generalRelays` list is where every member reads and writes the hub. If one of those relays
  * dies or stops accepting writes, the hub degrades silently: messages land on fewer relays, some members
@@ -7,20 +7,20 @@
  * creator PROVE which advertised relays still work and fix the list, deliberately. It is the relay twin
  * of hubRelayHealth's sibling, lib/hub/hubBlossomHealth (which does the same for Blossom servers).
  *
- *   probeRelays                 — for each relay: rebroadcast the hub's OWN event (kind 36942 / group
+ *   probeRelays                : for each relay: rebroadcast the hub's OWN event (kind 36942 / group
  *                                 36950) to that relay alone (no failover), then fetch it straight back
  *                                 from that same relay by id. A relay that rejects the write or won't
  *                                 serve it back is marked broken. This is a real write+read round-trip,
  *                                 not a reachability ping, so it catches write-gated / read-gated /
  *                                 no-retention relays that a socket check would false-pass. Retries once
  *                                 so a single network blip doesn't mark a relay broken.
- *   replacementRelayCandidates  — relays the hub doesn't already advertise (client + the user's NIP-65),
+ *   replacementRelayCandidates : relays the hub doesn't already advertise (client + the user's NIP-65),
  *                                 so the creator can swap a broken relay for one proven to work.
- *   republishHubWithRelays      — the same hub-event republish Hub Settings uses, with only the relay
+ *   republishHubWithRelays     : the same hub-event republish Hub Settings uses, with only the relay
  *                                 list changed. An explicit owner action; nothing here publishes on its own.
  *
- * Results feed hubStore.relayHealth (persisted per-account) via setRelayHealth, surfaced to the creator
- * by HubRelayHealthBanner and the per-relay badges in Hub Settings.
+ * Results feed the shared relay-health store (lib/nostr/relayHealthProbe), surfaced to the creator by
+ * HubRelayHealthBanner and the per-relay badges in Hub Settings.
  */
 
 import type { Event, Filter } from 'nostr-tools'
@@ -130,7 +130,7 @@ export async function probeRelays(
 }
 
 /**
- * Republish the hub event with ONLY its relay list changed — the identical path Hub Settings takes when
+ * Republish the hub event with ONLY its relay list changed: the identical path Hub Settings takes when
  * the owner edits relays there (v2: encrypted content, signed as O; v1: mined + signed as the creator),
  * published with relay failover, then mirrored into the local store. Clears the hub's relay-health marks
  * on success. Mirrors republishHubWithBlossomServers.
@@ -199,5 +199,4 @@ export async function republishHubWithRelays(
   if (accepted.length === 0) throw new Error('The hub update was not accepted by any relay. Please try again.')
 
   useHubStore.getState().setHubData(hub.dTag, { ...hub, generalRelays: relays, eventCreatedAt: signed.created_at })
-  useHubStore.getState().clearRelayHealth(hub.dTag)
 }
