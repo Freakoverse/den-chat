@@ -18,7 +18,7 @@ import { useProfileCache } from '@/hooks/useProfileCache'
 import { useVoiceDisplayPubkey, useMyVoicePubkey } from '@/hooks/useVoiceDisplayPubkey'
 import { useCachedImageUrl } from '@/lib/imageCache'
 import { UserProfileModal } from '@/components/hub/UserProfileModal'
-import { HubSettingsModal } from '@/components/hub/HubSettingsModal'
+import { HubSettingsModal, type SettingsPage } from '@/components/hub/HubSettingsModal'
 import { HubInfoModal } from '@/components/hub/HubInfoModal'
 import { InviteModal } from '@/components/hub/InviteModal'
 import { JoinRequestsModal } from '@/components/hub/JoinRequestsModal'
@@ -56,6 +56,7 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
   // When opening settings to edit one member's roles (from their profile modal): jump to Members and
   // focus this pubkey. Cleared on close so the next plain gear-open lands on the default page.
   const [settingsFocusMember, setSettingsFocusMember] = useState<string | undefined>(undefined)
+  const [settingsInitialPage, setSettingsInitialPage] = useState<SettingsPage | undefined>(undefined)
   const [showInfo, setShowInfo] = useState(false)
   const [showInvite, setShowInvite] = useState(false)
   const [showJoinRequests, setShowJoinRequests] = useState(false)
@@ -174,6 +175,18 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
       setShowSettings(true)
     }
   }, [pendingHubMemberRoles, hub, isCreator, clearPendingMemberRoles])
+
+  // Open Hub Settings at a requested page (e.g. the relay-health banner asking for the Network page).
+  const pendingHubSettingsPage = useNavigationStore((s) => s.pendingHubSettingsPage)
+  const clearPendingSettingsPage = useNavigationStore((s) => s.setPendingHubSettingsPage)
+  useEffect(() => {
+    if (pendingHubSettingsPage && hub && hub.dTag === pendingHubSettingsPage.dTag && isCreator) {
+      const page = pendingHubSettingsPage.page as SettingsPage
+      clearPendingSettingsPage(null)
+      setSettingsInitialPage(page)
+      setShowSettings(true)
+    }
+  }, [pendingHubSettingsPage, hub, isCreator, clearPendingSettingsPage])
   const secretsResolved = useHubStore((s) => activeHubId ? !!s.hubSecretsResolved[activeHubId] : false)
 
   // Reset the optimistic "withdrawn" flag whenever the hub is (re-)present in the user's list.
@@ -894,9 +907,9 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
       {isCreator && (
         <HubSettingsModal
           open={showSettings}
-          onClose={() => { setShowSettings(false); setSettingsFocusMember(undefined) }}
+          onClose={() => { setShowSettings(false); setSettingsFocusMember(undefined); setSettingsInitialPage(undefined) }}
           hub={hub}
-          initialPage={settingsFocusMember ? 'members' : undefined}
+          initialPage={settingsFocusMember ? 'members' : settingsInitialPage}
           focusMemberPubkey={settingsFocusMember}
         />
       )}

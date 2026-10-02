@@ -225,7 +225,7 @@ interface HubSettingsModalProps {
 }
 
 
-type SettingsPage = 'general' | 'channels' | 'roles' | 'members' | 'network' | 'security' | 'banned' | 'hidden' | 'reports' | 'dangerous'
+export type SettingsPage = 'general' | 'channels' | 'roles' | 'members' | 'network' | 'security' | 'banned' | 'hidden' | 'reports' | 'dangerous'
 
 const PAGES: { id: SettingsPage; label: string; icon: React.ElementType; danger?: boolean; creatorOnly?: boolean }[] = [
   { id: 'general', label: 'General', icon: Settings },

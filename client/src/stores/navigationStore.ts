@@ -48,6 +48,10 @@ interface NavigationStore {
    *  roles (set from a member's profile modal, consumed by ChannelList; owner-only). */
   pendingHubMemberRoles: { dTag: string; pubkey: string } | null
   setPendingHubMemberRoles: (v: { dTag: string; pubkey: string } | null) => void
+  /** Pending request to open owner Hub Settings at a specific page (e.g. the relay-health banner asking
+   *  to open the Network page). Set by the requester, consumed by ChannelList; owner-only. */
+  pendingHubSettingsPage: { dTag: string; page: string } | null
+  setPendingHubSettingsPage: (v: { dTag: string; page: string } | null) => void
 }
 
 export const useNavigationStore = create<NavigationStore>((set) => ({
@@ -73,5 +77,7 @@ export const useNavigationStore = create<NavigationStore>((set) => ({
   setPendingHubVoiceHostingDTag: (dTag) => set({ pendingHubVoiceHostingDTag: dTag }),
   pendingHubMemberRoles: null,
   setPendingHubMemberRoles: (v) => set({ pendingHubMemberRoles: v }),
+  pendingHubSettingsPage: null,
+  setPendingHubSettingsPage: (v) => set({ pendingHubSettingsPage: v }),
 }))
 

@@ -19,6 +19,7 @@ import { AlertTriangle, Loader2, Check, X, RefreshCw, Radio } from 'lucide-react
 import { useEscToClose } from '@/hooks/useEscToClose'
 import { type HubData } from '@/stores/hubStore'
 import { useUserStore } from '@/stores/userStore'
+import { useNavigationStore } from '@/stores/navigationStore'
 import { useRelayHealthStore } from '@/lib/nostr/relayHealthProbe'
 import {
   probeRelays, fetchHubProbeEvent, replacementRelayCandidates, republishHubWithRelays, type RelayCheck,
@@ -42,29 +43,30 @@ function useHubBrokenRelays(hub: HubData): string[] {
   return hub.generalRelays.filter((r) => status[norm(r)] === 'broken')
 }
 
-/** Non-closable banner for the channel view: the hub has broken advertised relays; opens the fix modal. */
+/**
+ * Non-closable banner for the channel view: the hub has broken advertised relays. The button opens Hub
+ * Settings at the Network page (where the creator sees everything and uses the Test & fix action in the
+ * HubRelayHealthNotice), rather than jumping straight into the fix modal.
+ */
 export function HubRelayHealthBanner({ hub }: { hub: HubData }) {
   const broken = useHubBrokenRelays(hub)
-  const [open, setOpen] = useState(false)
+  const openSettingsPage = useNavigationStore((s) => s.setPendingHubSettingsPage)
 
   if (broken.length === 0) return null
 
   return (
-    <>
-      <div className="mx-2 flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/8 border border-amber-500/20 text-xs shrink-0">
-        <AlertTriangle size={14} className="text-amber-400 shrink-0" />
-        <span className="flex-1 min-w-0 text-foreground">
-          {broken.length} of this hub's {hub.generalRelays.length} relay{hub.generalRelays.length === 1 ? '' : 's'} {broken.length === 1 ? 'is' : 'are'} broken: members may not send or receive here. Pick working relays.
-        </span>
-        <button
-          onClick={() => setOpen(true)}
-          className="shrink-0 px-2.5 py-1 rounded-md bg-amber-500/15 text-amber-300 hover:bg-amber-500/25 font-medium transition-colors cursor-pointer"
-        >
-          Fix relays
-        </button>
-      </div>
-      {open && <HubRelayHealthModal hub={hub} onClose={() => setOpen(false)} />}
-    </>
+    <div className="mx-2 flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/8 border border-amber-500/20 text-xs shrink-0">
+      <AlertTriangle size={14} className="text-amber-400 shrink-0" />
+      <span className="flex-1 min-w-0 text-foreground">
+        {broken.length} of this hub's {hub.generalRelays.length} relay{hub.generalRelays.length === 1 ? '' : 's'} {broken.length === 1 ? 'is' : 'are'} broken: members may not send or receive here. Pick working relays.
+      </span>
+      <button
+        onClick={() => openSettingsPage({ dTag: hub.dTag, page: 'network' })}
+        className="shrink-0 px-2.5 py-1 rounded-md bg-amber-500/15 text-amber-300 hover:bg-amber-500/25 font-medium transition-colors cursor-pointer"
+      >
+        Hub Settings
+      </button>
+    </div>
   )
 }
 
