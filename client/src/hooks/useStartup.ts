@@ -44,6 +44,9 @@ import { useNotificationStore } from '@/stores/notificationStore'
 import { STANDARD_KINDS } from '@/lib/crypto/constants'
 import { ADMIN_PUBKEY } from '@/lib/constants'
 
+/** Hubs whose advertised relays we've already health-probed this session (probe once per hub). */
+const probedRelayHealth = new Set<string>()
+
 export function useStartup() {
   const setLocalSigner = useUserStore((s) => s.setLocalSigner)
   const isAuthenticated = useUserStore((s) => s.isAuthenticated)
@@ -603,6 +606,27 @@ export function useStartup() {
             if (us.pubkey && isHubOwner(hub, us.pubkey)) {
               import('@/lib/hub/hubTieResolve').then(({ resolveHubEventUpdatedAtTie }) => {
                 resolveHubEventUpdatedAtTie(hub, us.signer, us.privateKey).catch(() => {})
+              })
+            }
+          })
+        }
+      }
+      // Owner-only, once per hub per session: probe the hub's ADVERTISED relays (rebroadcast the hub
+      // event to each + fetch it back) and record which are broken, so the creator gets a banner + the
+      // Hub Settings badges. Groups included (they have relays too). Writes only the creator's own hub
+      // event to the creator's own relays, so there's nothing sensitive leaked by the probe.
+      if (hub && !probedRelayHealth.has(hubId) && (hub.generalRelays?.length ?? 0) > 0) {
+        const us = useUserStore.getState()
+        if (us.pubkey && (us.signer || us.privateKey)) {
+          import('@/lib/hub/permissions').then(({ isHubOwner }) => {
+            if (us.pubkey && isHubOwner(hub, us.pubkey)) {
+              probedRelayHealth.add(hubId)
+              import('@/lib/hub/hubRelayHealth').then(({ probeRelays }) => {
+                probeRelays(hub, hub.generalRelays)
+                  .then((results) => {
+                    useHubStore.getState().setRelayHealth(hub.dTag, results.filter((r) => !r.ok).map((r) => r.relay))
+                  })
+                  .catch(() => { probedRelayHealth.delete(hubId) }) // let a later open retry on failure
               })
             }
           })
