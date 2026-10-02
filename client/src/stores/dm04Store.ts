@@ -11,9 +11,8 @@
 
 import { create } from 'zustand'
 import { nowSeconds } from '@/lib/time/clockOffset'
-import { fetchEventsFromRelays, publishEventProgressive, publishToSpecificRelays, subscribeToRelays, publishWithFailover } from '@/lib/nostr/relay-pool'
+import { fetchEventsFromRelays, publishEventProgressive, publishToSpecificRelays, subscribeToRelays } from '@/lib/nostr/relay-pool'
 import { fetchEventsWide, subscribeEventsWide, getReadRelays } from '@/lib/nostr/readRelays'
-import { makeRelayAuthSigner } from '@/lib/nostr/relayAuth'
 import { getPublishRelays, publishPersonal, usePostingBehaviourStore } from '@/stores/postingBehaviourStore'
 import { STANDARD_KINDS } from '@/lib/crypto/constants'
 import { encryptNip04, decryptNip04 } from '@/lib/nostr/nip04dm'
@@ -168,14 +167,8 @@ const MAX_PER_CONVERSATION = 1000
 let _myPubkey: string | null = null
 let _signer: ISigner | null = null
 let _privateKey: string | null = null
-// NIP-42 AUTH signer, so relays that gate kind-4 DM reads actually serve them (NIP-17 already does this;
-// NIP-04 didn't, which is why DMs were missing while hub messages and other clients were fine). Shared by
-// the live subs, pagination, and the per-person fetch below.
-let _onauth: ReturnType<typeof makeRelayAuthSigner> | undefined
 /** Set of pubkeys that have already been priority-fetched (avoids re-fetch on each click) */
 const _priorityFetched = new Set<string>()
-/** Pubkeys whose COUNTERPARTY relays we've already queried on open this session (see fetchFromCounterpartyRelays) */
-const _counterpartyRelayFetched = new Set<string>()
 
 /* ─── Store ─── */
 
@@ -232,17 +225,6 @@ export const useDM04Store = create<DM04State>((set, get) => ({
         fetchPerPerson(pubkey, _myPubkey, _signer, _privateKey, set, get)
           .catch((err) => console.warn(`[DM04] Priority fetch failed for ${pubkey.slice(0, 12)}…:`, err))
       }
-
-      // ALWAYS (once per session) also query the COUNTERPARTY's own relays on open — even for a non-empty
-      // conversation. A NIP-04 DM is published to the recipient's relays, so our own sent copy (and any of
-      // their messages that never reached our relays) often lives ONLY there. Reading only our own relays is
-      // why "their messages show, mine don't" in a conversation that already has their side. Not gated on
-      // emptiness (unlike the priority fetch above), so it fills in the missing half.
-      if (_myPubkey && !_counterpartyRelayFetched.has(pubkey)) {
-        _counterpartyRelayFetched.add(pubkey)
-        fetchFromCounterpartyRelays(pubkey, _myPubkey, _signer, _privateKey, set, get)
-          .catch((err) => console.warn(`[DM04] Counterparty-relay fetch failed for ${pubkey.slice(0, 12)}…:`, err))
-      }
     }
   },
 
@@ -288,9 +270,7 @@ export const useDM04Store = create<DM04State>((set, get) => ({
     _myPubkey = myPubkey
     _signer = signer
     _privateKey = privateKey
-    _onauth = makeRelayAuthSigner(signer, privateKey)
     _priorityFetched.clear()
-    _counterpartyRelayFetched.clear()
 
     // ─── Track A: Raw Feed (immediate UI) ───
     // Fetch last 100 NIP-04 events + keep live subscription open.
@@ -401,14 +381,12 @@ export const useDM04Store = create<DM04State>((set, get) => ({
       { kinds: [STANDARD_KINDS.NIP04_DM], '#p': [myPubkey], limit: TRACK_A_LIMIT },
       onDMEvent,
       onEose,
-      { onauth: _onauth },
     )
 
     const subSent = subscribeEventsWide(
       { kinds: [STANDARD_KINDS.NIP04_DM], authors: [myPubkey], limit: TRACK_A_LIMIT },
       onDMEvent,
       onEose,
-      { onauth: _onauth },
     )
 
     const sub = {
@@ -433,14 +411,10 @@ export const useDM04Store = create<DM04State>((set, get) => ({
     const reactionSubReceived = subscribeEventsWide(
       { kinds: [STANDARD_KINDS.REACTION], '#p': [myPubkey], limit: TRACK_A_LIMIT },
       onReactionEvent,
-      undefined,
-      { onauth: _onauth },
     )
     const reactionSubSent = subscribeEventsWide(
       { kinds: [STANDARD_KINDS.REACTION], authors: [myPubkey], limit: TRACK_A_LIMIT },
       onReactionEvent,
-      undefined,
-      { onauth: _onauth },
     )
 
     const reactionSub = {
@@ -485,14 +459,14 @@ export const useDM04Store = create<DM04State>((set, get) => ({
           authors: [counterpartyPubkey],
           until: until - 1,
           limit: PAGE_SIZE,
-        }, { onauth: _onauth }),
+        }),
         fetchEventsWide({
           kinds: [STANDARD_KINDS.NIP04_DM],
           authors: [myPubkey],
           '#p': [counterpartyPubkey],
           until: until - 1,
           limit: PAGE_SIZE,
-        }, { onauth: _onauth }),
+        }),
       ])
 
       const events = [...receivedEvents, ...sentEvents]
@@ -695,12 +669,6 @@ export const useDM04Store = create<DM04State>((set, get) => ({
             },
             allRelays.length > 0 ? allRelays : undefined,
           )
-
-          // Durability: the progressive publish above is a capped, fire-once pick, so a flaky relay can
-          // drop our only readable copy. Fail over across our OWN read relays (the ones we later read sent
-          // DMs back from) until enough accept, so a sent DM reliably lands where we can re-read it.
-          // (Best-effort; does not fix relays that GC kind-4 after accepting, see commit notes.)
-          publishWithFailover(signed, getReadRelays(), { target: 4 }).catch(() => {})
 
           // Auto-clear relay progress after 5 seconds
           setTimeout(() => {
@@ -1436,36 +1404,6 @@ async function fetchPerPerson(
   return latestCreatedAt
 }
 
-/**
- * Fetch an opened conversation from the COUNTERPARTY's own relays (their NIP-65 + kind-10050), on top of
- * our own read set. A NIP-04 DM is delivered to the recipient's relays, so our sent copy — and any of their
- * messages that never durably reached our relays — frequently lives only there. We read only our own relays
- * otherwise (and the Track B counterparty fallback fires only when a conversation is totally empty), which
- * is the structural cause of "their messages show, mine don't." Runs once per counterparty per session.
- */
-async function fetchFromCounterpartyRelays(
-  counterpartyPubkey: string,
-  myPubkey: string,
-  signer: ISigner | null,
-  privateKey: string | null,
-  set: (fn: (s: DM04State) => Partial<DM04State>) => void,
-  get: () => DM04State,
-): Promise<void> {
-  try {
-    const extraRelays = await discoverCounterpartyRelays(counterpartyPubkey, getDMFetchRelays())
-    if (extraRelays.length === 0) return
-    console.log(`[DM04] On-open fetch for ${counterpartyPubkey.slice(0, 12)}… from ${extraRelays.length} counterparty relay(s): ${extraRelays.map((r) => r.replace(/^wss:\/\//, '')).join(', ')}`)
-    const events = await fetchDMEventsWithTimeout(extraRelays, counterpartyPubkey, myPubkey)
-    for (const event of events) {
-      if (get().processedIds.has(event.id)) continue
-      set((s) => ({ processedIds: new Set(s.processedIds).add(event.id) }))
-      await processNip04Event(event, myPubkey, signer, privateKey, set, get)
-    }
-  } catch (err) {
-    console.warn(`[DM04] Counterparty-relay fetch error for ${counterpartyPubkey.slice(0, 12)}…:`, err)
-  }
-}
-
 /** Timeout-protected wrapper for fetching DMs in both directions */
 async function fetchDMEventsWithTimeout(
   relays: string[],
@@ -1487,7 +1425,6 @@ async function fetchDMEventsWithTimeout(
       fetchEventsFromRelays(
         relays,
         { kinds: [STANDARD_KINDS.NIP04_DM], authors: [counterpartyPubkey], '#p': [myPubkey], limit: PER_PERSON_LIMIT },
-        { onauth: _onauth },
       ),
       `received from ${counterpartyPubkey.slice(0, 12)}`,
     ),
@@ -1495,7 +1432,6 @@ async function fetchDMEventsWithTimeout(
       fetchEventsFromRelays(
         relays,
         { kinds: [STANDARD_KINDS.NIP04_DM], authors: [myPubkey], '#p': [counterpartyPubkey], limit: PER_PERSON_LIMIT },
-        { onauth: _onauth },
       ),
       `sent to ${counterpartyPubkey.slice(0, 12)}`,
     ),

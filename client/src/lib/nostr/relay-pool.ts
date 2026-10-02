@@ -509,32 +509,11 @@ export async function fetchReplaceable(
  * Fetch events matching a filter from SPECIFIC relays (not the global activeRelays).
  * Used for DNN relay discovery — querying a user's published relay list.
  */
-export async function fetchEventsFromRelays(
-  relays: string[],
-  filter: Filter | Filter[],
-  opts?: { onauth?: NonNullable<Parameters<typeof pool.subscribeMany>[2]['onauth']> },
-): Promise<Event[]> {
+export async function fetchEventsFromRelays(relays: string[], filter: Filter | Filter[]): Promise<Event[]> {
   if (relays.length === 0) return fetchEvents(filter)
   const merged = Array.isArray(filter)
     ? filter.reduce<Filter>((acc, f) => ({ ...acc, ...f }), {})
     : filter
-  // querySync cannot carry a NIP-42 onauth handler, so when one is supplied (e.g. kind-4 DM reads on
-  // relays that gate them) collect via an auth'd subscription until EOSE — the same shape querySync
-  // produces internally, but with AUTH so gated relays actually serve the events.
-  if (opts?.onauth) {
-    return new Promise<Event[]>((resolve) => {
-      const events: Event[] = []
-      const seen = new Set<string>()
-      let settled = false
-      const finish = () => { if (settled) return; settled = true; try { sub.close() } catch { /* ignore */ } resolve(events) }
-      const sub = pool.subscribeMany(relays, merged, {
-        onevent: (e) => { if (!seen.has(e.id)) { seen.add(e.id); events.push(e) } },
-        oneose: finish,
-        onauth: opts.onauth,
-      })
-      setTimeout(finish, FETCH_MAX_WAIT_MS)
-    })
-  }
   return pool.querySync(relays, merged, { maxWait: FETCH_MAX_WAIT_MS })
 }
 
