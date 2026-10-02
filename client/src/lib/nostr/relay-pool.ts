@@ -366,22 +366,69 @@ export async function publishWithFailover(
 }
 
 /**
- * Fetch events matching a filter from active relays.
- * Waits for all relays to respond (or timeout).
+ * After the first event arrives, if the still-open relays stay silent this long, resolve with what we
+ * have instead of blocking for the full maxWait. This is the fix for a relay that connects but never
+ * sends EOSE (e.g. nostrcheck.me): querySync's EOSE fires only on ALL-relay EOSE, so one such relay
+ * used to stall EVERY fetch for the whole timeout and thrash the pool (it was silently breaking DM
+ * fetching pool-wide). See collectEvents.
+ */
+const FETCH_IDLE_MS = 2000
+
+/**
+ * One-shot fetch that does NOT wait on a hung relay. Collects events (deduped by id) from `relays` and
+ * resolves on the first of: all-relay EOSE (healthy fast path), an idle window after the last event, or
+ * the hard `maxWait` cap.
+ *
+ * The idle window engages ONLY after the first event, so a query whose only answer lives on a slow relay
+ * still waits the full maxWait (the window never starts). We only cut off a relay that goes silent AFTER
+ * other relays have already delivered, which is exactly the all-EOSE stall we are fixing, not a slow
+ * relay holding the sole copy. Callers that must wait for a slow relay pass idleMs = maxWait (done
+ * automatically for the long-maxWait critical callers in fetchEvents).
+ */
+function collectEvents(relays: string[], filter: Filter, maxWait: number, idleMs: number): Promise<Event[]> {
+  return new Promise((resolve) => {
+    const byId = new Map<string, Event>()
+    let settled = false
+    let idleTimer: ReturnType<typeof setTimeout> | null = null
+    const finish = () => {
+      if (settled) return
+      settled = true
+      if (idleTimer) clearTimeout(idleTimer)
+      clearTimeout(hard)
+      try { sub.close() } catch { /* ignore */ }
+      resolve([...byId.values()])
+    }
+    const resetIdle = () => {
+      if (idleMs >= maxWait) return // idle disabled: the hard cap is the only early exit
+      if (idleTimer) clearTimeout(idleTimer)
+      idleTimer = setTimeout(finish, idleMs)
+    }
+    const sub = pool.subscribeMany(relays, filter, {
+      maxWait,
+      onevent(ev) { if (!byId.has(ev.id)) byId.set(ev.id, ev); resetIdle() },
+      oneose() { finish() }, // all relays EOSE'd (healthy fast path)
+    })
+    const hard = setTimeout(finish, maxWait)
+  })
+}
+
+/**
+ * Fetch events matching a filter from active relays. Returns whatever the responsive relays gave us:
+ * a single dead/hung relay cannot stall the whole query (see collectEvents / FETCH_IDLE_MS). Callers
+ * that must not miss an event living only on a slow relay pass a longer maxWait; doing so also disables
+ * the idle short-circuit (idleMs = maxWait), so those fetches wait in full as before.
  */
 export async function fetchEvents(
   filter: Filter | Filter[],
   maxWait: number = FETCH_MAX_WAIT_MS,
 ): Promise<Event[]> {
-  // nostr-tools querySync takes a single Filter; merge if array provided
+  // subscribeMany takes a single Filter; merge if an array was provided (same as the old querySync path)
   const merged = Array.isArray(filter)
     ? filter.reduce<Filter>((acc, f) => ({ ...acc, ...f }), {})
     : filter
-  // Cap the wait so a single slow/dead relay can't stall the whole query — we
-  // return everything the responsive relays gave us instead of hanging for the slowest.
-  // Callers that must not miss an event living only on a slow relay (e.g. hub
-  // loading) can pass a longer maxWait.
-  return pool.querySync(getRelays(), merged, { maxWait })
+  // A longer-than-default maxWait signals "I need completeness, wait for slow relays" → no idle cutoff.
+  const idleMs = maxWait > FETCH_MAX_WAIT_MS ? maxWait : Math.min(maxWait, FETCH_IDLE_MS)
+  return collectEvents(getRelays(), merged, maxWait, idleMs)
 }
 
 /**
@@ -531,7 +578,8 @@ export async function fetchEventsFromRelays(relays: string[], filter: Filter | F
   const merged = Array.isArray(filter)
     ? filter.reduce<Filter>((acc, f) => ({ ...acc, ...f }), {})
     : filter
-  return pool.querySync(relays, merged, { maxWait: FETCH_MAX_WAIT_MS })
+  // Same hung-relay protection as fetchEvents: a dead relay in this set can't stall the whole query.
+  return collectEvents(relays, merged, FETCH_MAX_WAIT_MS, Math.min(FETCH_MAX_WAIT_MS, FETCH_IDLE_MS))
 }
 
 /**
