@@ -272,6 +272,14 @@ export const useDM04Store = create<DM04State>((set, get) => ({
     _privateKey = privateKey
     _priorityFetched.clear()
 
+    // DIAGNOSTIC: what relays is the NIP-04 subscription actually using, and is the user's NIP-65 loaded?
+    {
+      const rs = getReadRelays()
+      const nip65 = useUserListsStore.getState().userRelays
+      console.log(`[DM04:DIAG] read set (${rs.length}): ${rs.map((r) => r.replace(/^wss:\/\//, '').replace(/\/$/, '')).join(', ')}`)
+      console.log(`[DM04:DIAG] NIP-65 userRelays loaded (${nip65.length}): ${nip65.map((r) => r.replace(/^wss:\/\//, '').replace(/\/$/, '')).join(', ') || '(EMPTY — not loaded yet)'}`)
+    }
+
     // ─── Track A: Raw Feed (immediate UI) ───
     // Fetch last 100 NIP-04 events + keep live subscription open.
     // Extract unique counterparties as events arrive for later NIP-78 reconciliation.

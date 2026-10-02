@@ -207,12 +207,20 @@ export function useStartup() {
     })
     // Load user's relay list (NIP-65), blossom server list, and own DM (kind-10050) inbox relays.
     useUserListsStore.getState().loadUserLists(pubkey).then(() => {
-      // The NIP-17 DM subscription starts on the first hub secret, which can beat this load. If it
-      // already started AND we just discovered the user's own 10050 relays, restart it so the gift-wrap
-      // inbox actually subscribes to that advertised mailbox (startSubscription closes the old sub first;
-      // processedWrapIds dedups the re-fetched batch, so the restart is cheap and safe).
-      if (useUserListsStore.getState().userDMRelays.length > 0 && useDMStore.getState().subscription) {
-        useDMStore.getState().startSubscription(pubkey, signer, privateKey)
+      // The DM subscriptions start on the first hub secret (or a 5s fallback), which routinely BEATS this
+      // load — so they start with `userRelays` still empty and read ONLY the client default relays, not the
+      // user's NIP-65 relays or kind-10050 inbox where their DMs actually live. Senders deliver to the
+      // recipient's advertised relays, so for most users their DMs are NOT on the app defaults, and the
+      // early sub returns nothing ("Track A: 0 events"). Now that the user's relay lists are loaded, restart
+      // whichever DM subs already started so they subscribe over the full read set. startSubscription closes
+      // the old sub first, and processed-id dedup makes the re-fetch cheap, so this is a safe one-time restart.
+      // (Previously only NIP-17 was restarted, and only when a 10050 existed — so NIP-04 never picked up the
+      // NIP-65 relays at all, which is why NIP-04 DMs were missing for most people.)
+      const lists = useUserListsStore.getState()
+      const learnedRelays = lists.userRelays.length > 0 || lists.userDMRelays.length > 0
+      if (learnedRelays) {
+        if (useDMStore.getState().subscription) useDMStore.getState().startSubscription(pubkey, signer, privateKey)
+        if (useDM04Store.getState().subscription) useDM04Store.getState().startSubscription(pubkey, signer, privateKey)
       }
     }).catch(() => { /* non-critical — subscription still works on client + NIP-65 relays */ })
 
