@@ -656,15 +656,14 @@ function ForumPostDetail({
     try {
       const { createHideMessageEvent } = await import('@/lib/nostr/events')
       const { signWithSigner: signFn } = await import('@/lib/nostr')
-      const { publishToSpecificRelays } = await import('@/lib/nostr/relay-pool')
-      const { getPublishRelays } = await import('@/stores/postingBehaviourStore')
+      const { publishContent } = await import('@/stores/postingBehaviourStore')
       const { signer: s, privateKey: pk } = useUserStore.getState()
       const unsigned = createHideMessageEvent(hubDTag, postRef, post.pubkey, 36943, true, channelId)
       // v2: author the hide as the moderator's pseudonym P (verified by P-set from the roster).
       const { signHubModEvent } = await import('@/lib/hub/hubMemberSign')
       const signed = hub ? await signHubModEvent({ hub, unsigned, pubkey: pubkey!, privateKey: pk, signer: s }) : await signFn(unsigned, s, pk)
       const relays = hub ? [...hub.generalRelays] : []
-      await publishToSpecificRelays(getPublishRelays(relays, { hubOnly: !!hub && isV2(hub) }), signed)
+      await publishContent(signed, relays, { hubOnly: !!hub && isV2(hub) })
       useHubStore.getState().addHiddenMessage(hubDTag, {
         ref: postRef,
         hiderPubkey: signed.pubkey,
@@ -1173,15 +1172,14 @@ function ForumPostDetail({
                           const { createHideMessageEvent } = await import('@/lib/nostr/events')
                           const { signWithSigner: signFn } = await import('@/lib/nostr')
                           const { signHubModEvent } = await import('@/lib/hub/hubMemberSign')
-                          const { publishToSpecificRelays } = await import('@/lib/nostr/relay-pool')
-                          const { getPublishRelays } = await import('@/stores/postingBehaviourStore')
+                          const { publishContent } = await import('@/stores/postingBehaviourStore')
                           const { signer: s, privateKey: pk } = useUserStore.getState()
                           const unsigned = createHideMessageEvent(hubDTag, replyRef, reply.pubkey, 36943, true, channelId)
                           // v2: author the hide as the moderator's pseudonym P (mirrors the post-level
                           // handler above) — otherwise this leaks the mod's real key R onto the wire.
                           const signed = hub ? await signHubModEvent({ hub, unsigned, pubkey: pubkey!, privateKey: pk, signer: s }) : await signFn(unsigned, s, pk)
                           const relays = hub ? [...hub.generalRelays] : []
-                          await publishToSpecificRelays(getPublishRelays(relays, { hubOnly: !!hub && isV2(hub) }), signed)
+                          await publishContent(signed, relays, { hubOnly: !!hub && isV2(hub) })
                           useHubStore.getState().addHiddenMessage(hubDTag, {
                             ref: replyRef, hiderPubkey: signed.pubkey, kind: 36943, targetPubkey: reply.pubkey,
                             createdAt: Math.floor(Date.now() / 1000),

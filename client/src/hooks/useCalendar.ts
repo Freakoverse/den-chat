@@ -31,8 +31,8 @@ import { KINDS } from '@/lib/crypto/constants'
 import { aesEncrypt, aesDecrypt } from '@/lib/crypto/aes'
 import { deriveEventsKey } from '@/lib/crypto/hkdf'
 
-import { publishEventProgressive, publishToSpecificRelays } from '@/lib/nostr/relay-pool'
-import { getPublishRelays, getDeletePublishRelays } from '@/stores/postingBehaviourStore'
+import { publishToSpecificRelays } from '@/lib/nostr/relay-pool'
+import { getDeletePublishRelays, publishContent } from '@/stores/postingBehaviourStore'
 import { isClientTagEnabled } from '@/components/social/ComposeSettings'
 
 // ─── Decrypted types ───
@@ -369,8 +369,7 @@ export function useCalendar(hubDTag: string | null) {
         : mineAndSign(unsigned, minPow, pubkey, signer, privateKey))
 
       const hubRelays = hub?.generalRelays || []
-      const publishRelays = getPublishRelays(hubRelays, { hubOnly: !!hub && isV2(hub) })
-      await publishEventProgressive(signed, () => {}, publishRelays)
+      await publishContent(signed, hubRelays, { hubOnly: !!hub && isV2(hub) })
 
       // Add to local store immediately
       useCalendarStore.getState().addEvent({
@@ -448,8 +447,7 @@ export function useCalendar(hubDTag: string | null) {
         ? signHubMemberEvent({ hub, unsigned, pubkey: pubkey!, privateKey, signer, minPow, channelKey: key })
         : mineAndSign(unsigned, minPow, pubkey, signer, privateKey))
       const hubRelays = hubs[hubDTag]?.generalRelays || []
-      const publishRelays = getPublishRelays(hubRelays, { hubOnly: !!hub && isV2(hub) })
-      await publishToSpecificRelays(publishRelays, signed)
+      await publishContent(signed, hubRelays, { hubOnly: !!hub && isV2(hub) })
 
       // Update local store
       useCalendarStore.getState().addEvent({
@@ -569,8 +567,7 @@ export function useCalendar(hubDTag: string | null) {
         ? signHubMemberEvent({ hub, unsigned, pubkey: pubkey!, privateKey, signer, minPow, channelKey: key })
         : mineAndSign(unsigned, minPow, pubkey, signer, privateKey))
       const hubRelays = hub?.generalRelays || []
-      const publishRelays = getPublishRelays(hubRelays, { hubOnly: !!hub && isV2(hub) })
-      await publishEventProgressive(signed, () => {}, publishRelays)
+      await publishContent(signed, hubRelays, { hubOnly: !!hub && isV2(hub) })
 
       // Add to local store
       useCalendarStore.getState().addRsvp({

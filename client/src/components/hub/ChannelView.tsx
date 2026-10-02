@@ -812,15 +812,14 @@ function MessageList({ hubDTag, channelId, channelName, optimisticMessages, setO
     try {
       const { createHideMessageEvent } = await import('@/lib/nostr/events')
       const { signWithSigner: signFn } = await import('@/lib/nostr')
-      const { publishToSpecificRelays } = await import('@/lib/nostr/relay-pool')
-      const { getPublishRelays } = await import('@/stores/postingBehaviourStore')
+      const { publishContent } = await import('@/stores/postingBehaviourStore')
       const { signer, privateKey } = useUserStore.getState()
       const unsigned = createHideMessageEvent(hubDTag, targetRef, targetPubkey, targetKind, isAddressable, channelId)
       // v2: owner authors the hide as O (global), a mod as their pseudonym P (same-page).
       const { signHubModEvent } = await import('@/lib/hub/hubMemberSign')
       const signed = hub ? await signHubModEvent({ hub, unsigned, pubkey: myPubkey!, privateKey, signer }) : await signFn(unsigned, signer, privateKey)
       const relays = hub ? [...hub.generalRelays] : []
-      await publishToSpecificRelays(getPublishRelays(relays, { hubOnly: !!hub && isV2(hub) }), signed)
+      await publishContent(signed, relays, { hubOnly: !!hub && isV2(hub) })
       // Optimistic update
       useHubStore.getState().addHiddenMessage(hubDTag, {
         ref: targetRef,

@@ -13,10 +13,9 @@ import {
   signWithSigner,
 } from '@/lib/nostr'
 import {
-  publishToSpecificRelays,
   subscribeToRelays,
 } from '@/lib/nostr/relay-pool'
-import { getPublishRelays } from '@/stores/postingBehaviourStore'
+import { publishContent } from '@/stores/postingBehaviourStore'
 import { useHubStore } from '@/stores/hubStore'
 import { isV2 } from '@/lib/hub/version'
 import type { Event, Filter } from 'nostr-tools'
@@ -218,9 +217,8 @@ export const usePinStore = create<PinState>((set, get) => ({
       return { pinsByHub: { ...s.pinsByHub, [hubDTag]: updated } }
     })
 
-    // Publish — hub relays only on v2 (a P-authored PIN_LIST pushed to the pinner's personal NIP-65 relays
-    // would let an observer link their pseudonym P → real key R by relay footprint).
-    await publishToSpecificRelays(getPublishRelays(relays, { hubOnly: isV2(useHubStore.getState().hubs[hubDTag]) }), signed)
+    // Publish with failover across the enabled Behaviour-toggle relays (client/user/hub).
+    await publishContent(signed, relays, { hubOnly: isV2(useHubStore.getState().hubs[hubDTag]) })
   },
 
   unpinMessage: async (hubDTag, channelId, aRef, myPubkey, relays, signer, privateKey, authSigner) => {
@@ -244,7 +242,7 @@ export const usePinStore = create<PinState>((set, get) => ({
       return { pinsByHub: { ...s.pinsByHub, [hubDTag]: updated } }
     })
 
-    // Publish — hub relays only on v2 (see pinMessage).
-    await publishToSpecificRelays(getPublishRelays(relays, { hubOnly: isV2(useHubStore.getState().hubs[hubDTag]) }), signed)
+    // Publish with failover across the enabled Behaviour-toggle relays (see pinMessage).
+    await publishContent(signed, relays, { hubOnly: isV2(useHubStore.getState().hubs[hubDTag]) })
   },
 }))

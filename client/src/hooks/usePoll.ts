@@ -16,8 +16,7 @@ import { stampHubExpiration } from '@/lib/hub/messageExpiration'
 import { aesEncrypt } from '@/lib/crypto/aes'
 import { deriveChannelKey } from '@/lib/crypto/hkdf'
 
-import { publishEventProgressive } from '@/lib/nostr/relay-pool'
-import { getPublishRelays } from '@/stores/postingBehaviourStore'
+import { publishContent } from '@/stores/postingBehaviourStore'
 import { isClientTagEnabled } from '@/components/social/ComposeSettings'
 
 export interface PollCreationData {
@@ -137,8 +136,7 @@ export function usePoll(hubDTag: string | null, channelId: string | null) {
       : mineAndSign(unsigned, minPow, pubkey, signer, privateKey))
 
     const hubRelays = hub?.generalRelays || []
-    const publishRelays = getPublishRelays(hubRelays, { hubOnly: !!hub && isV2(hub) })
-    await publishEventProgressive(signed, () => {}, publishRelays)
+    await publishContent(signed, hubRelays, { hubOnly: !!hub && isV2(hub) })
 
     // Add to local store immediately
     usePollStore.getState().addPoll({
@@ -193,8 +191,7 @@ export function usePoll(hubDTag: string | null, channelId: string | null) {
       : mineAndSign(unsigned, minPow, pubkey, signer, privateKey))
 
     const hubRelays = hub?.generalRelays || []
-    const publishRelays = getPublishRelays(hubRelays, { hubOnly: !!hub && isV2(hub) })
-    await publishEventProgressive(signed, () => {}, publishRelays)
+    await publishContent(signed, hubRelays, { hubOnly: !!hub && isV2(hub) })
 
     // Add to local store immediately
     usePollStore.getState().addVote({

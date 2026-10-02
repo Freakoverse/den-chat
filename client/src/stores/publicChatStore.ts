@@ -24,11 +24,10 @@ import {
   fetchReplaceable,
   subscribeEvents,
   publishEvent,
-  publishEventProgressive,
   publishToSpecificRelays,
   getRelays,
 } from '@/lib/nostr/relay-pool'
-import { getDeletePublishRelays, publishPersonal } from '@/stores/postingBehaviourStore'
+import { getDeletePublishRelays, publishContent, publishPersonal } from '@/stores/postingBehaviourStore'
 import { parseZapReceipt, type ZapInfo } from '@/lib/nostr/zap'
 import type { ISigner } from '@/stores/userStore'
 import type { Event } from 'nostr-tools'
@@ -642,12 +641,11 @@ export const usePublicChatStore = create<PublicChatState>((set, get) => ({
 
     ;(async () => {
       try {
-        const accepted = await publishEventProgressive(
-          signed,
-          (confirmed, total, acceptedRelays) => {
+        const accepted = await publishContent(signed, undefined, {
+          onProgress: (confirmed, total, acceptedRelays) => {
             get().setRelayProgress(signed.id, confirmed, total, acceptedRelays)
           },
-        )
+        })
 
         if (accepted.length === 0 && msg) {
           // All relays rejected — remove phantom message

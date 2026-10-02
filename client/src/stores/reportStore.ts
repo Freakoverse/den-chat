@@ -17,10 +17,7 @@ import {
   mineAndSign,
   type ReportType,
 } from '@/lib/nostr/events'
-import {
-  publishToSpecificRelays,
-} from '@/lib/nostr/relay-pool'
-import { getPublishRelays } from '@/stores/postingBehaviourStore'
+import { publishContent } from '@/stores/postingBehaviourStore'
 import { deriveReportsKey } from '@/lib/crypto/hkdf'
 import { aesEncrypt, aesDecrypt } from '@/lib/crypto/aes'
 import { fromHex } from '@/lib/crypto/lkh'
@@ -368,7 +365,7 @@ export const useReportStore = create<ReportState>((set, get) => ({
     const signed = v2 && hub
       ? await signHubMemberEvent({ hub, unsigned, pubkey, privateKey, signer, minPow: minPow || 0, channelKey: key })
       : await mineAndSign(unsigned, minPow || 0, pubkey, signer, privateKey)
-    await publishToSpecificRelays(getPublishRelays(relays, { hubOnly: v2 }), signed)
+    await publishContent(signed, relays, { hubOnly: v2 })
 
     // Optimistic local update — add to myReportsByHub. Key by the WIRE author (P on v2) so it matches
     // what fetchMyReports enumerates.
@@ -422,7 +419,7 @@ export const useReportStore = create<ReportState>((set, get) => ({
     const signed = hub && isV2(hub)
       ? await signHubMemberEvent({ hub, unsigned, pubkey, privateKey, signer, minPow: minPow || 0, channelKey: key })
       : await mineAndSign(unsigned, minPow || 0, pubkey, signer, privateKey)
-    await publishToSpecificRelays(getPublishRelays(relays, { hubOnly: !!hub && isV2(hub) }), signed)
+    await publishContent(signed, relays, { hubOnly: !!hub && isV2(hub) })
 
     // Optimistic local update — mark as retracted
     set((s) => ({

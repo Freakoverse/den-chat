@@ -9,9 +9,8 @@
 
 import { create } from 'zustand'
 import { nowSeconds } from '@/lib/time/clockOffset'
-import { publishToSpecificRelays, publishEventProgressive } from '@/lib/nostr/relay-pool'
 import { fetchDMInbox, subscribeDMInbox, getDMReadRelays } from '@/lib/nostr/readRelays'
-import { getPublishRelays, getDMSelfCopyRelays } from '@/stores/postingBehaviourStore'
+import { getPublishRelays, getDMSelfCopyRelays, publishDM } from '@/stores/postingBehaviourStore'
 import { STANDARD_KINDS } from '@/lib/crypto/constants'
 import { createGiftWrap, unwrapGiftWrap, computeRumorId, foreignKindWrapIds, type UnwrappedDM } from '@/lib/nostr/nip17'
 import { makeRelayAuthSigner } from '@/lib/nostr/relayAuth'
@@ -138,16 +137,18 @@ async function publishSelfCopy(progressId: string, wrap: Event, relays: string[]
     return 0
   }
   setSelfCopyProgress(progressId, { confirmed: 0, total: relays.length, acceptedRelays: [], settled: false, retrying })
-  const accepted = await publishEventProgressive(
+  // Failover across the user's own posting relays + kind-10050 DM inbox (publishDM), so the self copy
+  // lands somewhere we read back after a reload even when the deterministic pick is all dead relays.
+  const accepted = await publishDM(
     wrap,
+    [],
     (confirmed, total, acceptedRelays) => {
       setSelfCopyProgress(progressId, { confirmed, total, acceptedRelays, settled: false, retrying })
     },
-    relays,
   )
-  setSelfCopyProgress(progressId, { confirmed: accepted.length, total: relays.length, acceptedRelays: accepted, settled: true, retrying: false })
+  setSelfCopyProgress(progressId, { confirmed: accepted.length, total: Math.max(accepted.length, relays.length), acceptedRelays: accepted, settled: true, retrying: false })
   if (accepted.length === 0) {
-    console.warn(`[DM] self-copy of ${progressId.slice(0, 8)}… was accepted by NO relay (${relays.length} tried: ${relays.join(', ')}) — it will not survive a reload. Retry is available on the message.`)
+    console.warn(`[DM] self-copy of ${progressId.slice(0, 8)}… was accepted by NO relay: it will not survive a reload. Retry is available on the message.`)
   }
   return accepted.length
 }
@@ -653,13 +654,13 @@ export const useDMStore = create<DMState>((set, get) => ({
           get().setRelayProgress(progressId, 0, recipientRelays.length, [])
 
           await Promise.all([
-            publishEventProgressive(
+            publishDM(
               wraps.wrapForRecipient as unknown as Event,
+              extraRelays,
               (confirmed, total, acceptedRelays) => {
                 get().setRelayProgress(progressId, confirmed, total, acceptedRelays)
                 onProgress?.('publishing', { confirmed, total })
               },
-              recipientRelays,
             ),
             publishSelfCopy(progressId, wrapForSelf, selfCopyRelays, false),
           ])

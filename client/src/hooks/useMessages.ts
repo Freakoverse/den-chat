@@ -15,8 +15,8 @@ import { useUserStore } from '@/stores/userStore'
 import { useMessageStore, type ChatMessage as RawChatMessage } from '@/stores/messageStore'
 import type { Attachment } from '@/stores/messageStore'
 export type { Attachment }
-import { publishEventProgressive, publishToSpecificRelays, assertPublished } from '@/lib/nostr/relay-pool'
-import { getPublishRelays, getDeletePublishRelays } from '@/stores/postingBehaviourStore'
+import { publishToSpecificRelays, assertPublished } from '@/lib/nostr/relay-pool'
+import { getPublishRelays, getDeletePublishRelays, publishContent } from '@/stores/postingBehaviourStore'
 import { signWithSigner, mineAndSign, createMessageEvent, createDeletionEvent, createDeletedMessageEvent, createReactionEvent, createEditHintEvent } from '@/lib/nostr/events'
 import { nip19, type Event } from 'nostr-tools'
 import { KINDS, STANDARD_KINDS } from '@/lib/crypto/constants'
@@ -864,10 +864,13 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
 
     ;(async () => {
       try {
-        const accepted = await publishEventProgressive(signed, (confirmed, total, acceptedRelays) => {
-          setRelayProgress(eventId, confirmed, total, acceptedRelays)
-          onPhase?.('publishing', { confirmed, total })
-        }, publishRelays)
+        const accepted = await publishContent(signed, hubRelays, {
+          hubOnly: !!hub && isV2(hub),
+          onProgress: (confirmed, total, acceptedRelays) => {
+            setRelayProgress(eventId, confirmed, total, acceptedRelays)
+            onPhase?.('publishing', { confirmed, total })
+          },
+        })
 
         if (accepted.length === 0) {
           // All relays rejected — remove from local store AND the durable cache to avoid a phantom message.
@@ -1087,9 +1090,12 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
 
     // Progressive publishing — fires callback on each relay confirmation
     // The RelayProgressIndicator next to the message picks this up via eventId
-    const editAccepted = await publishEventProgressive(signed, (confirmed, total, acceptedRelays) => {
-      setRelayProgress(eventId, confirmed, total, acceptedRelays)
-    }, publishRelays)
+    const editAccepted = await publishContent(signed, hubRelays, {
+      hubOnly: !!hub && isV2(hub),
+      onProgress: (confirmed, total, acceptedRelays) => {
+        setRelayProgress(eventId, confirmed, total, acceptedRelays)
+      },
+    })
     assertPublished(editAccepted)   // dead-relay → throw so the edit field shows an error
 
     // Publish ephemeral edit hint (kind 26943) to notify other connected clients.
@@ -1243,12 +1249,11 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
       ? signHubMemberEvent({ hub, unsigned, pubkey: pubkey!, privateKey, signer, channelKey: key })
       : signWithSigner(unsigned, signer, privateKey))
     const hubRelays = hub?.generalRelays || []
-    const publishRelays = getPublishRelays(hubRelays, { hubOnly: !!hub && isV2(hub) })
 
     // Mark as processed to avoid dedup with subscription
     useMessageStore.getState().markReactionProcessed(signed.id)
 
-    await publishToSpecificRelays(publishRelays, signed)
+    await publishContent(signed, hubRelays, { hubOnly: !!hub && isV2(hub) })
   }, [hubDTag, channelId, signer, privateKey, getChannelKey])
 
   // Unreact — send kind 5 deletion request only
