@@ -174,6 +174,8 @@ let _privateKey: string | null = null
 let _onauth: ReturnType<typeof makeRelayAuthSigner> | undefined
 /** Set of pubkeys that have already been priority-fetched (avoids re-fetch on each click) */
 const _priorityFetched = new Set<string>()
+/** Pubkeys whose COUNTERPARTY relays we've already queried on open this session (see fetchFromCounterpartyRelays) */
+const _counterpartyRelayFetched = new Set<string>()
 
 /* ─── Store ─── */
 
@@ -230,6 +232,17 @@ export const useDM04Store = create<DM04State>((set, get) => ({
         fetchPerPerson(pubkey, _myPubkey, _signer, _privateKey, set, get)
           .catch((err) => console.warn(`[DM04] Priority fetch failed for ${pubkey.slice(0, 12)}…:`, err))
       }
+
+      // ALWAYS (once per session) also query the COUNTERPARTY's own relays on open — even for a non-empty
+      // conversation. A NIP-04 DM is published to the recipient's relays, so our own sent copy (and any of
+      // their messages that never reached our relays) often lives ONLY there. Reading only our own relays is
+      // why "their messages show, mine don't" in a conversation that already has their side. Not gated on
+      // emptiness (unlike the priority fetch above), so it fills in the missing half.
+      if (_myPubkey && !_counterpartyRelayFetched.has(pubkey)) {
+        _counterpartyRelayFetched.add(pubkey)
+        fetchFromCounterpartyRelays(pubkey, _myPubkey, _signer, _privateKey, set, get)
+          .catch((err) => console.warn(`[DM04] Counterparty-relay fetch failed for ${pubkey.slice(0, 12)}…:`, err))
+      }
     }
   },
 
@@ -277,6 +290,7 @@ export const useDM04Store = create<DM04State>((set, get) => ({
     _privateKey = privateKey
     _onauth = makeRelayAuthSigner(signer, privateKey)
     _priorityFetched.clear()
+    _counterpartyRelayFetched.clear()
 
     // ─── Track A: Raw Feed (immediate UI) ───
     // Fetch last 100 NIP-04 events + keep live subscription open.
@@ -1414,6 +1428,36 @@ async function fetchPerPerson(
   }
 
   return latestCreatedAt
+}
+
+/**
+ * Fetch an opened conversation from the COUNTERPARTY's own relays (their NIP-65 + kind-10050), on top of
+ * our own read set. A NIP-04 DM is delivered to the recipient's relays, so our sent copy — and any of their
+ * messages that never durably reached our relays — frequently lives only there. We read only our own relays
+ * otherwise (and the Track B counterparty fallback fires only when a conversation is totally empty), which
+ * is the structural cause of "their messages show, mine don't." Runs once per counterparty per session.
+ */
+async function fetchFromCounterpartyRelays(
+  counterpartyPubkey: string,
+  myPubkey: string,
+  signer: ISigner | null,
+  privateKey: string | null,
+  set: (fn: (s: DM04State) => Partial<DM04State>) => void,
+  get: () => DM04State,
+): Promise<void> {
+  try {
+    const extraRelays = await discoverCounterpartyRelays(counterpartyPubkey, getDMFetchRelays())
+    if (extraRelays.length === 0) return
+    console.log(`[DM04] On-open fetch for ${counterpartyPubkey.slice(0, 12)}… from ${extraRelays.length} counterparty relay(s): ${extraRelays.map((r) => r.replace(/^wss:\/\//, '')).join(', ')}`)
+    const events = await fetchDMEventsWithTimeout(extraRelays, counterpartyPubkey, myPubkey)
+    for (const event of events) {
+      if (get().processedIds.has(event.id)) continue
+      set((s) => ({ processedIds: new Set(s.processedIds).add(event.id) }))
+      await processNip04Event(event, myPubkey, signer, privateKey, set, get)
+    }
+  } catch (err) {
+    console.warn(`[DM04] Counterparty-relay fetch error for ${counterpartyPubkey.slice(0, 12)}…:`, err)
+  }
 }
 
 /** Timeout-protected wrapper for fetching DMs in both directions */
