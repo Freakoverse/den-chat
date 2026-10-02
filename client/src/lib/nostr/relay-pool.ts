@@ -334,7 +334,12 @@ export async function publishToSpecificRelays(relays: string[], event: Event): P
 export async function publishWithFailover(
   event: Event,
   seedRelays: string[],
-  opts: { pool?: string[]; target?: number } = {},
+  opts: {
+    pool?: string[]
+    target?: number
+    /** Called after each failover batch (and once at the start) so a send UI can show live progress. */
+    onProgress?: (confirmed: number, total: number, acceptedRelays: string[]) => void
+  } = {},
 ): Promise<string[]> {
   const target = opts.target ?? 3
   const norm = (u: string) => u.replace(/\/+$/, '')
@@ -346,6 +351,7 @@ export async function publishWithFailover(
     if (n && !seen.has(n)) { seen.add(n); candidates.push(u) }
   }
   const accepted = new Set<string>()
+  opts.onProgress?.(0, target, [])
   let i = 0
   while (accepted.size < target && i < candidates.length) {
     const need = target - accepted.size
@@ -353,6 +359,7 @@ export async function publishWithFailover(
     i += batch.length
     const got = await publishToSpecificRelays(batch, event)
     for (const r of got) accepted.add(norm(r))
+    opts.onProgress?.(accepted.size, target, Array.from(accepted))
   }
   return Array.from(accepted)
 }

@@ -210,6 +210,79 @@ export async function publishPersonal(event: Event, target = 3): Promise<string[
   return publishWithFailover(event, getPublishRelays(), { pool, target })
 }
 
+type PublishProgress = (confirmed: number, total: number, acceptedRelays: string[]) => void
+
+/**
+ * Publish ANY user content (hub message, public-chat post, poll, calendar event, reaction, pin, report …)
+ * with failover across the destinations enabled in Settings > Network > Behaviour.
+ *
+ * Drop-in replacement for `publishToSpecificRelays(getPublishRelays(hubRelays, { hubOnly }), signed)` and
+ * for a fire-once `publishEventProgressive(signed, cb, getPublishRelays(hubRelays))`: it seeds with that
+ * same toggle- and cap-aware pick, then routes around dead / write-rejecting relays across every enabled
+ * category — client (postToClientRelays), user NIP-65 (postToUserRelays) and hub (postToHubRelays), each
+ * honouring its toggle and excluding relays disabled in settings — until as many relays accept as the seed
+ * selected. A category toggled OFF is never added, so this never publishes somewhere the user turned off.
+ * This is what stops a deterministic pick that lands on dead relays from silently losing the event (the
+ * "disappearing messages" bug) the way fire-once publishing did.
+ *
+ * `hubOnly` is accepted for call-site parity and passed through to getPublishRelays, where it is inert (v2
+ * pseudonym events publish over the same relay set as v1, by product decision — see getPublishRelays).
+ */
+export async function publishContent(
+  event: Event,
+  hubRelays?: string[],
+  opts?: { hubOnly?: boolean; onProgress?: PublishProgress; target?: number },
+): Promise<string[]> {
+  const state = usePostingBehaviourStore.getState()
+  const norm = (u: string) => u.replace(/\/+$/, '')
+  const disabled = new Set(getRelayList().filter((r) => !r.enabled).map((r) => norm(r.url)))
+  const notDisabled = (u: string) => !disabled.has(norm(u))
+
+  const seed = getPublishRelays(hubRelays, opts?.hubOnly ? { hubOnly: true } : undefined)
+
+  const pool: string[] = []
+  if (state.postToClientRelays) pool.push(...getRelays()) // enabled-only already
+  if (state.postToUserRelays) pool.push(...useUserListsStore.getState().userRelays.filter(notDisabled))
+  if (state.postToHubRelays && hubRelays && hubRelays.length > 0) pool.push(...hubRelays.filter(notDisabled))
+
+  // Default target: land on as many live relays as the seed (toggle + cap aware) selected — so the number
+  // of copies tracks the user's own posting-behaviour settings (caps on = ~6 per list; caps off = all).
+  const target = opts?.target ?? (new Set(seed.map(norm)).size || 1)
+  return publishWithFailover(event, seed, { pool, target, onProgress: opts?.onProgress })
+}
+
+/**
+ * Publish a NIP-04 / NIP-17 DM with failover across the destinations enabled in Settings > Network >
+ * Behaviour, PLUS the always-on DM destinations.
+ *
+ * Seeds with the normal toggle- and cap-aware DM pick (getPublishRelays()) plus the recipient's advertised
+ * relays, then routes around dead relays across: the enabled client (postToClientRelays) and user NIP-65
+ * (postToUserRelays) categories, the user's OWN kind-10050 DM inbox (always-on, so a sent copy lands where
+ * the user reads it back after reload), and the recipient's relays (always-on, so it actually reaches
+ * them). This is the fix for DMs vanishing when the deterministic pick landed on dead/no-retention relays.
+ */
+export async function publishDM(
+  event: Event,
+  recipientRelays: string[] = [],
+  onProgress?: PublishProgress,
+): Promise<string[]> {
+  const state = usePostingBehaviourStore.getState()
+  const norm = (u: string) => u.replace(/\/+$/, '')
+  const disabled = new Set(getRelayList().filter((r) => !r.enabled).map((r) => norm(r.url)))
+  const notDisabled = (u: string) => !disabled.has(norm(u))
+  const recip = recipientRelays.filter(notDisabled)
+
+  const pool: string[] = []
+  if (state.postToClientRelays) pool.push(...getRelays()) // enabled-only already
+  if (state.postToUserRelays) pool.push(...useUserListsStore.getState().userRelays.filter(notDisabled))
+  pool.push(...useUserListsStore.getState().userDMRelays.filter(notDisabled)) // own inbox: read-back (always-on)
+  pool.push(...recip) // recipient delivery (always-on)
+
+  const seed = [...getPublishRelays(), ...recip]
+  const target = new Set(seed.map(norm)).size || 1
+  return publishWithFailover(event, seed, { pool, target, onProgress })
+}
+
 /**
  * Relay list for deletion requests (NIP-09 kind 5 + the app's "deleted" tombstones).
  *

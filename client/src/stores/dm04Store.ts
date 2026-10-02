@@ -11,9 +11,9 @@
 
 import { create } from 'zustand'
 import { nowSeconds } from '@/lib/time/clockOffset'
-import { fetchEventsFromRelays, publishEventProgressive, publishToSpecificRelays, subscribeToRelays } from '@/lib/nostr/relay-pool'
+import { fetchEventsFromRelays, publishToSpecificRelays, subscribeToRelays } from '@/lib/nostr/relay-pool'
 import { fetchEventsWide, subscribeEventsWide, getReadRelays } from '@/lib/nostr/readRelays'
-import { getPublishRelays, publishPersonal, usePostingBehaviourStore } from '@/stores/postingBehaviourStore'
+import { getPublishRelays, publishDM, publishPersonal, usePostingBehaviourStore } from '@/stores/postingBehaviourStore'
 import { STANDARD_KINDS } from '@/lib/crypto/constants'
 import { encryptNip04, decryptNip04 } from '@/lib/nostr/nip04dm'
 import { useBlockStore } from '@/stores/blockStore'
@@ -659,9 +659,6 @@ export const useDM04Store = create<DM04State>((set, get) => ({
       ;(async () => {
         try {
           const extraRelays = await relayDiscoveryPromise
-          const allRelays = extraRelays.length > 0
-            ? [...publishRelays, ...extraRelays]
-            : publishRelays
 
           if (extraRelays.length > 0) {
             console.log(`[DM04] Merging ${extraRelays.length} recipient relay(s):`, extraRelays)
@@ -669,13 +666,15 @@ export const useDM04Store = create<DM04State>((set, get) => ({
 
           onPhase?.('publishing')
 
-          await publishEventProgressive(
+          // Failover across the enabled Behaviour-toggle relays + the recipient's relays + our own DM inbox,
+          // so a deterministic pick that lands on dead relays no longer silently loses the sent message.
+          await publishDM(
             signed,
+            extraRelays,
             (confirmed, total, acceptedRelays) => {
               get().setRelayProgress(signed.id, confirmed, total, acceptedRelays)
               onPhase?.('publishing', { confirmed, total })
             },
-            allRelays.length > 0 ? allRelays : undefined,
           )
 
           // Auto-clear relay progress after 5 seconds
