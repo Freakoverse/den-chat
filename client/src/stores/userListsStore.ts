@@ -26,6 +26,9 @@ async function fetchReplaceableWithRetry(pubkey: string, kind: number, attempts 
 
 interface UserListsState {
   userRelays: string[]
+  /** created_at of the kind-10002 relay list DEN actually loaded, passed to the redundancy
+   *  rebroadcaster as `knownLatest` so it never spreads a STALE relay copy over this version. */
+  userRelaysCreatedAt?: number
   userBlossoms: string[]
   /**
    * The user's own NIP-17 DM inbox relays (kind 10050), if they've published one — typically via
@@ -55,6 +58,7 @@ function parseDMRelays(ev: Event | null): string[] {
 
 export const useUserListsStore = create<UserListsState>((set) => ({
   userRelays: [],
+  userRelaysCreatedAt: undefined,
   userBlossoms: [],
   userDMRelays: [],
   loaded: false,
@@ -77,7 +81,7 @@ export const useUserListsStore = create<UserListsState>((set) => ({
       ? blossomEv.tags.filter((t) => t[0] === 'server').map((t) => t[1])
       : []
 
-    set({ userRelays, userBlossoms, userDMRelays: parseDMRelays(dmRelayEv), loaded: true })
+    set({ userRelays, userRelaysCreatedAt: relayEv?.created_at, userBlossoms, userDMRelays: parseDMRelays(dmRelayEv), loaded: true })
   },
 
   refreshUserRelays: async (pubkey: string) => {
@@ -87,7 +91,7 @@ export const useUserListsStore = create<UserListsState>((set) => ({
       const userRelays = ev
         ? ev.tags.filter((t) => t[0] === 'r').map((t) => t[1])
         : []
-      set({ userRelays })
+      set({ userRelays, userRelaysCreatedAt: ev?.created_at })
     } finally {
       set({ refreshingRelays: false })
     }
