@@ -22,9 +22,7 @@ const DEFAULT_RELAYS = [
   'wss://nos.lol',
   'wss://relay.wellorder.net',
   'wss://nostr.mom',
-  'wss://nostrcheck.me',
   'wss://wheat.happytavern.co',
-  'wss://relay.0xchat.com',
   'wss://relay.snort.social',
   'wss://nostr.bitcoiner.social',
   // Curated 2026-09-01 against a per-relay write test (publish a kind 1 to each): kept only relays that
@@ -35,6 +33,11 @@ const DEFAULT_RELAYS = [
   // search.nos.today (search-only). The dead former-defaults are also stripped from existing users' SAVED
   // lists once — see RETIRED_DEFAULT_RELAYS / purgeRetiredRelaysOnce (mergeMissingDefaults only ADDS).
   // Critical events publish via publishWithFailover, so a transiently-dead relay can't strand them.
+  //
+  // 2026-10 READ-responsiveness recheck (the write test above never caught dead-on-read relays): removed
+  // relay.0xchat.com (connection refused) and nostrcheck.me (opens a socket but never answers REQ / sends
+  // EOSE — the worst case, since it hangs every querySync for the full timeout and thrashes the pool,
+  // which was silently breaking DM fetching for everyone). Both retired below.
 ]
 
 /**
@@ -51,9 +54,15 @@ const RETIRED_DEFAULT_RELAYS = [
   'wss://relay.cxplay.org',
   'wss://relay.nostr.moe',
   'wss://relay.poster.place',
+  // 2026-10: dead/unresponsive on READ (see DEFAULT_RELAYS note) — nostrcheck.me especially hangs every
+  // querySync (connects but never EOSEs), which was breaking DM fetching pool-wide.
+  'wss://relay.0xchat.com',
+  'wss://nostrcheck.me',
 ].map((u) => u.replace(/\/+$/, ''))
 
-const RETIRED_PURGE_FLAG = 'den-relays-retired-purge-v1'
+// Bumped to v2 so the one-time purge re-runs for users who were already purged under v1 (to strip the
+// newly-retired 0xchat / nostrcheck.me from their saved client relay list).
+const RETIRED_PURGE_FLAG = 'den-relays-retired-purge-v2'
 
 /** One-time (ever) removal of confirmed-dead former-default relays from the saved client relay list. */
 function purgeRetiredRelaysOnce(): void {
