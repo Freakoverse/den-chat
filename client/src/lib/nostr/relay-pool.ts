@@ -19,6 +19,7 @@ const FETCH_MAX_WAIT_MS = 4000
 /** Default relays — user can customize these later */
 const DEFAULT_RELAYS = [
   'wss://relay.primal.net',
+  'wss://relay.damus.io',
   'wss://nos.lol',
   'wss://relay.wellorder.net',
   'wss://nostr.mom',
