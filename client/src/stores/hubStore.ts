@@ -160,6 +160,13 @@ export interface HubState {
    * cleared when the hub event is republished with a working list.
    */
   blossomHealth: Record<string, string[]>
+  /**
+   * Per-hub broken ADVERTISED relays (dTag to relay URLs), from the creator-side relay health probe
+   * (see lib/hub/hubRelayHealth). Persisted per-account so a broken mark survives reloads until the
+   * creator fixes it (replaced wholesale by each re-probe; cleared when the hub is republished with a
+   * working relay list). Only meaningful for the hub creator.
+   */
+  relayHealth: Record<string, string[]>
   /** Decrypted hub secrets (keyed by d tag) — Uint8Array stored as hex */
   hubSecrets: Record<string, string>
   /** Currently selected hub d tag */
@@ -225,6 +232,9 @@ export interface HubState {
   /** Union `servers` into the hub's failed-advertised-server set (see blossomHealth). */
   addBlossomHealthFailures: (dTag: string, servers: string[]) => void
   clearBlossomHealth: (dTag: string) => void
+  /** Replace the hub's broken-advertised-relay set with the latest probe result (see relayHealth). */
+  setRelayHealth: (dTag: string, brokenRelays: string[]) => void
+  clearRelayHealth: (dTag: string) => void
   setHubSecret: (dTag: string, secretHex: string) => void
   setActiveHub: (dTag: string | null) => void
   setActiveChannel: (channelId: string | null) => void
@@ -309,6 +319,33 @@ function persistHubPrefs(prefs: Record<string, HubPrefs>): void {
   } catch { /* storage unavailable — non-fatal */ }
 }
 
+// ── Per-hub relay-health persistence (account-namespaced, same rationale as hub prefs) ──
+function relayHealthKey(account: string): string { return `den_hub_relay_health:${account}` }
+function loadPersistedRelayHealth(account: string | null): Record<string, string[]> {
+  if (!account) return {}
+  try {
+    const raw = localStorage.getItem(relayHealthKey(account))
+    if (!raw) return {}
+    const parsed = JSON.parse(raw)
+    if (parsed && typeof parsed === 'object') {
+      const out: Record<string, string[]> = {}
+      for (const [dTag, relays] of Object.entries(parsed as Record<string, unknown>)) {
+        if (Array.isArray(relays)) out[dTag] = relays.filter((r): r is string => typeof r === 'string')
+      }
+      return out
+    }
+  } catch { /* ignore */ }
+  return {}
+}
+function persistRelayHealth(health: Record<string, string[]>): void {
+  if (!_currentAccount) return
+  try {
+    const slim: Record<string, string[]> = {}
+    for (const [dTag, relays] of Object.entries(health)) if (relays.length > 0) slim[dTag] = relays
+    localStorage.setItem(relayHealthKey(_currentAccount), JSON.stringify(slim))
+  } catch { /* storage unavailable — non-fatal */ }
+}
+
 // ── Facilitator member-list cache persistence ──
 // Persist the vouched-member lists (public Pf pseudonyms only — no secrets, no real keys R) so that on
 // a fresh app start a member can immediately validate a facilitated author's messages instead of
@@ -350,6 +387,7 @@ export const useHubStore = create<HubState>((set) => ({
   hubs: {},
   hubStatus: {},
   blossomHealth: {},
+  relayHealth: {}, // hydrated per-account by hydratePersistedForAccount()
   hubSecrets: {},
   activeHubId: null,
   activeChannelId: null,
@@ -423,6 +461,23 @@ export const useHubStore = create<HubState>((set) => ({
       delete next[dTag]
       return { blossomHealth: next }
     }),
+  setRelayHealth: (dTag, brokenRelays) =>
+    set((state) => {
+      const norm = Array.from(new Set(brokenRelays.map((r) => r.replace(/\/+$/, ''))))
+      const health = { ...state.relayHealth }
+      if (norm.length > 0) health[dTag] = norm
+      else delete health[dTag]
+      persistRelayHealth(health)
+      return { relayHealth: health }
+    }),
+  clearRelayHealth: (dTag) =>
+    set((state) => {
+      if (!state.relayHealth[dTag]) return {}
+      const next = { ...state.relayHealth }
+      delete next[dTag]
+      persistRelayHealth(next)
+      return { relayHealth: next }
+    }),
 
   setHubSecret: (dTag, secretHex) =>
     set((state) => ({ hubSecrets: { ...state.hubSecrets, [dTag]: secretHex }, _secretsVersion: state._secretsVersion + 1 })),
@@ -482,6 +537,7 @@ export const useHubStore = create<HubState>((set) => ({
     set({
       hubPrefs: loadPersistedHubPrefs(account),
       hubFacilitatorMembers: loadPersistedFacilitatorMembers(account),
+      relayHealth: loadPersistedRelayHealth(account),
     })
   },
 
