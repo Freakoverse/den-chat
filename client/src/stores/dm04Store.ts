@@ -11,7 +11,7 @@
 
 import { create } from 'zustand'
 import { nowSeconds } from '@/lib/time/clockOffset'
-import { fetchEventsFromRelays, publishEventProgressive, publishToSpecificRelays, subscribeToRelays } from '@/lib/nostr/relay-pool'
+import { fetchEventsFromRelays, publishEventProgressive, publishToSpecificRelays, subscribeToRelays, publishWithFailover } from '@/lib/nostr/relay-pool'
 import { fetchEventsWide, subscribeEventsWide, getReadRelays } from '@/lib/nostr/readRelays'
 import { makeRelayAuthSigner } from '@/lib/nostr/relayAuth'
 import { getPublishRelays, publishPersonal, usePostingBehaviourStore } from '@/stores/postingBehaviourStore'
@@ -695,6 +695,12 @@ export const useDM04Store = create<DM04State>((set, get) => ({
             },
             allRelays.length > 0 ? allRelays : undefined,
           )
+
+          // Durability: the progressive publish above is a capped, fire-once pick, so a flaky relay can
+          // drop our only readable copy. Fail over across our OWN read relays (the ones we later read sent
+          // DMs back from) until enough accept, so a sent DM reliably lands where we can re-read it.
+          // (Best-effort; does not fix relays that GC kind-4 after accepting, see commit notes.)
+          publishWithFailover(signed, getReadRelays(), { target: 4 }).catch(() => {})
 
           // Auto-clear relay progress after 5 seconds
           setTimeout(() => {
