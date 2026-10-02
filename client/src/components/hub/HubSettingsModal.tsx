@@ -23,6 +23,7 @@ import { Input } from '@/components/ui/input'
 import { Separator } from '@/components/ui/separator'
 import { ImageCropModal } from '@/components/ui/ImageCropModal'
 import { useHubStore, type HubData, type Channel, type Category, type Role, type HubMember, type HideEntry } from '@/stores/hubStore'
+import { HubRelayHealthNotice } from '@/components/hub/HubRelayHealthBanner'
 import { type JoinNotePolicy, joinNoteEqual, JOIN_PROMPT_MAX } from '@/lib/hub/joinNote'
 import { useMessageStore } from '@/stores/messageStore'
 import { UserProfileModal } from '@/components/hub/UserProfileModal'
@@ -4829,6 +4830,12 @@ function NetworkPage({ hub, editRelays, setEditRelays, editBlossoms, setEditBlos
 }) {
   const userRelays = useUserListsStore((s) => s.userRelays)
   const userBlossoms = useUserListsStore((s) => s.userBlossoms)
+  // Broken advertised relays for this hub (from the creator-side health probe), normalized for matching.
+  const relayHealthBroken = useHubStore((s) => s.relayHealth[hub.dTag])
+  const brokenRelaySet = useMemo(
+    () => new Set((relayHealthBroken ?? []).map((r) => r.replace(/\/+$/, ''))),
+    [relayHealthBroken],
+  )
   const [customRelayInput, setCustomRelayInput] = useState('')
   const [customBlossomInput, setCustomBlossomInput] = useState('')
   const [showClientRelays, setShowClientRelays] = useState(false)
@@ -4911,6 +4918,7 @@ function NetworkPage({ hub, editRelays, setEditRelays, editBlossoms, setEditBlos
       {/* Current Hub Relays */}
       <section className="space-y-3">
         <h4 className="text-sm font-semibold text-foreground">Hub Relays</h4>
+        <HubRelayHealthNotice hub={hub} />
         <div className="space-y-1.5">
           {editRelays.length === 0 ? (
             <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/30">
@@ -4921,6 +4929,9 @@ function NetworkPage({ hub, editRelays, setEditRelays, editBlossoms, setEditBlos
             editRelays.map((url) => (
               <div key={url} className="flex items-center gap-2.5 px-3 py-2 rounded-lg bg-secondary/30 border border-border">
                 <span className="text-sm text-foreground font-mono truncate flex-1">{url}</span>
+                {brokenRelaySet.has(url.replace(/\/+$/, '')) && (
+                  <span className="shrink-0 text-[10px] font-medium text-destructive px-1.5 py-0.5 rounded bg-destructive/10">broken</span>
+                )}
                 <button
                   onClick={() => removeRelay(url)}
                   className="text-muted-foreground hover:text-destructive transition-colors cursor-pointer"

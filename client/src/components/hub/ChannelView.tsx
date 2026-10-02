@@ -20,6 +20,7 @@ import { useDecryptedMedia, getDecryptedBlobUrl } from '@/hooks/useDecryptedMedi
 import { UserProfileModal } from '@/components/hub/UserProfileModal'
 import { HubSettingsModal } from '@/components/hub/HubSettingsModal'
 import { HubBlossomHealthBanner } from '@/components/hub/HubBlossomHealthBanner'
+import { HubRelayHealthBanner } from '@/components/hub/HubRelayHealthBanner'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { Hash, Megaphone, Users, Pin, PinOff, Bell, Search, Send, Plus, Smile, Check, X, RotateCcw, Pencil, Reply, MoreVertical, Copy, MessageSquarePlus, Trash2, Loader2, Zap, Code, Bold, Italic, Strikethrough, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, Link, CodeSquare, ALargeSmall, Clipboard, ClipboardCheck, ClipboardPaste, Upload, FileIcon, Download, Image, Paperclip, AlertTriangle, AlertCircle, Eye, EyeOff, ShieldBan, ShieldAlert, ShieldOff, Lock, LockOpen, Settings, ArrowDown, ArrowLeft, Star, Vote, Clock, Flag, Shield, Globe, Radio, History, BadgeCheck, Mic, WifiOff, Scissors, Type } from 'lucide-react'
 import { useState, useEffect, useRef, useCallback, memo, useMemo, Fragment } from 'react'
@@ -349,6 +350,7 @@ export function ChannelView({ hideHeader = false }: { hideHeader?: boolean } = {
       {!hideHeader && <ChannelHeader channel={channel} channelId={activeChannelId!} isCreator={isCreator} />}
       {/* Creator-only: the hub's advertised Blossom servers failed to serve its files on load. */}
       {isCreator && hub && <HubBlossomHealthBanner hub={hub} />}
+      {isCreator && hub && <HubRelayHealthBanner hub={hub} />}
       {/* Loading overlay while blossom membership is being resolved.
           Starts below the 48px header (unless hidden) so the back button stays usable. */}
       {!secretsResolved && (
