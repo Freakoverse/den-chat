@@ -2854,29 +2854,29 @@ function PostingBehaviourSection() {
         </div>
         <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-border bg-secondary/30">
           <div>
-            <p className="text-sm font-medium text-foreground">Limit client relays to 3</p>
-            <p className="text-xs text-muted-foreground">Publish to at most 3 of your client relays to reduce load</p>
+            <p className="text-sm font-medium text-foreground">Limit client relays to 6</p>
+            <p className="text-xs text-muted-foreground">Publish to at most 6 of your client relays to reduce load</p>
           </div>
           <ToggleSwitch checked={limitClientRelays} onChange={setLimitClientRelays} />
         </div>
         <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-border bg-secondary/30">
           <div>
-            <p className="text-sm font-medium text-foreground">Limit user relays to 3</p>
-            <p className="text-xs text-muted-foreground">Publish to at most 3 of your NIP-65 relays to reduce load</p>
+            <p className="text-sm font-medium text-foreground">Limit user relays to 6</p>
+            <p className="text-xs text-muted-foreground">Publish to at most 6 of your NIP-65 relays to reduce load</p>
           </div>
           <ToggleSwitch checked={limitUserRelays} onChange={setLimitUserRelays} />
         </div>
         <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-border bg-secondary/30">
           <div>
-            <p className="text-sm font-medium text-foreground">Limit hub relays to 3</p>
-            <p className="text-xs text-muted-foreground">Publish hub messages to at most 3 hub relays to reduce load</p>
+            <p className="text-sm font-medium text-foreground">Limit hub relays to 6</p>
+            <p className="text-xs text-muted-foreground">Publish hub messages to at most 6 hub relays to reduce load</p>
           </div>
           <ToggleSwitch checked={limitHubRelays} onChange={setLimitHubRelays} />
         </div>
         <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-border bg-secondary/30">
           <div>
             <p className="text-sm font-medium text-foreground">Bypass relay limits for delete requests</p>
-            <p className="text-xs text-muted-foreground">Send deletion requests to every relay available (client, user and hub), ignoring the 3-relay caps above. A delete only works on relays that receive it, so this makes deletion as best-effort as possible.</p>
+            <p className="text-xs text-muted-foreground">Send deletion requests to every relay available (client, user and hub), ignoring the 6-relay caps above. A delete only works on relays that receive it, so this makes deletion as best-effort as possible.</p>
           </div>
           <ToggleSwitch checked={bypassDeleteRelayLimits} onChange={setBypassDeleteRelayLimits} />
         </div>

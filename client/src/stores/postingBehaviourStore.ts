@@ -16,13 +16,18 @@ import { blossomServers } from '@/lib/blossom'
 
 const LS_KEY = 'denchat_posting_behaviour'
 
+/** How many relays each enabled category (client / user / hub) is capped to when its "limit" toggle is on.
+ *  Raised from 3 to 6 to widen propagation (relays GC / drop events, so more copies = fewer "disappearing"
+ *  messages and DMs). Turning the category's limit toggle off still publishes to every relay in that list. */
+const RELAY_PUBLISH_CAP = 6
+
 interface PostingBehaviourState {
   postToClientRelays: boolean
   postToUserRelays: boolean
   postToHubRelays: boolean
-  limitClientRelays: boolean // cap client relays to 3
-  limitUserRelays: boolean   // cap user (NIP-65) relays to 3
-  limitHubRelays: boolean    // cap hub relays to 3
+  limitClientRelays: boolean // cap client relays to RELAY_PUBLISH_CAP
+  limitUserRelays: boolean   // cap user (NIP-65) relays to RELAY_PUBLISH_CAP
+  limitHubRelays: boolean    // cap hub relays to RELAY_PUBLISH_CAP
   limitClientBlossoms: boolean // cap client blossom servers to 3
   limitUserBlossoms: boolean   // cap user (kind 10063) blossom servers to 3
   limitHubBlossoms: boolean    // cap hub blossom servers to 3
@@ -139,13 +144,13 @@ export function getPublishRelays(hubRelays?: string[], opts?: { hubOnly?: boolea
 
   // Client relays (from relay-pool, which reads localStorage — already filtered to enabled)
   if (state.postToClientRelays) {
-    const limit = state.limitClientRelays ? 3 : Infinity
+    const limit = state.limitClientRelays ? RELAY_PUBLISH_CAP : Infinity
     pickForPubkey(getRelays(), limit, me).forEach((r) => result.add(r))
   }
 
   // User relays (NIP-65) — exclude any the user disabled in client settings
   if (state.postToUserRelays) {
-    const limit = state.limitUserRelays ? 3 : Infinity
+    const limit = state.limitUserRelays ? RELAY_PUBLISH_CAP : Infinity
     const userRelays = useUserListsStore.getState().userRelays
       .filter((r) => !disabledRelays.has(r.replace(/\/+$/, '')))
     pickForPubkey(userRelays, limit, me).forEach((r) => result.add(r))
@@ -153,7 +158,7 @@ export function getPublishRelays(hubRelays?: string[], opts?: { hubOnly?: boolea
 
   // Hub relays — exclude any the user disabled in client settings
   if (state.postToHubRelays && hubRelays && hubRelays.length > 0) {
-    const limit = state.limitHubRelays ? 3 : Infinity
+    const limit = state.limitHubRelays ? RELAY_PUBLISH_CAP : Infinity
     const filtered = hubRelays.filter((r) => !disabledRelays.has(r.replace(/\/+$/, '')))
     pickForPubkey(filtered, limit, me).forEach((r) => result.add(r))
   }
