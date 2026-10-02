@@ -31,18 +31,20 @@ export function getReadRelays(): string[] {
   return out
 }
 
-/** One-shot fetch across client + user relays. */
-export function fetchEventsWide(filter: Filter | Filter[]): Promise<Event[]> {
-  return fetchEventsFromRelays(getReadRelays(), filter)
+/** One-shot fetch across client + user relays. `opts.onauth` answers NIP-42 challenges (e.g. for
+ *  relays that gate kind-4 DM reads). */
+export function fetchEventsWide(filter: Filter | Filter[], opts?: Parameters<typeof fetchEventsFromRelays>[2]): Promise<Event[]> {
+  return fetchEventsFromRelays(getReadRelays(), filter, opts)
 }
 
-/** Real-time subscription across client + user relays. */
+/** Real-time subscription across client + user relays. `opts.onauth` answers NIP-42 challenges. */
 export function subscribeEventsWide(
   filter: Filter,
   onEvent: (event: Event) => void,
   onEose?: () => void,
+  opts?: Parameters<typeof subscribeToRelays>[4],
 ): { close: () => void } {
-  return subscribeToRelays(getReadRelays(), filter, onEvent, onEose)
+  return subscribeToRelays(getReadRelays(), filter, onEvent, onEose, opts)
 }
 
 /**

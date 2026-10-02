@@ -13,6 +13,7 @@ import { create } from 'zustand'
 import { nowSeconds } from '@/lib/time/clockOffset'
 import { fetchEventsFromRelays, publishEventProgressive, publishToSpecificRelays, subscribeToRelays } from '@/lib/nostr/relay-pool'
 import { fetchEventsWide, subscribeEventsWide, getReadRelays } from '@/lib/nostr/readRelays'
+import { makeRelayAuthSigner } from '@/lib/nostr/relayAuth'
 import { getPublishRelays, publishPersonal, usePostingBehaviourStore } from '@/stores/postingBehaviourStore'
 import { STANDARD_KINDS } from '@/lib/crypto/constants'
 import { encryptNip04, decryptNip04 } from '@/lib/nostr/nip04dm'
@@ -167,6 +168,10 @@ const MAX_PER_CONVERSATION = 1000
 let _myPubkey: string | null = null
 let _signer: ISigner | null = null
 let _privateKey: string | null = null
+// NIP-42 AUTH signer, so relays that gate kind-4 DM reads actually serve them (NIP-17 already does this;
+// NIP-04 didn't, which is why DMs were missing while hub messages and other clients were fine). Shared by
+// the live subs, pagination, and the per-person fetch below.
+let _onauth: ReturnType<typeof makeRelayAuthSigner> | undefined
 /** Set of pubkeys that have already been priority-fetched (avoids re-fetch on each click) */
 const _priorityFetched = new Set<string>()
 
@@ -270,6 +275,7 @@ export const useDM04Store = create<DM04State>((set, get) => ({
     _myPubkey = myPubkey
     _signer = signer
     _privateKey = privateKey
+    _onauth = makeRelayAuthSigner(signer, privateKey)
     _priorityFetched.clear()
 
     // ─── Track A: Raw Feed (immediate UI) ───
@@ -381,12 +387,14 @@ export const useDM04Store = create<DM04State>((set, get) => ({
       { kinds: [STANDARD_KINDS.NIP04_DM], '#p': [myPubkey], limit: TRACK_A_LIMIT },
       onDMEvent,
       onEose,
+      { onauth: _onauth },
     )
 
     const subSent = subscribeEventsWide(
       { kinds: [STANDARD_KINDS.NIP04_DM], authors: [myPubkey], limit: TRACK_A_LIMIT },
       onDMEvent,
       onEose,
+      { onauth: _onauth },
     )
 
     const sub = {
@@ -411,10 +419,14 @@ export const useDM04Store = create<DM04State>((set, get) => ({
     const reactionSubReceived = subscribeEventsWide(
       { kinds: [STANDARD_KINDS.REACTION], '#p': [myPubkey], limit: TRACK_A_LIMIT },
       onReactionEvent,
+      undefined,
+      { onauth: _onauth },
     )
     const reactionSubSent = subscribeEventsWide(
       { kinds: [STANDARD_KINDS.REACTION], authors: [myPubkey], limit: TRACK_A_LIMIT },
       onReactionEvent,
+      undefined,
+      { onauth: _onauth },
     )
 
     const reactionSub = {
@@ -459,14 +471,14 @@ export const useDM04Store = create<DM04State>((set, get) => ({
           authors: [counterpartyPubkey],
           until: until - 1,
           limit: PAGE_SIZE,
-        }),
+        }, { onauth: _onauth }),
         fetchEventsWide({
           kinds: [STANDARD_KINDS.NIP04_DM],
           authors: [myPubkey],
           '#p': [counterpartyPubkey],
           until: until - 1,
           limit: PAGE_SIZE,
-        }),
+        }, { onauth: _onauth }),
       ])
 
       const events = [...receivedEvents, ...sentEvents]
@@ -1425,6 +1437,7 @@ async function fetchDMEventsWithTimeout(
       fetchEventsFromRelays(
         relays,
         { kinds: [STANDARD_KINDS.NIP04_DM], authors: [counterpartyPubkey], '#p': [myPubkey], limit: PER_PERSON_LIMIT },
+        { onauth: _onauth },
       ),
       `received from ${counterpartyPubkey.slice(0, 12)}`,
     ),
@@ -1432,6 +1445,7 @@ async function fetchDMEventsWithTimeout(
       fetchEventsFromRelays(
         relays,
         { kinds: [STANDARD_KINDS.NIP04_DM], authors: [myPubkey], '#p': [counterpartyPubkey], limit: PER_PERSON_LIMIT },
+        { onauth: _onauth },
       ),
       `sent to ${counterpartyPubkey.slice(0, 12)}`,
     ),
