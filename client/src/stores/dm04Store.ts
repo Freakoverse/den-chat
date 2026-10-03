@@ -168,6 +168,8 @@ let _signer: ISigner | null = null
 let _privateKey: string | null = null
 /** Set of pubkeys that have already been priority-fetched (avoids re-fetch on each click) */
 const _priorityFetched = new Set<string>()
+/** Pubkeys whose OWN relays we've already pulled DMs from on open (once per contact per session) */
+const _counterpartyRelayFetched = new Set<string>()
 
 /* ─── Store ─── */
 
@@ -223,6 +225,14 @@ export const useDM04Store = create<DM04State>((set, get) => ({
         console.log(`[DM04] Priority fetch for ${pubkey.slice(0, 12)}…`)
         fetchPerPerson(pubkey, _myPubkey, _signer, _privateKey, set, get)
           .catch((err) => console.warn(`[DM04] Priority fetch failed for ${pubkey.slice(0, 12)}…:`, err))
+      }
+
+      // Also pull from the COUNTERPARTY'S own relays on open (one-shot, once per contact per session), so
+      // messages they published only to their advertised relays still surface. Runs regardless of whether
+      // we already have messages, since our relays may simply be missing some of theirs.
+      if (_myPubkey && !_counterpartyRelayFetched.has(pubkey)) {
+        _counterpartyRelayFetched.add(pubkey)
+        fetchFromCounterpartyRelays(pubkey, _myPubkey, _signer, _privateKey, set, get).catch(() => {})
       }
     }
   },
@@ -1400,6 +1410,36 @@ async function fetchPerPerson(
   }
 
   return latestCreatedAt
+}
+
+/**
+ * Proactively pull a conversation's DMs from the COUNTERPARTY'S OWN relays when the conversation is
+ * opened. Nostr relays are inconsistent, so a message the counterparty published only to their advertised
+ * relays (kind 10002 / 10050) may never reach ours. This is a ONE-SHOT fetch (no persistent subscription,
+ * no NIP-42 AUTH, both directions), deduped via processedIds, run once per contact per session. Deliberately
+ * a plain fetch, not a sub, to avoid the connection/AUTH storm an earlier per-open subscribe-collect caused.
+ */
+async function fetchFromCounterpartyRelays(
+  counterpartyPubkey: string,
+  myPubkey: string,
+  signer: ISigner | null,
+  privateKey: string | null,
+  set: (fn: (s: DM04State) => Partial<DM04State>) => void,
+  get: () => DM04State,
+): Promise<void> {
+  try {
+    const extraRelays = await discoverCounterpartyRelays(counterpartyPubkey, getDMFetchRelays())
+    if (extraRelays.length === 0) return
+    console.log(`[DM04] Opening ${counterpartyPubkey.slice(0, 12)}…: pulling from ${extraRelays.length} of their relays`)
+    const events = await fetchDMEventsWithTimeout(extraRelays, counterpartyPubkey, myPubkey)
+    for (const event of events) {
+      if (get().processedIds.has(event.id)) continue
+      set((s) => ({ processedIds: new Set(s.processedIds).add(event.id) }))
+      await processNip04Event(event, myPubkey, signer, privateKey, set, get)
+    }
+  } catch (err) {
+    console.warn(`[DM04] Counterparty-relay fetch failed for ${counterpartyPubkey.slice(0, 12)}…:`, err)
+  }
 }
 
 /** Timeout-protected wrapper for fetching DMs in both directions */
