@@ -22,7 +22,14 @@
 
 import { fetchEventsFromRelays, publishToSpecificRelays, getRelays } from './relay-pool'
 import { useUserListsStore } from '@/stores/userListsStore'
+import { relayHealthOf } from './relayHealthProbe'
 import type { Event, Filter } from 'nostr-tools'
+
+/** Lower = tried first. Prefer relays our health check found 'working'; a known-'broken' one last. */
+function healthRank(url: string): number {
+  const h = relayHealthOf(url)
+  return h === 'working' ? 0 : h === 'broken' ? 2 : 1
+}
 
 const RELAY_TIMEOUT_MS = 8_000
 
@@ -190,6 +197,8 @@ async function checkAndRebroadcast(filter: Filter, key: string, knownLatest?: nu
   while (coverage.size < TARGET_COPIES) {
     const pool = allRelays.filter((r) => !coverage.has(normalizeRelay(r)) && !tried.has(normalizeRelay(r)))
     if (pool.length === 0) break
+    // Prefer 'working' relays for the copies (stable sort keeps the hub-first/client/user base order).
+    pool.sort((a, b) => healthRank(a) - healthRank(b))
     const needed = TARGET_COPIES - coverage.size
     const batch = pool.slice(0, Math.min(pool.length, needed + 2)) // small over-provision
     batch.forEach((c) => tried.add(normalizeRelay(c)))
