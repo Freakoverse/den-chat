@@ -119,6 +119,33 @@ export function PinModal({ hubDTag, channelId, onClose, onJumpToMessage }: PinMo
     }
   }, [hubPins, channelId, msgByRef, hubDTag])
 
+  // Cooperative durability: when pins are open, re-spread each pinned message (loaded + not deleted) and
+  // each contributing PIN_LIST to any of the hub's advertised relays that are missing it, so a pin that
+  // only survived on one relay stops showing "Message not loaded" for others. Rebroadcast-only, hub relays
+  // only, deduped per session (see pinRebroadcast). Runs as loaded pins / lists become available.
+  useEffect(() => {
+    if (!hub || !hubPins) return
+    const hubRelays = hub.generalRelays || []
+    if (hubRelays.length === 0) return
+
+    const events: import('nostr-tools').Event[] = []
+    for (const pe of hubPins) {
+      const pinsHere = pe.pins.filter((p) => p.channelId === channelId)
+      if (pinsHere.length === 0) continue
+      // The contributing PIN_LIST itself.
+      if (pe.rawEvent) { try { events.push(JSON.parse(pe.rawEvent)) } catch { /* skip */ } }
+      // Each pinned message that's loaded and not deleted.
+      for (const p of pinsHere) {
+        const m = msgByRef.get(p.aRef)
+        if (m && !m.deleted && m.rawEvent) { try { events.push(JSON.parse(m.rawEvent)) } catch { /* skip */ } }
+      }
+    }
+    if (events.length === 0) return
+    import('@/lib/hub/pinRebroadcast').then(({ rebroadcastToHubRelays }) => {
+      rebroadcastToHubRelays(events, hubRelays).catch(() => {})
+    })
+  }, [hub, hubPins, channelId, msgByRef])
+
   // Filter pins for this channel and build sections grouped by pinner
   const { creatorSection, mySection, otherSections, totalOtherPins } = useMemo(() => {
     let creatorSection: PinSection | null = null

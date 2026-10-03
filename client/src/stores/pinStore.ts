@@ -46,6 +46,8 @@ export interface PinEvent {
   pubkey: string
   pins: PinRef[]
   createdAt: number
+  /** The full raw signed PIN_LIST event JSON, so it can be rebroadcast to hub relays that lack it. */
+  rawEvent?: string
 }
 
 interface PinState {
@@ -106,7 +108,7 @@ function parsePinEvent(event: Event): PinEvent {
       pins.push({ channelId: tag[1], aRef: tag[2] })
     }
   }
-  return { pubkey: event.pubkey, pins, createdAt: event.created_at }
+  return { pubkey: event.pubkey, pins, createdAt: event.created_at, rawEvent: JSON.stringify(event) }
 }
 
 function buildPinTags(hubDTag: string, pins: PinRef[]): [string, ...string[]][] {
