@@ -7,10 +7,11 @@
  * the dot: publish one of the USER'S OWN already-signed events to a single relay, then fetch it straight
  * back from that same relay by id. Accepted + served back => working; otherwise => broken.
  *
- * Probe payload (what the user "published related to hubs"): their own most recent hub message if we hold
- * one locally (v1 messages are authored by their real key, so identifiable), else their own relay list
- * (kind 10002) or profile (kind 0). Any of these is the user's own event and belongs on a relay, so
- * re-publishing it to test is harmless (and doubles as redundancy).
+ * Probe payload, preferring NIP-CHAT events (kind 36943) since that's the content whose durability
+ * matters most: (1) the user's OWN hub message if we hold one locally; (2) anyone's hub message (local,
+ * else fetched); (3) the user's own kind-1 note; (4) anyone's kind-1 note (brand-new user, or logged out).
+ * Publishing an already-signed public event to test is harmless (it's already public), and the
+ * write+read-back still proves whether a relay accepts and serves events.
  *
  * Results are cached per relay URL with a TTL and shared across the whole UI, so the labels are auto-
  * filled on open and shown instantly next time. In-flight probes are deduped per URL.
@@ -18,10 +19,10 @@
 
 import { create } from 'zustand'
 import type { Event } from 'nostr-tools'
-import { publishToSpecificRelays, fetchEventsFromRelays, fetchReplaceable, fetchEvents } from './relay-pool'
+import { publishToSpecificRelays, fetchEventsFromRelays, fetchEvents } from './relay-pool'
 import { useUserStore } from '@/stores/userStore'
 import { useMessageStore } from '@/stores/messageStore'
-import { STANDARD_KINDS } from '@/lib/crypto/constants'
+import { KINDS } from '@/lib/crypto/constants'
 
 export type RelayHealth = 'checking' | 'working' | 'broken'
 
@@ -88,32 +89,41 @@ function resetProbeEvent() { probeEventPromise = null }
 
 async function resolveProbeEvent(): Promise<Event | null> {
   const me = useUserStore.getState().pubkey
-
-  if (me) {
-    // 1. One of the user's OWN hub messages we already hold (v1: authored by their real key).
-    const byHub = useMessageStore.getState().messages
+  const byHub = useMessageStore.getState().messages
+  const firstLocalMessage = (minePubkey?: string): Event | null => {
     for (const byChannel of Object.values(byHub)) {
       for (const list of Object.values(byChannel)) {
         for (const m of list) {
-          if (m.pubkey === me && m.rawEvent) {
-            try { return JSON.parse(m.rawEvent) as Event } catch { /* keep looking */ }
-          }
+          if (!m.rawEvent) continue
+          if (minePubkey && m.pubkey !== minePubkey) continue
+          try { return JSON.parse(m.rawEvent) as Event } catch { /* keep looking */ }
         }
       }
     }
-
-    // 2. The user's own relay list (10002), then profile (0): always theirs, always belongs on relays,
-    //    and works for v2-only users whose hub messages are pseudonym-authored.
-    const own = (await fetchReplaceable(me, STANDARD_KINDS.RELAY_LIST).catch(() => null))
-      ?? (await fetchReplaceable(me, STANDARD_KINDS.USER_METADATA).catch(() => null))
-    if (own) return own
+    return null
   }
 
-  // 3. Brand-new user (or logged out) with nothing of their own yet: borrow any recent event from the
-  //    relays we already know and test with that. Publishing an already-signed event is fine (it's
-  //    already public), and the write+read-back still proves whether a relay accepts and serves events.
-  const borrowed = await fetchEvents({ kinds: [1], limit: 1 }).catch(() => [])
-  return borrowed[0] ?? null
+  // Prefer NIP-CHAT messages (kind 36943) as the probe, since that's the content whose durability matters.
+  // 1. The user's OWN hub message (v1: authored by their real key), from the local store.
+  if (me) {
+    const ownMsg = firstLocalMessage(me)
+    if (ownMsg) return ownMsg
+  }
+  // 2. Anyone's hub message: one we already hold locally, else fetch one from the relays.
+  const anyLocalMsg = firstLocalMessage()
+  if (anyLocalMsg) return anyLocalMsg
+  const foreignMsg = await fetchEvents({ kinds: [KINDS.MESSAGE], limit: 1 }).catch(() => [])
+  if (foreignMsg[0]) return foreignMsg[0]
+
+  // 3. The user's own kind-1 note (a logged-in user with no hub messages yet).
+  if (me) {
+    const own1 = await fetchEvents({ kinds: [1], authors: [me], limit: 1 }).catch(() => [])
+    if (own1[0]) return own1[0]
+  }
+  // 4. Anyone's kind-1 note (brand-new user, or logged out). Publishing an already-signed public event
+  //    is fine, and the write+read-back still proves whether a relay accepts and serves events.
+  const any1 = await fetchEvents({ kinds: [1], limit: 1 }).catch(() => [])
+  return any1[0] ?? null
 }
 
 function getProbeEvent(): Promise<Event | null> {
