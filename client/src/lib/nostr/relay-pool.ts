@@ -20,27 +20,31 @@ const FETCH_MAX_WAIT_MS = 4000
 const DEFAULT_RELAYS = [
   'wss://relay.primal.net',
   'wss://relay.damus.io',
-  'wss://nos.lol',
-  'wss://relay.wellorder.net',
-  'wss://nostr.mom',
   'wss://wheat.happytavern.co',
   'wss://relay.snort.social',
   'wss://nostr.bitcoiner.social',
-  'wss://relay.layer.systems', // re-added 2026-10 after a working write+read-back health test (TLS fixed)
-  // Curated 2026-09-01 against a per-relay write test (publish a kind 1 to each): kept only relays that
-  // actually accepted the write. REMOVED as dead (rejected the write / unreachable): relay.nostr.band,
-  // nostr.novacisko.cz, relay.cxplay.org, relay.nostr.moe, relay.poster.place. (relay.snort.social flaps:
-  // a 5xx earlier, accepted the write on re-test, kept. relay.layer.systems had an expired TLS cert then,
-  // now fixed, so it is back above.)
-  // Also long-defunct: relay.nostr.info, pyramid.fiatjaf.com (WoT write-gated), relay.noswhere.com &
-  // search.nos.today (search-only). The dead former-defaults are also stripped from existing users' SAVED
-  // lists once — see RETIRED_DEFAULT_RELAYS / purgeRetiredRelaysOnce (mergeMissingDefaults only ADDS).
-  // Critical events publish via publishWithFailover, so a transiently-dead relay can't strand them.
+  'wss://relay.layer.systems',
+  'wss://nostr.oxtr.dev',
+  'wss://relay.ditto.pub',
+  'wss://relay.nostr.net',
+  'wss://offchain.pub',
+  'wss://nostr-01.yakihonne.com',
+  // Curated against a per-relay WRITE test (publish a kind 1) and a write+READ-BACK health test (publish
+  // one of the user's own events, then fetch it back from that relay). Kept only relays that accept writes
+  // AND serve them back.
   //
-  // 2026-10 READ-responsiveness recheck (the write test above never caught dead-on-read relays): removed
-  // relay.0xchat.com (connection refused) and nostrcheck.me (opens a socket but never answers REQ / sends
-  // EOSE — the worst case, since it hangs every querySync for the full timeout and thrashes the pool,
-  // which was silently breaking DM fetching for everyone). Both retired below.
+  // 2026-10: removed nos.lol, relay.wellorder.net and nostr.mom. The health check (and a third-party tool)
+  // confirmed they accept a write but return nothing on read-back, so our events were landing there and
+  // then being unreadable. Added oxtr.dev, ditto.pub, nostr.net, offchain.pub and nostr-01.yakihonne.com,
+  // which passed the write+read-back test. relay.layer.systems is back after its TLS cert was fixed.
+  // Earlier removals (dead / write-rejecting / unreachable / read-hanging): relay.nostr.band, nostr.novacisko.cz,
+  // relay.cxplay.org, relay.nostr.moe, relay.poster.place, relay.nostr.info, pyramid.fiatjaf.com (WoT
+  // write-gated), relay.noswhere.com & search.nos.today (search-only), relay.0xchat.com (connection refused),
+  // nostrcheck.me (socket opens but never answers REQ / sends EOSE). All retired below.
+  //
+  // The dead/broken former-defaults are stripped from existing users' SAVED lists once (RETIRED_DEFAULT_RELAYS
+  // / purgeRetiredRelaysOnce; mergeMissingDefaults only ADDS). Critical events publish via publishWithFailover,
+  // which also prefers 'working' relays, so a transiently-dead relay can't strand them.
 ]
 
 /**
@@ -58,15 +62,20 @@ const RETIRED_DEFAULT_RELAYS = [
   'wss://relay.cxplay.org',
   'wss://relay.nostr.moe',
   'wss://relay.poster.place',
-  // 2026-10: dead/unresponsive on READ (see DEFAULT_RELAYS note) — nostrcheck.me especially hangs every
+  // 2026-10: dead/unresponsive on READ (see DEFAULT_RELAYS note): nostrcheck.me especially hangs every
   // querySync (connects but never EOSEs), which was breaking DM fetching pool-wide.
   'wss://relay.0xchat.com',
   'wss://nostrcheck.me',
+  // 2026-10: accept writes but serve nothing back on read (confirmed by the health check + a third-party
+  // tool), so events sent there were unreadable.
+  'wss://nos.lol',
+  'wss://relay.wellorder.net',
+  'wss://nostr.mom',
 ].map((u) => u.replace(/\/+$/, ''))
 
-// Bumped to v2 so the one-time purge re-runs for users who were already purged under v1 (to strip the
-// newly-retired 0xchat / nostrcheck.me from their saved client relay list).
-const RETIRED_PURGE_FLAG = 'den-relays-retired-purge-v2'
+// Bumped to v3 so the one-time purge re-runs for users already purged under v1/v2 (to strip the
+// newly-retired nos.lol / relay.wellorder.net / nostr.mom from their saved client relay list).
+const RETIRED_PURGE_FLAG = 'den-relays-retired-purge-v3'
 
 /** One-time (ever) removal of confirmed-dead former-default relays from the saved client relay list. */
 function purgeRetiredRelaysOnce(): void {
