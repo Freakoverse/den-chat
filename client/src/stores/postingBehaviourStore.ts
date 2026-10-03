@@ -9,12 +9,21 @@
 
 import { create } from 'zustand'
 import type { Event } from 'nostr-tools'
-import { getRelays, getRelayList, publishWithFailover } from '@/lib/nostr/relay-pool'
+import { getRelays, getRelayList, publishWithFailover, setPublishRanker } from '@/lib/nostr/relay-pool'
 import { useUserListsStore } from '@/stores/userListsStore'
 import { useUserStore } from '@/stores/userStore'
 import { blossomServers } from '@/lib/blossom'
+import { relayHealthOf } from '@/lib/nostr/relayHealthProbe'
 
 const LS_KEY = 'denchat_posting_behaviour'
+
+// Make every failover publish prefer relays our health check found 'working' (and try known-'broken'
+// ones only as a last resort). Registered globally so publishWithFailover can rank without relay-pool
+// importing the health store (a cycle). Stable within a rank tier, so determinism is preserved.
+setPublishRanker((url) => {
+  const h = relayHealthOf(url)
+  return h === 'working' ? 0 : h === 'broken' ? 2 : 1
+})
 
 /** How many relays each enabled category (client / user / hub) is capped to when its "limit" toggle is on.
  *  Raised from 3 to 6 to widen propagation (relays GC / drop events, so more copies = fewer "disappearing"

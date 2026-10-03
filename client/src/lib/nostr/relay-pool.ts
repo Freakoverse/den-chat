@@ -335,6 +335,13 @@ export async function publishToSpecificRelays(relays: string[], event: Event): P
  * (R-advertised) relays would link the pseudonym to R. Callers pass the pool that matches the event's
  * privacy boundary: client+NIP-65 relays for the user's own events, hub relays only for hub events.
  */
+/**
+ * Globally-registered relay ranker (lower = tried first), set by the relay-health layer so publishWithFailover
+ * can prefer 'working' relays without relay-pool importing the health store (which would be a cycle).
+ */
+let publishRanker: ((url: string) => number) | null = null
+export function setPublishRanker(fn: ((url: string) => number) | null): void { publishRanker = fn }
+
 export async function publishWithFailover(
   event: Event,
   seedRelays: string[],
@@ -343,6 +350,10 @@ export async function publishWithFailover(
     target?: number
     /** Called after each failover batch (and once at the start) so a send UI can show live progress. */
     onProgress?: (confirmed: number, total: number, acceptedRelays: string[]) => void
+    /** Try relays with a lower rank first (e.g. map 'working' relays to 0 and 'broken' to 2 so the
+     *  target is reached on healthy relays before a known-broken one is even attempted). Stable, so the
+     *  caller's deterministic order is preserved within each rank tier. */
+    rank?: (url: string) => number
   } = {},
 ): Promise<string[]> {
   const target = opts.target ?? 3
@@ -354,6 +365,11 @@ export async function publishWithFailover(
     const n = norm(u)
     if (n && !seen.has(n)) { seen.add(n); candidates.push(u) }
   }
+  // Prefer healthier relays first (stable sort keeps the deterministic within-tier order). Uses the
+  // explicit rank if given, else the globally-registered health ranker (see setPublishRanker), so every
+  // failover publish routes around known-broken relays without each caller wiring it up.
+  const rank = opts.rank ?? publishRanker
+  if (rank) candidates.sort((a, b) => rank(a) - rank(b))
   const accepted = new Set<string>()
   opts.onProgress?.(0, target, [])
   let i = 0
