@@ -14,6 +14,7 @@ import { useUserListsStore } from '@/stores/userListsStore'
 import { useUserStore } from '@/stores/userStore'
 import { blossomServers } from '@/lib/blossom'
 import { relayHealthOf } from '@/lib/nostr/relayHealthProbe'
+import { KINDS } from '@/lib/crypto/constants'
 
 const LS_KEY = 'denchat_posting_behaviour'
 
@@ -105,22 +106,51 @@ export const usePostingBehaviourStore = create<PostingBehaviourState>((set, get)
 })
 
 /**
- * Deterministic "ring" pick: same seed + same list → same subset, every time,
- * on every device. Sorting first gives a stable order everywhere; the start
- * offset is `hash(seed) mod len`, so different seeds land on different windows
- * (spreading load across the pool) while each seed is pinned to a fixed set.
- * Falls back to the first N if there's no seed.
- *
- * Seeding by the author's own pubkey means every one of the author's devices
- * computes the identical subset from the identical inputs — no syncing, no
- * NIP-65 required.
+ * Turn a seed string into a start offset. Pubkeys are uniformly-random hex, so we use the hex prefix
+ * (this preserves the existing per-user picks exactly). Hub d-tags can be arbitrary strings (UUIDs etc.),
+ * so for a non-hex seed we fall back to a small string hash.
+ */
+function hashSeed(seed: string): number {
+  if (/^[0-9a-f]{8}/i.test(seed)) return parseInt(seed.slice(0, 8), 16) >>> 0
+  let h = 5381
+  for (let i = 0; i < seed.length; i++) h = ((h << 5) + h + seed.charCodeAt(i)) >>> 0
+  return h
+}
+
+/**
+ * Full deterministic "ring" order of `arr` seeded by `seed`: same seed + same list → same order, on every
+ * device AND (when the seed is shared, e.g. a hub d-tag) for every user. Sorting first gives a stable base
+ * order everywhere; the start offset is `hash(seed) mod len`.
+ */
+function ringOrder<T>(arr: T[], seed: string): T[] {
+  if (arr.length <= 1) return [...arr]
+  const sorted = [...arr].sort()
+  const start = seed ? hashSeed(seed) % sorted.length : 0
+  return Array.from({ length: sorted.length }, (_, i) => sorted[(start + i) % sorted.length])
+}
+
+/**
+ * Deterministic "ring" pick of `count` items: the first `count` of ringOrder(). Seeding by the author's
+ * own pubkey means every one of the author's devices computes the identical subset (no syncing). Seeding
+ * by a hub d-tag instead makes every MEMBER of that hub converge on the same subset of the hub's relays.
  */
 function pickForPubkey<T>(arr: T[], count: number, seed: string): T[] {
   if (arr.length <= count) return [...arr]
-  const sorted = [...arr].sort()
-  // pubkeys are uniformly-random hex, so 32 bits of the prefix distributes fine
-  const start = seed ? parseInt(seed.slice(0, 8), 16) % sorted.length : 0
-  return Array.from({ length: count }, (_, i) => sorted[(start + i) % sorted.length])
+  return ringOrder(arr, seed).slice(0, count)
+}
+
+/**
+ * The hub d-tag an event belongs to, for seeding the hub relay pick. Most hub content references its hub
+ * via an 'h' tag; PIN_LIST and the hub/group container events carry the hub d-tag in their own 'd' tag.
+ * Returns undefined when it can't be determined (caller falls back to the user's pubkey seed).
+ */
+function hubDTagFromEvent(event: Event): string | undefined {
+  const h = event.tags.find((t) => t[0] === 'h')?.[1]
+  if (h) return h
+  if (event.kind === KINDS.PIN_LIST || event.kind === KINDS.HUB_EVENT || event.kind === KINDS.GROUP_EVENT) {
+    return event.tags.find((t) => t[0] === 'd')?.[1]
+  }
+  return undefined
 }
 
 /**
@@ -129,7 +159,7 @@ function pickForPubkey<T>(arr: T[], count: number, seed: string): T[] {
  * @param hubRelays Optional hub-specific relay list (from hub event)
  * @returns Deduplicated array of relay URLs to publish to
  */
-export function getPublishRelays(hubRelays?: string[], opts?: { hubOnly?: boolean }): string[] {
+export function getPublishRelays(hubRelays?: string[], opts?: { hubOnly?: boolean; hubSeed?: string }): string[] {
   const state = usePostingBehaviourStore.getState()
   const result = new Set<string>()
 
@@ -137,6 +167,9 @@ export function getPublishRelays(hubRelays?: string[], opts?: { hubOnly?: boolea
   // their devices selects the same subset from the same relay list. Empty seed
   // (logged out) falls back to the first N — deterministic either way.
   const me = useUserStore.getState().pubkey ?? ''
+  // The HUB relay pick can instead be seeded by the hub's d-tag (opts.hubSeed), so every MEMBER of that
+  // hub converges on the same subset of the hub's relays (client/user relays stay per-user).
+  const hubSeed = opts?.hubSeed || me
 
   // Build exclusion set: relays the user explicitly disabled in client settings
   const disabledRelays = new Set(
@@ -165,11 +198,12 @@ export function getPublishRelays(hubRelays?: string[], opts?: { hubOnly?: boolea
     pickForPubkey(userRelays, limit, me).forEach((r) => result.add(r))
   }
 
-  // Hub relays — exclude any the user disabled in client settings
+  // Hub relays: exclude any the user disabled in client settings. Seeded by the hub d-tag (hubSeed) when
+  // provided, so every member converges on the same hub relays.
   if (state.postToHubRelays && hubRelays && hubRelays.length > 0) {
     const limit = state.limitHubRelays ? RELAY_PUBLISH_CAP : Infinity
     const filtered = hubRelays.filter((r) => !disabledRelays.has(r.replace(/\/+$/, '')))
-    pickForPubkey(filtered, limit, me).forEach((r) => result.add(r))
+    pickForPubkey(filtered, limit, hubSeed).forEach((r) => result.add(r))
   }
 
   return Array.from(result)
@@ -240,19 +274,25 @@ type PublishProgress = (confirmed: number, total: number, acceptedRelays: string
 export async function publishContent(
   event: Event,
   hubRelays?: string[],
-  opts?: { hubOnly?: boolean; onProgress?: PublishProgress; target?: number },
+  opts?: { hubOnly?: boolean; onProgress?: PublishProgress; target?: number; hubDTag?: string },
 ): Promise<string[]> {
   const state = usePostingBehaviourStore.getState()
   const norm = (u: string) => u.replace(/\/+$/, '')
   const disabled = new Set(getRelayList().filter((r) => !r.enabled).map((r) => norm(r.url)))
   const notDisabled = (u: string) => !disabled.has(norm(u))
+  const me = useUserStore.getState().pubkey ?? ''
 
-  const seed = getPublishRelays(hubRelays, opts?.hubOnly ? { hubOnly: true } : undefined)
+  // For hub content, seed the HUB relay pick + failover order by the hub's d-tag (derived from the event),
+  // so every member of that hub deterministically converges on the same hub relays. Outside a hub (no
+  // shared seed) it stays per-user (seeded by our pubkey), which is all that's available there.
+  const hubSeed = (hubRelays && hubRelays.length > 0 ? (opts?.hubDTag || hubDTagFromEvent(event)) : '') || me
+
+  const seed = getPublishRelays(hubRelays, { hubOnly: opts?.hubOnly, hubSeed })
 
   const pool: string[] = []
-  if (state.postToClientRelays) pool.push(...getRelays()) // enabled-only already
-  if (state.postToUserRelays) pool.push(...useUserListsStore.getState().userRelays.filter(notDisabled))
-  if (state.postToHubRelays && hubRelays && hubRelays.length > 0) pool.push(...hubRelays.filter(notDisabled))
+  if (state.postToClientRelays) pool.push(...ringOrder(getRelays(), me)) // enabled-only already
+  if (state.postToUserRelays) pool.push(...ringOrder(useUserListsStore.getState().userRelays.filter(notDisabled), me))
+  if (state.postToHubRelays && hubRelays && hubRelays.length > 0) pool.push(...ringOrder(hubRelays.filter(notDisabled), hubSeed))
 
   // Default target: land on as many live relays as the seed (toggle + cap aware) selected — so the number
   // of copies tracks the user's own posting-behaviour settings (caps on = ~6 per list; caps off = all).
