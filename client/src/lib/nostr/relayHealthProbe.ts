@@ -27,10 +27,11 @@ export type RelayHealth = 'checking' | 'working' | 'broken'
 
 /** How long a cached result stays fresh before an auto-probe re-checks it (in the background, keeping the
  *  last label visible). Reopening a relay list within this window is pure cache: no probe, no 'checking'. */
-const TTL_MS = 30 * 60_000
+const TTL_MS = 24 * 60 * 60_000
 
-/** Persisted results older than this are dropped on load and re-checked fresh. */
-const PERSIST_MAX_AGE_MS = 24 * 60 * 60_000
+/** Persisted results older than this are dropped on load and re-checked fresh. Longer than TTL_MS so a
+ *  merely-stale result is still shown instantly (and re-checked in the background), not dropped. */
+const PERSIST_MAX_AGE_MS = 7 * 24 * 60 * 60_000
 const LS_KEY = 'den_relay_health'
 
 const norm = (u: string) => u.replace(/\/+$/, '')
@@ -111,8 +112,28 @@ function getProbeEvent(): Promise<Event | null> {
 const inFlight = new Set<string>()
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
-/** How many read-back attempts before we conclude a relay is broken (tolerates indexing lag). */
+/** How many read-back attempts within ONE probe pass before it concludes broken (tolerates indexing lag). */
 const READBACK_ATTEMPTS = 3
+
+/**
+ * One probe pass: publish `ev` once, then read it back with a few increasingly patient attempts. Relays
+ * routinely EOSE a query BEFORE a just-published event is indexed, so a single immediate read-back gave
+ * flaky false-broken results. 'broken' only when the write was refused outright or every read-back failed.
+ */
+async function probeOnce(url: string, ev: Event): Promise<'working' | 'broken'> {
+  let accepted = false
+  for (let attempt = 0; attempt < READBACK_ATTEMPTS; attempt++) {
+    if (!accepted) {
+      const got = await publishToSpecificRelays([url], ev).catch(() => [] as string[])
+      accepted = got.length > 0
+      if (!accepted) { await delay(500); continue } // write refused: retry the write
+    }
+    await delay(500 + attempt * 700) // give the relay time to index before reading back
+    const back = await fetchEventsFromRelays([url], { ids: [ev.id] }).catch(() => [])
+    if (back.some((e) => e.id === ev.id)) return 'working'
+  }
+  return 'broken'
+}
 
 export const useRelayHealthStore = create<RelayHealthState>((set, get) => {
   const persist = () => { const s = get(); persistState(s.status, s.checkedAt) }
@@ -120,6 +141,7 @@ export const useRelayHealthStore = create<RelayHealthState>((set, get) => {
     const n = norm(url)
     if (!n || inFlight.has(n)) return
     inFlight.add(n)
+    const prev = get().status[n]
     // Keep any prior result visible while re-checking; only show 'checking' on the first probe ever,
     // so a re-check doesn't flash the label.
     set((s) => ({ status: { ...s.status, [n]: s.status[n] ?? 'checking' } }))
@@ -130,22 +152,18 @@ export const useRelayHealthStore = create<RelayHealthState>((set, get) => {
         if (!ev) {
           result = null // no probe event available (e.g. logged-out) => show no label, keep the dot
         } else {
-          // Publish once, then read it back with a few increasingly patient attempts. Relays routinely
-          // EOSE a query BEFORE a just-published event is indexed, so a single immediate read-back
-          // produced flaky false-broken results (a reliable relay broken one run, fine the next). We
-          // only conclude 'broken' when the write was refused outright, or the read-back fails every try.
-          let accepted = false
-          for (let attempt = 0; attempt < READBACK_ATTEMPTS && result !== 'working'; attempt++) {
-            if (!accepted) {
-              const got = await publishToSpecificRelays([url], ev).catch(() => [] as string[])
-              accepted = got.length > 0
-              if (!accepted) { await delay(500); continue } // write refused: retry the write
+          let r = await probeOnce(url, ev)
+          if (r === 'broken') {
+            // Never flip to broken on a single pass. A relay that was WORKING needs 2 extra confirming
+            // passes (3 broken total) before it's marked broken; any other case needs 1 extra (2 total).
+            // A confirming pass that comes back working keeps it working.
+            const needed = prev === 'working' ? 3 : 2
+            for (let brokenRuns = 1; brokenRuns < needed && r === 'broken'; brokenRuns++) {
+              await delay(1500)
+              r = await probeOnce(url, ev)
             }
-            await delay(500 + attempt * 700) // give the relay time to index before reading back
-            const back = await fetchEventsFromRelays([url], { ids: [ev.id] }).catch(() => [])
-            if (back.some((e) => e.id === ev.id)) result = 'working'
           }
-          if (result !== 'working') result = 'broken'
+          result = r
         }
       } catch {
         result = 'broken'
