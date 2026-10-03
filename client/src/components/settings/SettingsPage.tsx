@@ -46,6 +46,7 @@ import {
 } from '@/lib/voice/soundEffects'
 import { DenChatLogo } from '@/components/ui/DenChatLogo'
 import { RelayHealthLabel } from '@/components/nostr/RelayHealthLabel'
+import { useRelayHealthStore } from '@/lib/nostr/relayHealthProbe'
 import {
   Settings, Palette, Globe, Shield, ShieldCheck, Info, Keyboard, MessageSquare, Users, ChevronsUpDown,
   Sun, Moon, Monitor, Plus, Minus, Trash2, Eye, EyeOff, Search,
@@ -1917,6 +1918,14 @@ function NetworkTab() {
     setClientRelays(getRelayList())
   }, [])
 
+  // Re-run the write+read-back health check for every relay shown here (client + user NIP-65), with a
+  // fresh timestamp so the 24h cache window restarts.
+  const refreshAllRelayHealth = useRelayHealthStore((s) => s.refreshAll)
+  const handleTestAgain = () => {
+    const urls = [...clientRelays.map((r) => r.url), ...useUserListsStore.getState().userRelays]
+    refreshAllRelayHealth(urls)
+  }
+
   const saveClientRelays = (list: { url: string; enabled: boolean }[]) => {
     setClientRelays(list)
     setRelays(list)
@@ -2030,6 +2039,22 @@ function NetworkTab() {
       {/* ── Relays ── */}
       {netTab === 'relays' && (
         <div className="space-y-8">
+          {/* Relay health: explains the working/broken labels + lets the user re-run the check */}
+          <section className="flex items-start gap-3 px-3 py-2.5 rounded-lg bg-secondary/30 border border-border">
+            <div className="flex-1 min-w-0">
+              <h4 className="text-sm font-semibold text-foreground">Relay health</h4>
+              <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">
+                The <span className="text-emerald-400">working</span>/<span className="text-destructive">broken</span> label beside each relay is a real test: it rebroadcasts one of your own events (a message you posted to a hub, or your relay list) to that relay and fetches it straight back, so a relay only counts as working if it actually accepts and serves your events. Results are cached for 24 hours.
+              </p>
+            </div>
+            <button
+              onClick={handleTestAgain}
+              className="shrink-0 h-8 px-3 rounded-md bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors cursor-pointer flex items-center gap-1.5"
+            >
+              <RefreshCw size={13} /> Test again
+            </button>
+          </section>
+
           {/* Client Relays */}
           <section className="space-y-3">
             <h4 className="text-sm font-semibold text-foreground">Client Relays</h4>

@@ -15,6 +15,7 @@ const norm = (u: string) => u.replace(/\/+$/, '')
 export function RelayHealthLabel({ url, className = '' }: { url: string; className?: string }) {
   const key = norm(url)
   const status = useRelayHealthStore((s) => s.status[key])
+  const progress = useRelayHealthStore((s) => s.progress[key])
   const probe = useRelayHealthStore((s) => s.probe)
 
   useEffect(() => { probe(url) }, [url, probe])
@@ -26,7 +27,11 @@ export function RelayHealthLabel({ url, className = '' }: { url: string; classNa
     : status === 'broken'
       ? 'text-destructive bg-destructive/10'
       : 'text-muted-foreground bg-muted-foreground/10'
-  const label = status === 'working' ? 'working' : status === 'broken' ? 'broken' : 'checking'
+  const label = status === 'working'
+    ? 'working'
+    : status === 'broken'
+      ? 'broken'
+      : progress ? `checking (${progress.done}/${progress.total})` : 'checking'
 
   return (
     <span className={`shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded ${cls} ${className}`}>

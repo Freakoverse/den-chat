@@ -70,10 +70,14 @@ function persistState(status: Record<string, RelayHealth>, checkedAt: Record<str
 interface RelayHealthState {
   status: Record<string, RelayHealth>
   checkedAt: Record<string, number>
+  /** While a relay is 'checking', its probe-attempt progress {done, total} (for a live "(n/n)" label). */
+  progress: Record<string, { done: number; total: number }>
   /** Auto-probe a relay (no-op if fresh or already in flight). Updates `status` when it resolves. */
   probe: (url: string) => void
-  /** Force a re-probe regardless of the TTL (used by an explicit re-test). */
+  /** Force a re-probe of one relay regardless of the TTL (shows 'checking (n/n)'), used by an explicit re-test. */
   refresh: (url: string) => void
+  /** Force a re-probe of many relays (one shared fresh probe event), used by the "Test again" button. */
+  refreshAll: (urls: string[]) => void
   /** Record a known result directly (e.g. the hub-event probe in the relay fix modal). */
   setStatus: (url: string, health: 'working' | 'broken') => void
 }
@@ -120,9 +124,10 @@ const READBACK_ATTEMPTS = 3
  * routinely EOSE a query BEFORE a just-published event is indexed, so a single immediate read-back gave
  * flaky false-broken results. 'broken' only when the write was refused outright or every read-back failed.
  */
-async function probeOnce(url: string, ev: Event): Promise<'working' | 'broken'> {
+async function probeOnce(url: string, ev: Event, onAttempt?: () => void): Promise<'working' | 'broken'> {
   let accepted = false
   for (let attempt = 0; attempt < READBACK_ATTEMPTS; attempt++) {
+    onAttempt?.() // one step of progress per loop iteration
     if (!accepted) {
       const got = await publishToSpecificRelays([url], ev).catch(() => [] as string[])
       accepted = got.length > 0
@@ -137,14 +142,21 @@ async function probeOnce(url: string, ev: Event): Promise<'working' | 'broken'> 
 
 export const useRelayHealthStore = create<RelayHealthState>((set, get) => {
   const persist = () => { const s = get(); persistState(s.status, s.checkedAt) }
-  const run = (url: string) => {
+  const run = (url: string, force = false) => {
     const n = norm(url)
     if (!n || inFlight.has(n)) return
     inFlight.add(n)
     const prev = get().status[n]
-    // Keep any prior result visible while re-checking; only show 'checking' on the first probe ever,
-    // so a re-check doesn't flash the label.
-    set((s) => ({ status: { ...s.status, [n]: s.status[n] ?? 'checking' } }))
+    // Never flip to broken on a single pass: a WORKING relay needs 2 extra confirming passes (3 total)
+    // before it's marked broken; any other case needs 1 extra (2 total). Progress counts one step per
+    // read-back loop iteration across all the passes we might run.
+    const needed = prev === 'working' ? 3 : 2
+    const total = needed * READBACK_ATTEMPTS
+    let done = 0
+    const bump = () => { done++; set((s) => ({ progress: { ...s.progress, [n]: { done, total } } })) }
+    // Background re-checks keep any prior result visible (only show 'checking' on the first probe ever),
+    // so they don't flash the label. An explicit re-test (force) shows 'checking (n/n)' so the user sees it run.
+    set((s) => ({ status: { ...s.status, [n]: force ? 'checking' : (s.status[n] ?? 'checking') }, progress: { ...s.progress, [n]: { done: 0, total } } }))
     ;(async () => {
       let result: RelayHealth | null = 'broken'
       try {
@@ -152,16 +164,10 @@ export const useRelayHealthStore = create<RelayHealthState>((set, get) => {
         if (!ev) {
           result = null // no probe event available (e.g. logged-out) => show no label, keep the dot
         } else {
-          let r = await probeOnce(url, ev)
-          if (r === 'broken') {
-            // Never flip to broken on a single pass. A relay that was WORKING needs 2 extra confirming
-            // passes (3 broken total) before it's marked broken; any other case needs 1 extra (2 total).
-            // A confirming pass that comes back working keeps it working.
-            const needed = prev === 'working' ? 3 : 2
-            for (let brokenRuns = 1; brokenRuns < needed && r === 'broken'; brokenRuns++) {
-              await delay(1500)
-              r = await probeOnce(url, ev)
-            }
+          let r = await probeOnce(url, ev, bump)
+          for (let brokenRuns = 1; brokenRuns < needed && r === 'broken'; brokenRuns++) {
+            await delay(1500) // a confirming pass that comes back working keeps it working
+            r = await probeOnce(url, ev, bump)
           }
           result = r
         }
@@ -172,9 +178,11 @@ export const useRelayHealthStore = create<RelayHealthState>((set, get) => {
       set((s) => {
         const status = { ...s.status }
         const checkedAt = { ...s.checkedAt }
+        const progress = { ...s.progress }
+        delete progress[n]
         if (result === null) { delete status[n]; delete checkedAt[n] }
         else { status[n] = result; checkedAt[n] = Date.now() }
-        return { status, checkedAt }
+        return { status, checkedAt, progress }
       })
       persist()
     })()
@@ -184,6 +192,7 @@ export const useRelayHealthStore = create<RelayHealthState>((set, get) => {
   return {
     status: initial.status,
     checkedAt: initial.checkedAt,
+    progress: {},
     probe: (url) => {
       const n = norm(url)
       const st = get()
@@ -191,7 +200,12 @@ export const useRelayHealthStore = create<RelayHealthState>((set, get) => {
       if (cached && cached !== 'checking' && Date.now() - (st.checkedAt[n] ?? 0) < TTL_MS) return
       run(url)
     },
-    refresh: (url) => { resetProbeEvent(); run(url) },
+    refresh: (url) => { resetProbeEvent(); run(url, true) },
+    refreshAll: (urls) => {
+      resetProbeEvent()
+      void getProbeEvent() // kick off a single shared re-fetch so every relay tests with the same event
+      for (const u of urls) run(u, true)
+    },
     setStatus: (url, health) => {
       const n = norm(url)
       if (!n) return
