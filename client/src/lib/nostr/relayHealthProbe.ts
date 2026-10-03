@@ -124,10 +124,9 @@ const READBACK_ATTEMPTS = 3
  * routinely EOSE a query BEFORE a just-published event is indexed, so a single immediate read-back gave
  * flaky false-broken results. 'broken' only when the write was refused outright or every read-back failed.
  */
-async function probeOnce(url: string, ev: Event, onAttempt?: () => void): Promise<'working' | 'broken'> {
+async function probeOnce(url: string, ev: Event): Promise<'working' | 'broken'> {
   let accepted = false
   for (let attempt = 0; attempt < READBACK_ATTEMPTS; attempt++) {
-    onAttempt?.() // one step of progress per loop iteration
     if (!accepted) {
       const got = await publishToSpecificRelays([url], ev).catch(() => [] as string[])
       accepted = got.length > 0
@@ -148,15 +147,13 @@ export const useRelayHealthStore = create<RelayHealthState>((set, get) => {
     inFlight.add(n)
     const prev = get().status[n]
     // Never flip to broken on a single pass: a WORKING relay needs 2 extra confirming passes (3 total)
-    // before it's marked broken; any other case needs 1 extra (2 total). Progress counts one step per
-    // read-back loop iteration across all the passes we might run.
+    // before it's marked broken; any other case needs 1 extra (2 total). Progress is the verification
+    // pass we're on out of that total (x/2, or x/3 when re-verifying a previously-working relay).
     const needed = prev === 'working' ? 3 : 2
-    const total = needed * READBACK_ATTEMPTS
-    let done = 0
-    const bump = () => { done++; set((s) => ({ progress: { ...s.progress, [n]: { done, total } } })) }
+    const setProg = (pass: number) => set((s) => ({ progress: { ...s.progress, [n]: { done: pass, total: needed } } }))
     // Background re-checks keep any prior result visible (only show 'checking' on the first probe ever),
     // so they don't flash the label. An explicit re-test (force) shows 'checking (n/n)' so the user sees it run.
-    set((s) => ({ status: { ...s.status, [n]: force ? 'checking' : (s.status[n] ?? 'checking') }, progress: { ...s.progress, [n]: { done: 0, total } } }))
+    set((s) => ({ status: { ...s.status, [n]: force ? 'checking' : (s.status[n] ?? 'checking') }, progress: { ...s.progress, [n]: { done: 1, total: needed } } }))
     ;(async () => {
       let result: RelayHealth | null = 'broken'
       try {
@@ -164,10 +161,11 @@ export const useRelayHealthStore = create<RelayHealthState>((set, get) => {
         if (!ev) {
           result = null // no probe event available (e.g. logged-out) => show no label, keep the dot
         } else {
-          let r = await probeOnce(url, ev, bump)
-          for (let brokenRuns = 1; brokenRuns < needed && r === 'broken'; brokenRuns++) {
+          let r = await probeOnce(url, ev) // pass 1
+          for (let pass = 2; pass <= needed && r === 'broken'; pass++) {
+            setProg(pass)
             await delay(1500) // a confirming pass that comes back working keeps it working
-            r = await probeOnce(url, ev, bump)
+            r = await probeOnce(url, ev)
           }
           result = r
         }
