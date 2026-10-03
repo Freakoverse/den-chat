@@ -18,7 +18,7 @@
 
 import { create } from 'zustand'
 import type { Event } from 'nostr-tools'
-import { publishToSpecificRelays, fetchEventsFromRelays, fetchReplaceable } from './relay-pool'
+import { publishToSpecificRelays, fetchEventsFromRelays, fetchReplaceable, fetchEvents } from './relay-pool'
 import { useUserStore } from '@/stores/userStore'
 import { useMessageStore } from '@/stores/messageStore'
 import { STANDARD_KINDS } from '@/lib/crypto/constants'
@@ -88,24 +88,32 @@ function resetProbeEvent() { probeEventPromise = null }
 
 async function resolveProbeEvent(): Promise<Event | null> {
   const me = useUserStore.getState().pubkey
-  if (!me) return null
 
-  // 1. One of the user's OWN hub messages we already hold (v1: authored by their real key).
-  const byHub = useMessageStore.getState().messages
-  for (const byChannel of Object.values(byHub)) {
-    for (const list of Object.values(byChannel)) {
-      for (const m of list) {
-        if (m.pubkey === me && m.rawEvent) {
-          try { return JSON.parse(m.rawEvent) as Event } catch { /* keep looking */ }
+  if (me) {
+    // 1. One of the user's OWN hub messages we already hold (v1: authored by their real key).
+    const byHub = useMessageStore.getState().messages
+    for (const byChannel of Object.values(byHub)) {
+      for (const list of Object.values(byChannel)) {
+        for (const m of list) {
+          if (m.pubkey === me && m.rawEvent) {
+            try { return JSON.parse(m.rawEvent) as Event } catch { /* keep looking */ }
+          }
         }
       }
     }
+
+    // 2. The user's own relay list (10002), then profile (0): always theirs, always belongs on relays,
+    //    and works for v2-only users whose hub messages are pseudonym-authored.
+    const own = (await fetchReplaceable(me, STANDARD_KINDS.RELAY_LIST).catch(() => null))
+      ?? (await fetchReplaceable(me, STANDARD_KINDS.USER_METADATA).catch(() => null))
+    if (own) return own
   }
 
-  // 2. Fall back to the user's own relay list (10002), then profile (0): always theirs, always
-  //    belongs on relays, and works for v2-only users whose hub messages are pseudonym-authored.
-  return (await fetchReplaceable(me, STANDARD_KINDS.RELAY_LIST).catch(() => null))
-    ?? (await fetchReplaceable(me, STANDARD_KINDS.USER_METADATA).catch(() => null))
+  // 3. Brand-new user (or logged out) with nothing of their own yet: borrow any recent event from the
+  //    relays we already know and test with that. Publishing an already-signed event is fine (it's
+  //    already public), and the write+read-back still proves whether a relay accepts and serves events.
+  const borrowed = await fetchEvents({ kinds: [1], limit: 1 }).catch(() => [])
+  return borrowed[0] ?? null
 }
 
 function getProbeEvent(): Promise<Event | null> {
