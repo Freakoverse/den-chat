@@ -55,7 +55,7 @@ export function HubRelayHealthBanner({ hub }: { hub: HubData }) {
   if (broken.length === 0) return null
 
   return (
-    <div className="mx-2 flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/8 border border-amber-500/20 text-xs shrink-0">
+    <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/8 border border-amber-500/20 text-xs shrink-0">
       <AlertTriangle size={14} className="text-amber-400 shrink-0" />
       <span className="flex-1 min-w-0 text-foreground">
         {broken.length} of this hub's {hub.generalRelays.length} relay{hub.generalRelays.length === 1 ? '' : 's'} {broken.length === 1 ? 'is' : 'are'} broken: members may not send or receive here. Pick working relays.

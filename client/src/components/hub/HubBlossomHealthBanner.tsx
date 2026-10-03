@@ -36,7 +36,7 @@ export function HubBlossomHealthBanner({ hub }: { hub: HubData }) {
 
   return (
     <>
-      <div className="mx-2 flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/8 border border-amber-500/20 text-xs shrink-0">
+      <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/8 border border-amber-500/20 text-xs shrink-0">
         <AlertTriangle size={14} className="text-amber-400 shrink-0" />
         <span className="flex-1 min-w-0 text-foreground">
           {failed.length} of this hub's {hub.blossomServers.length} Blossom server{hub.blossomServers.length === 1 ? '' : 's'} couldn't serve its files — members may load slowly or fail.
