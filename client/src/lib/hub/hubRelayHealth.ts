@@ -86,21 +86,35 @@ export async function fetchHubProbeEvent(hub: HubData): Promise<Event | null> {
     (e.created_at > best.created_at || (e.created_at === best.created_at && e.id < best.id)) ? e : best)
 }
 
-/** Write `event` to one relay (no failover) then fetch it straight back from that relay by id. */
+const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
+
+/**
+ * Write `event` to one relay (no failover) then read it back from that relay, tolerating indexing lag.
+ * Relays routinely EOSE a query BEFORE a just-published event is indexed, so a single immediate read-back
+ * gave flaky false-broken results (a reliable relay broken one run, fine the next). Publish once (retry
+ * the write on a blip), then read back with a settle delay and a few increasingly patient attempts.
+ */
 async function probeOneRelayOnce(relay: string, event: Event): Promise<RelayCheck> {
-  const accepted = await publishToSpecificRelays([relay], event)
-  if (accepted.length === 0) return { relay: normalize(relay), ok: false, reason: 'write rejected' }
-  const back = await fetchEventsFromRelays([relay], { ids: [event.id] })
-  if (back.some((e) => e.id === event.id)) return { relay: normalize(relay), ok: true }
-  return { relay: normalize(relay), ok: false, reason: 'not served back' }
+  let accepted = false
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (!accepted) {
+      const got = await publishToSpecificRelays([relay], event).catch(() => [] as string[])
+      accepted = got.length > 0
+      if (!accepted) { await delay(500); continue } // write refused: retry the write
+    }
+    await delay(500 + attempt * 700) // give the relay time to index before reading back
+    const back = await fetchEventsFromRelays([relay], { ids: [event.id] }).catch(() => [])
+    if (back.some((e) => e.id === event.id)) return { relay: normalize(relay), ok: true }
+  }
+  return { relay: normalize(relay), ok: false, reason: accepted ? 'not served back' : 'write rejected' }
 }
 
 /**
- * Probe each relay in `relays` with the hub's own event: rebroadcast it to that relay alone, then fetch
- * it back from that same relay. Retries once before marking a relay broken (a single blip shouldn't
- * condemn a relay). Runs the relays in parallel (each is independent); `onResult` fires per relay so a UI
- * can fill badges in as they resolve. Pass `probeEvent` to reuse one already fetched (the picker probes
- * current + candidate relays with the same event); otherwise it's fetched here.
+ * Probe each relay in `relays` with the hub's own event: rebroadcast it to that relay alone, then read it
+ * back from that same relay (write + read retried patiently inside probeOneRelayOnce to tolerate indexing
+ * lag, so a slow relay isn't falsely marked broken). Runs the relays in parallel (each is independent);
+ * `onResult` fires per relay so a UI can fill badges in as they resolve. Pass `probeEvent` to reuse one
+ * already fetched (the picker probes current + candidate relays with the same event); otherwise fetched here.
  */
 export async function probeRelays(
   hub: HubData,
@@ -115,14 +129,12 @@ export async function probeRelays(
   if (!event) throw new Error('Could not obtain the hub event to test relays with.')
 
   return Promise.all(targets.map(async (relay) => {
-    let result: RelayCheck = { relay, ok: false, reason: 'unreachable' }
-    for (let attempt = 0; attempt < 2; attempt++) {
-      try {
-        result = await probeOneRelayOnce(relay, event)
-      } catch (e) {
-        result = { relay, ok: false, reason: (e instanceof Error ? e.message : String(e)) || 'error' }
-      }
-      if (result.ok) break
+    // probeOneRelayOnce already retries the write + reads back patiently, so one call per relay suffices.
+    let result: RelayCheck
+    try {
+      result = await probeOneRelayOnce(relay, event)
+    } catch (e) {
+      result = { relay, ok: false, reason: (e instanceof Error ? e.message : String(e)) || 'error' }
     }
     onResult?.(result)
     return result

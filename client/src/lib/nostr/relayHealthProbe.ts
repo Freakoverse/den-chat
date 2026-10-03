@@ -73,13 +73,19 @@ function getProbeEvent(): Promise<Event | null> {
 }
 
 const inFlight = new Set<string>()
+const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
+
+/** How many read-back attempts before we conclude a relay is broken (tolerates indexing lag). */
+const READBACK_ATTEMPTS = 3
 
 export const useRelayHealthStore = create<RelayHealthState>((set, get) => {
   const run = (url: string) => {
     const n = norm(url)
     if (!n || inFlight.has(n)) return
     inFlight.add(n)
-    set((s) => ({ status: { ...s.status, [n]: 'checking' } }))
+    // Keep any prior result visible while re-checking; only show 'checking' on the first probe ever,
+    // so a re-check doesn't flash the label.
+    set((s) => ({ status: { ...s.status, [n]: s.status[n] ?? 'checking' } }))
     ;(async () => {
       let result: RelayHealth | null = 'broken'
       try {
@@ -87,13 +93,22 @@ export const useRelayHealthStore = create<RelayHealthState>((set, get) => {
         if (!ev) {
           result = null // no probe event available (e.g. logged-out) => show no label, keep the dot
         } else {
-          const accepted = await publishToSpecificRelays([url], ev)
-          if (accepted.length > 0) {
-            const back = await fetchEventsFromRelays([url], { ids: [ev.id] })
-            result = back.some((e) => e.id === ev.id) ? 'working' : 'broken'
-          } else {
-            result = 'broken'
+          // Publish once, then read it back with a few increasingly patient attempts. Relays routinely
+          // EOSE a query BEFORE a just-published event is indexed, so a single immediate read-back
+          // produced flaky false-broken results (a reliable relay broken one run, fine the next). We
+          // only conclude 'broken' when the write was refused outright, or the read-back fails every try.
+          let accepted = false
+          for (let attempt = 0; attempt < READBACK_ATTEMPTS && result !== 'working'; attempt++) {
+            if (!accepted) {
+              const got = await publishToSpecificRelays([url], ev).catch(() => [] as string[])
+              accepted = got.length > 0
+              if (!accepted) { await delay(500); continue } // write refused: retry the write
+            }
+            await delay(500 + attempt * 700) // give the relay time to index before reading back
+            const back = await fetchEventsFromRelays([url], { ids: [ev.id] }).catch(() => [])
+            if (back.some((e) => e.id === ev.id)) result = 'working'
           }
+          if (result !== 'working') result = 'broken'
         }
       } catch {
         result = 'broken'
