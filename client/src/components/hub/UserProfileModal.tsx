@@ -1332,7 +1332,7 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
         await markStep('Publishing join request')
         const unsignedEventV2 = createJoinRequest(dTag, hubContext.creatorPubkey, newIndexHashV2)
         const signedEventV2 = await authSigner({ ...unsignedEventV2, pubkey: modP })
-        await publishCriticalWithFailover(signedEventV2, getRelays([...hub.generalRelays], { hubOnly: true }), [...hub.generalRelays])
+        await publishCriticalWithFailover(signedEventV2, getRelays([...hub.generalRelays], { hubOnly: true, hubSeed: hub.dTag }), [...hub.generalRelays])
         markDone('Publishing join request')
 
         useHubStore.getState().setModBanList(dTag, myPubkey, allBanPubkeysV2)
@@ -1400,7 +1400,7 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
       await markStep('Publishing join request')
       const unsignedEvent = createJoinRequest(dTag, hubContext.creatorPubkey, newIndexHash)
       const signedEvent = await signFn(unsignedEvent, signer, privateKey)
-      await publishCriticalWithFailover(signedEvent, getRelays([...hub.generalRelays]), [...hub.generalRelays])
+      await publishCriticalWithFailover(signedEvent, getRelays([...hub.generalRelays], { hubSeed: hub.dTag }), [...hub.generalRelays])
       markDone('Publishing join request')
 
       useHubStore.getState().setModBanList(dTag, myPubkey, allBanPubkeys)
@@ -1506,7 +1506,7 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
         await markStep('Publishing join request')
         const unsignedEventV2 = createJoinRequest(dTag, hubContext.creatorPubkey, newIndexHashV2)
         const signedEventV2 = await authSigner({ ...unsignedEventV2, pubkey: modP })
-        await publishCriticalWithFailover(signedEventV2, getRelays([...hub.generalRelays], { hubOnly: true }), [...hub.generalRelays])
+        await publishCriticalWithFailover(signedEventV2, getRelays([...hub.generalRelays], { hubOnly: true, hubSeed: hub.dTag }), [...hub.generalRelays])
         markDone('Publishing join request')
 
         useHubStore.getState().setModBanList(dTag, myPubkey, remaining)
@@ -1574,7 +1574,7 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
       await markStep('Publishing join request')
       const unsignedEvent = createJoinRequest(dTag, hubContext.creatorPubkey, newIndexHash)
       const signedEvent = await signFn(unsignedEvent, signer, privateKey)
-      await publishCriticalWithFailover(signedEvent, getRelays([...hub.generalRelays]), [...hub.generalRelays])
+      await publishCriticalWithFailover(signedEvent, getRelays([...hub.generalRelays], { hubSeed: hub.dTag }), [...hub.generalRelays])
       markDone('Publishing join request')
 
       useHubStore.getState().setModBanList(dTag, myPubkey, remaining)
