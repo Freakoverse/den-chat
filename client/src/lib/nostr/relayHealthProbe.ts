@@ -25,10 +25,46 @@ import { STANDARD_KINDS } from '@/lib/crypto/constants'
 
 export type RelayHealth = 'checking' | 'working' | 'broken'
 
-/** How long a cached result stays fresh before an auto-probe re-checks it. */
-const TTL_MS = 5 * 60_000
+/** How long a cached result stays fresh before an auto-probe re-checks it (in the background, keeping the
+ *  last label visible). Reopening a relay list within this window is pure cache: no probe, no 'checking'. */
+const TTL_MS = 30 * 60_000
+
+/** Persisted results older than this are dropped on load and re-checked fresh. */
+const PERSIST_MAX_AGE_MS = 24 * 60 * 60_000
+const LS_KEY = 'den_relay_health'
 
 const norm = (u: string) => u.replace(/\/+$/, '')
+
+/** Load cached results from a previous session so labels show instantly after a restart (no 'checking'). */
+function loadPersisted(): { status: Record<string, RelayHealth>; checkedAt: Record<string, number> } {
+  try {
+    const raw = localStorage.getItem(LS_KEY)
+    if (!raw) return { status: {}, checkedAt: {} }
+    const parsed = JSON.parse(raw) as Record<string, { status?: string; checkedAt?: number }>
+    const status: Record<string, RelayHealth> = {}
+    const checkedAt: Record<string, number> = {}
+    const now = Date.now()
+    for (const [url, e] of Object.entries(parsed)) {
+      if (e && (e.status === 'working' || e.status === 'broken') && typeof e.checkedAt === 'number' && now - e.checkedAt < PERSIST_MAX_AGE_MS) {
+        status[url] = e.status
+        checkedAt[url] = e.checkedAt
+      }
+    }
+    return { status, checkedAt }
+  } catch {
+    return { status: {}, checkedAt: {} }
+  }
+}
+
+function persistState(status: Record<string, RelayHealth>, checkedAt: Record<string, number>): void {
+  try {
+    const out: Record<string, { status: RelayHealth; checkedAt: number }> = {}
+    for (const [url, st] of Object.entries(status)) {
+      if (st === 'working' || st === 'broken') out[url] = { status: st, checkedAt: checkedAt[url] ?? Date.now() }
+    }
+    localStorage.setItem(LS_KEY, JSON.stringify(out))
+  } catch { /* storage unavailable: non-fatal */ }
+}
 
 interface RelayHealthState {
   status: Record<string, RelayHealth>
@@ -79,6 +115,7 @@ const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 const READBACK_ATTEMPTS = 3
 
 export const useRelayHealthStore = create<RelayHealthState>((set, get) => {
+  const persist = () => { const s = get(); persistState(s.status, s.checkedAt) }
   const run = (url: string) => {
     const n = norm(url)
     if (!n || inFlight.has(n)) return
@@ -121,12 +158,14 @@ export const useRelayHealthStore = create<RelayHealthState>((set, get) => {
         else { status[n] = result; checkedAt[n] = Date.now() }
         return { status, checkedAt }
       })
+      persist()
     })()
   }
 
+  const initial = loadPersisted()
   return {
-    status: {},
-    checkedAt: {},
+    status: initial.status,
+    checkedAt: initial.checkedAt,
     probe: (url) => {
       const n = norm(url)
       const st = get()
@@ -139,6 +178,7 @@ export const useRelayHealthStore = create<RelayHealthState>((set, get) => {
       const n = norm(url)
       if (!n) return
       set((s) => ({ status: { ...s.status, [n]: health }, checkedAt: { ...s.checkedAt, [n]: Date.now() } }))
+      persist()
     },
   }
 })
