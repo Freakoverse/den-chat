@@ -14,7 +14,7 @@ import { useHubStore, type HubEntry, type HubFolder } from '@/stores/hubStore'
 import { resetSignerGuard } from '@/lib/auth/signerGuard'
 import { discover } from '@/lib/auth/pc55'
 import { fetchReplaceable, fetchEvents } from '@/lib/nostr/relay-pool'
-import { getCachedProfile, ensureProfile, subscribeProfile, seedProfile } from '@/hooks/useProfileCache'
+import { getCachedProfile, getCachedProfileCreatedAt, ensureProfile, subscribeProfile, seedProfile } from '@/hooks/useProfileCache'
 import { KINDS } from '@/lib/crypto/constants'
 import { useVoiceStore } from '@/stores/voiceStore'
 import { useHubLoader } from './useHubLoader'
@@ -416,7 +416,7 @@ export function useStartup() {
     const redundancyTimer = setTimeout(() => {
       import('@/lib/nostr/eventRedundancy').then(({ ensureAddressableRedundancy }) => {
         // Personal events — authored by the current user
-        ensureAddressableRedundancy(STANDARD_KINDS.USER_METADATA, pubkey)           // kind 0 — profile
+        ensureAddressableRedundancy(STANDARD_KINDS.USER_METADATA, pubkey, undefined, getCachedProfileCreatedAt(pubkey)) // kind 0: profile (version-aware)
         ensureAddressableRedundancy(STANDARD_KINDS.CONTACT_LIST, pubkey)            // kind 3 — follow list
         ensureAddressableRedundancy(10000, pubkey)                                  // kind 10000 — mute/block list
         ensureAddressableRedundancy(STANDARD_KINDS.RELAY_LIST, pubkey, undefined, useUserListsStore.getState().userRelaysCreatedAt) // kind 10002: relay list (version-aware)

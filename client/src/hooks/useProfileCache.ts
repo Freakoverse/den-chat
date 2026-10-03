@@ -30,6 +30,7 @@ interface CachedEntry {
   profile: NostrProfile
   fetchedAt: number // Date.now() timestamp
   empty?: boolean   // true = no profile found yet (likely a transient miss, still retrying)
+  createdAt?: number // created_at of the kind:0 event this was parsed from (for version-aware redundancy)
 }
 
 /** Stale-while-revalidate TTL: 1 hour */
@@ -75,8 +76,11 @@ function notifyListeners(pubkey: string) {
 }
 
 /** Store a profile in the cache, notify listeners, and trigger side effects */
-function setCachedEntry(pubkey: string, profile: NostrProfile) {
-  profileCache.set(pubkey, { profile, fetchedAt: Date.now() })
+function setCachedEntry(pubkey: string, profile: NostrProfile, createdAt?: number) {
+  // Preserve the last known created_at when a caller doesn't supply one (e.g. an external profile edit),
+  // so the version-aware redundancy guard never loses the version stamp.
+  const prevCreatedAt = profileCache.get(pubkey)?.createdAt
+  profileCache.set(pubkey, { profile, fetchedAt: Date.now(), createdAt: createdAt ?? prevCreatedAt })
   notifyListeners(pubkey)
   // Pre-cache avatar image as blob URL for instant rendering
   if (profile.picture) {
@@ -134,7 +138,7 @@ function flushProfileBatch() {
           try {
             const profile: NostrProfile = JSON.parse(event.content)
             emptyRetryCount.delete(pubkey) // got it — clear any retry state
-            setCachedEntry(pubkey, profile)
+            setCachedEntry(pubkey, profile, event.created_at)
           } catch { /* ignore parse errors */ }
         } else {
           // No event found within the query window — probably a transient relay
@@ -236,6 +240,11 @@ export function useProfileCache() {
  */
 export function getCachedProfile(pubkey: string): NostrProfile | undefined {
   return profileCache.get(pubkey)?.profile
+}
+
+/** created_at of the kind:0 event the cached profile was parsed from (for version-aware redundancy). */
+export function getCachedProfileCreatedAt(pubkey: string): number | undefined {
+  return profileCache.get(pubkey)?.createdAt
 }
 
 /**
