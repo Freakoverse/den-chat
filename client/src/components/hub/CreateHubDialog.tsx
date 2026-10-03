@@ -25,6 +25,7 @@ import { isClientTagEnabled } from '@/lib/nostr/events'
 import { publishToSpecificRelays, publishWithFailover, getRelayList } from '@/lib/nostr/relay-pool'
 import { getPublishRelays } from '@/stores/postingBehaviourStore'
 import { getRelays } from '@/lib/nostr/relay-pool'
+import { orderByHealth } from '@/lib/nostr/relayHealthProbe'
 import { KINDS } from '@/lib/crypto/constants'
 import { coordinateShortTag } from '@/lib/nostr/nipShort'
 import { createAndUploadMemberFiles, createAndUploadMemberFilesV2, blossomServers as blossomServerManager, uploadToBlossomServers } from '@/lib/blossom'
@@ -228,12 +229,15 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
   useEffect(() => {
     if (!open || relaysInitialized) return
 
-    // Deterministic ring pick seeded by `pubkey`: sort, start at hash(seed) mod len, take `max`.
+    // Deterministic ring order seeded by `pubkey`, then prefer relays the health check found 'working'
+    // (stable, so the ring order is kept within a health tier). Falls back to pure ring order when
+    // nothing's been probed yet.
     const pickForAuthor = (urls: string[], max: number): Set<string> => {
       if (urls.length <= max) return new Set(urls)
       const sorted = [...urls].sort()
       const start = pubkey ? parseInt(pubkey.slice(0, 8), 16) % sorted.length : 0
-      return new Set(Array.from({ length: max }, (_, i) => sorted[(start + i) % sorted.length]))
+      const ring = Array.from({ length: sorted.length }, (_, i) => sorted[(start + i) % sorted.length])
+      return new Set(orderByHealth(ring).slice(0, max))
     }
 
     // Client relays

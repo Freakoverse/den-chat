@@ -5,6 +5,7 @@ import { useUserStore, type ISigner } from '@/stores/userStore'
 import { isTauri, isMobileOS } from '@/lib/utils'
 import { ADMIN_PUBKEY, StorageKey } from '@/lib/constants'
 import { fetchReplaceable, fetchEvents, publishToSpecificRelays, getRelayList } from '@/lib/nostr/relay-pool'
+import { orderByHealth } from '@/lib/nostr/relayHealthProbe'
 import { MonitorSmartphone, Import, Plus, Loader2, AlertCircle, Link2, KeyRound, Copy, Check, AppWindow, ChevronDown, ChevronLeft, ChevronRight, X, Shield, ExternalLink, User, Lock, Eye, EyeOff, GitBranch, Sprout, KeySquare, Download, FileUp, BookOpen, Camera, Settings2, XCircle, FileText, Package, LockOpen, Globe, RefreshCw, Rocket, QrCode } from 'lucide-react'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { BlossomImage } from '@/components/ui/BlossomImage'
@@ -898,7 +899,7 @@ export function LoginScreen() {
       setOnboardingPrivateKey(loginResult.privKey)
       setOnboardingSigner(loginResult.signer)
       const clientRelays = getRelayList()
-      setOnboardRelays([...clientRelays].sort(() => Math.random() - 0.5).slice(0, 3).map((r) => ({ url: r.url, enabled: true })))
+      setOnboardRelays(orderByHealth([...clientRelays].sort(() => Math.random() - 0.5).map((r) => r.url)).slice(0, 3).map((url) => ({ url, enabled: true })))
       const clientBlossoms = blossomServerManager.getList()
       setOnboardBlossoms([...clientBlossoms].sort(() => Math.random() - 0.5).slice(0, 3).map((b) => ({ url: b.url, enabled: true })))
       setScreen('onboarding-profile')
@@ -938,8 +939,8 @@ export function LoginScreen() {
 
       // Pre-populate relay/blossom lists with 3 random enabled entries
       const clientRelays = getRelayList()
-      const shuffledRelays = [...clientRelays].sort(() => Math.random() - 0.5).slice(0, 3)
-      setOnboardRelays(shuffledRelays.map(r => ({ url: r.url, enabled: true })))
+      const shuffledRelays = orderByHealth([...clientRelays].sort(() => Math.random() - 0.5).map(r => r.url)).slice(0, 3)
+      setOnboardRelays(shuffledRelays.map(url => ({ url, enabled: true })))
 
       const clientBlossoms = blossomServerManager.getList()
       const shuffledBlossoms = [...clientBlossoms].sort(() => Math.random() - 0.5).slice(0, 3)

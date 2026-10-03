@@ -235,3 +235,17 @@ export const useRelayHealthStore = create<RelayHealthState>((set, get) => {
 export function relayHealthOf(url: string): RelayHealth | undefined {
   return useRelayHealthStore.getState().status[norm(url)]
 }
+
+/**
+ * Stable-sort relay URLs so the ones our health check found 'working' come first, then untested, then
+ * 'broken'. Stable, so the caller's base order (random shuffle, deterministic ring, etc.) is preserved
+ * within each tier. Used when auto-selecting relays (hub creation, account onboarding) so defaults prefer
+ * relays known to work. Falls back to the base order when nothing's been probed yet.
+ */
+export function orderByHealth(urls: string[]): string[] {
+  const rank = (u: string) => {
+    const h = relayHealthOf(u)
+    return h === 'working' ? 0 : h === 'broken' ? 2 : 1
+  }
+  return [...urls].sort((a, b) => rank(a) - rank(b))
+}

@@ -13,7 +13,8 @@ import { useUserStore } from '@/stores/userStore'
 import { useHubStore, type HubEntry, type HubFolder } from '@/stores/hubStore'
 import { resetSignerGuard } from '@/lib/auth/signerGuard'
 import { discover } from '@/lib/auth/pc55'
-import { fetchReplaceable, fetchEvents } from '@/lib/nostr/relay-pool'
+import { fetchReplaceable, fetchEvents, getRelays } from '@/lib/nostr/relay-pool'
+import { useRelayHealthStore } from '@/lib/nostr/relayHealthProbe'
 import { getCachedProfile, getCachedProfileCreatedAt, ensureProfile, subscribeProfile, seedProfile } from '@/hooks/useProfileCache'
 import { KINDS } from '@/lib/crypto/constants'
 import { useVoiceStore } from '@/stores/voiceStore'
@@ -63,6 +64,18 @@ export function useStartup() {
         setLocalSigner(info.name)
       }
     })
+  }, [])
+
+  // Probe client-relay health on app mount, even before login, so relay health is already known when a
+  // new user picks their account's relays or someone creates a hub (those selections prefer 'working'
+  // relays). Logged-out probes use the borrowed-event fallback; results are cached (24h) + persisted, so
+  // this is a one-time cost. Deferred slightly so it doesn't contend with first paint.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      const { probe } = useRelayHealthStore.getState()
+      for (const r of getRelays()) probe(r)
+    }, 1500)
+    return () => clearTimeout(t)
   }, [])
 
   // Physically purge expired (disappearing) messages at launch, independent of relay subscriptions —
