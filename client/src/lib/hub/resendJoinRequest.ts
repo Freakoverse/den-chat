@@ -92,5 +92,5 @@ export async function resendJoinRequest(hub: HubData, pubkey: string): Promise<v
     signed = await mineAndSign(unsigned, hub.joinMinPow || 0, pubkey, signer, privateKey)
   }
   // v2: hub relays ONLY (see the correlation note in the join/rescind paths). v1: hub + personal.
-  await publishCriticalWithFailover(signed, getPublishRelays(hubRelays, { hubOnly: v2 }), hubRelays)
+  await publishCriticalWithFailover(signed, getPublishRelays(hubRelays, { hubOnly: v2, hubSeed: hub.dTag }), hubRelays)
 }

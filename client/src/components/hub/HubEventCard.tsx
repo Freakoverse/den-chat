@@ -218,7 +218,7 @@ export function HubEventCard({ identifier, pubkey, relays }: HubEventCardProps) 
       }
       // v2: hub relays ONLY (mirrors DiscoverPage) — the sealed join request carries the hub coordinate;
       // fanning it out to the applicant's personal NIP-65 relays lets an observer correlate the addr key → R.
-      await publishCriticalWithFailover(signed, getPublishRelays(hubRelays, { hubOnly: isV2(hubData) }), hubRelays)
+      await publishCriticalWithFailover(signed, getPublishRelays(hubRelays, { hubOnly: isV2(hubData), hubSeed: hubData.dTag }), hubRelays)
 
       // Add to user's hub list
       if (!isAlreadyInList) {

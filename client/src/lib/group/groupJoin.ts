@@ -64,7 +64,7 @@ export async function requestJoinGroup(g: GroupData, note = ''): Promise<void> {
     signed = await mineAndSign(unsigned, g.joinMinPow || 0, k.me, k.signer, k.privateKey)
   }
   // v2: the group's relays only, so the addr key never lands on the requester's own NIP-65 relays.
-  const accepted = await publishCriticalWithFailover(signed, getPublishRelays(relays, { hubOnly: isGroupV2(g) }), relays)
+  const accepted = await publishCriticalWithFailover(signed, getPublishRelays(relays, { hubOnly: isGroupV2(g), hubSeed: g.dTag }), relays)
   if (accepted.length === 0) throw new Error('No relay accepted the join request. Please try again.')
 }
 
