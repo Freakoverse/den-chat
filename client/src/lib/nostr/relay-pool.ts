@@ -26,10 +26,12 @@ const DEFAULT_RELAYS = [
   'wss://wheat.happytavern.co',
   'wss://relay.snort.social',
   'wss://nostr.bitcoiner.social',
+  'wss://relay.layer.systems', // re-added 2026-10 after a working write+read-back health test (TLS fixed)
   // Curated 2026-09-01 against a per-relay write test (publish a kind 1 to each): kept only relays that
   // actually accepted the write. REMOVED as dead (rejected the write / unreachable): relay.nostr.band,
-  // nostr.novacisko.cz, relay.cxplay.org, relay.nostr.moe, relay.poster.place, relay.layer.systems
-  // (expired TLS cert). (relay.snort.social flaps — a 5xx earlier, accepted the write on re-test — kept.)
+  // nostr.novacisko.cz, relay.cxplay.org, relay.nostr.moe, relay.poster.place. (relay.snort.social flaps:
+  // a 5xx earlier, accepted the write on re-test, kept. relay.layer.systems had an expired TLS cert then,
+  // now fixed, so it is back above.)
   // Also long-defunct: relay.nostr.info, pyramid.fiatjaf.com (WoT write-gated), relay.noswhere.com &
   // search.nos.today (search-only). The dead former-defaults are also stripped from existing users' SAVED
   // lists once — see RETIRED_DEFAULT_RELAYS / purgeRetiredRelaysOnce (mergeMissingDefaults only ADDS).
@@ -49,7 +51,8 @@ const DEFAULT_RELAYS = [
  * (guarded by a flag), so a user who deliberately re-adds one later is respected.
  */
 const RETIRED_DEFAULT_RELAYS = [
-  'wss://relay.layer.systems',
+  // (relay.layer.systems was retired here for an expired TLS cert; re-added to DEFAULT_RELAYS 2026-10
+  //  after it tested healthy again, so it is intentionally no longer listed as retired.)
   'wss://relay.nostr.band',
   'wss://nostr.novacisko.cz',
   'wss://relay.cxplay.org',
