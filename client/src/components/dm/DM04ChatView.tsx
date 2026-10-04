@@ -1342,21 +1342,21 @@ function DM04MessageRow({
               <button
                 key={r.emoji}
                 onClick={() => onAddReaction(r.emoji, r.customUrl)}
-                className={`flex items-center gap-1 px-1.5 py-0.5 rounded-full text-xs border transition-colors cursor-pointer ${r.reacted
+                className={`inline-flex items-center gap-1 h-7 px-2.5 rounded-full text-base border transition-colors cursor-pointer ${r.reacted
                   ? 'bg-primary/15 border-primary/30 text-primary'
                   : 'bg-secondary/60 border-border hover:border-primary/20'
                   }`}
               >
                 <span>{(() => {
-                  if (r.customUrl) return <img src={r.customUrl} alt={r.emoji} className="h-4 w-4 object-contain inline" />
+                  if (r.customUrl) return <img src={r.customUrl} alt={r.emoji} className="h-5 w-5 object-contain inline" />
                   const scMatch = r.emoji.match(/^:([a-zA-Z0-9_-]+):$/)
                   if (scMatch) {
                     const entry = getEmojiMap().get(scMatch[1])
-                    if (entry) return <img src={entry.url} alt={r.emoji} className="h-4 w-4 object-contain inline" />
+                    if (entry) return <img src={entry.url} alt={r.emoji} className="h-5 w-5 object-contain inline" />
                   }
                   return r.emoji
                 })()}</span>
-                <span className="text-[10px] font-medium">{r.count}</span>
+                <span className="font-medium">{r.count}</span>
               </button>
             ))}
           </div>
@@ -1888,18 +1888,18 @@ function DM04ThreadModal({ parentMsg, threadReplies, recipientPubkey, getProfile
                           <button
                             key={r.emoji}
                             onClick={() => addReaction(reply.id, reply.senderPubkey, r.emoji, myPubkey!, recipientPubkey, signer, privateKey, r.customUrl)}
-                            className={`flex items-center gap-1 px-1.5 py-0.5 rounded-full text-xs border transition-colors cursor-pointer ${r.reacted ? 'bg-primary/15 border-primary/30 text-primary' : 'bg-secondary/60 border-border hover:border-primary/20'}`}
+                            className={`inline-flex items-center gap-1 h-7 px-2.5 rounded-full text-base border transition-colors cursor-pointer ${r.reacted ? 'bg-primary/15 border-primary/30 text-primary' : 'bg-secondary/60 border-border hover:border-primary/20'}`}
                           >
                             <span>{(() => {
-                              if (r.customUrl) return <img src={r.customUrl} alt={r.emoji} className="h-4 w-4 object-contain inline" />
+                              if (r.customUrl) return <img src={r.customUrl} alt={r.emoji} className="h-5 w-5 object-contain inline" />
                               const scMatch = r.emoji.match(/^:([a-zA-Z0-9_-]+):$/)
                               if (scMatch) {
                                 const entry = getEmojiMap().get(scMatch[1])
-                                if (entry) return <img src={entry.url} alt={r.emoji} className="h-4 w-4 object-contain inline" />
+                                if (entry) return <img src={entry.url} alt={r.emoji} className="h-5 w-5 object-contain inline" />
                               }
                               return r.emoji
                             })()}</span>
-                            <span className="text-[10px] font-medium">{r.count}</span>
+                            <span className="font-medium">{r.count}</span>
                           </button>
                         ))}
                       </div>
