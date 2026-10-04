@@ -20,6 +20,8 @@ const FETCH_MAX_WAIT_MS = 4000
 const DEFAULT_RELAYS = [
   'wss://relay.primal.net',
   'wss://relay.damus.io',
+  'wss://nos.lol',
+  'wss://nostr.mom',
   'wss://wheat.happytavern.co',
   'wss://relay.snort.social',
   'wss://nostr.bitcoiner.social',
@@ -33,10 +35,11 @@ const DEFAULT_RELAYS = [
   // one of the user's own events, then fetch it back from that relay). Kept only relays that accept writes
   // AND serve them back.
   //
-  // 2026-10: removed nos.lol, relay.wellorder.net and nostr.mom. The health check (and a third-party tool)
-  // confirmed they accept a write but return nothing on read-back, so our events were landing there and
-  // then being unreadable. Added oxtr.dev, ditto.pub, nostr.net, offchain.pub and nostr-01.yakihonne.com,
-  // which passed the write+read-back test. relay.layer.systems is back after its TLS cert was fixed.
+  // 2026-10: relay.wellorder.net removed. The health check (and a third-party tool) found it accepts a
+  // write but returns nothing on read-back, so events sent there were unreadable. nos.lol and nostr.mom
+  // briefly failed the same way and were removed, but recovered (re-tested working) and are back above.
+  // Added oxtr.dev, ditto.pub, nostr.net, offchain.pub and nostr-01.yakihonne.com, which passed the
+  // write+read-back test. relay.layer.systems is back after its TLS cert was fixed.
   // Earlier removals (dead / write-rejecting / unreachable / read-hanging): relay.nostr.band, nostr.novacisko.cz,
   // relay.cxplay.org, relay.nostr.moe, relay.poster.place, relay.nostr.info, pyramid.fiatjaf.com (WoT
   // write-gated), relay.noswhere.com & search.nos.today (search-only), relay.0xchat.com (connection refused),
@@ -66,11 +69,10 @@ const RETIRED_DEFAULT_RELAYS = [
   // querySync (connects but never EOSEs), which was breaking DM fetching pool-wide.
   'wss://relay.0xchat.com',
   'wss://nostrcheck.me',
-  // 2026-10: accept writes but serve nothing back on read (confirmed by the health check + a third-party
-  // tool), so events sent there were unreadable.
-  'wss://nos.lol',
+  // 2026-10: accepts writes but serves nothing back on read (confirmed by the health check + a third-party
+  // tool), so events sent there were unreadable. (nos.lol and nostr.mom had the same issue but recovered,
+  // so they are back in DEFAULT_RELAYS and intentionally not listed here.)
   'wss://relay.wellorder.net',
-  'wss://nostr.mom',
 ].map((u) => u.replace(/\/+$/, ''))
 
 // Bumped to v3 so the one-time purge re-runs for users already purged under v1/v2 (to strip the

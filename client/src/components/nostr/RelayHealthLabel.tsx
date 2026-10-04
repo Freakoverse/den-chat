@@ -5,23 +5,29 @@
  * relay that connects but won't accept/serve the user's events (like degmods did) reads "broken". Auto-
  * probes on mount and shares the cached result across the whole UI. Pairs with the reachability dot:
  * dot = can connect, label = actually works for me.
+ *
+ * With `interactive`, the pill becomes a button with a refresh icon: clicking it re-checks THAT ONE relay
+ * (refresh()), without touching any other relay's cached result or its automatic re-check schedule.
  */
 
 import { useEffect } from 'react'
+import { RefreshCw, Loader2 } from 'lucide-react'
 import { useRelayHealthStore } from '@/lib/nostr/relayHealthProbe'
 
 const norm = (u: string) => u.replace(/\/+$/, '')
 
-export function RelayHealthLabel({ url, className = '' }: { url: string; className?: string }) {
+export function RelayHealthLabel({ url, className = '', interactive = false }: { url: string; className?: string; interactive?: boolean }) {
   const key = norm(url)
   const status = useRelayHealthStore((s) => s.status[key])
   const progress = useRelayHealthStore((s) => s.progress[key])
   const probe = useRelayHealthStore((s) => s.probe)
+  const recheck = useRelayHealthStore((s) => s.recheck)
 
   useEffect(() => { probe(url) }, [url, probe])
 
   if (!status) return null
 
+  const checking = status === 'checking'
   const cls = status === 'working'
     ? 'text-emerald-400 bg-emerald-500/10'
     : status === 'broken'
@@ -33,9 +39,24 @@ export function RelayHealthLabel({ url, className = '' }: { url: string; classNa
       ? 'broken'
       : progress ? `checking (${progress.done}/${progress.total})` : 'checking'
 
-  return (
-    <span className={`shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded ${cls} ${className}`}>
-      {label}
-    </span>
-  )
+  const base = `shrink-0 inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded ${cls} ${className}`
+
+  if (interactive) {
+    return (
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); if (!checking) recheck(url) }}
+        disabled={checking}
+        title="Re-check this relay"
+        className={`${base} ${checking ? '' : 'cursor-pointer hover:brightness-125 transition'}`}
+      >
+        {label}
+        {checking
+          ? <Loader2 size={9} className="animate-spin" />
+          : <RefreshCw size={9} className="opacity-60" />}
+      </button>
+    )
+  }
+
+  return <span className={base}>{label}</span>
 }

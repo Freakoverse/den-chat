@@ -77,6 +77,9 @@ interface RelayHealthState {
   probe: (url: string) => void
   /** Force a re-probe of one relay regardless of the TTL (shows 'checking (n/n)'), used by an explicit re-test. */
   refresh: (url: string) => void
+  /** Re-check ONE relay now, preserving its checkedAt so its automatic 24h re-check schedule is unchanged
+   *  (for the per-relay re-check button on the health label). */
+  recheck: (url: string) => void
   /** Force a re-probe of many relays (one shared fresh probe event), used by the "Test again" button. */
   refreshAll: (urls: string[]) => void
   /** Record a known result directly (e.g. the hub-event probe in the relay fix modal). */
@@ -159,11 +162,12 @@ async function probeOnce(url: string, ev: Event): Promise<'working' | 'broken'> 
 
 export const useRelayHealthStore = create<RelayHealthState>((set, get) => {
   const persist = () => { const s = get(); persistState(s.status, s.checkedAt) }
-  const run = (url: string, force = false) => {
+  const run = (url: string, force = false, keepTimestamp = false) => {
     const n = norm(url)
     if (!n || inFlight.has(n)) return
     inFlight.add(n)
     const prev = get().status[n]
+    const prevCheckedAt = get().checkedAt[n] // for a manual per-relay re-check that leaves the auto-schedule intact
     // Never flip to broken on a single pass: a WORKING relay needs 2 extra confirming passes (3 total)
     // before it's marked broken; any other case needs 1 extra (2 total). Progress is the verification
     // pass we're on out of that total (x/2, or x/3 when re-verifying a previously-working relay).
@@ -197,7 +201,9 @@ export const useRelayHealthStore = create<RelayHealthState>((set, get) => {
         const progress = { ...s.progress }
         delete progress[n]
         if (result === null) { delete status[n]; delete checkedAt[n] }
-        else { status[n] = result; checkedAt[n] = Date.now() }
+        // keepTimestamp: update the status but preserve the original checkedAt, so a manual re-check
+        // doesn't push back the relay's automatic 24h re-check.
+        else { status[n] = result; checkedAt[n] = keepTimestamp && prevCheckedAt ? prevCheckedAt : Date.now() }
         return { status, checkedAt, progress }
       })
       persist()
@@ -217,6 +223,7 @@ export const useRelayHealthStore = create<RelayHealthState>((set, get) => {
       run(url)
     },
     refresh: (url) => { resetProbeEvent(); run(url, true) },
+    recheck: (url) => { run(url, true, true) },
     refreshAll: (urls) => {
       resetProbeEvent()
       void getProbeEvent() // kick off a single shared re-fetch so every relay tests with the same event
