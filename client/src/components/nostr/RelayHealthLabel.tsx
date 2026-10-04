@@ -13,6 +13,7 @@
 import { useEffect } from 'react'
 import { RefreshCw, Loader2 } from 'lucide-react'
 import { useRelayHealthStore } from '@/lib/nostr/relayHealthProbe'
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
 
 const norm = (u: string) => u.replace(/\/+$/, '')
 
@@ -43,18 +44,24 @@ export function RelayHealthLabel({ url, className = '', interactive = false }: {
 
   if (interactive) {
     return (
-      <button
-        type="button"
-        onClick={(e) => { e.stopPropagation(); if (!checking) recheck(url) }}
-        disabled={checking}
-        title="Re-check this relay"
-        className={`${base} ${checking ? '' : 'cursor-pointer hover:brightness-125 transition'}`}
-      >
-        {label}
-        {checking
-          ? <Loader2 size={9} className="animate-spin" />
-          : <RefreshCw size={9} className="opacity-60" />}
-      </button>
+      <TooltipProvider delayDuration={200}>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); if (!checking) recheck(url) }}
+              disabled={checking}
+              className={`${base} ${checking ? '' : 'cursor-pointer hover:brightness-125 transition'}`}
+            >
+              {label}
+              {checking
+                ? <Loader2 size={9} className="animate-spin" />
+                : <RefreshCw size={9} className="opacity-60" />}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="left" className="text-xs">Re-check this relay</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
     )
   }
 
