@@ -24,7 +24,7 @@ import { MessageActionBar, ReactionBar } from '@/components/hub/ChannelView'
 import { EmojiPickerPopover } from '@/components/chat/EmojiPickerPopover'
 import type { Reaction } from '@/components/hub/ChannelView'
 import { cn } from '@/lib/utils'
-import { truncateNpub, formatTimestamp } from '@/lib/utils'
+import { npubShort, formatTimestamp } from '@/lib/utils'
 import { useEscToClose } from '@/hooks/useEscToClose'
 
 // ─── Decrypted poll content type ───
@@ -81,7 +81,7 @@ function VotersModal({ optionLabel, voters, onClose }: VotersModalProps) {
           ) : (
             voters.map((v) => {
               const profile = getProfile(v.pubkey)
-              const name = profile?.display_name || profile?.name || truncateNpub(v.pubkey)
+              const name = profile?.display_name || profile?.name || npubShort(v.pubkey)
               return (
                 <div key={v.pubkey} className="flex items-center gap-2.5 px-3 py-1.5 rounded-lg hover:bg-accent/30 transition-colors">
                   <Avatar className="w-6 h-6">
@@ -656,7 +656,7 @@ export function PollCard({ poll, hubDTag, channelId, onOpenProfile, onReply, onT
 
   // Creator profile — resolve the real member R (v2 authors under pseudonym P)
   const creatorProfile = getProfile(pollRealPubkey)
-  const creatorName = creatorProfile?.display_name || creatorProfile?.name || truncateNpub(pollRealPubkey)
+  const creatorName = creatorProfile?.display_name || creatorProfile?.name || npubShort(pollRealPubkey)
 
   // Hidden poll placeholder — non-privileged users see a minimal placeholder
   // Check before decryption so we don't show a loading skeleton for hidden polls
