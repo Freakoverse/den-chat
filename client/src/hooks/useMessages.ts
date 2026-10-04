@@ -15,7 +15,7 @@ import { useUserStore } from '@/stores/userStore'
 import { useMessageStore, type ChatMessage as RawChatMessage } from '@/stores/messageStore'
 import type { Attachment } from '@/stores/messageStore'
 export type { Attachment }
-import { publishToSpecificRelays, assertPublished } from '@/lib/nostr/relay-pool'
+import { publishToSpecificRelays } from '@/lib/nostr/relay-pool'
 import { getPublishRelays, getDeletePublishRelays, publishContent } from '@/stores/postingBehaviourStore'
 import { signWithSigner, mineAndSign, createMessageEvent, createDeletionEvent, createDeletedMessageEvent, createReactionEvent, createEditHintEvent } from '@/lib/nostr/events'
 import { nip19, type Event } from 'nostr-tools'
@@ -1088,36 +1088,36 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
       }).catch((e) => console.warn('[Edit] Cache replace FAILED:', e))
     })
 
-    // Progressive publishing — fires callback on each relay confirmation
-    // The RelayProgressIndicator next to the message picks this up via eventId
-    const editAccepted = await publishContent(signed, hubRelays, {
-      hubOnly: !!hub && isV2(hub),
-      onProgress: (confirmed, total, acceptedRelays) => {
-        setRelayProgress(eventId, confirmed, total, acceptedRelays)
-      },
-    })
-    assertPublished(editAccepted)   // dead-relay → throw so the edit field shows an error
+    // Publish in the BACKGROUND so the edit UI doesn't block on failover. Reaching the full relay target
+    // can take ~15-30s when some of the hub's relays are slow/unhealthy (each relay has a 15s timeout),
+    // which left the "Saving…" button stuck. The edited message is already shown + cached optimistically,
+    // so we fire the publish and return; relay progress still updates via the onProgress callback.
+    ;(async () => {
+      try {
+        const editAccepted = await publishContent(signed, hubRelays, {
+          hubOnly: !!hub && isV2(hub),
+          onProgress: (confirmed, total, acceptedRelays) => {
+            setRelayProgress(eventId, confirmed, total, acceptedRelays)
+          },
+        })
+        if (editAccepted.length === 0) console.warn('[Edit] No relay accepted the edited message')
+      } catch (err) {
+        console.error('[Edit] Background publish failed:', err)
+      }
 
-    // Publish ephemeral edit hint (kind 26943) to notify other connected clients.
-    // Fire-and-forget — hint failure should not affect the edit itself.
-    // Uses mineAndSign to meet hub PoW difficulty (prevents amplification abuse, §6.13).
-    const hintUnsigned = createEditHintEvent(hubDTag!, dTag, channelId!)
-    ;(hub ? signHubMemberEvent({ hub, unsigned: hintUnsigned, pubkey: pubkey!, privateKey, signer, minPow }) : mineAndSign(hintUnsigned, minPow, pubkey, signer, privateKey))
-      .then((hintSigned) => {
-        console.log(`[EditHint] Publishing hint id=${hintSigned.id.slice(0, 12)}… kind=${hintSigned.kind} to ${publishRelays.length} relays, tags=${JSON.stringify(hintSigned.tags)}`)
-        return publishToSpecificRelays(publishRelays, hintSigned)
-      })
-      .then((accepted) => {
-        console.log(`[EditHint] Hint accepted by ${accepted.length}/${publishRelays.length} relays: ${accepted.join(', ')}`)
-      })
-      .catch((err) => {
+      // Publish ephemeral edit hint (kind 26943) to notify other connected clients. Fire-and-forget.
+      // Uses mineAndSign to meet hub PoW difficulty (prevents amplification abuse, §6.13).
+      try {
+        const hintUnsigned = createEditHintEvent(hubDTag!, dTag, channelId!)
+        const hintSigned = await (hub ? signHubMemberEvent({ hub, unsigned: hintUnsigned, pubkey: pubkey!, privateKey, signer, minPow }) : mineAndSign(hintUnsigned, minPow, pubkey, signer, privateKey))
+        const accepted = await publishToSpecificRelays(publishRelays, hintSigned)
+        console.log(`[EditHint] Hint accepted by ${accepted.length}/${publishRelays.length} relays`)
+      } catch (err) {
         console.error(`[EditHint] Hint publish FAILED:`, err)
-      })
+      }
 
-    // Auto-clear the relay progress indicator after 5 seconds
-    setTimeout(() => {
-      clearRelayProgress(eventId)
-    }, 5000)
+      setTimeout(() => clearRelayProgress(eventId), 5000)
+    })()
   }, [hubDTag, channelId, signer, privateKey, pubkey, getChannelKey])
 
   // Delete a message — re-publish with deleted tag + NIP-09 fallback via a-tag
