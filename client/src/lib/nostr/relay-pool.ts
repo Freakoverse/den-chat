@@ -310,9 +310,10 @@ export function assertPublished(accepted: string[] | undefined): void {
 
 /**
  * Publish an event to a SPECIFIC set of relays (not the global activeRelays).
- * Each relay has a 15-second timeout.
+ * Each relay has a `timeoutMs` timeout (default PUBLISH_TIMEOUT_MS = 15s; the relay-health probe passes a
+ * shorter one so a hanging relay doesn't drag the check out).
  */
-export async function publishToSpecificRelays(relays: string[], event: Event): Promise<string[]> {
+export async function publishToSpecificRelays(relays: string[], event: Event, timeoutMs: number = PUBLISH_TIMEOUT_MS): Promise<string[]> {
   if (relays.length === 0) return publishEvent(event) // fallback to default
 
   const promises = pool.publish(relays, event)
@@ -320,7 +321,7 @@ export async function publishToSpecificRelays(relays: string[], event: Event): P
   const results = await Promise.allSettled(
     promises.map((p) => Promise.race([
       p,
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 15_000)),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), timeoutMs)),
     ]))
   )
 
@@ -641,13 +642,13 @@ export async function fetchReplaceable(
  * Fetch events matching a filter from SPECIFIC relays (not the global activeRelays).
  * Used for DNN relay discovery — querying a user's published relay list.
  */
-export async function fetchEventsFromRelays(relays: string[], filter: Filter | Filter[]): Promise<Event[]> {
+export async function fetchEventsFromRelays(relays: string[], filter: Filter | Filter[], maxWait: number = FETCH_MAX_WAIT_MS): Promise<Event[]> {
   if (relays.length === 0) return fetchEvents(filter)
   const merged = Array.isArray(filter)
     ? filter.reduce<Filter>((acc, f) => ({ ...acc, ...f }), {})
     : filter
   // Same hung-relay protection as fetchEvents: a dead relay in this set can't stall the whole query.
-  return collectEvents(relays, merged, FETCH_MAX_WAIT_MS, Math.min(FETCH_MAX_WAIT_MS, FETCH_IDLE_MS))
+  return collectEvents(relays, merged, maxWait, Math.min(maxWait, FETCH_IDLE_MS))
 }
 
 /**

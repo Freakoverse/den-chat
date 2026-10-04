@@ -141,6 +141,14 @@ const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 const READBACK_ATTEMPTS = 3
 
 /**
+ * Dedicated timeout for each probe write and each read-back. Short on purpose: a relay that hangs on write
+ * or query should be marked as a problem quickly, not drag the whole health sweep to a crawl. The general
+ * publish/fetch defaults (15s write, 4s read) are tuned for real posts where we want to wait out slow ACKs;
+ * a health probe wants the opposite.
+ */
+const HEALTH_PROBE_TIMEOUT_MS = 5000
+
+/**
  * One probe pass: publish `ev` once, then read it back with a few increasingly patient attempts. Relays
  * routinely EOSE a query BEFORE a just-published event is indexed, so a single immediate read-back gave
  * flaky false-broken results. 'broken' only when the write was refused outright or every read-back failed.
@@ -149,12 +157,12 @@ async function probeOnce(url: string, ev: Event): Promise<'working' | 'broken'> 
   let accepted = false
   for (let attempt = 0; attempt < READBACK_ATTEMPTS; attempt++) {
     if (!accepted) {
-      const got = await publishToSpecificRelays([url], ev).catch(() => [] as string[])
+      const got = await publishToSpecificRelays([url], ev, HEALTH_PROBE_TIMEOUT_MS).catch(() => [] as string[])
       accepted = got.length > 0
       if (!accepted) { await delay(500); continue } // write refused: retry the write
     }
     await delay(500 + attempt * 700) // give the relay time to index before reading back
-    const back = await fetchEventsFromRelays([url], { ids: [ev.id] }).catch(() => [])
+    const back = await fetchEventsFromRelays([url], { ids: [ev.id] }, HEALTH_PROBE_TIMEOUT_MS).catch(() => [])
     if (back.some((e) => e.id === ev.id)) return 'working'
   }
   return 'broken'
