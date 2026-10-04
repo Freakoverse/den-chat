@@ -16,6 +16,9 @@ const pool = new SimplePool({ enableReconnect: true, enablePing: true })
  *  Prevents a slow/dead relay from stalling the whole fetch. */
 const FETCH_MAX_WAIT_MS = 4000
 
+/** Per-relay publish timeout: how long to wait for a relay's OK before treating it as failed. */
+const PUBLISH_TIMEOUT_MS = 15_000
+
 /** Default relays — user can customize these later */
 const DEFAULT_RELAYS = [
   'wss://relay.primal.net',
@@ -388,11 +391,46 @@ export async function publishWithFailover(
     const need = target - accepted.size
     const batch = candidates.slice(i, i + need + 2) // small over-provision so one round usually suffices
     i += batch.length
-    const got = await publishToSpecificRelays(batch, event)
-    for (const r of got) accepted.add(norm(r))
-    opts.onProgress?.(accepted.size, target, Array.from(accepted))
+    // Resolve this batch as soon as `need` relays ACK, without waiting out a slow/hanging relay in the batch
+    // (its publish keeps running in the background). Only advance to the next batch if the batch settles
+    // without reaching the target. This is what stops one unresponsive relay adding ~15s to every publish.
+    await publishBatchAccepting(batch, event, need, (url) => {
+      accepted.add(url)
+      opts.onProgress?.(accepted.size, target, Array.from(accepted))
+    })
   }
   return Array.from(accepted)
+}
+
+/**
+ * Publish `event` to `relays` in parallel and resolve as soon as `need` of them ACK (calling `onAccept`
+ * per relay as it does), instead of waiting for every relay to settle. Also resolves when all relays have
+ * settled (fewer than `need` accepted) or a hard cap elapses, so a relay that connects but never ACKs
+ * can't block it. Relays still publishing when it resolves keep going in the background. Resolves void;
+ * the caller tracks the accepted set via `onAccept`.
+ */
+function publishBatchAccepting(
+  relays: string[],
+  event: Event,
+  need: number,
+  onAccept: (url: string) => void,
+): Promise<void> {
+  const norm = (u: string) => u.replace(/\/+$/, '')
+  if (relays.length === 0) return Promise.resolve()
+  return new Promise<void>((resolve) => {
+    let acceptCount = 0
+    let settledCount = 0
+    let done = false
+    const finish = () => { if (done) return; done = true; clearTimeout(hard); resolve() }
+    const promises = pool.publish(relays, event)
+    promises.forEach((p, idx) => {
+      Promise.race([p, new Promise<never>((_, reject) => setTimeout(() => reject(new Error('publish timeout')), PUBLISH_TIMEOUT_MS))])
+        .then(() => { acceptCount++; onAccept(norm(relays[idx])); if (acceptCount >= need) finish() })
+        .catch(() => { /* relay rejected / timed out */ })
+        .finally(() => { settledCount++; if (settledCount >= promises.length) finish() })
+    })
+    const hard = setTimeout(finish, PUBLISH_TIMEOUT_MS + 1000)
+  })
 }
 
 /**
