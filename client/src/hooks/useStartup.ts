@@ -18,6 +18,8 @@ import { useRelayHealthStore } from '@/lib/nostr/relayHealthProbe'
 import { getCachedProfile, getCachedProfileCreatedAt, ensureProfile, subscribeProfile, seedProfile } from '@/hooks/useProfileCache'
 import { KINDS } from '@/lib/crypto/constants'
 import { useVoiceStore } from '@/stores/voiceStore'
+import { useCalendarStore } from '@/stores/calendarStore'
+import { resolveMemberPubkey } from '@/lib/hub/resolveMemberPubkey'
 import { useHubLoader } from './useHubLoader'
 import { useGroupLoader } from './useGroupLoader'
 import { useGroupStore } from '@/stores/groupStore'
@@ -649,6 +651,45 @@ export function useStartup() {
     }, 6000)
     return () => clearTimeout(timer)
   }, [isAuthenticated, activeHubId, pubkey, myVoiceHosts])
+
+  // ─── Hub calendar-event redundancy (cooperative rebroadcasting) ───
+  // When the user opens a hub, keep its NIP-52 calendar events (kind 31923) alive on
+  // ≥3 relays: any member who opens the hub tops up every event they can see (the same
+  // "any member helps" model as the hub event). RSVPs (kind 31925) are kept alive by
+  // their own author only (like voice-host): your attendance is yours to preserve.
+  // Version-aware via ensureAddressableRedundancy, and checkedThisSession dedups so each
+  // event/RSVP is probed at most once per session. Deleted (tombstoned) items are skipped:
+  // deletion propagates through the normal publish failover, not through this top-up.
+  const activeHubCalEvents = useCalendarStore((s) => (activeHubId ? s.events[activeHubId] : undefined))
+  const calRsvps = useCalendarStore((s) => s.rsvps)
+  useEffect(() => {
+    if (!isAuthenticated || !activeHubId || !pubkey) return
+    const hubId = activeHubId
+    const self = pubkey
+    // Settle delay (and cancel on hub change) so drive-by hubs aren't probed.
+    const timer = setTimeout(() => {
+      const hub = useHubStore.getState().hubs[hubId]
+      const hubRelays = hub ? [...hub.generalRelays] : []
+      const cal = useCalendarStore.getState()
+      const events = cal.events[hubId] || []
+      const members = useHubStore.getState().hubMembers[hubId]
+      // My own RSVPs across this hub's events. The wire author is the pseudonym `P` on a
+      // v2 hub, so resolve `P` → real key `R` before matching (a no-op on v1 hubs).
+      const myRsvps = Object.values(cal.rsvps)
+        .flat()
+        .filter((r) => r.hubDTag === hubId && !r.deleted && resolveMemberPubkey(r.pubkey, members) === self)
+      import('@/lib/nostr/eventRedundancy').then(({ ensureAddressableRedundancy }) => {
+        for (const ev of events) {
+          if (ev.deleted) continue
+          ensureAddressableRedundancy(KINDS.CALENDAR_TIME_EVENT, ev.pubkey, ev.dTag, ev.createdAt, hubRelays)
+        }
+        for (const r of myRsvps) {
+          ensureAddressableRedundancy(KINDS.CALENDAR_RSVP, r.pubkey, r.dTag, r.createdAt, hubRelays)
+        }
+      })
+    }, 7000)
+    return () => clearTimeout(timer)
+  }, [isAuthenticated, activeHubId, pubkey, activeHubCalEvents, calRsvps])
 
   // ─── Hub member-list Blossom redundancy (cooperative mirroring) ───
   // When the user opens a hub, check that its member-list files (index, spine/
