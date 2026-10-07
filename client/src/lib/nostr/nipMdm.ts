@@ -44,19 +44,35 @@ export interface MdmKeys {
   signer?: ISigner | null
 }
 
-/** Decrypted real-message payload (docs §2.1). */
+/** Decrypted real-message payload (docs §2.1). File URLs are appended into `t` (as dm04 does). */
 export interface MdmPayload {
   v: 1
   /** sender's real key, disclosed only to the recipient; verified per docs §1.3 */
   from: string
   t?: string
   edited?: number
+  /** tombstone marker for a deleted message (docs §6) */
+  deleted?: boolean
   /** addressable coordinate of the replied-to message: "30092:<authorM>:<d>" */
   reply?: string
-  attachments?: unknown[]
-  emoji?: [string, string][]
-  sticker?: [string, string][]
-  gif?: [string, string][]
+  /** addressable coordinate of the thread root */
+  rootRef?: string
+  isThread?: boolean
+  emoji?: [string, string, string?][]
+  sticker?: [string, string, string?][]
+  gif?: [string, string, string][]
+}
+
+/** The masked reaction kind (NIP-25, authored by the masked key, content encrypted). docs §6. */
+export const MDM_REACTION_KIND = 7
+
+/** Decrypted reaction payload (emoji private, like a message). */
+export interface MdmReactionPayload {
+  v: 1
+  from: string
+  emoji: string
+  /** image URL for a NIP-30 custom emoji */
+  customUrl?: string
 }
 
 /** The body a caller supplies (everything but `v`/`from`, which this module fills). */
@@ -121,8 +137,9 @@ function realNip44Decrypt(ciphertext: string, counterpartyPub: string, keys: Mdm
   return guardedDecrypt(ciphertext, counterpartyPub, keys.signer ?? null, null, 'nip44')
 }
 
-/** Build the self-copy (docs §3.4): authored by `C_from`, addressed to `C_to`, embeds the real event. */
-async function buildSelfCopy(real: Event, keys: MdmKeys, dSelf?: string): Promise<Event> {
+/** Build a self-copy (docs §3.4): authored by `C_from`, addressed to `C_to`, embedding any signed event
+ *  (a message or a reaction) verbatim so the sender can recover it. */
+export async function buildMdmSelfCopy(real: Event, keys: MdmKeys, dSelf?: string): Promise<Event> {
   const fromSigner = makeSubkeySigner(MDM_COPY_FROM, keys)
   const [cFrom, cTo] = await Promise.all([fromSigner.getPublicKey(), makeSubkeySigner(MDM_COPY_TO, keys).getPublicKey()])
   const payload: MdmSelfCopyPayload = { v: 1, event: real }
@@ -165,8 +182,86 @@ export async function buildMdmMessage(opts: {
     pubkey: maskedPub,
   }
   const real = await mSigner.signEvent(unsigned)
-  const selfCopy = await buildSelfCopy(real, opts.keys, opts.dSelf)
+  const selfCopy = await buildMdmSelfCopy(real, opts.keys, opts.dSelf)
   return { real, selfCopy, maskedPub }
+}
+
+/**
+ * Build a masked reaction (docs §6) and its self-copy: a kind-7 event authored by the reactor's masked key
+ * `M`, tagged with the target's addressable coordinate (`a`) and the recipient's real key (`p`), with the
+ * emoji NIP-44-encrypted from `M` to the recipient. The self-copy embeds the full reaction event.
+ */
+export async function buildMdmReaction(opts: {
+  targetCoordinate: string
+  recipientRootPub: string
+  myRootPub: string
+  emoji: string
+  customUrl?: string
+  keys: MdmKeys
+}): Promise<{ real: Event; selfCopy: Event }> {
+  const mSigner = maskedSigner(opts.recipientRootPub, opts.keys)
+  const maskedPub = await mSigner.getPublicKey()
+  const payload: MdmReactionPayload = { v: 1, from: opts.myRootPub, emoji: opts.emoji, ...(opts.customUrl ? { customUrl: opts.customUrl } : {}) }
+  const content = await mSigner.nip44Encrypt(opts.recipientRootPub, JSON.stringify(payload))
+  const unsigned: UnsignedEvent = {
+    kind: MDM_REACTION_KIND,
+    created_at: nowSeconds(),
+    tags: [['a', opts.targetCoordinate], ['p', opts.recipientRootPub]],
+    content,
+    pubkey: maskedPub,
+  }
+  const real = await mSigner.signEvent(unsigned)
+  const selfCopy = await buildMdmSelfCopy(real, opts.keys)
+  return { real, selfCopy }
+}
+
+export interface MdmReactionDecrypted {
+  payload: MdmReactionPayload
+  senderRootPub: string
+  verified: boolean
+  /** the `a` coordinate of the reacted-to masked message */
+  targetCoordinate: string | null
+}
+
+/** Decrypt a RECEIVED masked reaction (I am the recipient) and verify its author (docs §1.3 / §6). */
+export async function decryptReceivedReaction(event: Event, keys: MdmKeys): Promise<MdmReactionDecrypted | null> {
+  let payload: MdmReactionPayload
+  try {
+    payload = JSON.parse(await realNip44Decrypt(event.content, event.pubkey, keys))
+  } catch {
+    return null
+  }
+  if (!payload || payload.v !== 1 || typeof payload.from !== 'string' || typeof payload.emoji !== 'string') return null
+  let verified = false
+  try {
+    verified = (await peerMaskedPub(payload.from, keys)) === event.pubkey
+  } catch {
+    verified = false
+  }
+  return { payload, senderRootPub: payload.from, verified, targetCoordinate: event.tags.find((t) => t[0] === 'a')?.[1] ?? null }
+}
+
+/** Decrypt one of MY OWN reactions (from its embedded self-copy event) so my reactions show on any device. */
+export async function decryptOwnReaction(reactionEvent: Event, keys: MdmKeys): Promise<MdmReactionPayload | null> {
+  const recipientRootPub = reactionEvent.tags.find((t) => t[0] === 'p')?.[1]
+  if (!recipientRootPub) return null
+  try {
+    const payload: MdmReactionPayload = JSON.parse(await maskedSigner(recipientRootPub, keys).nip44Decrypt(recipientRootPub, reactionEvent.content))
+    if (!payload || payload.v !== 1) return null
+    return payload
+  } catch {
+    return null
+  }
+}
+
+/**
+ * A Blossom 24242 auth signer bound to the sender's masked key toward `recipientRootPub` (docs §6 / §10):
+ * uploads are authorized as `M`, so the Blossom server never sees the real key. Reuses ChatInputBar's
+ * `getUploadAuthSigner` seam, exactly as v2 hubs upload as their pseudonym.
+ */
+export function mdmBlossomAuthSigner(recipientRootPub: string, keys: MdmKeys): (unsigned: UnsignedEvent) => Promise<Event> {
+  const mSigner = maskedSigner(recipientRootPub, keys)
+  return (unsigned: UnsignedEvent) => mSigner.signEvent(unsigned)
 }
 
 export interface MdmDecrypted {

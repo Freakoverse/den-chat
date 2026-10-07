@@ -237,7 +237,7 @@ export function useStartup() {
       if (learnedRelays) {
         if (useDMStore.getState().subscription) useDMStore.getState().startSubscription(pubkey, signer, privateKey)
         if (useDM04Store.getState().subscription) useDM04Store.getState().startSubscription(pubkey, signer, privateKey)
-        if (useMdmStore.getState().subs.length > 0) void useMdmStore.getState().startSubscription(pubkey, signer, privateKey)
+        if (useMdmStore.getState().subscription) void useMdmStore.getState().startSubscription(pubkey, signer, privateKey)
       }
     }).catch(() => { /* non-critical — subscription still works on client + NIP-65 relays */ })
 
@@ -390,7 +390,7 @@ export function useStartup() {
         if (!useDM04Store.getState().subscription) {
           useDM04Store.getState().startSubscription(pubkey, signer, privateKey)
         }
-        if (useMdmStore.getState().subs.length === 0) {
+        if (!useMdmStore.getState().subscription) {
           void useMdmStore.getState().startSubscription(pubkey, signer, privateKey)
         }
         // Remote-signer recovery: while the PWA was backgrounded its relay link to
