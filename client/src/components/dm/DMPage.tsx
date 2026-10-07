@@ -40,7 +40,7 @@ import { nip19, type Event } from 'nostr-tools'
 import { getUploadBlossoms, getPublishRelays, getDMSelfCopyRelays } from '@/stores/postingBehaviourStore'
 import {
   Search, Plus, MessageSquare, Loader2,
-  Lock, Users, UserPlus, AlertCircle, X, ShieldBan, Eye, EyeOff, Shield, ShieldCheck, Info, VenetianMask,
+  Lock, Users, UserPlus, AlertCircle, X, ShieldBan, Eye, EyeOff, Shield, ShieldCheck, Info, VenetianMask, MoreVertical,
   AlertTriangle, Download, Star, ChevronLeft, Check, NotebookPen, RefreshCw, Radio,
 } from 'lucide-react'
 import { useEscToClose } from '@/hooks/useEscToClose'
@@ -212,6 +212,53 @@ export type DMProtocol = 'nip17' | 'nip04' | 'mdm'
 /** Which section of the page is open: the 1:1 DMs (either protocol) or Groups (§21). */
 export type DMSection = 'dms' | 'groups'
 
+/** Short tab labels per protocol (B-DMs = Basic/NIP-04, M-DMs = Masked/NIP-MDM, W-DMs = Wrapped/NIP-17). */
+export const DM_PROTOCOL_LABEL: Record<DMProtocol, string> = { nip04: 'B-DMs', mdm: 'M-DMs', nip17: 'W-DMs' }
+const DM_PROTOCOL_ORDER: DMProtocol[] = ['nip04', 'mdm', 'nip17']
+function dmProtocolIcon(p: DMProtocol, size = 14) {
+  return p === 'nip04' ? <Shield size={size} /> : p === 'mdm' ? <VenetianMask size={size} /> : <ShieldCheck size={size} />
+}
+
+/**
+ * A 3-dots header menu for an open DM, offering "Switch to <type>" for the other two protocols. Same
+ * house dropdown style as the per-message action menus. Replaces the old single inline switch button.
+ */
+export function DMSwitchMenu({ current, onSwitch }: { current: DMProtocol; onSwitch: (target: DMProtocol) => void }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const onDoc = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [open])
+  const others = DM_PROTOCOL_ORDER.filter((p) => p !== current)
+  return (
+    <div className="relative shrink-0" ref={ref}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors cursor-pointer"
+        aria-label="More"
+      >
+        <MoreVertical size={16} />
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full mt-1 w-48 bg-popover border border-border rounded-lg shadow-xl p-1 flex flex-col gap-1 z-30">
+          {others.map((p) => (
+            <button
+              key={p}
+              onClick={() => { setOpen(false); onSwitch(p) }}
+              className="flex items-center gap-2 w-full px-3 py-1.5 text-sm text-foreground/80 hover:bg-accent/50 cursor-pointer transition-colors rounded-md"
+            >
+              {dmProtocolIcon(p)} Switch to {DM_PROTOCOL_LABEL[p]}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function DMPage() {
   const myPubkey = useUserStore((s) => s.pubkey)
   const signer = useUserStore((s) => s.signer)
@@ -298,6 +345,15 @@ export function DMPage() {
     setMobileShowList(true)
   }, [])
 
+  // Switch the open conversation to another protocol (used by the per-DM 3-dots menu).
+  const switchTo = useCallback((target: DMProtocol) => {
+    setDmProtocol(target)
+    if (!activeConversation) return
+    if (target === 'nip04') setNip04Active(activeConversation)
+    else if (target === 'mdm') setMdmActive(activeConversation)
+    else setNip17Active(activeConversation)
+  }, [activeConversation, setNip04Active, setMdmActive, setNip17Active])
+
   return (
     <div className="flex flex-1 h-full overflow-hidden">
       {/* Left, Conversation list */}
@@ -325,10 +381,10 @@ export function DMPage() {
             : <DMEmptyState />
         ) : activeConversation ? (
           dmProtocol === 'nip04'
-            ? <DM04ChatView recipientPubkey={activeConversation} onSwitchProtocol={() => { setDmProtocol('nip17'); setNip17Active(activeConversation) }} onBack={handleMobileBack} />
+            ? <DM04ChatView recipientPubkey={activeConversation} onSwitchProtocol={switchTo} onBack={handleMobileBack} />
             : dmProtocol === 'mdm'
-              ? <MDMChatView recipientPubkey={activeConversation} onBack={handleMobileBack} />
-              : <DMChatView recipientPubkey={activeConversation} onSwitchProtocol={() => { setDmProtocol('nip04'); setNip04Active(activeConversation) }} onBack={handleMobileBack} />
+              ? <MDMChatView recipientPubkey={activeConversation} onSwitchProtocol={switchTo} onBack={handleMobileBack} />
+              : <DMChatView recipientPubkey={activeConversation} onSwitchProtocol={switchTo} onBack={handleMobileBack} />
         ) : (
           <DMEmptyState />
         )}
@@ -653,7 +709,7 @@ interface OptimisticDM17 {
   relayProgress?: { confirmed: number; total: number }
 }
 
-function DMChatView({ recipientPubkey, onSwitchProtocol, onBack }: { recipientPubkey: string; onSwitchProtocol: () => void; onBack?: () => void }) {
+function DMChatView({ recipientPubkey, onSwitchProtocol, onBack }: { recipientPubkey: string; onSwitchProtocol: (target: DMProtocol) => void; onBack?: () => void }) {
   const myPubkey = useUserStore((s) => s.pubkey)
   const signer = useUserStore((s) => s.signer)
   const privateKey = useUserStore((s) => s.privateKey)
@@ -992,21 +1048,7 @@ function DMChatView({ recipientPubkey, onSwitchProtocol, onBack }: { recipientPu
             </div>
           </div>
         </div>
-        <TooltipProvider delayDuration={200}>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={onSwitchProtocol}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 border border-border/50 transition-colors cursor-pointer shrink-0"
-              >
-                <Shield size={12} /> <span className="max-[1080px]:hidden">Switch to Private</span>
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" className="text-xs max-w-[200px]">
-              Switch to NIP-04 Private mode for this user. Enables replies, threads, and reactions.
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
+        <DMSwitchMenu current="nip17" onSwitch={onSwitchProtocol} />
       </div>
 
       {/* Messages */}

@@ -38,7 +38,7 @@ import { getUploadBlossoms } from '@/stores/postingBehaviourStore'
 import { EmojiPickerPopover, EmojiDiscoveryModal } from '@/components/chat/EmojiPickerPopover'
 import { StickerPickerPopover, StickerDiscoveryModal } from '@/components/chat/StickerPickerPopover'
 import { DeleteConfirmDialog, RawEventModal } from '@/components/hub/ChannelView'
-import { DMGifStarOverlay } from '@/components/dm/DMPage'
+import { DMGifStarOverlay, DMSwitchMenu, type DMProtocol } from '@/components/dm/DMPage'
 import { AlertTriangle, Download } from 'lucide-react'
 import { getEmojiMap } from '@/stores/emojiStore'
 import { BlossomImg } from '@/components/ui/BlossomImg'
@@ -128,7 +128,7 @@ interface OptimisticDM04 {
 /*  MAIN COMPONENT                             */
 /* ═══════════════════════════════════════════ */
 
-export function DM04ChatView({ recipientPubkey, onSwitchProtocol, onBack }: { recipientPubkey: string; onSwitchProtocol?: () => void; onBack?: () => void }) {
+export function DM04ChatView({ recipientPubkey, onSwitchProtocol, onBack }: { recipientPubkey: string; onSwitchProtocol?: (target: DMProtocol) => void; onBack?: () => void }) {
   const myPubkey = useUserStore((s) => s.pubkey)
   const signer = useUserStore((s) => s.signer)
   const privateKey = useUserStore((s) => s.privateKey)
@@ -541,25 +541,7 @@ export function DM04ChatView({ recipientPubkey, onSwitchProtocol, onBack }: { re
             </div>
           </div>
         </div>
-        {/* Note to Self: "Extra Private" hides metadata from relays, but there's no other party's
-            metadata to protect when you're messaging yourself — so the switch is pointless here. */}
-        {onSwitchProtocol && recipientPubkey !== myPubkey && (
-          <TooltipProvider delayDuration={200}>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  onClick={onSwitchProtocol}
-                  className="flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 border border-border/50 transition-colors cursor-pointer shrink-0 max-[1080px]:w-full"
-                >
-                  <ShieldCheck size={12} /> Switch to Extra Private
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom" className="text-xs max-w-[200px]">
-                Switch to NIP-17 Extra Private mode. Hides message metadata from relays.
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-        )}
+        {onSwitchProtocol && <DMSwitchMenu current="nip04" onSwitch={onSwitchProtocol} />}
       </div>
 
       {/* Messages */}
