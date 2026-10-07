@@ -239,7 +239,7 @@ export const useMdmStore = create<MdmState>((set, get) => ({
 
   sendMessage: async (recipientPubkey, content, myPubkey, signer, privateKey, replyTo, rootRef, isThread, onPhase, emojiTags, stickerTags, gifTags) => {
     const keys: MdmKeys = { privateKey, signer }
-    if (!mdmSupported(keys)) throw new Error('Masked DMs need a local key or a NIP-SKD signer.')
+    if (!mdmSupported(keys)) throw new Error('Masked DMs need a local key or a signer with NIP-SKD support.')
     const body: MdmBody = {
       t: content || undefined,
       reply: replyTo ? idToCoord.get(replyTo) : undefined,

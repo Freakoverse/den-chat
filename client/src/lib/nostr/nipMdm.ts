@@ -84,7 +84,7 @@ interface MdmSelfCopyPayload {
   event: Event
 }
 
-/** Whether masked DMs are possible with this key setup (local key, or a NIP-SKD signer). */
+/** Whether masked DMs are possible with this key setup (local key, or a signer with NIP-SKD support). */
 export function mdmSupported(keys: MdmKeys): boolean {
   return canUseV2(keys)
 }

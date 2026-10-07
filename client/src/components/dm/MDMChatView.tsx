@@ -221,7 +221,7 @@ export function MDMChatView({ recipientPubkey, onSwitchProtocol, onBack }: { rec
   const hasMore = conv?.hasMore ?? true
   const profile = getProfile(recipientPubkey)
   const npubStr = nip19.npubEncode(recipientPubkey)
-  const hasNip04 = mdmSupported({ privateKey, signer }) // masked DMs need a local key or a NIP-SKD signer
+  const hasNip04 = mdmSupported({ privateKey, signer }) // masked DMs need a local key or a signer with NIP-SKD support
 
   const myProfile = getProfile(myPubkey || '')
   const myDisplayName = myProfile?.display_name || myProfile?.name || (myPubkey ? truncateNpub(nip19.npubEncode(myPubkey)) : 'You')
@@ -768,7 +768,7 @@ export function MDMChatView({ recipientPubkey, onSwitchProtocol, onBack }: { rec
       {!hasNip04 && (
         <div className="mx-2 mb-1 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs text-amber-400 flex items-center gap-2">
           <AlertCircle size={14} className="shrink-0" />
-          <span>Masked DMs need a local key or a NIP-SKD signer.</span>
+          <span>Masked DMs need a local key or a signer with NIP-SKD support.</span>
         </div>
       )}
 
@@ -835,7 +835,7 @@ export function MDMChatView({ recipientPubkey, onSwitchProtocol, onBack }: { rec
         canSend={(message.trim() || pendingStickers.length > 0 || pendingGifs.length > 0) ? true : undefined}
         placeholder={hasNip04
           ? `Message ${profile?.display_name || profile?.name || truncateNpub(npubStr, 8)} (masked)`
-          : 'Masked DMs need a local key or a NIP-SKD signer'
+          : 'Masked DMs need a local key or a signer with NIP-SKD support'
         }
         topContent={replyBanner}
         hasTopContent={!!replyContext}

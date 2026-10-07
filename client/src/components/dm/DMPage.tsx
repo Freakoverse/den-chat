@@ -25,6 +25,7 @@ import { useDM04Store } from '@/stores/dm04Store'
 import { useMdmStore } from '@/stores/dmMdmStore'
 import { DM04ChatView } from '@/components/dm/DM04ChatView'
 import { MDMChatView } from '@/components/dm/MDMChatView'
+import { canUseV2 } from '@/lib/crypto/skd'
 import { useBlockStore } from '@/stores/blockStore'
 import { useFollowStore } from '@/stores/followStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
@@ -456,6 +457,10 @@ function ConversationList({
   // Block list, needed so the memo re-runs when users are blocked/unblocked
   const blockedPubkeys = useBlockStore((s) => s.blockedPubkeys)
   const myPubkey = useUserStore((s) => s.pubkey)
+  const mySigner = useUserStore((s) => s.signer)
+  const myPrivateKey = useUserStore((s) => s.privateKey)
+  // M-DMs need a local key or a signer with NIP-SKD support; when missing, show the same guard the chat view shows.
+  const mdmUnsupported = dmProtocol === 'mdm' && !canUseV2({ privateKey: myPrivateKey, signer: mySigner })
 
   const { getProfile } = useProfileCache()
 
@@ -631,6 +636,11 @@ function ConversationList({
           <div className="flex items-center justify-center py-8 text-muted-foreground">
             <Loader2 size={16} className="animate-spin mr-2" />
             <span className="text-xs">Loading messages...</span>
+          </div>
+        ) : mdmUnsupported ? (
+          <div className="flex flex-col items-center justify-center py-8 gap-2 text-center px-4">
+            <AlertCircle size={20} className="text-amber-500/70" />
+            <p className="text-xs text-amber-500">Masked DMs need a local key or a signer with NIP-SKD support.</p>
           </div>
         ) : filteredList.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-8 gap-2 text-center">
