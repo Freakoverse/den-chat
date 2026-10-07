@@ -508,7 +508,7 @@ export function MDMChatView({ recipientPubkey, onSwitchProtocol, onBack }: { rec
   return (
     <div ref={chatContainerRef} className="flex flex-col flex-1 min-w-0 h-full overflow-hidden relative gap-2">
       {/* Chat header card */}
-      <div className="flex items-center gap-3 px-4 py-3 bg-secondary/50 rounded-md shadow-md shrink-0 max-[1080px]:flex-col max-[1080px]:items-stretch max-[1080px]:gap-2">
+      <div className="flex items-center gap-3 px-4 py-3 bg-secondary/50 rounded-md shadow-md shrink-0">
         {/* Identity row (back + avatar + name) */}
         <div className="flex items-center gap-3 flex-1 min-w-0">
           {onBack && (
