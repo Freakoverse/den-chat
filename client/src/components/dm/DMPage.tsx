@@ -22,7 +22,9 @@ import { GroupChatView } from '@/components/group/GroupChatView'
 import { CreateGroupModal } from '@/components/group/CreateGroupModal'
 import { setNameFromAddress } from '@/lib/customSets'
 import { useDM04Store } from '@/stores/dm04Store'
+import { useMdmStore } from '@/stores/dmMdmStore'
 import { DM04ChatView } from '@/components/dm/DM04ChatView'
+import { MDMChatView } from '@/components/dm/MDMChatView'
 import { useBlockStore } from '@/stores/blockStore'
 import { useFollowStore } from '@/stores/followStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
@@ -38,7 +40,7 @@ import { nip19, type Event } from 'nostr-tools'
 import { getUploadBlossoms, getPublishRelays, getDMSelfCopyRelays } from '@/stores/postingBehaviourStore'
 import {
   Search, Plus, MessageSquare, Loader2,
-  Lock, Users, UserPlus, AlertCircle, X, ShieldBan, Eye, EyeOff, Shield, ShieldCheck, Info,
+  Lock, Users, UserPlus, AlertCircle, X, ShieldBan, Eye, EyeOff, Shield, ShieldCheck, Info, VenetianMask,
   AlertTriangle, Download, Star, ChevronLeft, Check, NotebookPen, RefreshCw, Radio,
 } from 'lucide-react'
 import { useEscToClose } from '@/hooks/useEscToClose'
@@ -206,7 +208,7 @@ function formatDMShortTime(ts: number): string {
 /*  MAIN PAGE                                  */
 /* ═══════════════════════════════════════════ */
 
-export type DMProtocol = 'nip17' | 'nip04'
+export type DMProtocol = 'nip17' | 'nip04' | 'mdm'
 /** Which section of the page is open: the 1:1 DMs (either protocol) or Groups (§21). */
 export type DMSection = 'dms' | 'groups'
 
@@ -220,10 +222,15 @@ export function DMPage() {
   const nip17Active = useDMStore((s) => s.activeConversation)
   const setNip17Active = useDMStore((s) => s.setActiveConversation)
 
-  // NIP-04 (Private)
+  // NIP-04 (Private / B-DMs)
   const loadingNip04 = useDM04Store((s) => s.loading)
   const nip04Active = useDM04Store((s) => s.activeConversation)
   const setNip04Active = useDM04Store((s) => s.setActiveConversation)
+
+  // NIP-MDM (Masked / M-DMs)
+  const loadingMdm = useMdmStore((s) => s.loading)
+  const mdmActive = useMdmStore((s) => s.activeConversation)
+  const setMdmActive = useMdmStore((s) => s.setActiveConversation)
 
   const [dmProtocol, setDmProtocol] = useState<DMProtocol>('nip04')
   const [showNewDM, setShowNewDM] = useState(false)
@@ -243,16 +250,16 @@ export function DMPage() {
   const [mobileShowList, setMobileShowList] = useState(() => {
     const gs = useGroupStore.getState()
     if (gs.dmSection === 'groups') return !gs.activeGroupId
-    return !useDM04Store.getState().activeConversation && !useDMStore.getState().activeConversation
+    return !useDM04Store.getState().activeConversation && !useDMStore.getState().activeConversation && !useMdmStore.getState().activeConversation
   })
 
   // Use the follow store loaded at startup, no re-fetch needed on mount
   const followSet = useFollowStore((s) => s.followedPubkeys)
 
   // Active conversation based on protocol
-  const activeConversation = dmProtocol === 'nip04' ? nip04Active : nip17Active
-  const setActiveConversation = dmProtocol === 'nip04' ? setNip04Active : setNip17Active
-  const loading = dmProtocol === 'nip04' ? loadingNip04 : loadingNip17
+  const activeConversation = dmProtocol === 'nip04' ? nip04Active : dmProtocol === 'mdm' ? mdmActive : nip17Active
+  const setActiveConversation = dmProtocol === 'nip04' ? setNip04Active : dmProtocol === 'mdm' ? setMdmActive : setNip17Active
+  const loading = dmProtocol === 'nip04' ? loadingNip04 : dmProtocol === 'mdm' ? loadingMdm : loadingNip17
 
   // Mobile list ↔ chat auto-switching. Two cases must be told apart, because both change
   // `activeConversation` (it's derived from the protocol's own persisted active conversation):
@@ -319,7 +326,9 @@ export function DMPage() {
         ) : activeConversation ? (
           dmProtocol === 'nip04'
             ? <DM04ChatView recipientPubkey={activeConversation} onSwitchProtocol={() => { setDmProtocol('nip17'); setNip17Active(activeConversation) }} onBack={handleMobileBack} />
-            : <DMChatView recipientPubkey={activeConversation} onSwitchProtocol={() => { setDmProtocol('nip04'); setNip04Active(activeConversation) }} onBack={handleMobileBack} />
+            : dmProtocol === 'mdm'
+              ? <MDMChatView recipientPubkey={activeConversation} onBack={handleMobileBack} />
+              : <DMChatView recipientPubkey={activeConversation} onSwitchProtocol={() => { setDmProtocol('nip04'); setNip04Active(activeConversation) }} onBack={handleMobileBack} />
         ) : (
           <DMEmptyState />
         )}
@@ -381,6 +390,10 @@ function ConversationList({
   const getNip04Conversations = useDM04Store((s) => s.getFilteredConversations)
   const nip04Conversations = useDM04Store((s) => s.conversations)
   const nip04Pending = useDM04Store((s) => s.pendingConversations)
+  // NIP-MDM store
+  const getMdmConversations = useMdmStore((s) => s.getFilteredConversations)
+  const mdmConversations = useMdmStore((s) => s.conversations)
+  const mdmPending = useMdmStore((s) => s.pendingConversations)
 
   // Block list, needed so the memo re-runs when users are blocked/unblocked
   const blockedPubkeys = useBlockStore((s) => s.blockedPubkeys)
@@ -396,9 +409,11 @@ function ConversationList({
   const { following, other } = useMemo(
     () => dmProtocol === 'nip04'
       ? getNip04Conversations(followSet)
-      : getNip17Conversations(followSet),
+      : dmProtocol === 'mdm'
+        ? getMdmConversations(followSet)
+        : getNip17Conversations(followSet),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [followSet, dmProtocol, nip17Conversations, nip17Pending, nip04Conversations, nip04Pending, blockedPubkeys],
+    [followSet, dmProtocol, nip17Conversations, nip17Pending, nip04Conversations, nip04Pending, mdmConversations, mdmPending, blockedPubkeys],
   )
 
   const activeList = tab === 'following' ? following : other
@@ -444,21 +459,30 @@ function ConversationList({
         <div className="flex items-center gap-1">
           <button
             onClick={() => onProtocolChange('nip04')}
-            className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 text-[11px] font-medium rounded-md transition-all cursor-pointer
+            className={`flex-1 flex items-center justify-center gap-1 py-1.5 text-[11px] font-medium rounded-md transition-all cursor-pointer
               ${section === 'dms' && dmProtocol === 'nip04'
                 ? 'bg-background text-foreground shadow-sm'
                 : 'text-muted-foreground hover:text-foreground'}`}
           >
-            <Shield size={12} /> Private
+            <Shield size={12} /> B-DMs
+          </button>
+          <button
+            onClick={() => onProtocolChange('mdm')}
+            className={`flex-1 flex items-center justify-center gap-1 py-1.5 text-[11px] font-medium rounded-md transition-all cursor-pointer
+              ${section === 'dms' && dmProtocol === 'mdm'
+                ? 'bg-background text-foreground shadow-sm'
+                : 'text-muted-foreground hover:text-foreground'}`}
+          >
+            <VenetianMask size={12} /> M-DMs
           </button>
           <button
             onClick={() => onProtocolChange('nip17')}
-            className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 text-[11px] font-medium rounded-md transition-all cursor-pointer
+            className={`flex-1 flex items-center justify-center gap-1 py-1.5 text-[11px] font-medium rounded-md transition-all cursor-pointer
               ${section === 'dms' && dmProtocol === 'nip17'
                 ? 'bg-background text-foreground shadow-sm'
                 : 'text-muted-foreground hover:text-foreground'}`}
           >
-            <ShieldCheck size={12} /> Extra Private
+            <ShieldCheck size={12} /> W-DMs
           </button>
           <TooltipProvider delayDuration={200}>
             <Tooltip>
@@ -470,11 +494,13 @@ function ConversationList({
                   <Info size={11} />
                 </button>
               </TooltipTrigger>
-              <TooltipContent side="right" className="text-xs max-w-[220px]">
-                <p className="font-medium">Private (NIP-04)</p>
-                <p className="text-muted-foreground">Encrypted messages with replies, threads, and reactions. Relay can see who the sender and receivers are.</p>
-                <p className="font-medium mt-1.5">Extra Private (NIP-17)</p>
-                <p className="text-muted-foreground">Gift-wrapped messages. Relay cannot see who the sender is and timming is obfuscated.</p>
+              <TooltipContent side="right" className="text-xs max-w-[240px]">
+                <p className="font-medium">B-DMs (Basic, NIP-04)</p>
+                <p className="text-muted-foreground">Encrypted messages with replies, threads, and reactions. The relay can see who the sender and receiver are.</p>
+                <p className="font-medium mt-1.5">M-DMs (Masked, NIP-MDM)</p>
+                <p className="text-muted-foreground">You are hidden from relays: you write under a per-recipient masked key. The recipient is addressed by their real key, and timing is truthful.</p>
+                <p className="font-medium mt-1.5">W-DMs (Wrapped, NIP-17)</p>
+                <p className="text-muted-foreground">Gift-wrapped messages. The relay cannot see who the sender is and timing is obfuscated.</p>
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>

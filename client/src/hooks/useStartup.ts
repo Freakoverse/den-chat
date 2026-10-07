@@ -43,6 +43,7 @@ import { useDnnStore } from '@/stores/dnnStore'
 import { useWotStore } from '@/stores/wotStore'
 import { useDMStore } from '@/stores/dmStore'
 import { useDM04Store } from '@/stores/dm04Store'
+import { useMdmStore } from '@/stores/dmMdmStore'
 import { useNotificationStore } from '@/stores/notificationStore'
 import { STANDARD_KINDS } from '@/lib/crypto/constants'
 import { ADMIN_PUBKEY } from '@/lib/constants'
@@ -236,6 +237,7 @@ export function useStartup() {
       if (learnedRelays) {
         if (useDMStore.getState().subscription) useDMStore.getState().startSubscription(pubkey, signer, privateKey)
         if (useDM04Store.getState().subscription) useDM04Store.getState().startSubscription(pubkey, signer, privateKey)
+        if (useMdmStore.getState().subs.length > 0) void useMdmStore.getState().startSubscription(pubkey, signer, privateKey)
       }
     }).catch(() => { /* non-critical — subscription still works on client + NIP-65 relays */ })
 
@@ -358,6 +360,7 @@ export function useStartup() {
       console.log('[Startup] Starting deferred DM subscriptions')
       useDMStore.getState().startSubscription(pubkey, signer, privateKey)
       useDM04Store.getState().startSubscription(pubkey, signer, privateKey)
+      void useMdmStore.getState().startSubscription(pubkey, signer, privateKey)
     }
 
     // Event-based trigger: watch for first hub secret becoming available
@@ -386,6 +389,9 @@ export function useStartup() {
         }
         if (!useDM04Store.getState().subscription) {
           useDM04Store.getState().startSubscription(pubkey, signer, privateKey)
+        }
+        if (useMdmStore.getState().subs.length === 0) {
+          void useMdmStore.getState().startSubscription(pubkey, signer, privateKey)
         }
         // Remote-signer recovery: while the PWA was backgrounded its relay link to
         // the signer (NIP-46 etc.) may have been suspended, leaving hub secrets
