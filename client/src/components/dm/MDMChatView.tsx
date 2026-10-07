@@ -27,7 +27,7 @@ import { nip19 } from 'nostr-tools'
 import {
   Loader2, Lock, AlertCircle, X, Reply, MoreVertical,
   Smile, Sticker, Trash2, Copy, Clipboard, ClipboardCheck, Code,
-  MessageSquarePlus, ShieldBan, Eye, EyeOff, Shield, ShieldCheck,
+  MessageSquarePlus, ShieldBan, Eye, EyeOff, Shield, ShieldCheck, VenetianMask,
   Check, RotateCcw, Star, ChevronLeft,
 } from 'lucide-react'
 import { MessageContent } from '@/components/chat/MessageContent'
@@ -531,7 +531,7 @@ export function MDMChatView({ recipientPubkey, onSwitchProtocol, onBack }: { rec
                 {profile?.display_name || profile?.name || truncateNpub(npubStr, 10)}
               </p>
               <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
-                <Shield size={9} />
+                <VenetianMask size={9} />
                 <span>Masked (NIP-MDM) - you are hidden from relays</span>
               </div>
             </div>

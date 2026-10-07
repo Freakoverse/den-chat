@@ -535,7 +535,7 @@ export function DM04ChatView({ recipientPubkey, onSwitchProtocol, onBack }: { re
                 {profile?.display_name || profile?.name || truncateNpub(npubStr, 10)}
               </p>
               <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
-                <Shield size={9} />
+                <Lock size={9} />
                 <span>Private (NIP-04 Encrypted)</span>
               </div>
             </div>

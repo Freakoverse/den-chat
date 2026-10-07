@@ -40,7 +40,7 @@ import { nip19, type Event } from 'nostr-tools'
 import { getUploadBlossoms, getPublishRelays, getDMSelfCopyRelays } from '@/stores/postingBehaviourStore'
 import {
   Search, Plus, MessageSquare, Loader2,
-  Lock, Users, UserPlus, AlertCircle, X, ShieldBan, Eye, EyeOff, Shield, ShieldCheck, Info, VenetianMask, MoreVertical,
+  Lock, Users, UserPlus, AlertCircle, X, ShieldBan, Eye, EyeOff, Ghost, Info, VenetianMask, MoreVertical,
   AlertTriangle, Download, Star, ChevronLeft, Check, NotebookPen, RefreshCw, Radio,
 } from 'lucide-react'
 import { useEscToClose } from '@/hooks/useEscToClose'
@@ -216,7 +216,7 @@ export type DMSection = 'dms' | 'groups'
 export const DM_PROTOCOL_LABEL: Record<DMProtocol, string> = { nip04: 'B-DMs', mdm: 'M-DMs', nip17: 'W-DMs' }
 const DM_PROTOCOL_ORDER: DMProtocol[] = ['nip04', 'mdm', 'nip17']
 function dmProtocolIcon(p: DMProtocol, size = 14) {
-  return p === 'nip04' ? <Shield size={size} /> : p === 'mdm' ? <VenetianMask size={size} /> : <ShieldCheck size={size} />
+  return p === 'nip04' ? <Lock size={size} /> : p === 'mdm' ? <VenetianMask size={size} /> : <Ghost size={size} />
 }
 
 /**
@@ -522,7 +522,7 @@ function ConversationList({
                 ? 'bg-background text-foreground shadow-sm'
                 : 'text-muted-foreground hover:text-foreground'}`}
           >
-            <Shield size={12} /> B-DMs
+            <Lock size={12} /> B-DMs
           </button>
           <button
             onClick={() => onProtocolChange('mdm')}
@@ -540,7 +540,7 @@ function ConversationList({
                 ? 'bg-background text-foreground shadow-sm'
                 : 'text-muted-foreground hover:text-foreground'}`}
           >
-            <ShieldCheck size={12} /> W-DMs
+            <Ghost size={12} /> W-DMs
           </button>
           <TooltipProvider delayDuration={200}>
             <Tooltip>
@@ -1041,7 +1041,7 @@ function DMChatView({ recipientPubkey, onSwitchProtocol, onBack }: { recipientPu
             </p>
             {/* flex-wrap: on narrow screens the 10050 pill drops to its own line instead of pushing into the switch button */}
             <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[10px] text-muted-foreground min-w-0">
-              <ShieldCheck size={9} className="shrink-0" />
+              <Ghost size={9} className="shrink-0" />
               <span className="shrink-0">Extra Private (NIP-17)</span>
               <PeerDMRelayListPill
                 pubkey={recipientPubkey}
