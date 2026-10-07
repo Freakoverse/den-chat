@@ -279,7 +279,9 @@ export function DMPage() {
   const mdmActive = useMdmStore((s) => s.activeConversation)
   const setMdmActive = useMdmStore((s) => s.setActiveConversation)
 
-  const [dmProtocol, setDmProtocol] = useState<DMProtocol>('nip04')
+  // Persisted in the store (not local state) so it survives the desktop/mobile remount, like dmSection.
+  const dmProtocol = useGroupStore((s) => s.dmProtocol)
+  const setDmProtocol = useGroupStore((s) => s.setDmProtocol)
   const [showNewDM, setShowNewDM] = useState(false)
   // Groups (NIP-CHAT §21) live in this page as their own section: row 1 = the 1:1 protocols, row 2 = Groups.
   const section = useGroupStore((s) => s.dmSection)

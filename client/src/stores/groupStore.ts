@@ -30,6 +30,11 @@ interface GroupState {
    *  page is mounted separately for the desktop and mobile layouts and remounts on a breakpoint change. */
   dmSection: 'dms' | 'groups'
   setDmSection: (s: 'dms' | 'groups') => void
+  /** Which 1:1 DM protocol tab is active (B-DMs/M-DMs/W-DMs). Here, not in DMPage state, for the same
+   *  reason as dmSection: the page remounts on a desktop/mobile breakpoint change and would otherwise
+   *  reset to the default, dropping you out of M-DMs/W-DMs. */
+  dmProtocol: 'nip17' | 'nip04' | 'mdm'
+  setDmProtocol: (p: 'nip17' | 'nip04' | 'mdm') => void
   /** Pending invites the user is looking at (naddr coords), not yet accepted. */
   pendingInvites: string[]
   /** Bumped by requestOpenGroup so the DM page switches to the Groups section even if the id is unchanged. */
@@ -60,6 +65,8 @@ export const useGroupStore = create<GroupState>((set) => ({
   activeGroupId: null,
   dmSection: 'dms',
   setDmSection: (dmSection) => set({ dmSection }),
+  dmProtocol: 'nip04',
+  setDmProtocol: (dmProtocol) => set({ dmProtocol }),
   pendingInvites: [],
   openNonce: 0,
 
