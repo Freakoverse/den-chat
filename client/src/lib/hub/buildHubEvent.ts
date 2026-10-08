@@ -30,6 +30,10 @@ interface BuildHubEventOptions {
   relays: string[]
   blossomServers: string[]
   indexFileHash: string
+  /** Struct-blob hash (new format). When set, the structural arrays move OUT of the event content into
+   *  the Blossom blob and the event carries a `["struct", hash, epoch]` tag — the event stays O(1). The
+   *  caller uploads the blob first (see lib/hub/hubStructBlob) and passes the verified hash here. */
+  structFileHash?: string
   channels: Channel[]
   categories: Category[]
   roles: Role[]
@@ -62,10 +66,14 @@ function validateHubLimits(opts: BuildHubEventOptions) {
   if (opts.icon && opts.icon.length > MEDIA_URL_MAX) errors.push(`Hub icon URL exceeds ${MEDIA_URL_MAX} characters`)
   if (opts.banner && opts.banner.length > MEDIA_URL_MAX) errors.push(`Hub banner URL exceeds ${MEDIA_URL_MAX} characters`)
 
-  // Array limits
-  if (opts.channels.length > MAX_CHANNELS) errors.push(`Too many channels (max ${MAX_CHANNELS})`)
-  if (opts.categories.length > MAX_CATEGORIES) errors.push(`Too many categories (max ${MAX_CATEGORIES})`)
-  if (opts.roles.length > MAX_ROLES) errors.push(`Too many roles (max ${MAX_ROLES})`)
+  // Array (count) limits — these keep the INLINE event under relay size limits, so they only apply to
+  // the legacy inline format. Struct-blob hubs move the arrays to a Blossom blob (the event is O(1)),
+  // so the channel/category/role COUNT caps are lifted; per-item string limits below still apply.
+  if (!opts.structFileHash) {
+    if (opts.channels.length > MAX_CHANNELS) errors.push(`Too many channels (max ${MAX_CHANNELS})`)
+    if (opts.categories.length > MAX_CATEGORIES) errors.push(`Too many categories (max ${MAX_CATEGORIES})`)
+    if (opts.roles.length > MAX_ROLES) errors.push(`Too many roles (max ${MAX_ROLES})`)
+  }
   if (opts.tags && opts.tags.length > MAX_TOPIC_TAGS) errors.push(`Too many topic tags (max ${MAX_TOPIC_TAGS})`)
   if (opts.relays.length > MAX_GENERAL_RELAYS) errors.push(`Too many relays (max ${MAX_GENERAL_RELAYS})`)
   if (opts.blossomServers.length > MAX_BLOSSOM_SERVERS) errors.push(`Too many blossom servers (max ${MAX_BLOSSOM_SERVERS})`)
@@ -158,8 +166,19 @@ export function buildHubEvent(opts: BuildHubEventOptions) {
   // NIP-SHORT short address (coordinate-derived, so stable across edits).
   if (opts.authorPubkey) eventTags.push(coordinateShortTag(KINDS.HUB_EVENT, opts.authorPubkey, dTag))
 
-  // Build JSON content per NIP-CHAT spec §6.1
-  const contentObj = {
+  // Struct-blob format (v1): the structural arrays live in a PLAINTEXT Blossom blob, so the public face
+  // moves to plaintext tags (picture/banner/about) — parseHubEvent reads those the same way it does for
+  // v2 — and the event content becomes empty. Keeps the event O(1) regardless of channel/role counts.
+  if (opts.structFileHash) {
+    if (icon) eventTags.push(['picture', icon])
+    if (banner) eventTags.push(['banner', banner])
+    if (description) eventTags.push(['about', description])
+    eventTags.push(['struct', opts.structFileHash, epoch.toString()])
+  }
+
+  // Build JSON content per NIP-CHAT spec §6.1. Struct-blob hubs carry no structure in content (it is in
+  // the Blossom blob; the public face is in tags above), so the content is empty.
+  const contentObj = opts.structFileHash ? {} : {
     settings: {
       description: description || undefined,
       icon: icon || undefined,
@@ -271,8 +290,14 @@ export async function buildHubEventV2(
   const [fam, ver] = (signerScheme || 'skd:1').split(':')
   eventTags.push(['signer_scheme', fam || 'skd', ver || '1'])
 
-  // Structural content (member-only) + the encrypted owner attestation, encrypted whole.
-  const contentObj = {
+  // Struct-blob format (v2): the structural arrays move into the encrypted Blossom blob, so the event
+  // content carries ONLY the owner attestation (needed for verification) and stays O(1). The blob is
+  // encrypted with the same hub_content_key, so it stays members-only.
+  if (opts.structFileHash) eventTags.push(['struct', opts.structFileHash, epoch.toString()])
+
+  // Structural content (member-only) + the encrypted owner attestation, encrypted whole. In struct-blob
+  // format the structure is in the blob, so only the attestation remains inline.
+  const contentObj = opts.structFileHash ? { owner_attestation: ownerAttestation } : {
     roles: roles.map(r => ({
       role_id: r.roleId, name: r.name, ...(r.color ? { color: r.color } : {}),
       position: r.position, ...(r.hoist ? { hoist: true } : {}), permissions: r.permissions,
