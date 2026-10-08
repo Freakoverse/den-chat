@@ -32,6 +32,8 @@ import { createAndUploadMemberFiles, createAndUploadMemberFilesV2, blossomServer
 import { makeSubkeySigner, mineAndSignAsSubkey } from '@/lib/nostr/v2send'
 import { ChatContext, canUseV2 } from '@/lib/crypto/skd'
 import { deriveHubContentKey, encryptHubContent, buildOwnerAttestation } from '@/lib/hub/hubContent'
+import { STRUCT_FORMAT_ENABLED } from '@/lib/hub/structFormat'
+import { serializeStructBlob, uploadStructBlob } from '@/lib/hub/hubStructBlob'
 import { DEFAULT_EVERYONE_PERMISSIONS } from '@/lib/hub/permissions'
 import type { UploadProgress } from '@/lib/blossom'
 
@@ -41,6 +43,7 @@ type UploadStatus = 'idle' | 'uploading' | 'success' | 'error'
 type CreationStep =
   | 'generating-secret'
   | 'uploading-member-files'
+  | 'uploading-struct-file'
   | 'building-event'
   | 'mining-event'
   | 'signing-event'
@@ -53,6 +56,7 @@ type CreationStep =
 const CREATION_STEPS: { key: CreationStep; label: string; icon: typeof KeyRound }[] = [
   { key: 'generating-secret', label: 'Generating hub secret', icon: KeyRound },
   { key: 'uploading-member-files', label: 'Uploading member files', icon: Upload },
+  { key: 'uploading-struct-file', label: 'Uploading structure file', icon: Upload },
   { key: 'building-event', label: 'Building hub event', icon: Database },
   { key: 'mining-event', label: 'Processing', icon: Cpu },
   { key: 'signing-event', label: 'Signing hub event', icon: FileSignature },
@@ -589,6 +593,9 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
       // V2_CREATION_ENABLED is the authoritative chokepoint: even if createV2 were somehow set, this
       // guarantees a v1 hub is created while v2 creation is gated off.
       const wantV2 = createV2 && canUseV2({ privateKey, signer }) && V2_CREATION_ENABLED
+      // Struct-blob format: when enabled, new hubs are created in the O(1) struct format (structure in a
+      // Blossom blob, struct tag on the event). Applies to BOTH v1 and v2 (orthogonal to the privacy type).
+      const wantStruct = STRUCT_FORMAT_ENABLED
       setCreationStep('uploading-member-files')
       let indexHash = ''
       let ownerPub = pubkey! // v1: creator's real key; v2: the derived owner pseudonym O
@@ -615,6 +622,30 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
         setMemberFileProgress(null)
       }
 
+      // Struct-blob: upload the structural arrays as a Blossom blob (v2 encrypted with hub_content_key +
+      // authored as the owner pseudonym O; v1 plaintext under the real key), verify it reads back, and keep
+      // its hash for the struct tag. Failure throws (aborts creation) rather than publish an event pointing
+      // at a structure blob that isn't durably stored.
+      let structHash = ''
+      if (wantStruct && pubkey) {
+        setCreationStep('uploading-struct-file')
+        const structRaw = {
+          roles: contentObj.roles,
+          grouped_roles: contentObj.grouped_roles,
+          categories: contentObj.categories,
+          channels: contentObj.channels,
+          plugins: contentObj.plugins,
+        }
+        const structKey = wantV2 ? deriveHubContentKey(hubSecret, epoch) : undefined
+        const { bytes, hash } = await serializeStructBlob(structRaw, structKey)
+        const structOwnerSigner = wantV2 ? makeSubkeySigner(ChatContext.owner(dTag), { privateKey, signer }) : null
+        structHash = await uploadStructBlob({
+          bytes, hash, servers: blossomServerList, dTag, signer, privateKey,
+          authSigner: structOwnerSigner ? (u) => structOwnerSigner.signEvent(u) : undefined,
+        })
+        markDone('uploading-struct-file')
+      }
+
       // Build hub event tags per NIP-CHAT spec
       setCreationStep('building-event')
       const tags: [string, ...string[]][] = [
@@ -631,6 +662,10 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
       }
       if (indexHash) {
         tags.push(['m', indexHash, epoch.toString()])
+      }
+      // Struct-blob pointer: structure lives in the Blossom blob, referenced here (parallel to `m`).
+      if (structHash) {
+        tags.push(['struct', structHash, epoch.toString()])
       }
       // NSFW / content-warning tags
       if (nsfw) {
@@ -652,6 +687,11 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
       if (wantV2) {
         tags.push(['version', '2'])
         tags.push(['signer_scheme', 'skd', '1'])
+      }
+      // Public face in plaintext tags. v2 always (structural content is encrypted); v1 only in struct
+      // format (there the content is empty too, so the face can't live in content.settings). v1 inline
+      // keeps the face in content.settings (below), unchanged.
+      if (wantV2 || wantStruct) {
         if (iconUrl) tags.push(['picture', iconUrl])
         if (bannerUrl) tags.push(['banner', bannerUrl])
         if (description.trim()) tags.push(['about', description.trim()])
@@ -663,12 +703,14 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
       setCreationStep('signing-event')
       // v2: encrypt the structural content with hub_content_key + embed the owner
       // attestation (R signs the coordinate), and author the hub under the pseudonym O.
-      let eventContent = JSON.stringify(contentObj)
+      // Struct-blob: the structure lives in the uploaded blob, so the event content carries no structural
+      // arrays (v1 → empty; v2 → owner attestation only). Inline hubs keep the full structure in content.
+      let eventContent = JSON.stringify(wantStruct ? {} : contentObj)
       if (wantV2) {
         const coord = `${KINDS.HUB_EVENT}:${ownerPub}:${dTag}`
         const ownerAtt = await buildOwnerAttestation(coord, pubkey!, signer, privateKey)
         const contentKey = deriveHubContentKey(hubSecret, epoch)
-        eventContent = await encryptHubContent(contentKey, { ...contentObj, owner_attestation: ownerAtt })
+        eventContent = await encryptHubContent(contentKey, wantStruct ? { owner_attestation: ownerAtt } : { ...contentObj, owner_attestation: ownerAtt })
       }
       // NIP-SHORT short address — coordinate-derived over the hub event's author (v1: R, v2: O).
       const shortTag = coordinateShortTag(KINDS.HUB_EVENT, wantV2 ? ownerPub : pubkey!, dTag)
@@ -739,6 +781,8 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
         generalRelays: relays,
         blossomServers: blossomServerList,
         indexFileHash: indexHash,
+        // Record the struct pointer so later edits re-publish in struct format (empty for inline hubs).
+        structFileHash: structHash || undefined,
         channels: channelDefs.map((ch) => ({
           channelId: ch.channel_id,
           name: ch.name,
@@ -1532,7 +1576,7 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
 
             {/* Overall progress bar */}
             {(() => {
-              const visibleSteps = CREATION_STEPS.filter(s => s.key !== 'mining-event' || createMinPow > 0)
+              const visibleSteps = CREATION_STEPS.filter(s => (s.key !== 'mining-event' || createMinPow > 0) && (s.key !== 'uploading-struct-file' || STRUCT_FORMAT_ENABLED))
               const doneCount = visibleSteps.filter(s => completedSteps.has(s.key)).length
               const pct = creationStep === 'done' ? 100 : Math.round((doneCount / visibleSteps.length) * 100)
               return (
@@ -1553,7 +1597,7 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
 
             {/* Step list */}
             <div className="space-y-1">
-              {CREATION_STEPS.filter(s => s.key !== 'mining-event' || createMinPow > 0).map((step) => {
+              {CREATION_STEPS.filter(s => (s.key !== 'mining-event' || createMinPow > 0) && (s.key !== 'uploading-struct-file' || STRUCT_FORMAT_ENABLED)).map((step) => {
                 const isDone = completedSteps.has(step.key)
                 const isCurrent = creationStep === step.key
                 const Icon = step.icon
