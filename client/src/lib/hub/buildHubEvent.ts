@@ -366,37 +366,55 @@ export async function buildAndSignV2HubEvent(
 export async function signHubEventForPublish(
   hub: { dTag: string; creatorPubkey: string; version?: number; signerScheme?: string; structFileHash?: string; blossomServers?: string[] },
   params: BuildHubEventOptions,
-  opts: { pubkey: string; privateKey: string | null; signer: ISigner | null; minPow?: number },
+  opts: {
+    pubkey: string; privateKey: string | null; signer: ISigner | null; minPow?: number
+    /** Fired right before a struct blob is (re)uploaded, for callers with a progress UI. Not fired when
+     *  the structure is unchanged (no upload) or the hub is legacy (no struct tag). */
+    onStructUpload?: () => void
+  },
 ): Promise<Event> {
   const { isV2 } = await import('@/lib/hub/version')
 
-  // Struct-blob hubs: a structural re-publish (channel/role/category edit) carries the *current*
-  // structure in `params`, so re-upload a fresh blob from it and swap in the new hash. The event then
-  // drops the structure (struct tag only), staying O(1). Legacy hubs (no struct tag) skip this and keep
-  // the inline format. Non-structural v2 pointer republishes go through republishV2* (which clone tags
-  // and preserve the struct tag with no upload), not this path.
+  // Struct-blob hubs: a re-publish carries the *current* structure in `params`. Re-upload the blob ONLY
+  // when that structure actually differs from what the store already holds, then swap in the new hash; the
+  // event drops the structure (struct tag only), staying O(1). When it is unchanged (a membership/role op
+  // that doesn't touch structure, minting the short address, etc.) carry the existing hash forward with no
+  // upload. This relies on every caller updating the store AFTER this returns, so the store still holds the
+  // pre-edit structure here. Legacy hubs (no struct tag) keep the inline format. Non-structural v2 pointer
+  // republishes go through republishV2* (which clone tags and preserve the struct tag), not this path.
   if (hub.structFileHash) {
-    const { resolveStructUploadContext, publishStructBlob } = await import('./hubStructBlob')
-    const { contentKey, authSigner } = await resolveStructUploadContext(hub, params.epoch, opts)
-    const structFileHash = await publishStructBlob({
-      input: { channels: params.channels, categories: params.categories, roles: params.roles, groupedRoles: params.groupedRoles },
-      contentKey,
-      servers: params.blossomServers?.length ? params.blossomServers : (hub.blossomServers || []),
-      dTag: params.dTag,
-      signer: opts.signer,
-      privateKey: opts.privateKey,
-      authSigner,
-    })
-    params = { ...params, structFileHash }
-    // Persist the new struct hash to the store immediately (the blob is already uploaded + verified). This
-    // keeps a later NON-structural republish (member-tree/health, which read hub.structFileHash to carry it
-    // forward) from reverting the event's struct pointer to the pre-edit blob within the same session. On
-    // reload the loader re-derives it from the event tag anyway, so this only bridges the in-session window.
-    try {
-      const { useHubStore } = await import('@/stores/hubStore')
-      const cur = useHubStore.getState().hubs[params.dTag]
-      if (cur && cur.structFileHash !== structFileHash) useHubStore.getState().setHubData(params.dTag, { ...cur, structFileHash })
-    } catch { /* store sync is best-effort */ }
+    const { buildStructObject, resolveStructUploadContext, publishStructBlob } = await import('./hubStructBlob')
+    const { useHubStore } = await import('@/stores/hubStore')
+    const curHub = useHubStore.getState().hubs[params.dTag]
+    const nextStruct = JSON.stringify(buildStructObject({ channels: params.channels, categories: params.categories, roles: params.roles, groupedRoles: params.groupedRoles }))
+    const curStruct = curHub
+      ? JSON.stringify(buildStructObject({ channels: curHub.channels, categories: curHub.categories, roles: curHub.roles, groupedRoles: curHub.groupedRoles }))
+      : null
+    if (curStruct !== null && curStruct === nextStruct) {
+      // Structure unchanged: reuse the existing blob + hash, no upload.
+      params = { ...params, structFileHash: hub.structFileHash }
+    } else {
+      opts.onStructUpload?.()
+      const { contentKey, authSigner } = await resolveStructUploadContext(hub, params.epoch, opts)
+      const structFileHash = await publishStructBlob({
+        input: { channels: params.channels, categories: params.categories, roles: params.roles, groupedRoles: params.groupedRoles },
+        contentKey,
+        servers: params.blossomServers?.length ? params.blossomServers : (hub.blossomServers || []),
+        dTag: params.dTag,
+        signer: opts.signer,
+        privateKey: opts.privateKey,
+        authSigner,
+      })
+      params = { ...params, structFileHash }
+      // Persist the new struct hash to the store immediately (the blob is already uploaded + verified). This
+      // keeps a later NON-structural republish (member-tree/health, which read hub.structFileHash to carry it
+      // forward) from reverting the event's struct pointer to the pre-edit blob within the same session. On
+      // reload the loader re-derives it from the event tag anyway, so this only bridges the in-session window.
+      try {
+        const cur = useHubStore.getState().hubs[params.dTag]
+        if (cur && cur.structFileHash !== structFileHash) useHubStore.getState().setHubData(params.dTag, { ...cur, structFileHash })
+      } catch { /* store sync is best-effort */ }
+    }
   }
 
   if (isV2(hub)) {

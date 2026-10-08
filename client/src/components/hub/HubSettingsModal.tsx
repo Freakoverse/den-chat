@@ -1303,6 +1303,7 @@ const MEMBER_SAVE_STEP_ORDER = [
   'Checking group access',
   'Rotating group encryption',
   'Uploading encryption index',
+  'Uploading structure file',
   'Publishing hub update',
 ]
 
@@ -6620,8 +6621,11 @@ function MembersPage({ hub, onFooterState, focusPubkey }: { hub: HubData; onFoot
           // This covers both the group-rotated case (new index, bumped epochs)
           // and the non-rotated case (same index from tree update, original epochs).
           // We skipped publishing earlier to avoid a stale intermediate event.
-          await markStep('Publishing hub update')
           const { signHubEventForPublish } = await import('@/lib/hub/buildHubEvent')
+          // When a group rotates, grouped_roles bumps and the struct blob changes, so signHubEventForPublish
+          // re-uploads it; surface that as its own step. A role change that didn't touch structure (a pure
+          // add, same grouped_roles) uploads nothing, so the step never appears (it is a non-core step).
+          let structStepShown = false
           const signedEvent = await signHubEventForPublish(hub, {
             dTag: hub.dTag,
             name: hub.name,
@@ -6645,7 +6649,12 @@ function MembersPage({ hub, onFooterState, focusPubkey }: { hub: HubData; onFoot
             messageExpiration: hub.messageExpiration || undefined, // carry the disappearing-messages timer forward
             publishedAt: hub.publishedAt,
             eventCreatedAt: hub.eventCreatedAt,
-          }, { pubkey: useUserStore.getState().pubkey!, privateKey, signer, minPow: hub.minPow })
+          }, {
+            pubkey: useUserStore.getState().pubkey!, privateKey, signer, minPow: hub.minPow,
+            onStructUpload: () => { structStepShown = true; void markStep('Uploading structure file') },
+          })
+          if (structStepShown) markStepDone('Uploading structure file')
+          await markStep('Publishing hub update')
           await casCheckIndex(hub.dTag, hub.creatorPubkey, hub.indexFileHash) // abort if another writer moved the index
           {
             // Fail loudly if no relay accepted, BEFORE flushing group secrets + deleting old blobs below
