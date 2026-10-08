@@ -296,11 +296,11 @@ export function useHubEventSubscription() {
           let ownerRealPubkey: string | undefined
           let secretDecryptFailed = false
           if (secretHex) {
+            const { fromHex } = await import('@/lib/crypto/lkh')
+            const { deriveHubContentKey, decryptHubContent } = await import('@/lib/hub/hubContent')
+            const key = deriveHubContentKey(fromHex(secretHex), hubData.epoch)
             let decrypted: unknown
             try {
-              const { fromHex } = await import('@/lib/crypto/lkh')
-              const { deriveHubContentKey, decryptHubContent } = await import('@/lib/hub/hubContent')
-              const key = deriveHubContentKey(fromHex(secretHex), hubData.epoch)
               decrypted = await decryptHubContent(key, event.content)
             } catch {
               secretDecryptFailed = true // stale secret — couldn't decrypt this epoch's content
@@ -308,7 +308,17 @@ export function useHubEventSubscription() {
             if (decrypted !== undefined) {
               try {
                 const { verifyOwnerAttestation } = await import('@/lib/hub/hubContent')
-                full = parseHubEvent(event, JSON.stringify(decrypted))
+                // Struct-blob: the structure lives in the encrypted Blossom blob, not the event content
+                // (which holds only the owner attestation). Fetch + decrypt it with the same content key for
+                // the structural parse. A blob hiccup throws here, leaving `full` null (keep existing
+                // structure below), NOT a lost-access signal (that is the event-content decrypt above).
+                let structObj: unknown = decrypted
+                if (hubData.structFileHash) {
+                  const { downloadTextFromBlossom } = await import('@/lib/blossom')
+                  const structCipher = await downloadTextFromBlossom(hubData.structFileHash, hubData.blossomServers)
+                  structObj = await decryptHubContent(key, structCipher)
+                }
+                full = parseHubEvent(event, JSON.stringify(structObj))
                 // Re-extract + verify the owner's real key R from the attestation on EVERY update — parseHubEvent
                 // doesn't (it can't verify), and the store's merge only preserves a PRIOR ownerRealPubkey. Without
                 // this, a member whose initial load raced/missed the extraction never learns the owner's R, so the
@@ -380,6 +390,30 @@ export function useHubEventSubscription() {
           }
           if (hubData.deleted) store.setHubStatus(dTag, 'deleted')
           return
+        }
+
+        // v1 struct-blob: the structure lives in a PLAINTEXT Blossom blob, not the event content (which is
+        // "{}"). parseHubEvent(event) above therefore returned EMPTY channels/roles, so merge the blob in
+        // before the structureChanged check + setHubData, or an edit would wipe the hub's channels live.
+        // On a blob fetch miss, keep the structure we already hold rather than wiping it.
+        if (hubData.structFileHash) {
+          try {
+            const { downloadTextFromBlossom } = await import('@/lib/blossom')
+            const blobText = await downloadTextFromBlossom(hubData.structFileHash, hubData.blossomServers)
+            const merged = parseHubEvent(event, blobText)
+            if (merged) {
+              hubData.channels = merged.channels
+              hubData.categories = merged.categories
+              hubData.roles = merged.roles
+              hubData.groupedRoles = merged.groupedRoles
+            } else { throw new Error('struct blob parse returned null') }
+          } catch (err) {
+            console.warn(`[HubEventSub] ${dTag}: v1 struct blob merge failed, keeping current structure:`, err)
+            hubData.channels = currentHub.channels
+            hubData.categories = currentHub.categories
+            hubData.roles = currentHub.roles
+            hubData.groupedRoles = currentHub.groupedRoles
+          }
         }
 
         // Check if this is actually newer (different index hash, hub epoch, group epochs, or channel/role structure)
