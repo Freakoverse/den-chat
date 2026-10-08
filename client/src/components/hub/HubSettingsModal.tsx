@@ -3554,12 +3554,12 @@ function SecurityPage({ hub }: { hub: HubData }) {
       )
       markDone('Uploading tree & index')
 
-      // 9. Publish updated hub event
-      await markStep('Publishing hub event')
+      // 9. Publish updated hub event.
       // Struct-blob (v1): this rotation bumps grouped_roles + epoch, so the plaintext struct blob's content
-      // changed, re-upload it and repoint the struct tag. (v1-only path: signed under R below.)
+      // changed, re-upload it (own step) and repoint the struct tag. (v1-only path: signed under R below.)
       let rebuiltStructHash = hub.structFileHash
       if (hub.structFileHash) {
+        await markStep('Uploading structure file')
         const { publishStructBlob } = await import('@/lib/hub/hubStructBlob')
         rebuiltStructHash = await publishStructBlob({
           input: { channels: hub.channels, categories: hub.categories, roles: hub.roles, groupedRoles: updatedGroupedRoles },
@@ -3567,7 +3567,9 @@ function SecurityPage({ hub }: { hub: HubData }) {
           dTag: hub.dTag,
           signer, privateKey,
         })
+        markDone('Uploading structure file')
       }
+      await markStep('Publishing hub event')
       const unsignedEvent = rebuildHubEvent({
         dTag: hub.dTag,
         name: hub.name,
@@ -3678,12 +3680,19 @@ function SecurityPage({ hub }: { hub: HubData }) {
   // reports success. v2 fix-encryption runs rebuildTreeV2, which emits exactly these 3 (no separate
   // upload/group step); v1 rebuilds inline and emits the fuller list.
   const allFixStepLabels = hub.version === 2
-    ? ['Downloading current tree', 'Rebuilding member tree', 'Publishing hub event']
+    ? [
+        'Downloading current tree',
+        'Rebuilding member tree',
+        // Struct hubs re-encrypt + re-upload the struct blob under the new epoch key during the rotate.
+        ...(hub.structFileHash ? ['Uploading structure file'] : []),
+        'Publishing hub event',
+      ]
     : [
         'Downloading current tree',
         'Rebuilding member tree',
         ...(groupedRoles.length > 0 ? ['Rebuilding group encryption'] : []),
         'Uploading tree & index',
+        ...(hub.structFileHash ? ['Uploading structure file'] : []),
         'Publishing hub event',
       ]
 

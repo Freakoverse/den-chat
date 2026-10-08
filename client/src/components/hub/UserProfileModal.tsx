@@ -690,7 +690,11 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
           await markStep('Done')
           return
         }
-        setBanStepLabels(V2_MEMBER_BAN_STEPS) // kickMemberV2 emits these labels via onStep
+        // kickMemberV2 emits these labels via onStep. A struct-format hub re-encrypts + re-uploads the
+        // struct blob under the new epoch key during the rotate, so slot that step in before the publish.
+        setBanStepLabels(useHubStore.getState().hubs[dTag]?.structFileHash
+          ? ['Downloading index & tree', 'Removing member & rotating secret', 'Uploading page & spine', 'Building index', 'Uploading structure file', 'Publishing hub event']
+          : V2_MEMBER_BAN_STEPS)
         let memberP = members.find(m => m.pubkey === displayPubkey)?.p
         if (!memberP) {
           // Owner re-derives P from R (ECDH symmetry) — local key, or a signer that supports the

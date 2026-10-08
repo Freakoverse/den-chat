@@ -299,11 +299,11 @@ export async function kickMemberV2(opts: {
   await verifyFileExists(newSpineHash, hub.blossomServers)
   await verifyFileExists(newIndexHash, hub.blossomServers)
 
-  // 7. Re-publish the hub event as O with content re-encrypted under the new epoch key.
-  onStep?.('Publishing hub event')
+  // 7. Re-publish the hub event as O with content re-encrypted under the new epoch key. republishV2HubRotate
+  // drives the final steps in order (struct-blob re-upload, then publish) via onStep.
   const pub = await republishV2HubRotate({
     hub, ownerPub: hub.creatorPubkey, newIndexHash, newEpoch,
-    oldHubSecret: oldSecret, newHubSecret: newSecret, groupedRolesOverride: bumpedGroupedRoles, privateKey, signer,
+    oldHubSecret: oldSecret, newHubSecret: newSecret, groupedRolesOverride: bumpedGroupedRoles, onStep, privateKey, signer,
   })
 
   const epochMap: Record<number, string> = {}
@@ -463,11 +463,11 @@ export async function rebuildTreeV2(opts: {
   await verifyFileExists(newSpineHash, hub.blossomServers)
   await verifyFileExists(newIndexHash, hub.blossomServers)
 
-  // 7. Re-publish as O with content re-encrypted under the new epoch key.
-  onStep?.('Publishing hub event')
+  // 7. Re-publish as O with content re-encrypted under the new epoch key. republishV2HubRotate drives the
+  // final steps in order (struct-blob re-upload, then publish) via onStep.
   const pub = await republishV2HubRotate({
     hub, ownerPub: hub.creatorPubkey, newIndexHash, newEpoch,
-    oldHubSecret: oldSecret, newHubSecret: newSecret, groupedRolesOverride: bumpedGroupedRoles, privateKey, signer,
+    oldHubSecret: oldSecret, newHubSecret: newSecret, groupedRolesOverride: bumpedGroupedRoles, onStep, privateKey, signer,
   })
 
   const epochMap: Record<number, string> = {}

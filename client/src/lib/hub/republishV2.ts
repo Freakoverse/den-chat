@@ -111,10 +111,13 @@ export async function republishV2HubRotate(opts: {
   newHubSecret: Uint8Array
   /** When groups rotate, the bumped grouped_roles to write into the (re-encrypted) content. */
   groupedRolesOverride?: Array<{ groupId: string; roleIds: string[]; epoch: number }>
+  /** Progress callback for the caller's UI. Drives the final two steps IN ORDER: "Uploading structure
+   *  file" (struct hubs only, right before the blob re-upload) then "Publishing hub event". */
+  onStep?: (step: string) => void
   privateKey: string | null
   signer: ISigner | null
 }): Promise<{ eventCreatedAt: number; publishedRelays: string[]; targetedRelays: string[] }> {
-  const { hub, ownerPub, newIndexHash, newEpoch, oldHubSecret, newHubSecret, groupedRolesOverride, privateKey, signer } = opts
+  const { hub, ownerPub, newIndexHash, newEpoch, oldHubSecret, newHubSecret, groupedRolesOverride, onStep, privateKey, signer } = opts
 
   const { fetchEvents, publishWithFailover, getRelays } = await import('@/lib/nostr/relay-pool')
   const { getPublishRelays } = await import('@/stores/postingBehaviourStore')
@@ -157,6 +160,7 @@ export async function republishV2HubRotate(opts: {
   // the plaintext structure.
   let newStructHash: string | undefined
   if (isStruct) {
+    onStep?.('Uploading structure file')
     const { publishStructBlob } = await import('./hubStructBlob')
     newStructHash = await publishStructBlob({
       input: {
@@ -195,6 +199,7 @@ export async function republishV2HubRotate(opts: {
   if (!mReplaced) newTags.push(['m', newIndexHash, newEpochStr])
   if (!epochReplaced) newTags.push(['epoch', newEpochStr])
 
+  onStep?.('Publishing hub event')
   const unsigned: UnsignedEvent = {
     kind: KINDS.HUB_EVENT,
     content: newContent,
