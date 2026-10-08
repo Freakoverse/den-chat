@@ -798,6 +798,21 @@ export function HubSettingsModal({ open, onClose, hub, initialPage, focusMemberP
         markStepDone('Updating member tree')
       }
 
+      // Struct-blob hub: a structural edit (channels/roles/categories) changes the blob, so re-upload it
+      // and point the event at the new hash. The non-core step shows only when it runs (struct hubs).
+      // Non-struct hubs keep the inline format (structStepHash undefined → no struct tag).
+      let structStepHash: string | undefined = hub.structFileHash || undefined
+      if (hub.structFileHash) {
+        await markStep('Uploading structure file')
+        const { publishStructBlob, resolveStructUploadContext } = await import('@/lib/hub/hubStructBlob')
+        const { contentKey, authSigner } = await resolveStructUploadContext(hub, hub.epoch, { privateKey, signer })
+        structStepHash = await publishStructBlob({
+          input: { channels: finalChannels, categories: finalCategories, roles: editRoles, groupedRoles: newGroupedRoles },
+          contentKey, servers: editBlossoms, dTag: hub.dTag, signer, privateKey, authSigner,
+        })
+        markStepDone('Uploading structure file')
+      }
+
       await markStep('Signing hub event')
       const hubEventParams = {
         dTag: hub.dTag,
@@ -810,6 +825,7 @@ export function HubSettingsModal({ open, onClose, hub, initialPage, focusMemberP
         relays: editRelays,
         blossomServers: editBlossoms,
         indexFileHash: currentIndexHash,
+        structFileHash: structStepHash,
         channels: finalChannels,
         categories: finalCategories,
         roles: editRoles,
@@ -887,6 +903,7 @@ export function HubSettingsModal({ open, onClose, hub, initialPage, focusMemberP
         discoverable: editDiscoverable,
         groupedRoles: newGroupedRoles.length > 0 ? newGroupedRoles : undefined,
         indexFileHash: currentIndexHash,
+        structFileHash: structStepHash,
         eventCreatedAt: signedEvent.created_at,
       })
 
@@ -1271,6 +1288,7 @@ const PUBLISH_STEP_ORDER = [
   'Uploading encryption index',
   'Cleaning deleted roles',
   'Updating member tree',
+  'Uploading structure file',
   'Processing',
   'Signing hub event',
   'Publishing to relays',
@@ -3537,6 +3555,18 @@ function SecurityPage({ hub }: { hub: HubData }) {
 
       // 9. Publish updated hub event
       await markStep('Publishing hub event')
+      // Struct-blob (v1): this rotation bumps grouped_roles + epoch, so the plaintext struct blob's content
+      // changed — re-upload it and repoint the struct tag. (v1-only path: signed under R below.)
+      let rebuiltStructHash = hub.structFileHash
+      if (hub.structFileHash) {
+        const { publishStructBlob } = await import('@/lib/hub/hubStructBlob')
+        rebuiltStructHash = await publishStructBlob({
+          input: { channels: hub.channels, categories: hub.categories, roles: hub.roles, groupedRoles: updatedGroupedRoles },
+          servers: hub.blossomServers,
+          dTag: hub.dTag,
+          signer, privateKey,
+        })
+      }
       const unsignedEvent = rebuildHubEvent({
         dTag: hub.dTag,
         name: hub.name,
@@ -3548,6 +3578,7 @@ function SecurityPage({ hub }: { hub: HubData }) {
         relays: [...hub.generalRelays],
         blossomServers: hub.blossomServers,
         indexFileHash: finalIndexHash,
+        structFileHash: rebuiltStructHash,
         channels: hub.channels,
         categories: hub.categories,
         roles: hub.roles,
@@ -3601,6 +3632,7 @@ function SecurityPage({ hub }: { hub: HubData }) {
         ...hub,
         indexFileHash: finalIndexHash,
         epoch: newEpoch,
+        structFileHash: rebuiltStructHash,
         groupedRoles: updatedGroupedRoles,
       })
 

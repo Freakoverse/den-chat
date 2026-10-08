@@ -1207,6 +1207,7 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
         ...hub,
         indexFileHash: newIndexHash,
         epoch: newEpoch,
+        structFileHash: rotatedStructHash,
         groupedRoles: updatedGroupedRoles.length > 0 ? updatedGroupedRoles : hub.groupedRoles,
         eventCreatedAt: signedEvent.created_at,
       })

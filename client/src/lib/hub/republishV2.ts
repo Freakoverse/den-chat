@@ -174,6 +174,13 @@ export async function republishV2HubRotate(opts: {
       privateKey,
       authSigner: (u) => ownerSigner.signEvent(u),
     })
+    // Keep the store's struct pointer fresh (the blob is uploaded + verified) so a later non-structural
+    // republish in this session carries the rotated hash forward, not the pre-rotation one.
+    try {
+      const { useHubStore } = await import('@/stores/hubStore')
+      const cur = useHubStore.getState().hubs[hub.dTag]
+      if (cur && cur.structFileHash !== newStructHash) useHubStore.getState().setHubData(hub.dTag, { ...cur, structFileHash: newStructHash })
+    } catch { /* best-effort */ }
   }
 
   const newEpochStr = String(newEpoch)

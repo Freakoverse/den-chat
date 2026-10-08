@@ -388,6 +388,15 @@ export async function signHubEventForPublish(
       authSigner,
     })
     params = { ...params, structFileHash }
+    // Persist the new struct hash to the store immediately (the blob is already uploaded + verified). This
+    // keeps a later NON-structural republish (member-tree/health, which read hub.structFileHash to carry it
+    // forward) from reverting the event's struct pointer to the pre-edit blob within the same session. On
+    // reload the loader re-derives it from the event tag anyway, so this only bridges the in-session window.
+    try {
+      const { useHubStore } = await import('@/stores/hubStore')
+      const cur = useHubStore.getState().hubs[params.dTag]
+      if (cur && cur.structFileHash !== structFileHash) useHubStore.getState().setHubData(params.dTag, { ...cur, structFileHash })
+    } catch { /* store sync is best-effort */ }
   }
 
   if (isV2(hub)) {
