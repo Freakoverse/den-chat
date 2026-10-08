@@ -568,7 +568,12 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
     setBanning(true)
     setBanError(null)
     setBanSteps([])
-    setBanStepLabels(V1_CREATOR_BAN_STEPS) // default (v1 inline path); v2 branches override before emitting
+    // Default (v1 inline path); v2 branches override before emitting. A struct-format hub re-uploads the
+    // struct blob after rotating, so slot that step in before the publish. (hub is read from the store here
+    // since the local `hub` const isn't bound until inside the try below.)
+    setBanStepLabels(useHubStore.getState().hubs[hubContext.dTag]?.structFileHash
+      ? ['Downloading index & tree', 'Removing member & rotating secret', 'Rotating group encryption', 'Uploading ban page & index', 'Uploading structure file', 'Publishing hub event']
+      : V1_CREATOR_BAN_STEPS)
 
     const markStep = async (step: string) => {
       setBanStep(step)
@@ -1152,18 +1157,15 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
       )
       markDone('Uploading ban page & index')
 
-      // 4. Re-publish hub event
-      await markStep('Publishing hub event')
-      const { buildHubEvent } = await import('@/lib/hub/buildHubEvent')
-      const { mineAndSign: signFn } = await import('@/lib/nostr/events')
-      const { publishToSpecificRelays: pubToRelays } = await import('@/lib/nostr/relay-pool')
       // Struct-blob hubs (v1): this rotation changes grouped_roles (and the epoch), so the plaintext struct
       // blob's content changed, re-upload it at the new epoch and point the event's struct tag at the new
-      // hash. Legacy inline hubs (no struct tag) skip this. (v2 kicks go through republishV2HubRotate, which
-      // re-encrypts the blob under the new key; this path is v1-only, so the blob is plaintext.)
+      // hash. Shown as its own step (added to banStepLabels when the hub is struct-format). Legacy inline
+      // hubs (no struct tag) skip it. (v2 kicks go through republishV2HubRotate, which re-encrypts the blob
+      // under the new key; this path is v1-only, so the blob is plaintext.)
       const rotatedGroupedRoles = updatedGroupedRoles.length > 0 ? updatedGroupedRoles : hub.groupedRoles
       let rotatedStructHash = hub.structFileHash
       if (hub.structFileHash) {
+        await markStep('Uploading structure file')
         const { publishStructBlob } = await import('@/lib/hub/hubStructBlob')
         rotatedStructHash = await publishStructBlob({
           input: { channels: hub.channels, categories: hub.categories, roles: hub.roles, groupedRoles: rotatedGroupedRoles },
@@ -1172,7 +1174,14 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
           signer,
           privateKey,
         })
+        markDone('Uploading structure file')
       }
+
+      // 4. Re-publish hub event
+      await markStep('Publishing hub event')
+      const { buildHubEvent } = await import('@/lib/hub/buildHubEvent')
+      const { mineAndSign: signFn } = await import('@/lib/nostr/events')
+      const { publishToSpecificRelays: pubToRelays } = await import('@/lib/nostr/relay-pool')
       const unsignedEvent = buildHubEvent({
         dTag: hub.dTag,
         name: hub.name,
