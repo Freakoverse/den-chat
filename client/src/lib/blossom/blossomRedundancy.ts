@@ -327,6 +327,10 @@ async function mirrorHubFiles(hub: HubData, memberPubkey: string): Promise<void>
 
   if (index.historyHash) targets.push({ hash: index.historyHash, label: `${hub.dTag} history` })
   for (const b of index.banPages) targets.push({ hash: b.hash, label: `${hub.dTag} bans` })
+  // The struct blob (channels/roles/categories/grouped_roles) is as critical to render a struct-format hub
+  // as the member index is to join it — and its bytes are content-addressed (fixed even when v2-encrypted),
+  // so any member can re-upload them without the key. Keep it on >= TARGET_COPIES servers like the rest.
+  if (hub.structFileHash) targets.push({ hash: hub.structFileHash, label: `${hub.dTag} struct` })
 
   for (const t of targets) {
     await mirrorHash(t.hash, candidates, t.label, undefined, authSigner)
@@ -347,7 +351,10 @@ export function ensureBlossomRedundancy(dTag: string, memberPubkey: string) {
   const hub = useHubStore.getState().hubs[dTag]
   if (!hub || !hub.indexFileHash || hub.blossomServers.length === 0) return
 
-  const key = `${dTag}:${hub.indexFileHash}`
+  // Include the struct hash in the dedup key: a structural edit (channel/role change) re-uploads the
+  // struct blob but does NOT move the member index, so keying on the index alone would skip re-mirroring
+  // the new struct blob. Keying on both re-runs the sweep whenever either pointer changes.
+  const key = `${dTag}:${hub.indexFileHash}:${hub.structFileHash || ''}`
   if (checkedThisSession.has(key)) return
   checkedThisSession.add(key)
 
@@ -399,6 +406,9 @@ export async function directUploadHubFiles(dTag: string, memberPubkey: string): 
       targets.push({ hash: b.hash, label: index.banPages.length > 1 ? `Ban page ${i + 1}` : 'Ban list' }),
     )
   } catch { /* index unreadable — still push the index file itself */ }
+  // The struct blob is a critical hub file too (channels/roles/categories); include it so the manual
+  // "Re-upload" covers it. Independent of the index, so add it outside the try.
+  if (hub.structFileHash) targets.push({ hash: hub.structFileHash, label: 'Structure' })
 
   const results: DirectUploadResult[] = []
   for (const t of targets) {
@@ -508,6 +518,8 @@ export async function checkBlossomFileAvailability(
   } catch {
     // Index unreadable from Blossom — still report the index file's own availability.
   }
+  // Report the struct blob's availability too (channels/roles/categories live there for struct hubs).
+  if (hub.structFileHash) targets.push({ hash: hub.structFileHash, label: 'Structure' })
 
   const files = await Promise.all(
     targets.map(async (t) => {
