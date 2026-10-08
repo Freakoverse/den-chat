@@ -38,6 +38,10 @@ export interface HubData {
   generalRelays: string[]
   blossomServers: string[]
   indexFileHash: string
+  /** struct-blob hash from the `struct` tag: when present, the structural arrays (channels / roles /
+   *  categories / grouped_roles / plugins) live in a Blossom blob (encrypted the same way the hub
+   *  encrypts its event content) instead of inline in the event. Empty/undefined = legacy inline hub. */
+  structFileHash?: string
   channels: Channel[]
   categories: Category[]
   roles: Role[]

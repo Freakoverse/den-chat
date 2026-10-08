@@ -68,6 +68,11 @@ export function parseHubEvent(event: Event, contentOverride?: string): (HubData 
     const mTag = event.tags.find(t => t[0] === 'm')
     const indexFileHash = mTag?.[1] || ''
 
+    // Parse struct-blob hash (new format): ['struct', '<sha256>', '<epoch>']. When present, the
+    // structural arrays live in a Blossom blob, not inline in the event content.
+    const structTag = event.tags.find(t => t[0] === 'struct')
+    const structFileHash = structTag?.[1] || ''
+
     // Parse topic tags
     const tags = event.tags
       .filter(t => t[0] === 't' && t[1])
@@ -256,6 +261,7 @@ export function parseHubEvent(event: Event, contentOverride?: string): (HubData 
       generalRelays,
       blossomServers,
       indexFileHash,
+      structFileHash,
       channels,
       categories,
       roles,
@@ -583,9 +589,17 @@ export async function decryptAndMergeV2HubContent(
     const { fromHex } = await import('@/lib/crypto/lkh')
     const { deriveHubContentKey, decryptHubContent, verifyOwnerAttestation } = await import('@/lib/hub/hubContent')
     const key = deriveHubContentKey(fromHex(secretHex), hubData.epoch)
-    const decrypted = await decryptHubContent(key, event.content)
-    const full = parseHubEvent(event, JSON.stringify(decrypted))
-    const ownerRealPubkey = verifiedOwnerRealPubkey(decrypted, hubData.creatorPubkey, dTag, verifyOwnerAttestation)
+    // The event content always holds the owner_attestation (both formats). In the struct-blob format the
+    // structural arrays live in the Blossom `struct` blob instead of the content, so fetch + decrypt that
+    // for the structure; otherwise the content itself carries the structure (legacy inline hubs).
+    const eventContent = await decryptHubContent(key, event.content)
+    let structObj: unknown = eventContent
+    if (hubData.structFileHash) {
+      const structCipher = await loadHubText(hubData.structFileHash, hubData.blossomServers, dTag)
+      structObj = await decryptHubContent(key, structCipher)
+    }
+    const full = parseHubEvent(event, JSON.stringify(structObj))
+    const ownerRealPubkey = verifiedOwnerRealPubkey(eventContent, hubData.creatorPubkey, dTag, verifyOwnerAttestation)
     if (full) {
       useHubStore.getState().setHubData(dTag, {
         ...hubData,
@@ -1241,6 +1255,23 @@ export function useHubLoader() {
           return
         }
 
+        // v1 (public) struct-blob hubs keep their structure in a PLAINTEXT Blossom blob (the public face
+        // stays in tags, same shape as v2). Fetch it and merge the structure before storing. v2 hubs do the
+        // equivalent after decrypting, in decryptAndMergeV2HubContent.
+        if (hubData.version !== 2 && hubData.structFileHash) {
+          try {
+            const full = parseHubEvent(event, await loadHubText(hubData.structFileHash, hubData.blossomServers, dTag))
+            if (full) {
+              hubData.channels = full.channels
+              hubData.categories = full.categories
+              hubData.roles = full.roles
+              hubData.groupedRoles = full.groupedRoles
+            }
+          } catch (err) {
+            console.warn(`Hub ${dTag}: failed to load v1 struct blob ${hubData.structFileHash}:`, err)
+          }
+        }
+
         setHubData(dTag, hubData)
 
         // Set hub status based on deleted flag
@@ -1297,36 +1328,11 @@ export function useHubLoader() {
                   })()
                 }
               } catch { /* localStorage unavailable — skip the once-per-device guard */ }
-              // v2: the structural content (channels/roles/categories) is encrypted with the
-              // hub content key. parseHubEvent left it empty; decrypt it now and merge.
+              // v2: the structural content (channels/roles/categories) lives in the struct blob (new
+              // format) or inline in the encrypted event content (legacy). decryptAndMergeV2HubContent
+              // fetches/decrypts the right source, verifies the owner attestation, and merges it in.
               if (hubData.version === 2) {
-                try {
-                  const { fromHex } = await import('@/lib/crypto/lkh')
-                  const { deriveHubContentKey, decryptHubContent, verifyOwnerAttestation } = await import('@/lib/hub/hubContent')
-                  const key = deriveHubContentKey(fromHex(result.secretHex), hubData.epoch)
-                  const decrypted = await decryptHubContent(key, event.content)
-                  const full = parseHubEvent(event, JSON.stringify(decrypted))
-                  // The owner attestation reveals the owner's real key R_owner (members-only) — but only
-                  // trust it if its signature (by R_owner over the hub coordinate) VERIFIES. Otherwise a
-                  // malicious owner could embed a victim's npub as rOwnerPub and every client would show the
-                  // hub as created by the victim + grant that key owner permissions (isHubOwner).
-                  const ownerRealPubkey = verifiedOwnerRealPubkey(decrypted, hubData.creatorPubkey, dTag, verifyOwnerAttestation)
-                  if (full) {
-                    setHubData(dTag, {
-                      ...hubData,
-                      channels: full.channels,
-                      categories: full.categories,
-                      roles: full.roles,
-                      groupedRoles: full.groupedRoles,
-                      description: full.description,
-                      icon: full.icon,
-                      banner: full.banner,
-                      ownerRealPubkey,
-                    })
-                  }
-                } catch (err) {
-                  console.warn(`Hub ${dTag}: failed to decrypt v2 hub content:`, err)
-                }
+                await decryptAndMergeV2HubContent(dTag, event, hubData, result.secretHex)
               }
             }
             if (result.members.length > 0) {
