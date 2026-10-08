@@ -1157,6 +1157,22 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
       const { buildHubEvent } = await import('@/lib/hub/buildHubEvent')
       const { mineAndSign: signFn } = await import('@/lib/nostr/events')
       const { publishToSpecificRelays: pubToRelays } = await import('@/lib/nostr/relay-pool')
+      // Struct-blob hubs (v1): this rotation changes grouped_roles (and the epoch), so the plaintext struct
+      // blob's content changed — re-upload it at the new epoch and point the event's struct tag at the new
+      // hash. Legacy inline hubs (no struct tag) skip this. (v2 kicks go through republishV2HubRotate, which
+      // re-encrypts the blob under the new key; this path is v1-only, so the blob is plaintext.)
+      const rotatedGroupedRoles = updatedGroupedRoles.length > 0 ? updatedGroupedRoles : hub.groupedRoles
+      let rotatedStructHash = hub.structFileHash
+      if (hub.structFileHash) {
+        const { publishStructBlob } = await import('@/lib/hub/hubStructBlob')
+        rotatedStructHash = await publishStructBlob({
+          input: { channels: hub.channels, categories: hub.categories, roles: hub.roles, groupedRoles: rotatedGroupedRoles },
+          servers: hub.blossomServers,
+          dTag: hub.dTag,
+          signer,
+          privateKey,
+        })
+      }
       const unsignedEvent = buildHubEvent({
         dTag: hub.dTag,
         name: hub.name,
@@ -1168,6 +1184,7 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
         relays: [...hub.generalRelays],
         blossomServers: hub.blossomServers,
         indexFileHash: newIndexHash,
+        structFileHash: rotatedStructHash,
         channels: hub.channels,
         categories: hub.categories,
         roles: hub.roles,

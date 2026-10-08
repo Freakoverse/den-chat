@@ -240,6 +240,9 @@ export async function safeTreeUpdate(params: SafeTreeUpdateParams): Promise<Safe
       relays: [...hub.generalRelays],
       blossomServers: hub.blossomServers,
       indexFileHash: newIndexHash,
+      // A membership change doesn't touch the structure, so carry the struct hash forward unchanged (no
+      // re-upload). Keeps the struct tag on a struct-format v1 hub so it doesn't revert to inline.
+      structFileHash: hub.structFileHash,
       channels: hub.channels,
       categories: hub.categories,
       roles: hub.roles,
@@ -618,6 +621,9 @@ export async function safePaginatedTreeUpdate(params: SafePaginatedTreeUpdatePar
       relays: [...hub.generalRelays],
       blossomServers: hub.blossomServers,
       indexFileHash: newIndexHash,
+      // A membership change doesn't touch the structure, so carry the struct hash forward unchanged (no
+      // re-upload). Keeps the struct tag on a struct-format v1 hub so it doesn't revert to inline.
+      structFileHash: hub.structFileHash,
       channels: hub.channels,
       categories: hub.categories,
       roles: hub.roles,

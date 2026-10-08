@@ -364,11 +364,32 @@ export async function buildAndSignV2HubEvent(
  * store). Replaces the inline `mineAndSign(buildHubEvent(...))` pattern everywhere.
  */
 export async function signHubEventForPublish(
-  hub: { dTag: string; creatorPubkey: string; version?: number; signerScheme?: string },
+  hub: { dTag: string; creatorPubkey: string; version?: number; signerScheme?: string; structFileHash?: string; blossomServers?: string[] },
   params: BuildHubEventOptions,
   opts: { pubkey: string; privateKey: string | null; signer: ISigner | null; minPow?: number },
 ): Promise<Event> {
   const { isV2 } = await import('@/lib/hub/version')
+
+  // Struct-blob hubs: a structural re-publish (channel/role/category edit) carries the *current*
+  // structure in `params`, so re-upload a fresh blob from it and swap in the new hash. The event then
+  // drops the structure (struct tag only), staying O(1). Legacy hubs (no struct tag) skip this and keep
+  // the inline format. Non-structural v2 pointer republishes go through republishV2* (which clone tags
+  // and preserve the struct tag with no upload), not this path.
+  if (hub.structFileHash) {
+    const { resolveStructUploadContext, publishStructBlob } = await import('./hubStructBlob')
+    const { contentKey, authSigner } = await resolveStructUploadContext(hub, params.epoch, opts)
+    const structFileHash = await publishStructBlob({
+      input: { channels: params.channels, categories: params.categories, roles: params.roles, groupedRoles: params.groupedRoles },
+      contentKey,
+      servers: params.blossomServers?.length ? params.blossomServers : (hub.blossomServers || []),
+      dTag: params.dTag,
+      signer: opts.signer,
+      privateKey: opts.privateKey,
+      authSigner,
+    })
+    params = { ...params, structFileHash }
+  }
+
   if (isV2(hub)) {
     const { useHubStore } = await import('@/stores/hubStore')
     const secretHex = useHubStore.getState().hubSecrets[hub.dTag]

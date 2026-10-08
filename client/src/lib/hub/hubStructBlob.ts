@@ -13,7 +13,7 @@
 import type { Channel, Category, Role } from '@/stores/hubStore'
 import type { GroupedRole } from '@/lib/hub/groupEncryption'
 import type { ISigner } from '@/stores/userStore'
-import { encryptHubContent } from './hubContent'
+import { encryptHubContent, deriveHubContentKey } from './hubContent'
 import { computeHash, uploadToBlossomServers, type BlossomAuthSigner } from '@/lib/blossom/client'
 import { downloadTextFromBlossom } from '@/lib/blossom'
 import { cacheHubBlob } from '@/lib/blossom/hubBlobStore'
@@ -88,6 +88,30 @@ export async function uploadStructBlob(opts: {
   if (computeHash(new TextEncoder().encode(readBack)) !== hash) throw new Error('Struct blob: read-back hash mismatch')
   await cacheHubBlob(hash, opts.bytes, opts.dTag).catch(() => { /* cache best-effort */ })
   return hash
+}
+
+/**
+ * Resolve how a hub's struct blob is encrypted + authenticated, matching how the hub encrypts its event
+ * content and uploads its member-tree blobs: v1 (public) → plaintext blob, Blossom auth as the real key
+ * (no context returned); v2 (private) → the hub_content_key at `epoch` + a Blossom auth signer that signs
+ * the 24242 auth as the owner pseudonym `O` (so the Blossom server never sees the real key). Owner-only —
+ * structure edits are owner-only, so `O` is always the right author.
+ */
+export async function resolveStructUploadContext(
+  hub: { dTag: string; creatorPubkey: string; version?: number },
+  epoch: number,
+  opts: { privateKey: string | null; signer: ISigner | null },
+): Promise<{ contentKey?: Uint8Array; authSigner?: BlossomAuthSigner }> {
+  if (hub.version !== 2) return {} // v1: plaintext blob, upload auth as the real key (like its other files)
+  const { useHubStore } = await import('@/stores/hubStore')
+  const secretHex = useHubStore.getState().hubSecrets[hub.dTag]
+  if (!secretHex) throw new Error('Hub secret not available to build the struct blob')
+  const { fromHex } = await import('@/lib/crypto/lkh')
+  const contentKey = deriveHubContentKey(fromHex(secretHex), epoch)
+  const { makeSubkeySigner } = await import('@/lib/nostr/v2send')
+  const { ChatContext } = await import('@/lib/crypto/skd')
+  const ownerSigner = makeSubkeySigner(ChatContext.owner(hub.dTag), opts)
+  return { contentKey, authSigner: (u) => ownerSigner.signEvent(u) }
 }
 
 /** Build + serialize + upload + verify in one call. Returns the struct hash to put in the `struct` tag. */

@@ -139,11 +139,42 @@ export async function republishV2HubRotate(opts: {
   const oldKey = deriveHubContentKey(oldHubSecret, hub.epoch)
   const newKey = deriveHubContentKey(newHubSecret, newEpoch)
   const contentObj = await decryptHubContent(oldKey, current.content) as Record<string, unknown>
-  // When groups rotated, write the bumped grouped_roles epochs into the content.
-  if (groupedRolesOverride) {
+  const structTag = current.tags.find(t => t[0] === 'struct')
+  const isStruct = !!(structTag && structTag[1])
+  // When groups rotated, write the bumped grouped_roles epochs. For an inline hub they live in the event
+  // content; for a struct hub they live in the (re-encrypted, re-uploaded) blob, so skip the content patch.
+  if (groupedRolesOverride && !isStruct) {
     contentObj.grouped_roles = groupedRolesOverride.map(g => ({ group_id: g.groupId, role_ids: g.roleIds, epoch: g.epoch }))
   }
   const newContent = await encryptHubContent(newKey, contentObj)
+
+  const ownerSigner = makeSubkeySigner(ChatContext.owner(hub.dTag), { privateKey, signer })
+
+  // Struct-blob hubs: the blob is encrypted with the content key, which just rotated — so a member
+  // deriving the NEW key could no longer decrypt the OLD blob. Re-encrypt the current structure (from the
+  // owner's in-memory hub, with any grouped_roles override applied) under the new key, upload it, and point
+  // the struct tag at the new hash + epoch. No download/decrypt of the old blob: the owner already holds
+  // the plaintext structure.
+  let newStructHash: string | undefined
+  if (isStruct) {
+    const { publishStructBlob } = await import('./hubStructBlob')
+    newStructHash = await publishStructBlob({
+      input: {
+        channels: hub.channels,
+        categories: hub.categories,
+        roles: hub.roles,
+        groupedRoles: groupedRolesOverride
+          ? groupedRolesOverride.map(g => ({ groupId: g.groupId, roleIds: g.roleIds, epoch: g.epoch }))
+          : hub.groupedRoles,
+      },
+      contentKey: newKey,
+      servers: hub.blossomServers,
+      dTag: hub.dTag,
+      signer,
+      privateKey,
+      authSigner: (u) => ownerSigner.signEvent(u),
+    })
+  }
 
   const newEpochStr = String(newEpoch)
   let mReplaced = false
@@ -151,6 +182,7 @@ export async function republishV2HubRotate(opts: {
   const newTags: string[][] = current.tags.map((t) => {
     if (t[0] === 'm') { mReplaced = true; return ['m', newIndexHash, newEpochStr] }
     if (t[0] === 'epoch') { epochReplaced = true; return ['epoch', newEpochStr] }
+    if (t[0] === 'struct' && newStructHash) return ['struct', newStructHash, newEpochStr]
     return t
   })
   if (!mReplaced) newTags.push(['m', newIndexHash, newEpochStr])
@@ -163,8 +195,6 @@ export async function republishV2HubRotate(opts: {
     created_at: current.created_at + 1,
     pubkey: ownerPub,
   }
-
-  const ownerSigner = makeSubkeySigner(ChatContext.owner(hub.dTag), { privateKey, signer })
   const signed = await mineAndSignAsSubkey(unsigned, hub.minPow > 0 ? hub.minPow : 0, ownerSigner)
 
   // Publish with FAILOVER (see republishV2HubIndex) — route around dead relays so a rotation's pointer
