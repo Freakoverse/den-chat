@@ -1,5 +1,5 @@
 /**
- * hubStructBlob — the hub "struct blob": the structural arrays (roles, grouped_roles, categories,
+ * hubStructBlob: the hub "struct blob", the structural arrays (roles, grouped_roles, categories,
  * channels, plugins) that used to live inline in the kind-36942 event content, moved verbatim into a
  * Blossom file so the event stays O(1) regardless of how many channels/roles a hub has. See
  * docs/NIP-MDM is unrelated; this is the NIP-CHAT hub struct-blob plan.
@@ -94,7 +94,7 @@ export async function uploadStructBlob(opts: {
  * Resolve how a hub's struct blob is encrypted + authenticated, matching how the hub encrypts its event
  * content and uploads its member-tree blobs: v1 (public) → plaintext blob, Blossom auth as the real key
  * (no context returned); v2 (private) → the hub_content_key at `epoch` + a Blossom auth signer that signs
- * the 24242 auth as the owner pseudonym `O` (so the Blossom server never sees the real key). Owner-only —
+ * the 24242 auth as the owner pseudonym `O` (so the Blossom server never sees the real key). Owner-only:
  * structure edits are owner-only, so `O` is always the right author.
  */
 export async function resolveStructUploadContext(

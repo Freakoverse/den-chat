@@ -328,7 +328,7 @@ async function mirrorHubFiles(hub: HubData, memberPubkey: string): Promise<void>
   if (index.historyHash) targets.push({ hash: index.historyHash, label: `${hub.dTag} history` })
   for (const b of index.banPages) targets.push({ hash: b.hash, label: `${hub.dTag} bans` })
   // The struct blob (channels/roles/categories/grouped_roles) is as critical to render a struct-format hub
-  // as the member index is to join it — and its bytes are content-addressed (fixed even when v2-encrypted),
+  // as the member index is to join it, and its bytes are content-addressed (fixed even when v2-encrypted),
   // so any member can re-upload them without the key. Keep it on >= TARGET_COPIES servers like the rest.
   if (hub.structFileHash) targets.push({ hash: hub.structFileHash, label: `${hub.dTag} struct` })
 

@@ -1158,7 +1158,7 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
       const { mineAndSign: signFn } = await import('@/lib/nostr/events')
       const { publishToSpecificRelays: pubToRelays } = await import('@/lib/nostr/relay-pool')
       // Struct-blob hubs (v1): this rotation changes grouped_roles (and the epoch), so the plaintext struct
-      // blob's content changed — re-upload it at the new epoch and point the event's struct tag at the new
+      // blob's content changed, re-upload it at the new epoch and point the event's struct tag at the new
       // hash. Legacy inline hubs (no struct tag) skip this. (v2 kicks go through republishV2HubRotate, which
       // re-encrypts the blob under the new key; this path is v1-only, so the blob is plaintext.)
       const rotatedGroupedRoles = updatedGroupedRoles.length > 0 ? updatedGroupedRoles : hub.groupedRoles

@@ -1,5 +1,5 @@
 /**
- * upgradeHubToStruct — convert an existing LEGACY (inline) hub to the struct-blob format.
+ * upgradeHubToStruct: convert an existing LEGACY (inline) hub to the struct-blob format.
  *
  * This is NOT a v1->v2 conversion: the hub keeps its exact privacy type, epoch, secret, members, and
  * index. All it does is move the structural arrays (channels/roles/categories/grouped_roles) out of the
@@ -107,7 +107,7 @@ export async function upgradeHubToStruct(opts: {
   const accepted = await publishCriticalWithFailover(
     signed, getPublishRelays([...hub.generalRelays], { hubOnly: isV2(hub) }), [...hub.generalRelays],
   )
-  if (accepted.length === 0) throw new Error('The hub upgrade was not accepted by any relay — please try again.')
+  if (accepted.length === 0) throw new Error('The hub upgrade was not accepted by any relay, please try again.')
 
   // 3. Advance the store: the hub is now struct-format. Cache the new event too.
   const cur = useHubStore.getState().hubs[hub.dTag]

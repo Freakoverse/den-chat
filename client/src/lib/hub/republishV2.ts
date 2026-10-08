@@ -150,7 +150,7 @@ export async function republishV2HubRotate(opts: {
 
   const ownerSigner = makeSubkeySigner(ChatContext.owner(hub.dTag), { privateKey, signer })
 
-  // Struct-blob hubs: the blob is encrypted with the content key, which just rotated — so a member
+  // Struct-blob hubs: the blob is encrypted with the content key, which just rotated, so a member
   // deriving the NEW key could no longer decrypt the OLD blob. Re-encrypt the current structure (from the
   // owner's in-memory hub, with any grouped_roles override applied) under the new key, upload it, and point
   // the struct tag at the new hash + epoch. No download/decrypt of the old blob: the owner already holds

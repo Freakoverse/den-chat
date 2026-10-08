@@ -1,5 +1,5 @@
 /**
- * structFormat — master switch for the hub STRUCT-BLOB writer (NIP-CHAT struct-blob plan).
+ * structFormat: master switch for the hub STRUCT-BLOB writer (NIP-CHAT struct-blob plan).
  *
  * The struct-blob moves a hub's structural arrays (channels/roles/categories/grouped_roles/plugins) out
  * of the kind-36942 event content into an encrypted Blossom blob referenced by a `["struct", hash, epoch]`

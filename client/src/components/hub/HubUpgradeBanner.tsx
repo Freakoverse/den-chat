@@ -1,5 +1,5 @@
 /**
- * HubUpgradeBanner — creator-only prompt to migrate a LEGACY (inline) hub to the struct-blob format,
+ * HubUpgradeBanner: creator-only prompt to migrate a LEGACY (inline) hub to the struct-blob format,
  * with a migration modal.
  *
  * The struct format moves the hub's structure (channels/roles/categories) into a Blossom blob so the hub

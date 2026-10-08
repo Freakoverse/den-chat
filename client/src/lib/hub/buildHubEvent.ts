@@ -31,7 +31,7 @@ interface BuildHubEventOptions {
   blossomServers: string[]
   indexFileHash: string
   /** Struct-blob hash (new format). When set, the structural arrays move OUT of the event content into
-   *  the Blossom blob and the event carries a `["struct", hash, epoch]` tag — the event stays O(1). The
+   *  the Blossom blob and the event carries a `["struct", hash, epoch]` tag, so the event stays O(1). The
    *  caller uploads the blob first (see lib/hub/hubStructBlob) and passes the verified hash here. */
   structFileHash?: string
   channels: Channel[]
@@ -66,7 +66,7 @@ function validateHubLimits(opts: BuildHubEventOptions) {
   if (opts.icon && opts.icon.length > MEDIA_URL_MAX) errors.push(`Hub icon URL exceeds ${MEDIA_URL_MAX} characters`)
   if (opts.banner && opts.banner.length > MEDIA_URL_MAX) errors.push(`Hub banner URL exceeds ${MEDIA_URL_MAX} characters`)
 
-  // Array (count) limits — these keep the INLINE event under relay size limits, so they only apply to
+  // Array (count) limits: these keep the INLINE event under relay size limits, so they only apply to
   // the legacy inline format. Struct-blob hubs move the arrays to a Blossom blob (the event is O(1)),
   // so the channel/category/role COUNT caps are lifted; per-item string limits below still apply.
   if (!opts.structFileHash) {
@@ -167,8 +167,8 @@ export function buildHubEvent(opts: BuildHubEventOptions) {
   if (opts.authorPubkey) eventTags.push(coordinateShortTag(KINDS.HUB_EVENT, opts.authorPubkey, dTag))
 
   // Struct-blob format (v1): the structural arrays live in a PLAINTEXT Blossom blob, so the public face
-  // moves to plaintext tags (picture/banner/about) — parseHubEvent reads those the same way it does for
-  // v2 — and the event content becomes empty. Keeps the event O(1) regardless of channel/role counts.
+  // moves to plaintext tags (picture/banner/about), which parseHubEvent reads the same way it does for
+  // v2, and the event content becomes empty. Keeps the event O(1) regardless of channel/role counts.
   if (opts.structFileHash) {
     if (icon) eventTags.push(['picture', icon])
     if (banner) eventTags.push(['banner', banner])

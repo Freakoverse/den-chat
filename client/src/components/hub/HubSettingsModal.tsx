@@ -3556,7 +3556,7 @@ function SecurityPage({ hub }: { hub: HubData }) {
       // 9. Publish updated hub event
       await markStep('Publishing hub event')
       // Struct-blob (v1): this rotation bumps grouped_roles + epoch, so the plaintext struct blob's content
-      // changed — re-upload it and repoint the struct tag. (v1-only path: signed under R below.)
+      // changed, re-upload it and repoint the struct tag. (v1-only path: signed under R below.)
       let rebuiltStructHash = hub.structFileHash
       if (hub.structFileHash) {
         const { publishStructBlob } = await import('@/lib/hub/hubStructBlob')
