@@ -556,15 +556,12 @@ select:focus-visible {
   flex: none;
   box-sizing: border-box;
   border: 1.5px solid hsl(var(--muted-foreground) / 0.45);
-  border-radius: 0.42em;
+  border-radius: 0.21em;
   background: hsl(var(--muted-foreground) / 0.1);
   position: relative;
   cursor: default;
-  vertical-align: -0.22em;
+  vertical-align: -0.15em;
   transition: background-color 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
-}
-.md-task-checkbox {
-  margin-top: 0.1em;
 }
 .task-list-item input[type="checkbox"] {
   margin-right: 0.45em;
