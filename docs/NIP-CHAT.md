@@ -1171,11 +1171,12 @@ Deleting a role does NOT trigger a tree update. The hub event is the authority f
     ["o", "https://blossom2.example.com"],
     ["o", "https://blossom3.example.com"],
     ["m", "<sha256_of_index_file>", "<epoch>"],
+    ["struct", "<sha256_of_structure_file>", "<epoch>"],
     ["published_at", "<original_creation_timestamp>"],
     ["client", "<client_app_name>"],
     ["s", "<short_address_code>"]
   ],
-  "content": "<JSON string>",
+  "content": "<JSON string, or '{}' in the struct-blob format>",
   "sig": "<signature>"
 }
 ```
@@ -1195,6 +1196,7 @@ Deleting a role does NOT trigger a tree update. The hub event is the authority f
 | `r` | Yes | Relay. Third value is `general`. At least one `general` MUST be defined. |
 | `o` | Yes | Blossom server URL. Recommend ≥3 for redundancy. Used for member files and media. |
 | `m` | Yes | Index file reference: `["m", "<sha256>", "<epoch>"]`. |
+| `struct` | No | **Structure-blob reference**: `["struct", "<sha256>", "<epoch>"]`, parallel to `m`. When present, the hub's structural arrays (`roles`, `grouped_roles`, `categories`, `channels`, `plugins`) live in a Blossom blob at that hash **instead of** inline in `content`, so the event stays O(1) regardless of how many channels/roles the hub has. The blob is encrypted the same way the hub encrypts its `content` (v1 plaintext JSON, v2 `hub_content_key`). **Presence of this tag is the format indicator**: there is no `version` bump and it applies to **both** v1 and v2 hubs (orthogonal to the privacy type). Absent ⇒ legacy inline format (structure is in `content`). See **Structure Blob** at the end of this section. |
 | `updated_at` | No | Real wall-clock time of the last edit, `["updated_at", "<unix_seconds>"]` (corrected clock). `created_at` is a logical counter (see below), so this is the actual "last edited" time: used for display and tie resolution, never for relay filtering or client-side selection. |
 | `t` | No | Discoverable topic tag (e.g., `["t", "gaming"]`). Multiple `t` tags allowed. Clients can query hubs via `#t` filters for hub discovery. |
 | `content-warning` | No | NIP-36: marks the hub as containing sensitive/NSFW content. Value is an optional reason string (may be empty). Clients SHOULD blur or hide NSFW hubs unless the user has opted in. |
@@ -1249,6 +1251,15 @@ Concurrent edits from two devices still last-write-win on a replaceable event (o
 > admitted. An unlisted hub is only hidden from Discover — it still publishes a public hub
 > event (stable `d`, `epoch`, `m`) and its pseudonymous `h`-tag traffic stays observable on
 > relays; only its branding and discoverability are hidden, not its existence or activity.
+
+> [!IMPORTANT]
+> **Struct-blob format: the structural arrays below may live in a Blossom blob instead of here.** When the
+> hub event carries a `struct` tag (§6.1 tag table), the `roles`, `grouped_roles`, `categories`, `channels`,
+> and `plugins` arrays are **not** in `content`; they are serialized to a Blossom blob referenced by that
+> tag, and `content` holds only what must stay inline (v1: `{}`; v2: `{ "owner_attestation": … }`). The JSON
+> shape below is unchanged; it just moves. See **Structure Blob** at the end of this section for why, how it
+> is encrypted, and how readers/writers handle it. The rest of this subsection describes that JSON shape
+> wherever it lives (inline `content` for legacy hubs, or the struct blob for struct-format hubs).
 
 ```json
 {
@@ -1407,6 +1418,32 @@ Only present when the hub has private channels with separate encryption.
 | `encryption` | string\|null | `"group:<group_id>"` or `null`. Ignored when `synced: true`. |
 | `position` | integer | Display order within category |
 | `permissions` | object | Role → permission overrides. Ignored when `synced: true`. |
+
+#### Structure Blob (the `struct` tag)
+
+A hub's structural arrays (`roles`, `grouped_roles`, `categories`, `channels`, `plugins`) can be moved out of the event `content` into a Blossom blob referenced by `["struct", "<sha256>", "<epoch>"]`, parallel to the member-index `m` tag. Whether a hub uses this is indicated solely by the **presence of the `struct` tag**: there is no `version` bump, and it applies to **both v1 and v2** hubs (it is orthogonal to the v1/v2 privacy distinction; a v1 hub stays v1, a v2 hub stays v2).
+
+**Why the structure is not in the hub event.** The worst case of the inline content is dominated by the per-channel/per-category **permission-override matrix**, which is `(channels + categories) × roles`, i.e. quadratic. At realistic maxima a fully-overridden hub's inline content runs to hundreds of KB up to multiple MB, and even plain maxed metadata (names, descriptions) exceeds the ~64 KB a relay will accept for a single event. Because the hub event is an **addressable replaceable event that is re-published on every membership change and epoch rotation**, an oversized event would fail to propagate exactly when it matters most. Moving the structure to a content-addressed Blossom blob makes the event **O(1)** in size regardless of how many channels, roles, categories, or overrides the hub has, so the `struct` tag (a fixed-size hash) is all the event carries. This removes any need for structural caps, permission bitmasks, or id surgery to fit the size budget.
+
+**Blob contents.** Exactly the structural arrays described above, as a single JSON object:
+
+```json
+{ "roles": [...], "grouped_roles": [...], "categories": [...], "channels": [...], "plugins": {} }
+```
+
+Nothing about these arrays changes: the field shapes in the Content Field Reference apply verbatim, just serialized into the blob.
+
+**What stays in the event.** The `content` carries only what must remain inline: in a **v1** hub it becomes `{}` (empty); in a **v2** hub it holds only `{ "owner_attestation": … }` (needed for creator verification, §4.3). The **public face** (`picture`, `banner`, `about`, plus `n`, `t`, `f`) stays in plaintext tags so the join/Discover card renders for non-members; in the struct-blob format the v1 face moves to these tags too (since `content.settings` is gone). All other tags (`r`, `o`, `m`, `epoch`, `version`, `w`, `W`, `s`, `published_at`, …) are unchanged.
+
+**Encryption.** The blob is encrypted the **same way the hub encrypts its event `content`**: a **v1** (public) hub stores it as plaintext JSON; a **v2** (private) hub encrypts it with `hub_content_key = deriveHubContentKey(hub_secret, epoch)` (identical scheme to the event content), so it stays members-only. Its byte size leaks a rough channel/role count, the same class of leak as the `m` index leaking a member count.
+
+**Epoch.** The `epoch` field in the `struct` tag is the **hub** epoch the blob is encrypted at (for v2 key derivation), matching the `epoch`/`m` tags, not a per-group or edit counter. On an epoch-rotating mutation (member removal / block / "fix encryption") the blob MUST be re-encrypted under the new epoch key and the tag re-pointed, exactly like the event content.
+
+**Reader behavior.** A client that sees a `struct` tag fetches the blob (in parallel with the `m` index, no added latency), decrypts it (v2) or reads it plaintext (v1), and populates the hub's structure from it; the public face still comes from the plaintext tags. A client that sees **no** `struct` tag reads the structure from `content` as before. Readers MUST cache the blob (like the index) so a Blossom outage still renders the last-known structure.
+
+**Writer behavior.** On a structural edit the writer re-serializes the blob, uploads it to the hub's Blossom servers with read-back verification, and republishes the event with the new `struct` hash, and the structure is dropped from `content` as above. A **non-structural** republish (membership change, relay/Blossom-list edit, short-address mint, cooperative rebroadcast) carries the existing `struct` hash forward unchanged, with no re-upload. The struct blob rides the same cooperative Blossom redundancy and local retention as the member-index files.
+
+**Compatibility and migration.** The read path is backward-compatible (both formats). A legacy inline hub can **adopt** the struct format at any time without changing its v1/v2 type: upload the structure blob and republish the event with a `struct` tag and the structure removed from `content`. Clients SHOULD ship the struct-**reader** in a release and let it propagate **before** writers begin emitting `struct` tags, because there is no `version` bump to gate on, so a pre-struct client will render a struct-format hub as empty/broken (an accepted transition cost, mitigated by reader-first rollout and normal update prompts).
 
 ---
 
