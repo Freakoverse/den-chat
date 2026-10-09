@@ -24,6 +24,7 @@ import { Separator } from '@/components/ui/separator'
 import { ImageCropModal } from '@/components/ui/ImageCropModal'
 import { useHubStore, type HubData, type Channel, type Category, type Role, type HubMember, type HideEntry } from '@/stores/hubStore'
 import { HubRelayHealthNotice } from '@/components/hub/HubRelayHealthBanner'
+import { HubUpgradeBanner } from '@/components/hub/HubUpgradeBanner'
 import { RelayHealthLabel } from '@/components/nostr/RelayHealthLabel'
 import { type JoinNotePolicy, joinNoteEqual, JOIN_PROMPT_MAX } from '@/lib/hub/joinNote'
 import { useMessageStore } from '@/stores/messageStore'
@@ -984,6 +985,10 @@ export function HubSettingsModal({ open, onClose, hub, initialPage, focusMemberP
 
                 <div className="flex-1 overflow-y-auto p-6">
                   {activePage === 'general' && (
+                    <>
+                    {/* Creator-only: legacy hub can be migrated to the struct-blob format (dormant until the
+                        reader ships). Always shown here, above the banner, until migrated. */}
+                    {isCreator && <HubUpgradeBanner hub={hub} className="mb-4" />}
                     <GeneralPage
                       hub={hub}
                       editName={editName} setEditName={setEditName}
@@ -998,6 +1003,7 @@ export function HubSettingsModal({ open, onClose, hub, initialPage, focusMemberP
                       editNsfw={editNsfw} setEditNsfw={setEditNsfw}
                       editDiscoverable={editDiscoverable} setEditDiscoverable={setEditDiscoverable}
                     />
+                    </>
                   )}
                   {activePage === 'channels' && (
                     <ChannelsPage

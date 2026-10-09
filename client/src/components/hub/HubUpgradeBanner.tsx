@@ -23,21 +23,18 @@ import { useUserStore } from '@/stores/userStore'
 import { STRUCT_FORMAT_ENABLED } from '@/lib/hub/structFormat'
 import { upgradeHubToStruct, type UpgradeStep } from '@/lib/hub/upgradeHubToStruct'
 
-/** Hubs whose banner the creator dismissed this session (it re-shows next launch if still legacy). */
-const dismissed = new Set<string>()
-
 const STEPS: UpgradeStep[] = ['Building structure file', 'Uploading to Blossom', 'Publishing hub update', 'Verifying']
 
-export function HubUpgradeBanner({ hub }: { hub: HubData }) {
+export function HubUpgradeBanner({ hub, className = '' }: { hub: HubData; className?: string }) {
   const [open, setOpen] = useState(false)
-  const [, bump] = useState(0)
 
-  // Dormant until the struct reader has shipped; hidden once the hub is already struct-format.
-  if (!STRUCT_FORMAT_ENABLED || hub.structFileHash || dismissed.has(hub.dTag)) return null
+  // Dormant until the struct reader has shipped; hidden once the hub is already struct-format. No dismiss:
+  // this stays in the creator's face until they migrate.
+  if (!STRUCT_FORMAT_ENABLED || hub.structFileHash) return null
 
   return (
     <>
-      <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/8 border border-primary/20 text-xs shrink-0">
+      <div className={`flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/8 border border-primary/20 text-xs shrink-0 ${className}`}>
         <Sparkles size={14} className="text-primary shrink-0" />
         <span className="flex-1 min-w-0 text-foreground">
           A hub update is available. Migrate this hub so it can keep growing without hitting size limits on channels, roles, and permissions.
@@ -47,13 +44,6 @@ export function HubUpgradeBanner({ hub }: { hub: HubData }) {
           className="shrink-0 px-2.5 py-1 rounded-md bg-primary/15 text-primary hover:bg-primary/25 font-medium transition-colors cursor-pointer"
         >
           Upgrade
-        </button>
-        <button
-          onClick={() => { dismissed.add(hub.dTag); bump((n) => n + 1) }}
-          aria-label="Dismiss for now"
-          className="shrink-0 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors cursor-pointer"
-        >
-          <X size={13} />
         </button>
       </div>
       {open && <HubUpgradeModal hub={hub} onClose={() => setOpen(false)} />}
