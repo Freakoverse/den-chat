@@ -296,7 +296,7 @@ export function DraftPreviewPage() {
                     ? <li className="list-none flex items-start gap-2">{children}</li>
                     : <li>{children}</li>,
                 input: ({ node, ...props }) =>
-                  <input {...props} readOnly className="md-task-checkbox mt-1 shrink-0" />,
+                  <input {...props} readOnly className="md-task-checkbox" />,
               }}
             >
               {event.content}

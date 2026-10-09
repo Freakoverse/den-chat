@@ -542,18 +542,47 @@ select:focus-visible {
 .task-list-item {
   list-style: none;
 }
-/* The global `input { appearance: none }` reset above strips the native checkbox, so task-list checkboxes
-   must restore it. `.md-task-checkbox` is used by the react-markdown component overrides (chat/article/
-   draft); the `.task-list-item input` selector catches every other markdown instance that renders the
-   default checkbox. */
+/* Custom-drawn task-list checkbox (the native one is stripped by the global `input { appearance: none }`
+   reset above, and a disabled native box looks muted anyway). A rounded square with a muted border when
+   unchecked; filled with the primary color and a themed check when checked. `.md-task-checkbox` is used by
+   the react-markdown component overrides (chat/article/draft); the `.task-list-item input` selector catches
+   every other markdown instance that renders the default checkbox. */
 .md-task-checkbox,
 .task-list-item input[type="checkbox"] {
-  -webkit-appearance: checkbox;
-  appearance: auto;
-  accent-color: hsl(var(--primary));
+  -webkit-appearance: none;
+  appearance: none;
+  width: 1.05em;
+  height: 1.05em;
+  flex: none;
+  box-sizing: border-box;
+  border: 1.5px solid hsl(var(--muted-foreground) / 0.5);
+  border-radius: 0.3em;
+  background: transparent;
+  position: relative;
   cursor: default;
-  vertical-align: middle;
+  vertical-align: -0.17em;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+.md-task-checkbox {
+  margin-top: 0.12em;
 }
 .task-list-item input[type="checkbox"] {
   margin-right: 0.4em;
+}
+.md-task-checkbox:checked,
+.task-list-item input[type="checkbox"]:checked {
+  background: hsl(var(--primary));
+  border-color: hsl(var(--primary));
+}
+.md-task-checkbox:checked::after,
+.task-list-item input[type="checkbox"]:checked::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 47%;
+  width: 0.28em;
+  height: 0.55em;
+  border: solid hsl(var(--primary-foreground));
+  border-width: 0 0.14em 0.14em 0;
+  transform: translate(-50%, -55%) rotate(45deg);
 }

@@ -44,7 +44,7 @@ import {
   Loader2, Clock, MessageSquare, Tag as TagIcon, Image as ImageIcon,
   Calendar, User, Check, MessageSquarePlus, Copy, Flag, EyeOff,
   Bold, Italic, Strikethrough, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6,
-  List as ListIcon, ListOrdered, Link, Code, CodeSquare, Eye, Smile, ALargeSmall,
+  List as ListIcon, ListOrdered, ListTodo, Link, Code, CodeSquare, Eye, Smile, ALargeSmall,
   Upload, FileIcon,
 } from 'lucide-react'
 import { EmojiPickerPopover } from '@/components/chat/EmojiPickerPopover'
@@ -1784,6 +1784,7 @@ function CreateForumPostModal({ onClose, sendMessage, canPublish, signer, privat
                     { icon: Heading3, action: () => insertLinePrefix('### '), tip: 'Heading 3' },
                     { icon: ListIcon, action: () => insertLinePrefix('- '), tip: 'Bullet List' },
                     { icon: ListOrdered, action: () => insertLinePrefix('1. '), tip: 'Numbered List' },
+                    { icon: ListTodo, action: () => insertLinePrefix('- [ ] '), tip: 'Checklist' },
                     { icon: Link, action: () => insertMarkdown('[', '](url)', 'text'), tip: 'Link' },
                     { icon: Code, action: () => insertMarkdown('`', '`', 'code'), tip: 'Inline Code' },
                     { icon: CodeSquare, action: () => insertMarkdown('```\n', '\n```', 'code'), tip: 'Code Block' },
@@ -2314,6 +2315,7 @@ function EditForumPostModal({ post, onClose, editMessage, signer, privateKey, hu
                     { icon: Heading3, action: () => insertLinePrefix('### '), tip: 'Heading 3' },
                     { icon: ListIcon, action: () => insertLinePrefix('- '), tip: 'Bullet List' },
                     { icon: ListOrdered, action: () => insertLinePrefix('1. '), tip: 'Numbered List' },
+                    { icon: ListTodo, action: () => insertLinePrefix('- [ ] '), tip: 'Checklist' },
                     { icon: Link, action: () => insertMarkdown('[', '](url)', 'text'), tip: 'Link' },
                     { icon: Code, action: () => insertMarkdown('`', '`', 'code'), tip: 'Inline Code' },
                     { icon: CodeSquare, action: () => insertMarkdown('```\n', '\n```', 'code'), tip: 'Code Block' },

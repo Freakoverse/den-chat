@@ -549,7 +549,7 @@ export function LongFormArticleReader() {
                     ? <li className="list-none -ml-5 flex items-start gap-2 text-sm text-foreground/90">{children}</li>
                     : <li>{children}</li>,
                 input: ({ node, ...props }) =>
-                  <input {...props} readOnly className="md-task-checkbox mt-1 shrink-0" />,
+                  <input {...props} readOnly className="md-task-checkbox" />,
                 table: ({ children }) => (
                   <div className="overflow-x-auto my-4 rounded-lg border border-border">
                     <table className="w-full text-xs">{children}</table>

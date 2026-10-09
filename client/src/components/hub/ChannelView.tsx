@@ -23,7 +23,7 @@ import { HubBlossomHealthBanner } from '@/components/hub/HubBlossomHealthBanner'
 import { HubRelayHealthBanner } from '@/components/hub/HubRelayHealthBanner'
 import { HubUpgradeBanner } from '@/components/hub/HubUpgradeBanner'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
-import { Hash, Megaphone, Users, Pin, PinOff, Bell, Search, Send, Plus, Smile, Check, X, RotateCcw, Pencil, Reply, MoreVertical, Copy, MessageSquarePlus, Trash2, Loader2, Zap, Code, Bold, Italic, Strikethrough, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, Link, CodeSquare, ALargeSmall, Clipboard, ClipboardCheck, ClipboardPaste, Upload, FileIcon, Download, Image, Paperclip, AlertTriangle, AlertCircle, Eye, EyeOff, ShieldBan, ShieldAlert, ShieldOff, Lock, LockOpen, Settings, ArrowDown, ArrowLeft, Star, Vote, Clock, Flag, Shield, Globe, Radio, History, BadgeCheck, Mic, WifiOff, Scissors, Type } from 'lucide-react'
+import { Hash, Megaphone, Users, Pin, PinOff, Bell, Search, Send, Plus, Smile, Check, X, RotateCcw, Pencil, Reply, MoreVertical, Copy, MessageSquarePlus, Trash2, Loader2, Zap, Code, Bold, Italic, Strikethrough, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, ListTodo, Link, CodeSquare, ALargeSmall, Clipboard, ClipboardCheck, ClipboardPaste, Upload, FileIcon, Download, Image, Paperclip, AlertTriangle, AlertCircle, Eye, EyeOff, ShieldBan, ShieldAlert, ShieldOff, Lock, LockOpen, Settings, ArrowDown, ArrowLeft, Star, Vote, Clock, Flag, Shield, Globe, Radio, History, BadgeCheck, Mic, WifiOff, Scissors, Type } from 'lucide-react'
 import { useState, useEffect, useRef, useCallback, memo, useMemo, Fragment } from 'react'
 import { useEscToClose, useEscBlock } from '@/hooks/useEscToClose'
 import { createPortal } from 'react-dom'
@@ -5930,6 +5930,7 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
                 { icon: Heading6, action: () => insertLinePrefix('###### '), tip: 'Heading 6' },
                 { icon: List, action: () => insertLinePrefix('- '), tip: 'Bullet List' },
                 { icon: ListOrdered, action: () => insertLinePrefix('1. '), tip: 'Numbered List' },
+                { icon: ListTodo, action: () => insertLinePrefix('- [ ] '), tip: 'Checklist' },
                 { icon: Link, action: () => insertMarkdown('[', '](url)', 'text'), tip: 'Link' },
                 { icon: Code, action: () => insertMarkdown('`', '`', 'code'), tip: 'Inline Code' },
                 { icon: CodeSquare, action: () => insertMarkdown('```\n', '\n```', 'code'), tip: 'Code Block' },

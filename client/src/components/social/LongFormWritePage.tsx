@@ -16,7 +16,7 @@ import { nip19 } from 'nostr-tools'
 import {
   ArrowLeft, Loader2, X, Upload, Check, Plus, Image as ImageIcon,
   Bold, Italic, Strikethrough, Heading1, Heading2, Heading3,
-  List as ListIcon, ListOrdered, Link, Code, CodeSquare, Smile,
+  List as ListIcon, ListOrdered, ListTodo, Link, Code, CodeSquare, Smile,
   Tag as TagIcon, FileIcon, Save, Video, ShieldAlert,
 } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
@@ -315,6 +315,7 @@ export function LongFormWritePage() {
     { icon: Heading3, action: () => insertLinePrefix('### '), tip: 'Heading 3' },
     { icon: ListIcon, action: () => insertLinePrefix('- '), tip: 'Bullet List' },
     { icon: ListOrdered, action: () => insertLinePrefix('1. '), tip: 'Numbered List' },
+    { icon: ListTodo, action: () => insertLinePrefix('- [ ] '), tip: 'Checklist' },
     { icon: Link, action: () => insertMarkdown('[', '](url)', 'text'), tip: 'Link' },
     { icon: Code, action: () => insertMarkdown('`', '`', 'code'), tip: 'Inline Code' },
     { icon: CodeSquare, action: () => insertMarkdown('```\n', '\n```', 'code'), tip: 'Code Block' },

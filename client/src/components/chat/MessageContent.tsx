@@ -1048,7 +1048,7 @@ export const MessageContent = memo(function MessageContent({ content, suffix, on
     // (type/checked/disabled) so it always renders, and force readOnly + the md-task-checkbox class, which
     // restores the native checkbox appearance the global `input { appearance: none }` reset strips.
     input: ({ node, ...props }) =>
-      <input {...props} readOnly className="md-task-checkbox mt-1 shrink-0" />,
+      <input {...props} readOnly className="md-task-checkbox" />,
     pre: ({ children }) => <>{children}</>,
     code: ({ className, children }) => {
       const isBlock = className?.includes('language-') || (typeof children === 'string' && children.includes('\n'))
