@@ -6,7 +6,7 @@
 import { useRef, useState } from 'react'
 import {
   Bold, Italic, Strikethrough, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6,
-  List, ListOrdered, Link, Code, CodeSquare, Eye, Clock,
+  List, ListOrdered, ListTodo, Link, Code, CodeSquare, Eye, Clock,
 } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { TimestampPickerPopover } from '@/components/chat/ChatInputBar'
@@ -80,6 +80,7 @@ export function MarkdownToolbar({ textareaRef, value, onChange, autoResize, clas
     { icon: Heading6, action: () => insertLinePrefix('###### '), tip: 'Heading 6' },
     { icon: List, action: () => insertLinePrefix('- '), tip: 'Bullet List' },
     { icon: ListOrdered, action: () => insertLinePrefix('1. '), tip: 'Numbered List' },
+    { icon: ListTodo, action: () => insertLinePrefix('- [ ] '), tip: 'Checklist' },
     { icon: Link, action: () => insertMarkdown('[', '](url)', 'text'), tip: 'Link' },
     { icon: Code, action: () => insertMarkdown('`', '`', 'code'), tip: 'Inline Code' },
     { icon: CodeSquare, action: () => insertMarkdown('```\n', '\n```', 'code'), tip: 'Code Block' },

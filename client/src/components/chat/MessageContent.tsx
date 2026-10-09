@@ -1039,7 +1039,17 @@ export const MessageContent = memo(function MessageContent({ content, suffix, on
     ul: ({ children }) => <ul className="list-disc list-outside pl-5 mb-3 last:mb-0">{children}</ul>,
     // Forward `start` so a list written as `3. …` renders from 3, not reset to 1 (remark-gfm parses the start number).
     ol: ({ children, start }) => <ol start={start} className="list-decimal list-outside pl-5 mb-3 last:mb-0">{children}</ol>,
-    li: ({ children }) => <li>{children}</li>,
+    // GFM task list items (`- [ ]` / `- [x]`): drop the disc marker and lay the checkbox beside the text.
+    li: ({ children, className }) =>
+      className?.includes('task-list-item')
+        ? <li className="list-none -ml-5 flex items-start gap-1.5">{children}</li>
+        : <li>{children}</li>,
+    // Render the task-list checkbox as a themed, read-only control (message content is immutable). Any
+    // other <input> markdown might emit is dropped.
+    input: ({ type, checked }) =>
+      type === 'checkbox'
+        ? <input type="checkbox" checked={!!checked} readOnly disabled className="mt-1 accent-primary cursor-default shrink-0" />
+        : null,
     pre: ({ children }) => <>{children}</>,
     code: ({ className, children }) => {
       const isBlock = className?.includes('language-') || (typeof children === 'string' && children.includes('\n'))

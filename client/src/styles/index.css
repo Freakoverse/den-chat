@@ -535,3 +535,16 @@ select:focus-visible {
   margin: 4px 8px;
   background: hsl(var(--border) / 0.6);
 }
+/* GFM task lists (- [ ] / - [x]) are parsed by remark-gfm into .task-list-item <li>s with a disabled
+   checkbox. The authored surfaces (chat/DM/forum messages, long-form articles, drafts) style these via
+   react-markdown component overrides; this is the catch-all so every OTHER markdown instance (changelog,
+   FAQ, release notes) also drops the stray disc bullet and gets a themed read-only checkbox. */
+.task-list-item {
+  list-style: none;
+}
+.task-list-item input[type="checkbox"] {
+  accent-color: hsl(var(--primary));
+  margin-right: 0.4em;
+  cursor: default;
+  vertical-align: middle;
+}

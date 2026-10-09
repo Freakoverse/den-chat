@@ -543,6 +543,15 @@ export function LongFormArticleReader() {
                 p: ({ children }) => <p className="text-sm leading-relaxed text-foreground/90 mb-4">{children}</p>,
                 ul: ({ children }) => <ul className="list-disc list-outside pl-5 text-sm text-foreground/90 mb-4 space-y-1">{children}</ul>,
                 ol: ({ children, start }) => <ol start={start} className="list-decimal list-outside pl-5 text-sm text-foreground/90 mb-4 space-y-1">{children}</ol>,
+                // GFM task list items: drop the disc marker, lay the themed read-only checkbox beside the text.
+                li: ({ children, className }) =>
+                  className?.includes('task-list-item')
+                    ? <li className="list-none -ml-5 flex items-start gap-2 text-sm text-foreground/90">{children}</li>
+                    : <li>{children}</li>,
+                input: ({ type, checked }) =>
+                  type === 'checkbox'
+                    ? <input type="checkbox" checked={!!checked} readOnly disabled className="mt-1 accent-primary cursor-default shrink-0" />
+                    : null,
                 table: ({ children }) => (
                   <div className="overflow-x-auto my-4 rounded-lg border border-border">
                     <table className="w-full text-xs">{children}</table>
