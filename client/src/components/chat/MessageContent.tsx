@@ -1042,7 +1042,7 @@ export const MessageContent = memo(function MessageContent({ content, suffix, on
     // GFM task list items (`- [ ]` / `- [x]`): drop the disc marker and lay the checkbox beside the text.
     li: ({ children, className }) =>
       className?.includes('task-list-item')
-        ? <li className="list-none -ml-5 flex items-end gap-1.5">{children}</li>
+        ? <li className="list-none -ml-5 flex items-center gap-1.5">{children}</li>
         : <li>{children}</li>,
     // Render the GFM task-list checkbox (read-only; message content is immutable). Spread the parsed props
     // (type/checked/disabled) so it always renders, and force readOnly + the md-task-checkbox class, which
