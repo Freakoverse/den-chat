@@ -47,6 +47,8 @@ import {
 import { DenChatLogo } from '@/components/ui/DenChatLogo'
 import { RelayHealthLabel } from '@/components/nostr/RelayHealthLabel'
 import { useRelayHealthStore } from '@/lib/nostr/relayHealthProbe'
+import { BlossomHealthLabel } from '@/components/nostr/BlossomHealthLabel'
+import { useBlossomHealthStore } from '@/lib/blossom/blossomHealthProbe'
 import {
   Settings, Palette, Globe, Shield, ShieldCheck, Info, Keyboard, MessageSquare, Users, ChevronsUpDown,
   Sun, Moon, Monitor, Plus, Minus, Trash2, Eye, EyeOff, Search,
@@ -1926,6 +1928,13 @@ function NetworkTab() {
     refreshAllRelayHealth(urls)
   }
 
+  // Re-run the upload+read-back health check for every Blossom server shown here (client + user list).
+  const refreshAllBlossomHealth = useBlossomHealthStore((s) => s.refreshAll)
+  const handleTestAllBlossom = () => {
+    const urls = [...clientBlossom.map((s) => s.url), ...useUserListsStore.getState().userBlossoms]
+    refreshAllBlossomHealth(urls)
+  }
+
   const saveClientRelays = (list: { url: string; enabled: boolean }[]) => {
     setClientRelays(list)
     setRelays(list)
@@ -2111,6 +2120,22 @@ function NetworkTab() {
       {/* ── Blossom Servers ── */}
       {netTab === 'blossom' && (
         <div className="space-y-8">
+          {/* Blossom health explainer + test-all */}
+          <section className="flex items-start gap-3">
+            <div className="flex-1 min-w-0">
+              <h4 className="text-sm font-semibold text-foreground">Blossom health</h4>
+              <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">
+                The <span className="text-emerald-400">working</span>/<span className="text-destructive">broken</span> label beside each server is a real test: it uploads a tiny file to that server and fetches it straight back, so a server only counts as working if it actually accepts your uploads and serves them. (The dot next to it is only a reachability ping.) Results are cached for 24 hours.
+              </p>
+            </div>
+            <button
+              onClick={handleTestAllBlossom}
+              className="shrink-0 h-8 px-3 rounded-md bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors cursor-pointer flex items-center gap-1.5"
+            >
+              <RefreshCw size={13} /> Test again
+            </button>
+          </section>
+
           {/* Client Blossom */}
           <section className="space-y-3">
             <h4 className="text-sm font-semibold text-foreground">Client Blossom Servers</h4>
@@ -2122,6 +2147,7 @@ function NetworkTab() {
                     const copy = [...clientBlossom]; copy[i] = { ...s, enabled: v }; saveClientBlossom(copy)
                   }} />
                   <span className="text-sm text-foreground flex-1 font-mono truncate">{s.url}</span>
+                  <BlossomHealthLabel url={s.url} interactive />
                   <BlossomHealthDot url={s.url} />
                   {!blossomServers.getDefaults().includes(s.url) && (
                     <button onClick={() => saveClientBlossom(clientBlossom.filter((_, j) => j !== i))} className="text-muted-foreground hover:text-destructive transition-colors cursor-pointer">
@@ -3401,6 +3427,7 @@ function UserBlossomListSection() {
             {servers.map((url) => (
               <div key={url} className="flex items-center gap-3 px-3 py-2 rounded-lg bg-secondary/30 border border-border">
                 <span className="text-sm text-foreground flex-1 font-mono truncate">{url}</span>
+                <BlossomHealthLabel url={url} interactive />
                 <BlossomHealthDot url={url} />
                 <button onClick={() => removeServer(url)} className="text-muted-foreground hover:text-destructive transition-colors cursor-pointer">
                   <Trash2 size={14} />
