@@ -111,6 +111,9 @@ export async function collectHubBlobHashes(hub: HubData): Promise<{ hashes: stri
   if (index.historyHash) hashes.push(index.historyHash)
   for (const b of index.banPages) hashes.push(b.hash)
   for (const gt of index.groupTrees) hashes.push(gt.hash)
+  // Struct-blob hubs keep channels/roles/categories in a Blossom blob referenced by the event's `struct`
+  // tag, NOT in the index. Include it, or a restored struct hub would resolve with no structure.
+  if (hub.structFileHash) hashes.push(hub.structFileHash)
 
   return { hashes: [...new Set(hashes.filter(Boolean))], estimatedMembers }
 }

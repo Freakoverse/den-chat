@@ -128,6 +128,16 @@ function parseHubEventForDiscover(event: Event): DiscoveredHub | null {
       if (minPow === 0) minPow = content.settings?.min_pow || 0
     } catch { }
 
+    // Public face in plaintext tags, overriding content.settings. v2 hubs (encrypted content) and v1
+    // struct-blob hubs (empty content) carry the face here instead of in content.settings, so without this
+    // they'd show in Discover with no icon/banner/description. Mirrors parseHubEvent in the loader.
+    const pictureTag = event.tags.find(t => t[0] === 'picture')?.[1]
+    const bannerTag = event.tags.find(t => t[0] === 'banner')?.[1]
+    const aboutTag = event.tags.find(t => t[0] === 'about')?.[1]
+    if (pictureTag) icon = pictureTag
+    if (bannerTag) banner = bannerTag
+    if (aboutTag) description = aboutTag
+
     // Extract published_at for display ordering (falls back to created_at)
     const publishedAtTag = event.tags.find(t => t[0] === 'published_at')?.[1]
     const publishedAt = publishedAtTag ? parseInt(publishedAtTag, 10) : event.created_at
