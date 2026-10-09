@@ -1176,7 +1176,7 @@ Deleting a role does NOT trigger a tree update. The hub event is the authority f
     ["client", "<client_app_name>"],
     ["s", "<short_address_code>"]
   ],
-  "content": "<JSON string, or '{}' in the struct-blob format>",
+  "content": "<'{}' (v1) or encrypted owner_attestation (v2); legacy hubs inline the structure JSON>",
   "sig": "<signature>"
 }
 ```
@@ -1196,7 +1196,7 @@ Deleting a role does NOT trigger a tree update. The hub event is the authority f
 | `r` | Yes | Relay. Third value is `general`. At least one `general` MUST be defined. |
 | `o` | Yes | Blossom server URL. Recommend ≥3 for redundancy. Used for member files and media. |
 | `m` | Yes | Index file reference: `["m", "<sha256>", "<epoch>"]`. |
-| `struct` | No | **Structure-blob reference**: `["struct", "<sha256>", "<epoch>"]`, parallel to `m`. When present, the hub's structural arrays (`roles`, `grouped_roles`, `categories`, `channels`, `plugins`) live in a Blossom blob at that hash **instead of** inline in `content`, so the event stays O(1) regardless of how many channels/roles the hub has. The blob is encrypted the same way the hub encrypts its `content` (v1 plaintext JSON, v2 `hub_content_key`). **Presence of this tag is the format indicator**: there is no `version` bump and it applies to **both** v1 and v2 hubs (orthogonal to the privacy type). Absent ⇒ legacy inline format (structure is in `content`). See **Structure Blob** at the end of this section. |
+| `struct` | Yes | **Structure-blob reference**: `["struct", "<sha256>", "<epoch>"]`, parallel to `m`. The hub's structural arrays (`roles`, `grouped_roles`, `categories`, `channels`, `plugins`) live in a Blossom blob at that hash, **not** inline in `content`, so the event is O(1) regardless of how many channels/roles the hub has. The blob is encrypted the same way the hub encrypts its `content` (v1 plaintext JSON, v2 `hub_content_key`). Required for all hubs; applies to **both** v1 and v2 with no `version` bump (orthogonal to the privacy type). **Legacy exception:** hubs created before the struct format existed inline the structure in `content` and omit this tag (the sole backward-compatibility case); clients MUST still read those and SHOULD prompt migration. See **Structure Blob** at the end of this section. |
 | `updated_at` | No | Real wall-clock time of the last edit, `["updated_at", "<unix_seconds>"]` (corrected clock). `created_at` is a logical counter (see below), so this is the actual "last edited" time: used for display and tie resolution, never for relay filtering or client-side selection. |
 | `t` | No | Discoverable topic tag (e.g., `["t", "gaming"]`). Multiple `t` tags allowed. Clients can query hubs via `#t` filters for hub discovery. |
 | `content-warning` | No | NIP-36: marks the hub as containing sensitive/NSFW content. Value is an optional reason string (may be empty). Clients SHOULD blur or hide NSFW hubs unless the user has opted in. |
@@ -1253,13 +1253,14 @@ Concurrent edits from two devices still last-write-win on a replaceable event (o
 > relays; only its branding and discoverability are hidden, not its existence or activity.
 
 > [!IMPORTANT]
-> **Struct-blob format: the structural arrays below may live in a Blossom blob instead of here.** When the
-> hub event carries a `struct` tag (§6.1 tag table), the `roles`, `grouped_roles`, `categories`, `channels`,
-> and `plugins` arrays are **not** in `content`; they are serialized to a Blossom blob referenced by that
-> tag, and `content` holds only what must stay inline (v1: `{}`; v2: `{ "owner_attestation": … }`). The JSON
-> shape below is unchanged; it just moves. See **Structure Blob** at the end of this section for why, how it
-> is encrypted, and how readers/writers handle it. The rest of this subsection describes that JSON shape
-> wherever it lives (inline `content` for legacy hubs, or the struct blob for struct-format hubs).
+> **The structural arrays below live in the struct blob, not in `content`.** A hub MUST reference them via
+> the `struct` tag (§6.1 tag table): the `roles`, `grouped_roles`, `categories`, `channels`, and `plugins`
+> arrays are serialized to a Blossom blob, and the event `content` holds only what must stay inline (v1:
+> `{}`; v2: `{ "owner_attestation": … }`). The JSON shape below is unchanged; it just lives in the blob. See
+> **Structure Blob** at the end of this section for why, how it is encrypted, and how readers/writers handle
+> it. **Legacy pre-struct hubs** inline this JSON in `content` and omit the `struct` tag (the sole
+> backward-compatibility case); clients MUST still read them. The rest of this subsection describes that JSON
+> shape wherever it lives.
 
 ```json
 {
@@ -1421,7 +1422,7 @@ Only present when the hub has private channels with separate encryption.
 
 #### Structure Blob (the `struct` tag)
 
-A hub's structural arrays (`roles`, `grouped_roles`, `categories`, `channels`, `plugins`) can be moved out of the event `content` into a Blossom blob referenced by `["struct", "<sha256>", "<epoch>"]`, parallel to the member-index `m` tag. Whether a hub uses this is indicated solely by the **presence of the `struct` tag**: there is no `version` bump, and it applies to **both v1 and v2** hubs (it is orthogonal to the v1/v2 privacy distinction; a v1 hub stays v1, a v2 hub stays v2).
+A hub's structural arrays (`roles`, `grouped_roles`, `categories`, `channels`, `plugins`) live in a Blossom blob referenced by `["struct", "<sha256>", "<epoch>"]`, parallel to the member-index `m` tag, **not** inline in the event `content`. This is **required** for all hubs and applies to **both v1 and v2** (it is orthogonal to the v1/v2 privacy distinction; a v1 hub stays v1, a v2 hub stays v2) with no `version` bump. Because the structure is referenced by a fixed-size hash, the hub event is **O(1)** in size no matter how large the hub grows.
 
 **Why the structure is not in the hub event.** The worst case of the inline content is dominated by the per-channel/per-category **permission-override matrix**, which is `(channels + categories) × roles`, i.e. quadratic. At realistic maxima a fully-overridden hub's inline content runs to hundreds of KB up to multiple MB, and even plain maxed metadata (names, descriptions) exceeds the ~64 KB a relay will accept for a single event. Because the hub event is an **addressable replaceable event that is re-published on every membership change and epoch rotation**, an oversized event would fail to propagate exactly when it matters most. Moving the structure to a content-addressed Blossom blob makes the event **O(1)** in size regardless of how many channels, roles, categories, or overrides the hub has, so the `struct` tag (a fixed-size hash) is all the event carries. This removes any need for structural caps, permission bitmasks, or id surgery to fit the size budget.
 
@@ -1439,11 +1440,11 @@ Nothing about these arrays changes: the field shapes in the Content Field Refere
 
 **Epoch.** The `epoch` field in the `struct` tag is the **hub** epoch the blob is encrypted at (for v2 key derivation), matching the `epoch`/`m` tags, not a per-group or edit counter. On an epoch-rotating mutation (member removal / block / "fix encryption") the blob MUST be re-encrypted under the new epoch key and the tag re-pointed, exactly like the event content.
 
-**Reader behavior.** A client that sees a `struct` tag fetches the blob (in parallel with the `m` index, no added latency), decrypts it (v2) or reads it plaintext (v1), and populates the hub's structure from it; the public face still comes from the plaintext tags. A client that sees **no** `struct` tag reads the structure from `content` as before. Readers MUST cache the blob (like the index) so a Blossom outage still renders the last-known structure.
+**Reader behavior.** A client fetches the blob (in parallel with the `m` index, no added latency), decrypts it (v2) or reads it plaintext (v1), and populates the hub's structure from it; the public face still comes from the plaintext tags. Readers MUST cache the blob (like the index) so a Blossom outage still renders the last-known structure. A client that encounters a **legacy** hub with no `struct` tag reads the structure from `content` instead (see below).
 
-**Writer behavior.** On a structural edit the writer re-serializes the blob, uploads it to the hub's Blossom servers with read-back verification, and republishes the event with the new `struct` hash, and the structure is dropped from `content` as above. A **non-structural** republish (membership change, relay/Blossom-list edit, short-address mint, cooperative rebroadcast) carries the existing `struct` hash forward unchanged, with no re-upload. The struct blob rides the same cooperative Blossom redundancy and local retention as the member-index files.
+**Writer behavior.** A hub MUST be published with a `struct` tag. On a structural edit the writer re-serializes the blob, uploads it to the hub's Blossom servers with read-back verification, and republishes the event with the new `struct` hash (the structure is never written into `content`). A **non-structural** republish (membership change, relay/Blossom-list edit, short-address mint, cooperative rebroadcast) carries the existing `struct` hash forward unchanged, with no re-upload. The struct blob rides the same cooperative Blossom redundancy and local retention as the member-index files.
 
-**Compatibility and migration.** The read path is backward-compatible (both formats). A legacy inline hub can **adopt** the struct format at any time without changing its v1/v2 type: upload the structure blob and republish the event with a `struct` tag and the structure removed from `content`. Clients SHOULD ship the struct-**reader** in a release and let it propagate **before** writers begin emitting `struct` tags, because there is no `version` bump to gate on, so a pre-struct client will render a struct-format hub as empty/broken (an accepted transition cost, mitigated by reader-first rollout and normal update prompts).
+**Legacy inline hubs (transitional).** DEN Chat shipped before the struct format existed and inlined the structure JSON directly in `content`, so hubs created then carry **no** `struct` tag. These are the **only** hubs allowed to omit it, and they exist purely because the size problem above was not yet addressed; the struct tag is to be understood as part of NIP-CHAT from the start, with legacy inline hubs the sole backward-compatibility accommodation. For them: a client that sees no `struct` tag reads the structure from `content` as a legacy hub, and owners SHOULD **migrate** by uploading the structure blob and republishing with a `struct` tag (the structure is then removed from `content`); the hub keeps its exact v1/v2 type, epoch, secret, members, and index, and it is one blob upload plus one event publish. An unmigrated hub remains subject to the relay event-size limit (exactly the failure the struct format removes). During the transition clients SHOULD ship the struct **reader** before relying on the tag; a client too old to read the struct format renders a struct hub empty/broken (mitigated by reader-first rollout and normal update prompts).
 
 ---
 
