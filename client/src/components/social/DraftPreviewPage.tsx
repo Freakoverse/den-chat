@@ -295,10 +295,8 @@ export function DraftPreviewPage() {
                   className?.includes('task-list-item')
                     ? <li className="list-none flex items-start gap-2">{children}</li>
                     : <li>{children}</li>,
-                input: ({ type, checked }) =>
-                  type === 'checkbox'
-                    ? <input type="checkbox" checked={!!checked} readOnly disabled className="mt-1 accent-primary cursor-default shrink-0" />
-                    : null,
+                input: ({ node, ...props }) =>
+                  <input {...props} readOnly className="md-task-checkbox mt-1 shrink-0" />,
               }}
             >
               {event.content}

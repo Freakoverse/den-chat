@@ -18,7 +18,7 @@ import { getFileDraft, setFileDraft, clearFileDraft } from '@/stores/draftStore'
 import {
   Send, Smile, Bold, Italic, Strikethrough,
   Heading1, Heading2, Heading3, Heading4, Heading5, Heading6,
-  List, ListOrdered, Link, Code, CodeSquare, ALargeSmall, Eye,
+  List, ListOrdered, ListTodo, Link, Code, CodeSquare, ALargeSmall, Eye,
   Plus, Upload, Loader2, FileIcon, X, AlertTriangle,
   Clock, Mic, Lock, LockOpen, Scissors, ClipboardPaste, Copy, Type,
 } from 'lucide-react'
@@ -863,6 +863,7 @@ export function ChatInputBar({
                 { icon: Heading6, action: () => insertLinePrefix('###### '), tip: 'Heading 6' },
                 { icon: List, action: () => insertLinePrefix('- '), tip: 'Bullet List' },
                 { icon: ListOrdered, action: () => insertLinePrefix('1. '), tip: 'Numbered List' },
+                { icon: ListTodo, action: () => insertLinePrefix('- [ ] '), tip: 'Checklist' },
                 { icon: Link, action: () => insertMarkdown('[', '](url)', 'text'), tip: 'Link' },
                 { icon: Code, action: () => insertMarkdown('`', '`', 'code'), tip: 'Inline Code' },
                 { icon: CodeSquare, action: () => insertMarkdown('```\n', '\n```', 'code'), tip: 'Code Block' },

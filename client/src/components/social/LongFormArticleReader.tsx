@@ -548,10 +548,8 @@ export function LongFormArticleReader() {
                   className?.includes('task-list-item')
                     ? <li className="list-none -ml-5 flex items-start gap-2 text-sm text-foreground/90">{children}</li>
                     : <li>{children}</li>,
-                input: ({ type, checked }) =>
-                  type === 'checkbox'
-                    ? <input type="checkbox" checked={!!checked} readOnly disabled className="mt-1 accent-primary cursor-default shrink-0" />
-                    : null,
+                input: ({ node, ...props }) =>
+                  <input {...props} readOnly className="md-task-checkbox mt-1 shrink-0" />,
                 table: ({ children }) => (
                   <div className="overflow-x-auto my-4 rounded-lg border border-border">
                     <table className="w-full text-xs">{children}</table>

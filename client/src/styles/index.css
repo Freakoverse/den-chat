@@ -542,9 +542,18 @@ select:focus-visible {
 .task-list-item {
   list-style: none;
 }
+/* The global `input { appearance: none }` reset above strips the native checkbox, so task-list checkboxes
+   must restore it. `.md-task-checkbox` is used by the react-markdown component overrides (chat/article/
+   draft); the `.task-list-item input` selector catches every other markdown instance that renders the
+   default checkbox. */
+.md-task-checkbox,
 .task-list-item input[type="checkbox"] {
+  -webkit-appearance: checkbox;
+  appearance: auto;
   accent-color: hsl(var(--primary));
-  margin-right: 0.4em;
   cursor: default;
   vertical-align: middle;
+}
+.task-list-item input[type="checkbox"] {
+  margin-right: 0.4em;
 }

@@ -1044,12 +1044,11 @@ export const MessageContent = memo(function MessageContent({ content, suffix, on
       className?.includes('task-list-item')
         ? <li className="list-none -ml-5 flex items-start gap-1.5">{children}</li>
         : <li>{children}</li>,
-    // Render the task-list checkbox as a themed, read-only control (message content is immutable). Any
-    // other <input> markdown might emit is dropped.
-    input: ({ type, checked }) =>
-      type === 'checkbox'
-        ? <input type="checkbox" checked={!!checked} readOnly disabled className="mt-1 accent-primary cursor-default shrink-0" />
-        : null,
+    // Render the GFM task-list checkbox (read-only; message content is immutable). Spread the parsed props
+    // (type/checked/disabled) so it always renders, and force readOnly + the md-task-checkbox class, which
+    // restores the native checkbox appearance the global `input { appearance: none }` reset strips.
+    input: ({ node, ...props }) =>
+      <input {...props} readOnly className="md-task-checkbox mt-1 shrink-0" />,
     pre: ({ children }) => <>{children}</>,
     code: ({ className, children }) => {
       const isBlock = className?.includes('language-') || (typeof children === 'string' && children.includes('\n'))
