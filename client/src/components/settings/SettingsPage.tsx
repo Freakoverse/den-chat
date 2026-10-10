@@ -5892,7 +5892,7 @@ function RebroadcastHubTool() {
         let i = 0
         for (const [, bytes] of blobs) {
           i++
-          setProgress(`Uploading member data to Blossom… ${i}/${blobs.size}`)
+          setProgress(`Uploading hub data to Blossom… ${i}/${blobs.size}`)
           try {
             await uploadToBlossomServers(bytes, signer, privateKey, undefined, 'application/octet-stream')
             uploaded++
@@ -5933,7 +5933,7 @@ function RebroadcastHubTool() {
       <div>
         <h3 className="text-sm font-semibold text-foreground flex items-center gap-2"><Rocket size={15} /> Rebroadcast a hub</h3>
         <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
-          Restore a hub from a file you exported earlier — either a full backup (<span className="font-mono">.json.gz</span>, via a hub's ⋮ → Export hub backup) which also re-uploads its member data, or an event-only <span className="font-mono">.json</span> (⋮ → View raw event → Export). Use this only to restore a hub that's been wiped.
+          Restore a hub from a file you exported earlier — either a full backup (<span className="font-mono">.json.gz</span>, via a hub's ⋮ → Export hub backup) which also re-uploads its member and structure data, or an event-only <span className="font-mono">.json</span> (⋮ → View raw event → Export). Use this only to restore a hub that's been wiped.
         </p>
       </div>
 
@@ -5956,7 +5956,7 @@ function RebroadcastHubTool() {
                 : ''}
           </div>
           <div className="text-[11px] text-muted-foreground">
-            {blobs ? `Full backup — includes ${blobs.size} member-data file(s) to re-upload.` : 'Event only — no member data included.'}
+            {blobs ? `Full backup — includes ${blobs.size} hub-data file(s) (member + structure) to re-upload.` : 'Event only — no member or structure data included.'}
           </div>
 
           {isDeleted && (
