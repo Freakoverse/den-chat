@@ -223,6 +223,9 @@ interface HubSettingsModalProps {
   initialPage?: SettingsPage
   /** On the Members page, expand and highlight this member (owner editing one person's roles). */
   focusMemberPubkey?: string
+  /** On the Channels page, open straight to this channel's or category's permissions editor
+   *  (from the channel/category context menu "Edit Permissions"). */
+  initialPermTarget?: { type: 'channel' | 'category'; id: string }
 }
 
 
@@ -243,7 +246,7 @@ const PAGES: { id: SettingsPage; label: string; icon: React.ElementType; danger?
 
 // ── Main Modal ──
 
-export function HubSettingsModal({ open, onClose, hub, initialPage, focusMemberPubkey }: HubSettingsModalProps) {
+export function HubSettingsModal({ open, onClose, hub, initialPage, focusMemberPubkey, initialPermTarget }: HubSettingsModalProps) {
   useEscToClose(onClose, open)
   const [activePage, setActivePage] = useState<SettingsPage>('general')
   const [mobileShowNav, setMobileShowNav] = useState(true)
@@ -1010,6 +1013,7 @@ export function HubSettingsModal({ open, onClose, hub, initialPage, focusMemberP
                       editCategories={editCategories} setEditCategories={setEditCategories}
                       editChannels={editChannels} setEditChannels={setEditChannels}
                       editRoles={editRoles}
+                      initialPermTarget={initialPermTarget}
                     />
                   )}
                   {activePage === 'roles' && <RolesPage hub={hub} editRoles={editRoles} setEditRoles={setEditRoles} editChannels={editChannels} editCategories={editCategories} isCreator={isCreator} />}
@@ -2044,9 +2048,11 @@ interface ChannelsPageProps {
   editCategories: Category[]; setEditCategories: (v: Category[]) => void
   editChannels: Channel[]; setEditChannels: (v: Channel[]) => void
   editRoles: Role[]
+  /** Open directly on this channel's/category's permissions editor (context menu "Edit Permissions"). */
+  initialPermTarget?: { type: 'channel' | 'category'; id: string }
 }
 
-function ChannelsPage({ editCategories, setEditCategories, editChannels, setEditChannels, editRoles }: ChannelsPageProps) {
+function ChannelsPage({ editCategories, setEditCategories, editChannels, setEditChannels, editRoles, initialPermTarget }: ChannelsPageProps) {
   const [newCategoryName, setNewCategoryName] = useState('')
   const [newChannelNames, setNewChannelNames] = useState<Record<string, string>>({})
   const [newChannelTypes, setNewChannelTypes] = useState<Record<string, 'chat' | 'forum' | 'announcement' | 'voice'>>({})
@@ -2057,7 +2063,9 @@ function ChannelsPage({ editCategories, setEditCategories, editChannels, setEdit
   const [editingChannelName, setEditingChannelName] = useState('')
   const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null)
   const [editingCategoryName, setEditingCategoryName] = useState('')
-  const [permEditTarget, setPermEditTarget] = useState<{ type: 'channel' | 'category'; id: string } | null>(null)
+  // Seeds from initialPermTarget so a context-menu "Edit Permissions" opens straight on the editor.
+  // The modal unmounts when closed, so this initializer re-runs fresh on every open.
+  const [permEditTarget, setPermEditTarget] = useState<{ type: 'channel' | 'category'; id: string } | null>(initialPermTarget ?? null)
 
   const addCategory = () => {
     const n = newCategoryName.trim()

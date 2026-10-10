@@ -57,6 +57,9 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
   // focus this pubkey. Cleared on close so the next plain gear-open lands on the default page.
   const [settingsFocusMember, setSettingsFocusMember] = useState<string | undefined>(undefined)
   const [settingsInitialPage, setSettingsInitialPage] = useState<SettingsPage | undefined>(undefined)
+  // When opening settings straight to one channel's/category's permissions page (channel/category
+  // context menu "Edit Permissions"). Cleared on close.
+  const [settingsInitialPermTarget, setSettingsInitialPermTarget] = useState<{ type: 'channel' | 'category'; id: string } | undefined>(undefined)
   const [showInfo, setShowInfo] = useState(false)
   const [showInvite, setShowInvite] = useState(false)
   const [showJoinRequests, setShowJoinRequests] = useState(false)
@@ -187,6 +190,20 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
       setShowSettings(true)
     }
   }, [pendingHubSettingsPage, hub, isCreator, clearPendingSettingsPage])
+
+  // Open Hub Settings → Channels straight at a channel's/category's permissions page (from the
+  // channel/category context menu). Owner only: the permissions editor is creator-gated.
+  const pendingHubChannelPerms = useNavigationStore((s) => s.pendingHubChannelPerms)
+  const clearPendingChannelPerms = useNavigationStore((s) => s.setPendingHubChannelPerms)
+  useEffect(() => {
+    if (pendingHubChannelPerms && hub && hub.dTag === pendingHubChannelPerms.dTag && isCreator) {
+      const { type, id } = pendingHubChannelPerms
+      clearPendingChannelPerms(null)
+      setSettingsInitialPage('channels')
+      setSettingsInitialPermTarget({ type, id })
+      setShowSettings(true)
+    }
+  }, [pendingHubChannelPerms, hub, isCreator, clearPendingChannelPerms])
   const secretsResolved = useHubStore((s) => activeHubId ? !!s.hubSecretsResolved[activeHubId] : false)
 
   // Reset the optimistic "withdrawn" flag whenever the hub is (re-)present in the user's list.
@@ -907,10 +924,11 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
       {isCreator && (
         <HubSettingsModal
           open={showSettings}
-          onClose={() => { setShowSettings(false); setSettingsFocusMember(undefined); setSettingsInitialPage(undefined) }}
+          onClose={() => { setShowSettings(false); setSettingsFocusMember(undefined); setSettingsInitialPage(undefined); setSettingsInitialPermTarget(undefined) }}
           hub={hub}
           initialPage={settingsFocusMember ? 'members' : settingsInitialPage}
           focusMemberPubkey={settingsFocusMember}
+          initialPermTarget={settingsInitialPermTarget}
         />
       )}
 
@@ -1075,6 +1093,8 @@ function CategoryGroup({ categoryId, name, channels, positionDigits, activeChann
         <div className="h-0.5 bg-primary rounded-full mx-2 mb-1" />
       )}
       <button
+        data-category-id={categoryId}
+        data-category-hub={hub?.dTag || undefined}
         onClick={() => setCollapsed(!collapsed)}
         draggable={!!dnd}
         onDragStart={dnd ? (e) => dnd.onCategoryDragStart(e, categoryId) : undefined}

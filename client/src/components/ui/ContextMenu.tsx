@@ -15,8 +15,18 @@ import { useState, useEffect, useCallback, useRef, createContext, type ReactNode
 import { saveBlobAs } from '@/lib/saveFile'
 import { createPortal } from 'react-dom'
 import {
-  Copy, Scissors, ClipboardPaste, MousePointerClick, Link, Image, TextSelect, Bell, CheckCheck, Download, Film, Volume2, Smile,
+  Copy, Scissors, ClipboardPaste, MousePointerClick, Link, Image, TextSelect, Bell, CheckCheck, Download, Film, Volume2, Smile, ShieldCheck,
 } from 'lucide-react'
+import { useHubStore } from '@/stores/hubStore'
+import { useUserStore } from '@/stores/userStore'
+import { useNavigationStore } from '@/stores/navigationStore'
+
+/** True when `pubkey` is the hub's creator/owner (same expression used across the hub UI). */
+function isHubCreator(dTag: string | undefined, pubkey: string | null): boolean {
+  if (!dTag || !pubkey) return false
+  const hub = useHubStore.getState().hubs[dTag]
+  return !!(hub && (hub.creatorPubkey === pubkey || hub.ownerRealPubkey === pubkey))
+}
 
 /** Save the media at `url` with a location picker where available (see lib/saveFile). */
 function downloadMediaUrl(url: string, fallbackName?: string) {
@@ -389,6 +399,38 @@ export function ContextMenuProvider({ children }: { children: ReactNode }) {
             useNavigationStore.getState().setActivePage('hubs')
             useHubStore.getState().setActiveHub(channelHub)
             useNavigationStore.getState().setPendingHubChannelNotif({ dTag: channelHub, channelId })
+            close()
+          },
+        })
+        // Creator-only: jump to Hub Settings → Channels at this channel's permissions page.
+        if (isHubCreator(channelHub, useUserStore.getState().pubkey)) {
+          items.push({
+            label: 'Edit Permissions',
+            icon: <ShieldCheck size={14} />,
+            action: () => {
+              useNavigationStore.getState().setActivePage('hubs')
+              useHubStore.getState().setActiveHub(channelHub)
+              useNavigationStore.getState().setPendingHubChannelPerms({ dTag: channelHub, type: 'channel', id: channelId })
+              close()
+            },
+          })
+        }
+      }
+
+      // --- Category actions (right-click on a category header in the channel list) ---
+      const categoryEl = target.closest('[data-category-id]') as HTMLElement | null
+      const categoryId = categoryEl?.dataset.categoryId
+      const categoryHub = categoryEl?.dataset.categoryHub
+      // Creator-only: jump to Hub Settings → Channels at this category's permissions page.
+      if (categoryId && categoryHub && isHubCreator(categoryHub, useUserStore.getState().pubkey)) {
+        if (items.length > 0) items.push({ separator: true })
+        items.push({
+          label: 'Edit Permissions',
+          icon: <ShieldCheck size={14} />,
+          action: () => {
+            useNavigationStore.getState().setActivePage('hubs')
+            useHubStore.getState().setActiveHub(categoryHub)
+            useNavigationStore.getState().setPendingHubChannelPerms({ dTag: categoryHub, type: 'category', id: categoryId })
             close()
           },
         })

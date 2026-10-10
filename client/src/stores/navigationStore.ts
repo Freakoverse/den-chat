@@ -52,6 +52,10 @@ interface NavigationStore {
    *  to open the Network page). Set by the requester, consumed by ChannelList; owner-only. */
   pendingHubSettingsPage: { dTag: string; page: string } | null
   setPendingHubSettingsPage: (v: { dTag: string; page: string } | null) => void
+  /** Pending request to open owner Hub Settings → Channels straight at one channel's or category's
+   *  permissions page (set from the channel/category context menu, consumed by ChannelList; owner-only). */
+  pendingHubChannelPerms: { dTag: string; type: 'channel' | 'category'; id: string } | null
+  setPendingHubChannelPerms: (v: { dTag: string; type: 'channel' | 'category'; id: string } | null) => void
 }
 
 export const useNavigationStore = create<NavigationStore>((set) => ({
@@ -79,5 +83,7 @@ export const useNavigationStore = create<NavigationStore>((set) => ({
   setPendingHubMemberRoles: (v) => set({ pendingHubMemberRoles: v }),
   pendingHubSettingsPage: null,
   setPendingHubSettingsPage: (v) => set({ pendingHubSettingsPage: v }),
+  pendingHubChannelPerms: null,
+  setPendingHubChannelPerms: (v) => set({ pendingHubChannelPerms: v }),
 }))
 
