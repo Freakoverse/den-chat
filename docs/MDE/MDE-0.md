@@ -11,7 +11,7 @@ This document defines **Markdown Extensions (MDE)**: an additive, version-contro
 MDE-0 is the genesis document. It defines the architecture, the four lineage laws, the governance model, and the file format. It defines no formatting tokens itself; the first token dictionary is MDE-1.
 
 ## Layered model
-- **Layer 1 (L1):** base Markdown. For the purposes of this standard, "standard Markdown" means **CommonMark plus GFM** (GitHub Flavored Markdown). This is the concrete, widely implemented baseline MDE builds on.
+- **Layer 1 (L1):** base Markdown. For the purposes of this standard, "standard Markdown" means **CommonMark plus GFM** (GitHub Flavored Markdown). This is the concrete, widely implemented baseline MDE builds on; the exact versions and the full construct list are given in Appendix: Layer 1 reference.
 - **Layer 2 (L2):** MDE. A set of versioned tokens that a standard-aware renderer processes after (or alongside) L1, transforming them into UI/HTML. An MDE-unaware renderer never sees L2 as anything but plain text.
 
 MDE is additive only. It can introduce new tokens; it can never redefine, remove, or reinterpret an L1 construct.
@@ -139,9 +139,41 @@ MDE tokens fall into two categories, which later dictionaries should keep distin
 - **Dynamic value tokens:** carry a machine value that the renderer transforms into a localized or computed display (for example a timestamp). These use the general shape `{type:payload}`.
 
 Dictionaries SHOULD prefer payloads that remain human-readable when unrendered, so that a legacy reader still sees meaningful plain text.
+
+## Appendix: Layer 1 reference (CommonMark 0.31.2 + GFM 0.29)
+This is the concrete Layer 1 that MDE builds on and that Law 1 forbids colliding with. "Standard Markdown" in this document means exactly this set: **CommonMark version 0.31.2** plus the **GitHub Flavored Markdown (GFM) version 0.29** extensions. The table is listed here for convenience and is the baseline this lineage targets; the authoritative definitions remain the CommonMark 0.31.2 and GFM 0.29 specifications. Platform-specific rendering features outside those two specs (for example GitHub's alert blocks, footnotes, or diagram fences) are not part of this baseline.
+
+| Construct | Syntax | Source |
+|-----------|--------|--------|
+| Paragraph | plain text separated by a blank line | CommonMark |
+| ATX heading | `# heading` through `###### heading` | CommonMark |
+| Setext heading | a text line underlined by `===` or `---` | CommonMark |
+| Thematic break | `---`, `***`, or `___` on their own line | CommonMark |
+| Blockquote | `> quoted text` | CommonMark |
+| Bullet list | `-`, `+`, or `*` item markers | CommonMark |
+| Ordered list | `1.` or `1)` item markers | CommonMark |
+| Indented code block | four leading spaces | CommonMark |
+| Fenced code block | a triple-backtick fence or a `~~~` fence | CommonMark |
+| HTML block | raw block-level HTML | CommonMark |
+| Link reference definition | `[label]: url "title"` | CommonMark |
+| Emphasis | `*text*` or `_text_` | CommonMark |
+| Strong | `**text**` or `__text__` | CommonMark |
+| Code span | text wrapped in a backtick pair | CommonMark |
+| Link | `[text](url)` or `[text][ref]` | CommonMark |
+| Image | `![alt](url)` | CommonMark |
+| Autolink | `<https://example.com>` | CommonMark |
+| Raw inline HTML | inline tags such as `<br>` or `<span>` | CommonMark |
+| Hard line break | two trailing spaces or a trailing `\` | CommonMark |
+| Backslash escape | `\*`, `\_`, and other escaped punctuation | CommonMark |
+| Entity / numeric reference | `&amp;`, `&#35;`, `&#x23;` | CommonMark |
+| Table | rows of `\| a \| b \|` with a `---` separator row | GFM |
+| Task list item | `- [ ]` and `- [x]` | GFM |
+| Strikethrough | `~~text~~` | GFM |
+| Extended autolink | bare `https://`, `www.`, and email URLs | GFM |
+| Tagfilter | disallows unsafe raw HTML such as `<script>` | GFM |
 <!-- MDE-SIGNED-REGION-END -->
 
 <!-- MDE-SEAL
-file_sha256: 114879bd7244075683e3bae01e72fec620ece4342c13cfb4d16999b909b3fb31
+file_sha256: 97aec06c5c10ccb56714b98e5903832d030895b55f0716f5d1105fb038e62060
 signature: PENDING_SIGNATURE
 -->

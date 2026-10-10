@@ -1,7 +1,7 @@
 <!-- MDE-SIGNED-REGION-START -->
 Author: npub1_V1_AUTHOR_PLACEHOLDER (replace with the version-1 author's npub before sealing)
 Previous version: 0
-Previous file_sha256: 114879bd7244075683e3bae01e72fec620ece4342c13cfb4d16999b909b3fb31
+Previous file_sha256: 97aec06c5c10ccb56714b98e5903832d030895b55f0716f5d1105fb038e62060
 Previous author signature: PENDING_MDE0_SIGNATURE (the MDE-0 author's signature of the hash above)
 
 # MDE-1: Core Feature Dictionary (Version 1 Baseline)
@@ -58,6 +58,6 @@ Renderers MUST sanitize output: a token's payload is data, never raw markup, so 
 <!-- MDE-SIGNED-REGION-END -->
 
 <!-- MDE-SEAL
-file_sha256: 139f65913bfece48a46283e864f2705c73e6990900613398a157dda405b865fb
+file_sha256: 04ca10ac38e5a95ebba96afa72953751204f14cd7f7e11c7abc5e5ea382b54f2
 signature: PENDING_SIGNATURE
 -->
