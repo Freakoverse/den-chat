@@ -530,6 +530,12 @@ select:focus-visible {
   color: hsl(var(--primary));
 }
 
+/* Login transition overlay: cosmetic loading bar that fills over the hold. */
+@keyframes loginLoadingBarFill {
+  from { width: 0%; }
+  to { width: 100%; }
+}
+
 /* Keep labels on one line and ellipsize overflow (e.g. long "Search ... with Engine" items). */
 .context-menu-label {
   flex: 1;

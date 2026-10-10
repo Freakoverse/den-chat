@@ -46,6 +46,14 @@ const skipSplash = (() => {
   try { return localStorage.getItem(StorageKey.SKIP_SPLASH) === 'true' } catch { return false }
 })()
 
+// Game-style tips shown on the login transition overlay. One is picked at random per login.
+const LOGIN_TIPS = [
+  'Lose your private key or seed words and you lose your account. No one can recover them for you.',
+  'If your private key or seed words are ever exposed, that account is permanently compromised.',
+  'There is no "reset password" or "forgot password" here. Keep your keys and seed words safe and secure.',
+  'Want to keep your and your members\' messages from disappearing forever? Run your own nostr relay and Blossom server.',
+]
+
 export default function App() {
   useStartup()
   useDeepLink()
@@ -59,11 +67,13 @@ export default function App() {
   const [showOverlay, setShowOverlay] = useState(false)
   const [overlayOpacity, setOverlayOpacity] = useState(0)
   const [showApp, setShowApp] = useState(isAuthenticated)
+  const [loginTip, setLoginTip] = useState('')
 
   useEffect(() => {
     // Detect login transition (was false, now true)
     if (!prevAuth.current && isAuthenticated) {
       // Phase 1: mount overlay transparent, keep LoginScreen visible
+      setLoginTip(LOGIN_TIPS[Math.floor(Math.random() * LOGIN_TIPS.length)])
       setShowOverlay(true)
       setOverlayOpacity(0)
 
@@ -74,10 +84,10 @@ export default function App() {
 
       // Phase 2: after fade-in (500ms), overlay is opaque — safe to swap to AppLayout
       const t1 = setTimeout(() => setShowApp(true), 1000)
-      // Phase 3: hold (10500ms: the original 500ms plus 10 extra seconds), then start fade-out
-      const t2 = setTimeout(() => setOverlayOpacity(0), 11500)
+      // Phase 3: hold (5500ms: the original 500ms plus 5 extra seconds), then start fade-out
+      const t2 = setTimeout(() => setOverlayOpacity(0), 6500)
       // Phase 4: after fade-out (500ms), unmount overlay
-      const t3 = setTimeout(() => setShowOverlay(false), 12000)
+      const t3 = setTimeout(() => setShowOverlay(false), 7000)
 
       prevAuth.current = isAuthenticated
       return () => { cancelAnimationFrame(raf); clearTimeout(t1); clearTimeout(t2); clearTimeout(t3) }
@@ -113,7 +123,21 @@ export default function App() {
             justifyContent: 'center',
           }}
         >
-          <DenChatLogo size={96} className="grayscale opacity-25" />
+          <div className="flex flex-col items-center gap-7 px-6 w-full max-w-md text-center">
+            <DenChatLogo size={96} className="grayscale opacity-25" />
+            {/* Game-style loading tip */}
+            <div className="flex flex-col items-center gap-1.5 min-h-[4.5rem]">
+              <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground/50">Tip</span>
+              <p className="text-sm text-muted-foreground/90 leading-relaxed">{loginTip}</p>
+            </div>
+            {/* Loading bar: cosmetic, fills over the overlay hold */}
+            <div className="w-56 h-1 rounded-full bg-muted-foreground/15 overflow-hidden">
+              <div
+                className="h-full rounded-full bg-muted-foreground/50"
+                style={{ animation: 'loginLoadingBarFill 6500ms linear forwards' }}
+              />
+            </div>
+          </div>
         </div>
       )}
     </ContextMenuProvider>
