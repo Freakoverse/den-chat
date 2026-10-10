@@ -34,17 +34,17 @@ All version-1 tokens are chosen to avoid every CommonMark and GFM construct (Law
 ## Graceful degradation
 A parser reading a document whose declared MDE version or lineage it does not support MUST leave every unrecognized token as readable plain text. It MUST NOT partially transform or corrupt it. Because the tokens are compact and, for timestamps, ISO 8601, unrendered content stays human-readable.
 
-The format of that metadata block (per file type) and what it carries (`version`, `lineage`, optional `hash`) is defined once in MDE-0 (Declaring MDE in a document), since it is architecture, not a version-1 feature.
+The format of that metadata block (per file type) and what it carries (`version`, `lineage`, `hash`, and `signature`, all required) is defined once in MDE-0 (Declaring MDE in a document), since it is architecture, not a version-1 feature.
 
 ## Parser flow
 A standard-aware client processes a document in three context-free phases:
 
 ```unset
-[Raw stream] -> 1. Scan metadata (version + lineage) -> 2. Load that dictionary -> 3. Stream render -> [HTML / UI]
+[Raw stream] -> 1. Scan metadata (version + lineage + hash) -> 2. Load that dictionary -> 3. Stream render -> [HTML / UI]
 ```
 
-1. **Scan.** Locate the `version` and `lineage` in the document's metadata block or `_mde` key.
-2. **Load.** Select the pre-verified token dictionary for that `(version, lineage)`. The dictionary was verified once, on adoption (MDE-0, File Format); it is not re-verified per document.
+1. **Scan.** Locate the `version`, `lineage`, and `hash` in the document's metadata block or `_mde` key. The `signature` is also present but is not needed to select the dictionary (MDE-0, Declaring MDE in a document).
+2. **Load.** Select the pre-verified token dictionary for that `(version, lineage)` at the declared `hash`, which pins the exact spec file. The dictionary was verified once, on adoption (MDE-0, File Format); it is not re-verified per document.
 3. **Render.** Transform the registered tokens into UI components:
    - `&&text&&` -> `<u>text</u>`
    - `||text||` -> `<span class="spoiler">text</span>`
@@ -58,6 +58,6 @@ Renderers MUST sanitize output: a token's payload is data, never raw markup, so 
 <!-- MDE-SIGNED-REGION-END -->
 
 <!-- MDE-SEAL
-file_sha256: 04ca10ac38e5a95ebba96afa72953751204f14cd7f7e11c7abc5e5ea382b54f2
+file_sha256: 7e3eb223802e6c92ddbc32ee85b80d9003e0c56bffff150753b25831bdbce73b
 signature: PENDING_SIGNATURE
 -->
