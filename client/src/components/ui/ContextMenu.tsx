@@ -199,10 +199,9 @@ export function ContextMenuProvider({ children }: { children: ReactNode }) {
               },
             })
           } else {
-            const shortText = selectedText.length > 24 ? `${selectedText.slice(0, 24)}…` : selectedText
             for (const engine of engines) {
               items.push({
-                label: `Search "${shortText}" with ${engine.name}`,
+                label: `Search with ${engine.name}`,
                 icon: <Search size={14} />,
                 action: () => {
                   // Query goes at the END of the stored URL, URL-encoded. openExternalUrl reaches the
