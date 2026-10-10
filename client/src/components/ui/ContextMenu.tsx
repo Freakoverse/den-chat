@@ -21,6 +21,7 @@ import { useHubStore } from '@/stores/hubStore'
 import { useUserStore } from '@/stores/userStore'
 import { useNavigationStore } from '@/stores/navigationStore'
 import { usePreferencesStore } from '@/stores/preferencesStore'
+import { openExternalUrl } from '@/lib/utils'
 
 /** True when `pubkey` is the hub's creator/owner (same expression used across the hub UI). */
 function isHubCreator(dTag: string | undefined, pubkey: string | null): boolean {
@@ -204,9 +205,9 @@ export function ContextMenuProvider({ children }: { children: ReactNode }) {
                 label: `Search "${shortText}" with ${engine.name}`,
                 icon: <Search size={14} />,
                 action: () => {
-                  // Query goes at the END of the stored URL, URL-encoded. Open in the default browser,
-                  // same mechanism as "Open Link".
-                  window.open(engine.url + encodeURIComponent(selectedText), '_blank', 'noopener,noreferrer')
+                  // Query goes at the END of the stored URL, URL-encoded. openExternalUrl reaches the
+                  // OS browser in Tauri (window.open from the webview does not).
+                  openExternalUrl(engine.url + encodeURIComponent(selectedText))
                   close()
                 },
               })

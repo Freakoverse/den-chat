@@ -609,7 +609,7 @@ function SearchEnginesSection() {
     <div className="space-y-2">
       <label className="text-sm font-medium text-foreground">Search Engines</label>
       <p className="text-xs text-muted-foreground">
-        Right-click selected text anywhere to search it. Add an engine by its search URL with the query at the end, for example <code className="text-[11px] px-1 py-0.5 rounded bg-secondary/60">https://www.google.com/search?q=</code> — the selected text is appended and URL-encoded. Results open in your default browser.
+        Right-click selected text anywhere to search it. Add an engine by its search URL with the query at the end, for example <code className="text-[11px] px-1 py-0.5 rounded bg-secondary/60">https://example.com/search?q=</code>. The selected text is appended and URL-encoded. Results open in your default browser.
       </p>
 
       {searchEngines.length > 0 && (
@@ -638,14 +638,14 @@ function SearchEnginesSection() {
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="Name (e.g. Google)"
+            placeholder="Name (e.g. Example)"
             className="w-full px-3 py-2 rounded-md border border-border bg-background text-sm focus:outline-none focus:ring-1 focus:ring-primary"
           />
           <input
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') save() }}
-            placeholder="https://www.google.com/search?q="
+            placeholder="https://example.com/search?q="
             className="w-full px-3 py-2 rounded-md border border-border bg-background text-sm focus:outline-none focus:ring-1 focus:ring-primary"
           />
           <div className="flex gap-2">
