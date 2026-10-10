@@ -609,7 +609,7 @@ function SearchEnginesSection() {
     <div className="space-y-2">
       <label className="text-sm font-medium text-foreground">Search Engines</label>
       <p className="text-xs text-muted-foreground">
-        Right-click selected text anywhere to search it. Add an engine by its search URL with the query at the end, for example <code className="text-[11px] px-1 py-0.5 rounded bg-secondary/60">https://example.com/search?q=</code>. The selected text is appended and URL-encoded. Results open in your default browser.
+        Right-click selected text anywhere to search it. Add an engine by its search URL with the query at the end, for example <code className="text-[11px] px-1 py-0.5 rounded bg-secondary/60">https://example.com/search?q=</code> or <code className="text-[11px] px-1 py-0.5 rounded bg-secondary/60">https://search.example.com/search?q=</code>. The selected text is appended and URL-encoded. Results open in your default browser.
       </p>
 
       {searchEngines.length > 0 && (

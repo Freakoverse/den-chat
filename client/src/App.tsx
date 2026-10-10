@@ -74,10 +74,10 @@ export default function App() {
 
       // Phase 2: after fade-in (500ms), overlay is opaque — safe to swap to AppLayout
       const t1 = setTimeout(() => setShowApp(true), 1000)
-      // Phase 3: hold (3500ms: the original 500ms plus 3 extra seconds), then start fade-out
-      const t2 = setTimeout(() => setOverlayOpacity(0), 4500)
+      // Phase 3: hold (10500ms: the original 500ms plus 10 extra seconds), then start fade-out
+      const t2 = setTimeout(() => setOverlayOpacity(0), 11500)
       // Phase 4: after fade-out (500ms), unmount overlay
-      const t3 = setTimeout(() => setShowOverlay(false), 5000)
+      const t3 = setTimeout(() => setShowOverlay(false), 12000)
 
       prevAuth.current = isAuthenticated
       return () => { cancelAnimationFrame(raf); clearTimeout(t1); clearTimeout(t2); clearTimeout(t3) }
