@@ -266,7 +266,8 @@ export function ContextMenuProvider({ children }: { children: ReactNode }) {
             // renderer let one through onto an anchor. Only the render layer is trusted
             // to strip these today; guard here too so right-click → Open can't execute JS.
             if (!/^\s*(javascript|data|vbscript):/i.test(linkHref)) {
-              window.open(linkHref, '_blank', 'noopener,noreferrer')
+              // openExternalUrl reaches the OS browser in Tauri (window.open from the webview does not).
+              openExternalUrl(linkHref)
             }
             close()
           },
