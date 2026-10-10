@@ -15,11 +15,12 @@ import { useState, useEffect, useCallback, useRef, createContext, type ReactNode
 import { saveBlobAs } from '@/lib/saveFile'
 import { createPortal } from 'react-dom'
 import {
-  Copy, Scissors, ClipboardPaste, MousePointerClick, Link, Image, TextSelect, Bell, CheckCheck, Download, Film, Volume2, Smile, ShieldCheck,
+  Copy, Scissors, ClipboardPaste, MousePointerClick, Link, Image, TextSelect, Bell, CheckCheck, Download, Film, Volume2, Smile, ShieldCheck, Search,
 } from 'lucide-react'
 import { useHubStore } from '@/stores/hubStore'
 import { useUserStore } from '@/stores/userStore'
 import { useNavigationStore } from '@/stores/navigationStore'
+import { usePreferencesStore } from '@/stores/preferencesStore'
 
 /** True when `pubkey` is the hub's creator/owner (same expression used across the hub UI). */
 function isHubCreator(dTag: string | undefined, pubkey: string | null): boolean {
@@ -179,6 +180,39 @@ export function ContextMenuProvider({ children }: { children: ReactNode }) {
             close()
           },
         })
+
+        // --- Search selected text with user-configured search engines (no defaults) ---
+        const selectedText = selection!.toString().trim()
+        if (selectedText) {
+          const engines = usePreferencesStore.getState().searchEngines
+          if (items.length > 0) items.push({ separator: true })
+          if (engines.length === 0) {
+            // No engines yet: offer a shortcut to the settings page where they are added.
+            items.push({
+              label: 'Add search engine',
+              icon: <Search size={14} />,
+              action: () => {
+                useNavigationStore.getState().setActivePage('settings')
+                useNavigationStore.getState().setSettingsTab('preferences')
+                close()
+              },
+            })
+          } else {
+            const shortText = selectedText.length > 24 ? `${selectedText.slice(0, 24)}…` : selectedText
+            for (const engine of engines) {
+              items.push({
+                label: `Search "${shortText}" with ${engine.name}`,
+                icon: <Search size={14} />,
+                action: () => {
+                  // Query goes at the END of the stored URL, URL-encoded. Open in the default browser,
+                  // same mechanism as "Open Link".
+                  window.open(engine.url + encodeURIComponent(selectedText), '_blank', 'noopener,noreferrer')
+                  close()
+                },
+              })
+            }
+          }
+        }
       }
 
       // --- Paste (for editable fields) ---
@@ -501,7 +535,7 @@ export function ContextMenuProvider({ children }: { children: ReactNode }) {
                   disabled={item.disabled}
                 >
                   <span className="context-menu-icon">{item.icon}</span>
-                  <span>{item.label}</span>
+                  <span className="context-menu-label">{item.label}</span>
                 </button>
               )
             })}

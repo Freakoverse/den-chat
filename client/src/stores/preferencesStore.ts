@@ -9,6 +9,14 @@ export type LanguageCode = 'en' | 'ja' | 'zh-CN' | 'ar' | 'de' | 'pt' | 'ro' | '
 
 export type TimeFormat = 'auto' | '12h' | '24h'
 
+export interface SearchEngine {
+  id: string
+  /** Display name shown in the right-click "search selection" menu, e.g. "Google". */
+  name: string
+  /** URL prefix; the URL-encoded selection is appended to the END, e.g. "https://www.google.com/search?q=". */
+  url: string
+}
+
 interface PreferencesState {
   language: LanguageCode
   timeFormat: TimeFormat
@@ -26,6 +34,8 @@ interface PreferencesState {
   voiceNoteMaxDuration: number
   /** Voice note audio bitrate in bps — default 32000 (32kbps Opus) */
   voiceNoteBitrate: number
+  /** User-defined search engines for the right-click "search selected text" action. No defaults: empty until the user adds some. */
+  searchEngines: SearchEngine[]
   setLanguage: (lang: LanguageCode) => void
   setTimeFormat: (format: TimeFormat) => void
   setShowEmbeds: (v: boolean) => void
@@ -35,11 +45,15 @@ interface PreferencesState {
   setShowCustomEmojis: (v: boolean) => void
   setVoiceNoteMaxDuration: (v: number) => void
   setVoiceNoteBitrate: (v: number) => void
+  /** Append a new user-defined search engine. */
+  addSearchEngine: (name: string, url: string) => void
+  /** Remove a user-defined search engine by id. */
+  removeSearchEngine: (id: string) => void
 }
 
 const STORAGE_KEY = 'den-chat-preferences'
 
-type PrefsData = { language: LanguageCode; timeFormat: TimeFormat; showEmbeds: boolean; showLinkPreviews: boolean; hideMutedWords: boolean; showMedia: boolean; showCustomEmojis: boolean; voiceNoteMaxDuration: number; voiceNoteBitrate: number }
+type PrefsData = { language: LanguageCode; timeFormat: TimeFormat; showEmbeds: boolean; showLinkPreviews: boolean; hideMutedWords: boolean; showMedia: boolean; showCustomEmojis: boolean; voiceNoteMaxDuration: number; voiceNoteBitrate: number; searchEngines: SearchEngine[] }
 
 function loadPrefs(): PrefsData {
   try {
@@ -56,10 +70,11 @@ function loadPrefs(): PrefsData {
         showCustomEmojis: parsed.showCustomEmojis !== false,
         voiceNoteMaxDuration: parsed.voiceNoteMaxDuration ?? 30,
         voiceNoteBitrate: parsed.voiceNoteBitrate ?? 32000,
+        searchEngines: Array.isArray(parsed.searchEngines) ? parsed.searchEngines : [],
       }
     }
   } catch { /* ignore */ }
-  return { language: 'en', timeFormat: 'auto', showEmbeds: true, showLinkPreviews: true, hideMutedWords: true, showMedia: true, showCustomEmojis: true, voiceNoteMaxDuration: 30, voiceNoteBitrate: 32000 }
+  return { language: 'en', timeFormat: 'auto', showEmbeds: true, showLinkPreviews: true, hideMutedWords: true, showMedia: true, showCustomEmojis: true, voiceNoteMaxDuration: 30, voiceNoteBitrate: 32000, searchEngines: [] }
 }
 
 function savePrefs(prefs: PrefsData) {
@@ -107,6 +122,17 @@ export const usePreferencesStore = create<PreferencesState>((set, get) => {
     setVoiceNoteBitrate: (voiceNoteBitrate) => {
       set({ voiceNoteBitrate })
       savePrefs({ ...get(), voiceNoteBitrate })
+    },
+    addSearchEngine: (name, url) => {
+      const engine: SearchEngine = { id: crypto.randomUUID(), name, url }
+      const searchEngines = [...get().searchEngines, engine]
+      set({ searchEngines })
+      savePrefs({ ...get(), searchEngines })
+    },
+    removeSearchEngine: (id) => {
+      const searchEngines = get().searchEngines.filter((e) => e.id !== id)
+      set({ searchEngines })
+      savePrefs({ ...get(), searchEngines })
     },
   }
 })

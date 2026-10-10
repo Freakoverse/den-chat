@@ -564,6 +564,12 @@ function PreferencesTab() {
         {/* Media Cache */}
         <MediaCacheSection />
 
+        {/* Divider */}
+        <div className="h-px bg-border" />
+
+        {/* Search Engines */}
+        <SearchEnginesSection />
+
       </div>
 
       {/* Language selector modal */}
@@ -573,6 +579,99 @@ function PreferencesTab() {
         currentLanguage={language}
         onSelect={(code) => { setLanguage(code); setShowLangModal(false) }}
       />
+    </div>
+  )
+}
+
+/**
+ * Search engines (Preferences tab). User-defined, no defaults: each entry is a display name plus a URL
+ * whose query goes at the END, so the right-click "search selected text" action appends the URL-encoded
+ * selection. Persisted via the preferences store.
+ */
+function SearchEnginesSection() {
+  const searchEngines = usePreferencesStore((s) => s.searchEngines)
+  const addSearchEngine = usePreferencesStore((s) => s.addSearchEngine)
+  const removeSearchEngine = usePreferencesStore((s) => s.removeSearchEngine)
+  const [adding, setAdding] = useState(false)
+  const [name, setName] = useState('')
+  const [url, setUrl] = useState('')
+
+  // Require a name and an http(s) URL. The query is appended to the end, so no placeholder token is needed.
+  const canSave = name.trim().length > 0 && /^https?:\/\/.+/i.test(url.trim())
+
+  const save = () => {
+    if (!canSave) return
+    addSearchEngine(name.trim(), url.trim())
+    setName(''); setUrl(''); setAdding(false)
+  }
+
+  return (
+    <div className="space-y-2">
+      <label className="text-sm font-medium text-foreground">Search Engines</label>
+      <p className="text-xs text-muted-foreground">
+        Right-click selected text anywhere to search it. Add an engine by its search URL with the query at the end, for example <code className="text-[11px] px-1 py-0.5 rounded bg-secondary/60">https://www.google.com/search?q=</code> — the selected text is appended and URL-encoded. Results open in your default browser.
+      </p>
+
+      {searchEngines.length > 0 && (
+        <div className="space-y-1.5">
+          {searchEngines.map((eng) => (
+            <div key={eng.id} className="flex items-center gap-2 px-3 py-2 rounded-lg border border-border bg-secondary/30">
+              <Search size={14} className="text-muted-foreground shrink-0" />
+              <div className="min-w-0 flex-1">
+                <div className="text-sm text-foreground truncate">{eng.name}</div>
+                <div className="text-[11px] text-muted-foreground truncate">{eng.url}</div>
+              </div>
+              <button
+                onClick={() => removeSearchEngine(eng.id)}
+                aria-label={`Remove ${eng.name}`}
+                className="shrink-0 p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors cursor-pointer"
+              >
+                <Trash2 size={14} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {adding ? (
+        <div className="space-y-2 p-3 rounded-lg border border-border bg-secondary/30">
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Name (e.g. Google)"
+            className="w-full px-3 py-2 rounded-md border border-border bg-background text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+          />
+          <input
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') save() }}
+            placeholder="https://www.google.com/search?q="
+            className="w-full px-3 py-2 rounded-md border border-border bg-background text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+          />
+          <div className="flex gap-2">
+            <button
+              onClick={save}
+              disabled={!canSave}
+              className="px-3 py-1.5 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Add
+            </button>
+            <button
+              onClick={() => { setAdding(false); setName(''); setUrl('') }}
+              className="px-3 py-1.5 rounded-md text-sm text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors cursor-pointer"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          onClick={() => setAdding(true)}
+          className="flex items-center gap-2 px-3 py-2 rounded-lg border border-border bg-secondary/30 hover:bg-secondary/60 text-sm text-foreground transition-colors cursor-pointer"
+        >
+          <Plus size={14} /> Add search engine
+        </button>
+      )}
     </div>
   )
 }
