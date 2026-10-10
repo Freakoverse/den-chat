@@ -1,7 +1,7 @@
 <!-- MDE-SIGNED-REGION-START -->
 Author: npub1_V1_AUTHOR_PLACEHOLDER (replace with the version-1 author's npub before sealing)
 Previous version: 0
-Previous file_sha256: 1101ca74fb7a99820d32896a70ebe87f509bffb1d9ba9d6ec6f2c87525042ed7
+Previous file_sha256: 114879bd7244075683e3bae01e72fec620ece4342c13cfb4d16999b909b3fb31
 Previous author signature: PENDING_MDE0_SIGNATURE (the MDE-0 author's signature of the hash above)
 
 # MDE-1: Core Feature Dictionary (Version 1 Baseline)
@@ -34,49 +34,7 @@ All version-1 tokens are chosen to avoid every CommonMark and GFM construct (Law
 ## Graceful degradation
 A parser reading a document whose declared MDE version or lineage it does not support MUST leave every unrecognized token as readable plain text. It MUST NOT partially transform or corrupt it. Because the tokens are compact and, for timestamps, ISO 8601, unrendered content stays human-readable.
 
-## Declaring MDE in a USER document
-This is distinct from the self-signing of the spec files above. A **user document** that merely *uses* MDE formatting does not carry the lineage chain. It declares only which dictionary to load: the **version** and the **lineage** (the lineage author's npub, which disambiguates forks when more than one lineage reaches the same version number). The full cryptographic chain lives in the signed spec files and is verified once, on adoption, not repeated in every document.
-
-The declaration uses the host file type's native comment or metadata facility, between the boundaries `[mde]` and `[/mde]`:
-
-Markdown, HTML, XML (`.md`, `.html`, `.xml`), inside an HTML comment:
-```markdown
-<!--
-[mde]
-version=1
-lineage=npub1_lineage_author...
-[/mde]
--->
-# Title
-An &&underlined sentence&& and a ||hidden chunk||, posted {t:2026-06-10T12:00:00Z}.
-```
-
-Plain text (`.txt`), one metadata line per line at the top:
-```unset
-// [mde]
-// version=1
-// lineage=npub1_lineage_author...
-// [/mde]
-A plain text file with an &&underlined idea&&.
-```
-
-Source code and config (`.py`, `.yaml`, `.js`), using the host comment syntax:
-```python
-# [mde]
-# version=1
-# lineage=npub1_lineage_author...
-# [/mde]
-blog_post = "Supports an &&underlined string&&."
-```
-
-JSON (`.json`), a reserved root key (JSON has no comments):
-```json
-{
-  "_mde": { "version": 1, "lineage": "npub1_lineage_author..." },
-  "title": "My Application Document",
-  "article_body": "A database entry with &&underlined strings&&."
-}
-```
+The format of that metadata block (per file type) and what it carries (`version`, `lineage`, optional `hash`) is defined once in MDE-0 (Declaring MDE in a document), since it is architecture, not a version-1 feature.
 
 ## Parser flow
 A standard-aware client processes a document in three context-free phases:
@@ -98,7 +56,8 @@ A standard-aware client processes a document in three context-free phases:
 
 Renderers MUST sanitize output: a token's payload is data, never raw markup, so an implementation MUST escape payload content before emitting it into HTML.
 <!-- MDE-SIGNED-REGION-END -->
+
 <!-- MDE-SEAL
-file_sha256: 2a71463f1811982f23c7bf9697c736485b63b02b6838faae81e96dac2aa15b77
+file_sha256: 139f65913bfece48a46283e864f2705c73e6990900613398a157dda405b865fb
 signature: PENDING_SIGNATURE
 -->

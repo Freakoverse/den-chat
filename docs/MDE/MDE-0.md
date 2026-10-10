@@ -70,6 +70,69 @@ The "signed region" is the content strictly **between** the start and end marker
 ### Lineage linking
 MDE-0 has no predecessor, so its signed region names only its author. Each later version names its author and, inside its signed region, the predecessor's `file_sha256` and the predecessor author's `signature` of that hash. Tampering with any link therefore breaks the tampered file's own signature. A verifier walks the chain once, on adoption: fetch versions 0..N, recompute each `file_sha256` from its canonicalized signed region, and verify each signature and each embedded predecessor reference. On success, the client compiles that version's token dictionary natively and does not consult the chain again while rendering.
 
+## Declaring MDE in a document
+The self-signing above applies to the **spec files** that define a lineage. A **user document** that merely *uses* MDE formatting is a different thing: it does not carry the lineage chain, only a pointer to the one `(version, lineage)` whose dictionary a renderer should load. This section defines that pointer once, as architecture, so every later version inherits it unchanged.
+
+The pointer carries four fields, all REQUIRED:
+- `version`: the MDE version the content targets.
+- `lineage`: the lineage author's npub. It disambiguates forks, since more than one lineage can reach the same version number.
+- `hash`: the targeted version file's `file_sha256`. This pins the declaration to one exact, immutable specification, so a renderer confirms it is loading the same dictionary bytes it verified on adoption, not a same-numbered fork or a tampered copy. The `hash`, not the `signature`, is what *selects* the version.
+- `signature`: the lineage author's signature of that `hash`, copied from the spec file's seal. It is carried, not dropped, for two reasons. First, the signature lives in the spec file's **seal**, which sits outside the signed region and is therefore **not** covered by `hash`; it cannot be reconstructed from the hash, so it is genuinely new information. Second, propagating it with every document makes a lineage's attestation **redundantly available in the wild**: if the origin spec file or its seal is ever lost, the signature survives, distributed across the corpus, and the chain stays verifiable. A renderer that already holds the verified dictionary need not re-check the signature per document, but MUST preserve it rather than strip it.
+
+The declaration uses the host file type's native comment or metadata facility, between the boundaries `[mde]` and `[/mde]`.
+
+Markdown, HTML, XML (`.md`, `.html`, `.xml`), inside an HTML comment:
+```markdown
+<!--
+[mde]
+version=1
+lineage=npub1_lineage_author...
+hash=file_sha256_of_target_version...
+signature=sig_of_that_hash_by_lineage_author...
+[/mde]
+-->
+# Title
+An &&underlined sentence&& and a ||hidden chunk||, posted {t:2026-06-10T12:00:00Z}.
+```
+
+Plain text (`.txt`), one metadata line per line at the top:
+```unset
+// [mde]
+// version=1
+// lineage=npub1_lineage_author...
+// hash=file_sha256_of_target_version...
+// signature=sig_of_that_hash_by_lineage_author...
+// [/mde]
+A plain text file with an &&underlined idea&&.
+```
+
+Source code and config (`.py`, `.yaml`, `.js`), using the host comment syntax:
+```python
+# [mde]
+# version=1
+# lineage=npub1_lineage_author...
+# hash=file_sha256_of_target_version...
+# signature=sig_of_that_hash_by_lineage_author...
+# [/mde]
+blog_post = "Supports an &&underlined string&&."
+```
+
+JSON (`.json`), a reserved root key (JSON has no comments):
+```json
+{
+  "_mde": {
+    "version": 1,
+    "lineage": "npub1_lineage_author...",
+    "hash": "file_sha256_of_target_version...",
+    "signature": "sig_of_that_hash_by_lineage_author..."
+  },
+  "title": "My Application Document",
+  "article_body": "A database entry with &&underlined strings&&."
+}
+```
+
+A transport binding MAY carry the same four fields in its own native structure instead of an embedded comment (see NIP-MDE for the Nostr tag form).
+
 ## Two kinds of extensions
 MDE tokens fall into two categories, which later dictionaries should keep distinct:
 - **Static text decorations:** wrap or mark literal text (for example underline, spoiler, highlight, alignment). The input text is also the displayed text.
@@ -77,7 +140,8 @@ MDE tokens fall into two categories, which later dictionaries should keep distin
 
 Dictionaries SHOULD prefer payloads that remain human-readable when unrendered, so that a legacy reader still sees meaningful plain text.
 <!-- MDE-SIGNED-REGION-END -->
+
 <!-- MDE-SEAL
-file_sha256: 1101ca74fb7a99820d32896a70ebe87f509bffb1d9ba9d6ec6f2c87525042ed7
+file_sha256: 114879bd7244075683e3bae01e72fec620ece4342c13cfb4d16999b909b3fb31
 signature: PENDING_SIGNATURE
 -->

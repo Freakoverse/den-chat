@@ -9,15 +9,17 @@ Where MDE specification files are hosted, fetched, and verified is left to the i
 A rich-text event (for example `kind: 30023` long-form, or `kind: 1` notes) declares its formatting baseline with a single tag:
 
 ```json
-["mde", "<version>", "<lineage>"]
+["mde", "<version>", "<lineage>", "<hash>", "<signature>"]
 ```
 
 - **`"mde"`**: the literal marker identifying this as an MDE declaration.
 - **`<version>`**: the MDE version the content complies with (`"0"`, `"1"`, ...).
-- **`<lineage>`**: the npub (or hex pubkey) identifying **which lineage** of the specification the content uses. Under MDE's adoption-based governance, more than one lineage (fork) can reach the same version number, so the lineage pubkey tells a client exactly which token dictionary to apply. For the most-adopted lineage this is the genesis author or the successor the ecosystem has adopted.
+- **`<lineage>`**: the npub (or hex pubkey) identifying **which lineage** of the specification the content uses. Under MDE's adoption-based governance, more than one lineage (fork) can reach the same version number, so the lineage pubkey tells a client which lineage the content follows. For the most-adopted lineage this is the genesis author or the successor the ecosystem has adopted.
+- **`<hash>`**: the targeted version file's `file_sha256`. This is what actually *selects* the dictionary: `version` + `lineage` can still be ambiguous if one author published more than one file under the same version number, but the hash pins the declaration to one exact, immutable specification. A client matches it against the dictionary it verified on adoption.
+- **`<signature>`**: the lineage author's signature of that `hash`, copied from the spec file's seal. These fields mirror the four-field document declaration defined in MDE-0 (Declaring MDE in a document).
 
-### Why the tag is lean
-A deliberately minimal tag. The `prev_hash` and `prev_signature` of the cryptographic lineage are properties of the **specification version**, not of each event, so repeating them on every note would be pure bloat and would buy nothing at render time: a client that supports version N already holds that version's verified, compiled dictionary. The full chain is carried by the signed MDE spec files and verified once, on adoption. An event therefore needs only enough to pick the right dictionary: `version` plus `lineage`.
+### Why the signature is carried
+The signature lives in the spec file's **seal**, outside the signed region, so it is **not** covered by `hash` and cannot be reconstructed from it. Carrying it on the event is not render-time bloat: it is **redundancy**. Nostr events are replicated across many relays, so propagating the signature with the content makes a lineage's attestation durably available in the wild. If the origin spec file or its seal is ever lost, the signature survives, distributed across the corpus, and the chain stays verifiable. What is deliberately **not** carried is the full `prev_hash`/`prev_signature` *chain*: that is a property of the specification lineage, walked once on adoption, not of each event.
 
 ## Example event (MDE version 1)
 ```json
@@ -29,7 +31,7 @@ A deliberately minimal tag. The `prev_hash` and `prev_signature` of the cryptogr
   "tags": [
     ["d", "universal-formatting-mde"],
     ["title", "Decentralized Typography via Protocol Tags"],
-    ["mde", "1", "npub1_lineage_author..."]
+    ["mde", "1", "npub1_lineage_author...", "file_sha256_of_target_version...", "sig_of_that_hash_by_lineage_author..."]
   ],
   "content": "Using MDE I can &&underline&& text, hide a ||secret plot point||, {=highlight an idea=}, show a localized {t:2026-06-10T12:00:00Z}, and align a {>centered title<} or a {>signed line>} without breaking legacy, un-updated clients."
 }
