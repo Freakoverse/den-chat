@@ -13,4 +13,4 @@
  * stays hidden. A hub that already carries a struct tag (if any exist) is still read and re-published
  * correctly regardless of this flag; the flag only governs whether we ADOPT the format somewhere new.
  */
-export const STRUCT_FORMAT_ENABLED = false
+export const STRUCT_FORMAT_ENABLED = true
