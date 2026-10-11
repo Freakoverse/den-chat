@@ -1042,13 +1042,13 @@ export const MessageContent = memo(function MessageContent({ content, suffix, on
     // GFM task list items (`- [ ]` / `- [x]`): drop the disc marker and lay the checkbox beside the text.
     li: ({ children, className }) =>
       className?.includes('task-list-item')
-        ? <li className="list-none -ml-5 flex items-center gap-1.5">{children}</li>
+        ? <li className="list-none -ml-5 flex items-start gap-1.5">{children}</li>
         : <li>{children}</li>,
     // Render the GFM task-list checkbox (read-only; message content is immutable). Spread the parsed props
     // (type/checked/disabled) so it always renders, and force readOnly + the md-task-checkbox class, which
     // restores the native checkbox appearance the global `input { appearance: none }` reset strips.
     input: ({ node, ...props }) =>
-      <input {...props} readOnly className="md-task-checkbox" />,
+      <input {...props} readOnly className="md-task-checkbox mt-1" />,
     pre: ({ children }) => <>{children}</>,
     code: ({ className, children }) => {
       const isBlock = className?.includes('language-') || (typeof children === 'string' && children.includes('\n'))
