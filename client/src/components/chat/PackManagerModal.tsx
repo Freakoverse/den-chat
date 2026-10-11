@@ -178,72 +178,134 @@ function DeleteSetDialog({ name, busy, onCancel, onConfirm }: { name: string; bu
   )
 }
 
-/** Single-file uploader used by the sticker and GIF Add flows (emoji reuses EmojiUploadForm). */
-function PackAddForm({ limitBytes, namePlaceholder, sanitize, onUpload, onDone }: {
+/**
+ * Multi-item staging uploader used by the sticker and GIF Add flows (emoji reuses EmojiUploadForm).
+ * Pick or drag-and-drop one or many images; each becomes an editable row (name + NSFW + remove). One
+ * Upload button sends them to Blossom one at a time, then hands the parent the whole batch so the set
+ * is saved in a single publish. Partial failures stay staged for retry; successes are added.
+ */
+type StagedFile = { id: string; file: File; preview: string; name: string; nsfw: boolean }
+
+function PackAddForm({ limitBytes, namePlaceholder, itemNoun, sanitize, onUploadItems, onDone }: {
   limitBytes: number
   namePlaceholder: string
+  itemNoun: string
   sanitize?: (v: string) => string
-  onUpload: (item: { url: string; name: string; nsfw: boolean }) => Promise<void>
+  onUploadItems: (items: { url: string; name: string; nsfw: boolean }[]) => Promise<void>
   onDone: () => void
 }) {
   const signer = useUserStore((s) => s.signer)
   const privateKey = useUserStore((s) => s.privateKey)
   const fileRef = useRef<HTMLInputElement>(null)
-  const [file, setFile] = useState<File | null>(null)
-  const [preview, setPreview] = useState<string | null>(null)
-  const [name, setName] = useState('')
-  const [nsfw, setNsfw] = useState(false)
+  const [items, setItems] = useState<StagedFile[]>([])
+  const [dragOver, setDragOver] = useState(false)
   const [uploading, setUploading] = useState(false)
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => () => { if (preview) URL.revokeObjectURL(preview) }, [preview])
+  // Revoke every staged preview URL on unmount (ref so cleanup sees the latest list, not the mount-time one).
+  const itemsRef = useRef(items); itemsRef.current = items
+  useEffect(() => () => { itemsRef.current.forEach((it) => URL.revokeObjectURL(it.preview)) }, [])
 
-  const pick = (f?: File) => {
-    if (!f) return
+  const addFiles = (files: FileList | File[] | null | undefined) => {
+    if (!files) return
     setError(null)
-    if (f.size > limitBytes) { setError(`File too large. Max ${(limitBytes / 1024 / 1024).toFixed(0)} MB`); return }
-    if (!f.type.startsWith('image/')) { setError('Only image files are allowed'); return }
-    setFile(f); setPreview(URL.createObjectURL(f))
-    if (!name.trim()) { const base = f.name.replace(/\.[^.]+$/, ''); setName(sanitize ? sanitize(base) : base) }
+    let skipped = 0
+    const staged: StagedFile[] = []
+    for (const f of Array.from(files)) {
+      if (!f.type.startsWith('image/') || f.size > limitBytes) { skipped++; continue }
+      const base = f.name.replace(/\.[^.]+$/, '')
+      staged.push({ id: crypto.randomUUID(), file: f, preview: URL.createObjectURL(f), name: sanitize ? sanitize(base) : base, nsfw: false })
+    }
+    if (staged.length) setItems((prev) => [...prev, ...staged])
+    if (skipped) setError(`${skipped} file${skipped !== 1 ? 's' : ''} skipped (not an image, or over ${(limitBytes / 1024 / 1024).toFixed(0)} MB)`)
   }
 
-  const upload = async () => {
-    if (!file || !name.trim() || uploading) return
+  const removeItem = (id: string) => setItems((prev) => { const it = prev.find((x) => x.id === id); if (it) URL.revokeObjectURL(it.preview); return prev.filter((x) => x.id !== id) })
+  const setItemName = (id: string, v: string) => setItems((prev) => prev.map((it) => it.id === id ? { ...it, name: sanitize ? sanitize(v) : v } : it))
+  const toggleNsfw = (id: string) => setItems((prev) => prev.map((it) => it.id === id ? { ...it, nsfw: !it.nsfw } : it))
+  const cancel = () => { items.forEach((it) => URL.revokeObjectURL(it.preview)); setItems([]); setError(null); onDone() }
+
+  const allNamed = items.length > 0 && items.every((it) => it.name.trim().length > 0)
+
+  const uploadAll = async () => {
+    if (!allNamed || uploading) return
     setUploading(true); setError(null)
+    const successes: { url: string; name: string; nsfw: boolean }[] = []
+    const failed: StagedFile[] = []
+    // One at a time, in order.
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i]
+      setProgress({ done: i, total: items.length })
+      try {
+        const data = new Uint8Array(await it.file.arrayBuffer())
+        const { hash, serverUrls } = await uploadToBlossomServers(data, signer, privateKey, getUploadBlossoms(), it.file.type)
+        const ext = it.file.type.split('/')[1]?.split('+')[0] || 'png'
+        const url = `${serverUrls[0] || 'https://blossom.primal.net'}/${hash}.${ext}`
+        successes.push({ url, name: (sanitize ? sanitize(it.name) : it.name.trim()).slice(0, 60), nsfw: it.nsfw })
+      } catch {
+        failed.push(it)
+      }
+    }
+    setProgress({ done: items.length, total: items.length })
     try {
-      const data = new Uint8Array(await file.arrayBuffer())
-      const { hash, serverUrls } = await uploadToBlossomServers(data, signer, privateKey, getUploadBlossoms(), file.type)
-      const ext = file.type.split('/')[1]?.split('+')[0] || 'png'
-      const url = `${serverUrls[0] || 'https://blossom.primal.net'}/${hash}.${ext}`
-      await onUpload({ url, name: (sanitize ? sanitize(name) : name.trim()).slice(0, 60), nsfw })
-      setFile(null); setPreview(null); setName(''); setNsfw(false); onDone()
+      if (successes.length) await onUploadItems(successes)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Upload failed')
-    } finally { setUploading(false) }
+      // Saving to the set failed: keep everything staged so nothing is lost.
+      setError(err instanceof Error ? err.message : 'Could not save to your set')
+      setUploading(false); setProgress(null)
+      return
+    }
+    // Revoke previews for the uploaded ones; keep failures staged for retry.
+    const failedIds = new Set(failed.map((f) => f.id))
+    items.forEach((it) => { if (!failedIds.has(it.id)) URL.revokeObjectURL(it.preview) })
+    setUploading(false); setProgress(null)
+    if (failed.length === 0) { setItems([]); onDone() }
+    else { setItems(failed); setError(`${failed.length} of ${items.length} could not be uploaded. The rest were added.`) }
   }
 
   return (
-    <div className="border-t border-border p-3 space-y-2 bg-secondary/15">
-      <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => pick(e.target.files?.[0])} />
-      {!file ? (
-        <button onClick={() => fileRef.current?.click()} className="w-full flex items-center justify-center gap-2 h-14 rounded-lg border border-dashed border-border text-sm text-muted-foreground hover:bg-secondary/40 transition-colors cursor-pointer">
-          <Upload size={16} /> Choose an image
-        </button>
-      ) : (
-        <div className="flex items-center gap-3">
-          <div className="w-12 h-12 rounded-md bg-secondary/40 flex items-center justify-center shrink-0 overflow-hidden">
-            {preview && <img src={preview} alt="" className="max-w-full max-h-full object-contain" />}
-          </div>
-          <input value={name} onChange={(e) => setName(sanitize ? sanitize(e.target.value) : e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') upload() }} placeholder={namePlaceholder} className="flex-1 h-9 px-3 rounded-lg bg-background border border-border text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary/40" />
-          <button onClick={() => setNsfw((v) => !v)} className={`px-2 py-1.5 rounded-lg text-[11px] font-bold border transition-colors cursor-pointer shrink-0 ${nsfw ? 'text-red-400 bg-red-400/10 border-red-400/40' : 'text-muted-foreground hover:text-foreground border-border'}`}>NSFW</button>
+    <div
+      className={`border-t border-border p-3 space-y-2.5 bg-secondary/15 ${dragOver ? 'ring-2 ring-primary/50 ring-inset' : ''}`}
+      onDragOver={(e) => { e.preventDefault(); if (!dragOver) setDragOver(true) }}
+      onDragLeave={(e) => { if (e.currentTarget === e.target) setDragOver(false) }}
+      onDrop={(e) => { e.preventDefault(); setDragOver(false); if (!uploading) addFiles(e.dataTransfer.files) }}
+    >
+      <input ref={fileRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => { addFiles(e.target.files); if (fileRef.current) fileRef.current.value = '' }} />
+
+      <button onClick={() => fileRef.current?.click()} disabled={uploading}
+        className="w-full flex items-center justify-center gap-2 h-14 rounded-lg border border-dashed border-border text-sm text-muted-foreground hover:bg-secondary/40 transition-colors cursor-pointer disabled:opacity-50">
+        <Upload size={16} /> {items.length ? 'Add more' : 'Choose images or drag and drop'}
+      </button>
+
+      {items.length > 0 && (
+        <div className="space-y-1.5">
+          {items.map((it) => (
+            <div key={it.id} className="flex items-center gap-2.5">
+              <div className="w-11 h-11 rounded-md bg-secondary/40 flex items-center justify-center shrink-0 overflow-hidden">
+                <img src={it.preview} alt="" className="max-w-full max-h-full object-contain" />
+              </div>
+              <input value={it.name} onChange={(e) => setItemName(it.id, e.target.value)} placeholder={namePlaceholder} disabled={uploading}
+                className="flex-1 min-w-0 h-9 px-3 rounded-lg bg-background border border-border text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary/40 disabled:opacity-60" />
+              <button onClick={() => toggleNsfw(it.id)} disabled={uploading}
+                className={`px-2 py-1.5 rounded-lg text-[11px] font-bold border transition-colors cursor-pointer shrink-0 disabled:opacity-50 ${it.nsfw ? 'text-red-400 bg-red-400/10 border-red-400/40' : 'text-muted-foreground hover:text-foreground border-border'}`}>NSFW</button>
+              <button onClick={() => removeItem(it.id)} disabled={uploading} aria-label="Remove"
+                className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors cursor-pointer shrink-0 disabled:opacity-50">
+                <Trash2 size={15} />
+              </button>
+            </div>
+          ))}
         </div>
       )}
+
       {error && <p className="text-xs text-destructive">{error}</p>}
-      {file && (
-        <div className="flex items-center justify-end gap-2">
-          <button onClick={() => { setFile(null); setPreview(null) }} disabled={uploading} className="px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors cursor-pointer disabled:opacity-50">Clear</button>
-          <button onClick={upload} disabled={!name.trim() || uploading} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
-            {uploading && <Loader2 size={12} className="animate-spin" />} Upload
+
+      {items.length > 0 && (
+        <div className="flex items-center justify-end gap-2 pt-0.5">
+          <button onClick={cancel} disabled={uploading} className="px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors cursor-pointer disabled:opacity-50">Cancel</button>
+          <button onClick={uploadAll} disabled={!allNamed || uploading} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
+            {uploading && <Loader2 size={12} className="animate-spin" />}
+            {uploading && progress ? `Uploading ${Math.min(progress.done + 1, progress.total)}/${progress.total}...` : `Upload ${items.length} ${itemNoun}${items.length !== 1 ? 's' : ''}`}
           </button>
         </div>
       )}
@@ -320,10 +382,23 @@ function StickerManageSection() {
             </button>
             {isOpen && (
               <div className="border-t border-border">
-                <PackActionRow addLabel="Add sticker" onRename={() => setRenameSetDTag(set.dTag)} onAdd={() => setAddTarget((v) => v === set.dTag ? null : set.dTag)} onDelete={() => setDeleteDTag(set.dTag)} />
+                <PackActionRow addLabel="Add sticker" onRename={() => setRenameSetDTag(set.dTag)} onAdd={() => setAddTarget(set.dTag)} onDelete={() => setDeleteDTag(set.dTag)} />
                 {addTarget === set.dTag && (
-                  <PackAddForm limitBytes={getStickerUploadLimitBytes()} namePlaceholder="sticker_name" sanitize={sanitizeShortcode}
-                    onUpload={async ({ url, name, nsfw }) => { const updated = [...set.stickers, { shortcode: name, url, nsfw, tagged: true }]; await publishStickerSet(set.dTag, set.name, updated, signer, privateKey); updateSet(set.dTag, updated) }}
+                  <PackAddForm limitBytes={getStickerUploadLimitBytes()} namePlaceholder="sticker_name" itemNoun="sticker" sanitize={sanitizeShortcode}
+                    onUploadItems={async (items) => {
+                      // Read the latest set from the store (closure's set.stickers is stale after the first batch).
+                      const base = useStickerStore.getState().myStickerSets.find((s) => s.dTag === set.dTag)?.stickers ?? set.stickers
+                      const used = new Set(base.map((s) => s.shortcode))
+                      const toAdd = items.map(({ url, name, nsfw }) => {
+                        const sc = sanitizeShortcode(name).slice(0, 60) || 'sticker'
+                        let unique = sc, n = 2
+                        while (used.has(unique)) unique = `${sc}_${n++}`
+                        used.add(unique)
+                        return { shortcode: unique, url, nsfw, tagged: true }
+                      })
+                      const updated = [...base, ...toAdd]
+                      await publishStickerSet(set.dTag, set.name, updated, signer, privateKey); updateSet(set.dTag, updated)
+                    }}
                     onDone={() => setAddTarget(null)} />
                 )}
                 {set.stickers.length === 0 ? (
@@ -427,10 +502,19 @@ function GifManageSection() {
             </button>
             {isOpen && (
               <div className="border-t border-border">
-                <PackActionRow addLabel="Add GIF" onRename={() => setRenameColDTag(col.dTag)} onAdd={() => setAddTarget((v) => v === col.dTag ? null : col.dTag)} onDelete={() => setDeleteDTag(col.dTag)} />
+                <PackActionRow addLabel="Add GIF" onRename={() => setRenameColDTag(col.dTag)} onAdd={() => setAddTarget(col.dTag)} onDelete={() => setDeleteDTag(col.dTag)} />
                 {addTarget === col.dTag && (
-                  <PackAddForm limitBytes={getGifUploadLimitBytes()} namePlaceholder="GIF name"
-                    onUpload={async ({ url, name, nsfw }) => { const updated = [...col.gifs, { name, url, nsfw, tagged: true }]; await publishGifCollection(col.dTag, col.name, updated, signer, privateKey); updateCol(col.dTag, updated) }}
+                  <PackAddForm limitBytes={getGifUploadLimitBytes()} namePlaceholder="GIF name" itemNoun="GIF"
+                    onUploadItems={async (items) => {
+                      // Read the latest collection from the store (closure's col.gifs is stale after the first batch).
+                      const base = useGifStore.getState().myGifCollections.find((c) => c.dTag === col.dTag)?.gifs ?? col.gifs
+                      const seen = new Set(base.map((g) => g.url))
+                      const toAdd = items
+                        .map(({ url, name, nsfw }) => ({ name: name.trim().slice(0, 60), url, nsfw, tagged: true }))
+                        .filter((g) => { if (seen.has(g.url)) return false; seen.add(g.url); return true })
+                      const updated = [...base, ...toAdd]
+                      await publishGifCollection(col.dTag, col.name, updated, signer, privateKey); updateCol(col.dTag, updated)
+                    }}
                     onDone={() => setAddTarget(null)} />
                 )}
                 {col.gifs.length === 0 ? (
