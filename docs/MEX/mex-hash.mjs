@@ -1,14 +1,14 @@
-// Reference hasher for MDE spec files.
+// Reference hasher for MEX spec files.
 //
-// Computes the SHA-256 over an MDE file's canonicalized SIGNED REGION, exactly as defined in MDE-CORE
+// Computes the SHA-256 over an MEX file's canonicalized SIGNED REGION, exactly as defined in MEX-CORE
 // (File Format > Canonicalization). Use it to (re)compute `file_sha256` whenever the signed region
 // changes, e.g. after inserting the real author npub or a predecessor's signature.
 //
-// Usage:  node docs/MDE/mde-hash.mjs docs/MDE/MDE-0.md
+// Usage:  node docs/MEX/mex-hash.mjs docs/MEX/MEX-0.md
 //
 // The signed region is the content strictly between the lines:
-//   <!-- MDE-SIGNED-REGION-START -->
-//   <!-- MDE-SIGNED-REGION-END -->
+//   <!-- MEX-SIGNED-REGION-START -->
+//   <!-- MEX-SIGNED-REGION-END -->
 // Canonicalization: UTF-8 (BOM dropped), EOLs normalized to LF, trailing spaces/tabs stripped per line,
 // trailing blank lines reduced to exactly one LF. The seal (file_sha256 + signature) sits AFTER the end
 // marker and is excluded, so writing it never changes the hash.
@@ -16,11 +16,11 @@
 import { readFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 
-const START = '<!-- MDE-SIGNED-REGION-START -->'
-const END = '<!-- MDE-SIGNED-REGION-END -->'
+const START = '<!-- MEX-SIGNED-REGION-START -->'
+const END = '<!-- MEX-SIGNED-REGION-END -->'
 
 const path = process.argv[2]
-if (!path) { console.error('usage: node mde-hash.mjs <file>'); process.exit(2) }
+if (!path) { console.error('usage: node mex-hash.mjs <file>'); process.exit(2) }
 
 let text = readFileSync(path, 'utf8')
 if (text.charCodeAt(0) === 0xfeff) text = text.slice(1) // drop BOM
