@@ -41,7 +41,7 @@ The signature lives in the spec file's **seal**, outside the signed region, so i
 ## Client compatibility and graceful degradation
 A legacy, MEX-unaware client stays safe with zero corruption:
 - It ignores the unknown `"mex"` tag (relays and clients ignore tags they do not index).
-- The raw tokens (for example `&&underline&&`, `||spoiler||`, `{t:2026-06-10T12:00:00Z}`) print as plain text. Because the tokens are compact and timestamps are recommended in ISO 8601, the content stays human-readable.
+- The raw tokens (for example `&&underline&&`, `||spoiler||`, `{t:2026-06-10T12:00:00Z}`) print as plain text. Because the tokens are compact and timestamps are ISO 8601 UTC instants, the content stays human-readable.
 
 A standard-aware client that does not support the declared `(base, version, lineage)` MUST behave the same way: render the tokens as readable plain text rather than partially transform them. A client that does not support the declared `base` at all degrades on that field alone, without resolving the lineage or hash.
 
