@@ -1,6 +1,6 @@
 // Reference hasher for MDE spec files.
 //
-// Computes the SHA-256 over an MDE file's canonicalized SIGNED REGION, exactly as defined in MDE-0
+// Computes the SHA-256 over an MDE file's canonicalized SIGNED REGION, exactly as defined in MDE-CORE
 // (File Format > Canonicalization). Use it to (re)compute `file_sha256` whenever the signed region
 // changes, e.g. after inserting the real author npub or a predecessor's signature.
 //

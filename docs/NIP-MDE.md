@@ -1,27 +1,28 @@
-# NIP-MDE: Nostr Integration for Markdown Extensions (MDE)
+# NIP-MDE: Nostr Integration for Markup Extensions (MDE)
 
 ## Abstract
-This NIP defines how Nostr clients declare which **Markdown Extensions (MDE)** formatting dictionary a rich-text event complies with, so a standard-aware client loads the right token set and a legacy client degrades safely. The MDE syntax, versioning, lineage laws, governance, and file format are defined entirely by the standalone MDE specification (MDE-0 and its lineage). This NIP only covers transport: how an event advertises its MDE baseline.
+This NIP defines how Nostr clients declare which **Markup Extensions (MDE)** formatting dictionary a rich-text event complies with, so a standard-aware client loads the right token set and a legacy client degrades safely. The MDE syntax, base model, versioning, lineage laws, governance, and file format are defined entirely by the standalone MDE specification (MDE-CORE and the per-base lineages that descend from it). This NIP only covers transport: how an event advertises its MDE baseline.
 
-Where MDE specification files are hosted, fetched, and verified is left to the implementor. Verification of a lineage is a one-time, on-adoption step (see MDE-0, File Format), not something a client repeats per event.
+Where MDE specification files are hosted, fetched, and verified is left to the implementor. Verification of a lineage is a one-time, on-adoption step (see MDE-CORE, File Format), not something a client repeats per event.
 
 ## The `mde` tag
 A rich-text event (for example `kind: 30023` long-form, or `kind: 1` notes) declares its formatting baseline with a single tag:
 
 ```json
-["mde", "<version>", "<lineage>", "<hash>", "<signature>"]
+["mde", "<base>", "<version>", "<lineage>", "<hash>", "<signature>"]
 ```
 
 - **`"mde"`**: the literal marker identifying this as an MDE declaration.
-- **`<version>`**: the MDE version the content complies with (`"0"`, `"1"`, ...).
-- **`<lineage>`**: the npub (or hex pubkey) identifying **which lineage** of the specification the content uses. Under MDE's adoption-based governance, more than one lineage (fork) can reach the same version number, so the lineage pubkey tells a client which lineage the content follows. For the most-adopted lineage this is the genesis author or the successor the ecosystem has adopted.
-- **`<hash>`**: the targeted version file's `file_sha256`. This is what actually *selects* the dictionary: `version` + `lineage` can still be ambiguous if one author published more than one file under the same version number, but the hash pins the declaration to one exact, immutable specification. A client matches it against the dictionary it verified on adoption.
-- **`<signature>`**: the lineage author's signature of that `hash`, copied from the spec file's seal. These fields mirror the four-field document declaration defined in MDE-0 (Declaring MDE in a document).
+- **`<base>`**: the base (L1) markup family the content is written in, for example `"markdown"` or `"djot"`. It is the dispatch discriminator: a client that does not support the base degrades immediately, without resolving anything else.
+- **`<version>`**: the MDE version the content complies with (`"0"`, `"1"`, ...), within that base's lineage.
+- **`<lineage>`**: the npub (or hex pubkey) identifying **which lineage** of the specification the content uses. Under MDE's adoption-based governance, more than one lineage (fork) can reach the same version number on the same base, so the lineage pubkey tells a client which lineage the content follows. For the most-adopted lineage this is the base profile's genesis author or the successor the ecosystem has adopted.
+- **`<hash>`**: the targeted version file's `file_sha256`. This is what actually *selects* the dictionary: `base` + `version` + `lineage` can still be ambiguous if one author published more than one file under the same version number, but the hash pins the declaration to one exact, immutable specification (and, transitively, the exact L1 version). A client matches it against the dictionary it verified on adoption.
+- **`<signature>`**: the lineage author's signature of that `hash`, copied from the spec file's seal. These fields mirror the five-field document declaration defined in MDE-CORE (Declaring MDE in a document).
 
 ### Why the signature is carried
 The signature lives in the spec file's **seal**, outside the signed region, so it is **not** covered by `hash` and cannot be reconstructed from it. Carrying it on the event is not render-time bloat: it is **redundancy**. Nostr events are replicated across many relays, so propagating the signature with the content makes a lineage's attestation durably available in the wild. If the origin spec file or its seal is ever lost, the signature survives, distributed across the corpus, and the chain stays verifiable. What is deliberately **not** carried is the full `prev_hash`/`prev_signature` *chain*: that is a property of the specification lineage, walked once on adoption, not of each event.
 
-## Example event (MDE version 1)
+## Example event (MDE base markdown, version 1)
 ```json
 {
   "id": "7b794f83733e84a2754c0926d8339ef6b7b212f43f019f1807d4b4a180f128af",
@@ -31,7 +32,7 @@ The signature lives in the spec file's **seal**, outside the signed region, so i
   "tags": [
     ["d", "universal-formatting-mde"],
     ["title", "Decentralized Typography via Protocol Tags"],
-    ["mde", "1", "npub1_lineage_author...", "file_sha256_of_target_version...", "sig_of_that_hash_by_lineage_author..."]
+    ["mde", "markdown", "1", "npub1_lineage_author...", "file_sha256_of_target_version...", "sig_of_that_hash_by_lineage_author..."]
   ],
   "content": "Using MDE I can &&underline&& text, hide a ||secret plot point||, {=highlight an idea=}, show a localized {t:2026-06-10T12:00:00Z}, and align a {>centered title<} or a {>signed line>} without breaking legacy, un-updated clients."
 }
@@ -42,7 +43,7 @@ A legacy, MDE-unaware client stays safe with zero corruption:
 - It ignores the unknown `"mde"` tag (relays and clients ignore tags they do not index).
 - The raw tokens (for example `&&underline&&`, `||spoiler||`, `{t:2026-06-10T12:00:00Z}`) print as plain text. Because the tokens are compact and timestamps are recommended in ISO 8601, the content stays human-readable.
 
-A standard-aware client that does not support the declared `(version, lineage)` MUST behave the same way: render the tokens as readable plain text rather than partially transform them.
+A standard-aware client that does not support the declared `(base, version, lineage)` MUST behave the same way: render the tokens as readable plain text rather than partially transform them. A client that does not support the declared `base` at all degrades on that field alone, without resolving the lineage or hash.
 
 ## Relationship to the MDE specification
-This NIP is transport only. The authoritative definitions of each token, the lineage laws, the adoption governance model, and the file format (including the signed-region canonicalization and the seal) live in the MDE specification files (`MDE-0`, `MDE-1`, and successors). A Nostr client implements MDE by compiling a verified version dictionary from those files and mapping the `mde` tag to it.
+This NIP is transport only. The authoritative definitions of the base model, the lineage laws, the adoption governance model, and the file format (including the signed-region canonicalization and the seal) live in the base-agnostic core (`MDE-CORE`), and each token is defined in a per-base lineage (for the Markdown base, `MDE-0` binds the base and `MDE-1` onward define the tokens). A Nostr client implements MDE by compiling a verified version dictionary from those files and mapping the `mde` tag to it.

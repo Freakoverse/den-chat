@@ -1,16 +1,17 @@
 <!-- MDE-SIGNED-REGION-START -->
-Author: npub1_V1_AUTHOR_PLACEHOLDER (replace with the version-1 author's npub before sealing)
+Author: npub1_MARKDOWN_V1_AUTHOR_PLACEHOLDER (replace with the version-1 author's npub before sealing)
+Base: markdown
 Previous version: 0
-Previous file_sha256: 97aec06c5c10ccb56714b98e5903832d030895b55f0716f5d1105fb038e62060
+Previous file_sha256: 8ab64d5c8d3fbdfbc0eb5ba792f76d43b39a176e9953ad7690c53fb65961d9ee
 Previous author signature: PENDING_MDE0_SIGNATURE (the MDE-0 author's signature of the hash above)
 
-# MDE-1: Core Feature Dictionary (Version 1 Baseline)
+# MDE-1: Markdown Core Feature Dictionary (Version 1 Baseline)
 
 ## Abstract
-This document is the first functional feature increment of the Markdown Extensions (MDE) standard. It inherits, in full, the architecture, four lineage laws, adoption governance, compliance model, and file format defined in MDE-0. It adds the version-1 token dictionary.
+This document is the first functional feature increment of Markup Extensions (MDE) on the Markdown base. It inherits, in full, the architecture, four lineage laws, adoption governance, compliance model, and file format defined in MDE-CORE, and the Markdown base binding and External Base Lock defined in MDE-0. It adds the version-1 token dictionary.
 
 ## Version 1 token dictionary
-All version-1 tokens are chosen to avoid every CommonMark and GFM construct (Law 1, MDE-0). Each row gives the token and its rendered output.
+All version-1 tokens are chosen to avoid every CommonMark and GFM construct (External Base Lock, MDE-CORE; the concrete Markdown collision list is in MDE-0). Each row gives the token and its rendered output.
 
 | Token | Meaning | Rendered output |
 |-------|---------|-----------------|
@@ -24,7 +25,7 @@ All version-1 tokens are chosen to avoid every CommonMark and GFM construct (Law
 
 ### Notes and semantics
 - **Spoiler and the GFM table pipe.** The spoiler delimiter is `||`. Because GFM uses a single `|` as a table-cell separator, an MDE token is resolved **within** cell text, never across the `|` cell boundaries. Outside tables, `||text||` is a plain inline spoiler.
-- **`{t:payload}` is a dynamic value token** (MDE-0, "Two kinds of extensions"), not a text decoration. Its delimiter is the brace family, deliberately **not** angle brackets: `<…>` is CommonMark autolink and inline-HTML territory and is barred by Law 1. The payload is one of:
+- **`{t:payload}` is a dynamic value token** (MDE-CORE, "Two kinds of extensions"), not a text decoration. Its delimiter is the brace family, deliberately **not** angle brackets: `<…>` is CommonMark autolink and inline-HTML territory and is barred by External Base Lock. The payload is one of:
   - an **ISO 8601** instant, e.g. `{t:2026-06-10T12:00:00Z}` (RECOMMENDED), or
   - a **Unix epoch seconds** integer, e.g. `{t:1718000000}`.
   ISO 8601 is recommended because an MDE-unaware reader still sees a human-readable instant, which a raw epoch integer does not provide. A renderer detects which form is present by shape (leading digits only with no letters or separators means epoch seconds; otherwise parse as ISO 8601). The rendered `<time>` carries the original value in `datetime` and shows the viewer's localized time.
@@ -32,19 +33,19 @@ All version-1 tokens are chosen to avoid every CommonMark and GFM construct (Law
 - The three alignment tokens differ only by their inner delimiters: center points both arrows inward (`{>` … `<}`), right points both right (`{>` … `>}`), left points both left (`{<` … `<}`).
 
 ## Graceful degradation
-A parser reading a document whose declared MDE version or lineage it does not support MUST leave every unrecognized token as readable plain text. It MUST NOT partially transform or corrupt it. Because the tokens are compact and, for timestamps, ISO 8601, unrendered content stays human-readable.
+A parser reading a document whose declared MDE base, version, or lineage it does not support MUST leave every unrecognized token as readable plain text. It MUST NOT partially transform or corrupt it. Because the tokens are compact and, for timestamps, ISO 8601, unrendered content stays human-readable.
 
-The format of that metadata block (per file type) and what it carries (`version`, `lineage`, `hash`, and `signature`, all required) is defined once in MDE-0 (Declaring MDE in a document), since it is architecture, not a version-1 feature.
+The format of that metadata block (per file type) and what it carries (`base`, `version`, `lineage`, `hash`, and `signature`, all required) is defined once in MDE-CORE (Declaring MDE in a document), since it is architecture, not a version-1 feature.
 
 ## Parser flow
 A standard-aware client processes a document in three context-free phases:
 
 ```unset
-[Raw stream] -> 1. Scan metadata (version + lineage + hash) -> 2. Load that dictionary -> 3. Stream render -> [HTML / UI]
+[Raw stream] -> 1. Scan metadata (base + version + lineage + hash) -> 2. Load that dictionary -> 3. Stream render -> [HTML / UI]
 ```
 
-1. **Scan.** Locate the `version`, `lineage`, and `hash` in the document's metadata block or `_mde` key. The `signature` is also present but is not needed to select the dictionary (MDE-0, Declaring MDE in a document).
-2. **Load.** Select the pre-verified token dictionary for that `(version, lineage)` at the declared `hash`, which pins the exact spec file. The dictionary was verified once, on adoption (MDE-0, File Format); it is not re-verified per document.
+1. **Scan.** Locate the `base`, `version`, `lineage`, and `hash` in the document's metadata block or `_mde` key. The `signature` is also present but is not needed to select the dictionary (MDE-CORE, Declaring MDE in a document).
+2. **Load.** Select the pre-verified token dictionary for that `(base, version, lineage)` at the declared `hash`, which pins the exact spec file. The dictionary was verified once, on adoption (MDE-CORE, File Format); it is not re-verified per document.
 3. **Render.** Transform the registered tokens into UI components:
    - `&&text&&` -> `<u>text</u>`
    - `||text||` -> `<span class="spoiler">text</span>`
@@ -58,6 +59,6 @@ Renderers MUST sanitize output: a token's payload is data, never raw markup, so 
 <!-- MDE-SIGNED-REGION-END -->
 
 <!-- MDE-SEAL
-file_sha256: 7e3eb223802e6c92ddbc32ee85b80d9003e0c56bffff150753b25831bdbce73b
+file_sha256: 91400b909110873a631925c2610d93ffd7b369b4a94c2b3646b49d69dea6c44c
 signature: PENDING_SIGNATURE
 -->
