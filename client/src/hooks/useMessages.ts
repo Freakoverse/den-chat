@@ -339,20 +339,27 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
       }
     }
 
-    // Try parsing as JSON message format {text, attachments}
-    if (decrypted && content) {
+    // Decode the content envelope (NIP-CHAT, message content envelope). The canonical form is a versioned
+    // JSON object `{ "v": 1, "text": ..., "attachments"?: ... }`, always stamped on send, so a user's text
+    // (even text that itself looks like JSON) is never mistaken for structure: it is always the `text`
+    // field, one level deep. Runs regardless of channel encryption (the envelope applies to public and
+    // encrypted channels alike; on encrypted channels `content` has already been decrypted above).
+    //
+    // TRANSITIONAL: messages published before the envelope existed carry no `v`. We still render their
+    // legacy `{text, attachments, ...}` shape (and bare non-JSON plain text). This no-`v` fallback is
+    // deprecated and SHOULD be removed around 2028-10 (~2 years out); after that, content lacking a `v`
+    // renders as plain text. No new message depends on it, every send stamps `v`.
+    if (content) {
       try {
         const parsed = JSON.parse(content)
-        if (parsed && typeof parsed.text === 'string') {
+        if (parsed && typeof parsed === 'object' && typeof parsed.text === 'string' && (parsed.v === 1 || parsed.v === undefined)) {
           content = parsed.text
           if (Array.isArray(parsed.attachments) && parsed.attachments.length > 0) {
             attachments = parsed.attachments
           }
-          // Check for nsfw flag in decrypted JSON
           if (parsed.nsfw === true) {
             isNsfw = true
           }
-          // Forum post fields
           if (typeof parsed.title === 'string') {
             title = parsed.title
           }
@@ -364,7 +371,7 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
           }
         }
       } catch {
-        // Not JSON — legacy plain text message, content stays as-is
+        // Not JSON — plain text message, content stays as-is.
       }
     }
 
@@ -678,19 +685,18 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
       throw new Error('Encryption key not ready — hub secret is still loading')
     }
 
-    // Wrap as JSON if attachments, nsfw, or forum fields present
-    let plaintext = text
-    if ((attachments && attachments.length > 0) || nsfw || forumFields) {
-      const payload: any = { text }
-      if (attachments && attachments.length > 0) payload.attachments = attachments
-      if (nsfw) payload.nsfw = true
-      if (forumFields) {
-        payload.title = forumFields.title
-        if (forumFields.featuredImage) payload.featured_image = forumFields.featuredImage
-        if (forumFields.tags && forumFields.tags.length > 0) payload.tags = forumFields.tags
-      }
-      plaintext = JSON.stringify(payload)
+    // Always wrap the content in the versioned envelope (NIP-CHAT, message content envelope): the user's
+    // text lives in `text`, never at the top level, so a message that happens to look like JSON can never
+    // be misread as structured data.
+    const payload: Record<string, unknown> = { v: 1, text }
+    if (attachments && attachments.length > 0) payload.attachments = attachments
+    if (nsfw) payload.nsfw = true
+    if (forumFields) {
+      payload.title = forumFields.title
+      if (forumFields.featuredImage) payload.featured_image = forumFields.featuredImage
+      if (forumFields.tags && forumFields.tags.length > 0) payload.tags = forumFields.tags
     }
+    const plaintext = JSON.stringify(payload)
 
     let content = plaintext
     if (key) {
@@ -922,19 +928,16 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
       throw new Error('Encryption key not ready — hub secret is still loading')
     }
 
-    // Wrap as JSON if attachments, nsfw, or forum fields present (same as sendMessage)
-    let plaintext = newText
-    if ((attachments && attachments.length > 0) || nsfw || forumFields) {
-      const payload: any = { text: newText }
-      if (attachments && attachments.length > 0) payload.attachments = attachments
-      if (nsfw) payload.nsfw = true
-      if (forumFields) {
-        payload.title = forumFields.title
-        if (forumFields.featuredImage) payload.featured_image = forumFields.featuredImage
-        if (forumFields.tags && forumFields.tags.length > 0) payload.tags = forumFields.tags
-      }
-      plaintext = JSON.stringify(payload)
+    // Always wrap in the versioned envelope (same as sendMessage).
+    const payload: Record<string, unknown> = { v: 1, text: newText }
+    if (attachments && attachments.length > 0) payload.attachments = attachments
+    if (nsfw) payload.nsfw = true
+    if (forumFields) {
+      payload.title = forumFields.title
+      if (forumFields.featuredImage) payload.featured_image = forumFields.featuredImage
+      if (forumFields.tags && forumFields.tags.length > 0) payload.tags = forumFields.tags
     }
+    const plaintext = JSON.stringify(payload)
 
     let content = plaintext
     if (key) {

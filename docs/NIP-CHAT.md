@@ -1605,10 +1605,11 @@ Because not all relays honor NIP-09 deletion requests, the client SHOULD also re
 
 #### Plaintext Format
 
-Before encryption, the message content is a JSON string:
+Before encryption, the message content is **always** a versioned JSON envelope, on every message, including one that is only plain text:
 
 ```json
 {
+  "v": 1,
   "text": "**hello** world, check this out @<hex_pubkey>",
   "attachments": [
     {
@@ -1622,13 +1623,19 @@ Before encryption, the message content is a JSON string:
 }
 ```
 
+Wrapping unconditionally is deliberate: the user's message is **always** the `text` field, one level deep, so content that itself looks like JSON (a user who literally types `{"text":"x"}`) can never be mistaken for the envelope. It is stored as the escaped string value of `text` and renders verbatim.
+
 | Field | Type | Description |
 |-------|------|-------------|
-| `text` | string | Message content in Markdown format. Mentions use `@<hex_pubkey>` inline. |
+| `v` | number | Envelope version, currently `1`, present on every message. A reader treats the content as this structured envelope only when `v` is present. A future revision may change the shape under a higher number, so readers MUST check `v` before interpreting the other fields. |
+| `text` | string | Message content in Markdown format. Mentions use `@<hex_pubkey>` inline. The whole user message is this field, even when that text is itself valid JSON. |
 | `attachments` | array | Optional. Blossom file references (see §6.2.1). |
 | `nsfw` | boolean | Optional. If `true`, the message contains sensitive/NSFW content. Clients SHOULD blur attachments and hide text behind a click-to-reveal overlay. This field is inside the encrypted content and only visible to members. |
+| `title`, `featured_image`, `tags` | string / string / array | Optional. Forum post fields (§21), carried in the same envelope. |
 
-The JSON is serialized, then encrypted with AES-256-GCM using the channel message key, and placed in the event's `content` field.
+The JSON is serialized, then encrypted with AES-256-GCM using the channel message key, and placed in the event's `content` field. On a public (unencrypted) channel the serialized JSON is the `content` directly.
+
+**Transitional (legacy, pre-`v`).** Messages published before the versioned envelope was introduced carry no `v`: earlier clients wrapped only when `attachments`, `nsfw`, or forum fields were present, and left plain text as a bare, non-JSON string. Readers MUST still render those, content with no `v` that parses as a JSON object with a string `text` is a legacy structured message, and content that is not JSON is legacy plain text. This no-`v` fallback is **deprecated** and will be removed around **October 2028** (about two years after introduction); after that, content lacking `v` renders as plain text. No message authored under this specification relies on the fallback, every message carries `v`.
 
 #### 6.2.1 Attachment Schema
 
