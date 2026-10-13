@@ -6,8 +6,11 @@
  */
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { Star, Loader2 } from 'lucide-react'
-import { useBlossomMedia } from '@/hooks/useBlossomMedia'
+import { Star, Loader2, FileDown } from 'lucide-react'
+import { useBlossomMedia, parseBlossomUrl } from '@/hooks/useBlossomMedia'
+import { blossomServers, downloadFromBlossom } from '@/lib/blossom'
+import { decryptFile } from '@/lib/crypto/fileEncryption'
+import { saveBlobAs } from '@/lib/saveFile'
 import { VerificationBadge } from '@/components/ui/VerificationBadge'
 import { ImageGallery } from '@/components/social/RichContent'
 import { getRenderLimit } from '@/lib/imageSizeGuard'
@@ -29,6 +32,10 @@ const ANIMATABLE_URL_RE = /\.(gif|webp)(\?[^\s#]*)?(#[^\s]*)?$/i
 const CONTENT_IMAGE_RE = /\.(jpg|jpeg|png|gif|webp|svg|bmp)(\?[^\s#]*)?(#[^\s]*)?$/i
 /** Blossom server URLs with a bare sha256 hash path (no file extension) */
 const CONTENT_BLOSSOM_SIMPLE = /^https?:\/\/(blossom\.(primal\.net|band|nostr\.hu|data\.haus)|cdn\.sovbit\.host)\/[a-f0-9]{64}(\?[^\s#]*)?(#[^\s]*)?$/i
+/** Media extensions that render inline (image/video/audio) — excluded from the file-download path. */
+const CONTENT_MEDIA_EXT_RE = /\.(jpg|jpeg|png|gif|webp|svg|bmp|mp4|webm|mov|m4v|mp3|ogg|wav|m4a|flac|aac)(\?[^\s#]*)?(#[^\s]*)?$/i
+/** Blossom hash URL carrying a NON-media extension (e.g. .zip, .pdf) — a downloadable file, not an image. */
+const CONTENT_BLOSSOM_FILE = /^https?:\/\/(blossom\.(primal\.net|band|nostr\.hu|data\.haus)|cdn\.sovbit\.host)\/[a-f0-9]{64}\.[a-z0-9]{1,16}(\?[^\s#]*)?(#[^\s]*)?$/i
 
 /** Check if a string is a single URL (starts with http(s), no spaces) */
 function isSingleUrl(s: string): boolean {
@@ -40,12 +47,16 @@ function isImageUrl(url: string): boolean {
   return CONTENT_IMAGE_RE.test(url) || CONTENT_BLOSSOM_SIMPLE.test(url)
 }
 
+/** Check if a URL is a downloadable (non-media) blossom file. */
+function isBlossomFileUrl(url: string): boolean {
+  return CONTENT_BLOSSOM_FILE.test(url) && !CONTENT_MEDIA_EXT_RE.test(url)
+}
+
 /* ────────────── Types ────────────── */
 
-export interface ContentMediaGroup {
-  kind: 'image-group'
-  urls: string[]
-}
+export type ContentMediaGroup =
+  | { kind: 'image-group'; urls: string[] }
+  | { kind: 'file'; url: string }
 
 /* ────────────── Extraction ────────────── */
 
@@ -90,6 +101,14 @@ export function extractContentMediaGroups(content: string): { groups: ContentMed
     // Check if this line is ONLY a single URL pointing to an image
     if (isSingleUrl(trimmed) && isImageUrl(trimmed)) {
       currentImages.push({ url: trimmed, index: i })
+      return
+    }
+
+    // A single non-media blossom file URL becomes its own download card (and breaks any image group).
+    if (isSingleUrl(trimmed) && isBlossomFileUrl(trimmed)) {
+      flushImages()
+      groups.push({ kind: 'file', url: trimmed })
+      linesToStrip.add(i)
       return
     }
 
@@ -257,6 +276,57 @@ export function ContentMediaImage({ src, className, style, onClick, enableFavori
   )
 }
 
+/**
+ * Download card for a non-media blossom file (zip, pdf, etc.) referenced by URL in message content.
+ * Fetches on click (not on render, so scrolling past a big file costs nothing) and decrypts when the URL
+ * carries an encryption fragment, so it works for both plain (B-DM) and encrypted (M-DM) attachments.
+ */
+export function ContentMediaFile({ url }: { url: string }) {
+  const parsed = useMemo(() => parseBlossomUrl(url), [url])
+  const [busy, setBusy] = useState(false)
+  const [failed, setFailed] = useState(false)
+
+  const ext = parsed?.ext || ''
+  const label = parsed ? `${parsed.hash.slice(0, 8)}${ext || '.bin'}` : 'file'
+
+  const download = useCallback(async () => {
+    if (!parsed || busy) return
+    setBusy(true); setFailed(false)
+    try {
+      const servers = [parsed.originServer, ...blossomServers.getServers().map((s) => s.replace(/\/+$/, ''))]
+        .filter((s, i, a) => a.indexOf(s) === i)
+      let bytes = await downloadFromBlossom(parsed.hash, servers)
+      if (parsed.enc) bytes = await decryptFile(bytes, parsed.enc.keyHex, parsed.enc.nonceHex)
+      const blob = new Blob([bytes.slice() as Uint8Array<ArrayBuffer>], { type: 'application/octet-stream' })
+      try { await saveBlobAs(blob, label, 'File') } catch { /* user cancelled the save dialog */ }
+    } catch {
+      setFailed(true)
+    } finally {
+      setBusy(false)
+    }
+  }, [parsed, busy, label])
+
+  return (
+    <button
+      onClick={download}
+      disabled={busy || !parsed}
+      className="mt-2 flex items-center gap-2.5 max-w-[400px] max-[1080px]:max-w-full px-3 py-2.5 rounded-lg border border-border bg-secondary/30 hover:bg-secondary/50 transition-colors cursor-pointer text-left disabled:opacity-60 disabled:cursor-default"
+    >
+      <span className="w-9 h-9 rounded-md bg-secondary/60 flex items-center justify-center shrink-0 text-muted-foreground">
+        {busy ? <Loader2 size={16} className="animate-spin" /> : <FileDown size={16} />}
+      </span>
+      <span className="min-w-0">
+        <span className="block text-sm text-foreground truncate">{label}</span>
+        <span className="block text-[11px] text-muted-foreground truncate">
+          {failed
+            ? <span className="text-destructive">Download failed, tap to retry</span>
+            : busy ? 'Downloading…' : (parsed?.enc ? 'Encrypted file, tap to download' : 'Tap to download')}
+        </span>
+      </span>
+    </button>
+  )
+}
+
 /** Renders grouped inline content images in grid layouts with gallery lightbox */
 export function ContentMediaGroups({ groups, galleryImages, onGalleryOpen }: {
   groups: ContentMediaGroup[]
@@ -268,6 +338,9 @@ export function ContentMediaGroups({ groups, galleryImages, onGalleryOpen }: {
   return (
     <>
       {groups.map((group, gi) => {
+        if (group.kind === 'file') {
+          return <ContentMediaFile key={`cf-${gi}`} url={group.url} />
+        }
         if (group.urls.length === 1) {
           const url = group.urls[0]
           return (
@@ -312,7 +385,7 @@ export function useContentMediaGrouping(content: string) {
   )
 
   const allContentImages = useMemo(
-    () => groups.flatMap(g => g.urls),
+    () => groups.flatMap(g => g.kind === 'image-group' ? g.urls : []),
     [groups]
   )
 

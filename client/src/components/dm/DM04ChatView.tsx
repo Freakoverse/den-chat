@@ -59,7 +59,8 @@ import { setNameFromAddress } from '@/lib/customSets'
 
 const GROUP_WINDOW_S = 5 * 60
 
-/** Map common MIME types to file extensions (for blossom URL suffix) */
+/** Map a MIME type to a file extension (for the blossom URL suffix). Non-media types must resolve to a
+ *  concrete extension so the URL is never a bare hash, which the renderer would mistake for an image. */
 function mimeToExt(mime: string): string {
   const map: Record<string, string> = {
     'image/jpeg': '.jpg', 'image/png': '.png', 'image/gif': '.gif',
@@ -67,8 +68,23 @@ function mimeToExt(mime: string): string {
     'video/mp4': '.mp4', 'video/webm': '.webm', 'video/quicktime': '.mov',
     'audio/mpeg': '.mp3', 'audio/ogg': '.ogg', 'audio/wav': '.wav',
     'audio/flac': '.flac', 'audio/aac': '.aac', 'audio/mp4': '.m4a',
+    'application/pdf': '.pdf', 'application/zip': '.zip', 'application/x-zip-compressed': '.zip',
+    'application/x-7z-compressed': '.7z', 'application/vnd.rar': '.rar', 'application/x-rar-compressed': '.rar',
+    'application/gzip': '.gz', 'application/x-tar': '.tar',
+    'text/plain': '.txt', 'text/markdown': '.md', 'text/csv': '.csv', 'application/json': '.json',
+    'application/msword': '.doc', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx',
+    'application/vnd.ms-excel': '.xls', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': '.xlsx',
+    'application/vnd.ms-powerpoint': '.ppt', 'application/vnd.openxmlformats-officedocument.presentationml.presentation': '.pptx',
+    'application/vnd.android.package-archive': '.apk',
   }
-  return map[mime] || ''
+  if (map[mime]) return map[mime]
+  // Unmapped media stays bare (rendered inline as before). Any other type gets a concrete extension,
+  // derived from the MIME subtype where sane, else a generic binary extension.
+  const type = mime.split('/')[0]
+  if (type === 'image' || type === 'video' || type === 'audio') return ''
+  const sub = mime.split('/')[1]?.split('+')[0]?.split(';')[0]?.trim()
+  if (sub && sub !== 'octet-stream' && /^[a-z0-9.-]{1,12}$/i.test(sub)) return `.${sub}`
+  return '.bin'
 }
 
 /** Extract NIP-30 emoji tags from a raw event JSON string */
@@ -1186,9 +1202,16 @@ function DM04MessageRow({
       const menuEl = menuRef.current?.querySelector('[data-action-menu]') as HTMLElement | null
       const dotsRect = dotsRef.current!.getBoundingClientRect()
       const menuHeight = menuEl?.offsetHeight || 300
-      const spaceBelow = window.innerHeight - dotsRect.bottom - 8
-      const spaceAbove = dotsRect.top - 8
-      setDropUp(spaceBelow < menuHeight && spaceAbove > menuHeight)
+      // Clip against the scrollable messages container, not just the viewport: the menu lives inside an
+      // overflow-y-auto list, so there can be plenty of viewport space below while the container still
+      // clips the menu (which is why Delete, the last item, went off-screen on the bottom message).
+      const container = dotsRef.current!.closest('.overflow-y-auto') as HTMLElement | null
+      const cRect = container?.getBoundingClientRect()
+      const bottomBound = cRect ? Math.min(window.innerHeight, cRect.bottom) : window.innerHeight
+      const topBound = cRect ? Math.max(0, cRect.top) : 0
+      const spaceBelow = bottomBound - dotsRect.bottom - 8
+      const spaceAbove = dotsRect.top - topBound - 8
+      setDropUp(spaceBelow < menuHeight && spaceAbove > spaceBelow)
     })
     return () => cancelAnimationFrame(raf)
   }, [showMenu])
