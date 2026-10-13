@@ -201,7 +201,9 @@ banned `R` cannot evade by minting a new `P`.
   the join/Discover card (§6.1). The hub **secret is not in the content** — it stays in the
   tree — so this adds no bootstrap step.
 - Message and every member-authored hub event gain the encrypted `identity` tag (`P_pub`
-  bound to `R` by a **per-message** `sig_R`); `pubkey` is `P`.
+  bound to `R` by a **per-message** `sig_R`); `pubkey` is `P`. The message `content` envelope
+  (§6.2) is **unchanged from v1**: `sig_R` signs it as part of the event digest, and no identity
+  data lives inside it.
 - Join requests are sealed to the owner `O` (§6.3).
 
 ### 0.4 v1 and v2 coexist — no forced migration (see §12)
