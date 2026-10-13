@@ -211,8 +211,20 @@ The decrypted `content` is a UTF-8 JSON object:
   "t": "Hello",                   // message text (optional if an attachment-only message)
   "edited": 1733251200,           // optional: unix time of the latest edit (present only on an edit, §2.2)
   "reply": "30092:<authorM>:<d>", // optional: addressable coordinate of the message this replies to (kept private; survives edits)
-  "attachments": [                // optional: encrypted-file references (same shape DEN DMs already use)
-    { "url": "<blossom url>", "m": "image/png", "key": "<hex>", "nonce": "<hex>", "x": "<hex>", "ox": "<hex>", "size": 12345, "dim": "800x600" }
+  "attachments": [                // optional: structured file references (the same shape hub messages and DEN DMs use)
+    {
+      "hash": "<sha256 hex>",            // Blossom blob hash (the ciphertext blob's hash when encrypted)
+      "type": "image/png",              // MIME type of the original file
+      "name": "photo.png",              // original filename
+      "size": 12345,                    // file size in bytes (ciphertext size when encrypted)
+      "servers": ["https://blossom.example"],  // optional: Blossom servers the sender uploaded to
+      "encryption": {                   // optional: present only for client-encrypted files
+        "algorithm": "aes-gcm",
+        "key": "<hex>",                 // AES-256 key (64 hex)
+        "nonce": "<hex>",               // AES-GCM nonce (24 hex)
+        "originalHash": "<sha256 hex>"  // hash of the plaintext file
+      }
+    }
   ],
   "emoji":   [["shortcode", "<url>"]],   // optional: custom emoji refs, as DEN DMs
   "sticker": [["id", "<url>"]],          // optional

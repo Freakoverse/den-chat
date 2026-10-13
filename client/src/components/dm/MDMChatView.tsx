@@ -36,11 +36,10 @@ import { DnnBadge } from '@/components/ui/DnnBadge'
 import { useGifStore } from '@/stores/gifStore'
 import { publishGifFavorites } from '@/lib/nostr/customGif'
 import { ChatInputBar, type FileAttachment } from '@/components/chat/ChatInputBar'
-import { appendDecryptionFragment } from '@/lib/blossom/encMediaUrl'
-import { getUploadBlossoms } from '@/stores/postingBehaviourStore'
+import type { Attachment } from '@/stores/messageStore'
 import { EmojiPickerPopover, EmojiDiscoveryModal } from '@/components/chat/EmojiPickerPopover'
 import { StickerPickerPopover, StickerDiscoveryModal } from '@/components/chat/StickerPickerPopover'
-import { DeleteConfirmDialog, RawEventModal } from '@/components/hub/ChannelView'
+import { DeleteConfirmDialog, RawEventModal, AttachmentRenderer } from '@/components/hub/ChannelView'
 import { DMGifStarOverlay, DMSwitchMenu, type DMProtocol } from '@/components/dm/DMPage'
 import { AlertTriangle, Download } from 'lucide-react'
 import { getEmojiMap } from '@/stores/emojiStore'
@@ -57,33 +56,6 @@ import { setNameFromAddress } from '@/lib/customSets'
 /* ─── Helpers ─── */
 
 const GROUP_WINDOW_S = 5 * 60
-
-/** Map common MIME types to file extensions (for blossom URL suffix) */
-function mimeToExt(mime: string): string {
-  const map: Record<string, string> = {
-    'image/jpeg': '.jpg', 'image/png': '.png', 'image/gif': '.gif',
-    'image/webp': '.webp', 'image/svg+xml': '.svg', 'image/bmp': '.bmp',
-    'video/mp4': '.mp4', 'video/webm': '.webm', 'video/quicktime': '.mov',
-    'audio/mpeg': '.mp3', 'audio/ogg': '.ogg', 'audio/wav': '.wav',
-    'audio/flac': '.flac', 'audio/aac': '.aac', 'audio/mp4': '.m4a',
-    'application/pdf': '.pdf', 'application/zip': '.zip', 'application/x-zip-compressed': '.zip',
-    'application/x-7z-compressed': '.7z', 'application/vnd.rar': '.rar', 'application/x-rar-compressed': '.rar',
-    'application/gzip': '.gz', 'application/x-tar': '.tar',
-    'text/plain': '.txt', 'text/markdown': '.md', 'text/csv': '.csv', 'application/json': '.json',
-    'application/msword': '.doc', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx',
-    'application/vnd.ms-excel': '.xls', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': '.xlsx',
-    'application/vnd.ms-powerpoint': '.ppt', 'application/vnd.openxmlformats-officedocument.presentationml.presentation': '.pptx',
-    'application/vnd.android.package-archive': '.apk',
-  }
-  if (map[mime]) return map[mime]
-  // Unmapped media stays bare (rendered inline as before). Any other type gets a concrete extension,
-  // derived from the MIME subtype where sane, else a generic binary extension.
-  const type = mime.split('/')[0]
-  if (type === 'image' || type === 'video' || type === 'audio') return ''
-  const sub = mime.split('/')[1]?.split('+')[0]?.split(';')[0]?.trim()
-  if (sub && sub !== 'octet-stream' && /^[a-z0-9.-]{1,12}$/i.test(sub)) return `.${sub}`
-  return '.bin'
-}
 
 /** Extract NIP-30 emoji tags from a raw event JSON string */
 function extractDM04EmojiTags(rawEvent?: string): [string, string, string?][] | undefined {
@@ -136,6 +108,7 @@ interface OptimisticDM04 {
   replyPreview?: string
   relayProgress?: { confirmed: number; total: number }
   sentEventId?: string  // event ID for reconciliation with store
+  attachments?: Attachment[]  // structured file attachments shown while publishing
 }
 
 /* ═══════════════════════════════════════════ */
@@ -406,19 +379,19 @@ export function MDMChatView({ recipientPubkey, onSwitchProtocol, onBack }: { rec
     setSendError(null)
 
     let content = text
-    if (attachments && attachments.length > 0) {
-      // Use configured blossom server + file extension for maximum compatibility.
-      // useBlossomMedia handles server failover across all configured servers.
-      const servers = getUploadBlossoms()
-      const baseUrl = servers[0]?.replace(/\/+$/, '') || 'https://blossom.primal.net'
-      const links = attachments.map((a) => {
-        const url = `${baseUrl}/${a.hash}${mimeToExt(a.type)}`
-        // Encrypted upload: carry the per-file AES key in a fragment so the
-        // recipient can decrypt. Stays private inside the NIP-04-encrypted body.
-        return a.encryption ? appendDecryptionFragment(url, a.encryption) : url
-      })
-      content = content ? `${content}\n${links.join('\n')}` : links.join('\n')
-    }
+    // Files ride as STRUCTURED attachments inside the encrypted MDM payload (NIP-MDM §2.1), not as URLs
+    // in the text: filenames, sizes, and per-file keys stay private, and the renderer gets full metadata.
+    // Map the composer's FileAttachment shape to the shared Attachment shape.
+    const mdmAttachments: Attachment[] | undefined = attachments && attachments.length
+      ? attachments.map((a) => ({
+          hash: a.hash,
+          type: a.type,
+          name: a.name,
+          size: a.size,
+          ...(a.serverUrls?.length ? { servers: a.serverUrls.map((u) => u.replace(/\/+$/, '')) } : {}),
+          ...(a.encryption ? { encryption: { algorithm: 'aes-gcm', key: a.encryption.keyHex, nonce: a.encryption.nonceHex, originalHash: a.encryption.originalHashHex } } : {}),
+        }))
+      : undefined
 
     // Append GIF URLs to content (like normal media uploads)
     if (pendingGifs.length > 0) {
@@ -441,6 +414,7 @@ export function MDMChatView({ recipientPubkey, onSwitchProtocol, onBack }: { rec
         status: 'publishing',
         replyDisplayName: replyContext?.displayName,
         replyPreview: replyContext?.content?.slice(0, 60),
+        attachments: mdmAttachments,
       },
     ])
 
@@ -484,6 +458,7 @@ export function MDMChatView({ recipientPubkey, onSwitchProtocol, onBack }: { rec
         pendingGifs.length > 0
           ? pendingGifs.map((g): [string, string, string, string] => ['j', g.name, g.url, g.nsfw ? 'nsfw' : 'sfw'])
           : undefined,
+        mdmAttachments,
       )
       setReplyContext(null)
       setPendingStickers([])
@@ -736,7 +711,12 @@ export function MDMChatView({ recipientPubkey, onSwitchProtocol, onBack }: { rec
                       <span className="text-xs text-muted-foreground">{formatShortTime(optMsg.timestamp)}</span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <div className="text-base text-foreground/90 break-words"><MessageContent content={optMsg.content} /></div>
+                      <div className="text-base text-foreground/90 break-words">
+                        {optMsg.content && <MessageContent content={optMsg.content} />}
+                        {optMsg.attachments && optMsg.attachments.length > 0 && (
+                          <AttachmentRenderer attachments={optMsg.attachments} />
+                        )}
+                      </div>
                       {optMsg.status === 'publishing' && !optMsg.relayProgress?.confirmed && (
                         <span className="text-[10px] text-muted-foreground italic whitespace-nowrap">
                           publishing...
@@ -1259,6 +1239,9 @@ function DM04MessageRow({
                   {mediaGroups.length > 0 && (
                     <ContentMediaGroupsWithGallery content={afterGifStrip} />
                   )}
+                  {msg.attachments && msg.attachments.length > 0 && (
+                    <AttachmentRenderer attachments={msg.attachments} gifTags={msg.gifTags} />
+                  )}
                   {contentGifUrls.length > 0 && (
                     <div className="flex flex-wrap gap-2">
                       {contentGifUrls.map((gifUrl, i) => {
@@ -1638,18 +1621,19 @@ function DM04ThreadModal({ parentMsg, threadReplies, recipientPubkey, getProfile
 
     setSending(true)
 
-    let content = text
-    if (attachments && attachments.length > 0) {
-      const servers = getUploadBlossoms()
-      const baseUrl = servers[0]?.replace(/\/+$/, '') || 'https://blossom.primal.net'
-      const links = attachments.map((a) => {
-        const url = `${baseUrl}/${a.hash}${mimeToExt(a.type)}`
-        // Encrypted upload: carry the per-file AES key in a fragment so the
-        // recipient can decrypt. Stays private inside the NIP-04-encrypted body.
-        return a.encryption ? appendDecryptionFragment(url, a.encryption) : url
-      })
-      content = content ? `${content}\n${links.join('\n')}` : links.join('\n')
-    }
+    const content = text
+    // Files ride as STRUCTURED attachments inside the encrypted MDM payload (NIP-MDM §2.1), not as URLs
+    // in the text: filenames, sizes, and per-file keys stay private, and the renderer gets full metadata.
+    const mdmAttachments: Attachment[] | undefined = attachments && attachments.length
+      ? attachments.map((a) => ({
+          hash: a.hash,
+          type: a.type,
+          name: a.name,
+          size: a.size,
+          ...(a.serverUrls?.length ? { servers: a.serverUrls.map((u) => u.replace(/\/+$/, '')) } : {}),
+          ...(a.encryption ? { encryption: { algorithm: 'aes-gcm', key: a.encryption.keyHex, nonce: a.encryption.nonceHex, originalHash: a.encryption.originalHashHex } } : {}),
+        }))
+      : undefined
 
     const tempId = `opt-thread-${Date.now()}-${Math.random().toString(36).slice(2)}`
     setMessage('')
@@ -1663,6 +1647,7 @@ function DM04ThreadModal({ parentMsg, threadReplies, recipientPubkey, getProfile
         status: 'publishing',
         replyDisplayName: inThreadReply?.displayName,
         replyPreview: inThreadReply?.content?.slice(0, 60),
+        attachments: mdmAttachments,
       },
     ])
 
@@ -1684,6 +1669,10 @@ function DM04ThreadModal({ parentMsg, threadReplies, recipientPubkey, getProfile
             })
           )
         },
+        undefined, // emojiTags
+        undefined, // stickerTags
+        undefined, // gifTags
+        mdmAttachments,
       )
       setInThreadReply(null)
       setTimeout(() => {
@@ -1803,6 +1792,11 @@ function DM04ThreadModal({ parentMsg, threadReplies, recipientPubkey, getProfile
                     <div className="text-base text-foreground/90 break-words [&_p]:m-0 [&_pre]:my-1 [&_code]:text-xs">
                       <MessageContent content={reply.gifTags && reply.gifTags.length > 0 ? reply.content.split('\n').filter((l: string) => !reply.gifTags!.some(([, u]: [string, string, string]) => l.trim() === u)).join('\n').trim() : reply.content} emojiTags={reply.emojiTags} mutedWords={mutedWords} />
                     </div>
+                    {reply.attachments && reply.attachments.length > 0 && (
+                      <div className={reply.content ? 'mt-1' : ''}>
+                        <AttachmentRenderer attachments={reply.attachments} gifTags={reply.gifTags} />
+                      </div>
+                    )}
                     {reply.stickerTags && reply.stickerTags.length > 0 && (
                       <div className={`flex flex-wrap gap-2 ${reply.content ? 'mt-1' : ''}`}>
                         {reply.stickerTags.map(([shortcode, url, setRef], si) => (
@@ -1938,7 +1932,12 @@ function DM04ThreadModal({ parentMsg, threadReplies, recipientPubkey, getProfile
                     <span className="text-xs text-muted-foreground">{formatShortTime(optMsg.timestamp)}</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <div className="text-base text-foreground/90 break-words"><MessageContent content={optMsg.content} /></div>
+                    <div className="text-base text-foreground/90 break-words">
+                      {optMsg.content && <MessageContent content={optMsg.content} />}
+                      {optMsg.attachments && optMsg.attachments.length > 0 && (
+                        <AttachmentRenderer attachments={optMsg.attachments} />
+                      )}
+                    </div>
                     {optMsg.status === 'publishing' && !optMsg.relayProgress?.confirmed && (
                       <span className="text-[10px] text-muted-foreground italic whitespace-nowrap">publishing...</span>
                     )}

@@ -3034,8 +3034,10 @@ function groupAttachments(attachments: Attachment[], baseUrl: string, imageUrls:
   return blocks
 }
 
-function AttachmentRenderer({ attachments, hubDTag, gifTags }: { attachments: Attachment[]; hubDTag: string; gifTags?: [string, string, string][] }) {
-  const hub = useHubStore((s) => s.hubs[hubDTag])
+export function AttachmentRenderer({ attachments, hubDTag, gifTags }: { attachments: Attachment[]; hubDTag?: string; gifTags?: [string, string, string][] }) {
+  // hubDTag is optional: in a DM (no hub) there are no hub-configured blossom servers, so retrieval
+  // falls back to each attachment's own `servers` plus the client's blossom list (see below).
+  const hub = useHubStore((s) => (hubDTag ? s.hubs[hubDTag] : undefined))
   const hubServers = hub?.blossomServers || []
   // Merge hub servers with the SAME curated client blossom list used for uploads
   // (blossomServers.getServers()). Previously this used a second, hardcoded default list that had

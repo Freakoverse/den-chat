@@ -24,6 +24,7 @@ import { nowSeconds } from '@/lib/time/clockOffset'
 import { useBlockStore } from '@/stores/blockStore'
 import { useWotStore } from '@/stores/wotStore'
 import type { ISigner } from '@/stores/userStore'
+import type { Attachment } from '@/stores/messageStore'
 import type { DM04Message, DM04Conversation, DM04Reaction } from '@/stores/dm04Store'
 import {
   MDM_KIND,
@@ -76,7 +77,7 @@ interface MdmState {
     recipientPubkey: string, content: string, myPubkey: string, signer: ISigner | null, privateKey: string | null,
     replyTo?: string, rootRef?: string, isThread?: boolean,
     onPhase?: (phase: 'publishing', relayProgress?: { confirmed: number; total: number }) => void,
-    emojiTags?: Tuple4[], stickerTags?: Tuple4[], gifTags?: Tuple4[],
+    emojiTags?: Tuple4[], stickerTags?: Tuple4[], gifTags?: Tuple4[], attachments?: Attachment[],
   ) => Promise<void>
   deleteMessage: (eventId: string, myPubkey: string, signer: ISigner | null, privateKey: string | null) => Promise<void>
   addReaction: (
@@ -237,7 +238,7 @@ export const useMdmStore = create<MdmState>((set, get) => ({
 
   stopSubscription: () => { get().subscription?.close(); set({ subscription: null }) },
 
-  sendMessage: async (recipientPubkey, content, myPubkey, signer, privateKey, replyTo, rootRef, isThread, onPhase, emojiTags, stickerTags, gifTags) => {
+  sendMessage: async (recipientPubkey, content, myPubkey, signer, privateKey, replyTo, rootRef, isThread, onPhase, emojiTags, stickerTags, gifTags, attachments) => {
     const keys: MdmKeys = { privateKey, signer }
     if (!mdmSupported(keys)) throw new Error('Masked DMs need a local key or a signer with NIP-SKD support.')
     const body: MdmBody = {
@@ -248,6 +249,7 @@ export const useMdmStore = create<MdmState>((set, get) => ({
       emoji: drop4(emojiTags),
       sticker: drop4(stickerTags),
       gif: drop4(gifTags) as [string, string, string][] | undefined,
+      attachments: attachments && attachments.length ? attachments : undefined,
     }
     const { real, selfCopy } = await buildMdmMessage({ recipientRootPub: recipientPubkey, myRootPub: myPubkey, body, keys })
 
@@ -356,7 +358,7 @@ export const useMdmStore = create<MdmState>((set, get) => ({
 /** Build a DM04Message-shaped record from a decrypted MDM payload. */
 function toMessage(
   real: Event,
-  payload: { t?: string; deleted?: boolean; reply?: string; rootRef?: string; isThread?: boolean; emoji?: [string, string, string?][]; sticker?: [string, string, string?][]; gif?: [string, string, string][] },
+  payload: { t?: string; deleted?: boolean; reply?: string; rootRef?: string; isThread?: boolean; emoji?: [string, string, string?][]; sticker?: [string, string, string?][]; gif?: [string, string, string][]; attachments?: Attachment[] },
   counterparty: string,
   myPubkey: string,
   isMine: boolean,
@@ -376,6 +378,7 @@ function toMessage(
     emojiTags: payload.emoji,
     stickerTags: payload.sticker,
     gifTags: payload.gif,
+    attachments: payload.deleted ? undefined : payload.attachments,
     rawEvent: JSON.stringify(real),
     verified,
   }

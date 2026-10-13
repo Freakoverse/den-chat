@@ -26,6 +26,7 @@ import {
 import { guardedDecrypt } from '@/lib/auth/signerGuard'
 import { nowSeconds } from '@/lib/time/clockOffset'
 import type { ISigner } from '@/stores/userStore'
+import type { Attachment } from '@/stores/messageStore'
 
 /** The masked direct message kind (addressable; 92 = BIP-39 index of "mask"). docs §9. */
 export const MDM_KIND = 30092
@@ -44,7 +45,7 @@ export interface MdmKeys {
   signer?: ISigner | null
 }
 
-/** Decrypted real-message payload (docs §2.1). File URLs are appended into `t` (as dm04 does). */
+/** Decrypted real-message payload (docs §2.1). */
 export interface MdmPayload {
   v: 1
   /** sender's real key, disclosed only to the recipient; verified per docs §1.3 */
@@ -61,6 +62,9 @@ export interface MdmPayload {
   emoji?: [string, string, string?][]
   sticker?: [string, string, string?][]
   gif?: [string, string, string][]
+  /** Structured file attachments (docs §2.1), private inside the encrypted payload. Reuses the hub
+   *  Attachment shape (hash, type, name, size, optional servers, optional per-file encryption). */
+  attachments?: Attachment[]
 }
 
 /** The masked reaction kind (NIP-25, authored by the masked key, content encrypted). docs §6. */

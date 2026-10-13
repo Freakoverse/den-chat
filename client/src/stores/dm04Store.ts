@@ -31,6 +31,7 @@ import {
   type DM04Contact,
 } from '@/lib/nostr/dm04ContactRegistry'
 import type { ISigner } from '@/stores/userStore'
+import type { Attachment } from '@/stores/messageStore'
 import type { Event } from 'nostr-tools'
 import { playSoundEffect } from '@/lib/voice/soundEffects'
 import { discoverRecipientRelays } from '@/lib/nostr/relayDiscovery'
@@ -56,6 +57,7 @@ export interface DM04Message {
   emojiTags?: [string, string, string?][]    // decrypted [shortcode, url, set-ref?]
   stickerTags?: [string, string, string?][]  // decrypted [shortcode, url, set-ref?]
   gifTags?: [string, string, string][]        // decrypted [name, url, nsfw]
+  attachments?: Attachment[]  // structured file attachments (M-DM; see NIP-MDM). Empty for NIP-04 B-DMs.
 }
 
 export interface DM04Conversation {
