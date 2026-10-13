@@ -237,6 +237,21 @@ unknown fields, and **MUST** tolerate a missing `t` when an attachment is presen
 `from` fails verification **MUST** be treated as unattributed (the stable masked key `M` is still a valid
 opaque pseudonym; a client MAY drop it or surface it as "unverified sender").
 
+The payload is **always** this versioned object, on every message, including one that is only plain
+text. Three reasons:
+
+1. **One shape for text and attachments.** A text-only message and one that carries `attachments` (or
+   `emoji`, `sticker`, `gif`) share a single structure, so a reader parses the same object either way and
+   never has to guess whether the content is a bare string or a wrapper.
+2. **Privacy.** All of it, the message text, the sender's `from`, reply references, and every attachment
+   field (filenames, sizes, and per-file encryption keys) lives inside the NIP-44 ciphertext, because
+   only the `d` and `p` tags are public (§2). Putting attachment metadata in tags would expose it.
+3. **No collision with user-typed JSON.** The user's own message is always the string value of `t`, one
+   level deep, so content a user literally types, even `{"t":"hi"}` or `{"v":1,"text":"hi"}`, is stored
+   and rendered verbatim as that string and can never be mistaken for the envelope. The reader also keys
+   off `v`: it interprets the structured fields only when `v` is present (`v` is the payload version, so
+   a future shape change bumps it per §9), which is the discriminator a bare-string format would lack.
+
 ### 2.2 Editing
 
 An edit republishes the **same** `(kind, M, d)` coordinate with new encrypted content and a `created_at`
