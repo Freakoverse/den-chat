@@ -1623,7 +1623,7 @@ Before encryption, the message content is **always** a versioned JSON envelope, 
 }
 ```
 
-Wrapping unconditionally is deliberate: the user's message is **always** the `text` field, one level deep, so content that itself looks like JSON (a user who literally types `{"text":"x"}`) can never be mistaken for the envelope. It is stored as the escaped string value of `text` and renders verbatim.
+Wrapping unconditionally is deliberate, for two reasons. **One shape for every message:** a text-only message and one carrying `attachments`, `nsfw`, or forum fields share a single structure, so a reader parses the same object either way instead of first guessing whether the content is a bare string or a wrapper. **No collision with user-typed JSON:** the user's message is **always** the `text` field, one level deep, so content that itself looks like JSON (a user who literally types `{"text":"x"}`) can never be mistaken for the envelope. Serializing the envelope stores that message as the escaped string value of `text` (its `"` become `\"`), so it round-trips and renders verbatim; the reader reads `text` and never re-parses it. (Privacy is **not** among the reasons here: on a public channel the serialized JSON is the `content` directly, unencrypted, so wrapping hides nothing. Attachment metadata is member-private only on encrypted and private channels, where the whole envelope is encrypted.)
 
 | Field | Type | Description |
 |-------|------|-------------|
