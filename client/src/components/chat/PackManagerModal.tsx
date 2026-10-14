@@ -9,7 +9,7 @@
  */
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { X, Smile, Sticker, Film, FolderPlus, Plus, Pencil, Trash2, ChevronDown, ChevronUp, Loader2, AlertTriangle, Upload, Star, StarOff, ImageOff } from 'lucide-react'
+import { X, Smile, Sticker, Film, FolderPlus, Plus, Pencil, Trash2, ChevronDown, ChevronUp, Loader2, AlertTriangle, Upload, Star, StarOff, ImageOff, Check } from 'lucide-react'
 import { useEscToClose } from '@/hooks/useEscToClose'
 import { useMobile } from '@/hooks/useMobile'
 import { BlossomImage } from '@/components/ui/BlossomImage'
@@ -21,7 +21,7 @@ import { useGifStore, getGifUploadLimitBytes } from '@/stores/gifStore'
 import { publishEmojiSet, deleteEmojiSet, publishEmojiSubscriptions } from '@/lib/nostr/customEmoji'
 import { publishStickerSet, deleteStickerSet, publishStickerSubscriptions } from '@/lib/nostr/customSticker'
 import { publishGifCollection, deleteGifCollection, publishGifSubscriptions, publishGifFavorites } from '@/lib/nostr/customGif'
-import { uploadToBlossomServers } from '@/lib/blossom'
+import { uploadToBlossomServers, type UploadProgress } from '@/lib/blossom'
 import { getUploadBlossoms } from '@/stores/postingBehaviourStore'
 
 export type PackKind = 'emoji' | 'sticker' | 'gif'
@@ -44,6 +44,13 @@ const NAV_GROUPS: { header: string; items: { id: PackSection; label: string; ico
 ]
 
 const sanitizeShortcode = (v: string) => v.replace(/[^a-zA-Z0-9_-]/g, '_').toLowerCase()
+
+const formatSpeed = (bps: number) => {
+  if (bps < 1024) return `${Math.round(bps)} B/s`
+  if (bps < 1024 * 1024) return `${(bps / 1024).toFixed(1)} KB/s`
+  return `${(bps / (1024 * 1024)).toFixed(1)} MB/s`
+}
+const shortServerName = (url: string) => { try { return new URL(url).hostname.replace('www.', '') } catch { return url } }
 
 export function PackManagerModal({ open, onClose, initialSection = 'mine-emoji' }: {
   open: boolean
@@ -201,6 +208,11 @@ function PackAddForm({ limitBytes, namePlaceholder, itemNoun, sanitize, onUpload
   const [uploading, setUploading] = useState(false)
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // Per-file upload state (mirrors hub-chat per-file progress): the row currently uploading shows a
+  // live percent/server/speed bar, finished rows show a check, the rest show "Waiting".
+  const [uploadingId, setUploadingId] = useState<string | null>(null)
+  const [itemProgress, setItemProgress] = useState<Record<string, UploadProgress>>({})
+  const [doneIds, setDoneIds] = useState<Set<string>>(new Set())
 
   // Revoke every staged preview URL on unmount (ref so cleanup sees the latest list, not the mount-time one).
   const itemsRef = useRef(items); itemsRef.current = items
@@ -223,29 +235,37 @@ function PackAddForm({ limitBytes, namePlaceholder, itemNoun, sanitize, onUpload
   const removeItem = (id: string) => setItems((prev) => { const it = prev.find((x) => x.id === id); if (it) URL.revokeObjectURL(it.preview); return prev.filter((x) => x.id !== id) })
   const setItemName = (id: string, v: string) => setItems((prev) => prev.map((it) => it.id === id ? { ...it, name: sanitize ? sanitize(v) : v } : it))
   const toggleNsfw = (id: string) => setItems((prev) => prev.map((it) => it.id === id ? { ...it, nsfw: !it.nsfw } : it))
-  const cancel = () => { items.forEach((it) => URL.revokeObjectURL(it.preview)); setItems([]); setError(null); onDone() }
+  const cancel = () => { items.forEach((it) => URL.revokeObjectURL(it.preview)); setItems([]); setError(null); setItemProgress({}); setDoneIds(new Set()); onDone() }
 
   const allNamed = items.length > 0 && items.every((it) => it.name.trim().length > 0)
 
   const uploadAll = async () => {
     if (!allNamed || uploading) return
-    setUploading(true); setError(null)
+    setUploading(true); setError(null); setDoneIds(new Set()); setItemProgress({})
     const successes: { url: string; name: string; nsfw: boolean }[] = []
     const failed: StagedFile[] = []
-    // One at a time, in order.
+    // One file at a time, in order. Within each file, uploadToBlossomServers honours the
+    // "Simultaneous blossom uploads" (parallelBlossomUploads) setting for the server fan-out; the
+    // per-file percent below only streams in sequential mode (parallel mode fires without progress).
     for (let i = 0; i < items.length; i++) {
       const it = items[i]
       setProgress({ done: i, total: items.length })
+      setUploadingId(it.id)
       try {
         const data = new Uint8Array(await it.file.arrayBuffer())
-        const { hash, serverUrls } = await uploadToBlossomServers(data, signer, privateKey, getUploadBlossoms(), it.file.type)
+        const { hash, serverUrls } = await uploadToBlossomServers(
+          data, signer, privateKey, getUploadBlossoms(), it.file.type,
+          (p) => setItemProgress((prev) => ({ ...prev, [it.id]: p })),
+        )
         const ext = it.file.type.split('/')[1]?.split('+')[0] || 'png'
         const url = `${serverUrls[0] || 'https://blossom.primal.net'}/${hash}.${ext}`
         successes.push({ url, name: (sanitize ? sanitize(it.name) : it.name.trim()).slice(0, 60), nsfw: it.nsfw })
+        setDoneIds((prev) => new Set(prev).add(it.id))
       } catch {
         failed.push(it)
       }
     }
+    setUploadingId(null)
     setProgress({ done: items.length, total: items.length })
     try {
       if (successes.length) await onUploadItems(successes)
@@ -279,21 +299,51 @@ function PackAddForm({ limitBytes, namePlaceholder, itemNoun, sanitize, onUpload
 
       {items.length > 0 && (
         <div className="space-y-1.5">
-          {items.map((it) => (
+          {items.map((it) => {
+            const prog = itemProgress[it.id]
+            const isActive = uploadingId === it.id
+            const isDone = doneIds.has(it.id)
+            return (
             <div key={it.id} className="flex items-center gap-2.5">
               <div className="w-11 h-11 rounded-md bg-secondary/40 flex items-center justify-center shrink-0 overflow-hidden">
                 <img src={it.preview} alt="" className="max-w-full max-h-full object-contain" />
               </div>
-              <input value={it.name} onChange={(e) => setItemName(it.id, e.target.value)} placeholder={namePlaceholder} disabled={uploading}
-                className="flex-1 min-w-0 h-9 px-3 rounded-lg bg-background border border-border text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary/40 disabled:opacity-60" />
-              <button onClick={() => toggleNsfw(it.id)} disabled={uploading}
-                className={`px-2 py-1.5 rounded-lg text-[11px] font-bold border transition-colors cursor-pointer shrink-0 disabled:opacity-50 ${it.nsfw ? 'text-red-400 bg-red-400/10 border-red-400/40' : 'text-muted-foreground hover:text-foreground border-border'}`}>NSFW</button>
-              <button onClick={() => removeItem(it.id)} disabled={uploading} aria-label="Remove"
-                className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors cursor-pointer shrink-0 disabled:opacity-50">
-                <Trash2 size={15} />
-              </button>
+              {uploading ? (
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs text-foreground truncate">{it.name.trim() || namePlaceholder}</p>
+                  {isDone ? (
+                    <span className="text-[10px] text-emerald-400 flex items-center gap-1"><Check size={10} /> Uploaded</span>
+                  ) : isActive && prog ? (
+                    <div className="mt-0.5">
+                      <div className="w-full h-1 rounded-full bg-secondary overflow-hidden">
+                        <div className="h-full bg-amber-400 rounded-full transition-all duration-150" style={{ width: `${prog.percent}%` }} />
+                      </div>
+                      <div className="flex items-center justify-between text-[9px] text-muted-foreground mt-0.5">
+                        <span className="truncate">{shortServerName(prog.serverUrl)} ({prog.serverIndex + 1}/{prog.totalServers})</span>
+                        <span>{prog.percent >= 100 ? <span className="text-amber-400">Processing...</span> : formatSpeed(prog.speed)}</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <span className="text-[10px] text-muted-foreground flex items-center gap-1">
+                      {isActive ? <><Loader2 size={9} className="animate-spin" /> Uploading...</> : 'Waiting...'}
+                    </span>
+                  )}
+                </div>
+              ) : (
+                <>
+                  <input value={it.name} onChange={(e) => setItemName(it.id, e.target.value)} placeholder={namePlaceholder}
+                    className="flex-1 min-w-0 h-9 px-3 rounded-lg bg-background border border-border text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary/40" />
+                  <button onClick={() => toggleNsfw(it.id)}
+                    className={`px-2 py-1.5 rounded-lg text-[11px] font-bold border transition-colors cursor-pointer shrink-0 ${it.nsfw ? 'text-red-400 bg-red-400/10 border-red-400/40' : 'text-muted-foreground hover:text-foreground border-border'}`}>NSFW</button>
+                  <button onClick={() => removeItem(it.id)} aria-label="Remove"
+                    className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors cursor-pointer shrink-0">
+                    <Trash2 size={15} />
+                  </button>
+                </>
+              )}
             </div>
-          ))}
+            )
+          })}
         </div>
       )}
 
