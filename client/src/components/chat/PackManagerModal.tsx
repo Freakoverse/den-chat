@@ -14,9 +14,8 @@ import { useEscToClose } from '@/hooks/useEscToClose'
 import { useMobile } from '@/hooks/useMobile'
 import { BlossomImage } from '@/components/ui/BlossomImage'
 import { RenamePackModal } from '@/components/chat/RenamePackModal'
-import { EmojiUploadForm } from '@/components/chat/EmojiPickerPopover'
 import { useUserStore } from '@/stores/userStore'
-import { useEmojiStore } from '@/stores/emojiStore'
+import { useEmojiStore, getEmojiUploadLimitBytes } from '@/stores/emojiStore'
 import { useStickerStore, getStickerUploadLimitBytes } from '@/stores/stickerStore'
 import { useGifStore, getGifUploadLimitBytes } from '@/stores/gifStore'
 import { publishEmojiSet, deleteEmojiSet, publishEmojiSubscriptions } from '@/lib/nostr/customEmoji'
@@ -179,7 +178,7 @@ function DeleteSetDialog({ name, busy, onCancel, onConfirm }: { name: string; bu
 }
 
 /**
- * Multi-item staging uploader used by the sticker and GIF Add flows (emoji reuses EmojiUploadForm).
+ * Multi-item staging uploader used by the emoji, sticker and GIF Add flows in this manager.
  * Pick or drag-and-drop one or many images; each becomes an editable row (name + NSFW + remove). One
  * Upload button sends them to Blossom one at a time, then hands the parent the whole batch so the set
  * is saved in a single publish. Partial failures stay staged for retry; successes are added.
@@ -708,15 +707,26 @@ function EmojiManageSection() {
                   </button>
                 </div>
 
-                {/* Add form */}
+                {/* Add form (same multi-item staging uploader stickers/GIFs use) */}
                 {addTargetDTag === set.dTag && (
                   <div className="border-t border-border">
-                    <EmojiUploadForm
-                      sets={myEmojiSets}
-                      targetSet={set.dTag}
-                      onTargetChange={setAddTargetDTag}
-                      onDone={() => setAddTargetDTag(null)}
-                    />
+                    <PackAddForm limitBytes={getEmojiUploadLimitBytes()} namePlaceholder="emoji_name" itemNoun="emoji" sanitize={sanitizeShortcode}
+                      onUploadItems={async (items) => {
+                        // Read the latest set from the store (closure's set.emojis is stale after the first batch).
+                        const base = useEmojiStore.getState().myEmojiSets.find((s) => s.dTag === set.dTag)?.emojis ?? set.emojis
+                        const used = new Set(base.map((e) => e.shortcode))
+                        const toAdd = items.map(({ url, name, nsfw }) => {
+                          const sc = sanitizeShortcode(name).slice(0, 60) || 'emoji'
+                          let unique = sc, n = 2
+                          while (used.has(unique)) unique = `${sc}_${n++}`
+                          used.add(unique)
+                          return { shortcode: unique, url, nsfw, tagged: true }
+                        })
+                        const updated = [...base, ...toAdd]
+                        await publishEmojiSet(set.dTag, set.name, updated, signer, privateKey)
+                        updateMyEmojiSet(set.dTag, updated)
+                      }}
+                      onDone={() => setAddTargetDTag(null)} />
                   </div>
                 )}
 
