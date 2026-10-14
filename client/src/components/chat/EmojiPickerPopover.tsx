@@ -11,12 +11,11 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { refreshSubscribedPacks } from '@/lib/customSets'
 import { createPortal } from 'react-dom'
 import EmojiPickerReact, { EmojiStyle, Theme } from 'emoji-picker-react'
-import { Smile, Sparkles, Users, Plus, Trash2, Loader2, Upload, Search, X, Image, AlertTriangle, Check, Compass, ShieldQuestion, Pencil, Settings2 } from 'lucide-react'
+import { Smile, Sparkles, Users, Plus, Trash2, Loader2, Search, X, Image, Check, Compass, ShieldQuestion, Pencil, Settings2 } from 'lucide-react'
 import { PackManagerModal } from '@/components/chat/PackManagerModal'
-import { useEmojiStore, getEmojiUploadLimitBytes, hasOversizedEmoji, type CustomEmoji, type EmojiSet } from '@/stores/emojiStore'
-import { publishEmojiSet, publishEmojiSubscriptions, discoverEmojiSets, fetchEmojiSetByAddress, fetchEmojiSetsByAuthor } from '@/lib/nostr/customEmoji'
-import { uploadToBlossomServers, computeHash } from '@/lib/blossom'
-import { getUploadBlossoms } from '@/stores/postingBehaviourStore'
+import { useEmojiStore, hasOversizedEmoji, type CustomEmoji, type EmojiSet } from '@/stores/emojiStore'
+import { publishEmojiSubscriptions, discoverEmojiSets, fetchEmojiSetByAddress, fetchEmojiSetsByAuthor } from '@/lib/nostr/customEmoji'
+import { computeHash } from '@/lib/blossom'
 import { useUserStore } from '@/stores/userStore'
 import { useBlockStore } from '@/stores/blockStore'
 import { useFollowStore } from '@/stores/followStore'
@@ -28,7 +27,6 @@ import { nip19 } from 'nostr-tools'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { BlossomImage } from '@/components/ui/BlossomImage'
 import { Button } from '@/components/ui/button'
-import { CustomSelect } from '@/components/ui/custom-select'
 
 // emoji-picker-react lays its Basic-tab emojis out with JS-computed absolute
 // positions: columns = floor(width / 34px). At exactly 340 (= 10 × 34) Firefox
@@ -436,183 +434,6 @@ function EmojiButton({ emoji, onClick, onDelete, onRename }: {
         >
           <Trash2 size={7} />
         </button>
-      )}
-    </div>
-  )
-}
-
-// ─── Upload Form ───
-
-export function EmojiUploadForm({ sets, targetSet, onTargetChange, onDone }: {
-  sets: EmojiSet[]
-  targetSet: string
-  onTargetChange: (dTag: string) => void
-  onDone: () => void
-}) {
-  const updateMyEmojiSet = useEmojiStore((s) => s.updateMyEmojiSet)
-  const signer = useUserStore((s) => s.signer)
-  const privateKey = useUserStore((s) => s.privateKey)
-  const fileInputRef = useRef<HTMLInputElement>(null)
-
-  const [shortcode, setShortcode] = useState('')
-  const [file, setFile] = useState<File | null>(null)
-  const [preview, setPreview] = useState<string | null>(null)
-  const [uploading, setUploading] = useState(false)
-  const [uploadProgress, setUploadProgress] = useState(0)
-  const [error, setError] = useState<string | null>(null)
-  const [nsfw, setNsfw] = useState(false)
-
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0]
-    if (!f) return
-    setError(null)
-
-    // Check emoji upload limit
-    const limitBytes = getEmojiUploadLimitBytes()
-    if (f.size > limitBytes) {
-      setError(`File too large (${(f.size / 1024 / 1024).toFixed(1)} MB). Max: ${(limitBytes / 1024 / 1024).toFixed(0)} MB`)
-      return
-    }
-
-    // Check if it's an image
-    if (!f.type.startsWith('image/')) {
-      setError('Only image files are allowed')
-      return
-    }
-
-    setFile(f)
-    setPreview(URL.createObjectURL(f))
-
-    // Auto-fill shortcode from filename
-    if (!shortcode) {
-      const name = f.name.replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9_-]/g, '_').toLowerCase()
-      setShortcode(name)
-    }
-  }
-
-  const handleUpload = async () => {
-    if (!file || !shortcode.trim()) return
-    const sc = shortcode.trim().replace(/[^a-zA-Z0-9_-]/g, '_').toLowerCase()
-    setUploading(true)
-    setError(null)
-    setUploadProgress(0)
-
-    try {
-      const data = new Uint8Array(await file.arrayBuffer())
-      const servers = getUploadBlossoms()
-
-      const { hash, serverUrls } = await uploadToBlossomServers(
-        data,
-        signer,
-        privateKey,
-        servers,
-        file.type,
-        (progress) => setUploadProgress(progress.percent),
-      )
-
-      // Build the URL from a server that ACTUALLY accepted this blob — hardcoding blossom.primal.net
-      // produced a dead link (broken picker previews) whenever the upload landed elsewhere. serverUrls
-      // is non-empty here (uploadToBlossomServers throws if zero servers accepted).
-      const ext = file.type.split('/')[1]?.split('+')[0] || 'png'
-      const url = `${serverUrls[0] || 'https://blossom.primal.net'}/${hash}.${ext}`
-
-      // Add to the target set
-      const set = sets.find((s) => s.dTag === targetSet)
-      if (set) {
-        const newEmojis = [...set.emojis, { shortcode: sc, url, nsfw, tagged: true }]
-        await publishEmojiSet(targetSet, set.name, newEmojis, signer, privateKey)
-        updateMyEmojiSet(targetSet, newEmojis)
-      }
-
-      // Reset form
-      setFile(null)
-      setPreview(null)
-      setShortcode('')
-      setUploadProgress(0)
-      setNsfw(false)
-      onDone()
-    } catch (err) {
-      console.error('Emoji upload failed:', err)
-      setError(err instanceof Error ? err.message : 'Upload failed')
-    } finally {
-      setUploading(false)
-    }
-  }
-
-  useEffect(() => {
-    return () => { if (preview) URL.revokeObjectURL(preview) }
-  }, [preview])
-
-  return (
-    <div className="px-2 py-2 border-b border-[hsl(var(--border))] bg-[hsl(var(--muted)/0.15)] space-y-2">
-      {/* Row 1: Set selector */}
-      <div className="flex items-center gap-1.5">
-        <span className="text-xs text-[hsl(var(--muted-foreground))] shrink-0">Set:</span>
-        <CustomSelect
-          value={targetSet}
-          onChange={onTargetChange}
-          options={sets.map((s) => ({ value: s.dTag, label: s.name }))}
-          compact
-        />
-      </div>
-
-      {/* Row 2: File select + preview */}
-      <div className="flex items-center gap-1.5">
-        <input type="file" ref={fileInputRef} accept="image/*" className="hidden" onChange={handleFileSelect} />
-        <button
-          onClick={() => fileInputRef.current?.click()}
-          className="h-9 px-3 rounded-md text-xs bg-[hsl(var(--secondary))] border border-[hsl(var(--border))] text-[hsl(var(--foreground))] hover:bg-[hsl(var(--muted)/0.5)] transition-colors cursor-pointer flex items-center gap-1.5 shrink-0"
-        >
-          <Upload size={11} />
-          {file ? 'Change' : 'Select Image'}
-        </button>
-        {preview && (
-          <img src={preview} alt="Preview" className="w-7 h-7 rounded border border-[hsl(var(--border))] object-contain bg-[hsl(var(--muted)/0.3)] shrink-0" />
-        )}
-        {file && (
-          <span className="text-xs text-[hsl(var(--muted-foreground))] truncate">{file.name}</span>
-        )}
-      </div>
-
-      {/* Row 3: Shortcode + NSFW + Add */}
-      <div className="flex items-center gap-1.5">
-        <input
-          value={shortcode}
-          onChange={(e) => setShortcode(e.target.value.replace(/[^a-zA-Z0-9_-]/g, ''))}
-          placeholder="shortcode"
-          className="flex-1 h-9 px-3 rounded-md text-sm bg-[hsl(var(--background))] border border-[hsl(var(--border))] text-[hsl(var(--foreground))] placeholder:text-[hsl(var(--muted-foreground))] focus:outline-none font-mono min-w-0"
-        />
-        <button
-          onClick={() => setNsfw(!nsfw)}
-          className={`h-9 px-2.5 rounded-md text-xs font-medium transition-colors cursor-pointer shrink-0 ${nsfw ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-muted/30 text-muted-foreground border border-border'}`}
-        >
-          {nsfw ? 'NSFW' : 'SFW'}
-        </button>
-        <button
-          onClick={handleUpload}
-          disabled={!file || !shortcode.trim() || uploading}
-          className="h-9 px-3.5 rounded-md bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] text-xs font-medium hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50 flex items-center gap-1 shrink-0"
-        >
-          {uploading ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
-          {uploading ? `${uploadProgress}%` : 'Add'}
-        </button>
-      </div>
-
-      {/* Upload progress bar */}
-      {uploading && (
-        <div className="h-1 rounded-full bg-[hsl(var(--muted)/0.3)] overflow-hidden">
-          <div
-            className="h-full bg-[hsl(var(--primary))] rounded-full transition-all duration-300"
-            style={{ width: `${uploadProgress}%` }}
-          />
-        </div>
-      )}
-
-      {error && (
-        <div className="flex items-center gap-1 text-xs text-red-400">
-          <AlertTriangle size={10} className="shrink-0" />
-          <span className="truncate">{error}</span>
-        </div>
       )}
     </div>
   )
