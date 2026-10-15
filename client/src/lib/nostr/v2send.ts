@@ -20,6 +20,7 @@
 import { finalizeEvent, nip44, type UnsignedEvent, type Event } from 'nostr-tools'
 import { hexToBytes } from '@noble/hashes/utils'
 import { deriveSubKeyLocal, deriveBlindedLocal, signerSupportsSkd, SkdUnsupportedError, type SkdSigner, type ChatCtx } from '@/lib/crypto/skd'
+import { attachShortCode, SHORT_ADDRESS_KINDS } from '@/lib/nostr/nipShort'
 import type { ISigner } from '@/stores/userStore'
 
 /** A minimal signer bound to a derived sub-key. */
@@ -107,13 +108,18 @@ export async function mineAndSignAsSubkey(
   pSigner: SubkeySigner,
 ): Promise<Event> {
   const pubkey = await pSigner.getPublicKey()
+  // Centralized NIP-SHORT: stamp the `s` tag for allowlisted kinds over the on-wire author (P/O), so a
+  // v2 build/republish path can't drop the short address. Idempotent. See SHORT_ADDRESS_KINDS.
+  const base: UnsignedEvent = SHORT_ADDRESS_KINDS.has(unsigned.kind)
+    ? attachShortCode({ ...unsigned, pubkey }, pubkey)
+    : { ...unsigned, pubkey }
   if (minPow <= 0) {
-    return pSigner.signEvent({ ...unsigned, pubkey })
+    return pSigner.signEvent(base)
   }
 
   const { mineEvent, countLeadingZeroBits } = await import('@/lib/pow/pow')
   const MAX_RETRIES = 5
-  let mined = await mineEvent({ ...unsigned, pubkey }, minPow, pubkey)
+  let mined = await mineEvent(base, minPow, pubkey)
   let signed = await pSigner.signEvent(mined)
   let attempts = 0
   while (countLeadingZeroBits(signed.id) < minPow && attempts < MAX_RETRIES) {

@@ -49,6 +49,20 @@ export function isCoordinateKind(kind: number): boolean {
   return kind === 0 || kind === 3 || (kind >= 10000 && kind < 20000) || (kind >= 30000 && kind < 40000)
 }
 
+/**
+ * Kinds that get a short address automatically at sign time (see the signer hooks in
+ * lib/nostr/events.ts `signWithSigner` and lib/nostr/v2send.ts `mineAndSignAsSubkey`). This is the
+ * single source of truth for "which events are worth a shareable short address": deliberately a
+ * curated set, NOT every kind, so the per-author 6-char code space stays uncrowded. Attaching is
+ * idempotent, so a builder that already added the `s` tag is unaffected. Add a kind here rather than
+ * sprinkling `attachShortCode` through new publish paths.
+ *   1     text note
+ *   30023 long-form article
+ *   36942 hub event (NIP-CHAT)
+ *   36950 group event (NIP-CHAT §21)
+ */
+export const SHORT_ADDRESS_KINDS = new Set<number>([1, 30023, 36942, 36950])
+
 export function canonicalInput(source: CodeSource): string {
   if (isCoordinateKind(source.kind)) {
     const d = source.tags.find((t) => t[0] === 'd')?.[1] ?? ''

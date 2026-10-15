@@ -2,10 +2,11 @@
  * Event Builder — Create and sign Nostr events for NIP-CHAT
  */
 
-import { finalizeEvent, type UnsignedEvent, type Event } from 'nostr-tools'
+import { finalizeEvent, getPublicKey, type UnsignedEvent, type Event } from 'nostr-tools'
 import { nowSeconds } from '@/lib/time/clockOffset'
 import { KINDS, STANDARD_KINDS } from '@/lib/crypto/constants'
 import { useUserStore, type ISigner } from '@/stores/userStore'
+import { attachShortCode, SHORT_ADDRESS_KINDS } from '@/lib/nostr/nipShort'
 
 type Tag = [string, ...string[]]
 
@@ -90,6 +91,10 @@ export async function signWithSigner(
       throw new Error('Your signer is set to a different account than the one you’re logged in to. Switch it back to this account (or log out and back in) before publishing.')
     }
     const eventWithPubkey = { ...unsignedEvent, pubkey }
+    // Centralized NIP-SHORT: stamp the `s` tag for allowlisted kinds so no build/republish path can
+    // forget it. Idempotent (no-op if a builder already added it); derives the code over the real
+    // signing pubkey. See SHORT_ADDRESS_KINDS.
+    if (SHORT_ADDRESS_KINDS.has(eventWithPubkey.kind)) attachShortCode(eventWithPubkey, pubkey)
     const signed = await signer.signEvent(eventWithPubkey)
     if (!signed?.sig) throw new Error('Signing was cancelled or failed.')
     if (expected && signed.pubkey !== expected) {
@@ -98,6 +103,11 @@ export async function signWithSigner(
     return signed as unknown as Event
   }
   if (privateKey) {
+    if (SHORT_ADDRESS_KINDS.has(unsignedEvent.kind)) {
+      // Same centralized NIP-SHORT stamping for the local-key path; derive the author from the key.
+      const pk = getPublicKey(hexToBytes(privateKey))
+      return signEvent(attachShortCode({ ...unsignedEvent, pubkey: pk }, pk), privateKey)
+    }
     return signEvent(unsignedEvent, privateKey)
   }
   throw new Error('No signer or private key available')
