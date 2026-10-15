@@ -3433,7 +3433,7 @@ export function ReactionBar({ reactions, messageId, onAddReaction, rawReactions,
           <TooltipTrigger asChild>
             <button
               onClick={() => setShowReactionList(true)}
-              className="inline-flex items-center gap-1 h-7 px-2.5 rounded-full text-base cursor-pointer transition-colors border bg-secondary/50 border-border text-muted-foreground hover:bg-secondary hover:text-foreground"
+              className="inline-flex items-center gap-1 h-8 px-2.5 rounded-full text-base cursor-pointer transition-colors border bg-secondary/50 border-border text-muted-foreground hover:bg-secondary hover:text-foreground"
             >
               <Users size={15} />
               <span className="font-semibold">{totalCount}</span>
@@ -3447,7 +3447,7 @@ export function ReactionBar({ reactions, messageId, onAddReaction, rawReactions,
           <TooltipTrigger asChild>
           <button
             onClick={() => onAddReaction(messageId, r.emoji, r.customUrl)}
-            className={`inline-flex items-center gap-1 h-7 px-2.5 rounded-full text-base cursor-pointer transition-colors border ${r.reacted
+            className={`inline-flex items-center gap-1 h-8 px-2.5 rounded-full text-base cursor-pointer transition-colors border ${r.reacted
               ? 'bg-primary/20 border-primary/40 text-foreground'
               : 'bg-secondary/50 border-border text-muted-foreground hover:bg-secondary'
               }`}
