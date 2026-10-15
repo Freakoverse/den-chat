@@ -3406,7 +3406,7 @@ export function ReactionBar({ reactions, messageId, onAddReaction, rawReactions,
               <button
                 ref={addReactionBtnRef}
                 onClick={() => setShowPicker(!showPicker)}
-                className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-secondary/50 border border-border text-muted-foreground hover:bg-secondary hover:text-foreground cursor-pointer transition-colors"
+                className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-secondary/50 border border-border text-muted-foreground hover:bg-secondary hover:text-foreground cursor-pointer transition-colors"
               >
                 <Smile size={14} />
               </button>
