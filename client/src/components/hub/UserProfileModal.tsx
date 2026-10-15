@@ -1210,6 +1210,9 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
         groupedRoles: updatedGroupedRoles.length > 0 ? updatedGroupedRoles : hub.groupedRoles,
         publishedAt: hub.publishedAt,
         eventCreatedAt: hub.eventCreatedAt,
+        // v1 author = creator's real key. REQUIRED so buildHubEvent re-emits the NIP-SHORT `s` tag
+        // (a kick must not drop the hub's short address). Mirrors signHubEventForPublish.
+        authorPubkey: hub.creatorPubkey,
       })
       const signedEvent = await signFn(unsignedEvent, hub.minPow, myPubkey, signer, privateKey)
       await publishCriticalWithFailover(signedEvent, getPublishRelays([...hub.generalRelays]), [...hub.generalRelays])

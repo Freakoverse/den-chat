@@ -255,6 +255,9 @@ export async function safeTreeUpdate(params: SafeTreeUpdateParams): Promise<Safe
       groupedRoles: hub.groupedRoles,
       publishedAt: hub.publishedAt,
       eventCreatedAt: baseCreatedAt,
+      // v1 author = creator's real key. REQUIRED so buildHubEvent re-emits the NIP-SHORT `s` tag; without
+      // it every membership change (join approval, kick) silently drops the hub's short address.
+      authorPubkey: hub.creatorPubkey,
     })
     const signedEvent = await mineAndSign(unsignedEvent, hub.minPow, hub.creatorPubkey, signer, privateKey)
     publishedCreatedAt = signedEvent.created_at
@@ -636,6 +639,9 @@ export async function safePaginatedTreeUpdate(params: SafePaginatedTreeUpdatePar
       groupedRoles: hub.groupedRoles,
       publishedAt: hub.publishedAt,
       eventCreatedAt: baseCreatedAt,
+      // v1 author = creator's real key. REQUIRED so buildHubEvent re-emits the NIP-SHORT `s` tag; without
+      // it every membership change (join approval, kick) silently drops the hub's short address.
+      authorPubkey: hub.creatorPubkey,
     })
     const signedEvent = await mineAndSign(unsignedEvent, hub.minPow, hub.creatorPubkey, signer, privateKey)
     publishedCreatedAt = signedEvent.created_at
