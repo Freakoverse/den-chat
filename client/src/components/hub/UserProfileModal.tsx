@@ -26,7 +26,7 @@ import {
   X, Copy, Check, Pencil, UserPlus, UserMinus, ExternalLink,
   MoreVertical, ShieldBan, ShieldCheck, MessageCircle,
   Globe, Zap, AtSign, Camera, ImageIcon, Loader2, XCircle, AlertTriangle,
-  Flag, BadgeCheck, RotateCw, Users, TreePine, HandCoins,
+  Flag, BadgeCheck, RotateCw, Users, TreePine, HandCoins, Code,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
@@ -109,6 +109,37 @@ const V1_CREATOR_BAN_STEPS = ['Downloading index & tree', 'Removing member & rot
 const V2_MEMBER_BAN_STEPS = ['Downloading index & tree', 'Removing member & rotating secret', 'Uploading page & spine', 'Building index', 'Publishing hub event']
 const V2_NONMEMBER_BAN_STEPS = ['Downloading index & tree', 'Uploading ban pages', 'Publishing hub event']
 
+/**
+ * Minimal raw-event viewer for the user's kind-0 profile event. Defined locally (not imported from
+ * ChannelView's RawEventModal) to avoid the ChannelView <-> UserProfileModal import cycle.
+ */
+function ProfileRawEventModal({ rawJson, onClose }: { rawJson: string; onClose: () => void }) {
+  useEscToClose(onClose, true)
+  const [copied, setCopied] = useState(false)
+  const handleCopy = () => {
+    navigator.clipboard.writeText(rawJson)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+  return createPortal(
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[220]" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
+      <div className="bg-secondary border border-border rounded-xl shadow-xl w-full max-w-2xl max-h-[80vh] flex flex-col mx-4" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+          <h3 className="text-sm font-semibold text-foreground flex items-center gap-2"><Code size={15} className="text-muted-foreground" /> Raw profile event (kind 0)</h3>
+          <div className="flex items-center gap-1">
+            <button onClick={handleCopy} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs text-foreground hover:bg-accent/50 transition-colors cursor-pointer">
+              {copied ? <><Check size={13} className="text-emerald-400" /> Copied</> : <><Copy size={13} /> Copy</>}
+            </button>
+            <button onClick={onClose} className="p-1 rounded text-muted-foreground hover:text-foreground cursor-pointer transition-colors"><X size={16} /></button>
+          </div>
+        </div>
+        <pre className="px-4 py-3 overflow-auto text-xs text-foreground/90 whitespace-pre-wrap break-all font-mono">{rawJson}</pre>
+      </div>
+    </div>,
+    document.body,
+  )
+}
+
 export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPosts, onDM, startEditing: startEditingProp, hubContext }: UserProfileModalProps) {
   useEscToClose(onClose, open)
   const myPubkey = useUserStore((s) => s.pubkey)
@@ -141,6 +172,9 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
   const dropdownMenuRef = useRef<HTMLDivElement>(null)
   // Fixed-viewport coords for the portaled dropdown menu (so the modal's overflow can't clip it).
   const [dropdownPos, setDropdownPos] = useState<{ top?: number; bottom?: number; right: number } | null>(null)
+  // The user's raw kind-0 profile event (pretty JSON), for the "View raw event" menu item.
+  const [rawProfileEventJson, setRawProfileEventJson] = useState<string | null>(null)
+  const [showRawEvent, setShowRawEvent] = useState(false)
 
   // Links modal state
   const [showLinksViewer, setShowLinksViewer] = useState(false)
@@ -283,6 +317,7 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
     }).then((events) => {
       if (events.length > 0) {
         const latest = events.sort((a, b) => b.created_at - a.created_at)[0]
+        setRawProfileEventJson(JSON.stringify(latest, null, 2))
         try {
           const parsed = JSON.parse(latest.content)
           const data: ProfileData = {
@@ -346,6 +381,8 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
       setEditing(false)
       setLoaded(false)
       setShowDropdown(false)
+      setRawProfileEventJson(null)
+      setShowRawEvent(false)
       setShowLinksViewer(false)
       setShowLinksEditor(false)
       setHasLinks(false)
@@ -1806,6 +1843,15 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
                             Report to Hub Admin
                           </button>
                         )}
+                        {rawProfileEventJson && (
+                          <button
+                            onClick={() => { setShowDropdown(false); setShowRawEvent(true) }}
+                            className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-foreground hover:bg-accent/50 transition-colors cursor-pointer rounded-md"
+                          >
+                            <Code size={14} className="text-muted-foreground" />
+                            View Raw Event
+                          </button>
+                        )}
                       </div>,
                       document.body,
                     )}
@@ -2232,6 +2278,10 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
           hubCreatorPubkey={hubContext.creatorPubkey}
           reportedPubkey={displayPubkey}
         />
+      )}
+      {/* Raw kind-0 profile event viewer */}
+      {showRawEvent && rawProfileEventJson && (
+        <ProfileRawEventModal rawJson={rawProfileEventJson} onClose={() => setShowRawEvent(false)} />
       )}
       {/* Block type modal */}
       <BlockTypeModal
