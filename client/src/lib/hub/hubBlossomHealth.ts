@@ -227,7 +227,10 @@ export async function republishHubWithBlossomServers(
       signer,
     })
   } else {
-    signed = await mineAndSign(buildHubEvent(params), hub.minPow, pubkey, signer, privateKey)
+    // authorPubkey is REQUIRED for buildHubEvent to emit the NIP-SHORT `s` tag (v1 author = creator's
+    // real key). Omitting it silently strips a hub's short address on every Blossom-health rebroadcast,
+    // making `snpub...` share links unresolvable. Mirror buildAndSignHubEvent.
+    signed = await mineAndSign(buildHubEvent({ ...params, authorPubkey: hub.creatorPubkey }), hub.minPow, pubkey, signer, privateKey)
   }
 
   // Zero relays accepted → fail loudly rather than advance local state and split-brain the hub.

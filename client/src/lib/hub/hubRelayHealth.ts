@@ -205,7 +205,10 @@ export async function republishHubWithRelays(
       signer,
     })
   } else {
-    signed = await mineAndSign(buildHubEvent(params), hub.minPow, pubkey, signer, privateKey)
+    // authorPubkey is REQUIRED for buildHubEvent to emit the NIP-SHORT `s` tag (v1 author = creator's
+    // real key). Omitting it silently strips a hub's short address on every relay-health rebroadcast,
+    // making `snpub...` share links unresolvable. Mirror buildAndSignHubEvent.
+    signed = await mineAndSign(buildHubEvent({ ...params, authorPubkey: hub.creatorPubkey }), hub.minPow, pubkey, signer, privateKey)
   }
 
   // Seed the publish with the NEW relay list (plus failover) so the update lands on the relays we're
