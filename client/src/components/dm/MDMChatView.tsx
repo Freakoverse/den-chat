@@ -153,7 +153,7 @@ export function MDMChatView({ recipientPubkey, onSwitchProtocol, onBack }: { rec
   const [threadModalParent, setThreadModalParent] = useState<DM04Message | null>(null)
   const [showProfile, setShowProfile] = useState(false)
   const [deleteModalMsg, setDeleteModalMsg] = useState<DM04Message | null>(null)
-  const [rawEventData, setRawEventData] = useState<{ rawJson: string; decryptedContent: string } | null>(null)
+  const [rawEventData, setRawEventData] = useState<{ rawJson: string; decryptedContent: string; textContent?: string } | null>(null)
   const [optimisticMessages, setOptimisticMessages] = useState<OptimisticDM04[]>([])
 
   // Clear optimistic messages when switching conversations (component is reused, not remounted)
@@ -640,7 +640,7 @@ export function MDMChatView({ recipientPubkey, onSwitchProtocol, onBack }: { rec
                       onThreadReply={() => handleThreadReply(msg)}
                       onAddReaction={(emoji, customUrl) => handleAddReaction(msg.id, msg.senderPubkey, emoji, customUrl)}
                       onScrollToMessage={scrollToMessage}
-                      onViewRaw={() => msg.rawEvent && setRawEventData({ rawJson: msg.rawEvent, decryptedContent: msg.content })}
+                      onViewRaw={() => msg.rawEvent && setRawEventData({ rawJson: msg.rawEvent, decryptedContent: msg.decryptedRaw ?? msg.content, textContent: msg.content })}
                       onRequestDelete={() => setDeleteModalMsg(msg)}
                       onShowProfile={() => !msg.isMine && setShowProfile(true)}
                       getProfile={getProfile}
@@ -870,6 +870,7 @@ export function MDMChatView({ recipientPubkey, onSwitchProtocol, onBack }: { rec
           rawJson={rawEventData.rawJson}
           decryptedContent={rawEventData.decryptedContent}
           isDecrypted={true}
+          textContent={rawEventData.textContent}
           onClose={() => setRawEventData(null)}
         />
       )}

@@ -380,6 +380,8 @@ function toMessage(
     gifTags: payload.gif,
     attachments: payload.deleted ? undefined : payload.attachments,
     rawEvent: JSON.stringify(real),
+    // Full decrypted payload for the raw-event viewer's faithful "Decrypted" tab (the real {v,from,t,...}).
+    decryptedRaw: payload.deleted ? undefined : JSON.stringify(payload, null, 2),
     verified,
   }
 }

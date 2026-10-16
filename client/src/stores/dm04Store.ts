@@ -58,6 +58,9 @@ export interface DM04Message {
   stickerTags?: [string, string, string?][]  // decrypted [shortcode, url, set-ref?]
   gifTags?: [string, string, string][]        // decrypted [name, url, nsfw]
   attachments?: Attachment[]  // structured file attachments (M-DM; see NIP-MDM). Empty for NIP-04 B-DMs.
+  /** M-DM only: the full decrypted MdmPayload JSON (`{v,from,t,...}`), for the raw-event viewer's
+   *  faithful "Decrypted" tab. Unused for NIP-04 B-DMs (their `content` is already the plaintext). */
+  decryptedRaw?: string
 }
 
 export interface DM04Conversation {

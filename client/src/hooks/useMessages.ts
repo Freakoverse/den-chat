@@ -42,6 +42,10 @@ export interface ChatMessage {
   dTag: string
   pubkey: string
   content: string
+  /** The full decrypted content envelope string (e.g. `{"v":1,"text":...,"attachments":...}`), captured
+   *  before `content` is reduced to the extracted `text`. Powers the raw-event viewer's faithful
+   *  "Decrypted" tab. Undefined only when there was nothing to decrypt. */
+  decryptedRaw?: string
   timestamp: number
   replyTo?: string
   rootRef?: string
@@ -339,6 +343,10 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
       }
     }
 
+    // The decrypted (or, on a public channel, plaintext) content envelope as it is on the wire, kept before
+    // the decode below reduces `content` to just `.text`. The raw-event viewer shows this verbatim.
+    const decryptedRaw = (decrypted || !key) && content !== '[Encrypted message]' ? content : undefined
+
     // Decode the content envelope (NIP-CHAT, message content envelope). The canonical form is a versioned
     // JSON object `{ "v": 1, "text": ..., "attachments"?: ... }`, always stamped on send, so a user's text
     // (even text that itself looks like JSON) is never mistaken for structure: it is always the `text`
@@ -408,6 +416,7 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
       realPubkey,
       identityInvalid: identityInvalid || undefined,
       content,
+      decryptedRaw,
       timestamp: raw.createdAt,
       replyTo: raw.replyTo,
       rootRef: raw.rootRef,

@@ -768,7 +768,7 @@ function MessageList({ hubDTag, channelId, channelName, optimisticMessages, setO
   const { storeReactions, reactions } = useDecryptedReactions(hubDTag, getChannelKey, hub, hubMembers, channelId)
   const [highlightedId, setHighlightedId] = useState<string | null>(null)
   const [deleteModalMsg, setDeleteModalMsg] = useState<ChatMessage | null>(null)
-  const [rawEventData, setRawEventData] = useState<{ rawJson: string; decryptedContent: string; isDecrypted: boolean } | null>(null)
+  const [rawEventData, setRawEventData] = useState<{ rawJson: string; decryptedContent: string; isDecrypted: boolean; textContent?: string } | null>(null)
   // Pending unreact — stores info needed to confirm + execute unreact
   const [pendingUnreact, setPendingUnreact] = useState<{ messageId: string; emoji: string; eventId: string } | null>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
@@ -1802,10 +1802,7 @@ function MessageList({ hubDTag, channelId, channelName, optimisticMessages, setO
                       onTimeTravel={handleTimeTravel}
                       onRequestDelete={() => setDeleteModalMsg(msg)}
                       onViewRaw={(raw) => {
-                        const payload = msg.attachments?.length || msg.nsfw
-                          ? JSON.stringify({ text: msg.content, ...(msg.attachments?.length ? { attachments: msg.attachments } : {}), ...(msg.nsfw ? { nsfw: true } : {}) }, null, 2)
-                          : msg.content
-                        setRawEventData({ rawJson: raw, decryptedContent: payload, isDecrypted: msg.decrypted })
+                        setRawEventData({ rawJson: raw, decryptedContent: msg.decryptedRaw ?? msg.content, isDecrypted: msg.decrypted, textContent: msg.content })
                       }}
                       channelId={channelId}
                       onReport={(rpk, aTag, preview) => setReportModal({ pubkey: rpk, messageATag: aTag, messagePreview: preview })}
@@ -2018,6 +2015,7 @@ function MessageList({ hubDTag, channelId, channelName, optimisticMessages, setO
           rawJson={rawEventData.rawJson}
           decryptedContent={rawEventData.decryptedContent}
           isDecrypted={rawEventData.isDecrypted}
+          textContent={rawEventData.textContent}
           onClose={() => setRawEventData(null)}
         />
       )}
@@ -6690,16 +6688,19 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
 
 // â”€â”€ Raw Event Modal â”€â”€
 
-export function RawEventModal({ rawJson, decryptedContent, isDecrypted, onClose, hideDecryptedTab }: {
+export function RawEventModal({ rawJson, decryptedContent, isDecrypted, onClose, hideDecryptedTab, textContent }: {
   rawJson: string
   decryptedContent: string
   isDecrypted: boolean
   onClose: () => void
   hideDecryptedTab?: boolean
+  /** When provided, adds a "Text" tab showing just the message text (hub messages and M-DMs). */
+  textContent?: string
 }) {
   useEscToClose(onClose)
   const [copied, setCopied] = useState(false)
-  const [activeTab, setActiveTab] = useState<'raw' | 'decrypted'>('raw')
+  const [activeTab, setActiveTab] = useState<'raw' | 'decrypted' | 'text'>('raw')
+  const showTextTab = textContent != null
 
   let prettyRaw: string
   try {
@@ -6720,7 +6721,7 @@ export function RawEventModal({ rawJson, decryptedContent, isDecrypted, onClose,
     }
   }
 
-  const currentContent = activeTab === 'raw' ? prettyRaw : prettyDecrypted
+  const currentContent = activeTab === 'raw' ? prettyRaw : activeTab === 'text' ? (textContent ?? '') : prettyDecrypted
 
   const handleCopy = () => {
     navigator.clipboard.writeText(currentContent)
@@ -6759,6 +6760,17 @@ export function RawEventModal({ rawJson, decryptedContent, isDecrypted, onClose,
                 >
                   Decrypted
                 </button>
+                {showTextTab && (
+                  <button
+                    onClick={() => { setActiveTab('text'); setCopied(false) }}
+                    className={`px-2.5 py-1 rounded text-xs font-medium cursor-pointer transition-colors ${activeTab === 'text'
+                      ? 'bg-accent text-foreground'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'
+                      }`}
+                  >
+                    Text
+                  </button>
+                )}
               </>
             )}
           </div>
@@ -7182,7 +7194,7 @@ function ThreadModal({ parentMsg, threadReplies, hubDTag, channelId, getProfile,
   const { storeReactions, reactions } = useDecryptedReactions(hubDTag, getChannelKey, threadHub, threadHubMembers, channelId)
   const allMessages = useMemo(() => [parentMsg, ...threadReplies], [parentMsg, threadReplies])
 
-  const [rawEventData, setRawEventData] = useState<{ rawJson: string; decryptedContent: string; isDecrypted: boolean } | null>(null)
+  const [rawEventData, setRawEventData] = useState<{ rawJson: string; decryptedContent: string; isDecrypted: boolean; textContent?: string } | null>(null)
   const [deleteModalMsg, setDeleteModalMsg] = useState<ChatMessage | null>(null)
   const [pendingUnreact, setPendingUnreact] = useState<{ messageId: string; emoji: string; eventId: string } | null>(null)
   const [optimisticMessages, setOptimisticMessages] = useState<OptimisticMessage[]>([])
@@ -7448,10 +7460,7 @@ function ThreadModal({ parentMsg, threadReplies, hubDTag, channelId, getProfile,
                   onScrollToMessage={scrollToThreadMessage}
                   onRequestDelete={() => setDeleteModalMsg(parentMsg)}
                   onViewRaw={(raw) => {
-                    const payload = parentMsg.attachments?.length || parentMsg.nsfw
-                      ? JSON.stringify({ text: parentMsg.content, ...(parentMsg.attachments?.length ? { attachments: parentMsg.attachments } : {}), ...(parentMsg.nsfw ? { nsfw: true } : {}) }, null, 2)
-                      : parentMsg.content
-                    setRawEventData({ rawJson: raw, decryptedContent: payload, isDecrypted: parentMsg.decrypted })
+                    setRawEventData({ rawJson: raw, decryptedContent: parentMsg.decryptedRaw ?? parentMsg.content, isDecrypted: parentMsg.decrypted, textContent: parentMsg.content })
                   }}
                   getProfileForReply={getProfile}
                   hideThreadReply
@@ -7511,10 +7520,7 @@ function ThreadModal({ parentMsg, threadReplies, hubDTag, channelId, getProfile,
                     onScrollToMessage={scrollToThreadMessage}
                     onRequestDelete={() => setDeleteModalMsg(reply)}
                     onViewRaw={(raw) => {
-                      const payload = reply.attachments?.length || reply.nsfw
-                        ? JSON.stringify({ text: reply.content, ...(reply.attachments?.length ? { attachments: reply.attachments } : {}), ...(reply.nsfw ? { nsfw: true } : {}) }, null, 2)
-                        : reply.content
-                      setRawEventData({ rawJson: raw, decryptedContent: payload, isDecrypted: reply.decrypted })
+                      setRawEventData({ rawJson: raw, decryptedContent: reply.decryptedRaw ?? reply.content, isDecrypted: reply.decrypted, textContent: reply.content })
                     }}
                     getProfileForReply={getProfile}
                     hideThreadReply
@@ -7636,6 +7642,7 @@ function ThreadModal({ parentMsg, threadReplies, hubDTag, channelId, getProfile,
             rawJson={rawEventData.rawJson}
             decryptedContent={rawEventData.decryptedContent}
             isDecrypted={rawEventData.isDecrypted}
+            textContent={rawEventData.textContent}
             onClose={() => setRawEventData(null)}
           />
         )}
