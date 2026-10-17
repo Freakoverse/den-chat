@@ -66,11 +66,11 @@ function getProbeAuth(): Promise<string | null> {
 }
 
 /**
- * One probe pass: PUT the probe blob (tests WRITE — always uploaded, never skipped on HEAD, since write
+ * One probe pass: PUT the probe blob (tests WRITE, always uploaded, never skipped on HEAD, since write
  * rejection is the failure we care about), then GET it back by hash and verify the bytes. 'broken' when the
  * upload is refused, the read-back fails, or the bytes don't match.
  */
-async function probeOnce(url: string, authHeader: string): Promise<'working' | 'broken'> {
+async function probeOnce(url: string, authHeader: string): Promise<{ health: 'working' | 'broken'; range: boolean }> {
   const hash = probeHash()
   try {
     const putRes = await fetch(`${norm(url)}/upload`, {
@@ -79,44 +79,66 @@ async function probeOnce(url: string, authHeader: string): Promise<'working' | '
       body: new Blob([PROBE_BYTES.buffer as ArrayBuffer]),
       signal: AbortSignal.timeout(HEALTH_PROBE_TIMEOUT_MS),
     }).catch(() => null)
-    if (!putRes?.ok) return 'broken'
+    if (!putRes?.ok) return { health: 'broken', range: false }
 
     const getRes = await fetch(`${norm(url)}/${hash}`, {
       signal: AbortSignal.timeout(HEALTH_PROBE_TIMEOUT_MS),
     }).catch(() => null)
-    if (!getRes?.ok) return 'broken'
+    if (!getRes?.ok) return { health: 'broken', range: false }
     const back = new Uint8Array(await getRes.arrayBuffer())
-    return computeHash(back) === hash ? 'working' : 'broken'
+    if (computeHash(back) !== hash) return { health: 'broken', range: false }
+
+    // Partial-fetch capability: request a sub-range and verify the returned bytes EXACTLY match the known
+    // probe content. Requires BOTH a 206 and correct bytes: a 200 (range ignored, full body served) or any
+    // mismatch ⇒ false. Runs in the browser, so it also reflects CORS: this is range fetching as the client
+    // would really use it (pull only a member's path out of a large roster blob instead of the whole file).
+    let range = false
+    try {
+      const a = 5, b = 15 // a sub-range well inside the 24-byte probe blob
+      const rr = await fetch(`${norm(url)}/${hash}`, {
+        headers: { Range: `bytes=${a}-${b}` },
+        signal: AbortSignal.timeout(HEALTH_PROBE_TIMEOUT_MS),
+      }).catch(() => null)
+      if (rr && rr.status === 206) {
+        const part = new Uint8Array(await rr.arrayBuffer())
+        const want = PROBE_BYTES.slice(a, b + 1)
+        range = part.length === want.length && part.every((v, i) => v === want[i])
+      }
+    } catch { /* range stays false */ }
+
+    return { health: 'working', range }
   } catch {
-    return 'broken'
+    return { health: 'broken', range: false }
   }
 }
 
-function loadPersisted(): { status: Record<string, BlossomHealth>; checkedAt: Record<string, number> } {
+function loadPersisted(): { status: Record<string, BlossomHealth>; checkedAt: Record<string, number>; range: Record<string, boolean> } {
   try {
     const raw = localStorage.getItem(LS_KEY)
-    if (!raw) return { status: {}, checkedAt: {} }
-    const parsed = JSON.parse(raw) as Record<string, { status?: string; checkedAt?: number }>
+    if (!raw) return { status: {}, checkedAt: {}, range: {} }
+    const parsed = JSON.parse(raw) as Record<string, { status?: string; checkedAt?: number; range?: boolean }>
     const status: Record<string, BlossomHealth> = {}
     const checkedAt: Record<string, number> = {}
+    const range: Record<string, boolean> = {}
     const now = Date.now()
     for (const [url, e] of Object.entries(parsed)) {
       if (e && (e.status === 'working' || e.status === 'broken') && typeof e.checkedAt === 'number' && now - e.checkedAt < PERSIST_MAX_AGE_MS) {
         status[url] = e.status
         checkedAt[url] = e.checkedAt
+        if (typeof e.range === 'boolean') range[url] = e.range
       }
     }
-    return { status, checkedAt }
+    return { status, checkedAt, range }
   } catch {
-    return { status: {}, checkedAt: {} }
+    return { status: {}, checkedAt: {}, range: {} }
   }
 }
 
-function persistState(status: Record<string, BlossomHealth>, checkedAt: Record<string, number>): void {
+function persistState(status: Record<string, BlossomHealth>, checkedAt: Record<string, number>, range: Record<string, boolean>): void {
   try {
-    const out: Record<string, { status: BlossomHealth; checkedAt: number }> = {}
+    const out: Record<string, { status: BlossomHealth; checkedAt: number; range?: boolean }> = {}
     for (const [url, st] of Object.entries(status)) {
-      if (st === 'working' || st === 'broken') out[url] = { status: st, checkedAt: checkedAt[url] ?? Date.now() }
+      if (st === 'working' || st === 'broken') out[url] = { status: st, checkedAt: checkedAt[url] ?? Date.now(), ...(range[url] !== undefined ? { range: range[url] } : {}) }
     }
     localStorage.setItem(LS_KEY, JSON.stringify(out))
   } catch { /* storage unavailable: non-fatal */ }
@@ -125,6 +147,8 @@ function persistState(status: Record<string, BlossomHealth>, checkedAt: Record<s
 interface BlossomHealthState {
   status: Record<string, BlossomHealth>
   checkedAt: Record<string, number>
+  /** Per working server: does it serve HTTP byte-range requests correctly (verified 206 + exact bytes)? */
+  range: Record<string, boolean>
   /** While 'checking', the probe-pass progress {done, total} for a live "(n/n)" label. */
   progress: Record<string, { done: number; total: number }>
   /** Auto-probe a server (no-op if fresh or already in flight). */
@@ -143,7 +167,7 @@ const inFlight = new Set<string>()
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
 export const useBlossomHealthStore = create<BlossomHealthState>((set, get) => {
-  const persist = () => { const s = get(); persistState(s.status, s.checkedAt) }
+  const persist = () => { const s = get(); persistState(s.status, s.checkedAt, s.range) }
   const run = (url: string, force = false, keepTimestamp = false) => {
     const n = norm(url)
     if (!n || inFlight.has(n)) return
@@ -157,18 +181,20 @@ export const useBlossomHealthStore = create<BlossomHealthState>((set, get) => {
     set((s) => ({ status: { ...s.status, [n]: force ? 'checking' : (s.status[n] ?? 'checking') }, progress: { ...s.progress, [n]: { done: 1, total: needed } } }))
     ;(async () => {
       let result: BlossomHealth | null = 'broken'
+      let rangeCap = false
       try {
         const auth = await getProbeAuth()
         if (!auth) {
           result = null // no auth (logged out / no key): show no label, keep the reachability dot
         } else {
           let r = await probeOnce(url, auth) // pass 1
-          for (let pass = 2; pass <= needed && r === 'broken'; pass++) {
+          for (let pass = 2; pass <= needed && r.health === 'broken'; pass++) {
             setProg(pass)
             await delay(1200) // a confirming pass that comes back working keeps it working
             r = await probeOnce(url, auth)
           }
-          result = r
+          result = r.health
+          rangeCap = r.range
         }
       } catch {
         result = 'broken'
@@ -177,11 +203,17 @@ export const useBlossomHealthStore = create<BlossomHealthState>((set, get) => {
       set((s) => {
         const status = { ...s.status }
         const checkedAt = { ...s.checkedAt }
+        const range = { ...s.range }
         const progress = { ...s.progress }
         delete progress[n]
-        if (result === null) { delete status[n]; delete checkedAt[n] }
-        else { status[n] = result; checkedAt[n] = keepTimestamp && prevCheckedAt ? prevCheckedAt : Date.now() }
-        return { status, checkedAt, progress }
+        if (result === null) { delete status[n]; delete checkedAt[n]; delete range[n] }
+        else {
+          status[n] = result
+          checkedAt[n] = keepTimestamp && prevCheckedAt ? prevCheckedAt : Date.now()
+          if (result === 'working') range[n] = rangeCap
+          else delete range[n]
+        }
+        return { status, checkedAt, range, progress }
       })
       persist()
     })()
@@ -191,6 +223,7 @@ export const useBlossomHealthStore = create<BlossomHealthState>((set, get) => {
   return {
     status: initial.status,
     checkedAt: initial.checkedAt,
+    range: initial.range,
     progress: {},
     probe: (url) => {
       const n = norm(url)
@@ -209,7 +242,11 @@ export const useBlossomHealthStore = create<BlossomHealthState>((set, get) => {
     setStatus: (url, health) => {
       const n = norm(url)
       if (!n) return
-      set((s) => ({ status: { ...s.status, [n]: health }, checkedAt: { ...s.checkedAt, [n]: Date.now() } }))
+      set((s) => {
+        const range = { ...s.range }
+        delete range[n] // a directly-set result carries no range-capability info; a probe will fill it in
+        return { status: { ...s.status, [n]: health }, checkedAt: { ...s.checkedAt, [n]: Date.now() }, range }
+      })
       persist()
     },
   }

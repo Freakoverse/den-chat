@@ -21,6 +21,7 @@ const norm = (u: string) => u.replace(/\/+$/, '')
 export function BlossomHealthLabel({ url, className = '', interactive = false }: { url: string; className?: string; interactive?: boolean }) {
   const key = norm(url)
   const status = useBlossomHealthStore((s) => s.status[key])
+  const range = useBlossomHealthStore((s) => s.range[key])
   const progress = useBlossomHealthStore((s) => s.progress[key])
   const probe = useBlossomHealthStore((s) => s.probe)
   const recheck = useBlossomHealthStore((s) => s.recheck)
@@ -43,28 +44,51 @@ export function BlossomHealthLabel({ url, className = '', interactive = false }:
 
   const base = `shrink-0 inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded ${cls} ${className}`
 
-  if (interactive) {
-    return (
+  // Secondary badge: this working server also serves HTTP byte-range requests correctly (verified 206 +
+  // exact bytes). Lets a client pull only the bytes it needs out of a large blob instead of the whole file.
+  const partialBadge = status === 'working' && range === true
+    ? (
       <TooltipProvider delayDuration={200}>
         <Tooltip>
           <TooltipTrigger asChild>
-            <button
-              type="button"
-              onClick={(e) => { e.stopPropagation(); if (!checking) recheck(url) }}
-              disabled={checking}
-              className={`${base} ${checking ? '' : 'cursor-pointer hover:brightness-125 transition'}`}
-            >
-              {label}
-              {checking
-                ? <Loader2 size={9} className="animate-spin" />
-                : <RefreshCw size={9} className="opacity-60" />}
-            </button>
+            <span className="shrink-0 inline-flex items-center text-[10px] font-medium px-1.5 py-0.5 rounded text-sky-400 bg-sky-500/10 cursor-default">partial reads</span>
           </TooltipTrigger>
-          <TooltipContent side="left" className="text-xs">Re-check this server (uploads a tiny test file + reads it back)</TooltipContent>
+          <TooltipContent side="left" className="text-xs max-w-[220px]">Supports HTTP byte-range requests: a client can fetch just part of a file instead of the whole thing</TooltipContent>
         </Tooltip>
       </TooltipProvider>
     )
+    : null
+
+  if (interactive) {
+    return (
+      <span className="inline-flex items-center gap-1">
+        <TooltipProvider delayDuration={200}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); if (!checking) recheck(url) }}
+                disabled={checking}
+                className={`${base} ${checking ? '' : 'cursor-pointer hover:brightness-125 transition'}`}
+              >
+                {label}
+                {checking
+                  ? <Loader2 size={9} className="animate-spin" />
+                  : <RefreshCw size={9} className="opacity-60" />}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="left" className="text-xs">Re-check this server (uploads a tiny test file + reads it back)</TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+        {partialBadge}
+      </span>
+    )
   }
 
-  return <span className={base}>{label}</span>
+  return (
+    <span className="inline-flex items-center gap-1">
+      <span className={base}>{label}</span>
+      {partialBadge}
+    </span>
+  )
 }
