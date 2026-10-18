@@ -6025,6 +6025,9 @@ function ReportCard({ report, getProfile, hub, onClose }: { report: HubReport; g
 
 function MembersPage({ hub, onFooterState, focusPubkey }: { hub: HubData; onFooterState: (state: any) => void; focusPubkey?: string }) {
   const hubMembers = useHubStore((s) => s.hubMembers[hub.dTag]) || []
+  // A multi-page hub fills its roster in progressively (see loadRemainingPageMembers). Block role edits
+  // until it's complete, so the owner can't stage/save changes against a half-loaded member list.
+  const membersLoading = useHubStore((s) => !!s.hubMembersLoading[hub.dTag])
   const setHubMembers = useHubStore((s) => s.setHubMembers)
   const setHubData = useHubStore((s) => s.setHubData)
   const signer = useUserStore((s) => s.signer)
@@ -6101,6 +6104,7 @@ function MembersPage({ hub, onFooterState, focusPubkey }: { hub: HubData; onFoot
   }
 
   const toggleRole = (memberPubkey: string, roleId: string, roleName: string) => {
+    if (membersLoading) return // roster still filling in: don't stage edits against a partial list
     if (roleName === 'everyone') return
     const currentMember = membersWithCreator.find(m => m.pubkey === memberPubkey)
     if (!currentMember) return
@@ -6127,7 +6131,7 @@ function MembersPage({ hub, onFooterState, focusPubkey }: { hub: HubData; onFoot
   }
 
   const handleSave = async () => {
-    if (!isDirty || saving) return
+    if (!isDirty || saving || membersLoading) return // backstop: never publish against a partial roster
     setSaving(true)
     setSaveError(null)
     setSaveSuccess(false)
@@ -6742,7 +6746,7 @@ function MembersPage({ hub, onFooterState, focusPubkey }: { hub: HubData; onFoot
         Manage member roles. Changes are staged locally — click <strong>Save &amp; Publish</strong> to update the tree and publish.
       </p>
       <p className="text-xs text-muted-foreground/70 leading-relaxed">
-        Only members from your local page are shown. To manage a specific member, search by their user address (npub).
+        The full member list loads progressively for large hubs. To manage a specific member, search by their user address (npub).
       </p>
 
       <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-secondary/50 border border-border">
@@ -6754,7 +6758,19 @@ function MembersPage({ hub, onFooterState, focusPubkey }: { hub: HubData; onFoot
         </span>
       </div>
 
-      <div className="flex flex-col gap-2 max-h-[400px] overflow-y-auto">
+      {/* Still background-loading the remaining member pages: role edits are blocked until the full roster
+          is in, so the owner can't stage/publish against a partial list.
+          TODO(guardrail): once the large-hub download guardrail lands (very large hubs won't auto-fetch all
+          pages), replace this with a "Load all members" trigger button when the full load hasn't been
+          triggered yet, instead of implying it is downloading automatically. */}
+      {membersLoading && (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-secondary/40 border border-border text-xs text-muted-foreground">
+          <Loader2 size={13} className="animate-spin shrink-0" />
+          <span>Still downloading the full member list. Role changes are disabled until it finishes.</span>
+        </div>
+      )}
+
+      <div className={cn('flex flex-col gap-2 max-h-[400px] overflow-y-auto', membersLoading && 'opacity-60')}>
         {filteredMembers.length === 0 ? (
           <p className="text-sm text-muted-foreground text-center py-6">
             No members match your search.
@@ -6827,11 +6843,11 @@ function MembersPage({ hub, onFooterState, focusPubkey }: { hub: HubData; onFoot
                         </div>
                         <button
                           onClick={() => toggleRole(member.pubkey, role.roleId, role.name)}
-                          disabled={isEveryone}
+                          disabled={isEveryone || membersLoading}
                           className={cn(
                             'shrink-0 h-7 px-2.5 rounded-md flex items-center gap-1.5 text-xs font-medium transition-all border',
-                            isEveryone && 'opacity-40 cursor-not-allowed',
-                            !isEveryone && 'cursor-pointer',
+                            (isEveryone || membersLoading) && 'opacity-40 cursor-not-allowed',
+                            !isEveryone && !membersLoading && 'cursor-pointer',
                             hasRole
                               ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400'
                               : 'bg-transparent border-border/40 text-muted-foreground/60 hover:border-border/70',
