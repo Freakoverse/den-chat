@@ -6,7 +6,7 @@
  * bookmarks, or comments since it's an unpublished draft).
  */
 
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef, Children } from 'react'
 import { useSocialStore } from '@/stores/socialStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { fetchEvents } from '@/lib/nostr/relay-pool'
@@ -291,10 +291,16 @@ export function DraftPreviewPage() {
                   return <code className={cn("text-[12px] font-mono", className)}>{children}</code>
                 },
                 // GFM task list items: drop the disc marker, lay the themed read-only checkbox beside the text.
-                li: ({ children, className }) =>
-                  className?.includes('task-list-item')
-                    ? <li className="md-task list-none flex flex-wrap items-start gap-2">{children}</li>
-                    : <li>{children}</li>,
+                li: ({ children, className }) => {
+                  if (!className?.includes('task-list-item')) return <li>{children}</li>
+                  const kids = Children.toArray(children)
+                  return (
+                    <li className="md-task list-none flex items-start gap-2">
+                      {kids[0]}
+                      <div className="flex-1 min-w-0">{kids.slice(1)}</div>
+                    </li>
+                  )
+                },
                 input: ({ node, ...props }) =>
                   <input {...props} readOnly className="md-task-checkbox mt-1" />,
               }}

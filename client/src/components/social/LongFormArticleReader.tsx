@@ -5,7 +5,7 @@
  * author info, and action buttons (edit/delete for own articles).
  */
 
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef, Children } from 'react'
 import { nowSeconds } from '@/lib/time/clockOffset'
 import { useSocialStore } from '@/stores/socialStore'
 import { useUserStore } from '@/stores/userStore'
@@ -544,10 +544,16 @@ export function LongFormArticleReader() {
                 ul: ({ children }) => <ul className="list-disc list-outside pl-5 text-sm text-foreground/90 mb-4 space-y-1">{children}</ul>,
                 ol: ({ children, start }) => <ol start={start} className="list-decimal list-outside pl-5 text-sm text-foreground/90 mb-4 space-y-1">{children}</ol>,
                 // GFM task list items: drop the disc marker, lay the themed read-only checkbox beside the text.
-                li: ({ children, className }) =>
-                  className?.includes('task-list-item')
-                    ? <li className="md-task list-none flex flex-wrap items-start gap-2 text-sm text-foreground/90">{children}</li>
-                    : <li>{children}</li>,
+                li: ({ children, className }) => {
+                  if (!className?.includes('task-list-item')) return <li>{children}</li>
+                  const kids = Children.toArray(children)
+                  return (
+                    <li className="md-task list-none flex items-start gap-2 text-sm text-foreground/90">
+                      {kids[0]}
+                      <div className="flex-1 min-w-0">{kids.slice(1)}</div>
+                    </li>
+                  )
+                },
                 input: ({ node, ...props }) =>
                   <input {...props} readOnly className="md-task-checkbox mt-1" />,
                 table: ({ children }) => (

@@ -1040,10 +1040,18 @@ export const MessageContent = memo(function MessageContent({ content, suffix, on
     // Forward `start` so a list written as `3. …` renders from 3, not reset to 1 (remark-gfm parses the start number).
     ol: ({ children, start }) => <ol start={start} className="list-decimal list-outside pl-5 mb-3 last:mb-0">{children}</ol>,
     // GFM task list items (`- [ ]` / `- [x]`): drop the disc marker and lay the checkbox beside the text.
-    li: ({ children, className }) =>
-      className?.includes('task-list-item')
-        ? <li className="md-task list-none flex flex-wrap items-start gap-1.5">{children}</li>
-        : <li>{children}</li>,
+    li: ({ children, className }) => {
+      if (!className?.includes('task-list-item')) return <li>{children}</li>
+      // Checkbox (first child, from remark-gfm) stays as the marker; the label + any nested list go in a
+      // flex-1 column so the label wraps BESIDE the checkbox and a nested list sits BELOW it.
+      const kids = Children.toArray(children)
+      return (
+        <li className="md-task list-none flex items-start gap-1.5">
+          {kids[0]}
+          <div className="flex-1 min-w-0">{kids.slice(1)}</div>
+        </li>
+      )
+    },
     // Render the GFM task-list checkbox (read-only; message content is immutable). Spread the parsed props
     // (type/checked/disabled) so it always renders, and force readOnly + the md-task-checkbox class, which
     // restores the native checkbox appearance the global `input { appearance: none }` reset strips.
