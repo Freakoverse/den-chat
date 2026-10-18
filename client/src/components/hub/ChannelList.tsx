@@ -3,7 +3,8 @@ import { useUserStore } from '@/stores/userStore'
 import { useNotificationStore } from '@/stores/notificationStore'
 import { useNavigationStore } from '@/stores/navigationStore'
 import { getPermissionsForUser } from '@/lib/hub/permissions'
-import { Hash, Megaphone, MessagesSquare, MessageSquare, ChevronDown, ChevronUp, ChevronRight, Settings, UserPlus, Inbox, Loader2, SlidersHorizontal, Volume2, MicOff, HeadphoneOff, Camera, ScreenShare, X, User, Radar, Boxes, AlertTriangle, CalendarDays, Lock, Undo2, AtSign, GripVertical, ListOrdered, Check } from 'lucide-react'
+import { Hash, Megaphone, MessagesSquare, MessageSquare, ChevronDown, ChevronUp, ChevronRight, Settings, UserPlus, Inbox, Loader2, SlidersHorizontal, Volume2, MicOff, HeadphoneOff, Camera, ScreenShare, X, User, Users, Radar, Boxes, AlertTriangle, CalendarDays, Lock, Undo2, AtSign, GripVertical, ListOrdered, Check, Download } from 'lucide-react'
+import { loadRemainingPageMembers } from '@/hooks/useHubLoader'
 import { cn, npubShort } from '@/lib/utils'
 import { BlossomImage } from '@/components/ui/BlossomImage'
 import { HUB_BANNER_PLACEHOLDER } from '@/lib/constants'
@@ -53,6 +54,19 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
   const hubMembers = useHubStore((s) => activeHubId ? s.hubMembers[activeHubId] : undefined)
   const membersLoading = useHubStore((s) => activeHubId ? !!s.hubMembersLoading[activeHubId] : false)
   const membersProgress = useHubStore((s) => activeHubId ? s.hubMembersProgress[activeHubId] : undefined)
+  // Guardrail: a very large hub defers loading its extra member pages until the user asks (value = the
+  // lookup pubkey to resume with). hubPageCount feeds the "N member files" line.
+  const membersDeferred = useHubStore((s) => activeHubId ? s.hubMembersDeferred[activeHubId] : undefined)
+  const hubPageCount = useHubStore((s) => activeHubId ? s.hubPageCounts[activeHubId] : undefined)
+
+  const handleLoadAllMembers = useCallback(() => {
+    if (!activeHubId || !membersDeferred) return
+    const hubData = useHubStore.getState().hubs[activeHubId]
+    const secretHex = useHubStore.getState().hubSecrets[activeHubId]
+    if (!hubData || !secretHex) return
+    useHubStore.getState().setHubMembersDeferred(activeHubId, null)
+    void loadRemainingPageMembers(hubData.dTag, hubData, membersDeferred, secretHex)
+  }, [activeHubId, membersDeferred])
   const channelScrollRef = useRef<HTMLDivElement>(null)
   const [showSettings, setShowSettings] = useState(false)
   // When opening settings to edit one member's roles (from their profile modal): jump to Members and
@@ -776,6 +790,25 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
               <span>{membersProgress.pagesDone} / {membersProgress.totalPages} files</span>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Guardrail: a very large hub did not auto-load its extra member pages. Offer a manual trigger. */}
+      {membersDeferred && !membersLoading && (
+        <div className="shrink-0 rounded-lg bg-secondary/50 shadow-md px-3 py-2.5">
+          <div className="flex items-start gap-2">
+            <Users size={14} className="text-muted-foreground shrink-0 mt-0.5" />
+            <div className="min-w-0 flex-1">
+              <p className="text-[11px] font-medium text-foreground">Large hub{hubPageCount ? ` · ${hubPageCount} member files` : ''}</p>
+              <p className="text-[10px] text-muted-foreground mt-0.5 leading-snug">Only your own member page is loaded. Load the full list to see everyone and resolve all roles.</p>
+            </div>
+          </div>
+          <button
+            onClick={handleLoadAllMembers}
+            className="mt-2 w-full flex items-center justify-center gap-1.5 h-7 rounded-md bg-primary text-primary-foreground text-[11px] font-medium hover:bg-primary/90 transition-colors cursor-pointer"
+          >
+            <Download size={12} /> Load all members
+          </button>
         </div>
       )}
 

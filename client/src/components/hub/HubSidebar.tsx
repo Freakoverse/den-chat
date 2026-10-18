@@ -8,7 +8,7 @@ import { useDM04Store } from '@/stores/dm04Store'
 import { useBlockStore } from '@/stores/blockStore'
 import { useWotStore } from '@/stores/wotStore'
 import { usePublicChatStore } from '@/stores/publicChatStore'
-import { Plus, Pencil, MessageSquare, MessagesSquare, Settings, AtSign, Compass, XCircle, FolderClosed, Search, Sparkles, X, Volume2, RefreshCw, Loader2, Wallet, Unplug } from 'lucide-react'
+import { Plus, Pencil, MessageSquare, MessagesSquare, Settings, AtSign, Compass, XCircle, FolderClosed, Search, Sparkles, X, Volume2, RefreshCw, Loader2, Wallet, Unplug, Download } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { BlossomImage } from '@/components/ui/BlossomImage'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
@@ -526,8 +526,10 @@ function HubIcon({ label, isActive, onClick, children, isAction, isPreview, stat
   const rounding = isActive ? 'rounded-2xl' : 'rounded-[24px] hover:rounded-2xl'
 
   // Background load of a multi-page hub's remaining member pages (see loadRemainingPageMembers). Shown as a
-  // small spinner on the BOTTOM-LEFT of the icon, opposite the bottom-right unread badges.
+  // small spinner on the BOTTOM-LEFT of the icon, opposite the bottom-right unread badges. When a very large
+  // hub has DEFERRED that load (guardrail), a static download badge sits in the same bottom-left spot.
   const membersLoading = useHubStore((s) => hubDTag ? !!s.hubMembersLoading[hubDTag] : false)
+  const membersDeferred = useHubStore((s) => hubDTag ? !!s.hubMembersDeferred[hubDTag] : false)
 
   // Unread state from notification store — suppress until initialized
   const notifReady = useNotificationStore((s) => s.initialized)
@@ -651,6 +653,19 @@ function HubIcon({ label, isActive, onClick, children, isAction, isPreview, stat
         <div className={cn('absolute bottom-0 w-[15px] h-[15px] rounded-full bg-secondary flex items-center justify-center shadow-md z-10 pointer-events-none border-2 border-secondary', compact ? '-left-1' : 'left-2')}>
           <Loader2 className="w-2.5 h-2.5 animate-spin text-primary" />
         </div>
+      )}
+
+      {/* Member-list load DEFERRED (very large hub, guardrail): static download badge in the same spot,
+          prompting the user to open the hub and run "Load all members". */}
+      {membersDeferred && !membersLoading && status !== 'deleted' && status !== 'not-found' && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <div className={cn('absolute bottom-0 w-[15px] h-[15px] rounded-full bg-amber-500 flex items-center justify-center shadow-md z-10 cursor-default border-2 border-secondary', compact ? '-left-1' : 'left-2')}>
+              <Download className="w-2 h-2 text-white" strokeWidth={3} />
+            </div>
+          </TooltipTrigger>
+          <TooltipContent side="right">Full member list not loaded (open the hub to load it)</TooltipContent>
+        </Tooltip>
       )}
     </div>
   )

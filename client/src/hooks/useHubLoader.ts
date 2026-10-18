@@ -330,15 +330,22 @@ async function loadHubText(hash: string, servers: string[], dTag: string): Promi
 }
 
 /**
+ * Guardrail: hubs with MORE than this many member pages do NOT auto-load their remaining pages (each page
+ * is up to ~5MB). Past it the load waits for a manual "Load all members" trigger. 10 pages = up to ~100k
+ * members, so an auto-load pulls at most ~50MB before deferring. (Metered-connection handling is a
+ * separate follow-up.)
+ */
+const MEMBER_AUTOLOAD_PAGE_LIMIT = 10
+
+/**
  * After a member's OWN page is loaded (which opens the hub), progressively fetch the REMAINING leaf pages
  * in the background and merge their members into the store. A multi-page hub (>10k members) otherwise only
  * ever shows the viewer's own page, so authors on other pages resolve to the default role; filling in the
  * full roster fixes that. Fire-and-forget: each page is best-effort (a failed page is skipped and retried
  * on the next open), and `loadHubText` dedups against the local cache so already-held pages cost nothing.
  *
- * NOTE: this is intentionally UNBOUNDED for now (fetches every other page in index order). The
- * large-hub guardrail (manual trigger past some size) and metered-connection handling are a separate
- * follow-up; until then a very large hub will background-fetch all its pages.
+ * Triggered automatically for hubs up to MEMBER_AUTOLOAD_PAGE_LIMIT pages; larger hubs call this from the
+ * "Load all members" action instead. Exported so that action can invoke it.
  */
 export async function loadRemainingPageMembers(
   dTag: string,
@@ -1422,8 +1429,15 @@ export function useHubLoader() {
             // Multi-page hub: the step above loaded only the viewer's OWN page (fast open). Fetch the rest
             // in the background and merge, so the full roster + every author's role fills in. Fire-and-forget
             // (runs AFTER setHubMembers above so it never races the initial roster); cached pages are free.
+            // Guardrail: past MEMBER_AUTOLOAD_PAGE_LIMIT pages, defer to a manual "Load all members" trigger
+            // (store the lookup key so it can resume) rather than auto-pulling tens of MB.
             if (result.pageCount > 1 && result.lookupPubkey && result.secretHex) {
-              void loadRemainingPageMembers(dTag, hubData, result.lookupPubkey, result.secretHex)
+              if (result.pageCount > MEMBER_AUTOLOAD_PAGE_LIMIT) {
+                useHubStore.getState().setHubMembersDeferred(dTag, result.lookupPubkey)
+              } else {
+                useHubStore.getState().setHubMembersDeferred(dTag, null) // clear any stale deferral
+                void loadRemainingPageMembers(dTag, hubData, result.lookupPubkey, result.secretHex)
+              }
             }
             // Write the ban list whenever it RESOLVED (even if genuinely empty, so a full unban clears the
             // display) — but never on a transient ban-page fetch failure (banListUnresolved), which would

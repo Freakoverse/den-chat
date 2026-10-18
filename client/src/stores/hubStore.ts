@@ -181,6 +181,9 @@ export interface HubState {
   /** Live progress of that background load (keyed by d tag): pages done/total, members added so far, and
    *  the start time (for a throughput readout). Absent when not loading. */
   hubMembersProgress: Record<string, { pagesDone: number; totalPages: number; members: number; startedAt: number }>
+  /** Very large hubs don't auto-load their extra pages; the value is the viewer's lookup pubkey (P in v2,
+   *  R in v1) so the "Load all members" action can resume. Present = deferred/awaiting a manual trigger. */
+  hubMembersDeferred: Record<string, string>
   /** Hub being previewed (ephemeral, not in hub list event) */
   previewHubId: string | null
   /** Per-hub preferences (facilitator, visibility toggles) */
@@ -245,6 +248,7 @@ export interface HubState {
   mergeHubMembers: (dTag: string, members: HubMember[]) => void
   setHubMembersLoading: (dTag: string, loading: boolean) => void
   setHubMembersProgress: (dTag: string, progress: { pagesDone: number; totalPages: number; members: number; startedAt: number } | null) => void
+  setHubMembersDeferred: (dTag: string, lookupPubkey: string | null) => void
   setPreviewHub: (dTag: string | null) => void
   setHubPref: <K extends keyof HubPrefs>(dTag: string, key: K, value: HubPrefs[K]) => void
   setHubBanList: (dTag: string, pubkeys: string[]) => void
@@ -374,6 +378,7 @@ export const useHubStore = create<HubState>((set) => ({
   hubMembers: {},
   hubMembersLoading: {},
   hubMembersProgress: {},
+  hubMembersDeferred: {},
   previewHubId: null,
   // Start empty — hydrated per-account by hydratePersistedForAccount() on login (persistence is
   // namespaced by account, and there is no account at module-eval time).
@@ -507,6 +512,14 @@ export const useHubStore = create<HubState>((set) => ({
       if (progress) next[dTag] = progress
       else delete next[dTag]
       return { hubMembersProgress: next }
+    }),
+
+  setHubMembersDeferred: (dTag, lookupPubkey) =>
+    set((state) => {
+      const next = { ...state.hubMembersDeferred }
+      if (lookupPubkey) next[dTag] = lookupPubkey
+      else delete next[dTag]
+      return { hubMembersDeferred: next }
     }),
 
   setPreviewHub: (dTag) => set({ previewHubId: dTag }),
