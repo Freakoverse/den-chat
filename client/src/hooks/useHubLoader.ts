@@ -329,12 +329,69 @@ async function loadHubText(hash: string, servers: string[], dTag: string): Promi
   }
 }
 
+/**
+ * After a member's OWN page is loaded (which opens the hub), progressively fetch the REMAINING leaf pages
+ * in the background and merge their members into the store. A multi-page hub (>10k members) otherwise only
+ * ever shows the viewer's own page, so authors on other pages resolve to the default role; filling in the
+ * full roster fixes that. Fire-and-forget: each page is best-effort (a failed page is skipped and retried
+ * on the next open), and `loadHubText` dedups against the local cache so already-held pages cost nothing.
+ *
+ * NOTE: this is intentionally UNBOUNDED for now (fetches every other page in index order). The
+ * large-hub guardrail (manual trigger past some size) and metered-connection handling are a separate
+ * follow-up; until then a very large hub will background-fetch all its pages.
+ */
+async function loadRemainingPageMembers(
+  dTag: string,
+  hubData: HubData & { creatorPubkey: string },
+  lookupPubkey: string,
+  secretHex: string,
+): Promise<void> {
+  const { setHubMembersLoading, mergeHubMembers } = useHubStore.getState()
+  setHubMembersLoading(dTag, true)
+  try {
+    const { parseIndexFile, findPageForPubkey, getPageMembersV2 } = await import('@/lib/blossom')
+    const { deserializeLeafPage, getPageMembers, fromHex } = await import('@/lib/crypto/lkh')
+    const { isV2 } = await import('@/lib/hub/version')
+
+    const index = parseIndexFile(await loadHubText(hubData.indexFileHash, hubData.blossomServers, dTag))
+    if (!(index.pageSize > 0) || index.leafPages.length <= 1) return
+    const ownPage = findPageForPubkey(index, lookupPubkey)
+    const remaining = index.leafPages.filter((p) => p.hash !== ownPage?.hash)
+    if (remaining.length === 0) return
+
+    const v2 = isV2(hubData)
+    const epochMap = useHubStore.getState().epochSecrets[dTag] || {}
+    const secretBytes = fromHex(secretHex)
+    const resolveEpochSecret = (epoch: number): Uint8Array | undefined =>
+      epochMap[epoch] ? fromHex(epochMap[epoch]) : secretBytes
+
+    for (const page of remaining) {
+      // Abort if the hub's index moved on under us (rotation/kick/edit): a newer processHub run will
+      // reload members from scratch, and merging stale-page members on top of it would be wrong.
+      if (useHubStore.getState().hubs[dTag]?.indexFileHash !== hubData.indexFileHash) break
+      try {
+        const pageContent = await loadHubText(page.hash, hubData.blossomServers, dTag)
+        const members: HubMember[] = v2
+          ? (await getPageMembersV2(pageContent, resolveEpochSecret)).map((m) => ({ pubkey: m.pubkey, roles: m.roles, flags: m.flags, p: m.p }))
+          : getPageMembers(deserializeLeafPage(pageContent))
+        if (members.length > 0) mergeHubMembers(dTag, members)
+      } catch (err) {
+        console.warn(`Hub ${dTag}: progressive load of page ${page.pageIndex} failed (will retry on next open):`, err)
+      }
+    }
+  } catch (err) {
+    console.warn(`Hub ${dTag}: progressive member load failed:`, err)
+  } finally {
+    setHubMembersLoading(dTag, false)
+  }
+}
+
 export async function loadHubSecret(
   hubData: HubData & { creatorPubkey: string },
   memberPubkey: string,
   memberPrivateKey: string | null,
   signer: any,
-): Promise<{ secretHex: string; members: HubMember[]; bannedPubkeys: string[]; banListUnresolved?: boolean; historyHash: string; pageCount: number; failReason?: 'signer-issue' | 'not-a-member' } | null> {
+): Promise<{ secretHex: string; members: HubMember[]; bannedPubkeys: string[]; banListUnresolved?: boolean; historyHash: string; pageCount: number; lookupPubkey?: string; failReason?: 'signer-issue' | 'not-a-member' } | null> {
   if (!hubData.indexFileHash || hubData.blossomServers.length === 0) {
     return null
   }
@@ -465,7 +522,9 @@ export async function loadHubSecret(
       }
 
       const secretHex = Array.from(hubSecret).map(b => b.toString(16).padStart(2, '0')).join('')
-      return { secretHex, members, bannedPubkeys, banListUnresolved, historyHash: index.historyHash, pageCount: index.leafPages.length }
+      // `lookupPubkey` (P in v2, R in v1) lets the caller drive the background load of the OTHER pages
+      // without re-deriving P (a signer round-trip).
+      return { secretHex, members, bannedPubkeys, banListUnresolved, historyHash: index.historyHash, pageCount: index.leafPages.length, lookupPubkey }
     }
 
     // ── Monolithic format (legacy / facilitator) ──
@@ -1345,6 +1404,12 @@ export function useHubLoader() {
             }
             if (result.members.length > 0) {
               setHubMembers(dTag, result.members)
+            }
+            // Multi-page hub: the step above loaded only the viewer's OWN page (fast open). Fetch the rest
+            // in the background and merge, so the full roster + every author's role fills in. Fire-and-forget
+            // (runs AFTER setHubMembers above so it never races the initial roster); cached pages are free.
+            if (result.pageCount > 1 && result.lookupPubkey && result.secretHex) {
+              void loadRemainingPageMembers(dTag, hubData, result.lookupPubkey, result.secretHex)
             }
             // Write the ban list whenever it RESOLVED (even if genuinely empty, so a full unban clears the
             // display) — but never on a transient ban-page fetch failure (banListUnresolved), which would

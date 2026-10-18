@@ -9,7 +9,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { truncateNpub, cn } from '@/lib/utils'
 import { nip19 } from 'nostr-tools'
 import { useState, useMemo } from 'react'
-import { Crown, Search, ChevronDown, Info, Hash, Users } from 'lucide-react'
+import { Crown, Search, ChevronDown, Info, Hash, Users, Loader2 } from 'lucide-react'
 import { useDnnStore } from '@/stores/dnnStore'
 import { formatDnnId } from '@/lib/dnn/formatDnnId'
 import { getEffectivePermissions } from '@/lib/hub/permissions'
@@ -22,6 +22,7 @@ export function MemberList() {
   const activeChannelId = useHubStore((s) => s.activeChannelId)
   const hub = useHubStore((s) => (activeHubId ? s.hubs[activeHubId] : null))
   const hubMembers = useHubStore((s) => (activeHubId ? s.hubMembers[activeHubId] : undefined))
+  const membersLoading = useHubStore((s) => (activeHubId ? !!s.hubMembersLoading[activeHubId] : false))
   const pageCount = useHubStore((s) => (activeHubId ? s.hubPageCounts[activeHubId] : undefined))
   const myPubkey = useUserStore((s) => s.pubkey)
   const { getProfile } = useProfileCache()
@@ -168,6 +169,9 @@ export function MemberList() {
           <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             {channelScoped ? 'In This Channel' : 'Active Members'} — {totalCount}
           </span>
+          {membersLoading && !channelScoped && (
+            <Loader2 size={11} className="animate-spin text-muted-foreground/60 shrink-0" aria-label="Loading remaining member pages" />
+          )}
           {isLargeHub && !channelScoped && (
             <div className="relative">
               <button

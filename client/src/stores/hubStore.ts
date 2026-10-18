@@ -176,6 +176,8 @@ export interface HubState {
   hideNotFoundHubs: boolean
   /** Hub members extracted from LKH tree (keyed by hub d tag) */
   hubMembers: Record<string, HubMember[]>
+  /** True while a multi-page hub is still background-loading its remaining member pages (keyed by d tag). */
+  hubMembersLoading: Record<string, boolean>
   /** Hub being previewed (ephemeral, not in hub list event) */
   previewHubId: string | null
   /** Per-hub preferences (facilitator, visibility toggles) */
@@ -236,6 +238,9 @@ export interface HubState {
   setHideDeletedHubs: (hide: boolean) => void
   setHideNotFoundHubs: (hide: boolean) => void
   setHubMembers: (dTag: string, members: HubMember[]) => void
+  /** Append members to a hub's roster (dedup by real pubkey, keeping existing), for progressive page loads. */
+  mergeHubMembers: (dTag: string, members: HubMember[]) => void
+  setHubMembersLoading: (dTag: string, loading: boolean) => void
   setPreviewHub: (dTag: string | null) => void
   setHubPref: <K extends keyof HubPrefs>(dTag: string, key: K, value: HubPrefs[K]) => void
   setHubBanList: (dTag: string, pubkeys: string[]) => void
@@ -363,6 +368,7 @@ export const useHubStore = create<HubState>((set) => ({
   // Only hide when the user has explicitly opted in.
   hideNotFoundHubs: localStorage.getItem('den_hide_notfound_hubs') === 'true',
   hubMembers: {},
+  hubMembersLoading: {},
   previewHubId: null,
   // Start empty — hydrated per-account by hydratePersistedForAccount() on login (persistence is
   // namespaced by account, and there is no account at module-eval time).
@@ -475,6 +481,20 @@ export const useHubStore = create<HubState>((set) => ({
       const deduped = members.filter((m) => (seen.has(m.pubkey) ? false : (seen.add(m.pubkey), true)))
       return { hubMembers: { ...state.hubMembers, [dTag]: deduped } }
     }),
+
+  mergeHubMembers: (dTag, members) =>
+    set((state) => {
+      // Append members from a just-loaded page, deduped by real pubkey. Existing entries WIN (kept as-is),
+      // so the member's own-page roster set first by setHubMembers is never overwritten by a later page.
+      const existing = state.hubMembers[dTag] || []
+      const seen = new Set(existing.map((m) => m.pubkey))
+      const added = members.filter((m) => (seen.has(m.pubkey) ? false : (seen.add(m.pubkey), true)))
+      if (added.length === 0) return state
+      return { hubMembers: { ...state.hubMembers, [dTag]: [...existing, ...added] } }
+    }),
+
+  setHubMembersLoading: (dTag, loading) =>
+    set((state) => ({ hubMembersLoading: { ...state.hubMembersLoading, [dTag]: loading } })),
 
   setPreviewHub: (dTag) => set({ previewHubId: dTag }),
 
