@@ -14,9 +14,6 @@ import { useDnnStore } from '@/stores/dnnStore'
 import { formatDnnId } from '@/lib/dnn/formatDnnId'
 import { getEffectivePermissions } from '@/lib/hub/permissions'
 
-/** PAGE_SIZE matches the constant in lkh.ts — used for approximate total count display */
-const PAGE_SIZE = 10_000
-
 export function MemberList() {
   const activeHubId = useHubStore((s) => s.activeHubId)
   const activeChannelId = useHubStore((s) => s.activeChannelId)
@@ -39,12 +36,11 @@ export function MemberList() {
   if (!hub) return null
 
   /**
-   * Large hub detection: if the paginated index has more than 1 page,
-   * we only have our own page's members (up to PAGE_SIZE).
-   * The sidebar shows "Active Members" and an approximate total.
+   * Large hub detection: the paginated index has more than 1 page. Members from every page are now
+   * loaded progressively in the background (see loadRemainingPageMembers in useHubLoader), so the full
+   * roster fills in over time; the header shows a spinner while that load is still in flight.
    */
   const isLargeHub = (pageCount ?? 0) > 1
-  const approxTotal = isLargeHub ? (pageCount! * PAGE_SIZE) : 0
 
   // Build the members list including the creator
   const allMembers = useMemo(() => {
@@ -167,7 +163,7 @@ export function MemberList() {
       <div className="px-4 pt-3 pb-2 border-b border-border/50">
         <div className="flex items-center gap-1.5">
           <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            {channelScoped ? 'In This Channel' : 'Active Members'} — {totalCount}
+            {channelScoped ? 'In This Channel' : 'Members'} · {totalCount}
           </span>
           {membersLoading && !channelScoped && (
             <Loader2 size={11} className="animate-spin text-muted-foreground/60 shrink-0" aria-label="Loading remaining member pages" />
@@ -178,14 +174,15 @@ export function MemberList() {
                 onClick={() => setShowInfoTooltip(!showInfoTooltip)}
                 onBlur={() => setTimeout(() => setShowInfoTooltip(false), 150)}
                 className="text-muted-foreground/50 hover:text-muted-foreground transition-colors cursor-pointer"
-                title={`~${formatCount(approxTotal)} total members across ${pageCount} pages`}
               >
                 <Info size={11} />
               </button>
               {showInfoTooltip && (
                 <div className="absolute left-0 top-full mt-1 z-50 w-52 p-2.5 rounded-lg bg-popover border border-border shadow-lg text-[10px] text-muted-foreground leading-relaxed animate-in fade-in-0 zoom-in-95">
-                  <p className="font-medium text-foreground mb-1">{formatCount(approxTotal)} total members</p>
-                  <p>This hub has {pageCount} member pages. Only members from your page are shown here. Use Hub Settings → Members to search by npub.</p>
+                  <p className="font-medium text-foreground mb-1">{formatCount(totalCount)} members{membersLoading ? ' loaded so far' : ''}</p>
+                  <p>{membersLoading
+                    ? `This hub spans ${pageCount} member pages; still loading the rest.`
+                    : `Loaded from all ${pageCount} member pages.`}</p>
                 </div>
               )}
             </div>
@@ -262,7 +259,7 @@ export function MemberList() {
                     {group.label}
                   </span>
                   <span className="text-[10px] text-muted-foreground ml-auto shrink-0">
-                    — {group.members.length}
+                    · {group.members.length}
                   </span>
                 </button>
                 {!isCollapsed && (
