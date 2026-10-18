@@ -15,7 +15,7 @@ import {
   Loader2, Plus, Minus, Trash2, GripVertical, ChevronDown, ChevronUp,
   ChevronRight, Tag, XCircle, Zap, RotateCcw, AlertTriangle,
   Lock, ShieldCheck, RefreshCw, ShieldBan, Search, MessagesSquare, Megaphone, Pencil, Volume2,
-  Radio, Info, Lightbulb, Flag, Users, Check, ChevronLeft, UserPlus, EyeOff, Ban,
+  Radio, Info, Lightbulb, Flag, Users, Check, ChevronLeft, UserPlus, EyeOff, Ban, Download,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -37,6 +37,7 @@ import { truncateNpub, npubShort } from '@/lib/utils'
 import { uploadToBlossomServers, blossomServers as blossomServerManager } from '@/lib/blossom'
 import type { UploadProgress } from '@/lib/blossom'
 import { buildHubEvent } from '@/lib/hub/buildHubEvent'
+import { loadRemainingPageMembers } from '@/hooks/useHubLoader'
 import { mineAndSign } from '@/lib/nostr'
 import { publishToSpecificRelays, publishCriticalWithFailover, getRelayList } from '@/lib/nostr/relay-pool'
 import { getPublishRelays } from '@/stores/postingBehaviourStore'
@@ -6028,6 +6029,19 @@ function MembersPage({ hub, onFooterState, focusPubkey }: { hub: HubData; onFoot
   // A multi-page hub fills its roster in progressively (see loadRemainingPageMembers). Block role edits
   // until it's complete, so the owner can't stage/save changes against a half-loaded member list.
   const membersLoading = useHubStore((s) => !!s.hubMembersLoading[hub.dTag])
+  // Very large hub whose extra pages were NOT auto-loaded (guardrail). Value = lookup pubkey to resume with.
+  const membersDeferred = useHubStore((s) => s.hubMembersDeferred[hub.dTag])
+  const membersPageCount = useHubStore((s) => s.hubPageCounts[hub.dTag])
+  // "up to ~N MB" ceiling: remaining pages x ~5MB per full page (own page already loaded, so -1).
+  const estDownloadMb = Math.max((membersPageCount ?? 1) - 1, 0) * 5
+  const estDownloadLabel = estDownloadMb >= 1024 ? `${(estDownloadMb / 1024).toFixed(1)} GB` : `${estDownloadMb} MB`
+  const handleLoadAllMembers = () => {
+    if (!membersDeferred) return
+    const secretHex = useHubStore.getState().hubSecrets[hub.dTag]
+    if (!secretHex) return
+    useHubStore.getState().setHubMembersDeferred(hub.dTag, null)
+    void loadRemainingPageMembers(hub.dTag, hub, membersDeferred, secretHex)
+  }
   const setHubMembers = useHubStore((s) => s.setHubMembers)
   const setHubData = useHubStore((s) => s.setHubData)
   const signer = useUserStore((s) => s.signer)
@@ -6759,14 +6773,31 @@ function MembersPage({ hub, onFooterState, focusPubkey }: { hub: HubData; onFoot
       </div>
 
       {/* Still background-loading the remaining member pages: role edits are blocked until the full roster
-          is in, so the owner can't stage/publish against a partial list.
-          TODO(guardrail): once the large-hub download guardrail lands (very large hubs won't auto-fetch all
-          pages), replace this with a "Load all members" trigger button when the full load hasn't been
-          triggered yet, instead of implying it is downloading automatically. */}
+          is in, so the owner can't stage/publish against a partial list. */}
       {membersLoading && (
         <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-secondary/40 border border-border text-xs text-muted-foreground">
           <Loader2 size={13} className="animate-spin shrink-0" />
           <span>Still downloading the full member list. Role changes are disabled until it finishes.</span>
+        </div>
+      )}
+
+      {/* Guardrail: a very large hub did NOT auto-load its extra member pages, so only the owner's own page
+          is listed. Offer the same manual trigger as the in-hub "Load all members" card. */}
+      {membersDeferred && !membersLoading && (
+        <div className="rounded-lg bg-secondary/50 shadow-md px-3 py-2.5">
+          <div className="flex items-start gap-2">
+            <Users size={14} className="text-muted-foreground shrink-0 mt-0.5" />
+            <div className="min-w-0 flex-1">
+              <p className="text-[11px] font-medium text-foreground">Only your own member page is loaded</p>
+              <p className="text-[10px] text-muted-foreground mt-0.5 leading-snug">This is a large hub{membersPageCount ? ` (${membersPageCount} member files)` : ''}, so the rest of the list was not downloaded automatically. Load it (up to ~{estDownloadLabel}) to manage every member.</p>
+            </div>
+          </div>
+          <button
+            onClick={handleLoadAllMembers}
+            className="mt-2 w-full flex items-center justify-center gap-1.5 h-7 rounded-md bg-primary text-primary-foreground text-[11px] font-medium hover:bg-primary/90 transition-colors cursor-pointer"
+          >
+            <Download size={12} /> Load all members
+          </button>
         </div>
       )}
 
