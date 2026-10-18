@@ -67,6 +67,11 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
     useHubStore.getState().setHubMembersDeferred(activeHubId, null)
     void loadRemainingPageMembers(hubData.dTag, hubData, membersDeferred, secretHex)
   }, [activeHubId, membersDeferred])
+
+  // Rough CEILING for the "Load all members" size hint: each not-yet-loaded page is up to ~5MB (a full
+  // 10k-member page; real pages are usually smaller, hence "up to"). Own page is already loaded, so -1.
+  const estMembersDownloadMb = Math.max((hubPageCount ?? 1) - 1, 0) * 5
+  const estMembersDownloadLabel = estMembersDownloadMb >= 1024 ? `${(estMembersDownloadMb / 1024).toFixed(1)} GB` : `${estMembersDownloadMb} MB`
   const channelScrollRef = useRef<HTMLDivElement>(null)
   const [showSettings, setShowSettings] = useState(false)
   // When opening settings to edit one member's roles (from their profile modal): jump to Members and
@@ -800,7 +805,7 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
             <Users size={14} className="text-muted-foreground shrink-0 mt-0.5" />
             <div className="min-w-0 flex-1">
               <p className="text-[11px] font-medium text-foreground">Large hub{hubPageCount ? ` · ${hubPageCount} member files` : ''}</p>
-              <p className="text-[10px] text-muted-foreground mt-0.5 leading-snug">Only your own member page is loaded. Load the full list to see everyone and resolve all roles.</p>
+              <p className="text-[10px] text-muted-foreground mt-0.5 leading-snug">Only your own member page is loaded. Loading the rest (up to ~{estMembersDownloadLabel}) shows everyone and resolves all roles.</p>
             </div>
           </div>
           <button
