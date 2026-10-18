@@ -293,7 +293,7 @@ export function DraftPreviewPage() {
                 // GFM task list items: drop the disc marker, lay the themed read-only checkbox beside the text.
                 li: ({ children, className }) =>
                   className?.includes('task-list-item')
-                    ? <li className="list-none flex items-start gap-2">{children}</li>
+                    ? <li className="md-task list-none flex flex-wrap items-start gap-2">{children}</li>
                     : <li>{children}</li>,
                 input: ({ node, ...props }) =>
                   <input {...props} readOnly className="md-task-checkbox mt-1" />,

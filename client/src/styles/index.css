@@ -608,3 +608,22 @@ select:focus-visible {
   -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.8 8.6l2.7 2.7L12.2 5.1' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 74% no-repeat;
   mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.8 8.6l2.7 2.7L12.2 5.1' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 74% no-repeat;
 }
+
+/* Layout for the OVERRIDDEN task-list items (chat/DM/forum, long-form articles, drafts) which render each
+   item as a flex row of [checkbox][text] with the `md-task` marker. Two things the bare flex row gets
+   wrong on NESTED lists:
+   1. A child <ul>/<ol> is a flex sibling, so it lands to the RIGHT of the text instead of below it. Give it
+      flex-basis:100% (the row wraps) so it drops to its own full-width line, keeping its own `pl-5` indent.
+   2. The top-level pull-left (so the checkbox lines up with paragraph text) must NOT apply to nested items,
+      or it cancels the nested list's indent. Scope the negative margin to top-level and reset it when nested. */
+.md-task {
+  margin-left: -1.25rem;
+}
+.md-task .md-task {
+  margin-left: 0;
+}
+.md-task > ul,
+.md-task > ol {
+  flex-basis: 100%;
+  margin-top: 0.25rem;
+}
