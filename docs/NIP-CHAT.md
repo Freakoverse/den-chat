@@ -693,7 +693,10 @@ reverse `Pf → R_f`, its client remembers the vouched `R_f`s locally (for the l
 > **Why `R` in the event, not "look it up in the roster"?** The roster is *paginated* — a member
 > holds `P→R` only for members on **their own** leaf page. So anything that must resolve `R`
 > cross-page carries it **in the event** (the identity tag for content, `enc(R)` for typing),
-> exactly as messages do. The roster is only for the owner's rehydration and same-page display.
+> exactly as messages do. The roster is otherwise used for the owner's rehydration and for display; a
+> client MAY background-load other pages' rosters to show the full member list (§5.2 "Partial member
+> visibility & progressive loading"), but that load is best-effort, so per-message `R` resolution MUST NOT
+> depend on it.
 
 ### 4.7 Facilitation — the full system
 
@@ -972,7 +975,7 @@ root:s1t2:m3n4:m3n4:AEScipher_left4:AEScipher_left4:AEScipher_hub_secret
 6. Walk up the spine: find the spine node referencing your `page-root` node ID, AES-decrypt up to `root`
 7. AES-decrypt the hub secret from the `root` line
 
-**Partial member visibility:** In this model, a member only downloads their own leaf page and the spine — not all pages. Therefore the client only has visibility of the members on its own page (up to `PAGE_SIZE`). Clients SHOULD label this subset "Active Members" and display an approximate total count (`page_count × PAGE_SIZE`) when multiple pages exist.
+**Partial member visibility & progressive loading:** A member needs only their own leaf page plus the spine to decrypt the hub secret, so a client opens the hub on that page alone, then SHOULD fetch the remaining leaf pages in the background and merge each page's roster until it holds the full member list. A member's **role** lives on their leaf page (it is never carried in events), so a member whose page has not yet been loaded MUST be treated as the base `everyone` role until it is, and clients SHOULD indicate that the roster is still loading. For a very large hub a client MAY defer the background load behind an explicit user action rather than fetch every page automatically, since each page holds up to `PAGE_SIZE` members. Clients MUST NOT assume the locally-held roster is complete while it spans more than one page.
 
 #### Member Decryption (Monolithic)
 
