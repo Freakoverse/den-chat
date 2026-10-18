@@ -302,6 +302,14 @@ export function parseHubEvent(event: Event, contentOverride?: string): (HubData 
  * Throws only when the blob is on no server AND we hold no local copy.
  */
 async function loadHubText(hash: string, servers: string[], dTag: string): Promise<string> {
+  // Content-addressed dedup: a Blossom hash IS the sha256 of its bytes, so a blob we already hold locally
+  // under `hash` is byte-identical content, serve it and skip the network entirely. A changed hub event
+  // yields new index/page/spine hashes that naturally miss this cache, so "re-download only when the
+  // content changed" falls out for free. (The catch-block below keeps the same read as the servers-down
+  // self-heal fallback; on a cache hit we never reach it.)
+  const cached = await getCachedHubText(hash)
+  if (cached !== null) return cached
+
   try {
     const { text, failedRequested } = await downloadTextFromBlossomDetailed(hash, servers)
     // Health signal for the creator's "your advertised Blossom servers are failing" banner: which of the
