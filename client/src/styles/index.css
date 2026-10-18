@@ -536,6 +536,16 @@ select:focus-visible {
   to { width: 100%; }
 }
 
+/* Indeterminate progress bar: a short segment slides across a track, for loads with no known total
+   (e.g. a hub's remaining member pages streaming in). Pair with a ~25%-wide child segment. */
+@keyframes indeterminateBar {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
+.animate-indeterminate-bar {
+  animation: indeterminateBar 1.3s ease-in-out infinite;
+}
+
 /* Keep labels on one line and ellipsize overflow (e.g. long "Search ... with Engine" items). */
 .context-menu-label {
   flex: 1;

@@ -51,6 +51,7 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
   const myVoicePubkey = useMyVoicePubkey(hub?.dTag) // v2: our voice host is authored under P, not R
   const groupSecrets = useHubStore((s) => activeHubId ? s.groupSecrets[activeHubId] : undefined)
   const hubMembers = useHubStore((s) => activeHubId ? s.hubMembers[activeHubId] : undefined)
+  const membersLoading = useHubStore((s) => activeHubId ? !!s.hubMembersLoading[activeHubId] : false)
   const channelScrollRef = useRef<HTMLDivElement>(null)
   const [showSettings, setShowSettings] = useState(false)
   // When opening settings to edit one member's roles (from their profile modal): jump to Members and
@@ -746,6 +747,21 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
       {isCreator && layoutError && (
         <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-destructive/10 border border-destructive/30 text-[11px] text-destructive shrink-0">
           <AlertTriangle size={11} className="shrink-0" /> {layoutError}
+        </div>
+      )}
+
+      {/* Members/roles still streaming in for a multi-page hub: a slim indeterminate bar between the
+          header card and the channel list. (The guardrail's "Load all members" action will live in this
+          same slot for very large hubs once that lands.) */}
+      {membersLoading && (
+        <div className="shrink-0 px-0.5">
+          <div className="flex items-center gap-1.5 mb-1">
+            <Loader2 size={11} className="animate-spin text-muted-foreground shrink-0" />
+            <span className="text-[10px] text-muted-foreground">Downloading members &amp; roles...</span>
+          </div>
+          <div className="h-1 w-full rounded-full bg-secondary overflow-hidden">
+            <div className="h-full w-1/4 rounded-full bg-primary animate-indeterminate-bar" />
+          </div>
         </div>
       )}
 

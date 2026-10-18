@@ -525,6 +525,10 @@ function HubIcon({ label, isActive, onClick, children, isAction, isPreview, stat
   const size = compact ? 'w-10 h-10' : 'w-12 h-12'
   const rounding = isActive ? 'rounded-2xl' : 'rounded-[24px] hover:rounded-2xl'
 
+  // Background load of a multi-page hub's remaining member pages (see loadRemainingPageMembers). Shown as a
+  // small spinner on the BOTTOM-LEFT of the icon, opposite the bottom-right unread badges.
+  const membersLoading = useHubStore((s) => hubDTag ? !!s.hubMembersLoading[hubDTag] : false)
+
   // Unread state from notification store — suppress until initialized
   const notifReady = useNotificationStore((s) => s.initialized)
   const hubUnreads = useNotificationStore((s) => hubDTag ? s.hubUnreads[hubDTag] : undefined)
@@ -640,6 +644,13 @@ function HubIcon({ label, isActive, onClick, children, isAction, isPreview, stat
       {/* Simple notification dot (e.g. social feed) */}
       {!isActive && hasNotificationDot && (
         <div className={cn('absolute bottom-0 w-[14px] h-[14px] rounded-full bg-destructive shadow-md z-10 pointer-events-none border-2 border-secondary', compact ? '-right-1' : 'right-2')} />
+      )}
+
+      {/* Member-list background load: bottom-LEFT spinner, opposite the unread badges. */}
+      {membersLoading && status !== 'deleted' && status !== 'not-found' && (
+        <div className={cn('absolute bottom-0 w-[15px] h-[15px] rounded-full bg-secondary flex items-center justify-center shadow-md z-10 pointer-events-none border-2 border-secondary', compact ? '-left-1' : 'left-2')}>
+          <Loader2 className="w-2.5 h-2.5 animate-spin text-primary" />
+        </div>
       )}
     </div>
   )
