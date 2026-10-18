@@ -178,6 +178,9 @@ export interface HubState {
   hubMembers: Record<string, HubMember[]>
   /** True while a multi-page hub is still background-loading its remaining member pages (keyed by d tag). */
   hubMembersLoading: Record<string, boolean>
+  /** Live progress of that background load (keyed by d tag): pages done/total, members added so far, and
+   *  the start time (for a throughput readout). Absent when not loading. */
+  hubMembersProgress: Record<string, { pagesDone: number; totalPages: number; members: number; startedAt: number }>
   /** Hub being previewed (ephemeral, not in hub list event) */
   previewHubId: string | null
   /** Per-hub preferences (facilitator, visibility toggles) */
@@ -241,6 +244,7 @@ export interface HubState {
   /** Append members to a hub's roster (dedup by real pubkey, keeping existing), for progressive page loads. */
   mergeHubMembers: (dTag: string, members: HubMember[]) => void
   setHubMembersLoading: (dTag: string, loading: boolean) => void
+  setHubMembersProgress: (dTag: string, progress: { pagesDone: number; totalPages: number; members: number; startedAt: number } | null) => void
   setPreviewHub: (dTag: string | null) => void
   setHubPref: <K extends keyof HubPrefs>(dTag: string, key: K, value: HubPrefs[K]) => void
   setHubBanList: (dTag: string, pubkeys: string[]) => void
@@ -369,6 +373,7 @@ export const useHubStore = create<HubState>((set) => ({
   hideNotFoundHubs: localStorage.getItem('den_hide_notfound_hubs') === 'true',
   hubMembers: {},
   hubMembersLoading: {},
+  hubMembersProgress: {},
   previewHubId: null,
   // Start empty — hydrated per-account by hydratePersistedForAccount() on login (persistence is
   // namespaced by account, and there is no account at module-eval time).
@@ -495,6 +500,14 @@ export const useHubStore = create<HubState>((set) => ({
 
   setHubMembersLoading: (dTag, loading) =>
     set((state) => ({ hubMembersLoading: { ...state.hubMembersLoading, [dTag]: loading } })),
+
+  setHubMembersProgress: (dTag, progress) =>
+    set((state) => {
+      const next = { ...state.hubMembersProgress }
+      if (progress) next[dTag] = progress
+      else delete next[dTag]
+      return { hubMembersProgress: next }
+    }),
 
   setPreviewHub: (dTag) => set({ previewHubId: dTag }),
 

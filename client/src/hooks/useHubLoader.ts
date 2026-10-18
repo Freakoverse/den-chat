@@ -340,13 +340,13 @@ async function loadHubText(hash: string, servers: string[], dTag: string): Promi
  * large-hub guardrail (manual trigger past some size) and metered-connection handling are a separate
  * follow-up; until then a very large hub will background-fetch all its pages.
  */
-async function loadRemainingPageMembers(
+export async function loadRemainingPageMembers(
   dTag: string,
   hubData: HubData & { creatorPubkey: string },
   lookupPubkey: string,
   secretHex: string,
 ): Promise<void> {
-  const { setHubMembersLoading, mergeHubMembers } = useHubStore.getState()
+  const { setHubMembersLoading, setHubMembersProgress, mergeHubMembers } = useHubStore.getState()
   setHubMembersLoading(dTag, true)
   try {
     const { parseIndexFile, findPageForPubkey, getPageMembersV2 } = await import('@/lib/blossom')
@@ -365,24 +365,38 @@ async function loadRemainingPageMembers(
     const resolveEpochSecret = (epoch: number): Uint8Array | undefined =>
       epochMap[epoch] ? fromHex(epochMap[epoch]) : secretBytes
 
+    // Progress readout. `totalPages` is exact (from the index); `members` is a RUNNING tally of what this
+    // background load has merged so far, because a page's member count is only known once it is downloaded
+    // and parsed, never up front, so the UI shows it as a count, not a fraction. `pagesDone` starts at 1
+    // for the already-loaded own page.
+    const totalPages = index.leafPages.length
+    const startedAt = Date.now()
+    let pagesDone = 1
+    let members = 0
+    setHubMembersProgress(dTag, { pagesDone, totalPages, members, startedAt })
+
     for (const page of remaining) {
       // Abort if the hub's index moved on under us (rotation/kick/edit): a newer processHub run will
       // reload members from scratch, and merging stale-page members on top of it would be wrong.
       if (useHubStore.getState().hubs[dTag]?.indexFileHash !== hubData.indexFileHash) break
       try {
         const pageContent = await loadHubText(page.hash, hubData.blossomServers, dTag)
-        const members: HubMember[] = v2
+        const pageMembers: HubMember[] = v2
           ? (await getPageMembersV2(pageContent, resolveEpochSecret)).map((m) => ({ pubkey: m.pubkey, roles: m.roles, flags: m.flags, p: m.p }))
           : getPageMembers(deserializeLeafPage(pageContent))
-        if (members.length > 0) mergeHubMembers(dTag, members)
+        if (pageMembers.length > 0) mergeHubMembers(dTag, pageMembers)
+        members += pageMembers.length
       } catch (err) {
         console.warn(`Hub ${dTag}: progressive load of page ${page.pageIndex} failed (will retry on next open):`, err)
       }
+      pagesDone++
+      setHubMembersProgress(dTag, { pagesDone, totalPages, members, startedAt })
     }
   } catch (err) {
     console.warn(`Hub ${dTag}: progressive member load failed:`, err)
   } finally {
     setHubMembersLoading(dTag, false)
+    setHubMembersProgress(dTag, null)
   }
 }
 

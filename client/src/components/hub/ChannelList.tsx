@@ -52,6 +52,7 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
   const groupSecrets = useHubStore((s) => activeHubId ? s.groupSecrets[activeHubId] : undefined)
   const hubMembers = useHubStore((s) => activeHubId ? s.hubMembers[activeHubId] : undefined)
   const membersLoading = useHubStore((s) => activeHubId ? !!s.hubMembersLoading[activeHubId] : false)
+  const membersProgress = useHubStore((s) => activeHubId ? s.hubMembersProgress[activeHubId] : undefined)
   const channelScrollRef = useRef<HTMLDivElement>(null)
   const [showSettings, setShowSettings] = useState(false)
   // When opening settings to edit one member's roles (from their profile modal): jump to Members and
@@ -754,14 +755,27 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
           header card and the channel list. (The guardrail's "Load all members" action will live in this
           same slot for very large hubs once that lands.) */}
       {membersLoading && (
-        <div className="shrink-0 px-0.5">
-          <div className="flex items-center gap-1.5 mb-1">
-            <Loader2 size={11} className="animate-spin text-muted-foreground shrink-0" />
-            <span className="text-[10px] text-muted-foreground">Downloading members &amp; roles...</span>
+        <div className="shrink-0 rounded-lg bg-secondary/50 shadow-md px-3 py-2">
+          <div className="flex items-center justify-between gap-2 mb-1.5">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <Loader2 size={12} className="animate-spin text-primary shrink-0" />
+              <span className="text-[11px] font-medium text-foreground truncate">Downloading members &amp; roles</span>
+            </div>
+            {membersProgress && (
+              <span className="text-[10px] text-muted-foreground tabular-nums shrink-0">
+                {Math.round(membersProgress.members / Math.max((Date.now() - membersProgress.startedAt) / 1000, 0.5)).toLocaleString()}/s
+              </span>
+            )}
           </div>
-          <div className="h-1 w-full rounded-full bg-secondary overflow-hidden">
+          <div className="h-1.5 w-full rounded-full bg-secondary overflow-hidden">
             <div className="h-full w-1/4 rounded-full bg-primary animate-indeterminate-bar" />
           </div>
+          {membersProgress && (
+            <div className="mt-1.5 flex items-center justify-between gap-2 text-[10px] text-muted-foreground tabular-nums">
+              <span>{membersProgress.members.toLocaleString()} members</span>
+              <span>{membersProgress.pagesDone} / {membersProgress.totalPages} files</span>
+            </div>
+          )}
         </div>
       )}
 
