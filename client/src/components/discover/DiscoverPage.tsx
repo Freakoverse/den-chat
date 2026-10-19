@@ -1197,7 +1197,7 @@ function ManageRecommendationsModal({ open, onClose }: { open: boolean; onClose:
     .filter((e) => hubStatus[e.dTag] === 'loaded')
     .map((e) => hubsData[e.dTag])
     .filter((h) => !!h && !!h.creatorPubkey)
-    .map((h) => ({ dTag: h.dTag, name: h.name, creatorPubkey: h.creatorPubkey, relayHint: h.generalRelays?.[0], coord: hubCoord(h.creatorPubkey, h.dTag) }))
+    .map((h) => ({ dTag: h.dTag, name: h.name, icon: h.icon, banner: h.banner, creatorPubkey: h.creatorPubkey, relayHint: h.generalRelays?.[0], coord: hubCoord(h.creatorPubkey, h.dTag) }))
   const myHubCoords = new Set(myHubs.map((h) => h.coord))
   const external = [...myRecs.values()].filter((r) => !myHubCoords.has(r.coord))
 
@@ -1252,11 +1252,26 @@ function ManageRecommendationsModal({ open, onClose }: { open: boolean; onClose:
                 {myHubs.map((h) => {
                   const on = myRecs.has(h.coord)
                   return (
-                    <div key={h.coord} className="flex items-center justify-between gap-2 px-2 py-1.5 rounded-md hover:bg-secondary/40">
-                      <span className="text-sm text-foreground truncate">{h.name || h.dTag.slice(0, 8)}</span>
+                    <div key={h.coord} className="relative flex items-center gap-2.5 p-1.5 rounded-lg border border-border overflow-hidden">
+                      {h.banner && (
+                        <div className="absolute inset-0 opacity-25 pointer-events-none">
+                          <BannerImage src={h.banner} alt="" unblur />
+                        </div>
+                      )}
+                      <div className="absolute inset-0 bg-gradient-to-r from-background/75 via-background/85 to-background/95 pointer-events-none" />
+                      <div className="relative w-9 h-9 rounded-md overflow-hidden shrink-0 bg-secondary">
+                        {h.icon ? (
+                          <IconImage src={h.icon} name={h.name || h.dTag} unblur />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center text-xs font-semibold text-primary bg-primary/20">
+                            {(h.name || h.dTag).slice(0, 2).toUpperCase()}
+                          </div>
+                        )}
+                      </div>
+                      <span className="relative flex-1 min-w-0 text-sm font-medium text-foreground truncate">{h.name || h.dTag.slice(0, 8)}</span>
                       <button
                         onClick={() => toggle({ coord: h.coord, pubkey: h.creatorPubkey, dTag: h.dTag, relayHint: h.relayHint })}
-                        className={`px-2 py-0.5 rounded text-[11px] font-medium cursor-pointer shrink-0 ${on ? 'bg-emerald-500/15 text-emerald-400' : 'bg-secondary text-muted-foreground hover:text-foreground'}`}
+                        className={`relative px-2 py-0.5 rounded text-[11px] font-medium cursor-pointer shrink-0 ${on ? 'bg-emerald-500/15 text-emerald-400' : 'bg-secondary text-muted-foreground hover:text-foreground'}`}
                       >
                         {on ? 'Recommended' : 'Recommend'}
                       </button>
