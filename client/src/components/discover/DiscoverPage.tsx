@@ -2015,7 +2015,7 @@ export function DiscoverPage() {
                           {perspectiveFirehose ? 'Showing every discoverable hub. Toggle off to go back to your sources.' : 'Turn off all sources to browse every discoverable hub'}
                         </TooltipContent>
                       </Tooltip>
-                      <span className={`w-px self-stretch my-1 shrink-0 ${perspectiveFirehose ? 'bg-amber-500/60' : 'bg-foreground/30'}`} />
+                      <span className={`w-px self-stretch my-1 shrink-0 ${perspectiveFirehose ? 'bg-amber-500/60' : 'bg-foreground/20'}`} />
                       <button
                         onClick={() => setShowSourceModal(true)}
                         className={`flex items-center gap-1.5 pl-2 pr-2.5 py-1 rounded-r-full transition-colors cursor-pointer min-w-0 ${perspectiveFirehose ? 'text-amber-400' : 'text-muted-foreground hover:text-foreground'}`}
