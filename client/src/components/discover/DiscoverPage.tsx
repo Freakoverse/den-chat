@@ -1448,12 +1448,26 @@ export function DiscoverPage() {
   const followedPubkeys = useFollowStore((s) => s.followedPubkeys)
   const trustedSources = useRecommendationStore((s) => s.trustedSources)
   const recAllOffAck = useRecommendationStore((s) => s.allOffAck)
+  const setTrustedSources = useRecommendationStore((s) => s.setTrustedSources)
+  const setAllOffAck = useRecommendationStore((s) => s.setAllOffAck)
   const enabledSources = useMemo(() => trustedSources.filter((s) => s.enabled).map((s) => s.pubkey), [trustedSources])
   // Perspective with every source turned off (and acknowledged) = the raw "all discoverable" firehose.
   const perspectiveFirehose = recSection === 'perspective' && enabledSources.length === 0 && recAllOffAck
   const myPubkey = useUserStore((s) => s.pubkey)
   const [showManageRecs, setShowManageRecs] = useState(false)
   const [showSourceModal, setShowSourceModal] = useState(false)
+  const [showAllOffConfirm, setShowAllOffConfirm] = useState(false)
+  // Quick "all sources off" toggle (left of the Recommendation chip). Turning it ON needs the same
+  // confirmation as the sources modal; turning it OFF re-enables every source and clears the ack.
+  const toggleAllOff = useCallback(() => {
+    if (perspectiveFirehose) setTrustedSources(trustedSources.map((s) => ({ ...s, enabled: true })))
+    else setShowAllOffConfirm(true)
+  }, [perspectiveFirehose, trustedSources, setTrustedSources])
+  const confirmAllOff = useCallback(() => {
+    setTrustedSources(trustedSources.map((s) => ({ ...s, enabled: false })))
+    setAllOffAck(true)
+    setShowAllOffConfirm(false)
+  }, [trustedSources, setTrustedSources, setAllOffAck])
   // Load the user's own recommendation list once we know who they are.
   useEffect(() => {
     if (myPubkey) useRecommendationStore.getState().loadMyRecs(myPubkey)
@@ -1987,17 +2001,36 @@ export function DiscoverPage() {
                   </Tooltip>
 
                   {recSection === 'perspective' && (
-                    <button
-                      onClick={() => setShowSourceModal(true)}
-                      className="flex items-center gap-1.5 pl-2 pr-2.5 py-1 rounded-full border bg-secondary/60 border-border text-[11px] font-medium text-muted-foreground hover:text-foreground transition-colors cursor-pointer max-w-full"
-                    >
-                      <ShieldAlert size={12} className="shrink-0" />
-                      <span className="truncate">
-                        {enabledSources.length === 0
-                          ? 'Recommendation of: none'
-                          : `Recommendation of: ${truncateNpub(nip19.npubEncode(enabledSources[0]), 10)}${enabledSources.length > 1 ? ` +${enabledSources.length - 1}` : ''}`}
-                      </span>
-                    </button>
+                    <>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button
+                            onClick={toggleAllOff}
+                            className={`flex items-center gap-2 pl-1 pr-2 py-1 rounded-full border text-[11px] font-medium transition-colors cursor-pointer
+                              ${perspectiveFirehose ? 'bg-amber-500/10 border-amber-500/40 text-amber-400' : 'bg-secondary/60 border-border text-muted-foreground hover:text-foreground'}`}
+                          >
+                            <span className={`relative inline-block w-7 h-4 rounded-full transition-colors shrink-0 ${perspectiveFirehose ? 'bg-amber-500' : 'bg-muted-foreground/30'}`}>
+                              <span className={`absolute top-[2px] left-0 block w-3 h-3 rounded-full bg-white shadow transition-transform ${perspectiveFirehose ? 'translate-x-[14px]' : 'translate-x-[2px]'}`} />
+                            </span>
+                            All hubs
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom" className="text-xs">
+                          {perspectiveFirehose ? 'Showing every discoverable hub with no curation' : 'Turn off all sources to browse every discoverable hub'}
+                        </TooltipContent>
+                      </Tooltip>
+                      <button
+                        onClick={() => setShowSourceModal(true)}
+                        className="flex items-center gap-1.5 pl-2 pr-2.5 py-1 rounded-full border bg-secondary/60 border-border text-[11px] font-medium text-muted-foreground hover:text-foreground transition-colors cursor-pointer max-w-full"
+                      >
+                        <ShieldAlert size={12} className="shrink-0" />
+                        <span className="truncate">
+                          {enabledSources.length === 0
+                            ? 'Recommendation of: none'
+                            : `Recommendation of: ${truncateNpub(nip19.npubEncode(enabledSources[0]), 10)}${enabledSources.length > 1 ? ` +${enabledSources.length - 1}` : ''}`}
+                        </span>
+                      </button>
+                    </>
                   )}
                 </div>
               </div>
@@ -2187,6 +2220,22 @@ export function DiscoverPage() {
       />
       <ManageRecommendationsModal open={showManageRecs} onClose={() => setShowManageRecs(false)} />
       <TrustedSourcesModal open={showSourceModal} onClose={() => setShowSourceModal(false)} />
+      {showAllOffConfirm && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center px-2" onClick={() => setShowAllOffConfirm(false)}>
+          <div className="absolute inset-0 bg-black/60" />
+          <div className="relative z-10 w-full max-w-sm rounded-xl border border-border bg-background shadow-2xl p-6" onClick={(e) => e.stopPropagation()}>
+            <div className="flex flex-col items-center text-center gap-3">
+              <div className="w-12 h-12 rounded-full bg-amber-500/10 flex items-center justify-center"><AlertTriangle size={24} className="text-amber-500" /></div>
+              <h3 className="text-base font-semibold text-foreground">Browse without a trusted source?</h3>
+              <p className="text-sm text-muted-foreground leading-relaxed">Perspective will show every discoverable hub with no curation. You hold responsibility for what you see. Re-enable a source any time to go back.</p>
+              <div className="flex items-center gap-2 w-full mt-1">
+                <button onClick={() => setShowAllOffConfirm(false)} className="flex-1 px-4 py-2 rounded-lg text-sm font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/50 cursor-pointer">Cancel</button>
+                <button onClick={confirmAllOff} className="flex-1 px-4 py-2 rounded-lg text-sm font-medium bg-amber-500 text-white hover:bg-amber-600 cursor-pointer">I understand</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   )
 }
