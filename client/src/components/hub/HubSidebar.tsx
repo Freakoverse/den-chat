@@ -494,6 +494,13 @@ export function HubSidebar({ activePage, onNavigate, compact = false }: { active
                 <RefreshCw size={14} /> Try again
               </button>
             </div>
+
+            <button
+              onClick={() => { setNotFoundModalHub(null); setSettingsTab('my-hubs'); onNavigate?.('settings') }}
+              className="mt-3 w-full text-center text-[11px] text-muted-foreground/70 hover:text-foreground underline transition-colors cursor-pointer"
+            >
+              or remove it from your hub list
+            </button>
           </div>
         </div>
       )}
