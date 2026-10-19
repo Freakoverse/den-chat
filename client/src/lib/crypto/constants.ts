@@ -85,4 +85,7 @@ export const APP_DATA_DTAGS = {
   /** Groups (NIP-CHAT §21): per-group read timestamp + mute settings, encrypted, capped at the group
    *  list limit so the event never outgrows relay size limits. Separate from the hub event on purpose. */
   GROUP_READ_STATE: 'den-group-read-state',
+  /** Hub recommendations (Discover): a user's PUBLIC, plaintext list of recommended hubs as `a` tags,
+   *  read by their followers and by trusted-source curation in the Discover page. */
+  HUB_RECOMMENDATIONS: 'den-hub-recommendations',
 } as const
