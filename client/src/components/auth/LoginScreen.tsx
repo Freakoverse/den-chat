@@ -6,7 +6,7 @@ import { isTauri, isMobileOS } from '@/lib/utils'
 import { ADMIN_PUBKEY, StorageKey } from '@/lib/constants'
 import { fetchReplaceable, fetchEvents, publishToSpecificRelays, getRelayList } from '@/lib/nostr/relay-pool'
 import { orderByHealth } from '@/lib/nostr/relayHealthProbe'
-import { MonitorSmartphone, Import, Plus, Loader2, AlertCircle, Link2, KeyRound, Copy, Check, AppWindow, ChevronDown, ChevronLeft, ChevronRight, X, Shield, ExternalLink, User, Lock, Eye, EyeOff, GitBranch, Sprout, KeySquare, Download, FileUp, BookOpen, Camera, Settings2, XCircle, FileText, Package, LockOpen, Globe, RefreshCw, Rocket, QrCode } from 'lucide-react'
+import { MonitorSmartphone, Import, Plus, Loader2, AlertCircle, Link2, KeyRound, Copy, Check, AppWindow, ChevronDown, ChevronLeft, ChevronRight, X, Shield, ExternalLink, User, Lock, Eye, EyeOff, GitBranch, Sprout, KeySquare, Download, FileUp, BookOpen, Camera, Settings2, XCircle, FileText, Package, LockOpen, Globe, RefreshCw, Rocket, QrCode, Info, Gauge } from 'lucide-react'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { BlossomImage } from '@/components/ui/BlossomImage'
 import { Button } from '@/components/ui/button'
@@ -77,6 +77,7 @@ export function LoginScreen() {
   const connectAbortRef = useRef<AbortController | null>(null)
   const [copied, setCopied] = useState(false)
   const [showTerms, setShowTerms] = useState(false)
+  const [showMeteredInfo, setShowMeteredInfo] = useState(false)
   const [showGuide, setShowGuide] = useState(false)
   const [showExtensionGuide, setShowExtensionGuide] = useState(false)
 
@@ -2685,10 +2686,19 @@ export function LoginScreen() {
               Terms of Use
             </button>
           </p>
+
+          {/* Metered-connection heads-up (opens an explainer; no detection, purely informational) */}
+          <button
+            onClick={() => setShowMeteredInfo(true)}
+            className="flex items-center justify-center gap-1 mx-auto mt-0.5 text-[11px] text-muted-foreground/70 hover:text-foreground transition-colors cursor-pointer"
+          >
+            On a metered connection? Be careful <Info size={11} className="shrink-0" />
+          </button>
         </CardContent>
       </Card>
 
       <TermsModal open={showTerms} onClose={() => setShowTerms(false)} />
+      <MeteredInfoModal open={showMeteredInfo} onClose={() => setShowMeteredInfo(false)} />
       <GuideModal
         open={showGuide}
         onClose={() => setShowGuide(false)}
@@ -2811,6 +2821,51 @@ const TERMS_SECTIONS = [
     content: 'You are solely responsible for all content you create, publish, and broadcast through DEN Chat. Once a Nostr event is signed and published to the network, it may be replicated and stored across multiple relays indefinitely. Deletion requests are best-effort and cannot be guaranteed; any content you publish should be considered potentially permanent. DEN Chat does not monitor, moderate, or endorse any user-generated content.',
   },
 ]
+
+/* ─── Metered-connection explainer ─── */
+function MeteredInfoModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  useEscToClose(onClose, open)
+
+  if (!open) return null
+
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
+
+      <div className="relative z-10 w-full max-w-md mx-4 max-h-[85vh] flex flex-col bg-card rounded-xl border border-border shadow-2xl">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
+          <div className="flex items-center gap-2.5">
+            <Gauge size={18} className="text-primary" />
+            <h2 className="font-semibold text-foreground">Metered connection</h2>
+          </div>
+          <button onClick={onClose} className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors cursor-pointer">
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="px-5 py-4 overflow-y-auto text-sm text-muted-foreground leading-relaxed space-y-3">
+          <p>
+            To work, DEN Chat downloads data for each of your hubs: your own member page, other members' pages
+            as the roster fills in, and media as you view it. Across your whole hub list this can range from a
+            few MB to hundreds of MB or more, depending on how many hubs you are in and how large they are.
+          </p>
+          <p className="text-foreground/90 font-medium">
+            If you are on mobile data or another limited connection, do your first sign-in and browse on Wi-Fi,
+            and do not clear the app's cache afterward.
+          </p>
+          <p>
+            Once that data is cached, reopening the same hubs costs almost nothing, so DEN Chat stays cheap on a
+            metered connection. Only new or changed data is fetched again.
+          </p>
+        </div>
+
+        <div className="px-5 py-3 border-t border-border shrink-0 flex justify-end">
+          <Button onClick={onClose} className="h-8 px-4 text-xs">Got it</Button>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 function TermsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [expanded, setExpanded] = useState<number | null>(null)
