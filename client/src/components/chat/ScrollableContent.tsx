@@ -1,10 +1,10 @@
 import { useState, useRef, useEffect, type ReactNode } from 'react'
 import { ChevronsDown, ChevronsUp } from 'lucide-react'
 
-const MAX_CONTENT_HEIGHT = 600
+const MAX_CONTENT_HEIGHT = 900
 
 /**
- * Wraps message content in a height-constrained container (600px). When the content overflows it starts
+ * Wraps message content in a height-constrained container (900px). When the content overflows it starts
  * clipped with a fade overlay and a "Show all" button. Expanding removes the height cap entirely (the
  * message flows at full height, no inner scroll) and surfaces a STICKY "Show less" button that floats at
  * the bottom of the viewport while reading, so a long message can always be collapsed from anywhere.
