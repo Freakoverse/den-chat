@@ -1219,11 +1219,11 @@ function ManageRecommendationsModal({ open, onClose }: { open: boolean; onClose:
       <div className="absolute inset-0 bg-black/60" onClick={onClose} />
       <div className="relative z-10 w-full max-w-md max-h-[85vh] flex flex-col rounded-xl border border-border bg-background shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
-          <h2 className="font-semibold text-foreground">Your recommended hubs</h2>
+          <h2 className="font-semibold text-foreground">Manage recommendations</h2>
           <button onClick={onClose} className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary cursor-pointer"><X size={16} /></button>
         </div>
         <div className="px-5 py-4 overflow-y-auto space-y-4">
-          <p className="text-xs text-muted-foreground leading-relaxed">People who follow you see these under their Discover <span className="font-medium text-foreground">Follows</span> tab. Only discoverable hubs are shown there.</p>
+          <p className="text-xs text-muted-foreground leading-relaxed">People who follow you see the hubs you recommend under their Discover <span className="font-medium text-foreground">Follows</span> tab. Only discoverable hubs are shown there.</p>
           <div>
             <label className="text-xs font-medium text-foreground">Add by address</label>
             <div className="flex items-center gap-2 mt-1">
@@ -1243,6 +1243,7 @@ function ManageRecommendationsModal({ open, onClose }: { open: boolean; onClose:
           {myHubs.length > 0 && (
             <div>
               <label className="text-xs font-medium text-foreground">From your hubs</label>
+              <p className="text-[11px] text-muted-foreground mt-0.5">Every hub in your list. Tap <span className="text-emerald-400">Recommend</span> to add one.</p>
               <div className="mt-1 space-y-1">
                 {myHubs.map((h) => {
                   const on = myRecs.has(h.coord)
