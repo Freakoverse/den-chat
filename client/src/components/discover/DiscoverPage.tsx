@@ -1942,7 +1942,7 @@ export function DiscoverPage() {
 
                 {/* Recommendation source sub-tabs + quick filters (same state the Filters modal edits) */}
                 <div className="flex items-center gap-2 mt-2 flex-wrap">
-                  <div className="flex items-center gap-1 p-0.5 rounded-lg bg-secondary/40 border border-border">
+                  <div className="flex items-center gap-1 p-0.5 rounded-lg border border-border">
                     {([['follows', 'Follows'], ['perspective', 'Perspective']] as const).map(([id, label]) => (
                       <button
                         key={id}
