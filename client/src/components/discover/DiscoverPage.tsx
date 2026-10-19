@@ -2018,7 +2018,11 @@ export function DiscoverPage() {
                     <p className="text-xs text-muted-foreground max-w-xs break-all">
                       {searchQuery
                         ? `No hubs match "${searchQuery}". Try a different search or adjust filters.`
-                        : 'No discoverable hubs match the current filters. Try adjusting your filter settings.'}
+                        : perspectiveFirehose
+                          ? 'No discoverable hubs match the current filters. Try adjusting your filter settings.'
+                          : recSection === 'follows'
+                            ? 'No recommendations from people you follow yet. When someone you follow recommends a hub, it shows here.'
+                            : 'No recommendations from your trusted sources yet. Add a source, or turn all sources off to browse every discoverable hub.'}
                     </p>
                   </div>
                 )}
