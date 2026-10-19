@@ -23,7 +23,8 @@ import { nowSeconds } from '@/lib/time/clockOffset'
 import { KINDS } from '@/lib/crypto/constants'
 import { useFollowStore } from '@/stores/followStore'
 import { useRecommendationStore } from '@/stores/recommendationStore'
-import { fetchRecommendationRefs } from '@/lib/hub/hubRecommendations'
+import { fetchRecommendationRefs, hubCoord, parseHubCoord, type HubRecRef } from '@/lib/hub/hubRecommendations'
+import { resolveShortAddress, looksLikeShortAddress, SHORT_ADDRESS_PATTERN } from '@/lib/nostr/nipShort'
 import { countLeadingZeroBits } from '@/lib/pow/pow'
 import { MAX_HUB_LIST_ENTRIES } from '@/lib/hub/hubLimits'
 
@@ -1148,6 +1149,139 @@ function IconImage({ src, name, unblur }: { src: string; name: string; unblur?: 
   return <img src={blossom.src || src} alt="" className={`w-full h-full object-cover ${unblur ? '' : 'blur-sm'}`} loading="lazy" />
 }
 
+// Parse a hub "address" the user pastes: an naddr1, a raw "36942:pubkey:dTag" coordinate, or a NIP-SHORT
+// share address (including inside a denchat.top/#hub/<short> link). Returns a recommendation ref or null.
+async function parseHubAddress(input: string): Promise<HubRecRef | null> {
+  const raw = input.trim().replace(/^nostr:/, '')
+  if (!raw) return null
+  try {
+    const dec = nip19.decode(raw)
+    if (dec.type === 'naddr') {
+      const a = dec.data as { kind: number; pubkey: string; identifier: string }
+      if (a.kind === KINDS.HUB_EVENT && a.pubkey && a.identifier) return { coord: hubCoord(a.pubkey, a.identifier), pubkey: a.pubkey, dTag: a.identifier }
+    }
+  } catch { /* not an naddr */ }
+  const direct = parseHubCoord(raw)
+  if (direct) return direct
+  const short = input.match(SHORT_ADDRESS_PATTERN)?.[0]
+  if (short && looksLikeShortAddress(short)) {
+    const res = await resolveShortAddress(short)
+    if (res.status === 'resolved' && res.event.kind === KINDS.HUB_EVENT) {
+      const d = res.event.tags.find((t) => t[0] === 'd')?.[1]
+      if (d) return { coord: hubCoord(res.event.pubkey, d), pubkey: res.event.pubkey, dTag: d }
+    }
+  }
+  return null
+}
+
+// Manage the user's own recommendation list (shown from the Follows tab).
+function ManageRecommendationsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const signer = useUserStore((s) => s.signer)
+  const privateKey = useUserStore((s) => s.privateKey)
+  const myRecs = useRecommendationStore((s) => s.myRecs)
+  const addRec = useRecommendationStore((s) => s.addRec)
+  const removeRec = useRecommendationStore((s) => s.removeRec)
+  const hubEntries = useHubStore((s) => s.hubEntries)
+  const hubsData = useHubStore((s) => s.hubs)
+  const [addr, setAddr] = useState('')
+  const [addErr, setAddErr] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  useEscToClose(onClose, open)
+  if (!open) return null
+
+  const myHubs = hubEntries
+    .map((e) => hubsData[e.dTag])
+    .filter((h) => !!h && !!h.creatorPubkey)
+    .map((h) => ({ dTag: h.dTag, name: h.name, creatorPubkey: h.creatorPubkey, relayHint: h.generalRelays?.[0], coord: hubCoord(h.creatorPubkey, h.dTag) }))
+  const myHubCoords = new Set(myHubs.map((h) => h.coord))
+  const external = [...myRecs.values()].filter((r) => !myHubCoords.has(r.coord))
+
+  const doAdd = async () => {
+    setAddErr(null); setBusy(true)
+    try {
+      const ref = await parseHubAddress(addr)
+      if (!ref) { setAddErr('Not a valid hub address (npub/naddr, a 36942:... coordinate, or a share link).'); return }
+      await addRec(ref, signer, privateKey)
+      setAddr('')
+    } catch (e) { setAddErr(e instanceof Error ? e.message : 'Failed to add') }
+    finally { setBusy(false) }
+  }
+  const toggle = async (ref: HubRecRef) => {
+    try {
+      if (myRecs.has(ref.coord)) await removeRec(ref.coord, signer, privateKey)
+      else await addRec(ref, signer, privateKey)
+    } catch { /* store reverts on failure */ }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center px-2">
+      <div className="absolute inset-0 bg-black/60" onClick={onClose} />
+      <div className="relative z-10 w-full max-w-md max-h-[85vh] flex flex-col rounded-xl border border-border bg-background shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
+          <h2 className="font-semibold text-foreground">Your recommended hubs</h2>
+          <button onClick={onClose} className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary cursor-pointer"><X size={16} /></button>
+        </div>
+        <div className="px-5 py-4 overflow-y-auto space-y-4">
+          <p className="text-xs text-muted-foreground leading-relaxed">People who follow you see these under their Discover <span className="font-medium text-foreground">Follows</span> tab. Only discoverable hubs are shown there.</p>
+          <div>
+            <label className="text-xs font-medium text-foreground">Add by address</label>
+            <div className="flex items-center gap-2 mt-1">
+              <input
+                value={addr}
+                onChange={(e) => { setAddr(e.target.value); setAddErr(null) }}
+                onKeyDown={(e) => { if (e.key === 'Enter') doAdd() }}
+                placeholder="npub/naddr, 36942:..., or a hub share link"
+                className="flex-1 min-w-0 px-2.5 py-1.5 rounded-md bg-secondary/60 border border-border text-sm text-foreground placeholder:text-muted-foreground outline-none"
+              />
+              <button onClick={doAdd} disabled={!addr.trim() || busy} className="px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 disabled:opacity-40 cursor-pointer shrink-0">
+                {busy ? <Loader2 size={13} className="animate-spin" /> : 'Add'}
+              </button>
+            </div>
+            {addErr && <p className="text-[11px] text-destructive mt-1">{addErr}</p>}
+          </div>
+          {myHubs.length > 0 && (
+            <div>
+              <label className="text-xs font-medium text-foreground">From your hubs</label>
+              <div className="mt-1 space-y-1">
+                {myHubs.map((h) => {
+                  const on = myRecs.has(h.coord)
+                  return (
+                    <div key={h.coord} className="flex items-center justify-between gap-2 px-2 py-1.5 rounded-md hover:bg-secondary/40">
+                      <span className="text-sm text-foreground truncate">{h.name || h.dTag.slice(0, 8)}</span>
+                      <button
+                        onClick={() => toggle({ coord: h.coord, pubkey: h.creatorPubkey, dTag: h.dTag, relayHint: h.relayHint })}
+                        className={`px-2 py-0.5 rounded text-[11px] font-medium cursor-pointer shrink-0 ${on ? 'bg-emerald-500/15 text-emerald-400' : 'bg-secondary text-muted-foreground hover:text-foreground'}`}
+                      >
+                        {on ? 'Recommended' : 'Recommend'}
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+          {external.length > 0 && (
+            <div>
+              <label className="text-xs font-medium text-foreground">Added by address</label>
+              <div className="mt-1 space-y-1">
+                {external.map((r) => (
+                  <div key={r.coord} className="flex items-center justify-between gap-2 px-2 py-1.5 rounded-md hover:bg-secondary/40">
+                    <span className="text-xs text-muted-foreground font-mono truncate">{r.dTag.slice(0, 8)} / {truncateNpub(nip19.npubEncode(r.pubkey), 10)}</span>
+                    <button onClick={() => removeRec(r.coord, signer, privateKey)} className="px-2 py-0.5 rounded text-[11px] font-medium bg-secondary text-muted-foreground hover:text-destructive cursor-pointer shrink-0">Remove</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {myRecs.size === 0 && myHubs.length === 0 && (
+            <p className="text-xs text-muted-foreground text-center py-4">You haven't recommended any hubs yet.</p>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Main Page Component ──
 export function DiscoverPage() {
   const [discoverTab, setDiscoverTab] = useState<DiscoverTab>('hubs')
@@ -1178,6 +1312,12 @@ export function DiscoverPage() {
   const enabledSources = useMemo(() => trustedSources.filter((s) => s.enabled).map((s) => s.pubkey), [trustedSources])
   // Perspective with every source turned off (and acknowledged) = the raw "all discoverable" firehose.
   const perspectiveFirehose = recSection === 'perspective' && enabledSources.length === 0 && recAllOffAck
+  const myPubkey = useUserStore((s) => s.pubkey)
+  const [showManageRecs, setShowManageRecs] = useState(false)
+  // Load the user's own recommendation list once we know who they are.
+  useEffect(() => {
+    if (myPubkey) useRecommendationStore.getState().loadMyRecs(myPubkey)
+  }, [myPubkey])
   // Default range 15–25 for both PoW (`w`) and join PoW (`W`). Both ranges are INERT by default:
   // message-PoW filtering + hub-event PoW verification apply only when "Require a message difficulty"
   // is on, and join-PoW filtering only when "Require a join difficulty" is on. So out of the box every
@@ -1721,14 +1861,24 @@ export function DiscoverPage() {
                     </span>
                   </div>
 
-                  <button
-                    onClick={() => { if (perspectiveFirehose) loadHubs(); else loadRecHubs(recSection === 'follows' ? [...followedPubkeys] : enabledSources) }}
-                    disabled={sourceLoading}
-                    className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer disabled:opacity-50"
-                  >
-                    {sourceLoading ? <Loader2 size={12} className="animate-spin" /> : <Compass size={12} />}
-                    Refresh
-                  </button>
+                  <div className="flex items-center gap-3">
+                    {recSection === 'follows' && (
+                      <button
+                        onClick={() => setShowManageRecs(true)}
+                        className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                      >
+                        <Plus size={12} /> Manage my recommendations
+                      </button>
+                    )}
+                    <button
+                      onClick={() => { if (perspectiveFirehose) loadHubs(); else loadRecHubs(recSection === 'follows' ? [...followedPubkeys] : enabledSources) }}
+                      disabled={sourceLoading}
+                      className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer disabled:opacity-50"
+                    >
+                      {sourceLoading ? <Loader2 size={12} className="animate-spin" /> : <Compass size={12} />}
+                      Refresh
+                    </button>
+                  </div>
                 </div>
 
                 {/* Loading state */}
@@ -1877,6 +2027,7 @@ export function DiscoverPage() {
         setFilterClientTags={setFilterClientTags}
         onApplySearch={searchRelays}
       />
+      <ManageRecommendationsModal open={showManageRecs} onClose={() => setShowManageRecs(false)} />
     </>
   )
 }
