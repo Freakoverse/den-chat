@@ -19,6 +19,7 @@ import { useUserStore } from '@/stores/userStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { useBlossomMedia } from '@/hooks/useBlossomMedia'
 import { fetchEvents } from '@/lib/nostr/relay-pool'
+import { nowSeconds } from '@/lib/time/clockOffset'
 import { KINDS } from '@/lib/crypto/constants'
 import { countLeadingZeroBits } from '@/lib/pow/pow'
 import { MAX_HUB_LIST_ENTRIES } from '@/lib/hub/hubLimits'
@@ -1170,8 +1171,15 @@ export function DiscoverPage() {
       byDTag.set(h.dTag, h)
     }
 
+    // Forged-preview guard: a relay can serve a 36942 with a far-future created_at + the same d-tag to win
+    // the newest-wins merge below and show a spoofed name/version. Drop events dated implausibly in the
+    // future (legitimate hub events use the corrected clock, nowSeconds). The real creator-binding /
+    // forgery checks run when the hub is actually opened or joined; this just keeps the preview honest.
+    const maxCreatedAt = nowSeconds() + 3600 // allow ~1h of clock skew / rapid-edit drift
+
     // Merge new events (keep latest per d tag)
     for (const ev of newEvents) {
+      if (ev.created_at > maxCreatedAt) continue
       const d = ev.tags.find(t => t[0] === 'd')?.[1]
       if (!d) continue
       const existingHub = byDTag.get(d)
