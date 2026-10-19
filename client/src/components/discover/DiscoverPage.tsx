@@ -1184,13 +1184,17 @@ function ManageRecommendationsModal({ open, onClose }: { open: boolean; onClose:
   const removeRec = useRecommendationStore((s) => s.removeRec)
   const hubEntries = useHubStore((s) => s.hubEntries)
   const hubsData = useHubStore((s) => s.hubs)
+  const hubStatus = useHubStore((s) => s.hubStatus)
   const [addr, setAddr] = useState('')
   const [addErr, setAddErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   useEscToClose(onClose, open)
   if (!open) return null
 
+  // Only hubs actually present in the list: skip deleted / not-found / still-fetching entries so the
+  // picker matches the sidebar (a created-then-deleted test hub shouldn't resurface here).
   const myHubs = hubEntries
+    .filter((e) => hubStatus[e.dTag] === 'loaded')
     .map((e) => hubsData[e.dTag])
     .filter((h) => !!h && !!h.creatorPubkey)
     .map((h) => ({ dTag: h.dTag, name: h.name, creatorPubkey: h.creatorPubkey, relayHint: h.generalRelays?.[0], coord: hubCoord(h.creatorPubkey, h.dTag) }))
