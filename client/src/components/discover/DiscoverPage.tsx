@@ -21,8 +21,9 @@ import { useBlossomMedia } from '@/hooks/useBlossomMedia'
 import { fetchEvents } from '@/lib/nostr/relay-pool'
 import { nowSeconds } from '@/lib/time/clockOffset'
 import { KINDS } from '@/lib/crypto/constants'
+import { ADMIN_PUBKEY } from '@/lib/constants'
 import { useFollowStore } from '@/stores/followStore'
-import { useRecommendationStore } from '@/stores/recommendationStore'
+import { useRecommendationStore, type TrustedSource } from '@/stores/recommendationStore'
 import { fetchRecommendationRefs, hubCoord, parseHubCoord, type HubRecRef } from '@/lib/hub/hubRecommendations'
 import { resolveShortAddress, looksLikeShortAddress, SHORT_ADDRESS_PATTERN } from '@/lib/nostr/nipShort'
 import { countLeadingZeroBits } from '@/lib/pow/pow'
@@ -1282,6 +1283,109 @@ function ManageRecommendationsModal({ open, onClose }: { open: boolean; onClose:
   )
 }
 
+// Manage the trusted recommendation sources for the Perspective tab (local, per device).
+function TrustedSourcesModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const trustedSources = useRecommendationStore((s) => s.trustedSources)
+  const setTrustedSources = useRecommendationStore((s) => s.setTrustedSources)
+  const setAllOffAck = useRecommendationStore((s) => s.setAllOffAck)
+  const { getProfile } = useProfileCache()
+  const [local, setLocal] = useState<TrustedSource[]>(trustedSources)
+  const [npubInput, setNpubInput] = useState('')
+  const [addErr, setAddErr] = useState<string | null>(null)
+  const [showConfirm, setShowConfirm] = useState(false)
+  useEffect(() => { if (open) { setLocal(trustedSources.map((s) => ({ ...s }))); setNpubInput(''); setAddErr(null); setShowConfirm(false) } }, [open, trustedSources])
+  useEscToClose(onClose, open)
+  if (!open) return null
+
+  const anyEnabled = local.some((s) => s.enabled)
+  const nameFor = (pk: string) => {
+    const p = getProfile(pk)
+    return p?.display_name || p?.name || truncateNpub(nip19.npubEncode(pk), 12)
+  }
+  const addNpub = () => {
+    setAddErr(null)
+    const raw = npubInput.trim().replace(/^nostr:/, '')
+    let pk: string | null = null
+    if (/^[0-9a-f]{64}$/i.test(raw)) pk = raw.toLowerCase()
+    else { try { const d = nip19.decode(raw); if (d.type === 'npub') pk = d.data as string } catch { /* invalid */ } }
+    if (!pk) { setAddErr('Enter a valid npub or hex pubkey.'); return }
+    if (local.some((s) => s.pubkey === pk)) { setNpubInput(''); return }
+    setLocal([...local, { pubkey: pk, enabled: true }])
+    setNpubInput('')
+  }
+  const toggle = (pk: string) => setLocal(local.map((s) => s.pubkey === pk ? { ...s, enabled: !s.enabled } : s))
+  const remove = (pk: string) => setLocal(local.filter((s) => s.pubkey !== pk))
+  const onSet = () => { if (anyEnabled) { setTrustedSources(local); onClose() } else setShowConfirm(true) }
+  const confirmAllOff = () => { setTrustedSources(local); setAllOffAck(true); setShowConfirm(false); onClose() }
+
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center px-2">
+      <div className="absolute inset-0 bg-black/60" onClick={onClose} />
+      <div className="relative z-10 w-full max-w-md max-h-[85vh] flex flex-col rounded-xl border border-border bg-background shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
+          <h2 className="font-semibold text-foreground">Trusted recommendation sources</h2>
+          <button onClick={onClose} className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary cursor-pointer"><X size={16} /></button>
+        </div>
+        <div className="px-5 py-4 overflow-y-auto space-y-3">
+          <p className="text-xs text-muted-foreground leading-relaxed">The Perspective tab shows hubs recommended by the sources you enable here (saved on this device only).</p>
+          <div className="space-y-1">
+            {local.map((s) => (
+              <div key={s.pubkey} className="flex items-center justify-between gap-2 px-2 py-1.5 rounded-md hover:bg-secondary/40">
+                <div className="flex items-center gap-2 min-w-0">
+                  <button onClick={() => toggle(s.pubkey)} className={`relative w-9 h-[18px] rounded-full transition-colors cursor-pointer shrink-0 ${s.enabled ? 'bg-primary' : 'bg-muted-foreground/30'}`}>
+                    <span className={`absolute top-[2px] w-3.5 h-3.5 rounded-full bg-white shadow transition-transform ${s.enabled ? 'translate-x-[20px]' : 'translate-x-[2px]'}`} />
+                  </button>
+                  <span className="text-sm text-foreground truncate">
+                    {nameFor(s.pubkey)}{s.pubkey === ADMIN_PUBKEY && <span className="text-[10px] text-muted-foreground ml-1">(DEN)</span>}
+                  </span>
+                </div>
+                {s.pubkey !== ADMIN_PUBKEY && (
+                  <button onClick={() => remove(s.pubkey)} className="text-muted-foreground hover:text-destructive cursor-pointer shrink-0"><X size={14} /></button>
+                )}
+              </div>
+            ))}
+          </div>
+          <div>
+            <label className="text-xs font-medium text-foreground">Add a source</label>
+            <div className="flex items-center gap-2 mt-1">
+              <input value={npubInput} onChange={(e) => { setNpubInput(e.target.value); setAddErr(null) }} onKeyDown={(e) => { if (e.key === 'Enter') addNpub() }} placeholder="npub1..." className="flex-1 min-w-0 px-2.5 py-1.5 rounded-md bg-secondary/60 border border-border text-sm text-foreground placeholder:text-muted-foreground outline-none" />
+              <button onClick={addNpub} disabled={!npubInput.trim()} className="px-3 py-1.5 rounded-md bg-secondary text-foreground text-xs font-medium hover:bg-accent disabled:opacity-40 cursor-pointer shrink-0">Add</button>
+            </div>
+            {addErr && <p className="text-[11px] text-destructive mt-1">{addErr}</p>}
+          </div>
+          {!anyEnabled && (
+            <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/30">
+              <AlertTriangle size={14} className="text-amber-500 shrink-0 mt-0.5" />
+              <p className="text-[11px] text-amber-500/90 leading-snug">With no trusted source selected, Perspective shows every discoverable hub, including ones we have no control of not showing you. View at your own risk; you hold responsibility for what you might see.</p>
+            </div>
+          )}
+        </div>
+        <div className="px-5 py-3 border-t border-border shrink-0 flex justify-end gap-2">
+          <button onClick={onClose} className="px-3 py-1.5 rounded-md border border-border text-xs text-muted-foreground hover:text-foreground hover:bg-secondary/50 cursor-pointer">Cancel</button>
+          <button onClick={onSet} className="px-4 py-1.5 rounded-md bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 cursor-pointer">Set</button>
+        </div>
+      </div>
+
+      {showConfirm && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center px-2" onClick={() => setShowConfirm(false)}>
+          <div className="absolute inset-0 bg-black/60" />
+          <div className="relative z-10 w-full max-w-sm rounded-xl border border-border bg-background shadow-2xl p-6" onClick={(e) => e.stopPropagation()}>
+            <div className="flex flex-col items-center text-center gap-3">
+              <div className="w-12 h-12 rounded-full bg-amber-500/10 flex items-center justify-center"><AlertTriangle size={24} className="text-amber-500" /></div>
+              <h3 className="text-base font-semibold text-foreground">Browse without a trusted source?</h3>
+              <p className="text-sm text-muted-foreground leading-relaxed">Perspective will show every discoverable hub with no curation. You hold responsibility for what you see. Re-enable a source any time to go back.</p>
+              <div className="flex items-center gap-2 w-full mt-1">
+                <button onClick={() => setShowConfirm(false)} className="flex-1 px-4 py-2 rounded-lg text-sm font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/50 cursor-pointer">Cancel</button>
+                <button onClick={confirmAllOff} className="flex-1 px-4 py-2 rounded-lg text-sm font-medium bg-amber-500 text-white hover:bg-amber-600 cursor-pointer">I understand</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Main Page Component ──
 export function DiscoverPage() {
   const [discoverTab, setDiscoverTab] = useState<DiscoverTab>('hubs')
@@ -1314,6 +1418,7 @@ export function DiscoverPage() {
   const perspectiveFirehose = recSection === 'perspective' && enabledSources.length === 0 && recAllOffAck
   const myPubkey = useUserStore((s) => s.pubkey)
   const [showManageRecs, setShowManageRecs] = useState(false)
+  const [showSourceModal, setShowSourceModal] = useState(false)
   // Load the user's own recommendation list once we know who they are.
   useEffect(() => {
     if (myPubkey) useRecommendationStore.getState().loadMyRecs(myPubkey)
@@ -1845,6 +1950,20 @@ export function DiscoverPage() {
                       {showNsfw ? 'Showing hubs marked as sensitive content' : 'Include hubs marked as sensitive content'}
                     </TooltipContent>
                   </Tooltip>
+
+                  {recSection === 'perspective' && (
+                    <button
+                      onClick={() => setShowSourceModal(true)}
+                      className="flex items-center gap-1.5 pl-2 pr-2.5 py-1 rounded-full border bg-secondary/60 border-border text-[11px] font-medium text-muted-foreground hover:text-foreground transition-colors cursor-pointer max-w-full"
+                    >
+                      <ShieldAlert size={12} className="shrink-0" />
+                      <span className="truncate">
+                        {enabledSources.length === 0
+                          ? 'Recommendation of: none'
+                          : `Recommendation of: ${truncateNpub(nip19.npubEncode(enabledSources[0]), 10)}${enabledSources.length > 1 ? ` +${enabledSources.length - 1}` : ''}`}
+                      </span>
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -2028,6 +2147,7 @@ export function DiscoverPage() {
         onApplySearch={searchRelays}
       />
       <ManageRecommendationsModal open={showManageRecs} onClose={() => setShowManageRecs(false)} />
+      <TrustedSourcesModal open={showSourceModal} onClose={() => setShowSourceModal(false)} />
     </>
   )
 }
