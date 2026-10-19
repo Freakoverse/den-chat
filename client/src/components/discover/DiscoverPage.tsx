@@ -1332,8 +1332,8 @@ function TrustedSourcesModal({ open, onClose }: { open: boolean; onClose: () => 
             {local.map((s) => (
               <div key={s.pubkey} className="flex items-center justify-between gap-2 px-2 py-1.5 rounded-md hover:bg-secondary/40">
                 <div className="flex items-center gap-2 min-w-0">
-                  <button onClick={() => toggle(s.pubkey)} className={`relative w-9 h-[18px] rounded-full transition-colors cursor-pointer shrink-0 ${s.enabled ? 'bg-primary' : 'bg-muted-foreground/30'}`}>
-                    <span className={`absolute top-[2px] w-3.5 h-3.5 rounded-full bg-white shadow transition-transform ${s.enabled ? 'translate-x-[20px]' : 'translate-x-[2px]'}`} />
+                  <button onClick={() => toggle(s.pubkey)} className={`relative inline-block w-7 h-4 rounded-full transition-colors cursor-pointer shrink-0 ${s.enabled ? 'bg-primary' : 'bg-muted-foreground/30'}`}>
+                    <span className={`absolute top-[2px] left-0 block w-3 h-3 rounded-full bg-white shadow transition-transform ${s.enabled ? 'translate-x-[14px]' : 'translate-x-[2px]'}`} />
                   </button>
                   <span className="text-sm text-foreground truncate">
                     {nameFor(s.pubkey)}{s.pubkey === ADMIN_PUBKEY && <span className="text-[10px] text-muted-foreground ml-1">(DEN)</span>}
