@@ -355,6 +355,8 @@ interface FilterModalProps {
   onClose: () => void
   showNsfw: boolean
   setShowNsfw: (v: boolean) => void
+  unblurMedia: boolean
+  setUnblurMedia: (v: boolean) => void
   powMin: number
   setPowMin: (v: number) => void
   powMax: number
@@ -374,8 +376,9 @@ interface FilterModalProps {
   onApplySearch?: () => void
 }
 
-function FilterModal({ open, onClose, showNsfw, setShowNsfw, powMin, setPowMin, powMax, setPowMax, requireMessagePow, setRequireMessagePow, joinPowMin, setJoinPowMin, joinPowMax, setJoinPowMax, requireJoinPow, setRequireJoinPow, filterTags, setFilterTags, filterClientTags, setFilterClientTags, onApplySearch }: FilterModalProps) {
+function FilterModal({ open, onClose, showNsfw, setShowNsfw, unblurMedia, setUnblurMedia, powMin, setPowMin, powMax, setPowMax, requireMessagePow, setRequireMessagePow, joinPowMin, setJoinPowMin, joinPowMax, setJoinPowMax, requireJoinPow, setRequireJoinPow, filterTags, setFilterTags, filterClientTags, setFilterClientTags, onApplySearch }: FilterModalProps) {
   const [localNsfw, setLocalNsfw] = useState(showNsfw)
+  const [localUnblur, setLocalUnblur] = useState(unblurMedia)
   const [localPowMin, setLocalPowMin] = useState(powMin)
   const [localPowMax, setLocalPowMax] = useState(powMax)
   const [localRequireMessagePow, setLocalRequireMessagePow] = useState(requireMessagePow)
@@ -398,6 +401,7 @@ function FilterModal({ open, onClose, showNsfw, setShowNsfw, powMin, setPowMin, 
   useEffect(() => {
     if (open) {
       setLocalNsfw(showNsfw)
+      setLocalUnblur(unblurMedia)
       setLocalPowMin(powMin)
       setLocalPowMax(powMax)
       setLocalRequireMessagePow(requireMessagePow)
@@ -412,7 +416,7 @@ function FilterModal({ open, onClose, showNsfw, setShowNsfw, powMin, setPowMin, 
       const combined = new Set([...DEFAULT_CLIENT_OPTIONS, ...filterClientTags])
       setClientTagOptions([...combined])
     }
-  }, [open, showNsfw, powMin, powMax, requireMessagePow, joinPowMin, joinPowMax, requireJoinPow, filterTags, filterClientTags])
+  }, [open, showNsfw, unblurMedia, powMin, powMax, requireMessagePow, joinPowMin, joinPowMax, requireJoinPow, filterTags, filterClientTags])
 
   useEscToClose(onClose, open)
 
@@ -441,6 +445,7 @@ function FilterModal({ open, onClose, showNsfw, setShowNsfw, powMin, setPowMin, 
 
   const handleApply = () => {
     setShowNsfw(localNsfw)
+    setUnblurMedia(localUnblur)
     setPowMin(localPowMin)
     setPowMax(localPowMax)
     setRequireMessagePow(localRequireMessagePow)
@@ -458,6 +463,7 @@ function FilterModal({ open, onClose, showNsfw, setShowNsfw, powMin, setPowMin, 
 
   const handleReset = () => {
     setLocalNsfw(false)
+    setLocalUnblur(false)
     setLocalPowMin(15)
     setLocalPowMax(25)
     setLocalRequireMessagePow(false)
@@ -506,6 +512,22 @@ function FilterModal({ open, onClose, showNsfw, setShowNsfw, powMin, setPowMin, 
             >
               <div className={`absolute top-[3px] w-4 h-4 rounded-full bg-white shadow transition-transform
                 ${localNsfw ? 'translate-x-[22px]' : 'translate-x-[3px]'}`} />
+            </button>
+          </div>
+
+          {/* Unblur media toggle */}
+          <div className="flex items-center justify-between">
+            <div>
+              <label className="text-sm font-medium text-foreground">Unblur banners &amp; icons</label>
+              <p className="text-xs text-muted-foreground mt-0.5">Show discovered hubs' media sharp instead of blurred</p>
+            </div>
+            <button
+              onClick={() => setLocalUnblur(!localUnblur)}
+              className={`relative w-10 h-[22px] rounded-full transition-colors cursor-pointer shrink-0
+                ${localUnblur ? 'bg-primary' : 'bg-muted-foreground/30'}`}
+            >
+              <div className={`absolute top-[3px] w-4 h-4 rounded-full bg-white shadow transition-transform
+                ${localUnblur ? 'translate-x-[22px]' : 'translate-x-[3px]'}`} />
             </button>
           </div>
 
@@ -738,7 +760,7 @@ function FilterModal({ open, onClose, showNsfw, setShowNsfw, powMin, setPowMin, 
 }
 
 // ── Hub Discovery Card ──
-function DiscoverHubCard({ hub }: { hub: DiscoveredHub }) {
+function DiscoverHubCard({ hub, unblur }: { hub: DiscoveredHub; unblur?: boolean }) {
   const myPubkey = useUserStore((s) => s.pubkey)
   const signer = useUserStore((s) => s.signer)
   const privateKey = useUserStore((s) => s.privateKey)
@@ -880,7 +902,7 @@ function DiscoverHubCard({ hub }: { hub: DiscoveredHub }) {
       {/* Banner */}
       <div className="relative h-28 overflow-hidden bg-gradient-to-br from-primary/20 via-primary/5 to-secondary">
         {hub.banner ? (
-          <BannerImage src={hub.banner} alt={hub.name} />
+          <BannerImage src={hub.banner} alt={hub.name} unblur={unblur} />
         ) : (
           <img src={HUB_BANNER_PLACEHOLDER} alt="" className="w-full h-full object-cover" loading="lazy" />
         )}
@@ -921,7 +943,7 @@ function DiscoverHubCard({ hub }: { hub: DiscoveredHub }) {
         <div className="flex items-center gap-2.5 -mt-6 relative z-10">
           {hub.icon ? (
             <div className="w-11 h-11 rounded-xl overflow-hidden shrink-0 bg-secondary border-2 border-card shadow-lg">
-              <IconImage src={hub.icon} name={hub.name} />
+              <IconImage src={hub.icon} name={hub.name} unblur={unblur} />
             </div>
           ) : (
             <div className="w-11 h-11 rounded-xl bg-primary/20 flex items-center justify-center shrink-0 border-2 border-card shadow-lg">
@@ -1040,7 +1062,7 @@ function DiscoverHubCard({ hub }: { hub: DiscoveredHub }) {
           categories: [], roles: [], minPow: hub.minPow, joinMinPow: hub.joinMinPow, nsfw: hub.nsfw, discoverable: hub.discoverable,
         joinNote: hub.joinNote,
         }}
-        blurMedia
+        blurMedia={!unblur}
         onCreatorClick={() => {
           setShowInfoModal(false)
           setShowCreatorProfile(true)
@@ -1101,17 +1123,17 @@ function DiscoverHubCard({ hub }: { hub: DiscoveredHub }) {
 }
 
 // ── Blossom image helpers ──
-function BannerImage({ src, alt }: { src: string; alt: string }) {
+function BannerImage({ src, alt, unblur }: { src: string; alt: string; unblur?: boolean }) {
   const blossom = useBlossomMedia(src)
   const [imgError, setImgError] = useState(false)
   useEffect(() => { setImgError(false) }, [src, blossom.src])
   if (blossom.loading) return <div className="w-full h-full bg-secondary animate-pulse" />
   // Unreachable / broken banner → DEN placeholder (ours, so no blur needed)
   if (blossom.error || imgError) return <img src={HUB_BANNER_PLACEHOLDER} alt="" className="w-full h-full object-cover" loading="lazy" />
-  return <img src={blossom.src || src} alt={alt} className="w-full h-full object-cover blur-lg" loading="lazy" onError={() => { blossom.onImgError(); setImgError(true) }} />
+  return <img src={blossom.src || src} alt={alt} className={`w-full h-full object-cover ${unblur ? '' : 'blur-lg'}`} loading="lazy" onError={() => { blossom.onImgError(); setImgError(true) }} />
 }
 
-function IconImage({ src, name }: { src: string; name: string }) {
+function IconImage({ src, name, unblur }: { src: string; name: string; unblur?: boolean }) {
   const blossom = useBlossomMedia(src)
   if (blossom.error || blossom.loading) {
     return (
@@ -1120,7 +1142,7 @@ function IconImage({ src, name }: { src: string; name: string }) {
       </div>
     )
   }
-  return <img src={blossom.src || src} alt="" className="w-full h-full object-cover blur-sm" loading="lazy" />
+  return <img src={blossom.src || src} alt="" className={`w-full h-full object-cover ${unblur ? '' : 'blur-sm'}`} loading="lazy" />
 }
 
 // ── Main Page Component ──
@@ -1141,6 +1163,7 @@ export function DiscoverPage() {
 
   // Filter state (defaults: NSFW off, PoW 15-25, no tags)
   const [showNsfw, setShowNsfw] = useState(false)
+  const [unblurMedia, setUnblurMedia] = useState(false)
   // Default range 15–25 for both PoW (`w`) and join PoW (`W`). Both ranges are INERT by default:
   // message-PoW filtering + hub-event PoW verification apply only when "Require a message difficulty"
   // is on, and join-PoW filtering only when "Require a join difficulty" is on. So out of the box every
@@ -1658,7 +1681,7 @@ export function DiscoverPage() {
                 {pagedHubs.length > 0 && (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                     {pagedHubs.map(hub => (
-                      <DiscoverHubCard key={hub.dTag} hub={hub} />
+                      <DiscoverHubCard key={hub.dTag} hub={hub} unblur={unblurMedia} />
                     ))}
                   </div>
                 )}
@@ -1757,6 +1780,8 @@ export function DiscoverPage() {
         onClose={() => setShowFilterModal(false)}
         showNsfw={showNsfw}
         setShowNsfw={setShowNsfw}
+        unblurMedia={unblurMedia}
+        setUnblurMedia={setUnblurMedia}
         powMin={powMin}
         setPowMin={setPowMin}
         powMax={powMax}
