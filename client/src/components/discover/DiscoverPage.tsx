@@ -1192,11 +1192,13 @@ function ManageRecommendationsModal({ open, onClose }: { open: boolean; onClose:
   if (!open) return null
 
   // Only hubs actually present in the list: skip deleted / not-found / still-fetching entries so the
-  // picker matches the sidebar (a created-then-deleted test hub shouldn't resurface here).
+  // picker matches the sidebar (a created-then-deleted test hub shouldn't resurface here). Also skip
+  // hubs with discovery turned off (f=off): recommending one would leak a hub its owner opted out of
+  // listing, and followers' Discover filters it out anyway.
   const myHubs = hubEntries
     .filter((e) => hubStatus[e.dTag] === 'loaded')
     .map((e) => hubsData[e.dTag])
-    .filter((h) => !!h && !!h.creatorPubkey)
+    .filter((h) => !!h && !!h.creatorPubkey && h.discoverable !== false)
     .map((h) => ({ dTag: h.dTag, name: h.name, icon: h.icon, banner: h.banner, creatorPubkey: h.creatorPubkey, relayHint: h.generalRelays?.[0], coord: hubCoord(h.creatorPubkey, h.dTag) }))
   const myHubCoords = new Set(myHubs.map((h) => h.coord))
   const external = [...myRecs.values()].filter((r) => !myHubCoords.has(r.coord))
@@ -1206,6 +1208,19 @@ function ManageRecommendationsModal({ open, onClose }: { open: boolean; onClose:
     try {
       const ref = await parseHubAddress(addr)
       if (!ref) { setAddErr('Not a valid hub address (npub/naddr, a 36942:... coordinate, or a share link).'); return }
+      // Only recommend hubs their owner has opted into listing (f != off). Fetch the hub event and
+      // check before publishing, so you can't vouch for a hub that chose not to be discoverable.
+      const events = await fetchEvents({ kinds: [KINDS.HUB_EVENT], authors: [ref.pubkey], '#d': [ref.dTag] })
+      const maxCreatedAt = nowSeconds() + 3600
+      let hub: DiscoveredHub | null = null
+      let newest = -1
+      for (const ev of events) {
+        if (ev.created_at > maxCreatedAt || ev.created_at <= newest) continue
+        const h = parseHubEventForDiscover(ev)
+        if (h) { hub = h; newest = ev.created_at }
+      }
+      if (!hub) { setAddErr('Could not find that hub on the network.'); return }
+      if (!hub.discoverable) { setAddErr('That hub has discovery turned off, so it cannot be recommended.'); return }
       await addRec(ref, signer, privateKey)
       setAddr('')
     } catch (e) { setAddErr(e instanceof Error ? e.message : 'Failed to add') }
