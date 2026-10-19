@@ -4,12 +4,13 @@ import { ChevronsDown, ChevronsUp } from 'lucide-react'
 const MAX_CONTENT_HEIGHT = 600
 
 /**
- * Wraps message content in a height-constrained container (600px).
- * When content overflows, it starts clipped with a fade overlay.
- * "Show all" enables scrolling within the same 600px box.
+ * Wraps message content in a height-constrained container (600px). When the content overflows it starts
+ * clipped with a fade overlay and a "Show all" button. Expanding removes the height cap entirely (the
+ * message flows at full height, no inner scroll) and surfaces a STICKY "Show less" button that floats at
+ * the bottom of the viewport while reading, so a long message can always be collapsed from anywhere.
  */
 export function ScrollableContent({ children }: { children: ReactNode }) {
-  const [scrollEnabled, setScrollEnabled] = useState(false)
+  const [expanded, setExpanded] = useState(false)
   const [overflows, setOverflows] = useState(false)
   const contentRef = useRef<HTMLDivElement>(null)
 
@@ -23,17 +24,16 @@ export function ScrollableContent({ children }: { children: ReactNode }) {
     return () => observer.disconnect()
   }, [])
 
-  const handleToggle = () => {
-    const next = !scrollEnabled
-    setScrollEnabled(next)
-    if (!next && contentRef.current) {
-      contentRef.current.scrollTop = 0
-    }
+  const collapse = () => {
+    setExpanded(false)
+    // Re-orient: once a tall message snaps back to the cap, keep its top in view so the user isn't left
+    // stranded below where the long version used to extend.
+    requestAnimationFrame(() => contentRef.current?.scrollIntoView({ block: 'nearest' }))
   }
 
   return (
     // flex-col: some callers place this inside a flex ROW (the compact grouped-message variant). A bare
-    // fragment would make the content box and the "Show all" button siblings in that row, so the button
+    // fragment would make the content box and the toggle button siblings in that row, so the button
     // floated to the right of the text instead of below it. A column wrapper keeps them stacked anywhere.
     // min-w-0 w-full: inside a flex row a bare block would shrink-wrap its content, and a w-full textarea
     // inside it then collapses to the browser's intrinsic ~20 columns (the "edit box shrinks left" report).
@@ -41,26 +41,38 @@ export function ScrollableContent({ children }: { children: ReactNode }) {
       <div className="relative min-w-0 w-full">
         <div
           ref={contentRef}
-          className={scrollEnabled ? 'overflow-y-auto' : 'overflow-hidden'}
-          style={{ maxHeight: MAX_CONTENT_HEIGHT, scrollbarWidth: 'thin' as const }}
+          className={expanded ? '' : 'overflow-hidden'}
+          style={expanded ? undefined : { maxHeight: MAX_CONTENT_HEIGHT }}
         >
           {children}
         </div>
-        {/* Gradient fade when content is clipped */}
-        {overflows && !scrollEnabled && (
+
+        {/* Gradient fade while the content is clipped */}
+        {overflows && !expanded && (
           <div className="absolute bottom-0 left-0 right-0 h-16 pointer-events-none bg-gradient-to-t from-background to-transparent" />
         )}
+
+        {/* Sticky "Show less" while expanded: floats at the viewport bottom so a long message can always be
+            collapsed from anywhere. The row is click-through; only the pill itself is clickable. */}
+        {overflows && expanded && (
+          <div className="sticky bottom-2 z-10 mt-1 flex justify-center pointer-events-none">
+            <button
+              onClick={collapse}
+              className="pointer-events-auto flex items-center gap-1.5 text-[11px] font-medium px-3 py-1 rounded-md cursor-pointer transition-colors bg-secondary text-foreground border border-border shadow-md hover:bg-accent"
+            >
+              <ChevronsUp size={13} /> Show less
+            </button>
+          </div>
+        )}
       </div>
-      {overflows && (
+
+      {/* "Show all" while collapsed */}
+      {overflows && !expanded && (
         <button
-          onClick={handleToggle}
-          className="flex items-center justify-center gap-1.5 w-full text-[11px] font-medium py-1 mt-0.5 rounded-md cursor-pointer transition-all text-muted-foreground hover:text-foreground hover:bg-accent/50"
+          onClick={() => setExpanded(true)}
+          className="mx-auto mt-1 flex items-center gap-1.5 text-[11px] font-medium px-3 py-1 rounded-md cursor-pointer transition-colors bg-secondary text-foreground border border-border shadow-sm hover:bg-accent"
         >
-          {scrollEnabled ? (
-            <><ChevronsUp size={13} /> Show less</>
-          ) : (
-            <><ChevronsDown size={13} /> Show all</>
-          )}
+          <ChevronsDown size={13} /> Show all
         </button>
       )}
     </div>
