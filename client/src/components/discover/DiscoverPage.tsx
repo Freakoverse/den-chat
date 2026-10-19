@@ -2001,36 +2001,35 @@ export function DiscoverPage() {
                   </Tooltip>
 
                   {recSection === 'perspective' && (
-                    <>
+                    <div className={`flex items-center rounded-full border text-[11px] font-medium transition-colors max-w-full
+                      ${perspectiveFirehose ? 'bg-amber-500/10 border-amber-500/40' : 'bg-secondary/60 border-border'}`}>
                       <Tooltip>
                         <TooltipTrigger asChild>
-                          <button
-                            onClick={toggleAllOff}
-                            className={`flex items-center gap-2 pl-1 pr-2 py-1 rounded-full border text-[11px] font-medium transition-colors cursor-pointer
-                              ${perspectiveFirehose ? 'bg-amber-500/10 border-amber-500/40 text-amber-400' : 'bg-secondary/60 border-border text-muted-foreground hover:text-foreground'}`}
-                          >
+                          <button onClick={toggleAllOff} className="flex items-center pl-1 pr-1.5 py-1 rounded-l-full cursor-pointer shrink-0">
                             <span className={`relative inline-block w-7 h-4 rounded-full transition-colors shrink-0 ${perspectiveFirehose ? 'bg-amber-500' : 'bg-muted-foreground/30'}`}>
                               <span className={`absolute top-[2px] left-0 block w-3 h-3 rounded-full bg-white shadow transition-transform ${perspectiveFirehose ? 'translate-x-[14px]' : 'translate-x-[2px]'}`} />
                             </span>
-                            All hubs
                           </button>
                         </TooltipTrigger>
                         <TooltipContent side="bottom" className="text-xs">
-                          {perspectiveFirehose ? 'Showing every discoverable hub with no curation' : 'Turn off all sources to browse every discoverable hub'}
+                          {perspectiveFirehose ? 'Showing every discoverable hub. Toggle off to go back to your sources.' : 'Turn off all sources to browse every discoverable hub'}
                         </TooltipContent>
                       </Tooltip>
+                      <span className={`w-px self-stretch my-1 shrink-0 ${perspectiveFirehose ? 'bg-amber-500/30' : 'bg-border'}`} />
                       <button
                         onClick={() => setShowSourceModal(true)}
-                        className="flex items-center gap-1.5 pl-2 pr-2.5 py-1 rounded-full border bg-secondary/60 border-border text-[11px] font-medium text-muted-foreground hover:text-foreground transition-colors cursor-pointer max-w-full"
+                        className={`flex items-center gap-1.5 pl-2 pr-2.5 py-1 rounded-r-full transition-colors cursor-pointer min-w-0 ${perspectiveFirehose ? 'text-amber-400' : 'text-muted-foreground hover:text-foreground'}`}
                       >
                         <ShieldAlert size={12} className="shrink-0" />
                         <span className="truncate">
-                          {enabledSources.length === 0
-                            ? 'Recommendation of: none'
-                            : `Recommendation of: ${truncateNpub(nip19.npubEncode(enabledSources[0]), 10)}${enabledSources.length > 1 ? ` +${enabledSources.length - 1}` : ''}`}
+                          {perspectiveFirehose
+                            ? 'Every discoverable hub'
+                            : enabledSources.length === 0
+                              ? 'Recommendation of: none'
+                              : `Recommendation of: ${truncateNpub(nip19.npubEncode(enabledSources[0]), 10)}${enabledSources.length > 1 ? ` +${enabledSources.length - 1}` : ''}`}
                         </span>
                       </button>
-                    </>
+                    </div>
                   )}
                 </div>
               </div>
