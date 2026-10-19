@@ -16,6 +16,7 @@ import { useNavigationStore } from '@/stores/navigationStore'
 import { useNotificationStore } from '@/stores/notificationStore'
 import { useDMStore } from '@/stores/dmStore'
 import { useDM04Store } from '@/stores/dm04Store'
+import { useMdmStore } from '@/stores/dmMdmStore'
 import { usePublicChatStore } from '@/stores/publicChatStore'
 import { DenChatLogo } from '@/components/ui/DenChatLogo'
 import { DoodleBackground } from '@/components/ui/DoodleBackground'
@@ -69,21 +70,20 @@ export function AppLayout() {
   const hubTotalUnread = useNotificationStore((s) => s.totalUnread)
   const nip17Convos = useDMStore((s) => s.conversations)
   const nip04Convos = useDM04Store((s) => s.conversations)
+  const mdmConvos = useMdmStore((s) => s.conversations)
   const blockedPubkeys = useBlockStore((s) => s.blockedPubkeys)
   const wotShouldHide = useWotStore((s) => s.shouldHide)
   const dmTotalUnread = useMemo(() => {
     if (!notifInitialized) return 0
     let total = 0
-    for (const [pk, conv] of nip17Convos) {
-      if (blockedPubkeys.has(pk) || wotShouldHide(pk, 'dms')) continue
-      total += conv.unread
-    }
-    for (const [pk, conv] of nip04Convos) {
-      if (blockedPubkeys.has(pk) || wotShouldHide(pk, 'dms')) continue
-      total += conv.unread
+    for (const convos of [nip17Convos, nip04Convos, mdmConvos]) {
+      for (const [pk, conv] of convos) {
+        if (blockedPubkeys.has(pk) || wotShouldHide(pk, 'dms')) continue
+        total += conv.unread
+      }
     }
     return total
-  }, [nip17Convos, nip04Convos, blockedPubkeys, wotShouldHide, notifInitialized])
+  }, [nip17Convos, nip04Convos, mdmConvos, blockedPubkeys, wotShouldHide, notifInitialized])
   const pcMessages = usePublicChatStore((s) => s.messages)
   const pcTopics = usePublicChatStore((s) => s.topics)
   const pcReadTimes = useNotificationStore((s) => s.pcReadTimes)

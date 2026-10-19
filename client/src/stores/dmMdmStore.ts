@@ -23,6 +23,8 @@ import { discoverRecipientRelays } from '@/lib/nostr/relayDiscovery'
 import { nowSeconds } from '@/lib/time/clockOffset'
 import { useBlockStore } from '@/stores/blockStore'
 import { useWotStore } from '@/stores/wotStore'
+import { useFollowStore } from '@/stores/followStore'
+import { playSoundEffect } from '@/lib/voice/soundEffects'
 import type { ISigner } from '@/stores/userStore'
 import type { Attachment } from '@/stores/messageStore'
 import type { DM04Message, DM04Conversation, DM04Reaction } from '@/stores/dm04Store'
@@ -53,6 +55,23 @@ const coordToId = new Map<string, string>()   // coordinate → the real event i
 const pendingReactions = new Map<string, { emoji: string; user: string; customUrl?: string }[]>() // coord → reactions whose target isn't loaded yet
 const processedIds = new Set<string>()
 const processedReactionIds = new Set<string>()
+
+// Only real-time messages (received this session) play the DM sound; backfilled history never does.
+const mdmSessionStartTime = nowSeconds()
+
+// Persisted per-conversation read marks. Without these, re-running the subscription on every tab open
+// re-counts all backfilled history as unread (the "always unread" bug). A conversation's messages at or
+// before its lastRead don't count. Mirrors how NIP-04/17 gate unread on a persisted lastRead.
+const MDM_READ_KEY = 'den_mdm_read_times'
+const readTimes = new Map<string, number>()
+try {
+  const raw = localStorage.getItem(MDM_READ_KEY)
+  if (raw) for (const [k, v] of Object.entries(JSON.parse(raw) as Record<string, unknown>)) if (typeof v === 'number') readTimes.set(k, v)
+} catch { /* storage unavailable: start empty */ }
+function markMdmRead(counterparty: string) {
+  readTimes.set(counterparty, nowSeconds())
+  try { localStorage.setItem(MDM_READ_KEY, JSON.stringify(Object.fromEntries(readTimes))) } catch { /* non-fatal */ }
+}
 
 interface ReactionEntry { users: Set<string>; customUrl?: string }
 
@@ -111,7 +130,21 @@ function upsertMessage(conversations: Map<string, DM04Conversation>, counterpart
     conv.messages[at] = msg
   } else {
     conv.messages.push(msg)
-    if (!msg.isMine && counterparty !== active) conv.unread += 1
+    if (!msg.isMine) {
+      if (counterparty === active) {
+        // Arrived while viewing it: keep the persisted read mark current so it stays read on reload.
+        markMdmRead(counterparty)
+      } else {
+        // Count toward unread only if newer than the last time this conversation was read (persisted),
+        // so backfilled history doesn't re-count every time the subscription re-runs.
+        const lastRead = readTimes.get(counterparty) ?? 0
+        if (!(lastRead > 0 && msg.createdAt <= lastRead)) conv.unread += 1
+      }
+      // Real-time message from a followed user: play the DM sound (never for backfill).
+      if (msg.createdAt >= mdmSessionStartTime && useFollowStore.getState().followedPubkeys.has(counterparty)) {
+        playSoundEffect('dm_message')
+      }
+    }
   }
   idToCoord.set(msg.id, coord)
   coordToId.set(coord, msg.id)
@@ -135,15 +168,19 @@ export const useMdmStore = create<MdmState>((set, get) => ({
   relayProgress: {},
   subscription: null,
 
-  setActiveConversation: (pubkey) => set((s) => {
-    if (pubkey && s.conversations.has(pubkey)) {
-      const conversations = new Map(s.conversations)
-      const conv = conversations.get(pubkey)!
-      if (conv.unread > 0) conversations.set(pubkey, { ...conv, unread: 0 })
-      return { activeConversation: pubkey, conversations }
-    }
-    return { activeConversation: pubkey }
-  }),
+  setActiveConversation: (pubkey) => {
+    // Persist the read mark so this conversation's backfilled history doesn't re-count as unread next load.
+    if (pubkey) markMdmRead(pubkey)
+    set((s) => {
+      if (pubkey && s.conversations.has(pubkey)) {
+        const conversations = new Map(s.conversations)
+        const conv = conversations.get(pubkey)!
+        if (conv.unread > 0) conversations.set(pubkey, { ...conv, unread: 0 })
+        return { activeConversation: pubkey, conversations }
+      }
+      return { activeConversation: pubkey }
+    })
+  },
   addPendingConversation: (pubkey) => set((s) => ({ pendingConversations: new Set(s.pendingConversations).add(pubkey) })),
   removePendingConversation: (pubkey) => set((s) => { const n = new Set(s.pendingConversations); n.delete(pubkey); return { pendingConversations: n } }),
 

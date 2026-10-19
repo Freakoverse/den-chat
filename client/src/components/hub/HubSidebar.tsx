@@ -5,6 +5,7 @@ import { useVoiceStore } from '@/stores/voiceStore'
 import { useNotificationStore } from '@/stores/notificationStore'
 import { useDMStore } from '@/stores/dmStore'
 import { useDM04Store } from '@/stores/dm04Store'
+import { useMdmStore } from '@/stores/dmMdmStore'
 import { useBlockStore } from '@/stores/blockStore'
 import { useWotStore } from '@/stores/wotStore'
 import { usePublicChatStore } from '@/stores/publicChatStore'
@@ -57,21 +58,20 @@ export function HubSidebar({ activePage, onNavigate, compact = false }: { active
   // Exclude blocked and WoT-hidden users to avoid phantom badges
   const nip17Conversations = useDMStore((s) => s.conversations)
   const nip04Conversations = useDM04Store((s) => s.conversations)
+  const mdmConversations = useMdmStore((s) => s.conversations)
   const blockedPubkeys = useBlockStore((s) => s.blockedPubkeys)
   const wotShouldHide = useWotStore((s) => s.shouldHide)
   const dmTotalUnread = useMemo(() => {
     if (!notifInitialized) return 0
     let total = 0
-    for (const [pk, conv] of nip17Conversations) {
-      if (blockedPubkeys.has(pk) || wotShouldHide(pk, 'dms')) continue
-      total += conv.unread
-    }
-    for (const [pk, conv] of nip04Conversations) {
-      if (blockedPubkeys.has(pk) || wotShouldHide(pk, 'dms')) continue
-      total += conv.unread
+    for (const convos of [nip17Conversations, nip04Conversations, mdmConversations]) {
+      for (const [pk, conv] of convos) {
+        if (blockedPubkeys.has(pk) || wotShouldHide(pk, 'dms')) continue
+        total += conv.unread
+      }
     }
     return total
-  }, [nip17Conversations, nip04Conversations, blockedPubkeys, wotShouldHide, notifInitialized])
+  }, [nip17Conversations, nip04Conversations, mdmConversations, blockedPubkeys, wotShouldHide, notifInitialized])
 
   // Public Chat unread totals
   const pcMessages = usePublicChatStore((s) => s.messages)
