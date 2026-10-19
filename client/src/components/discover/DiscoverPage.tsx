@@ -21,6 +21,9 @@ import { useBlossomMedia } from '@/hooks/useBlossomMedia'
 import { fetchEvents } from '@/lib/nostr/relay-pool'
 import { nowSeconds } from '@/lib/time/clockOffset'
 import { KINDS } from '@/lib/crypto/constants'
+import { useFollowStore } from '@/stores/followStore'
+import { useRecommendationStore } from '@/stores/recommendationStore'
+import { fetchRecommendationRefs } from '@/lib/hub/hubRecommendations'
 import { countLeadingZeroBits } from '@/lib/pow/pow'
 import { MAX_HUB_LIST_ENTRIES } from '@/lib/hub/hubLimits'
 
@@ -1164,6 +1167,17 @@ export function DiscoverPage() {
   // Filter state (defaults: NSFW off, PoW 15-25, no tags)
   const [showNsfw, setShowNsfw] = useState(false)
   const [unblurMedia, setUnblurMedia] = useState(false)
+
+  // Recommendation-driven sub-tabs (within the hubs view).
+  const [recSection, setRecSection] = useState<'follows' | 'perspective'>('perspective')
+  const [recHubs, setRecHubs] = useState<DiscoveredHub[]>([])
+  const [recLoading, setRecLoading] = useState(false)
+  const followedPubkeys = useFollowStore((s) => s.followedPubkeys)
+  const trustedSources = useRecommendationStore((s) => s.trustedSources)
+  const recAllOffAck = useRecommendationStore((s) => s.allOffAck)
+  const enabledSources = useMemo(() => trustedSources.filter((s) => s.enabled).map((s) => s.pubkey), [trustedSources])
+  // Perspective with every source turned off (and acknowledged) = the raw "all discoverable" firehose.
+  const perspectiveFirehose = recSection === 'perspective' && enabledSources.length === 0 && recAllOffAck
   // Default range 15–25 for both PoW (`w`) and join PoW (`W`). Both ranges are INERT by default:
   // message-PoW filtering + hub-event PoW verification apply only when "Require a message difficulty"
   // is on, and join-PoW filtering only when "Require a join difficulty" is on. So out of the box every
@@ -1265,6 +1279,50 @@ export function DiscoverPage() {
       setLoading(false)
     }
   }, [fetchBatch, mergeHubs])
+
+  // Resolve the recommended-hub list for a set of recommendation authors: fetch their recommendation lists,
+  // collect the referenced hub coordinates, fetch those hubs' 36942 events, keep only discoverable ones
+  // (newest per coord), and apply the same forged-preview guard as the firehose.
+  const loadRecHubs = useCallback(async (authors: string[]) => {
+    if (authors.length === 0) { setRecHubs([]); return }
+    setRecLoading(true)
+    try {
+      const refs = await fetchRecommendationRefs(authors)
+      if (refs.length === 0) { setRecHubs([]); return }
+      const wantCoords = new Set(refs.map((r) => r.coord))
+      const pubkeys = [...new Set(refs.map((r) => r.pubkey))]
+      const dTags = [...new Set(refs.map((r) => r.dTag))]
+      // authors x #d is a superset of the exact coords; we filter down to wantCoords below.
+      const events = await fetchEvents({ kinds: [KINDS.HUB_EVENT], authors: pubkeys, '#d': dTags })
+      const maxCreatedAt = nowSeconds() + 3600
+      const byCoord = new Map<string, { hub: DiscoveredHub; createdAt: number }>()
+      for (const ev of events) {
+        if (ev.created_at > maxCreatedAt) continue // forged far-future guard
+        const d = ev.tags.find((t) => t[0] === 'd')?.[1]
+        if (!d) continue
+        const coord = `${KINDS.HUB_EVENT}:${ev.pubkey}:${d}`
+        if (!wantCoords.has(coord)) continue
+        const prev = byCoord.get(coord)
+        if (prev && ev.created_at <= prev.createdAt) continue
+        const h = parseHubEventForDiscover(ev)
+        if (!h || !h.discoverable) continue
+        byCoord.set(coord, { hub: h, createdAt: ev.created_at })
+      }
+      setRecHubs([...byCoord.values()].map((x) => x.hub).sort((a, b) => b.publishedAt - a.publishedAt))
+    } catch (err) {
+      console.error('Failed to load recommended hubs:', err)
+      setRecHubs([])
+    } finally {
+      setRecLoading(false)
+    }
+  }, [])
+
+  // (Re)load recommended hubs whenever the active author set changes. Firehose mode uses `hubs` instead.
+  useEffect(() => {
+    if (discoverTab !== 'hubs' || perspectiveFirehose) return
+    const authors = recSection === 'follows' ? [...followedPubkeys] : enabledSources
+    loadRecHubs(authors)
+  }, [discoverTab, recSection, perspectiveFirehose, followedPubkeys, enabledSources, loadRecHubs])
 
   // Load next batch (triggered by pagination proximity)
   const loadMoreHubs = useCallback(async () => {
@@ -1391,8 +1449,13 @@ export function DiscoverPage() {
   }, [])
 
   // Filter hubs
+  // The active hub source for the current sub-tab: the resolved recommendation list, or the raw firehose
+  // (`hubs`) only when Perspective has every source turned off and acknowledged.
+  const sourceHubs = perspectiveFirehose ? hubs : recHubs
+  const sourceLoading = perspectiveFirehose ? loading : recLoading
+
   const filteredHubs = useMemo(() => {
-    let result = hubs
+    let result = sourceHubs
 
     // Direct address lookup — bypass ALL filters
     if (searchQuery.trim()) {
@@ -1402,6 +1465,8 @@ export function DiscoverPage() {
           const decoded = nip19.decode(q)
           if (decoded.type === 'naddr') {
             const addr = decoded.data as { kind: number; pubkey: string; identifier: string }
+            // Address lookups hit the firehose `hubs` (populated by relay search) so a deep-link / npub
+            // search resolves a specific hub regardless of which recommendation sub-tab is active.
             return hubs.filter(h => h.dTag === addr.identifier && h.creatorPubkey === addr.pubkey)
           }
         } catch {
@@ -1477,7 +1542,7 @@ export function DiscoverPage() {
     }
 
     return result
-  }, [hubs, showNsfw, powMin, powMax, joinPowMin, joinPowMax, requireJoinPow, requireMessagePow, filterTags, filterClientTags, searchQuery, blockedPubkeys, wotSettings, wotGraphDepth])
+  }, [sourceHubs, hubs, showNsfw, powMin, powMax, joinPowMin, joinPowMax, requireJoinPow, requireMessagePow, filterTags, filterClientTags, searchQuery, blockedPubkeys, wotSettings, wotGraphDepth])
 
   // Numbered pagination
   const totalPages = Math.max(1, Math.ceil(filteredHubs.length / PAGE_SIZE))
@@ -1491,14 +1556,15 @@ export function DiscoverPage() {
     setCurrentPage(1)
   }, [showNsfw, powMin, powMax, joinPowMin, joinPowMax, requireJoinPow, requireMessagePow, filterTags, filterClientTags, searchQuery])
 
-  // Prefetch next batch when user is within 2 pages of the end
+  // Prefetch next batch when user is within 2 pages of the end. Firehose only: the recommendation lists are
+  // finite (no relay pagination), so there's nothing more to fetch in those tabs.
   useEffect(() => {
-    if (exhausted || loading) return
+    if (!perspectiveFirehose || exhausted || loading) return
     const pagesFromEnd = totalPages - currentPage
     if (pagesFromEnd <= 2 && hubs.length > 0) {
       loadMoreHubs()
     }
-  }, [currentPage, totalPages, exhausted, loading, hubs.length, loadMoreHubs])
+  }, [perspectiveFirehose, currentPage, totalPages, exhausted, loading, hubs.length, loadMoreHubs])
 
   // Active filter indicator count
   const activeFilterCount = (showNsfw ? 1 : 0) + (requireMessagePow ? 1 : 0) + ((powMin !== 15 || powMax !== 25) ? 1 : 0) + ((joinPowMin !== 15 || joinPowMax !== 25) ? 1 : 0) + (requireJoinPow ? 1 : 0) + (filterTags.length > 0 ? 1 : 0) + (filterClientTags.length > 0 ? 1 : 0)
@@ -1609,8 +1675,19 @@ export function DiscoverPage() {
                   </button>
                 </div>
 
-                {/* Quick filters — same state the Filters modal edits (the modal re-reads it on open) */}
-                <div className="flex items-center gap-2 mt-2">
+                {/* Recommendation source sub-tabs + quick filters (same state the Filters modal edits) */}
+                <div className="flex items-center gap-2 mt-2 flex-wrap">
+                  <div className="flex items-center gap-1 p-0.5 rounded-lg bg-secondary/40 border border-border">
+                    {([['follows', 'Follows'], ['perspective', 'Perspective']] as const).map(([id, label]) => (
+                      <button
+                        key={id}
+                        onClick={() => setRecSection(id)}
+                        className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors cursor-pointer ${recSection === id ? 'bg-secondary text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
@@ -1645,17 +1722,17 @@ export function DiscoverPage() {
                   </div>
 
                   <button
-                    onClick={loadHubs}
-                    disabled={loading}
+                    onClick={() => { if (perspectiveFirehose) loadHubs(); else loadRecHubs(recSection === 'follows' ? [...followedPubkeys] : enabledSources) }}
+                    disabled={sourceLoading}
                     className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer disabled:opacity-50"
                   >
-                    {loading ? <Loader2 size={12} className="animate-spin" /> : <Compass size={12} />}
+                    {sourceLoading ? <Loader2 size={12} className="animate-spin" /> : <Compass size={12} />}
                     Refresh
                   </button>
                 </div>
 
                 {/* Loading state */}
-                {loading && hubs.length === 0 && (
+                {sourceLoading && sourceHubs.length === 0 && (
                   <div className="flex items-center justify-center py-20 text-muted-foreground">
                     <Loader2 size={20} className="animate-spin mr-3" />
                     <span className="text-sm">Discovering hubs across relays...</span>
@@ -1663,7 +1740,7 @@ export function DiscoverPage() {
                 )}
 
                 {/* Empty state */}
-                {!loading && filteredHubs.length === 0 && (
+                {!sourceLoading && filteredHubs.length === 0 && (
                   <div className="flex flex-col items-center justify-center py-20 text-center">
                     <div className="w-16 h-16 rounded-2xl bg-secondary flex items-center justify-center mb-4">
                       <Search size={24} className="text-muted-foreground" />
