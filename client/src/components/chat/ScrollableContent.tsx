@@ -55,7 +55,7 @@ export function ScrollableContent({ children }: { children: ReactNode }) {
         {/* Sticky "Show less" while expanded: floats at the viewport bottom so a long message can always be
             collapsed from anywhere. The row is click-through; only the pill itself is clickable. */}
         {overflows && expanded && (
-          <div className="sticky bottom-2 z-10 mt-1 flex justify-center pointer-events-none">
+          <div className="sticky bottom-2 z-10 mt-1 flex justify-end pointer-events-none">
             <button
               onClick={collapse}
               className="pointer-events-auto flex items-center gap-1.5 text-[11px] font-medium px-3 py-1 rounded-md cursor-pointer transition-colors bg-secondary text-foreground border border-border shadow-md hover:bg-accent"
@@ -70,7 +70,7 @@ export function ScrollableContent({ children }: { children: ReactNode }) {
       {overflows && !expanded && (
         <button
           onClick={() => setExpanded(true)}
-          className="mx-auto mt-1 flex items-center gap-1.5 text-[11px] font-medium px-3 py-1 rounded-md cursor-pointer transition-colors bg-secondary text-foreground border border-border shadow-sm hover:bg-accent"
+          className="ml-auto mt-1 flex items-center gap-1.5 text-[11px] font-medium px-3 py-1 rounded-md cursor-pointer transition-colors bg-secondary text-foreground border border-border shadow-sm hover:bg-accent"
         >
           <ChevronsDown size={13} /> Show all
         </button>
