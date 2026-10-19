@@ -24,6 +24,7 @@ import { nowSeconds } from '@/lib/time/clockOffset'
 import { useBlockStore } from '@/stores/blockStore'
 import { useWotStore } from '@/stores/wotStore'
 import { useFollowStore } from '@/stores/followStore'
+import { useNotificationStore } from '@/stores/notificationStore'
 import { playSoundEffect } from '@/lib/voice/soundEffects'
 import type { ISigner } from '@/stores/userStore'
 import type { Attachment } from '@/stores/messageStore'
@@ -59,19 +60,11 @@ const processedReactionIds = new Set<string>()
 // Only real-time messages (received this session) play the DM sound; backfilled history never does.
 const mdmSessionStartTime = nowSeconds()
 
-// Persisted per-conversation read marks. Without these, re-running the subscription on every tab open
-// re-counts all backfilled history as unread (the "always unread" bug). A conversation's messages at or
-// before its lastRead don't count. Mirrors how NIP-04/17 gate unread on a persisted lastRead.
-const MDM_READ_KEY = 'den_mdm_read_times'
-const readTimes = new Map<string, number>()
-try {
-  const raw = localStorage.getItem(MDM_READ_KEY)
-  if (raw) for (const [k, v] of Object.entries(JSON.parse(raw) as Record<string, unknown>)) if (typeof v === 'number') readTimes.set(k, v)
-} catch { /* storage unavailable: start empty */ }
-function markMdmRead(counterparty: string) {
-  readTimes.set(counterparty, nowSeconds())
-  try { localStorage.setItem(MDM_READ_KEY, JSON.stringify(Object.fromEntries(readTimes))) } catch { /* non-fatal */ }
-}
+// Per-conversation read marks live in the notification store (mdmUnreads, keyed on the counterparty's real
+// key), so they persist locally AND sync across devices via the NIP-78 DM read-state event, exactly like
+// NIP-04/17. Unread counts a message only if it is newer than that lastRead, so re-running the subscription
+// never re-counts backfilled history.
+const mdmLastRead = (counterparty: string) => useNotificationStore.getState().mdmUnreads[counterparty]?.lastRead ?? 0
 
 interface ReactionEntry { users: Set<string>; customUrl?: string }
 
@@ -132,12 +125,12 @@ function upsertMessage(conversations: Map<string, DM04Conversation>, counterpart
     conv.messages.push(msg)
     if (!msg.isMine) {
       if (counterparty === active) {
-        // Arrived while viewing it: keep the persisted read mark current so it stays read on reload.
-        markMdmRead(counterparty)
+        // Arrived while viewing it: advance the read mark so it stays read on reload / other devices.
+        useNotificationStore.getState().markDmRead(counterparty, 'mdm')
       } else {
         // Count toward unread only if newer than the last time this conversation was read (persisted),
         // so backfilled history doesn't re-count every time the subscription re-runs.
-        const lastRead = readTimes.get(counterparty) ?? 0
+        const lastRead = mdmLastRead(counterparty)
         if (!(lastRead > 0 && msg.createdAt <= lastRead)) conv.unread += 1
       }
       // Real-time message from a followed user: play the DM sound (never for backfill).
@@ -169,8 +162,8 @@ export const useMdmStore = create<MdmState>((set, get) => ({
   subscription: null,
 
   setActiveConversation: (pubkey) => {
-    // Persist the read mark so this conversation's backfilled history doesn't re-count as unread next load.
-    if (pubkey) markMdmRead(pubkey)
+    // Persist + sync the read mark so this conversation's backfilled history doesn't re-count as unread.
+    if (pubkey) useNotificationStore.getState().markDmRead(pubkey, 'mdm')
     set((s) => {
       if (pubkey && s.conversations.has(pubkey)) {
         const conversations = new Map(s.conversations)

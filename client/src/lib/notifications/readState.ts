@@ -76,6 +76,7 @@ export function hasAnyMute(settings: HubMuteSettings): boolean {
 export interface DmReadState {
   dm17: Record<string, number>  // NIP-17 conversations (counterparty pubkey → timestamp)
   dm04: Record<string, number>  // NIP-04 conversations (counterparty pubkey → timestamp)
+  mdm: Record<string, number>   // NIP-MDM (masked) conversations (counterparty real key → timestamp)
 }
 
 /** Public chat read-state: per-topic timestamps */
@@ -334,9 +335,10 @@ export function parseDmReadState(decryptedContent: string): DmReadState {
     return {
       dm17: parsed.dm17 ?? {},
       dm04: parsed.dm04 ?? {},
+      mdm: parsed.mdm ?? {},
     }
   } catch {
-    return { dm17: {}, dm04: {} }
+    return { dm17: {}, dm04: {}, mdm: {} }
   }
 }
 

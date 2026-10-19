@@ -109,6 +109,8 @@ export interface NotificationState {
   dm17Unreads: Record<string, ConversationUnread>
   /** NIP-04 DM per-conversation unread state */
   dm04Unreads: Record<string, ConversationUnread>
+  /** NIP-MDM (masked DM) per-conversation unread state */
+  mdmUnreads: Record<string, ConversationUnread>
 
   // ── Public Chat ──
   /** Per-topic read timestamps */
@@ -161,8 +163,8 @@ export interface NotificationState {
   startPendingHubChannelTimers: (hubDTag: string) => void
 
   // DMs
-  markDmRead: (conversationId: string, type: 'nip17' | 'nip04') => void
-  incrementDmUnread: (conversationId: string, type: 'nip17' | 'nip04') => void
+  markDmRead: (conversationId: string, type: 'nip17' | 'nip04' | 'mdm') => void
+  incrementDmUnread: (conversationId: string, type: 'nip17' | 'nip04' | 'mdm') => void
 
   // Public Chat
   markTopicRead: (topic: string) => void
@@ -305,13 +307,16 @@ function buildGroupReadStateFromStore(
 /** Build DmReadState from the store's live state for serialization */
 function buildDmReadStateFromStore(
   dm17Unreads: Record<string, ConversationUnread>,
-  dm04Unreads: Record<string, ConversationUnread>
+  dm04Unreads: Record<string, ConversationUnread>,
+  mdmUnreads: Record<string, ConversationUnread>
 ): DmReadState {
   const dm17: Record<string, number> = {}
   const dm04: Record<string, number> = {}
+  const mdm: Record<string, number> = {}
   for (const [k, v] of Object.entries(dm17Unreads)) dm17[k] = v.lastRead
   for (const [k, v] of Object.entries(dm04Unreads)) dm04[k] = v.lastRead
-  return { dm17, dm04 }
+  for (const [k, v] of Object.entries(mdmUnreads)) mdm[k] = v.lastRead
+  return { dm17, dm04, mdm }
 }
 
 // ── Store ──
@@ -368,6 +373,7 @@ function preloadFromLocalStorage() {
   // DM read-state
   let dm17Unreads: Record<string, ConversationUnread> = {}
   let dm04Unreads: Record<string, ConversationUnread> = {}
+  let mdmUnreads: Record<string, ConversationUnread> = {}
   try {
     const dmCached = loadCachedEvent('dm')
     if (dmCached?.content) {
@@ -377,6 +383,9 @@ function preloadFromLocalStorage() {
       }
       for (const [k, v] of Object.entries(dmState.dm04)) {
         dm04Unreads[k] = { lastRead: v, count: 0 }
+      }
+      for (const [k, v] of Object.entries(dmState.mdm)) {
+        mdmUnreads[k] = { lastRead: v, count: 0 }
       }
     }
   } catch { /* ignore */ }
@@ -398,7 +407,7 @@ function preloadFromLocalStorage() {
     }
   } catch { /* ignore */ }
 
-  return { hubUnreads, hubMuteSettings, hubSeenTo, channelMuteSettings, dm17Unreads, dm04Unreads, socialSeenAt, pcReadTimes }
+  return { hubUnreads, hubMuteSettings, hubSeenTo, channelMuteSettings, dm17Unreads, dm04Unreads, mdmUnreads, socialSeenAt, pcReadTimes }
 }
 
 /**
@@ -453,6 +462,7 @@ const initialState = {
   channelFlash: {} as Record<string, Record<string, number>>,
   dm17Unreads: _preloaded.dm17Unreads,
   dm04Unreads: _preloaded.dm04Unreads,
+  mdmUnreads: _preloaded.mdmUnreads,
   pcReadTimes: _preloaded.pcReadTimes,
   ...recomputeTotals({
     hubUnreads: _preloaded.hubUnreads,
@@ -643,6 +653,7 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
     // Hydrate DM unreads, merging with live counts
     const dm17Unreads: Record<string, ConversationUnread> = {}
     const dm04Unreads: Record<string, ConversationUnread> = {}
+    const mdmUnreads: Record<string, ConversationUnread> = {}
     for (const [k, v] of Object.entries(dmState.dm17)) {
       const live = liveState.dm17Unreads[k]
       dm17Unreads[k] = (live && live.lastRead >= v) ? live : { lastRead: v, count: 0 }
@@ -651,12 +662,19 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
       const live = liveState.dm04Unreads[k]
       dm04Unreads[k] = (live && live.lastRead >= v) ? live : { lastRead: v, count: 0 }
     }
+    for (const [k, v] of Object.entries(dmState.mdm)) {
+      const live = liveState.mdmUnreads[k]
+      mdmUnreads[k] = (live && live.lastRead >= v) ? live : { lastRead: v, count: 0 }
+    }
     // Include any conversations from live state not in relay event
     for (const [k, v] of Object.entries(liveState.dm17Unreads)) {
       if (!dm17Unreads[k]) dm17Unreads[k] = v
     }
     for (const [k, v] of Object.entries(liveState.dm04Unreads)) {
       if (!dm04Unreads[k]) dm04Unreads[k] = v
+    }
+    for (const [k, v] of Object.entries(liveState.mdmUnreads)) {
+      if (!mdmUnreads[k]) mdmUnreads[k] = v
     }
 
     set({
@@ -668,6 +686,7 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
       channelMuteSettings,
       dm17Unreads,
       dm04Unreads,
+      mdmUnreads,
       pcReadTimes: pcState.topics,
       ...recomputeTotals({ hubUnreads, hubMuteSettings, dm17Unreads, dm04Unreads }),
     })
@@ -689,6 +708,7 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
     channelMuteSettings: {},
     dm17Unreads: {},
     dm04Unreads: {},
+    mdmUnreads: {},
     pcReadTimes: {},
     totalHubUnread: 0,
     totalDmUnread: 0,
@@ -924,7 +944,7 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
   markDmRead: (conversationId, type) => {
     const now = nowSeconds()
     console.log('[notif] markDmRead called:', { conversationId: conversationId.slice(0, 12) + '...', type, now })
-    const key = type === 'nip17' ? 'dm17Unreads' : 'dm04Unreads'
+    const key = type === 'nip17' ? 'dm17Unreads' : type === 'nip04' ? 'dm04Unreads' : 'mdmUnreads'
     set((state) => {
       const unreads = { ...state[key] }
       unreads[conversationId] = { lastRead: now, count: 0 }
@@ -935,7 +955,7 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
   },
 
   incrementDmUnread: (conversationId, type) => {
-    const key = type === 'nip17' ? 'dm17Unreads' : 'dm04Unreads'
+    const key = type === 'nip17' ? 'dm17Unreads' : type === 'nip04' ? 'dm04Unreads' : 'mdmUnreads'
     set((state) => {
       const unreads = { ...state[key] }
       const existing = unreads[conversationId] || { lastRead: 0, count: 0 }
@@ -1028,7 +1048,7 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
 
   publishDmReadState: async (signer, privateKey) => {
     const state = get()
-    const dmState = buildDmReadStateFromStore(state.dm17Unreads, state.dm04Unreads)
+    const dmState = buildDmReadStateFromStore(state.dm17Unreads, state.dm04Unreads, state.mdmUnreads)
     const content = JSON.stringify(dmState)
 
     let encryptedContent: string | null = null
@@ -1150,7 +1170,7 @@ useGroupStore.subscribe((gs, prev) => {
 
 function _saveDmToLocalStorage(get: () => NotificationState) {
   const state = get()
-  const dmState = buildDmReadStateFromStore(state.dm17Unreads, state.dm04Unreads)
+  const dmState = buildDmReadStateFromStore(state.dm17Unreads, state.dm04Unreads, state.mdmUnreads)
   const cached = loadCachedEvent('dm')
   const now = nowSeconds()
 
