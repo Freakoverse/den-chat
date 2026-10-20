@@ -62,6 +62,8 @@ export async function upgradeHubToStruct(opts: {
     tags: hub.tags && hub.tags.length > 0 ? hub.tags : undefined,
     relays: hub.generalRelays,
     blossomServers: hub.blossomServers,
+    dedicatedRelays: hub.dedicatedRelays,
+    dedicatedBlossomServers: hub.dedicatedBlossomServers,
     indexFileHash: hub.indexFileHash,
     structFileHash: structHash,
     channels: hub.channels,

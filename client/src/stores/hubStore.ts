@@ -37,6 +37,11 @@ export interface HubData {
   epoch: number
   generalRelays: string[]
   blossomServers: string[]
+  /** Subset of generalRelays the hub owner declares it operates itself (the `dedicated` marker on the
+   *  `r` tag). A hub with none has no committed retention, so its history is best-effort only. */
+  dedicatedRelays?: string[]
+  /** Subset of blossomServers marked `dedicated` on the `o` tag (same meaning as dedicatedRelays). */
+  dedicatedBlossomServers?: string[]
   indexFileHash: string
   /** struct-blob hash from the `struct` tag: when present, the structural arrays (channels / roles /
    *  categories / grouped_roles / plugins) live in a Blossom blob (encrypted the same way the hub

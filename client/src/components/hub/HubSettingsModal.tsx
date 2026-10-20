@@ -284,6 +284,8 @@ export function HubSettingsModal({ open, onClose, hub, initialPage, focusMemberP
   const [editDiscoverable, setEditDiscoverable] = useState(hub.discoverable !== false)
   const [editRelays, setEditRelays] = useState<string[]>(() => [...hub.generalRelays])
   const [editBlossoms, setEditBlossoms] = useState<string[]>(() => [...hub.blossomServers])
+  const [editDedicatedRelays, setEditDedicatedRelays] = useState<string[]>(() => [...(hub.dedicatedRelays || [])])
+  const [editDedicatedBlossoms, setEditDedicatedBlossoms] = useState<string[]>(() => [...(hub.dedicatedBlossomServers || [])])
   const [editRoles, setEditRoles] = useState<Role[]>(() => [...hub.roles])
 
   const [publishing, setPublishing] = useState(false)
@@ -355,10 +357,12 @@ export function HubSettingsModal({ open, onClose, hub, initialPage, focusMemberP
     if (editDiscoverable !== (hub.discoverable !== false)) return true
     if (JSON.stringify([...editRelays].sort()) !== JSON.stringify([...hub.generalRelays].sort())) return true
     if (JSON.stringify([...editBlossoms].sort()) !== JSON.stringify([...hub.blossomServers].sort())) return true
+    if (JSON.stringify([...editDedicatedRelays].sort()) !== JSON.stringify([...(hub.dedicatedRelays || [])].sort())) return true
+    if (JSON.stringify([...editDedicatedBlossoms].sort()) !== JSON.stringify([...(hub.dedicatedBlossomServers || [])].sort())) return true
     if (JSON.stringify(editRoles.map(r => ({ id: r.roleId, name: r.name, color: r.color, pos: r.position, hoist: r.hoist, perms: r.permissions }))) !==
       JSON.stringify(hub.roles.map(r => ({ id: r.roleId, name: r.name, color: r.color, pos: r.position, hoist: r.hoist, perms: r.permissions })))) return true
     return false
-  }, [editName, editDescription, editIcon, editBanner, editTags, editCategories, editChannels, editMinPow, editJoinMinPow, editJoinNote, editMessageExpiration, editNsfw, editDiscoverable, editRelays, editBlossoms, editRoles, hub])
+  }, [editName, editDescription, editIcon, editBanner, editTags, editCategories, editChannels, editMinPow, editJoinMinPow, editJoinNote, editMessageExpiration, editNsfw, editDiscoverable, editRelays, editBlossoms, editDedicatedRelays, editDedicatedBlossoms, editRoles, hub])
 
   // Role change summary for the Roles page footer
   const roleChangeSummary = useMemo(() => {
@@ -432,11 +436,14 @@ export function HubSettingsModal({ open, onClose, hub, initialPage, focusMemberP
   const networkChangeSummary = useMemo(() => {
     const relaysDiff = JSON.stringify([...editRelays].sort()) !== JSON.stringify([...hub.generalRelays].sort())
     const blossomDiff = JSON.stringify([...editBlossoms].sort()) !== JSON.stringify([...hub.blossomServers].sort())
+    const dedicatedDiff = JSON.stringify([...editDedicatedRelays].sort()) !== JSON.stringify([...(hub.dedicatedRelays || [])].sort())
+      || JSON.stringify([...editDedicatedBlossoms].sort()) !== JSON.stringify([...(hub.dedicatedBlossomServers || [])].sort())
     const parts: string[] = []
     if (relaysDiff) parts.push('relays')
     if (blossomDiff) parts.push('blossom servers')
+    if (dedicatedDiff && !relaysDiff && !blossomDiff) parts.push('dedicated servers')
     return { parts, total: parts.length }
-  }, [editRelays, editBlossoms, hub.generalRelays, hub.blossomServers])
+  }, [editRelays, editBlossoms, editDedicatedRelays, editDedicatedBlossoms, hub.generalRelays, hub.blossomServers, hub.dedicatedRelays, hub.dedicatedBlossomServers])
 
   const handlePublish = async () => {
     setPublishing(true)
@@ -829,6 +836,8 @@ export function HubSettingsModal({ open, onClose, hub, initialPage, focusMemberP
         tags: editTags.length > 0 ? editTags : undefined,
         relays: editRelays,
         blossomServers: editBlossoms,
+        dedicatedRelays: editDedicatedRelays.filter((r) => editRelays.includes(r)),
+        dedicatedBlossomServers: editDedicatedBlossoms.filter((s) => editBlossoms.includes(s)),
         indexFileHash: currentIndexHash,
         structFileHash: structStepHash,
         channels: finalChannels,
@@ -900,6 +909,8 @@ export function HubSettingsModal({ open, onClose, hub, initialPage, focusMemberP
         roles: editRoles,
         generalRelays: editRelays,
         blossomServers: editBlossoms,
+        dedicatedRelays: editDedicatedRelays.filter((r) => editRelays.includes(r)),
+        dedicatedBlossomServers: editDedicatedBlossoms.filter((s) => editBlossoms.includes(s)),
         minPow: editMinPow,
         joinMinPow: editJoinMinPow,
         joinNote: editJoinNote,
@@ -1025,7 +1036,7 @@ export function HubSettingsModal({ open, onClose, hub, initialPage, focusMemberP
                     <SecurityPage hub={hub} />
                   )}
                   {activePage === 'network' && isCreator && (
-                    <NetworkPage hub={hub} editRelays={editRelays} setEditRelays={setEditRelays} editBlossoms={editBlossoms} setEditBlossoms={setEditBlossoms} />
+                    <NetworkPage hub={hub} editRelays={editRelays} setEditRelays={setEditRelays} editBlossoms={editBlossoms} setEditBlossoms={setEditBlossoms} editDedicatedRelays={editDedicatedRelays} setEditDedicatedRelays={setEditDedicatedRelays} editDedicatedBlossoms={editDedicatedBlossoms} setEditDedicatedBlossoms={setEditDedicatedBlossoms} />
                   )}
                   {activePage === 'banned' && isCreator && (
                     <BannedUsersPage hub={hub} />
@@ -3595,6 +3606,8 @@ function SecurityPage({ hub }: { hub: HubData }) {
         tags: hub.tags,
         relays: [...hub.generalRelays],
         blossomServers: hub.blossomServers,
+        dedicatedRelays: hub.dedicatedRelays,
+        dedicatedBlossomServers: hub.dedicatedBlossomServers,
         indexFileHash: finalIndexHash,
         structFileHash: rebuiltStructHash,
         channels: hub.channels,
@@ -4879,13 +4892,23 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
 
 // ── Network Page (Relays + Blossom Servers) ──
 
-function NetworkPage({ hub, editRelays, setEditRelays, editBlossoms, setEditBlossoms }: {
+function NetworkPage({ hub, editRelays, setEditRelays, editBlossoms, setEditBlossoms, editDedicatedRelays, setEditDedicatedRelays, editDedicatedBlossoms, setEditDedicatedBlossoms }: {
   hub: HubData
   editRelays: string[]
   setEditRelays: (relays: string[]) => void
   editBlossoms: string[]
   setEditBlossoms: (blossoms: string[]) => void
+  editDedicatedRelays: string[]
+  setEditDedicatedRelays: (relays: string[]) => void
+  editDedicatedBlossoms: string[]
+  setEditDedicatedBlossoms: (blossoms: string[]) => void
 }) {
+  const toggleDedicatedRelay = (url: string) =>
+    setEditDedicatedRelays(editDedicatedRelays.includes(url) ? editDedicatedRelays.filter((r) => r !== url) : [...editDedicatedRelays, url])
+  const toggleDedicatedBlossom = (url: string) =>
+    setEditDedicatedBlossoms(editDedicatedBlossoms.includes(url) ? editDedicatedBlossoms.filter((s) => s !== url) : [...editDedicatedBlossoms, url])
+  const hasDedicatedRelay = editRelays.some((r) => editDedicatedRelays.includes(r))
+  const hasDedicatedBlossom = editBlossoms.some((s) => editDedicatedBlossoms.includes(s))
   const userRelays = useUserListsStore((s) => s.userRelays)
   const userBlossoms = useUserListsStore((s) => s.userBlossoms)
   const [customRelayInput, setCustomRelayInput] = useState('')
@@ -4918,6 +4941,7 @@ function NetworkPage({ hub, editRelays, setEditRelays, editBlossoms, setEditBlos
 
   const removeRelay = (url: string) => {
     setEditRelays(editRelays.filter(r => r !== url))
+    if (editDedicatedRelays.includes(url)) setEditDedicatedRelays(editDedicatedRelays.filter(r => r !== url))
   }
 
   const addCustomRelay = () => {
@@ -4937,6 +4961,7 @@ function NetworkPage({ hub, editRelays, setEditRelays, editBlossoms, setEditBlos
 
   const removeBlossom = (url: string) => {
     setEditBlossoms(editBlossoms.filter(b => b !== url))
+    if (editDedicatedBlossoms.includes(url)) setEditDedicatedBlossoms(editDedicatedBlossoms.filter(s => s !== url))
   }
 
   const addCustomBlossom = () => {
@@ -4971,6 +4996,20 @@ function NetworkPage({ hub, editRelays, setEditRelays, editBlossoms, setEditBlos
       <section className="space-y-3">
         <h4 className="text-sm font-semibold text-foreground">Hub Relays</h4>
         <HubRelayHealthNotice hub={hub} />
+        {/* Dedicated-relay reliability notice */}
+        {editRelays.length > 0 && (
+          hasDedicatedRelay ? (
+            <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30">
+              <ShieldCheck size={14} className="text-emerald-400 shrink-0 mt-0.5" />
+              <p className="text-xs text-emerald-400/90 leading-relaxed">This hub runs a dedicated relay, so its message history is reliably retained.</p>
+            </div>
+          ) : (
+            <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/30">
+              <AlertTriangle size={14} className="text-amber-500 shrink-0 mt-0.5" />
+              <p className="text-xs text-amber-500/90 leading-relaxed">No dedicated relay. Hub history lives only on shared public relays and may be dropped or lost over time. Mark a relay you operate as <span className="font-semibold">Dedicated</span> for reliable retention.</p>
+            </div>
+          )
+        )}
         <div className="space-y-1.5">
           {editRelays.length === 0 ? (
             <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/30">
@@ -4978,10 +5017,25 @@ function NetworkPage({ hub, editRelays, setEditRelays, editBlossoms, setEditBlos
               <p className="text-xs text-amber-500">No relays configured. Members won't be able to send or receive messages.</p>
             </div>
           ) : (
-            editRelays.map((url) => (
+            editRelays.map((url) => {
+              const isDedicated = editDedicatedRelays.includes(url)
+              return (
               <div key={url} className="flex items-center gap-2.5 px-3 py-2 rounded-lg bg-secondary/30 border border-border">
                 <span className="text-sm text-foreground font-mono truncate flex-1">{url}</span>
                 <RelayHealthLabel url={url} />
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={() => toggleDedicatedRelay(url)}
+                      className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors cursor-pointer shrink-0 ${isDedicated ? 'bg-emerald-500/15 text-emerald-400' : 'bg-secondary text-muted-foreground hover:text-foreground'}`}
+                    >
+                      <ShieldCheck size={11} /> {isDedicated ? 'Dedicated' : 'Mark dedicated'}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="text-xs max-w-[220px]">
+                    A relay your hub operates itself (self-hosted or paid) that commits to retaining this hub's history. Only mark relays you control.
+                  </TooltipContent>
+                </Tooltip>
                 <button
                   onClick={() => removeRelay(url)}
                   className="text-muted-foreground hover:text-destructive transition-colors cursor-pointer"
@@ -4989,7 +5043,7 @@ function NetworkPage({ hub, editRelays, setEditRelays, editBlossoms, setEditBlos
                   <Trash2 size={14} />
                 </button>
               </div>
-            ))
+            )})
           )}
         </div>
       </section>
@@ -5137,6 +5191,19 @@ function NetworkPage({ hub, editRelays, setEditRelays, editBlossoms, setEditBlos
       {/* Current Hub Blossom Servers */}
       <section className="space-y-3">
         <h4 className="text-sm font-semibold text-foreground">Hub Blossom Servers</h4>
+        {editBlossoms.length > 0 && (
+          hasDedicatedBlossom ? (
+            <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30">
+              <ShieldCheck size={14} className="text-emerald-400 shrink-0 mt-0.5" />
+              <p className="text-xs text-emerald-400/90 leading-relaxed">This hub runs a dedicated Blossom server, so its media and files are reliably retained.</p>
+            </div>
+          ) : (
+            <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/30">
+              <AlertTriangle size={14} className="text-amber-500 shrink-0 mt-0.5" />
+              <p className="text-xs text-amber-500/90 leading-relaxed">No dedicated Blossom server. Hub media and member/key files live only on shared servers and may be garbage-collected over time. Mark a server you operate as <span className="font-semibold">Dedicated</span> for reliable retention.</p>
+            </div>
+          )
+        )}
         <div className="space-y-1.5">
           {editBlossoms.length === 0 ? (
             <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/30">
@@ -5144,9 +5211,24 @@ function NetworkPage({ hub, editRelays, setEditRelays, editBlossoms, setEditBlos
               <p className="text-xs text-amber-500">No blossom servers configured. Hub files won't be accessible.</p>
             </div>
           ) : (
-            editBlossoms.map((url) => (
+            editBlossoms.map((url) => {
+              const isDedicated = editDedicatedBlossoms.includes(url)
+              return (
               <div key={url} className="flex items-center gap-2.5 px-3 py-2 rounded-lg bg-secondary/30 border border-border">
                 <span className="text-sm text-foreground font-mono truncate flex-1">{url}</span>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={() => toggleDedicatedBlossom(url)}
+                      className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors cursor-pointer shrink-0 ${isDedicated ? 'bg-emerald-500/15 text-emerald-400' : 'bg-secondary text-muted-foreground hover:text-foreground'}`}
+                    >
+                      <ShieldCheck size={11} /> {isDedicated ? 'Dedicated' : 'Mark dedicated'}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="text-xs max-w-[220px]">
+                    A Blossom server your hub operates itself that commits to retaining this hub's media and files. Only mark servers you control.
+                  </TooltipContent>
+                </Tooltip>
                 <button
                   onClick={() => removeBlossom(url)}
                   className="text-muted-foreground hover:text-destructive transition-colors cursor-pointer"
@@ -5154,7 +5236,7 @@ function NetworkPage({ hub, editRelays, setEditRelays, editBlossoms, setEditBlos
                   <Trash2 size={14} />
                 </button>
               </div>
-            ))
+            )})
           )}
         </div>
       </section>

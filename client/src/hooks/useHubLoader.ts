@@ -51,18 +51,26 @@ export function parseHubEvent(event: Event, contentOverride?: string): (HubData 
     const mEpoch = event.tags.find(t => t[0] === 'm')?.[2]
     const epoch = epochTag ? parseInt(epochTag, 10) : (mEpoch ? parseInt(mEpoch, 10) : 1)
 
-    // Parse relay tags — every relay tag is a hub (general) relay
+    // Parse relay tags — every relay tag is a hub (general) relay. A `dedicated` marker anywhere after
+    // the URL means the hub operates that relay itself (committed retention).
     const generalRelays: string[] = []
+    const dedicatedRelays: string[] = []
     for (const tag of event.tags) {
       if (tag[0] === 'r' && tag[1]) {
         generalRelays.push(tag[1])
+        if (tag.slice(2).includes('dedicated')) dedicatedRelays.push(tag[1])
       }
     }
 
-    // Parse blossom servers
-    const blossomServers = event.tags
-      .filter(t => t[0] === 'o' && t[1])
-      .map(t => t[1])
+    // Parse blossom servers (same `dedicated` marker convention on the `o` tag)
+    const blossomServers: string[] = []
+    const dedicatedBlossomServers: string[] = []
+    for (const tag of event.tags) {
+      if (tag[0] === 'o' && tag[1]) {
+        blossomServers.push(tag[1])
+        if (tag.slice(2).includes('dedicated')) dedicatedBlossomServers.push(tag[1])
+      }
+    }
 
     // Parse index file hash
     const mTag = event.tags.find(t => t[0] === 'm')
@@ -260,6 +268,8 @@ export function parseHubEvent(event: Event, contentOverride?: string): (HubData 
       epoch,
       generalRelays,
       blossomServers,
+      dedicatedRelays,
+      dedicatedBlossomServers,
       indexFileHash,
       structFileHash,
       channels,

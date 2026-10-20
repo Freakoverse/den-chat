@@ -1233,6 +1233,8 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
         tags: hub.tags,
         relays: [...hub.generalRelays],
         blossomServers: hub.blossomServers,
+        dedicatedRelays: hub.dedicatedRelays,
+        dedicatedBlossomServers: hub.dedicatedBlossomServers,
         indexFileHash: newIndexHash,
         structFileHash: rotatedStructHash,
         channels: hub.channels,

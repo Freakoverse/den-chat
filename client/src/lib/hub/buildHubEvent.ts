@@ -29,6 +29,10 @@ interface BuildHubEventOptions {
   tags?: string[]
   relays: string[]
   blossomServers: string[]
+  /** URLs within `relays` the hub operates itself → emitted with a `dedicated` marker on the `r` tag. */
+  dedicatedRelays?: string[]
+  /** URLs within `blossomServers` the hub operates itself → `dedicated` marker on the `o` tag. */
+  dedicatedBlossomServers?: string[]
   indexFileHash: string
   /** Struct-blob hash (new format). When set, the structural arrays move OUT of the event content into
    *  the Blossom blob and the event carries a `["struct", hash, epoch]` tag, so the event stays O(1). The
@@ -106,9 +110,12 @@ export function buildHubEvent(opts: BuildHubEventOptions) {
 
   const {
     dTag, name, description, epoch, icon, banner, tags,
-    relays, blossomServers, indexFileHash, channels, categories, roles, minPow, joinMinPow, joinNote, messageExpiration, nsfw, discoverable, groupedRoles,
+    relays, blossomServers, dedicatedRelays, dedicatedBlossomServers, indexFileHash, channels, categories, roles, minPow, joinMinPow, joinNote, messageExpiration, nsfw, discoverable, groupedRoles,
     publishedAt, eventCreatedAt
   } = opts
+
+  const dedicatedRelaySet = new Set(dedicatedRelays || [])
+  const dedicatedBlossomSet = new Set(dedicatedBlossomServers || [])
 
   // Build event tags
   const eventTags: [string, ...string[]][] = [
@@ -118,10 +125,10 @@ export function buildHubEvent(opts: BuildHubEventOptions) {
   ]
 
   for (const relay of relays) {
-    eventTags.push(['r', relay, 'general'])
+    eventTags.push(dedicatedRelaySet.has(relay) ? ['r', relay, 'general', 'dedicated'] : ['r', relay, 'general'])
   }
   for (const server of blossomServers) {
-    eventTags.push(['o', server])
+    eventTags.push(dedicatedBlossomSet.has(server) ? ['o', server, 'dedicated'] : ['o', server])
   }
   if (indexFileHash) {
     eventTags.push(['m', indexFileHash, epoch.toString()])
@@ -256,18 +263,21 @@ export async function buildHubEventV2(
 
   const {
     dTag, name, description, epoch, icon, banner, tags,
-    relays, blossomServers, indexFileHash, channels, categories, roles,
+    relays, blossomServers, dedicatedRelays, dedicatedBlossomServers, indexFileHash, channels, categories, roles,
     minPow, joinMinPow, joinNote, messageExpiration, nsfw, discoverable, groupedRoles,
     publishedAt, eventCreatedAt, contentKey, ownerAttestation, signerScheme,
   } = opts
+
+  const dedicatedRelaySet = new Set(dedicatedRelays || [])
+  const dedicatedBlossomSet = new Set(dedicatedBlossomServers || [])
 
   const eventTags: [string, ...string[]][] = [
     ['d', dTag],
     ['n', name],
     ['epoch', epoch.toString()],
   ]
-  for (const relay of relays) eventTags.push(['r', relay, 'general'])
-  for (const server of blossomServers) eventTags.push(['o', server])
+  for (const relay of relays) eventTags.push(dedicatedRelaySet.has(relay) ? ['r', relay, 'general', 'dedicated'] : ['r', relay, 'general'])
+  for (const server of blossomServers) eventTags.push(dedicatedBlossomSet.has(server) ? ['o', server, 'dedicated'] : ['o', server])
   if (indexFileHash) eventTags.push(['m', indexFileHash, epoch.toString()])
   eventTags.push(['updated_at', nowSeconds().toString()]) // real edit time (see v1 path / §6.1)
   if (tags) for (const t of tags) eventTags.push(['t', t])
@@ -364,7 +374,7 @@ export async function buildAndSignV2HubEvent(
  * store). Replaces the inline `mineAndSign(buildHubEvent(...))` pattern everywhere.
  */
 export async function signHubEventForPublish(
-  hub: { dTag: string; creatorPubkey: string; version?: number; signerScheme?: string; structFileHash?: string; blossomServers?: string[] },
+  hub: { dTag: string; creatorPubkey: string; version?: number; signerScheme?: string; structFileHash?: string; blossomServers?: string[]; dedicatedRelays?: string[]; dedicatedBlossomServers?: string[] },
   params: BuildHubEventOptions,
   opts: {
     pubkey: string; privateKey: string | null; signer: ISigner | null; minPow?: number
@@ -374,6 +384,12 @@ export async function signHubEventForPublish(
   },
 ): Promise<Event> {
   const { isV2 } = await import('@/lib/hub/version')
+
+  // Preserve the hub's dedicated-relay/server markers on every republish unless the caller overrides them
+  // explicitly (only Settings → Network does). Without this, routine republishes (member ops, health
+  // rebroadcasts, short-address mint, struct upgrade) would silently drop the `dedicated` markers.
+  if (params.dedicatedRelays === undefined) params = { ...params, dedicatedRelays: hub.dedicatedRelays }
+  if (params.dedicatedBlossomServers === undefined) params = { ...params, dedicatedBlossomServers: hub.dedicatedBlossomServers }
 
   // Struct-blob hubs: a re-publish carries the *current* structure in `params`. Re-upload the blob ONLY
   // when that structure actually differs from what the store already holds, then swap in the new hash; the

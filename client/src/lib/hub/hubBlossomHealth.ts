@@ -193,6 +193,8 @@ export async function republishHubWithBlossomServers(
     tags: hub.tags && hub.tags.length > 0 ? hub.tags : undefined,
     relays: hub.generalRelays,
     blossomServers: newServers,
+    dedicatedRelays: hub.dedicatedRelays,
+    dedicatedBlossomServers: hub.dedicatedBlossomServers,
     indexFileHash: hub.indexFileHash,
     // Carry the struct-blob hash forward unchanged: this is a non-structural rebroadcast (only the Blossom
     // server list changed), so the existing struct blob is still valid, no re-upload. Keeps the struct tag

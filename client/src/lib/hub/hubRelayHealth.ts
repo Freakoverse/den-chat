@@ -172,6 +172,8 @@ export async function republishHubWithRelays(
     tags: hub.tags && hub.tags.length > 0 ? hub.tags : undefined,
     relays,
     blossomServers: hub.blossomServers,
+    dedicatedRelays: hub.dedicatedRelays,
+    dedicatedBlossomServers: hub.dedicatedBlossomServers,
     indexFileHash: hub.indexFileHash,
     // Carry the struct-blob hash forward unchanged: this rebroadcast only changes the relay list, not the
     // structure, so the existing struct blob stays valid (no re-upload) and the event keeps its struct tag.
