@@ -1065,7 +1065,7 @@ function DiscoverHubCard({ hub, unblur }: { hub: DiscoveredHub; unblur?: boolean
           tags: hub.tags, description: hub.description, epoch: 1, generalRelays: hub.generalRelays,
           blossomServers: hub.blossomServers, indexFileHash: '', channels: [],
           categories: [], roles: [], minPow: hub.minPow, joinMinPow: hub.joinMinPow, nsfw: hub.nsfw, discoverable: hub.discoverable,
-        joinNote: hub.joinNote,
+          joinNote: hub.joinNote, eventCreatedAt: hub.event.created_at,
         }}
         blurMedia={!unblur}
         onCreatorClick={() => {
