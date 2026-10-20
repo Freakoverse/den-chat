@@ -568,6 +568,8 @@ function ConversationList({
             </Tooltip>
           </TooltipProvider>
         </div>
+        {/* Divider between the 1:1 protocol tabs and Groups */}
+        <div className="h-px bg-border mx-1 my-0.5" />
         {/* Row 2, Groups, same pill styling as the protocol tabs */}
         <button
           onClick={() => onSectionChange('groups')}
@@ -591,7 +593,7 @@ function ConversationList({
             onClick={() => onSelect(myPubkey)}
             className="w-full flex items-center justify-center gap-1.5 py-1.5 text-[11px] font-medium rounded-md bg-secondary/40 border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors cursor-pointer"
           >
-            <NotebookPen size={12} /> DM self
+            <NotebookPen size={12} /> B-DM Self
           </button>
         </div>
       )}
