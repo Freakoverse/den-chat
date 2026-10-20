@@ -20,6 +20,7 @@ export interface TrustedSource { pubkey: string; enabled: boolean }
 
 const TRUSTED_KEY = 'den_rec_trusted_sources'
 const ALLOFF_KEY = 'den_rec_alloff_ack'
+const FOLLOWRECS_KEY = 'den_rec_follow_recs'
 
 function loadTrusted(): TrustedSource[] {
   try {
@@ -48,6 +49,13 @@ function loadAllOffAck(): boolean {
 function saveAllOffAck(v: boolean) {
   try { localStorage.setItem(ALLOFF_KEY, v ? '1' : '0') } catch { /* non-fatal */ }
 }
+function loadFollowRecs(): boolean {
+  // Default ON: fold recommendations from people you follow into the feed.
+  try { return localStorage.getItem(FOLLOWRECS_KEY) !== '0' } catch { return true }
+}
+function saveFollowRecs(v: boolean) {
+  try { localStorage.setItem(FOLLOWRECS_KEY, v ? '1' : '0') } catch { /* non-fatal */ }
+}
 
 // Serialize recommendation-list publishes so rapid add/remove don't race each other.
 let publishQueue: Promise<void> = Promise.resolve()
@@ -61,10 +69,12 @@ interface RecState {
   /** The user's own recommended hubs, keyed by coordinate (retains relay hints). */
   myRecs: Map<string, HubRecRef>
   myRecsLoaded: boolean
-  /** Trusted recommendation sources for the Perspective tab (local, per device). */
+  /** Trusted recommendation sources (local, per device). */
   trustedSources: TrustedSource[]
-  /** Set once the user has explicitly accepted the "no trusted sources" (firehose) warning. */
+  /** Set once the user has explicitly accepted the "see everything" (firehose) warning. */
   allOffAck: boolean
+  /** Include recommendations published by people you follow in the feed (local, per device, default on). */
+  followRecs: boolean
 
   loadMyRecs: (myPubkey: string) => Promise<void>
   hasRec: (coord: string) => boolean
@@ -74,6 +84,8 @@ interface RecState {
   setTrustedSources: (list: TrustedSource[]) => void
   /** Explicitly set the firehose acknowledgement (the all-off confirm). */
   setAllOffAck: (v: boolean) => void
+  /** Toggle folding your follows' recommendations into the feed (persists). */
+  setFollowRecs: (v: boolean) => void
 }
 
 export const useRecommendationStore = create<RecState>((set, get) => ({
@@ -81,6 +93,7 @@ export const useRecommendationStore = create<RecState>((set, get) => ({
   myRecsLoaded: false,
   trustedSources: loadTrusted(),
   allOffAck: loadAllOffAck(),
+  followRecs: loadFollowRecs(),
 
   loadMyRecs: async (myPubkey) => {
     try {
@@ -134,5 +147,10 @@ export const useRecommendationStore = create<RecState>((set, get) => ({
   setAllOffAck: (v) => {
     saveAllOffAck(v)
     set({ allOffAck: v })
+  },
+
+  setFollowRecs: (v) => {
+    saveFollowRecs(v)
+    set({ followRecs: v })
   },
 }))

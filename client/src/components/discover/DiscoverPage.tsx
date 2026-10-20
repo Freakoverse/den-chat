@@ -41,8 +41,8 @@ import { useWotStore } from '@/stores/wotStore'
 import { useNavigationStore } from '@/stores/navigationStore'
 import {
   Compass, Search, Loader2, Hash, Info, UserPlus, Check, AlertTriangle,
-  X, ShieldAlert, SlidersHorizontal, ChevronLeft, ChevronRight, Plus,
-  Gamepad2, Package, Globe, Monitor, ChevronDown,
+  X, SlidersHorizontal, ChevronLeft, ChevronRight, Plus,
+  Gamepad2, Package, Globe, Monitor, ChevronDown, Settings,
 } from 'lucide-react'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import type { Event } from 'nostr-tools'
@@ -1175,7 +1175,7 @@ async function parseHubAddress(input: string): Promise<HubRecRef | null> {
   return null
 }
 
-// Manage the user's own recommendation list (shown from the Follows tab).
+// Manage the user's own recommendation list (what your followers see when they enable Following recommendations).
 function ManageRecommendationsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const signer = useUserStore((s) => s.signer)
   const privateKey = useUserStore((s) => s.privateKey)
@@ -1318,7 +1318,7 @@ function ManageRecommendationsModal({ open, onClose }: { open: boolean; onClose:
   )
 }
 
-// Manage the trusted recommendation sources for the Perspective tab (local, per device).
+// Manage the trusted recommendation sources that feed the hub list (local, per device).
 function TrustedSourcesModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const trustedSources = useRecommendationStore((s) => s.trustedSources)
   const setTrustedSources = useRecommendationStore((s) => s.setTrustedSources)
@@ -1362,7 +1362,7 @@ function TrustedSourcesModal({ open, onClose }: { open: boolean; onClose: () => 
           <button onClick={onClose} className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary cursor-pointer"><X size={16} /></button>
         </div>
         <div className="px-5 py-4 overflow-y-auto space-y-3">
-          <p className="text-xs text-muted-foreground leading-relaxed">The Perspective tab shows hubs recommended by the sources you enable here (saved on this device only).</p>
+          <p className="text-xs text-muted-foreground leading-relaxed">Discover shows hubs recommended by the sources you enable here (saved on this device only).</p>
           <div className="space-y-1">
             {local.map((s) => (
               <div key={s.pubkey} className="flex items-center justify-between gap-2 px-2 py-1.5 rounded-md hover:bg-secondary/40">
@@ -1391,7 +1391,7 @@ function TrustedSourcesModal({ open, onClose }: { open: boolean; onClose: () => 
           {!anyEnabled && (
             <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/30">
               <AlertTriangle size={14} className="text-amber-500 shrink-0 mt-0.5" />
-              <p className="text-[11px] text-amber-500/90 leading-snug">With no trusted source selected, Perspective shows every discoverable hub, including ones we have no control of not showing you. View at your own risk; you hold responsibility for what you might see.</p>
+              <p className="text-[11px] text-amber-500/90 leading-snug">With no trusted source selected, Discover shows every discoverable hub, including ones we have no control of not showing you. View at your own risk; you hold responsibility for what you might see.</p>
             </div>
           )}
         </div>
@@ -1408,7 +1408,7 @@ function TrustedSourcesModal({ open, onClose }: { open: boolean; onClose: () => 
             <div className="flex flex-col items-center text-center gap-3">
               <div className="w-12 h-12 rounded-full bg-amber-500/10 flex items-center justify-center"><AlertTriangle size={24} className="text-amber-500" /></div>
               <h3 className="text-base font-semibold text-foreground">Browse without a trusted source?</h3>
-              <p className="text-sm text-muted-foreground leading-relaxed">Perspective will show every discoverable hub with no curation. You hold responsibility for what you see. Re-enable a source any time to go back.</p>
+              <p className="text-sm text-muted-foreground leading-relaxed">Discover will show every discoverable hub with no curation. You hold responsibility for what you see. Re-enable a source any time to go back.</p>
               <div className="flex items-center gap-2 w-full mt-1">
                 <button onClick={() => setShowConfirm(false)} className="flex-1 px-4 py-2 rounded-lg text-sm font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/50 cursor-pointer">Cancel</button>
                 <button onClick={confirmAllOff} className="flex-1 px-4 py-2 rounded-lg text-sm font-medium bg-amber-500 text-white hover:bg-amber-600 cursor-pointer">I understand</button>
@@ -1441,28 +1441,37 @@ export function DiscoverPage() {
   const [showNsfw, setShowNsfw] = useState(false)
   const [unblurMedia, setUnblurMedia] = useState(false)
 
-  // Recommendation-driven sub-tabs (within the hubs view).
-  const [recSection, setRecSection] = useState<'follows' | 'perspective'>('perspective')
+  // Recommendation-driven hub feed (no more Follows/Perspective tabs): hubs come from the recommendation
+  // lists of your trusted sources plus, when enabled, the people you follow. "See everything" turns the
+  // whole feed into the raw "all discoverable" firehose.
   const [recHubs, setRecHubs] = useState<DiscoveredHub[]>([])
   const [recLoading, setRecLoading] = useState(false)
   const followedPubkeys = useFollowStore((s) => s.followedPubkeys)
   const trustedSources = useRecommendationStore((s) => s.trustedSources)
   const recAllOffAck = useRecommendationStore((s) => s.allOffAck)
+  const followRecs = useRecommendationStore((s) => s.followRecs)
   const setTrustedSources = useRecommendationStore((s) => s.setTrustedSources)
   const setAllOffAck = useRecommendationStore((s) => s.setAllOffAck)
+  const setFollowRecs = useRecommendationStore((s) => s.setFollowRecs)
   const enabledSources = useMemo(() => trustedSources.filter((s) => s.enabled).map((s) => s.pubkey), [trustedSources])
-  // Perspective with every source turned off (and acknowledged) = the raw "all discoverable" firehose.
-  const perspectiveFirehose = recSection === 'perspective' && enabledSources.length === 0 && recAllOffAck
+  // Every source turned off (and acknowledged) = the raw "all discoverable" firehose.
+  const seeEverything = enabledSources.length === 0 && recAllOffAck
+  // Authors whose recommendation lists feed the curated view: trusted sources + (optionally) your follows.
+  const recAuthors = useMemo(() => {
+    const set = new Set<string>(enabledSources)
+    if (followRecs) for (const pk of followedPubkeys) set.add(pk)
+    return [...set]
+  }, [enabledSources, followRecs, followedPubkeys])
   const myPubkey = useUserStore((s) => s.pubkey)
   const [showManageRecs, setShowManageRecs] = useState(false)
   const [showSourceModal, setShowSourceModal] = useState(false)
   const [showAllOffConfirm, setShowAllOffConfirm] = useState(false)
-  // Quick "all sources off" toggle (left of the Recommendation chip). Turning it ON needs the same
-  // confirmation as the sources modal; turning it OFF re-enables every source and clears the ack.
+  // "See everything" toggle. Turning it ON needs the same confirmation as the sources modal; turning it
+  // OFF re-enables every source and clears the ack.
   const toggleAllOff = useCallback(() => {
-    if (perspectiveFirehose) setTrustedSources(trustedSources.map((s) => ({ ...s, enabled: true })))
+    if (seeEverything) setTrustedSources(trustedSources.map((s) => ({ ...s, enabled: true })))
     else setShowAllOffConfirm(true)
-  }, [perspectiveFirehose, trustedSources, setTrustedSources])
+  }, [seeEverything, trustedSources, setTrustedSources])
   const confirmAllOff = useCallback(() => {
     setTrustedSources(trustedSources.map((s) => ({ ...s, enabled: false })))
     setAllOffAck(true)
@@ -1611,12 +1620,11 @@ export function DiscoverPage() {
     }
   }, [])
 
-  // (Re)load recommended hubs whenever the active author set changes. Firehose mode uses `hubs` instead.
+  // (Re)load recommended hubs whenever the active author set changes. "See everything" uses `hubs` instead.
   useEffect(() => {
-    if (discoverTab !== 'hubs' || perspectiveFirehose) return
-    const authors = recSection === 'follows' ? [...followedPubkeys] : enabledSources
-    loadRecHubs(authors)
-  }, [discoverTab, recSection, perspectiveFirehose, followedPubkeys, enabledSources, loadRecHubs])
+    if (discoverTab !== 'hubs' || seeEverything) return
+    loadRecHubs(recAuthors)
+  }, [discoverTab, seeEverything, recAuthors, loadRecHubs])
 
   // Load next batch (triggered by pagination proximity)
   const loadMoreHubs = useCallback(async () => {
@@ -1744,9 +1752,9 @@ export function DiscoverPage() {
 
   // Filter hubs
   // The active hub source for the current sub-tab: the resolved recommendation list, or the raw firehose
-  // (`hubs`) only when Perspective has every source turned off and acknowledged.
-  const sourceHubs = perspectiveFirehose ? hubs : recHubs
-  const sourceLoading = perspectiveFirehose ? loading : recLoading
+  // (`hubs`) only when every source is turned off and "See everything" is acknowledged.
+  const sourceHubs = seeEverything ? hubs : recHubs
+  const sourceLoading = seeEverything ? loading : recLoading
 
   const filteredHubs = useMemo(() => {
     let result = sourceHubs
@@ -1853,12 +1861,12 @@ export function DiscoverPage() {
   // Prefetch next batch when user is within 2 pages of the end. Firehose only: the recommendation lists are
   // finite (no relay pagination), so there's nothing more to fetch in those tabs.
   useEffect(() => {
-    if (!perspectiveFirehose || exhausted || loading) return
+    if (!seeEverything || exhausted || loading) return
     const pagesFromEnd = totalPages - currentPage
     if (pagesFromEnd <= 2 && hubs.length > 0) {
       loadMoreHubs()
     }
-  }, [perspectiveFirehose, currentPage, totalPages, exhausted, loading, hubs.length, loadMoreHubs])
+  }, [seeEverything, currentPage, totalPages, exhausted, loading, hubs.length, loadMoreHubs])
 
   // Active filter indicator count
   const activeFilterCount = (showNsfw ? 1 : 0) + (requireMessagePow ? 1 : 0) + ((powMin !== 15 || powMax !== 25) ? 1 : 0) + ((joinPowMin !== 15 || joinPowMax !== 25) ? 1 : 0) + (requireJoinPow ? 1 : 0) + (filterTags.length > 0 ? 1 : 0) + (filterClientTags.length > 0 ? 1 : 0)
@@ -1969,19 +1977,8 @@ export function DiscoverPage() {
                   </button>
                 </div>
 
-                {/* Recommendation source sub-tabs + quick filters (same state the Filters modal edits) */}
+                {/* Recommendation controls + quick filters (same state the Filters modal edits) */}
                 <div className="flex items-center gap-2 mt-2 flex-wrap">
-                  <div className="flex items-center gap-1 p-0.5 rounded-lg border border-border">
-                    {([['follows', 'Follows'], ['perspective', 'Perspective']] as const).map(([id, label]) => (
-                      <button
-                        key={id}
-                        onClick={() => setRecSection(id)}
-                        className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors cursor-pointer ${recSection === id ? 'bg-secondary text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
@@ -2000,37 +1997,54 @@ export function DiscoverPage() {
                     </TooltipContent>
                   </Tooltip>
 
-                  {recSection === 'perspective' && (
-                    <div className={`flex items-center rounded-full border text-[11px] font-medium transition-colors max-w-full
-                      ${perspectiveFirehose ? 'bg-amber-500/10 border-amber-500/40' : 'bg-secondary/60 border-border'}`}>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <button onClick={toggleAllOff} className="flex items-center pl-1 pr-1.5 py-1 rounded-l-full cursor-pointer shrink-0">
-                            <span className={`relative inline-block w-7 h-4 rounded-full transition-colors shrink-0 ${perspectiveFirehose ? 'bg-amber-500' : 'bg-muted-foreground/30'}`}>
-                              <span className={`absolute top-[2px] left-0 block w-3 h-3 rounded-full bg-white shadow transition-transform ${perspectiveFirehose ? 'translate-x-[14px]' : 'translate-x-[2px]'}`} />
-                            </span>
-                          </button>
-                        </TooltipTrigger>
-                        <TooltipContent side="bottom" className="text-xs">
-                          {perspectiveFirehose ? 'Showing every discoverable hub. Toggle off to go back to your sources.' : 'Turn off all sources to browse every discoverable hub'}
-                        </TooltipContent>
-                      </Tooltip>
-                      <span className={`w-px self-stretch my-1 shrink-0 ${perspectiveFirehose ? 'bg-amber-500/60' : 'bg-foreground/15'}`} />
+                  {/* Fold in recommendations from people you follow */}
+                  <Tooltip>
+                    <TooltipTrigger asChild>
                       <button
-                        onClick={() => setShowSourceModal(true)}
-                        className={`flex items-center gap-1.5 pl-2 pr-2.5 py-1 rounded-r-full transition-colors cursor-pointer min-w-0 ${perspectiveFirehose ? 'text-amber-400' : 'text-muted-foreground hover:text-foreground'}`}
+                        onClick={() => setFollowRecs(!followRecs)}
+                        className={`flex items-center gap-2 pl-1 pr-2 py-1 rounded-full border text-[11px] font-medium transition-colors cursor-pointer
+                          ${followRecs ? 'bg-primary/10 border-primary/40 text-primary' : 'bg-secondary/60 border-border text-muted-foreground hover:text-foreground'}`}
                       >
-                        <ShieldAlert size={12} className="shrink-0" />
-                        <span className="truncate">
-                          {perspectiveFirehose
-                            ? 'Every discoverable hub'
-                            : enabledSources.length === 0
-                              ? 'Recommendation of: none'
-                              : `Recommendation of: ${truncateNpub(nip19.npubEncode(enabledSources[0]), 10)}${enabledSources.length > 1 ? ` +${enabledSources.length - 1}` : ''}`}
+                        <span className={`relative inline-block w-7 h-4 rounded-full transition-colors shrink-0 ${followRecs ? 'bg-primary' : 'bg-muted-foreground/30'}`}>
+                          <span className={`absolute top-[2px] left-0 block w-3 h-3 rounded-full bg-white shadow transition-transform ${followRecs ? 'translate-x-[14px]' : 'translate-x-[2px]'}`} />
                         </span>
+                        Following recommendations
                       </button>
-                    </div>
-                  )}
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" className="text-xs">
+                      {followRecs ? 'Including hubs recommended by people you follow' : 'Hubs recommended by people you follow are hidden'}
+                    </TooltipContent>
+                  </Tooltip>
+
+                  {/* See everything (firehose) toggle + a cogwheel that opens the source manager */}
+                  <div className={`flex items-center rounded-full border text-[11px] font-medium transition-colors
+                    ${seeEverything ? 'bg-amber-500/10 border-amber-500/40' : 'bg-secondary/60 border-border'}`}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button onClick={toggleAllOff} className={`flex items-center gap-2 pl-1 pr-2 py-1 rounded-l-full cursor-pointer ${seeEverything ? 'text-amber-400' : 'text-muted-foreground hover:text-foreground'}`}>
+                          <span className={`relative inline-block w-7 h-4 rounded-full transition-colors shrink-0 ${seeEverything ? 'bg-amber-500' : 'bg-muted-foreground/30'}`}>
+                            <span className={`absolute top-[2px] left-0 block w-3 h-3 rounded-full bg-white shadow transition-transform ${seeEverything ? 'translate-x-[14px]' : 'translate-x-[2px]'}`} />
+                          </span>
+                          See everything
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom" className="text-xs">
+                        {seeEverything ? 'Showing every discoverable hub. Toggle off to go back to recommendations.' : 'Ignore recommendations and browse every discoverable hub'}
+                      </TooltipContent>
+                    </Tooltip>
+                    <span className={`w-px self-stretch my-1 shrink-0 ${seeEverything ? 'bg-amber-500/60' : 'bg-foreground/15'}`} />
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          onClick={() => setShowSourceModal(true)}
+                          className={`flex items-center px-2 py-1 rounded-r-full transition-colors cursor-pointer ${seeEverything ? 'text-amber-400' : 'text-muted-foreground hover:text-foreground'}`}
+                        >
+                          <Settings size={13} />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom" className="text-xs">Manage recommendation sources</TooltipContent>
+                    </Tooltip>
+                  </div>
                 </div>
               </div>
 
@@ -2048,16 +2062,14 @@ export function DiscoverPage() {
                   </div>
 
                   <div className="flex items-center gap-3">
-                    {recSection === 'follows' && (
-                      <button
-                        onClick={() => setShowManageRecs(true)}
-                        className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-                      >
-                        <Plus size={12} /> Manage my recommendations
-                      </button>
-                    )}
                     <button
-                      onClick={() => { if (perspectiveFirehose) loadHubs(); else loadRecHubs(recSection === 'follows' ? [...followedPubkeys] : enabledSources) }}
+                      onClick={() => setShowManageRecs(true)}
+                      className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                    >
+                      <Plus size={12} /> Manage my recommendations
+                    </button>
+                    <button
+                      onClick={() => { if (seeEverything) loadHubs(); else loadRecHubs(recAuthors) }}
                       disabled={sourceLoading}
                       className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer disabled:opacity-50"
                     >
@@ -2085,11 +2097,9 @@ export function DiscoverPage() {
                     <p className="text-xs text-muted-foreground max-w-xs break-all">
                       {searchQuery
                         ? `No hubs match "${searchQuery}". Try a different search or adjust filters.`
-                        : perspectiveFirehose
+                        : seeEverything
                           ? 'No discoverable hubs match the current filters. Try adjusting your filter settings.'
-                          : recSection === 'follows'
-                            ? 'No recommendations from people you follow yet. When someone you follow recommends a hub, it shows here.'
-                            : 'No recommendations from your trusted sources yet. Add a source, or turn all sources off to browse every discoverable hub.'}
+                          : 'No recommendations yet. Add a source with the cogwheel, enable Following recommendations, or turn on See everything to browse every discoverable hub.'}
                     </p>
                   </div>
                 )}
@@ -2226,7 +2236,7 @@ export function DiscoverPage() {
             <div className="flex flex-col items-center text-center gap-3">
               <div className="w-12 h-12 rounded-full bg-amber-500/10 flex items-center justify-center"><AlertTriangle size={24} className="text-amber-500" /></div>
               <h3 className="text-base font-semibold text-foreground">Browse without a trusted source?</h3>
-              <p className="text-sm text-muted-foreground leading-relaxed">Perspective will show every discoverable hub with no curation. You hold responsibility for what you see. Re-enable a source any time to go back.</p>
+              <p className="text-sm text-muted-foreground leading-relaxed">Discover will show every discoverable hub with no curation. You hold responsibility for what you see. Re-enable a source any time to go back.</p>
               <div className="flex items-center gap-2 w-full mt-1">
                 <button onClick={() => setShowAllOffConfirm(false)} className="flex-1 px-4 py-2 rounded-lg text-sm font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/50 cursor-pointer">Cancel</button>
                 <button onClick={confirmAllOff} className="flex-1 px-4 py-2 rounded-lg text-sm font-medium bg-amber-500 text-white hover:bg-amber-600 cursor-pointer">I understand</button>
