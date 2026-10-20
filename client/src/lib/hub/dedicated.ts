@@ -10,7 +10,7 @@ export function isDedicatedTag(tag: string[]): boolean {
 
 /** Tooltip copy for the "Dedicated" badge, accurate to which servers the hub actually operates. */
 export function dedicatedTooltip(relay: boolean, blossom: boolean): string {
-  if (relay && blossom) return "This hub runs its own dedicated relay and Blossom server, so its message history and media are reliably retained rather than left on shared public servers."
-  if (relay) return "This hub runs its own dedicated relay, so its message history is reliably retained rather than left on shared public relays. (No dedicated Blossom server, so media relies on shared servers.)"
-  return "This hub runs its own dedicated Blossom server, so its media and files are reliably retained rather than left on shared servers. (No dedicated relay, so message history relies on shared relays.)"
+  if (relay && blossom) return "This hub runs its own dedicated relay and Blossom server, so its message history, media, and vital hub files (the member list, structure, and key material) are reliably retained rather than left on shared public servers."
+  if (relay) return "This hub runs its own dedicated relay, so its message history is reliably retained rather than left on shared public relays. (No dedicated Blossom server, so its media and vital hub files like the member list and structure rely on shared servers.)"
+  return "This hub runs its own dedicated Blossom server, so its media and vital hub files (the member list, structure, and key material) are reliably retained rather than left on shared servers. (No dedicated relay, so its message history relies on shared relays.)"
 }

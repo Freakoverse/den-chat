@@ -5195,12 +5195,12 @@ function NetworkPage({ hub, editRelays, setEditRelays, editBlossoms, setEditBlos
           hasDedicatedBlossom ? (
             <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30">
               <ShieldCheck size={14} className="text-emerald-400 shrink-0 mt-0.5" />
-              <p className="text-xs text-emerald-400/90 leading-relaxed">This hub runs a dedicated Blossom server, so its media and files are reliably retained.</p>
+              <p className="text-xs text-emerald-400/90 leading-relaxed">This hub runs a dedicated Blossom server, so its media and vital hub files (member list, structure, key material) are reliably retained.</p>
             </div>
           ) : (
             <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/30">
               <AlertTriangle size={14} className="text-amber-500 shrink-0 mt-0.5" />
-              <p className="text-xs text-amber-500/90 leading-relaxed">No dedicated Blossom server. Hub media and member/key files live only on shared servers and may be garbage-collected over time. Mark a server you operate as <span className="font-semibold">Dedicated</span> for reliable retention.</p>
+              <p className="text-xs text-amber-500/90 leading-relaxed">No dedicated Blossom server. Hub media and vital hub files (the member list, structure, and key material) live only on shared servers and may be garbage-collected over time. Mark a server you operate as <span className="font-semibold">Dedicated</span> for reliable retention.</p>
             </div>
           )
         )}
@@ -5226,7 +5226,7 @@ function NetworkPage({ hub, editRelays, setEditRelays, editBlossoms, setEditBlos
                     </button>
                   </TooltipTrigger>
                   <TooltipContent side="top" className="text-xs max-w-[220px]">
-                    A Blossom server your hub operates itself that commits to retaining this hub's media and files. <span className="font-bold text-amber-400">Only mark servers you control.</span>
+                    A Blossom server your hub operates itself that commits to retaining this hub's media and vital hub files (the member list, structure, and key material). <span className="font-bold text-amber-400">Only mark servers you control.</span>
                   </TooltipContent>
                 </Tooltip>
                 <button

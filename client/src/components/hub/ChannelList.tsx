@@ -629,10 +629,10 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
             const hasDedicatedBlossom = (hub.dedicatedBlossomServers || []).some((s) => hub.blossomServers.includes(s))
             if (hasDedicatedRelay && hasDedicatedBlossom) return null
             const tip = !hasDedicatedRelay && !hasDedicatedBlossom
-              ? 'This hub runs no dedicated relay or Blossom server, so its messages and media live only on shared public servers and may be dropped or lost over time.'
+              ? 'This hub runs no dedicated relay or Blossom server, so its messages, media, and vital hub files (the member list and structure) live only on shared public servers and may be dropped or lost over time.'
               : !hasDedicatedRelay
                 ? 'This hub runs no dedicated relay, so its message history lives only on shared public relays and may be lost over time.'
-                : 'This hub runs no dedicated Blossom server, so its media and files live only on shared servers and may be lost over time.'
+                : 'This hub runs no dedicated Blossom server, so its media and vital hub files (the member list, structure, and key material) live only on shared servers and may be lost over time.'
             return (
               <TooltipProvider delayDuration={200}>
                 <Tooltip>
