@@ -1404,7 +1404,7 @@ function TrustedSourcesModal({ open, onClose }: { open: boolean; onClose: () => 
             <div className="flex flex-col items-center text-center gap-3">
               <div className="w-12 h-12 rounded-full bg-amber-500/10 flex items-center justify-center"><AlertTriangle size={24} className="text-amber-500" /></div>
               <h3 className="text-base font-semibold text-foreground">See every hub on the network?</h3>
-              <p className="text-sm text-muted-foreground leading-relaxed">DEN is a client for a permissionless, decentralized network, like a web browser. Hubs are created and hosted by their owners on relays and storage DEN does not run or control. This shows every discoverable hub with no curation, including content no one has vouched for. You hold responsibility for what you see. Turn it off any time to go back to recommendations.</p>
+              <p className="text-sm text-muted-foreground leading-relaxed">DEN is a client for a permissionless, decentralized network, like a web browser. Hubs are created and hosted by their owners on relays and storage DEN does not run or control. This shows every discoverable hub with no curation, including content no one has vouched for: hubs that are not marked NSFW but should be, and hubs that may be illegal, scams, or spam. You hold responsibility for what you see. Turn it off any time to go back to recommendations.</p>
               <div className="flex items-center gap-2 w-full mt-1">
                 <button onClick={() => setShowConfirm(false)} className="flex-1 px-4 py-2 rounded-lg text-sm font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/50 cursor-pointer">Cancel</button>
                 <button onClick={confirmAllOff} className="flex-1 px-4 py-2 rounded-lg text-sm font-medium bg-amber-500 text-white hover:bg-amber-600 cursor-pointer">I understand</button>
@@ -1413,6 +1413,71 @@ function TrustedSourcesModal({ open, onClose }: { open: boolean; onClose: () => 
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+// Explains DEN's neutral-client stance and how to deal with hubs a user believes are illegal.
+function IllegalHubGuideModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [tab, setTab] = useState<'explanation' | 'cope' | 'reporting'>('explanation')
+  useEscToClose(onClose, open)
+  useEffect(() => { if (open) setTab('explanation') }, [open])
+  if (!open) return null
+
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center px-2">
+      <div className="absolute inset-0 bg-black/60" onClick={onClose} />
+      <div className="relative z-10 w-full max-w-md max-h-[85vh] flex flex-col rounded-xl border border-border bg-background shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
+          <h2 className="font-semibold text-foreground">Found a hub you think is illegal?</h2>
+          <button onClick={onClose} className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary cursor-pointer"><X size={16} /></button>
+        </div>
+        <div className="flex items-center gap-1 px-3 pt-3 shrink-0">
+          {([['explanation', 'Explanation'], ['cope', 'Cope'], ['reporting', 'Reporting']] as const).map(([id, label]) => (
+            <button
+              key={id}
+              onClick={() => setTab(id)}
+              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer ${tab === id ? 'bg-secondary text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <div className="px-5 py-4 overflow-y-auto text-sm text-muted-foreground leading-relaxed space-y-3">
+          {tab === 'explanation' && (
+            <>
+              <p>DEN Chat is a <span className="text-foreground font-medium">client</span>, a viewer for a permissionless, decentralized network, the same way a web browser like Brave, Firefox, or Chrome is a viewer for the web.</p>
+              <p>A browser does not block or delete the websites you visit, and its maker is not responsible for what those sites host. It simply renders what already exists on the network.</p>
+              <p>DEN works the same way. It does not host, control, or moderate hubs. Every hub is created by its owner and stored on independent Nostr relays and Blossom servers that DEN does not run or operate.</p>
+              <p>So just as Brave cannot take down a website, DEN cannot take down a hub. Turning on <span className="text-foreground font-medium">See everything</span> shows the raw network with no curation, which is why it is off by default and asks you to confirm.</p>
+            </>
+          )}
+          {tab === 'cope' && (
+            <>
+              <p>If you would rather not come across hubs like this, the default settings already protect you, you only see risky content when you choose to:</p>
+              <ul className="list-disc pl-5 space-y-1.5">
+                <li>Keep <span className="text-foreground font-medium">See everything</span> off, so you only see hubs recommended by DEN, people you follow, and sources you trust.</li>
+                <li>Keep <span className="text-foreground font-medium">Unblur media</span> off, so banners and icons in the uncurated feed stay blurred.</li>
+                <li>Keep <span className="text-foreground font-medium">NSFW hubs</span> off.</li>
+              </ul>
+              <p>With those left at their defaults, the curated feed is the only thing you see, and its hubs have been vouched for.</p>
+            </>
+          )}
+          {tab === 'reporting' && (
+            <>
+              <p>Report it to the parties with the authority to act, <span className="text-foreground font-medium">not to DEN</span>. DEN cannot remove a hub any more than a web browser can remove a website.</p>
+              <p>Work out where the hub and its media actually live, then report the details to those operators:</p>
+              <ul className="list-disc pl-5 space-y-1.5">
+                <li>The <span className="text-foreground font-medium">Nostr relays</span> carrying the hub's events.</li>
+                <li>The <span className="text-foreground font-medium">Blossom servers</span> hosting its images and files.</li>
+                <li>Any <span className="text-foreground font-medium">domain or hosting provider / DNS registrar</span> behind a link it uses.</li>
+                <li>The relevant <span className="text-foreground font-medium">legal authorities</span>.</li>
+              </ul>
+              <p>Reporting to the hosts and registrars is what actually gets content taken down. This is exactly how you would handle finding such content through a web browser: you report it to whoever hosts it and to the authorities, not to the maker of the browser.</p>
+            </>
+          )}
+        </div>
+      </div>
     </div>
   )
 }
@@ -1461,6 +1526,7 @@ export function DiscoverPage() {
   const myPubkey = useUserStore((s) => s.pubkey)
   const [showManageRecs, setShowManageRecs] = useState(false)
   const [showSourceModal, setShowSourceModal] = useState(false)
+  const [showGuide, setShowGuide] = useState(false)
   const [showAllOffConfirm, setShowAllOffConfirm] = useState(false)
   // "See everything" toggle. Turning it ON needs the same confirmation as the sources modal; turning it
   // OFF re-enables every source and clears the ack.
@@ -1880,7 +1946,7 @@ export function DiscoverPage() {
   }, [seeEverything, currentPage, totalPages, exhausted, loading, hubs.length, loadMoreHubs])
 
   // Active filter indicator count
-  const activeFilterCount = (showNsfw ? 1 : 0) + (requireMessagePow ? 1 : 0) + ((powMin !== 15 || powMax !== 25) ? 1 : 0) + ((joinPowMin !== 15 || joinPowMax !== 25) ? 1 : 0) + (requireJoinPow ? 1 : 0) + (filterTags.length > 0 ? 1 : 0) + (filterClientTags.length > 0 ? 1 : 0)
+  const activeFilterCount = (showNsfw ? 1 : 0) + (unblurMedia ? 1 : 0) + (requireMessagePow ? 1 : 0) + ((powMin !== 15 || powMax !== 25) ? 1 : 0) + ((joinPowMin !== 15 || joinPowMax !== 25) ? 1 : 0) + (requireJoinPow ? 1 : 0) + (filterTags.length > 0 ? 1 : 0) + (filterClientTags.length > 0 ? 1 : 0)
 
   const LeftPanel = (
     <ResizablePanel id="discover" defaultWidth={280} minWidth={200} maxWidth={420} className="flex flex-col bg-background pr-2 py-2 gap-2 max-[1080px]:hidden">
@@ -2075,6 +2141,20 @@ export function DiscoverPage() {
                       {unblurMedia ? 'Media in See everything is shown sharp' : 'Recommended hubs are always sharp; this unblurs the uncurated feed too'}
                     </TooltipContent>
                   </Tooltip>
+
+                  {/* Guide: what DEN is, and what to do about a hub you believe is illegal */}
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        onClick={() => setShowGuide(true)}
+                        className="flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-dashed border-border text-[11px] font-medium text-muted-foreground hover:text-foreground hover:border-solid transition-colors cursor-pointer"
+                      >
+                        <Info size={12} className="shrink-0" />
+                        Illegal hub?
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" className="text-xs">How DEN handles content, and how to report a hub</TooltipContent>
+                  </Tooltip>
                 </div>
               </div>
 
@@ -2259,6 +2339,7 @@ export function DiscoverPage() {
       />
       <ManageRecommendationsModal open={showManageRecs} onClose={() => setShowManageRecs(false)} />
       <TrustedSourcesModal open={showSourceModal} onClose={() => setShowSourceModal(false)} />
+      <IllegalHubGuideModal open={showGuide} onClose={() => setShowGuide(false)} />
       {showAllOffConfirm && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center px-2" onClick={() => setShowAllOffConfirm(false)}>
           <div className="absolute inset-0 bg-black/60" />
@@ -2266,7 +2347,7 @@ export function DiscoverPage() {
             <div className="flex flex-col items-center text-center gap-3">
               <div className="w-12 h-12 rounded-full bg-amber-500/10 flex items-center justify-center"><AlertTriangle size={24} className="text-amber-500" /></div>
               <h3 className="text-base font-semibold text-foreground">See every hub on the network?</h3>
-              <p className="text-sm text-muted-foreground leading-relaxed">DEN is a client for a permissionless, decentralized network, like a web browser. Hubs are created and hosted by their owners on relays and storage DEN does not run or control. This shows every discoverable hub with no curation, including content no one has vouched for. You hold responsibility for what you see. Turn it off any time to go back to recommendations.</p>
+              <p className="text-sm text-muted-foreground leading-relaxed">DEN is a client for a permissionless, decentralized network, like a web browser. Hubs are created and hosted by their owners on relays and storage DEN does not run or control. This shows every discoverable hub with no curation, including content no one has vouched for: hubs that are not marked NSFW but should be, and hubs that may be illegal, scams, or spam. You hold responsibility for what you see. Turn it off any time to go back to recommendations.</p>
               <div className="flex items-center gap-2 w-full mt-1">
                 <button onClick={() => setShowAllOffConfirm(false)} className="flex-1 px-4 py-2 rounded-lg text-sm font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/50 cursor-pointer">Cancel</button>
                 <button onClick={confirmAllOff} className="flex-1 px-4 py-2 rounded-lg text-sm font-medium bg-amber-500 text-white hover:bg-amber-600 cursor-pointer">I understand</button>
