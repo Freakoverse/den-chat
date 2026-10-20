@@ -42,7 +42,7 @@ import { useNavigationStore } from '@/stores/navigationStore'
 import {
   Compass, Search, Loader2, Hash, Info, UserPlus, Check, AlertTriangle,
   X, SlidersHorizontal, ChevronLeft, ChevronRight, Plus,
-  Gamepad2, Package, Globe, Monitor, ChevronDown, Settings,
+  Gamepad2, Package, Globe, Monitor, ChevronDown, Settings, ShieldCheck,
 } from 'lucide-react'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import type { Event } from 'nostr-tools'
@@ -74,6 +74,9 @@ interface DiscoveredHub {
   version?: number
   generalRelays: string[]
   blossomServers: string[]
+  /** True when the hub declares both a dedicated relay and a dedicated Blossom server (fully self-hosted,
+   *  reliably retained). See the `dedicated` marker on the r/o tags (NIP-CHAT 6.1.1). */
+  fullyDedicated: boolean
   /** Original publication time (from published_at tag) — used for display ordering */
   publishedAt: number
   /** Client tag (e.g. 'DEN Chat') — identifies which app created this hub */
@@ -89,6 +92,10 @@ function parseHubEventForDiscover(event: Event): DiscoveredHub | null {
     const tags = event.tags.filter(t => t[0] === 't' && t[1]).map(t => t[1])
     const generalRelays = event.tags.filter(t => t[0] === 'r' && t[1]).map(t => t[1])
     const blossomServers = event.tags.filter(t => t[0] === 'o' && t[1]).map(t => t[1])
+    // Fully dedicated = the owner declares both a dedicated relay and a dedicated Blossom server.
+    const hasDedicatedRelay = event.tags.some(t => t[0] === 'r' && t[1] && t.slice(2).includes('dedicated'))
+    const hasDedicatedBlossom = event.tags.some(t => t[0] === 'o' && t[1] && t.slice(2).includes('dedicated'))
+    const fullyDedicated = hasDedicatedRelay && hasDedicatedBlossom
     const fTag = event.tags.find(t => t[0] === 'f')
     const discoverable = fTag ? fTag[1] !== 'off' : true
     const nsfw = event.tags.some(t => t[0] === 'content-warning')
@@ -159,7 +166,7 @@ function parseHubEventForDiscover(event: Event): DiscoveredHub | null {
       joinNote: parseJoinNoteTag(event.tags),
       nsfw, discoverable, creatorPubkey: event.pubkey,
       version: versionVal ? (parseInt(versionVal, 10) || undefined) : undefined,
-      generalRelays, blossomServers, publishedAt, clientTag,
+      generalRelays, blossomServers, fullyDedicated, publishedAt, clientTag,
     }
   } catch {
     return null
@@ -911,6 +918,18 @@ function DiscoverHubCard({ hub, unblur }: { hub: DiscoveredHub; unblur?: boolean
 
         {/* Badges — 7. No bolt icon on PoW */}
         <div className="absolute top-2 right-2 flex items-center gap-1">
+          {hub.fullyDedicated && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium text-white bg-emerald-500/80 backdrop-blur-sm cursor-help">
+                  <ShieldCheck size={10} /> Dedicated
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="text-xs max-w-[240px]">
+                This hub runs its own dedicated relay and Blossom server, so its message history and media are reliably retained rather than left on shared public servers.
+              </TooltipContent>
+            </Tooltip>
+          )}
           <Tooltip>
             <TooltipTrigger asChild>
               <span className={`px-1.5 py-0.5 rounded text-[9px] font-medium text-white backdrop-blur-sm cursor-help ${hub.version === 2 ? 'bg-violet-500/80' : 'bg-sky-500/70'}`}>

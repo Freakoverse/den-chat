@@ -23,7 +23,7 @@ import { truncateNpub } from '@/lib/utils'
 import { nip19 } from 'nostr-tools'
 import { HubInfoModal } from '@/components/hub/HubInfoModal'
 import {
-  Info, UserPlus, Zap, AlertTriangle, Loader2, Check, Hash, X,
+  Info, UserPlus, Zap, AlertTriangle, Loader2, Check, Hash, X, ShieldCheck,
 } from 'lucide-react'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { HubJoinWarningModal } from '@/components/hub/HubJoinWarningModal'
@@ -115,6 +115,8 @@ export function HubEventCard({ identifier, pubkey, relays }: HubEventCardProps) 
 
         const generalRelays = latest.tags.filter(t => t[0] === 'r' && t[1]).map(t => t[1])
         const blossomServers = latest.tags.filter(t => t[0] === 'o' && t[1]).map(t => t[1])
+        const dedicatedRelays = latest.tags.filter(t => t[0] === 'r' && t[1] && t.slice(2).includes('dedicated')).map(t => t[1])
+        const dedicatedBlossomServers = latest.tags.filter(t => t[0] === 'o' && t[1] && t.slice(2).includes('dedicated')).map(t => t[1])
         const indexFileHash = latest.tags.find(t => t[0] === 'm')?.[1] || ''
         const tags = latest.tags.filter(t => t[0] === 't' && t[1]).map(t => t[1])
 
@@ -151,6 +153,8 @@ export function HubEventCard({ identifier, pubkey, relays }: HubEventCardProps) 
           epoch,
           generalRelays,
           blossomServers,
+          dedicatedRelays,
+          dedicatedBlossomServers,
           indexFileHash,
           channels: [],
           categories: [],
@@ -323,6 +327,18 @@ export function HubEventCard({ identifier, pubkey, relays }: HubEventCardProps) 
             <p className="text-[10px] text-muted-foreground">by {creatorName}</p>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
+            {(hubData.dedicatedRelays?.some((r) => hubData.generalRelays.includes(r)) && hubData.dedicatedBlossomServers?.some((s) => hubData.blossomServers.includes(s))) && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium bg-emerald-500/15 text-emerald-400 cursor-help">
+                    <ShieldCheck size={10} /> Dedicated
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="text-xs max-w-[240px]">
+                  This hub runs its own dedicated relay and Blossom server, so its message history and media are reliably retained rather than left on shared public servers.
+                </TooltipContent>
+              </Tooltip>
+            )}
             <Tooltip>
               <TooltipTrigger asChild>
                 <span className={`px-1.5 py-0.5 rounded text-[9px] font-medium cursor-help ${hubData.version === 2 ? 'bg-violet-500/15 text-violet-400' : 'bg-sky-500/15 text-sky-400'}`}>

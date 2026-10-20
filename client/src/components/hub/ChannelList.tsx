@@ -637,8 +637,8 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
               <TooltipProvider delayDuration={200}>
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <button onClick={() => setShowInfo(true)} className="flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-amber-500/25 text-amber-200 text-[10px] font-medium shrink-0 cursor-pointer backdrop-blur-sm drop-shadow-sm">
-                      <AlertTriangle size={11} /> History at risk
+                    <button onClick={() => setShowInfo(true)} aria-label="History at risk" className="flex items-center justify-center p-1 rounded-md bg-amber-500/25 text-amber-200 shrink-0 cursor-pointer backdrop-blur-sm drop-shadow-sm">
+                      <AlertTriangle size={12} />
                     </button>
                   </TooltipTrigger>
                   <TooltipContent side="bottom" className="text-xs max-w-[240px]">{tip}</TooltipContent>
