@@ -21,6 +21,7 @@ import { useCachedImageUrl } from '@/lib/imageCache'
 import { UserProfileModal } from '@/components/hub/UserProfileModal'
 import { HubSettingsModal, type SettingsPage } from '@/components/hub/HubSettingsModal'
 import { HubInfoModal } from '@/components/hub/HubInfoModal'
+import { HubReliabilityModal } from '@/components/hub/HubReliabilityModal'
 import { InviteModal } from '@/components/hub/InviteModal'
 import { JoinRequestsModal } from '@/components/hub/JoinRequestsModal'
 import { useJoinRequestCount } from '@/hooks/useJoinRequestCount'
@@ -82,6 +83,7 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
   // context menu "Edit Permissions"). Cleared on close.
   const [settingsInitialPermTarget, setSettingsInitialPermTarget] = useState<{ type: 'channel' | 'category'; id: string } | undefined>(undefined)
   const [showInfo, setShowInfo] = useState(false)
+  const [showReliability, setShowReliability] = useState(false)
   const [showInvite, setShowInvite] = useState(false)
   const [showJoinRequests, setShowJoinRequests] = useState(false)
   const [showUserSettings, setShowUserSettings] = useState(false)
@@ -637,7 +639,7 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
               <TooltipProvider delayDuration={200}>
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <button onClick={() => setShowInfo(true)} aria-label="History at risk" className="flex items-center justify-center p-1 rounded-md bg-amber-500/25 text-amber-200 shrink-0 cursor-pointer backdrop-blur-sm drop-shadow-sm">
+                    <button onClick={() => setShowReliability(true)} aria-label="History at risk" className="flex items-center justify-center p-1 rounded-md bg-amber-500/25 text-amber-200 shrink-0 cursor-pointer backdrop-blur-sm drop-shadow-sm">
                       <AlertTriangle size={12} />
                     </button>
                   </TooltipTrigger>
@@ -1030,6 +1032,18 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
         onCreatorClick={() => {
           setShowInfo(false)
           setShowCreatorProfile(true)
+        }}
+      />
+
+      <HubReliabilityModal
+        open={showReliability}
+        onClose={() => setShowReliability(false)}
+        hub={hub}
+        isCreator={isCreator}
+        onOpenNetworkSettings={() => {
+          setShowReliability(false)
+          setSettingsInitialPage('network')
+          setShowSettings(true)
         }}
       />
 
