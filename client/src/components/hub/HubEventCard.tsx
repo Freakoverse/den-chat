@@ -335,8 +335,8 @@ export function HubEventCard({ identifier, pubkey, relays }: HubEventCardProps) 
               return (
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium bg-emerald-500/15 text-emerald-400 cursor-help">
-                      <ShieldCheck size={10} /> Dedicated
+                    <span className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium text-emerald-400 cursor-help ${dr && db ? 'bg-emerald-500/15' : 'bg-emerald-500/10'}`}>
+                      <ShieldCheck size={10} /> {dr && db ? 'Dedicated' : 'Half-dedicated'}
                     </span>
                   </TooltipTrigger>
                   <TooltipContent side="top" className="text-xs max-w-[240px]">{dedicatedTooltip(dr, db)}</TooltipContent>

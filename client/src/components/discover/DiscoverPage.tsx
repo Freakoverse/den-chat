@@ -921,8 +921,8 @@ function DiscoverHubCard({ hub, unblur }: { hub: DiscoveredHub; unblur?: boolean
           {(hub.dedicatedRelay || hub.dedicatedBlossom) && (
             <Tooltip>
               <TooltipTrigger asChild>
-                <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium text-white bg-emerald-500/80 backdrop-blur-sm cursor-help">
-                  <ShieldCheck size={10} /> Dedicated
+                <span className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium text-white backdrop-blur-sm cursor-help ${hub.dedicatedRelay && hub.dedicatedBlossom ? 'bg-emerald-500/80' : 'bg-emerald-500/50'}`}>
+                  <ShieldCheck size={10} /> {hub.dedicatedRelay && hub.dedicatedBlossom ? 'Dedicated' : 'Half-dedicated'}
                 </span>
               </TooltipTrigger>
               <TooltipContent side="top" className="text-xs max-w-[240px]">{dedicatedTooltip(hub.dedicatedRelay, hub.dedicatedBlossom)}</TooltipContent>
