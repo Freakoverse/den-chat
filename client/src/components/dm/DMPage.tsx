@@ -335,9 +335,10 @@ export function DMPage() {
   // No need to start/stop them on DMPage mount/unmount
 
   const handleSelectConversation = useCallback((pubkey: string) => {
+    setSection('dms') // selecting a 1:1 conversation always leaves the Groups section (e.g. B-DM Self)
     setActiveConversation(pubkey)
     setMobileShowList(false)
-  }, [setActiveConversation])
+  }, [setActiveConversation, setSection])
 
   const handleStartConversation = useCallback((pubkey: string) => {
     setActiveConversation(pubkey)
