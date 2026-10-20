@@ -5,7 +5,7 @@
  * Opened by clicking the hub name in the channel list banner.
  */
 
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { saveBlobAs } from '@/lib/saveFile'
 import { X, Copy, Check, Tag, MoreVertical, Code, Link2, Radio, Loader2, Archive, AlertTriangle, RefreshCw, Database, ChevronDown } from 'lucide-react'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
@@ -61,8 +61,16 @@ export function HubInfoModal({ open, onClose, hub, blurMedia, onCreatorClick }: 
 
   // ── Hub version (event created_at) — lets members compare what they're seeing ──
   const retryHub = useHubStore((s) => s.retryHub)
-  // Read the version live from the store so it updates after "Fetch latest".
-  const liveVersion = useHubStore((s) => s.hubs[hub.dTag]?.eventCreatedAt) ?? hub.eventCreatedAt
+  // Read the version live from the store so it updates after "Fetch latest" (for hubs the user joined).
+  const storeVersion = useHubStore((s) => s.hubs[hub.dTag]?.eventCreatedAt)
+  // Discover-only hubs aren't in the store and retryHub (loader over hubEntries) can't touch them, so
+  // "Fetch latest" also fetches the event directly and records the result here.
+  const [fetchedVersion, setFetchedVersion] = useState<number | null>(null)
+  useEffect(() => { setFetchedVersion(null) }, [hub.dTag])
+  const liveVersion = useMemo(() => {
+    const vals = [storeVersion, hub.eventCreatedAt, fetchedVersion].filter((v): v is number => typeof v === 'number')
+    return vals.length ? Math.max(...vals) : null
+  }, [storeVersion, hub.eventCreatedAt, fetchedVersion])
   const [versionCopied, setVersionCopied] = useState(false)
   const [fetchingLatest, setFetchingLatest] = useState(false)
 
@@ -77,10 +85,16 @@ export function HubInfoModal({ open, onClose, hub, blurMedia, onCreatorClick }: 
     setVersionCopied(true)
     setTimeout(() => setVersionCopied(false), 2000)
   }
-  const fetchLatest = () => {
+  const fetchLatest = async () => {
     setFetchingLatest(true)
-    retryHub(hub.dTag) // re-fetch from relays (+ local cache) via the loader; store updates in place
-    setTimeout(() => setFetchingLatest(false), 4000)
+    retryHub(hub.dTag) // joined hubs: re-fetch via the loader; store updates in place
+    try {
+      // Works for discover-only hubs too (not in hubEntries, so the loader never touches them): pull the
+      // newest hub event straight from relays, cache it, and show its timestamp.
+      const ev = await fetchReplaceable(hub.creatorPubkey, KINDS.HUB_EVENT, hub.dTag)
+      if (ev) { putHubEvent(ev).catch(() => {}); setFetchedVersion(ev.created_at) }
+    } catch { /* leave the current version shown */ }
+    finally { setFetchingLatest(false) }
   }
 
   /** Resolve the signed hub event: relays first, local cache if it's been wiped. */
