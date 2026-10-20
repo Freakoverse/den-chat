@@ -3092,6 +3092,7 @@ Clients SHOULD offer a **"Hide non-member messages"** toggle (recommended defaul
 - When **OFF**: messages from non-members are rendered normally (they may still be unreadable if the non-member didn't have the hub secret)
 - The toggle applies globally across all hubs
 - Own messages are never filtered regardless of membership status
+- **Evaluated against the _current_ roster, not membership at post time.** A user who was a member when they posted but has since left or been removed is treated as a non-member: with the toggle ON (the default) their past messages are hidden for other viewers, exactly like any other non-member. Leaving or being removed therefore retroactively hides that author's history. (A banned former member is removed by the ban filter above regardless of this toggle.)
 
 This prevents cache pollution from events published by unauthorized clients to the hub's general relays. In v2 the identity drop rule (§9.9) supersedes this toggle: an event without a valid `identity` attestation is dropped before it can pollute the cache.
 
@@ -3114,7 +3115,15 @@ presence):
    `event.id` — the attestation digest deliberately excludes `nonce` so it survives PoW mining.)
 3. **Ban check:** if `R_pub` (or `P_pub`) is on the decrypted ban set (§5.3), **drop**
    (hard filter, no reveal — same treatment as a v1 ban).
-4. Otherwise render, attributing the message to the **real user `R`** (resolved via the
+4. **Current-roster check:** steps (1)–(3) prove the event is a valid, un-banned,
+   member-authored event, but a valid attestation only proves the author was a member under
+   the epoch they posted in. A member who has since **left or been removed** still produces
+   old events that pass (1)–(3) (their past messages remain decryptable by current members).
+   Clients therefore also apply the §9.8 current-membership filter here: if the resolved `R`
+   is not on the **current** member list (and the message is not validly facilitated, §5.6),
+   hide it under the same "hide non-member messages" default. This is what makes leaving or
+   being removed retroactively hide an author's history in v2 as well as v1.
+5. Otherwise render, attributing the message to the **real user `R`** (resolved via the
    attestation; profile fetched from `R`'s kind:0).
 
 Notifications/sounds fire only for events that pass (1)–(3) **and** the hub's PoW
