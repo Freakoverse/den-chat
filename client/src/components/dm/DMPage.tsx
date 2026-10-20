@@ -519,7 +519,7 @@ function ConversationList({
 
       {/* Tabs, one container, two rows: row 1 the 1:1 protocols, row 2 Groups (§21). Exactly one is active. */}
       <div className="shrink-0">
-        <div className="flex flex-col gap-0.5 p-0.5 rounded-lg bg-secondary/60 border border-border">
+        <div className="flex flex-col gap-0.5 p-0.5 rounded-lg bg-secondary/60">
         <div className="flex items-center gap-1">
           <button
             onClick={() => onProtocolChange('nip04')}
