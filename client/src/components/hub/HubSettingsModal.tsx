@@ -5033,7 +5033,7 @@ function NetworkPage({ hub, editRelays, setEditRelays, editBlossoms, setEditBlos
                     </button>
                   </TooltipTrigger>
                   <TooltipContent side="top" className="text-xs max-w-[220px]">
-                    A relay your hub operates itself (self-hosted or paid) that commits to retaining this hub's history. Only mark relays you control.
+                    A relay your hub operates itself (self-hosted or paid) that commits to retaining this hub's history. <span className="font-bold text-amber-400">Only mark relays you control.</span>
                   </TooltipContent>
                 </Tooltip>
                 <button
@@ -5226,7 +5226,7 @@ function NetworkPage({ hub, editRelays, setEditRelays, editBlossoms, setEditBlos
                     </button>
                   </TooltipTrigger>
                   <TooltipContent side="top" className="text-xs max-w-[220px]">
-                    A Blossom server your hub operates itself that commits to retaining this hub's media and files. Only mark servers you control.
+                    A Blossom server your hub operates itself that commits to retaining this hub's media and files. <span className="font-bold text-amber-400">Only mark servers you control.</span>
                   </TooltipContent>
                 </Tooltip>
                 <button
