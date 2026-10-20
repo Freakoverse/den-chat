@@ -1198,8 +1198,8 @@ Deleting a role does NOT trigger a tree update. The hub event is the authority f
 | `message_expiration` | No | Disappearing-messages timer as a DURATION in **seconds** (a JSON-number-as-string). Absent, `0`, or malformed ⇒ off. When set, every durable chat event in the hub carries a NIP-40 `["expiration", <created_at + this>]` tag (§9.10). **Named distinctly from NIP-40's `expiration` on purpose** — an `expiration` tag on the hub event would make relays delete the hub itself. Hub-wide policy only; per-message expiry is stamped at send time. |
 | `epoch` | Yes | Current hub-wide secret epoch. Incrementing integer starting at `1`. Increments only on secret rotation (member removal or a user being added to the block list). |
 | `b` | No | DNN ID requirement (`on`/`off`). Default: `off`. |
-| `r` | Yes | Relay. Third value is `general`. At least one `general` MUST be defined. |
-| `o` | Yes | Blossom server URL. Recommend ≥3 for redundancy. Used for member files and media. |
+| `r` | Yes | Relay. Third value is `general`. At least one `general` MUST be defined. A relay the hub operates itself for committed retention MAY carry an additional `dedicated` marker (`["r", "<url>", "general", "dedicated"]`) — see §6.1.1. |
+| `o` | Yes | Blossom server URL. Recommend ≥3 for redundancy. Used for member files and media. A server the hub operates itself MAY carry a `dedicated` marker (`["o", "<url>", "dedicated"]`) — see §6.1.1. |
 | `m` | Yes | Index file reference: `["m", "<sha256>", "<epoch>"]`. |
 | `struct` | Yes | **Structure-blob reference**: `["struct", "<sha256>", "<epoch>"]`, parallel to `m`. The hub's structural arrays (`roles`, `grouped_roles`, `categories`, `channels`, `plugins`) live in a Blossom blob at that hash, **not** inline in `content`, so the event is O(1) regardless of how many channels/roles the hub has. The blob is encrypted the same way the hub encrypts its `content` (v1 plaintext JSON, v2 `hub_content_key`). Required for all hubs; applies to **both** v1 and v2 with no `version` bump (orthogonal to the privacy type). **Legacy exception:** hubs created before the struct format existed inline the structure in `content` and omit this tag (the sole backward-compatibility case); clients MUST still read those and SHOULD prompt migration. See **Structure Blob** at the end of this section. |
 | `updated_at` | No | Real wall-clock time of the last edit, `["updated_at", "<unix_seconds>"]` (corrected clock). `created_at` is a logical counter (see below), so this is the actual "last edited" time: used for display and tie resolution, never for relay filtering or client-side selection. |
@@ -1450,6 +1450,24 @@ Nothing about these arrays changes: the field shapes in the Content Field Refere
 **Writer behavior.** A hub MUST be published with a `struct` tag. On a structural edit the writer re-serializes the blob, uploads it to the hub's Blossom servers with read-back verification, and republishes the event with the new `struct` hash (the structure is never written into `content`). A **non-structural** republish (membership change, relay/Blossom-list edit, short-address mint, cooperative rebroadcast) carries the existing `struct` hash forward unchanged, with no re-upload. The struct blob rides the same cooperative Blossom redundancy and local retention as the member-index files.
 
 **Legacy inline hubs (transitional).** DEN Chat shipped before the struct format existed and inlined the structure JSON directly in `content`, so hubs created then carry **no** `struct` tag. These are the **only** hubs allowed to omit it, and they exist purely because the size problem above was not yet addressed; the struct tag is to be understood as part of NIP-CHAT from the start, with legacy inline hubs the sole backward-compatibility accommodation. For them: a client that sees no `struct` tag reads the structure from `content` as a legacy hub, and owners SHOULD **migrate** by uploading the structure blob and republishing with a `struct` tag (the structure is then removed from `content`); the hub keeps its exact v1/v2 type, epoch, secret, members, and index, and it is one blob upload plus one event publish. An unmigrated hub remains subject to the relay event-size limit (exactly the failure the struct format removes). During the transition clients SHOULD ship the struct **reader** before relying on the tag; a client too old to read the struct format renders a struct hub empty/broken (mitigated by reader-first rollout and normal update prompts).
+
+#### 6.1.1 Dedicated relays and Blossom servers (reliability)
+
+Because enforcement and storage are entirely client-side and relay-agnostic (§9.9, §5.7), a hub's events and files live wherever its `r`/`o` lists point, and shared public relays and Blossom servers are free to drop, evict, or garbage-collect that data at any time. A hub that lists only shared public servers therefore has **best-effort** history: it may become incomplete or disappear, and there is no party committed to keeping it.
+
+To make retention a deliberate choice, a hub MAY mark any relay or Blossom server it **operates itself** (self-hosted or paid) as **dedicated**, by appending a `dedicated` marker to that server's tag:
+
+- `["r", "<relay-url>", "general", "dedicated"]`
+- `["o", "<blossom-url>", "dedicated"]`
+
+The marker is an **additional** element, so it is backward-compatible: a client that doesn't recognize it simply treats the server as a normal `general` relay / Blossom server. Detection is positional-agnostic: a server is dedicated when any element after the URL equals `dedicated`.
+
+Semantics and rules:
+
+- **Self-declared, not verified.** The marker is the owner's assertion that this server is theirs and commits to retaining the hub's data. It is not cryptographically proven. Clients MAY corroborate it with their own retention/health probes (the relay and Blossom health checks), but the marker itself is a claim, not a guarantee.
+- **Who sets it.** Only whoever may edit hub settings (the owner, §4) sets or clears the marker, since it lives in the hub event. It MUST be preserved across every routine republish (membership changes, role/epoch rotations, health rebroadcasts, short-address mint, struct migration); only an explicit settings edit changes it.
+- **Client indication (SHOULD).** When a hub has **no** dedicated relay, clients SHOULD show members a visible, non-blocking indication that message history may be incomplete or lost; likewise when it has **no** dedicated Blossom server, for media and member/key files. When at least one dedicated server of each kind is present, clients MAY show a positive "reliably retained" indication. These are rendering hints; they do not change how events are read, written, or enforced.
+- **No routing change (for now).** Marking a server dedicated does not by itself change read/write routing: publishes still use the hub's full relay list with failover, and reads still fall back across all servers. Prioritizing dedicated servers is a future extension, expected alongside a deployable Nostr+Blossom hub-server package.
 
 ---
 
@@ -3428,8 +3446,8 @@ Clients MUST hide any hub carrying a `new_hub` tag from search/browse/discovery.
 | `W` | Hub (**v2**) | Minimum **join** PoW difficulty (NIP-13), separate from and higher than `w`; the join request MUST meet it, dropped before the owner spends an ECDH (§6.1, §6.3) |
 | `epoch` | Hub, Message, Poll, Vote, Report, Voice Host | Secret epoch number (incrementing integer) |
 | `b` | Hub | DNN ID requirement flag |
-| `r` | Hub | Relay (`general`) |
-| `o` | Hub | Blossom server URL |
+| `r` | Hub | Relay (`general`); optional `dedicated` marker (§6.1.1) |
+| `o` | Hub | Blossom server URL; optional `dedicated` marker (§6.1.1) |
 | `m` | Hub | Index file reference: `["m", "<sha256>", "<epoch>"]` |
 | `updated_at` | Hub | Real wall-clock time of the last edit: `["updated_at", "<unix_seconds>"]` (corrected clock). Display-only and for owner-side tie resolution; never used for relay filtering or client-side event selection (§6.1). Absent on older events: fall back to the lowest-id rule. |
 | `h` | Message | Hub `d` tag reference |
