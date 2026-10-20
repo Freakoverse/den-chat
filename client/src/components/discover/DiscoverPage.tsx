@@ -359,7 +359,8 @@ interface FilterModalProps {
   open: boolean
   onClose: () => void
   showNsfw: boolean
-  setShowNsfw: (v: boolean) => void
+  /** Shared with the quick toggle: enabling asks for confirmation first (not batched behind Apply). */
+  onRequestNsfw: (next: boolean) => void
   unblurMedia: boolean
   /** Shared with the quick toggle: enabling asks for confirmation first (not batched behind Apply). */
   onRequestUnblur: (next: boolean) => void
@@ -382,8 +383,7 @@ interface FilterModalProps {
   onApplySearch?: () => void
 }
 
-function FilterModal({ open, onClose, showNsfw, setShowNsfw, unblurMedia, onRequestUnblur, powMin, setPowMin, powMax, setPowMax, requireMessagePow, setRequireMessagePow, joinPowMin, setJoinPowMin, joinPowMax, setJoinPowMax, requireJoinPow, setRequireJoinPow, filterTags, setFilterTags, filterClientTags, setFilterClientTags, onApplySearch }: FilterModalProps) {
-  const [localNsfw, setLocalNsfw] = useState(showNsfw)
+function FilterModal({ open, onClose, showNsfw, onRequestNsfw, unblurMedia, onRequestUnblur, powMin, setPowMin, powMax, setPowMax, requireMessagePow, setRequireMessagePow, joinPowMin, setJoinPowMin, joinPowMax, setJoinPowMax, requireJoinPow, setRequireJoinPow, filterTags, setFilterTags, filterClientTags, setFilterClientTags, onApplySearch }: FilterModalProps) {
   const [localPowMin, setLocalPowMin] = useState(powMin)
   const [localPowMax, setLocalPowMax] = useState(powMax)
   const [localRequireMessagePow, setLocalRequireMessagePow] = useState(requireMessagePow)
@@ -405,7 +405,6 @@ function FilterModal({ open, onClose, showNsfw, setShowNsfw, unblurMedia, onRequ
   // Sync on open
   useEffect(() => {
     if (open) {
-      setLocalNsfw(showNsfw)
       setLocalPowMin(powMin)
       setLocalPowMax(powMax)
       setLocalRequireMessagePow(requireMessagePow)
@@ -448,7 +447,6 @@ function FilterModal({ open, onClose, showNsfw, setShowNsfw, unblurMedia, onRequ
   }
 
   const handleApply = () => {
-    setShowNsfw(localNsfw)
     setPowMin(localPowMin)
     setPowMax(localPowMax)
     setRequireMessagePow(localRequireMessagePow)
@@ -465,8 +463,8 @@ function FilterModal({ open, onClose, showNsfw, setShowNsfw, unblurMedia, onRequ
   }
 
   const handleReset = () => {
-    setLocalNsfw(false)
-    setLocalUnblur(false)
+    onRequestNsfw(false)
+    onRequestUnblur(false)
     setLocalPowMin(15)
     setLocalPowMax(25)
     setLocalRequireMessagePow(false)
@@ -480,7 +478,7 @@ function FilterModal({ open, onClose, showNsfw, setShowNsfw, unblurMedia, onRequ
     setClientTagOptions([...DEFAULT_CLIENT_OPTIONS])
   }
 
-  const hasChanges = localNsfw !== false || localPowMin !== 15 || localPowMax !== 25 || localRequireMessagePow !== false || localJoinPowMin !== 15 || localJoinPowMax !== 25 || localRequireJoinPow !== false || localTags.length > 0 || localClientTags.length > 0
+  const hasChanges = showNsfw || unblurMedia || localPowMin !== 15 || localPowMax !== 25 || localRequireMessagePow !== false || localJoinPowMin !== 15 || localJoinPowMax !== 25 || localRequireJoinPow !== false || localTags.length > 0 || localClientTags.length > 0
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center px-2" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
@@ -509,12 +507,12 @@ function FilterModal({ open, onClose, showNsfw, setShowNsfw, unblurMedia, onRequ
               <p className="text-xs text-muted-foreground mt-0.5">Include hubs marked as sensitive content</p>
             </div>
             <button
-              onClick={() => setLocalNsfw(!localNsfw)}
+              onClick={() => onRequestNsfw(!showNsfw)}
               className={`relative w-10 h-[22px] rounded-full transition-colors cursor-pointer shrink-0
-                ${localNsfw ? 'bg-red-500' : 'bg-muted-foreground/30'}`}
+                ${showNsfw ? 'bg-red-500' : 'bg-muted-foreground/30'}`}
             >
               <div className={`absolute top-[3px] w-4 h-4 rounded-full bg-white shadow transition-transform
-                ${localNsfw ? 'translate-x-[22px]' : 'translate-x-[3px]'}`} />
+                ${showNsfw ? 'translate-x-[22px]' : 'translate-x-[3px]'}`} />
             </button>
           </div>
 
@@ -1483,6 +1481,13 @@ export function DiscoverPage() {
     else setUnblurMedia(next)
   }, [unblurMedia])
   const confirmUnblur = useCallback(() => { setUnblurMedia(true); setShowUnblurConfirm(false) }, [])
+  // NSFW toggle (quick toggle + Filters modal share this). Enabling re-confirms the viewer is an adult.
+  const [showNsfwConfirm, setShowNsfwConfirm] = useState(false)
+  const requestNsfw = useCallback((next: boolean) => {
+    if (next && !showNsfw) setShowNsfwConfirm(true)
+    else setShowNsfw(next)
+  }, [showNsfw])
+  const confirmNsfw = useCallback(() => { setShowNsfw(true); setShowNsfwConfirm(false) }, [])
   // Load the user's own recommendation list once we know who they are.
   useEffect(() => {
     if (myPubkey) useRecommendationStore.getState().loadMyRecs(myPubkey)
@@ -1988,7 +1993,7 @@ export function DiscoverPage() {
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
-                        onClick={() => setShowNsfw(!showNsfw)}
+                        onClick={() => requestNsfw(!showNsfw)}
                         className={`flex items-center gap-2 pl-1 pr-2 py-1 rounded-full border text-[11px] font-medium transition-colors cursor-pointer
                           ${showNsfw ? 'bg-red-500/10 border-red-500/40 text-red-400' : 'bg-secondary/60 border-border text-muted-foreground hover:text-foreground'}`}
                       >
@@ -2231,7 +2236,7 @@ export function DiscoverPage() {
         open={showFilterModal}
         onClose={() => setShowFilterModal(false)}
         showNsfw={showNsfw}
-        setShowNsfw={setShowNsfw}
+        onRequestNsfw={requestNsfw}
         unblurMedia={unblurMedia}
         onRequestUnblur={requestUnblur}
         powMin={powMin}
@@ -2265,6 +2270,22 @@ export function DiscoverPage() {
               <div className="flex items-center gap-2 w-full mt-1">
                 <button onClick={() => setShowAllOffConfirm(false)} className="flex-1 px-4 py-2 rounded-lg text-sm font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/50 cursor-pointer">Cancel</button>
                 <button onClick={confirmAllOff} className="flex-1 px-4 py-2 rounded-lg text-sm font-medium bg-amber-500 text-white hover:bg-amber-600 cursor-pointer">I understand</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {showNsfwConfirm && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center px-2" onClick={() => setShowNsfwConfirm(false)}>
+          <div className="absolute inset-0 bg-black/60" />
+          <div className="relative z-10 w-full max-w-sm rounded-xl border border-border bg-background shadow-2xl p-6" onClick={(e) => e.stopPropagation()}>
+            <div className="flex flex-col items-center text-center gap-3">
+              <div className="w-12 h-12 rounded-full bg-red-500/10 flex items-center justify-center"><AlertTriangle size={24} className="text-red-500" /></div>
+              <h3 className="text-base font-semibold text-foreground">Show NSFW hubs?</h3>
+              <p className="text-sm text-muted-foreground leading-relaxed">You already confirmed you are an adult when you started using DEN Chat, so this is just a reminder and a reconfirmation: you are an adult and you want to see hubs marked as NSFW. Turn it off any time.</p>
+              <div className="flex items-center gap-2 w-full mt-1">
+                <button onClick={() => setShowNsfwConfirm(false)} className="flex-1 px-4 py-2 rounded-lg text-sm font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/50 cursor-pointer">Cancel</button>
+                <button onClick={confirmNsfw} className="flex-1 px-4 py-2 rounded-lg text-sm font-medium bg-red-500 text-white hover:bg-red-600 cursor-pointer">I am an adult</button>
               </div>
             </div>
           </div>
