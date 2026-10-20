@@ -1675,11 +1675,12 @@ export function DiscoverPage() {
     }
   }, [])
 
-  // (Re)load recommended hubs whenever the active author set changes. "See everything" uses `hubs` instead.
+  // (Re)load recommended hubs whenever the active author set changes. We load them even in "See everything"
+  // mode (which displays `hubs`) so the recommended-coord set is known and those hubs stay unblurred there.
   useEffect(() => {
-    if (discoverTab !== 'hubs' || seeEverything) return
+    if (discoverTab !== 'hubs') return
     loadRecHubs(recAuthors)
-  }, [discoverTab, seeEverything, recAuthors, loadRecHubs])
+  }, [discoverTab, recAuthors, loadRecHubs])
 
   // Load next batch (triggered by pagination proximity)
   const loadMoreHubs = useCallback(async () => {
@@ -1806,10 +1807,11 @@ export function DiscoverPage() {
   }, [])
 
   // Filter hubs
-  // The active hub source for the current sub-tab: the resolved recommendation list, or the raw firehose
-  // (`hubs`) only when every source is turned off and "See everything" is acknowledged.
+  // The active hub source: the resolved recommendation list, or the raw firehose (`hubs`) under See everything.
   const sourceHubs = seeEverything ? hubs : recHubs
   const sourceLoading = seeEverything ? loading : recLoading
+  // Coords of the currently recommended hubs, so they stay unblurred even inside the See everything firehose.
+  const recommendedCoords = useMemo(() => new Set(recHubs.map((h) => hubCoord(h.creatorPubkey, h.dTag))), [recHubs])
 
   const filteredHubs = useMemo(() => {
     let result = sourceHubs
@@ -1908,10 +1910,11 @@ export function DiscoverPage() {
     return filteredHubs.slice(start, start + PAGE_SIZE)
   }, [filteredHubs, currentPage])
 
-  // Reset to page 1 on filter/search change
+  // Reset to page 1 on filter/search change, or when the feed source changes (toggling See everything /
+  // the recommendation toggles swaps the underlying list, so a stale page index would show nothing).
   useEffect(() => {
     setCurrentPage(1)
-  }, [showNsfw, powMin, powMax, joinPowMin, joinPowMax, requireJoinPow, requireMessagePow, filterTags, filterClientTags, searchQuery])
+  }, [showNsfw, powMin, powMax, joinPowMin, joinPowMax, requireJoinPow, requireMessagePow, filterTags, filterClientTags, searchQuery, seeEverything, sourceRecs, followRecs])
 
   // Prefetch next batch when user is within 2 pages of the end. Firehose only: the recommendation lists are
   // finite (no relay pagination), so there's nothing more to fetch in those tabs.
@@ -2215,7 +2218,7 @@ export function DiscoverPage() {
                 {pagedHubs.length > 0 && (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                     {pagedHubs.map(hub => (
-                      <DiscoverHubCard key={hub.dTag} hub={hub} unblur={!seeEverything || unblurMedia} />
+                      <DiscoverHubCard key={hub.dTag} hub={hub} unblur={!seeEverything || unblurMedia || recommendedCoords.has(hubCoord(hub.creatorPubkey, hub.dTag))} />
                     ))}
                   </div>
                 )}

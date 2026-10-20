@@ -22,7 +22,6 @@ export interface TrustedSource { pubkey: string; enabled: boolean }
 const TRUSTED_KEY = 'den_rec_trusted_sources'
 const FOLLOWRECS_KEY = 'den_rec_follow_recs'
 const SOURCERECS_KEY = 'den_rec_source_recs'
-const SEEALL_KEY = 'den_rec_see_everything'
 
 function loadTrusted(): TrustedSource[] {
   try {
@@ -96,7 +95,8 @@ export const useRecommendationStore = create<RecState>((set, get) => ({
   trustedSources: loadTrusted(),
   followRecs: loadBool(FOLLOWRECS_KEY, true),
   sourceRecs: loadBool(SOURCERECS_KEY, true),
-  seeEverything: loadBool(SEEALL_KEY, false),
+  // Never persisted: the firehose always starts off on a fresh launch, so nobody relaunches into it.
+  seeEverything: false,
 
   loadMyRecs: async (myPubkey) => {
     try {
@@ -155,7 +155,6 @@ export const useRecommendationStore = create<RecState>((set, get) => ({
   },
 
   setSeeEverything: (v) => {
-    saveBool(SEEALL_KEY, v)
-    set({ seeEverything: v })
+    set({ seeEverything: v }) // intentionally not persisted (resets to off each launch)
   },
 }))
