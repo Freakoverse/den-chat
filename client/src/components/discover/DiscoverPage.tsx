@@ -1318,13 +1318,11 @@ function ManageRecommendationsModal({ open, onClose }: { open: boolean; onClose:
 function TrustedSourcesModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const trustedSources = useRecommendationStore((s) => s.trustedSources)
   const setTrustedSources = useRecommendationStore((s) => s.setTrustedSources)
-  const setAllOffAck = useRecommendationStore((s) => s.setAllOffAck)
   const { getProfile } = useProfileCache()
   const [local, setLocal] = useState<TrustedSource[]>(trustedSources)
   const [npubInput, setNpubInput] = useState('')
   const [addErr, setAddErr] = useState<string | null>(null)
-  const [showConfirm, setShowConfirm] = useState(false)
-  useEffect(() => { if (open) { setLocal(trustedSources.map((s) => ({ ...s }))); setNpubInput(''); setAddErr(null); setShowConfirm(false) } }, [open, trustedSources])
+  useEffect(() => { if (open) { setLocal(trustedSources.map((s) => ({ ...s }))); setNpubInput(''); setAddErr(null) } }, [open, trustedSources])
   useEscToClose(onClose, open)
   if (!open) return null
 
@@ -1346,8 +1344,7 @@ function TrustedSourcesModal({ open, onClose }: { open: boolean; onClose: () => 
   }
   const toggle = (pk: string) => setLocal(local.map((s) => s.pubkey === pk ? { ...s, enabled: !s.enabled } : s))
   const remove = (pk: string) => setLocal(local.filter((s) => s.pubkey !== pk))
-  const onSet = () => { if (anyEnabled) { setTrustedSources(local); onClose() } else setShowConfirm(true) }
-  const confirmAllOff = () => { setTrustedSources(local); setAllOffAck(true); setShowConfirm(false); onClose() }
+  const onSet = () => { setTrustedSources(local); onClose() }
 
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center px-2">
@@ -1358,7 +1355,7 @@ function TrustedSourcesModal({ open, onClose }: { open: boolean; onClose: () => 
           <button onClick={onClose} className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary cursor-pointer"><X size={16} /></button>
         </div>
         <div className="px-5 py-4 overflow-y-auto space-y-3">
-          <p className="text-xs text-muted-foreground leading-relaxed">Discover shows hubs recommended by the sources you enable here (saved on this device only).</p>
+          <p className="text-xs text-muted-foreground leading-relaxed">When the <span className="font-medium text-foreground">Recommendations</span> toggle is on, Discover shows hubs recommended by the sources you enable here (saved on this device only).</p>
           <div className="space-y-1">
             {local.map((s) => (
               <div key={s.pubkey} className="flex items-center justify-between gap-2 px-2 py-1.5 rounded-md hover:bg-secondary/40">
@@ -1385,9 +1382,9 @@ function TrustedSourcesModal({ open, onClose }: { open: boolean; onClose: () => 
             {addErr && <p className="text-[11px] text-destructive mt-1">{addErr}</p>}
           </div>
           {!anyEnabled && (
-            <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/30">
-              <AlertTriangle size={14} className="text-amber-500 shrink-0 mt-0.5" />
-              <p className="text-[11px] text-amber-500/90 leading-snug">With no trusted source selected, Discover shows every discoverable hub, including ones we have no control of not showing you. View at your own risk; you hold responsibility for what you might see.</p>
+            <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-secondary/60 border border-border">
+              <Info size={14} className="text-muted-foreground shrink-0 mt-0.5" />
+              <p className="text-[11px] text-muted-foreground leading-snug">No source enabled, so no hubs from trusted sources will show. Your follows' recommendations still appear when Following recommendations is on.</p>
             </div>
           )}
         </div>
@@ -1396,23 +1393,6 @@ function TrustedSourcesModal({ open, onClose }: { open: boolean; onClose: () => 
           <button onClick={onSet} className="px-4 py-1.5 rounded-md bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 cursor-pointer">Set</button>
         </div>
       </div>
-
-      {showConfirm && (
-        <div className="absolute inset-0 z-10 flex items-center justify-center px-2" onClick={() => setShowConfirm(false)}>
-          <div className="absolute inset-0 bg-black/60" />
-          <div className="relative z-10 w-full max-w-sm rounded-xl border border-border bg-background shadow-2xl p-6" onClick={(e) => e.stopPropagation()}>
-            <div className="flex flex-col items-center text-center gap-3">
-              <div className="w-12 h-12 rounded-full bg-amber-500/10 flex items-center justify-center"><AlertTriangle size={24} className="text-amber-500" /></div>
-              <h3 className="text-base font-semibold text-foreground">See every hub on the network?</h3>
-              <p className="text-sm text-muted-foreground leading-relaxed">DEN is a client for a permissionless, decentralized network, like a web browser. Hubs are created and hosted by their owners on relays and storage DEN does not run or control. This shows every discoverable hub with no curation, including content no one has vouched for: hubs that are not marked NSFW but should be, and hubs that may be illegal, scams, or spam. You hold responsibility for what you see. Turn it off any time to go back to recommendations.</p>
-              <div className="flex items-center gap-2 w-full mt-1">
-                <button onClick={() => setShowConfirm(false)} className="flex-1 px-4 py-2 rounded-lg text-sm font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/50 cursor-pointer">Cancel</button>
-                <button onClick={confirmAllOff} className="flex-1 px-4 py-2 rounded-lg text-sm font-medium bg-amber-500 text-white hover:bg-amber-600 cursor-pointer">I understand</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
@@ -1509,36 +1489,34 @@ export function DiscoverPage() {
   const [recLoading, setRecLoading] = useState(false)
   const followedPubkeys = useFollowStore((s) => s.followedPubkeys)
   const trustedSources = useRecommendationStore((s) => s.trustedSources)
-  const recAllOffAck = useRecommendationStore((s) => s.allOffAck)
   const followRecs = useRecommendationStore((s) => s.followRecs)
-  const setTrustedSources = useRecommendationStore((s) => s.setTrustedSources)
-  const setAllOffAck = useRecommendationStore((s) => s.setAllOffAck)
+  const sourceRecs = useRecommendationStore((s) => s.sourceRecs)
+  const seeEverything = useRecommendationStore((s) => s.seeEverything)
   const setFollowRecs = useRecommendationStore((s) => s.setFollowRecs)
+  const setSourceRecs = useRecommendationStore((s) => s.setSourceRecs)
+  const setSeeEverything = useRecommendationStore((s) => s.setSeeEverything)
   const enabledSources = useMemo(() => trustedSources.filter((s) => s.enabled).map((s) => s.pubkey), [trustedSources])
-  // Every source turned off (and acknowledged) = the raw "all discoverable" firehose.
-  const seeEverything = enabledSources.length === 0 && recAllOffAck
-  // Authors whose recommendation lists feed the curated view: trusted sources + (optionally) your follows.
+  // Three independent inputs feed the curated view. "See everything" is the separate firehose.
   const recAuthors = useMemo(() => {
-    const set = new Set<string>(enabledSources)
+    const set = new Set<string>()
+    if (sourceRecs) for (const pk of enabledSources) set.add(pk)
     if (followRecs) for (const pk of followedPubkeys) set.add(pk)
     return [...set]
-  }, [enabledSources, followRecs, followedPubkeys])
+  }, [sourceRecs, enabledSources, followRecs, followedPubkeys])
   const myPubkey = useUserStore((s) => s.pubkey)
   const [showManageRecs, setShowManageRecs] = useState(false)
   const [showSourceModal, setShowSourceModal] = useState(false)
   const [showGuide, setShowGuide] = useState(false)
   const [showAllOffConfirm, setShowAllOffConfirm] = useState(false)
-  // "See everything" toggle. Turning it ON needs the same confirmation as the sources modal; turning it
-  // OFF re-enables every source and clears the ack.
+  // "See everything" (firehose) toggle. Turning it ON needs confirmation; OFF is immediate.
   const toggleAllOff = useCallback(() => {
-    if (seeEverything) setTrustedSources(trustedSources.map((s) => ({ ...s, enabled: true })))
+    if (seeEverything) setSeeEverything(false)
     else setShowAllOffConfirm(true)
-  }, [seeEverything, trustedSources, setTrustedSources])
+  }, [seeEverything, setSeeEverything])
   const confirmAllOff = useCallback(() => {
-    setTrustedSources(trustedSources.map((s) => ({ ...s, enabled: false })))
-    setAllOffAck(true)
+    setSeeEverything(true)
     setShowAllOffConfirm(false)
-  }, [trustedSources, setTrustedSources, setAllOffAck])
+  }, [setSeeEverything])
   // Unblur toggle (quick toggle + Filters modal share this). Recommended hubs are always shown sharp;
   // this flag only unblurs the uncurated "See everything" feed, so enabling it asks for confirmation.
   const [showUnblurConfirm, setShowUnblurConfirm] = useState(false)
@@ -2093,35 +2071,54 @@ export function DiscoverPage() {
                     </TooltipContent>
                   </Tooltip>
 
-                  {/* See everything (firehose) toggle + a cogwheel that opens the source manager */}
+                  {/* Trusted-source recommendations (DEN + added npubs) toggle + a cogwheel to manage them */}
                   <div className={`flex items-center rounded-full border text-[11px] font-medium transition-colors
-                    ${seeEverything ? 'bg-amber-500/10 border-amber-500/40' : 'bg-secondary/60 border-border'}`}>
+                    ${sourceRecs ? 'bg-primary/10 border-primary/40' : 'bg-secondary/60 border-border'}`}>
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        <button onClick={toggleAllOff} className={`flex items-center gap-2 pl-1 pr-2 py-1 rounded-l-full cursor-pointer ${seeEverything ? 'text-amber-400' : 'text-muted-foreground hover:text-foreground'}`}>
-                          <span className={`relative inline-block w-7 h-4 rounded-full transition-colors shrink-0 ${seeEverything ? 'bg-amber-500' : 'bg-muted-foreground/30'}`}>
-                            <span className={`absolute top-[2px] left-0 block w-3 h-3 rounded-full bg-white shadow transition-transform ${seeEverything ? 'translate-x-[14px]' : 'translate-x-[2px]'}`} />
+                        <button onClick={() => setSourceRecs(!sourceRecs)} className={`flex items-center gap-2 pl-1 pr-2 py-1 rounded-l-full cursor-pointer ${sourceRecs ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}`}>
+                          <span className={`relative inline-block w-7 h-4 rounded-full transition-colors shrink-0 ${sourceRecs ? 'bg-primary' : 'bg-muted-foreground/30'}`}>
+                            <span className={`absolute top-[2px] left-0 block w-3 h-3 rounded-full bg-white shadow transition-transform ${sourceRecs ? 'translate-x-[14px]' : 'translate-x-[2px]'}`} />
                           </span>
-                          See everything
+                          Recommendations
                         </button>
                       </TooltipTrigger>
                       <TooltipContent side="bottom" className="text-xs">
-                        {seeEverything ? 'Showing every discoverable hub. Toggle off to go back to recommendations.' : 'Ignore recommendations and browse every discoverable hub'}
+                        {sourceRecs ? 'Including hubs recommended by DEN and your trusted sources' : 'Hubs recommended by DEN and your trusted sources are hidden'}
                       </TooltipContent>
                     </Tooltip>
-                    <span className={`w-px self-stretch my-1 shrink-0 ${seeEverything ? 'bg-amber-500/60' : 'bg-foreground/15'}`} />
+                    <span className={`w-px self-stretch my-1 shrink-0 ${sourceRecs ? 'bg-primary/50' : 'bg-foreground/15'}`} />
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <button
                           onClick={() => setShowSourceModal(true)}
-                          className={`flex items-center px-2 py-1 rounded-r-full transition-colors cursor-pointer ${seeEverything ? 'text-amber-400' : 'text-muted-foreground hover:text-foreground'}`}
+                          className={`flex items-center px-2 py-1 rounded-r-full transition-colors cursor-pointer ${sourceRecs ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}`}
                         >
                           <Settings size={13} />
                         </button>
                       </TooltipTrigger>
-                      <TooltipContent side="bottom" className="text-xs">Manage recommendation sources</TooltipContent>
+                      <TooltipContent side="bottom" className="text-xs">Manage your trusted sources</TooltipContent>
                     </Tooltip>
                   </div>
+
+                  {/* See everything (firehose), independent of the recommendation toggles */}
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        onClick={toggleAllOff}
+                        className={`flex items-center gap-2 pl-1 pr-2 py-1 rounded-full border text-[11px] font-medium transition-colors cursor-pointer
+                          ${seeEverything ? 'bg-amber-500/10 border-amber-500/40 text-amber-400' : 'bg-secondary/60 border-border text-muted-foreground hover:text-foreground'}`}
+                      >
+                        <span className={`relative inline-block w-7 h-4 rounded-full transition-colors shrink-0 ${seeEverything ? 'bg-amber-500' : 'bg-muted-foreground/30'}`}>
+                          <span className={`absolute top-[2px] left-0 block w-3 h-3 rounded-full bg-white shadow transition-transform ${seeEverything ? 'translate-x-[14px]' : 'translate-x-[2px]'}`} />
+                        </span>
+                        See everything
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" className="text-xs">
+                      {seeEverything ? 'Showing every discoverable hub. Toggle off to go back to recommendations.' : 'Ignore recommendations and browse every discoverable hub'}
+                    </TooltipContent>
+                  </Tooltip>
 
                   {/* Unblur media (only affects "See everything"; recommended hubs always show sharp) */}
                   <Tooltip>

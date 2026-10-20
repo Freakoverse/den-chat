@@ -1,10 +1,11 @@
 /**
  * recommendationStore: the user's own hub-recommendation list (published as a public NIP-78 event, see
- * lib/hub/hubRecommendations) plus the LOCAL (per-device) config of which npubs the user trusts as
- * recommendation sources for the Discover "Perspective" tab.
+ * lib/hub/hubRecommendations) plus the LOCAL (per-device) Discover config.
  *
- * The app admin is always a trusted source (can be toggled off but not removed). Turning every source off
- * (and acknowledging the warning) is how the user opts into the raw "all discoverable" firehose.
+ * The Discover feed is driven by three independent, per-device toggles: followRecs (hubs recommended by
+ * people you follow), sourceRecs (hubs recommended by your trusted sources: DEN + added npubs), and
+ * seeEverything (the uncurated "all discoverable" firehose). The app admin is always a trusted source
+ * (can be toggled off but not removed).
  */
 
 import { create } from 'zustand'
@@ -19,8 +20,9 @@ import {
 export interface TrustedSource { pubkey: string; enabled: boolean }
 
 const TRUSTED_KEY = 'den_rec_trusted_sources'
-const ALLOFF_KEY = 'den_rec_alloff_ack'
 const FOLLOWRECS_KEY = 'den_rec_follow_recs'
+const SOURCERECS_KEY = 'den_rec_source_recs'
+const SEEALL_KEY = 'den_rec_see_everything'
 
 function loadTrusted(): TrustedSource[] {
   try {
@@ -43,18 +45,14 @@ function loadTrusted(): TrustedSource[] {
 function saveTrusted(list: TrustedSource[]) {
   try { localStorage.setItem(TRUSTED_KEY, JSON.stringify(list)) } catch { /* non-fatal */ }
 }
-function loadAllOffAck(): boolean {
-  try { return localStorage.getItem(ALLOFF_KEY) === '1' } catch { return false }
+function loadBool(key: string, def: boolean): boolean {
+  try {
+    const v = localStorage.getItem(key)
+    return v == null ? def : v === '1'
+  } catch { return def }
 }
-function saveAllOffAck(v: boolean) {
-  try { localStorage.setItem(ALLOFF_KEY, v ? '1' : '0') } catch { /* non-fatal */ }
-}
-function loadFollowRecs(): boolean {
-  // Default ON: fold recommendations from people you follow into the feed.
-  try { return localStorage.getItem(FOLLOWRECS_KEY) !== '0' } catch { return true }
-}
-function saveFollowRecs(v: boolean) {
-  try { localStorage.setItem(FOLLOWRECS_KEY, v ? '1' : '0') } catch { /* non-fatal */ }
+function saveBool(key: string, v: boolean) {
+  try { localStorage.setItem(key, v ? '1' : '0') } catch { /* non-fatal */ }
 }
 
 // Serialize recommendation-list publishes so rapid add/remove don't race each other.
@@ -71,29 +69,34 @@ interface RecState {
   myRecsLoaded: boolean
   /** Trusted recommendation sources (local, per device). */
   trustedSources: TrustedSource[]
-  /** Set once the user has explicitly accepted the "see everything" (firehose) warning. */
-  allOffAck: boolean
-  /** Include recommendations published by people you follow in the feed (local, per device, default on). */
+  /** Include recommendations from people you follow in the feed (local, per device, default on). */
   followRecs: boolean
+  /** Include recommendations from your trusted sources (DEN + added npubs) in the feed (default on). */
+  sourceRecs: boolean
+  /** Firehose: show every discoverable hub with no curation (default off, independent of the above). */
+  seeEverything: boolean
 
   loadMyRecs: (myPubkey: string) => Promise<void>
   hasRec: (coord: string) => boolean
   addRec: (ref: HubRecRef, signer: ISigner | null, privateKey: string | null) => Promise<void>
   removeRec: (coord: string, signer: ISigner | null, privateKey: string | null) => Promise<void>
-  /** Replace the trusted-source list (persists). Clears allOffAck when any source is enabled. */
+  /** Replace the trusted-source list (persists). */
   setTrustedSources: (list: TrustedSource[]) => void
-  /** Explicitly set the firehose acknowledgement (the all-off confirm). */
-  setAllOffAck: (v: boolean) => void
   /** Toggle folding your follows' recommendations into the feed (persists). */
   setFollowRecs: (v: boolean) => void
+  /** Toggle folding your trusted sources' recommendations into the feed (persists). */
+  setSourceRecs: (v: boolean) => void
+  /** Toggle the uncurated firehose (persists). */
+  setSeeEverything: (v: boolean) => void
 }
 
 export const useRecommendationStore = create<RecState>((set, get) => ({
   myRecs: new Map(),
   myRecsLoaded: false,
   trustedSources: loadTrusted(),
-  allOffAck: loadAllOffAck(),
-  followRecs: loadFollowRecs(),
+  followRecs: loadBool(FOLLOWRECS_KEY, true),
+  sourceRecs: loadBool(SOURCERECS_KEY, true),
+  seeEverything: loadBool(SEEALL_KEY, false),
 
   loadMyRecs: async (myPubkey) => {
     try {
@@ -138,19 +141,21 @@ export const useRecommendationStore = create<RecState>((set, get) => ({
 
   setTrustedSources: (list) => {
     saveTrusted(list)
-    const anyEnabled = list.some((s) => s.enabled)
-    const allOffAck = anyEnabled ? false : get().allOffAck
-    if (anyEnabled) saveAllOffAck(false)
-    set({ trustedSources: list, allOffAck })
-  },
-
-  setAllOffAck: (v) => {
-    saveAllOffAck(v)
-    set({ allOffAck: v })
+    set({ trustedSources: list })
   },
 
   setFollowRecs: (v) => {
-    saveFollowRecs(v)
+    saveBool(FOLLOWRECS_KEY, v)
     set({ followRecs: v })
+  },
+
+  setSourceRecs: (v) => {
+    saveBool(SOURCERECS_KEY, v)
+    set({ sourceRecs: v })
+  },
+
+  setSeeEverything: (v) => {
+    saveBool(SEEALL_KEY, v)
+    set({ seeEverything: v })
   },
 }))
