@@ -361,7 +361,8 @@ interface FilterModalProps {
   showNsfw: boolean
   setShowNsfw: (v: boolean) => void
   unblurMedia: boolean
-  setUnblurMedia: (v: boolean) => void
+  /** Shared with the quick toggle: enabling asks for confirmation first (not batched behind Apply). */
+  onRequestUnblur: (next: boolean) => void
   powMin: number
   setPowMin: (v: number) => void
   powMax: number
@@ -381,9 +382,8 @@ interface FilterModalProps {
   onApplySearch?: () => void
 }
 
-function FilterModal({ open, onClose, showNsfw, setShowNsfw, unblurMedia, setUnblurMedia, powMin, setPowMin, powMax, setPowMax, requireMessagePow, setRequireMessagePow, joinPowMin, setJoinPowMin, joinPowMax, setJoinPowMax, requireJoinPow, setRequireJoinPow, filterTags, setFilterTags, filterClientTags, setFilterClientTags, onApplySearch }: FilterModalProps) {
+function FilterModal({ open, onClose, showNsfw, setShowNsfw, unblurMedia, onRequestUnblur, powMin, setPowMin, powMax, setPowMax, requireMessagePow, setRequireMessagePow, joinPowMin, setJoinPowMin, joinPowMax, setJoinPowMax, requireJoinPow, setRequireJoinPow, filterTags, setFilterTags, filterClientTags, setFilterClientTags, onApplySearch }: FilterModalProps) {
   const [localNsfw, setLocalNsfw] = useState(showNsfw)
-  const [localUnblur, setLocalUnblur] = useState(unblurMedia)
   const [localPowMin, setLocalPowMin] = useState(powMin)
   const [localPowMax, setLocalPowMax] = useState(powMax)
   const [localRequireMessagePow, setLocalRequireMessagePow] = useState(requireMessagePow)
@@ -406,7 +406,6 @@ function FilterModal({ open, onClose, showNsfw, setShowNsfw, unblurMedia, setUnb
   useEffect(() => {
     if (open) {
       setLocalNsfw(showNsfw)
-      setLocalUnblur(unblurMedia)
       setLocalPowMin(powMin)
       setLocalPowMax(powMax)
       setLocalRequireMessagePow(requireMessagePow)
@@ -450,7 +449,6 @@ function FilterModal({ open, onClose, showNsfw, setShowNsfw, unblurMedia, setUnb
 
   const handleApply = () => {
     setShowNsfw(localNsfw)
-    setUnblurMedia(localUnblur)
     setPowMin(localPowMin)
     setPowMax(localPowMax)
     setRequireMessagePow(localRequireMessagePow)
@@ -520,19 +518,19 @@ function FilterModal({ open, onClose, showNsfw, setShowNsfw, unblurMedia, setUnb
             </button>
           </div>
 
-          {/* Unblur media toggle */}
+          {/* Unblur media toggle (shared with the quick toggle; enabling asks for confirmation, applies immediately) */}
           <div className="flex items-center justify-between">
             <div>
-              <label className="text-sm font-medium text-foreground">Unblur banners &amp; icons</label>
-              <p className="text-xs text-muted-foreground mt-0.5">Show discovered hubs' media sharp instead of blurred</p>
+              <label className="text-sm font-medium text-foreground">Unblur "See everything" media</label>
+              <p className="text-xs text-muted-foreground mt-0.5">Recommended hubs always show sharp. This unblurs media in the uncurated feed too.</p>
             </div>
             <button
-              onClick={() => setLocalUnblur(!localUnblur)}
+              onClick={() => onRequestUnblur(!unblurMedia)}
               className={`relative w-10 h-[22px] rounded-full transition-colors cursor-pointer shrink-0
-                ${localUnblur ? 'bg-primary' : 'bg-muted-foreground/30'}`}
+                ${unblurMedia ? 'bg-primary' : 'bg-muted-foreground/30'}`}
             >
               <div className={`absolute top-[3px] w-4 h-4 rounded-full bg-white shadow transition-transform
-                ${localUnblur ? 'translate-x-[22px]' : 'translate-x-[3px]'}`} />
+                ${unblurMedia ? 'translate-x-[22px]' : 'translate-x-[3px]'}`} />
             </button>
           </div>
 
@@ -1407,8 +1405,8 @@ function TrustedSourcesModal({ open, onClose }: { open: boolean; onClose: () => 
           <div className="relative z-10 w-full max-w-sm rounded-xl border border-border bg-background shadow-2xl p-6" onClick={(e) => e.stopPropagation()}>
             <div className="flex flex-col items-center text-center gap-3">
               <div className="w-12 h-12 rounded-full bg-amber-500/10 flex items-center justify-center"><AlertTriangle size={24} className="text-amber-500" /></div>
-              <h3 className="text-base font-semibold text-foreground">Browse without a trusted source?</h3>
-              <p className="text-sm text-muted-foreground leading-relaxed">Discover will show every discoverable hub with no curation. You hold responsibility for what you see. Re-enable a source any time to go back.</p>
+              <h3 className="text-base font-semibold text-foreground">See every hub on the network?</h3>
+              <p className="text-sm text-muted-foreground leading-relaxed">DEN is a client for a permissionless, decentralized network, like a web browser. Hubs are created and hosted by their owners on relays and storage DEN does not run or control. This shows every discoverable hub with no curation, including content no one has vouched for. You hold responsibility for what you see. Turn it off any time to go back to recommendations.</p>
               <div className="flex items-center gap-2 w-full mt-1">
                 <button onClick={() => setShowConfirm(false)} className="flex-1 px-4 py-2 rounded-lg text-sm font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/50 cursor-pointer">Cancel</button>
                 <button onClick={confirmAllOff} className="flex-1 px-4 py-2 rounded-lg text-sm font-medium bg-amber-500 text-white hover:bg-amber-600 cursor-pointer">I understand</button>
@@ -1477,6 +1475,14 @@ export function DiscoverPage() {
     setAllOffAck(true)
     setShowAllOffConfirm(false)
   }, [trustedSources, setTrustedSources, setAllOffAck])
+  // Unblur toggle (quick toggle + Filters modal share this). Recommended hubs are always shown sharp;
+  // this flag only unblurs the uncurated "See everything" feed, so enabling it asks for confirmation.
+  const [showUnblurConfirm, setShowUnblurConfirm] = useState(false)
+  const requestUnblur = useCallback((next: boolean) => {
+    if (next && !unblurMedia) setShowUnblurConfirm(true)
+    else setUnblurMedia(next)
+  }, [unblurMedia])
+  const confirmUnblur = useCallback(() => { setUnblurMedia(true); setShowUnblurConfirm(false) }, [])
   // Load the user's own recommendation list once we know who they are.
   useEffect(() => {
     if (myPubkey) useRecommendationStore.getState().loadMyRecs(myPubkey)
@@ -2045,6 +2051,25 @@ export function DiscoverPage() {
                       <TooltipContent side="bottom" className="text-xs">Manage recommendation sources</TooltipContent>
                     </Tooltip>
                   </div>
+
+                  {/* Unblur media (only affects "See everything"; recommended hubs always show sharp) */}
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        onClick={() => requestUnblur(!unblurMedia)}
+                        className={`flex items-center gap-2 pl-1 pr-2 py-1 rounded-full border text-[11px] font-medium transition-colors cursor-pointer
+                          ${unblurMedia ? 'bg-amber-500/10 border-amber-500/40 text-amber-400' : 'bg-secondary/60 border-border text-muted-foreground hover:text-foreground'}`}
+                      >
+                        <span className={`relative inline-block w-7 h-4 rounded-full transition-colors shrink-0 ${unblurMedia ? 'bg-amber-500' : 'bg-muted-foreground/30'}`}>
+                          <span className={`absolute top-[2px] left-0 block w-3 h-3 rounded-full bg-white shadow transition-transform ${unblurMedia ? 'translate-x-[14px]' : 'translate-x-[2px]'}`} />
+                        </span>
+                        Unblur media
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" className="text-xs">
+                      {unblurMedia ? 'Media in See everything is shown sharp' : 'Recommended hubs are always sharp; this unblurs the uncurated feed too'}
+                    </TooltipContent>
+                  </Tooltip>
                 </div>
               </div>
 
@@ -2108,7 +2133,7 @@ export function DiscoverPage() {
                 {pagedHubs.length > 0 && (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                     {pagedHubs.map(hub => (
-                      <DiscoverHubCard key={hub.dTag} hub={hub} unblur={unblurMedia} />
+                      <DiscoverHubCard key={hub.dTag} hub={hub} unblur={!seeEverything || unblurMedia} />
                     ))}
                   </div>
                 )}
@@ -2208,7 +2233,7 @@ export function DiscoverPage() {
         showNsfw={showNsfw}
         setShowNsfw={setShowNsfw}
         unblurMedia={unblurMedia}
-        setUnblurMedia={setUnblurMedia}
+        onRequestUnblur={requestUnblur}
         powMin={powMin}
         setPowMin={setPowMin}
         powMax={powMax}
@@ -2235,11 +2260,27 @@ export function DiscoverPage() {
           <div className="relative z-10 w-full max-w-sm rounded-xl border border-border bg-background shadow-2xl p-6" onClick={(e) => e.stopPropagation()}>
             <div className="flex flex-col items-center text-center gap-3">
               <div className="w-12 h-12 rounded-full bg-amber-500/10 flex items-center justify-center"><AlertTriangle size={24} className="text-amber-500" /></div>
-              <h3 className="text-base font-semibold text-foreground">Browse without a trusted source?</h3>
-              <p className="text-sm text-muted-foreground leading-relaxed">Discover will show every discoverable hub with no curation. You hold responsibility for what you see. Re-enable a source any time to go back.</p>
+              <h3 className="text-base font-semibold text-foreground">See every hub on the network?</h3>
+              <p className="text-sm text-muted-foreground leading-relaxed">DEN is a client for a permissionless, decentralized network, like a web browser. Hubs are created and hosted by their owners on relays and storage DEN does not run or control. This shows every discoverable hub with no curation, including content no one has vouched for. You hold responsibility for what you see. Turn it off any time to go back to recommendations.</p>
               <div className="flex items-center gap-2 w-full mt-1">
                 <button onClick={() => setShowAllOffConfirm(false)} className="flex-1 px-4 py-2 rounded-lg text-sm font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/50 cursor-pointer">Cancel</button>
                 <button onClick={confirmAllOff} className="flex-1 px-4 py-2 rounded-lg text-sm font-medium bg-amber-500 text-white hover:bg-amber-600 cursor-pointer">I understand</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {showUnblurConfirm && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center px-2" onClick={() => setShowUnblurConfirm(false)}>
+          <div className="absolute inset-0 bg-black/60" />
+          <div className="relative z-10 w-full max-w-sm rounded-xl border border-border bg-background shadow-2xl p-6" onClick={(e) => e.stopPropagation()}>
+            <div className="flex flex-col items-center text-center gap-3">
+              <div className="w-12 h-12 rounded-full bg-amber-500/10 flex items-center justify-center"><AlertTriangle size={24} className="text-amber-500" /></div>
+              <h3 className="text-base font-semibold text-foreground">Unblur uncurated media?</h3>
+              <p className="text-sm text-muted-foreground leading-relaxed">Recommended hubs already show sharp. This also unblurs banners and icons in "See everything", media from hubs no one has vouched for, which may be explicit or disturbing. You hold responsibility for what you see. Turn it off any time.</p>
+              <div className="flex items-center gap-2 w-full mt-1">
+                <button onClick={() => setShowUnblurConfirm(false)} className="flex-1 px-4 py-2 rounded-lg text-sm font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/50 cursor-pointer">Cancel</button>
+                <button onClick={confirmUnblur} className="flex-1 px-4 py-2 rounded-lg text-sm font-medium bg-amber-500 text-white hover:bg-amber-600 cursor-pointer">I understand</button>
               </div>
             </div>
           </div>
