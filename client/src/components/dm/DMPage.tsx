@@ -575,7 +575,10 @@ function ConversationList({
             {/* B-DM Self (NIP-04 only): open an encrypted conversation with your own key */}
             <button
               onClick={() => onSelect(myPubkey)}
-              className="w-full flex items-center justify-center gap-1.5 py-1.5 text-[11px] font-medium rounded-md text-muted-foreground hover:text-foreground hover:bg-background/50 transition-colors cursor-pointer"
+              className={`w-full flex items-center justify-center gap-1.5 py-1.5 text-[11px] font-medium rounded-md transition-all cursor-pointer
+                ${section === 'dms' && activePubkey === myPubkey
+                  ? 'bg-background text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-background/50'}`}
             >
               <NotebookPen size={12} /> B-DM Self
             </button>
