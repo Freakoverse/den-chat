@@ -267,18 +267,12 @@ export const useWotStore = create<WotState>((set, get) => ({
   updateSettings: (partial) => {
     const next = { ...get().settings, ...partial }
     saveSettings(next)
-
-    // Check if we need to build more graph
-    const depthIncreased = partial.followDepth !== undefined && partial.followDepth > graphData.builtDepth
     set({ settings: next })
 
-    // Clear score cache when settings change (threshold or depth affects results)
+    // Recompute scores from the graph we already have (threshold / depth / bonus affect results). We do
+    // NOT auto-fetch a deeper graph here: raising Follow Depth beyond what's built surfaces a manual
+    // "recalculate" button in Settings (buildGraph) so the user controls when the fetch happens.
     scoreCache.clear()
-
-    // Only trigger a build if depth increased beyond what we've already cached
-    if (depthIncreased && !get().building) {
-      get().buildGraph()
-    }
   },
 
   shouldHide: (pubkey, context) => {
