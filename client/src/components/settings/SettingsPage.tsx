@@ -3584,6 +3584,8 @@ function ModerationTab() {
   const buildTotal = useWotStore((s) => s.buildTotal)
   const buildDepthTarget = useWotStore((s) => s.buildDepthTarget)
   const buildDepthCurrent = useWotStore((s) => s.buildDepthCurrent)
+  // Advanced section (Web of Trust, and room for future advanced controls). Collapsed by default.
+  const [advancedOpen, setAdvancedOpen] = useState(false)
 
   return (
     <div className="space-y-8">
@@ -3624,6 +3626,20 @@ function ModerationTab() {
       {/* Divider */}
       <div className="h-px bg-border" />
 
+      {/* Advanced (collapsible): holds Web of Trust for now; more advanced sections can live here later */}
+      <button
+        onClick={() => setAdvancedOpen((o) => !o)}
+        className="flex items-center justify-between w-full gap-3 cursor-pointer"
+      >
+        <div className="text-left">
+          <h4 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Advanced</h4>
+          <p className="text-xs text-muted-foreground mt-1">Power-user controls. Most people never need to change these.</p>
+        </div>
+        <ChevronDown size={18} className={`text-muted-foreground shrink-0 transition-transform ${advancedOpen ? 'rotate-180' : ''}`} />
+      </button>
+
+      {advancedOpen && (
+      <div className="space-y-6">
       {/* Web of Trust */}
       <section className="space-y-5">
         <div>
@@ -3689,8 +3705,6 @@ function ModerationTab() {
           <p className="text-xs text-muted-foreground">
             {wotSettings.followDepth === 0 && 'Only your direct follows contribute to scores.'}
             {wotSettings.followDepth === 1 && 'Follows of your follows also contribute (+1 depth).'}
-            {wotSettings.followDepth === 2 && 'Two degrees of separation from your follows (+2 depth).'}
-            {wotSettings.followDepth === 3 && 'Three degrees deep — wide trust radius (+3 depth).'}
           </p>
           <div className="flex items-center gap-3 px-2 py-1 rounded-sm bg-secondary">
             <div className="flex-1 relative h-6 flex items-center">
@@ -3698,17 +3712,17 @@ function ModerationTab() {
                 <div className="absolute inset-0 bg-muted-foreground/20" />
                 <div
                   className="absolute inset-y-0 left-0 bg-gradient-to-r from-sky-500 to-violet-400"
-                  style={{ width: `${(wotSettings.followDepth / 3) * 100}%` }}
+                  style={{ width: `${wotSettings.followDepth * 100}%` }}
                 />
               </div>
               <div
                 className="absolute w-5 h-5 rounded-full bg-primary border-2 border-background shadow-lg pointer-events-none transition-all"
-                style={{ left: `calc(${(wotSettings.followDepth / 3) * 100}% - 10px)` }}
+                style={{ left: `calc(${wotSettings.followDepth * 100}% - 10px)` }}
               />
               <input
                 type="range"
                 min={0}
-                max={3}
+                max={1}
                 step={1}
                 value={wotSettings.followDepth}
                 onChange={(e) => updateWot({ followDepth: Number(e.target.value) })}
@@ -3719,8 +3733,6 @@ function ModerationTab() {
           <div className="flex justify-between text-[10px] text-muted-foreground/60 px-0.5">
             <span>0</span>
             <span>1</span>
-            <span>2</span>
-            <span>3</span>
           </div>
           {graphDepth < wotSettings.followDepth && (
             <button
@@ -3841,6 +3853,8 @@ function ModerationTab() {
           </div>
         </div>
       </section>
+      </div>
+      )}
     </div>
   )
 }

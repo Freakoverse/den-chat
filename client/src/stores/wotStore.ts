@@ -35,7 +35,7 @@ const MAX_GRAPH_SIZE = 5000 // safety cap on total graph nodes
 
 export interface WotSettings {
   scoreThreshold: number    // -5 to +5, default 0
-  followDepth: number       // 0 to 3, default 0
+  followDepth: number       // 0 to 1, default 0
   dnnBonus: boolean         // DNN ID = +1, default true
   applySocial: boolean      // Filter social feed, default true
   applyPublicChat: boolean  // Filter public chat, default true
@@ -142,7 +142,10 @@ function loadSettings(): WotSettings {
     const stored = localStorage.getItem(STORAGE_KEY)
     if (stored) {
       const parsed = JSON.parse(stored)
-      return { ...DEFAULT_SETTINGS, ...parsed }
+      // Follow Depth now maxes out at 1 (one hop): clamp any previously-saved deeper value so an old
+      // config can't silently keep a heavy multi-hop graph in effect.
+      const followDepth = Math.min(1, Math.max(0, Number(parsed.followDepth) || 0))
+      return { ...DEFAULT_SETTINGS, ...parsed, followDepth }
     }
   } catch { /* ignore */ }
   return { ...DEFAULT_SETTINGS }
