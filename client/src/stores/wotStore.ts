@@ -496,7 +496,14 @@ export const useWotStore = create<WotState>((set, get) => ({
             if (allKnown.size >= MAX_GRAPH_SIZE) break
           }
 
-          if (nextLevel.size === 0) break
+          if (nextLevel.size === 0) {
+            // No new pubkeys reachable at this depth (common with very few follows). The graph is fully
+            // built, so mark it as satisfying the requested depth instead of leaving builtDepth behind,
+            // which would make the UI read a lower depth and look like it never built.
+            graphData.builtDepth = targetDepth
+            set({ graphDepth: targetDepth, graphSize: graphData.follows.size, buildDepthCurrent: targetDepth })
+            break
+          }
 
           console.log(`[WoT] Depth ${depth}: fetching ${nextLevel.size} follow lists`)
 
@@ -582,6 +589,11 @@ export const useWotStore = create<WotState>((set, get) => ({
 
     // If graph was never built, do a full build
     if (graphData.builtDepth < 0) {
+      return get().buildGraph()
+    }
+
+    // Built shallower than the configured depth (e.g. depth was raised): expand instead of just refreshing.
+    if (graphData.builtDepth < settings.followDepth) {
       return get().buildGraph()
     }
 
