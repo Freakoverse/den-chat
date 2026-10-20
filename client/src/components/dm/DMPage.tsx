@@ -568,7 +568,20 @@ function ConversationList({
             </Tooltip>
           </TooltipProvider>
         </div>
-        {/* Divider between the 1:1 protocol tabs and Groups */}
+        {dmProtocol === 'nip04' && myPubkey && (
+          <>
+            {/* Divider between the 1:1 protocol tabs and the self shortcut */}
+            <div className="h-px bg-border mx-1 my-0.5" />
+            {/* B-DM Self (NIP-04 only): open an encrypted conversation with your own key */}
+            <button
+              onClick={() => onSelect(myPubkey)}
+              className="w-full flex items-center justify-center gap-1.5 py-1.5 text-[11px] font-medium rounded-md text-muted-foreground hover:text-foreground hover:bg-background/50 transition-colors cursor-pointer"
+            >
+              <NotebookPen size={12} /> B-DM Self
+            </button>
+          </>
+        )}
+        {/* Divider between the tabs (and self shortcut) and Groups */}
         <div className="h-px bg-border mx-1 my-0.5" />
         {/* Row 2, Groups, same pill styling as the protocol tabs */}
         <button
@@ -586,18 +599,6 @@ function ConversationList({
       {section === 'groups' ? (
         <GroupList activeDTag={activeGroupId} onSelect={onSelectGroup} onCreate={onCreateGroup} />
       ) : (<>
-      {/* DM self (NIP-04 only), open an encrypted conversation with your own key */}
-      {dmProtocol === 'nip04' && myPubkey && (
-        <div className="shrink-0">
-          <button
-            onClick={() => onSelect(myPubkey)}
-            className="w-full flex items-center justify-center gap-1.5 py-1.5 text-[11px] font-medium rounded-md bg-secondary/40 border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors cursor-pointer"
-          >
-            <NotebookPen size={12} /> B-DM Self
-          </button>
-        </div>
-      )}
-
       {/* Following/Other tabs + Search + conversation list, one card */}
       <div className="flex-1 min-h-0 flex flex-col gap-2 p-2 rounded-md bg-secondary/50 shadow-md">
       {/* Following / Other tabs */}
