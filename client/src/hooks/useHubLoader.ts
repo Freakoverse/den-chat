@@ -11,6 +11,7 @@
 import { useEffect, useRef } from 'react'
 import { useHubStore, type HubData, type Channel, type Category, type Role } from '@/stores/hubStore'
 import { parseJoinNoteTag } from '@/lib/hub/joinNote'
+import { isDedicatedTag } from '@/lib/hub/dedicated'
 import { useUserStore } from '@/stores/userStore'
 import { fetchEvents, fetchEventsProgressive } from '@/lib/nostr/relay-pool'
 import { getAllHubEvents } from '@/lib/cache/hubEventCache'
@@ -58,7 +59,7 @@ export function parseHubEvent(event: Event, contentOverride?: string): (HubData 
     for (const tag of event.tags) {
       if (tag[0] === 'r' && tag[1]) {
         generalRelays.push(tag[1])
-        if (tag.slice(2).includes('dedicated')) dedicatedRelays.push(tag[1])
+        if (isDedicatedTag(tag)) dedicatedRelays.push(tag[1])
       }
     }
 
@@ -68,7 +69,7 @@ export function parseHubEvent(event: Event, contentOverride?: string): (HubData 
     for (const tag of event.tags) {
       if (tag[0] === 'o' && tag[1]) {
         blossomServers.push(tag[1])
-        if (tag.slice(2).includes('dedicated')) dedicatedBlossomServers.push(tag[1])
+        if (isDedicatedTag(tag)) dedicatedBlossomServers.push(tag[1])
       }
     }
 
