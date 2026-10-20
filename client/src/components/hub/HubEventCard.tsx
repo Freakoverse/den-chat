@@ -309,6 +309,44 @@ export function HubEventCard({ identifier, pubkey, relays }: HubEventCardProps) 
           <img src={HUB_BANNER_PLACEHOLDER} alt="" className="w-full h-full object-cover" loading="lazy" />
         )}
         <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent" />
+        {/* Badges — top-right over the banner, wrappable */}
+        <div className="absolute top-2 right-2 flex flex-wrap items-center justify-end gap-1 max-w-[80%]">
+          {(() => {
+            const dr = !!hubData.dedicatedRelays?.some((r) => hubData.generalRelays.includes(r))
+            const db = !!hubData.dedicatedBlossomServers?.some((s) => hubData.blossomServers.includes(s))
+            if (!dr && !db) return null
+            return (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium text-white backdrop-blur-sm cursor-help ${dr && db ? 'bg-emerald-500/80' : 'bg-emerald-500/55'}`}>
+                    <ShieldCheck size={10} /> {dr && db ? 'Dedicated' : 'Half-dedicated'}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="text-xs max-w-[240px]">{dedicatedTooltip(dr, db)}</TooltipContent>
+              </Tooltip>
+            )
+          })()}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className={`px-1.5 py-0.5 rounded text-[9px] font-medium text-white backdrop-blur-sm cursor-help ${hubData.version === 2 ? 'bg-violet-500/80' : 'bg-sky-500/70'}`}>
+                {hubData.version === 2 ? 'Private' : 'Public'}
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="text-xs max-w-[240px]">
+              {hubData.version === 2
+                ? "Messages are encrypted, activity is hidden behind mask addresses, and a hub's structure is hidden."
+                : "Messages are encrypted/hidden, but all other activity and a hub's structure are public."}
+            </TooltipContent>
+          </Tooltip>
+          {hubData.nsfw && (
+            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-red-500/80 text-white backdrop-blur-sm">NSFW</span>
+          )}
+          {hubData.joinMinPow > 0 && (
+            <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium bg-amber-500/80 text-white backdrop-blur-sm">
+              Processing needed: {hubData.joinMinPow}
+            </span>
+          )}
+        </div>
       </div>
 
       <div className="p-3 space-y-2 relative">
@@ -326,43 +364,6 @@ export function HubEventCard({ identifier, pubkey, relays }: HubEventCardProps) 
           <div className="flex-1 min-w-0">
             <h4 className="text-sm font-semibold text-foreground truncate">{hubData.name}</h4>
             <p className="text-[10px] text-muted-foreground">by {creatorName}</p>
-          </div>
-          <div className="flex items-center gap-1.5 shrink-0">
-            {(() => {
-              const dr = !!hubData.dedicatedRelays?.some((r) => hubData.generalRelays.includes(r))
-              const db = !!hubData.dedicatedBlossomServers?.some((s) => hubData.blossomServers.includes(s))
-              if (!dr && !db) return null
-              return (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <span className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium text-emerald-400 cursor-help ${dr && db ? 'bg-emerald-500/15' : 'bg-emerald-500/10'}`}>
-                      <ShieldCheck size={10} /> {dr && db ? 'Dedicated' : 'Half-dedicated'}
-                    </span>
-                  </TooltipTrigger>
-                  <TooltipContent side="top" className="text-xs max-w-[240px]">{dedicatedTooltip(dr, db)}</TooltipContent>
-                </Tooltip>
-              )
-            })()}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className={`px-1.5 py-0.5 rounded text-[9px] font-medium cursor-help ${hubData.version === 2 ? 'bg-violet-500/15 text-violet-400' : 'bg-sky-500/15 text-sky-400'}`}>
-                  {hubData.version === 2 ? 'Private' : 'Public'}
-                </span>
-              </TooltipTrigger>
-              <TooltipContent side="top" className="text-xs max-w-[240px]">
-                {hubData.version === 2
-                  ? "Messages are encrypted, activity is hidden behind mask addresses, and a hub's structure is hidden."
-                  : "Messages are encrypted/hidden, but all other activity and a hub's structure are public."}
-              </TooltipContent>
-            </Tooltip>
-            {hubData.nsfw && (
-              <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-red-500/20 text-red-400">NSFW</span>
-            )}
-            {hubData.joinMinPow > 0 && (
-              <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium bg-amber-500/15 text-amber-400">
-                Processing needed: {hubData.joinMinPow}
-              </span>
-            )}
           </div>
         </div>
 
