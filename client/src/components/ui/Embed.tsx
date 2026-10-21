@@ -23,7 +23,7 @@ import type { EmbedInfo } from '@/lib/embeds'
 
 interface EmbedProps {
   embed: EmbedInfo
-  /** Max width constraint (chat uses 400px, social feed uses full width) */
+  /** Max width constraint (chat uses 600px, social feed uses full width) */
   maxWidth?: number | string
   className?: string
 }

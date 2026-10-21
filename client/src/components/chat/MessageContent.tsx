@@ -410,7 +410,7 @@ export function LinkPreview({ href }: { href: string }) {
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      className="flex mt-1 rounded-lg border border-border overflow-hidden max-w-[min(400px,100%)] bg-secondary/30 hover:bg-secondary/50 transition-colors group"
+      className="flex mt-1 rounded-lg border border-border overflow-hidden max-w-[min(600px,100%)] bg-secondary/30 hover:bg-secondary/50 transition-colors group"
     >
       {preview.image && (
         <img
@@ -862,8 +862,8 @@ function RevealEmbed({ embed }: { embed: ReturnType<typeof detectEmbed> }) {
   if (revealed) {
     return (
       <div className="mt-1">
-        <LazyInView skeleton minHeight={embed.layout === 'video' ? 225 : (embed.height ?? 200)}>
-          <Embed embed={embed} maxWidth={400} />
+        <LazyInView skeleton minHeight={embed.layout === 'video' ? 337 : (embed.height ?? 200)}>
+          <Embed embed={embed} maxWidth={600} />
         </LazyInView>
       </div>
     )
@@ -951,8 +951,8 @@ export const MessageContent = memo(function MessageContent({ content, suffix, on
         {unique.map((item, i) =>
           item.type === 'embed' ? (
             <div key={`embed-${i}`} className="mt-1">
-              <LazyInView skeleton minHeight={item.embed!.layout === 'video' ? 225 : (item.embed!.height ?? 200)}>
-                <Embed embed={item.embed!} maxWidth={400} />
+              <LazyInView skeleton minHeight={item.embed!.layout === 'video' ? 337 : (item.embed!.height ?? 200)}>
+                <Embed embed={item.embed!} maxWidth={600} />
               </LazyInView>
             </div>
           ) : item.type === 'hidden' ? (
