@@ -26,6 +26,8 @@ import { useHubStore, type HubData, type Channel, type Category, type Role, type
 import { HubRelayHealthNotice } from '@/components/hub/HubRelayHealthBanner'
 import { HubUpgradeBanner } from '@/components/hub/HubUpgradeBanner'
 import { RelayHealthLabel } from '@/components/nostr/RelayHealthLabel'
+import { BlossomHealthLabel } from '@/components/nostr/BlossomHealthLabel'
+import { HubBlossomHealthBanner } from '@/components/hub/HubBlossomHealthBanner'
 import { type JoinNotePolicy, joinNoteEqual, JOIN_PROMPT_MAX } from '@/lib/hub/joinNote'
 import { useMessageStore } from '@/stores/messageStore'
 import { UserProfileModal } from '@/components/hub/UserProfileModal'
@@ -5022,7 +5024,7 @@ function NetworkPage({ hub, editRelays, setEditRelays, editBlossoms, setEditBlos
               return (
               <div key={url} className="flex items-center gap-2.5 px-3 py-2 rounded-lg bg-secondary/30 border border-border">
                 <span className="text-sm text-foreground font-mono truncate flex-1">{url}</span>
-                <RelayHealthLabel url={url} />
+                <RelayHealthLabel url={url} interactive />
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <button
@@ -5068,7 +5070,7 @@ function NetworkPage({ hub, editRelays, setEditRelays, editBlossoms, setEditBlos
               availableClientRelays.map(url => (
                 <div key={url} className="flex items-center gap-2.5 px-3 py-1.5 rounded-lg bg-secondary/20 border border-border/60">
                   <span className="text-xs text-muted-foreground font-mono truncate flex-1">{url}</span>
-                  <RelayHealthLabel url={url} />
+                  <RelayHealthLabel url={url} interactive />
                   <button
                     onClick={() => addRelay(url)}
                     disabled={editRelays.length >= MAX_GENERAL_RELAYS}
@@ -5103,7 +5105,7 @@ function NetworkPage({ hub, editRelays, setEditRelays, editBlossoms, setEditBlos
               availableUserRelays.map(url => (
                 <div key={url} className="flex items-center gap-2.5 px-3 py-1.5 rounded-lg bg-secondary/20 border border-border/60">
                   <span className="text-xs text-muted-foreground font-mono truncate flex-1">{url}</span>
-                  <RelayHealthLabel url={url} />
+                  <RelayHealthLabel url={url} interactive />
                   <button
                     onClick={() => addRelay(url)}
                     disabled={editRelays.length >= MAX_GENERAL_RELAYS}
@@ -5191,6 +5193,7 @@ function NetworkPage({ hub, editRelays, setEditRelays, editBlossoms, setEditBlos
       {/* Current Hub Blossom Servers */}
       <section className="space-y-3">
         <h4 className="text-sm font-semibold text-foreground">Hub Blossom Servers</h4>
+        <HubBlossomHealthBanner hub={hub} />
         {editBlossoms.length > 0 && (
           hasDedicatedBlossom ? (
             <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30">
@@ -5216,6 +5219,7 @@ function NetworkPage({ hub, editRelays, setEditRelays, editBlossoms, setEditBlos
               return (
               <div key={url} className="flex items-center gap-2.5 px-3 py-2 rounded-lg bg-secondary/30 border border-border">
                 <span className="text-sm text-foreground font-mono truncate flex-1">{url}</span>
+                <BlossomHealthLabel url={url} interactive />
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <button
