@@ -11,51 +11,94 @@
  * Nothing publishes without the owner's explicit click; the banner only informs.
  */
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { AlertTriangle, Loader2, Check, X, RefreshCw, HardDrive } from 'lucide-react'
 import { useEscToClose } from '@/hooks/useEscToClose'
 import { useHubStore, type HubData } from '@/stores/hubStore'
 import { useUserStore } from '@/stores/userStore'
+import { useNavigationStore } from '@/stores/navigationStore'
+import { useBlossomHealthStore } from '@/lib/blossom/blossomHealthProbe'
 import {
   probeServers, mirrorTreeToServers, republishHubWithBlossomServers, replacementCandidates, type ServerCheck,
 } from '@/lib/hub/hubBlossomHealth'
 
-/** Hubs whose banner the creator dismissed this session (it re-shows next launch if still broken). */
-const dismissed = new Set<string>()
-
 const short = (u: string) => u.replace(/^https?:\/\//, '')
 const norm = (u: string) => u.replace(/\/+$/, '')
 
-export function HubBlossomHealthBanner({ hub }: { hub: HubData }) {
-  const failed = useHubStore((s) => s.blossomHealth[hub.dTag])
-  const [open, setOpen] = useState(false)
-  const [, bump] = useState(0)
+/**
+ * The hub's advertised Blossom servers that currently read 'broken' in the shared Blossom-health store
+ * (auto-probing on mount), unioned with any that failed to serve the hub's real files during load. Single
+ * source for the banner + notice, mirroring useHubBrokenRelays.
+ */
+function useHubBrokenBlossoms(hub: HubData): string[] {
+  const status = useBlossomHealthStore((s) => s.status)
+  const probe = useBlossomHealthStore((s) => s.probe)
+  const loadFailed = useHubStore((s) => s.blossomHealth[hub.dTag])
+  const serversKey = hub.blossomServers.map(norm).join(',')
+  useEffect(() => {
+    for (const s of serversKey.split(',').filter(Boolean)) probe(s)
+  }, [serversKey, probe])
+  const failedSet = new Set((loadFailed || []).map(norm))
+  return hub.blossomServers.filter((s) => status[norm(s)] === 'broken' || failedSet.has(norm(s)))
+}
 
-  if (!failed || failed.length === 0 || dismissed.has(hub.dTag)) return null
+/**
+ * Non-closable banner for the channel view: the hub has broken advertised Blossom servers. The button opens
+ * Hub Settings at the Network page (where the creator runs the Check & fix action in the notice), mirroring
+ * HubRelayHealthBanner.
+ */
+export function HubBlossomHealthBanner({ hub }: { hub: HubData }) {
+  const broken = useHubBrokenBlossoms(hub)
+  const openSettingsPage = useNavigationStore((s) => s.setPendingHubSettingsPage)
+
+  if (broken.length === 0) return null
+
+  return (
+    <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/8 border border-amber-500/20 text-xs shrink-0">
+      <AlertTriangle size={14} className="text-amber-400 shrink-0" />
+      <span className="flex-1 min-w-0 text-foreground">
+        {broken.length} of this hub's {hub.blossomServers.length} Blossom server{hub.blossomServers.length === 1 ? '' : 's'} {broken.length === 1 ? 'is' : 'are'} broken: members may load this hub's media and files slowly or not at all.
+      </span>
+      <button
+        onClick={() => openSettingsPage({ dTag: hub.dTag, page: 'network' })}
+        className="shrink-0 px-2.5 py-1 rounded-md bg-amber-500/15 text-amber-300 hover:bg-amber-500/25 font-medium transition-colors cursor-pointer"
+      >
+        Hub Settings
+      </button>
+    </div>
+  )
+}
+
+/**
+ * Non-closable notice for inside Hub Settings (Network, Blossom section): same warning, opens the repair
+ * modal. Renders nothing when there are no known-broken servers. Mirrors HubRelayHealthNotice.
+ */
+export function HubBlossomHealthNotice({ hub }: { hub: HubData }) {
+  const broken = useHubBrokenBlossoms(hub)
+  const [open, setOpen] = useState(false)
+
+  if (broken.length === 0) return null
 
   return (
     <>
-      <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/8 border border-amber-500/20 text-xs shrink-0">
-        <AlertTriangle size={14} className="text-amber-400 shrink-0" />
-        <span className="flex-1 min-w-0 text-foreground">
-          {failed.length} of this hub's {hub.blossomServers.length} Blossom server{hub.blossomServers.length === 1 ? '' : 's'} couldn't serve its files — members may load slowly or fail.
-        </span>
-        <button
-          onClick={() => setOpen(true)}
-          className="shrink-0 px-2.5 py-1 rounded-md bg-amber-500/15 text-amber-300 hover:bg-amber-500/25 font-medium transition-colors cursor-pointer"
-        >
-          Check &amp; fix
-        </button>
-        <button
-          onClick={() => { dismissed.add(hub.dTag); bump((n) => n + 1) }}
-          aria-label="Dismiss for now"
-          className="shrink-0 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors cursor-pointer"
-        >
-          <X size={13} />
-        </button>
+      <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-xs">
+        <AlertTriangle size={14} className="text-amber-400 shrink-0 mt-0.5" />
+        <div className="flex-1 min-w-0">
+          <p className="text-foreground">
+            Broken Blossom servers: <span className="font-mono text-amber-300">{broken.map(short).join(', ')}</span>.
+            They can't serve this hub's media and vital files, so members on them may load slowly or fail.
+            Test the servers below, pick ones that show <span className="text-emerald-400">working</span>, and publish.
+          </p>
+          <button
+            onClick={() => setOpen(true)}
+            className="mt-1.5 px-2.5 py-1 rounded-md bg-amber-500/15 text-amber-300 hover:bg-amber-500/25 font-medium transition-colors cursor-pointer"
+          >
+            Check &amp; fix servers
+          </button>
+        </div>
       </div>
-      {open && <HubBlossomHealthModal hub={hub} failed={failed} onClose={() => setOpen(false)} />}
+      {open && <HubBlossomHealthModal hub={hub} failed={broken} onClose={() => setOpen(false)} />}
     </>
   )
 }
