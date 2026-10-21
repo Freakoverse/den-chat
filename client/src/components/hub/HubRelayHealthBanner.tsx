@@ -21,6 +21,7 @@ import { type HubData } from '@/stores/hubStore'
 import { useUserStore } from '@/stores/userStore'
 import { useNavigationStore } from '@/stores/navigationStore'
 import { useRelayHealthStore } from '@/lib/nostr/relayHealthProbe'
+import { useTimedDismiss } from '@/hooks/useTimedDismiss'
 import {
   probeRelays, fetchHubProbeEvent, replacementRelayCandidates, republishHubWithRelays, type RelayCheck,
 } from '@/lib/hub/hubRelayHealth'
@@ -32,6 +33,9 @@ const norm = (u: string) => u.replace(/\/+$/, '')
 // enough working ones, so we surface the warning only when fewer than this many non-broken relays remain.
 const MIN_HEALTHY_RELAYS = 3
 const relaysAtRisk = (total: number, brokenCount: number) => brokenCount > 0 && total - brokenCount < MIN_HEALTHY_RELAYS
+
+// Dismissing the banner hides it for 6h; it re-shows on restart (map clears) or after 6h if still broken.
+const DISMISS_TTL = 6 * 60 * 60 * 1000
 
 /**
  * The hub's advertised relays that currently read 'broken' in the shared relay-health store, auto-probing
@@ -56,8 +60,9 @@ function useHubBrokenRelays(hub: HubData): string[] {
 export function HubRelayHealthBanner({ hub }: { hub: HubData }) {
   const broken = useHubBrokenRelays(hub)
   const openSettingsPage = useNavigationStore((s) => s.setPendingHubSettingsPage)
+  const { dismissed, dismiss } = useTimedDismiss(`relay:${hub.dTag}`, DISMISS_TTL)
 
-  if (!relaysAtRisk(hub.generalRelays.length, broken.length)) return null
+  if (dismissed || !relaysAtRisk(hub.generalRelays.length, broken.length)) return null
 
   return (
     <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/8 border border-amber-500/20 text-xs shrink-0">
@@ -70,6 +75,13 @@ export function HubRelayHealthBanner({ hub }: { hub: HubData }) {
         className="shrink-0 px-2.5 py-1 rounded-md bg-amber-500/15 text-amber-300 hover:bg-amber-500/25 font-medium transition-colors cursor-pointer"
       >
         Hub Settings
+      </button>
+      <button
+        onClick={dismiss}
+        aria-label="Dismiss for now"
+        className="shrink-0 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors cursor-pointer"
+      >
+        <X size={13} />
       </button>
     </div>
   )
