@@ -28,6 +28,11 @@ import {
 const short = (u: string) => u.replace(/^wss?:\/\//, '')
 const norm = (u: string) => u.replace(/\/+$/, '')
 
+// Only warn once redundancy is actually threatened: a broken relay is harmless while the hub still has
+// enough working ones, so we surface the warning only when fewer than this many non-broken relays remain.
+const MIN_HEALTHY_RELAYS = 3
+const relaysAtRisk = (total: number, brokenCount: number) => brokenCount > 0 && total - brokenCount < MIN_HEALTHY_RELAYS
+
 /**
  * The hub's advertised relays that currently read 'broken' in the shared relay-health store, auto-probing
  * them on mount. This is the single source for the banner/notice, so a broken relay surfaces the moment
@@ -52,7 +57,7 @@ export function HubRelayHealthBanner({ hub }: { hub: HubData }) {
   const broken = useHubBrokenRelays(hub)
   const openSettingsPage = useNavigationStore((s) => s.setPendingHubSettingsPage)
 
-  if (broken.length === 0) return null
+  if (!relaysAtRisk(hub.generalRelays.length, broken.length)) return null
 
   return (
     <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/8 border border-amber-500/20 text-xs shrink-0">
@@ -78,7 +83,7 @@ export function HubRelayHealthNotice({ hub }: { hub: HubData }) {
   const broken = useHubBrokenRelays(hub)
   const [open, setOpen] = useState(false)
 
-  if (broken.length === 0) return null
+  if (!relaysAtRisk(hub.generalRelays.length, broken.length)) return null
 
   return (
     <>

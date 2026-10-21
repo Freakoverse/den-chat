@@ -26,6 +26,11 @@ import {
 const short = (u: string) => u.replace(/^https?:\/\//, '')
 const norm = (u: string) => u.replace(/\/+$/, '')
 
+// Only warn once redundancy is actually threatened: a broken server is harmless while the hub still has
+// enough working ones, so we surface the warning only when fewer than this many non-broken servers remain.
+const MIN_HEALTHY_SERVERS = 3
+const serversAtRisk = (total: number, brokenCount: number) => brokenCount > 0 && total - brokenCount < MIN_HEALTHY_SERVERS
+
 /**
  * The hub's advertised Blossom servers that currently read 'broken' in the shared Blossom-health store
  * (auto-probing on mount), unioned with any that failed to serve the hub's real files during load. Single
@@ -52,7 +57,7 @@ export function HubBlossomHealthBanner({ hub }: { hub: HubData }) {
   const broken = useHubBrokenBlossoms(hub)
   const openSettingsPage = useNavigationStore((s) => s.setPendingHubSettingsPage)
 
-  if (broken.length === 0) return null
+  if (!serversAtRisk(hub.blossomServers.length, broken.length)) return null
 
   return (
     <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/8 border border-amber-500/20 text-xs shrink-0">
@@ -78,7 +83,7 @@ export function HubBlossomHealthNotice({ hub }: { hub: HubData }) {
   const broken = useHubBrokenBlossoms(hub)
   const [open, setOpen] = useState(false)
 
-  if (broken.length === 0) return null
+  if (!serversAtRisk(hub.blossomServers.length, broken.length)) return null
 
   return (
     <>
