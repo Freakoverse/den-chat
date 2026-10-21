@@ -54,9 +54,9 @@ export function getCachedImageUrl(url: string): string | undefined {
  * Useful for pre-warming the cache (e.g. when a profile is fetched).
  * For Blossom URLs, checks persistent cache before hitting the network.
  */
-export function preCacheImage(url: string): void {
+export function preCacheImage(url: string, maxBytes?: number): void {
   if (!isCacheableUrl(url) || blobCache.has(url) || pendingFetches.has(url) || failedUrls.has(url)) return
-  _doFetch(url)
+  _doFetch(url, maxBytes)
 }
 
 /**

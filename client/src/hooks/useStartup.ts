@@ -15,7 +15,7 @@ import { resetSignerGuard } from '@/lib/auth/signerGuard'
 import { discover } from '@/lib/auth/pc55'
 import { fetchReplaceable, fetchEvents, getRelays } from '@/lib/nostr/relay-pool'
 import { useRelayHealthStore } from '@/lib/nostr/relayHealthProbe'
-import { getCachedProfile, getCachedProfileCreatedAt, ensureProfile, subscribeProfile, seedProfile } from '@/hooks/useProfileCache'
+import { getCachedProfile, getCachedProfileCreatedAt, ensureProfile, subscribeProfile, seedProfile, hydrateProfilesFromDb } from '@/hooks/useProfileCache'
 import { KINDS } from '@/lib/crypto/constants'
 import { useVoiceStore } from '@/stores/voiceStore'
 import { useCalendarStore } from '@/stores/calendarStore'
@@ -68,6 +68,10 @@ export function useStartup() {
       }
     })
   }, [])
+
+  // Hydrate the shared profile cache (kind-0 names/avatars) from IndexedDB once at launch, so profiles
+  // render instantly on restart and still revalidate via stale-while-revalidate on access.
+  useEffect(() => { hydrateProfilesFromDb() }, [])
 
   // Probe client-relay health on app mount, even before login, so relay health is already known when a
   // new user picks their account's relays or someone creates a hub (those selections prefer 'working'

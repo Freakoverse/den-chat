@@ -14,6 +14,14 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { fetchEvents } from '@/lib/nostr/relay-pool'
 import { useDnnStore } from '@/stores/dnnStore'
 import { preCacheImage } from '@/lib/imageCache'
+import { getRenderLimit } from '@/lib/imageSizeGuard'
+import { putProfileDb, getAllProfilesDb } from '@/lib/cache/profileCacheDb'
+
+/** Avatar pre-fetch respects the Settings "Profile Pictures" render-size limit (0 = no auto-download). */
+function profilePictureMaxBytes(): number | undefined {
+  const mb = getRenderLimit('profile')
+  return mb > 0 ? mb * 1024 * 1024 : 0
+}
 
 export interface NostrProfile {
   name?: string
@@ -80,16 +88,42 @@ function setCachedEntry(pubkey: string, profile: NostrProfile, createdAt?: numbe
   // Preserve the last known created_at when a caller doesn't supply one (e.g. an external profile edit),
   // so the version-aware redundancy guard never loses the version stamp.
   const prevCreatedAt = profileCache.get(pubkey)?.createdAt
-  profileCache.set(pubkey, { profile, fetchedAt: Date.now(), createdAt: createdAt ?? prevCreatedAt })
+  const fetchedAt = Date.now()
+  const resolvedCreatedAt = createdAt ?? prevCreatedAt
+  profileCache.set(pubkey, { profile, fetchedAt, createdAt: resolvedCreatedAt })
   notifyListeners(pubkey)
-  // Pre-cache avatar image as blob URL for instant rendering
+  // Durable copy so names/avatars render instantly on restart (metadata only; images stay under the
+  // image cache's size limits). Fire-and-forget.
+  putProfileDb({ pubkey, profile, createdAt: resolvedCreatedAt, fetchedAt })
+  // Pre-cache avatar image as blob URL for instant rendering, under the Settings profile-picture size limit.
   if (profile.picture) {
-    preCacheImage(profile.picture)
+    const maxB = profilePictureMaxBytes()
+    if (maxB !== 0) preCacheImage(profile.picture, maxB)
   }
   // Trigger DNN verification if nip05 is present
   if (profile.nip05) {
     useDnnStore.getState().verifyPubkey(pubkey, profile.nip05)
   }
+}
+
+/**
+ * Hydrate the in-memory profile cache from IndexedDB at launch. Entries keep their original fetchedAt, so
+ * anything past the TTL still revalidates on first access (stale-while-revalidate), and fresh ones render
+ * instantly without a relay round-trip. Won't clobber an already-live entry. Metadata only — images are
+ * fetched on render under the size limits.
+ */
+let hydrated = false
+export async function hydrateProfilesFromDb(): Promise<void> {
+  if (hydrated) return
+  hydrated = true
+  try {
+    const rows = await getAllProfilesDb()
+    for (const row of rows) {
+      if (!row?.pubkey || profileCache.has(row.pubkey)) continue
+      profileCache.set(row.pubkey, { profile: row.profile || {}, fetchedAt: row.fetchedAt || 0, createdAt: row.createdAt })
+      notifyListeners(row.pubkey)
+    }
+  } catch { /* ignore */ }
 }
 
 /** ── Batched profile fetching ──
@@ -138,7 +172,13 @@ function flushProfileBatch() {
           try {
             const profile: NostrProfile = JSON.parse(event.content)
             emptyRetryCount.delete(pubkey) // got it — clear any retry state
-            setCachedEntry(pubkey, profile, event.created_at)
+            // Version guard: never let a stale relay copy overwrite a newer one we already hold.
+            const prev = profileCache.get(pubkey)
+            if (prev && !prev.empty && prev.createdAt != null && event.created_at < prev.createdAt) {
+              profileCache.set(pubkey, { ...prev, fetchedAt: Date.now() }) // still mark fresh so SWR settles
+            } else {
+              setCachedEntry(pubkey, profile, event.created_at)
+            }
           } catch { /* ignore parse errors */ }
         } else {
           // No event found within the query window — probably a transient relay
@@ -276,7 +316,10 @@ export function seedProfile(pubkey: string, profile: NostrProfile): void {
   if (profileCache.has(pubkey)) return
   profileCache.set(pubkey, { profile, fetchedAt: 0 })
   notifyListeners(pubkey)
-  if (profile.picture) preCacheImage(profile.picture)
+  if (profile.picture) {
+    const maxB = profilePictureMaxBytes()
+    if (maxB !== 0) preCacheImage(profile.picture, maxB)
+  }
 }
 
 /** Subscribe to cache updates for `pubkey`; returns an unsubscribe fn. */
