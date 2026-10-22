@@ -41,6 +41,36 @@ function downloadMediaUrl(url: string, fallbackName?: string) {
     })
 }
 
+/** Re-encode a blob to PNG via a canvas (clipboard image write needs PNG in most webviews). */
+async function toPngBlob(blob: Blob): Promise<Blob> {
+  if (blob.type === 'image/png') return blob
+  const bmp = await createImageBitmap(blob)
+  try {
+    const canvas = document.createElement('canvas')
+    canvas.width = bmp.width
+    canvas.height = bmp.height
+    const ctx = canvas.getContext('2d')
+    if (!ctx) throw new Error('no 2d context')
+    ctx.drawImage(bmp, 0, 0)
+    return await new Promise<Blob>((res, rej) => canvas.toBlob((b) => (b ? res(b) : rej(new Error('toBlob failed'))), 'image/png'))
+  } finally {
+    bmp.close()
+  }
+}
+
+/** Copy the actual image FILE to the clipboard (so it can be pasted into other apps). Falls back to copying
+ *  the URL text if the image can't be fetched (CORS) or the clipboard rejects the write. Animated images
+ *  are flattened to a single PNG frame, which is what a static clipboard image is anyway. */
+async function copyImageFile(url: string): Promise<void> {
+  try {
+    const blob = await fetch(url).then((r) => r.blob())
+    const png = await toPngBlob(blob)
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })])
+  } catch {
+    try { await navigator.clipboard.writeText(url) } catch { /* nothing more we can do */ }
+  }
+}
+
 interface MenuItem {
   label: string
   icon: ReactNode
@@ -289,6 +319,14 @@ export function ContextMenuProvider({ children }: { children: ReactNode }) {
           icon: <Download size={14} />,
           action: () => {
             downloadMediaUrl(imgSrc)
+            close()
+          },
+        })
+        items.push({
+          label: 'Copy Image',
+          icon: <Copy size={14} />,
+          action: () => {
+            copyImageFile(imgSrc)
             close()
           },
         })
