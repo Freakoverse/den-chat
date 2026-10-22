@@ -6,7 +6,7 @@
  * Always: banner, avatar, name, npub (copy), bio, nip-05, website, lightning
  */
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { nowSeconds } from '@/lib/time/clockOffset'
 import { createPortal } from 'react-dom'
 import { useEscToClose } from '@/hooks/useEscToClose'
@@ -21,12 +21,16 @@ import { useNavigationStore } from '@/stores/navigationStore'
 import { useDMStore } from '@/stores/dmStore'
 import { useDM04Store } from '@/stores/dm04Store'
 import { useSocialStore } from '@/stores/socialStore'
+import { fetchEventsWide } from '@/lib/nostr/readRelays'
+import { RichContent } from '@/components/social/RichContent'
+import { ArticleCardItem, dedupeAndFilter, type ArticleCard } from '@/components/social/LongFormFeedPage'
 import { useHubStore } from '@/stores/hubStore'
 import {
   X, Copy, Check, Pencil, UserPlus, UserMinus, ExternalLink,
   MoreVertical, ShieldBan, ShieldCheck, MessageCircle,
   Globe, Zap, AtSign, Camera, ImageIcon, Loader2, XCircle, AlertTriangle,
   Flag, BadgeCheck, RotateCw, Users, TreePine, HandCoins, Code,
+  Plus, FileText, Package, User,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
@@ -42,7 +46,7 @@ import { ProfilePacksSection } from '@/components/hub/ProfilePacksSection'
 import { historyReadFailure } from '@/lib/hub/historyGuard'
 import { publishPersonal, getPublishRelays } from '@/stores/postingBehaviourStore'
 import { signWithSigner } from '@/lib/nostr/events'
-import { nip19 } from 'nostr-tools'
+import { nip19, type Event } from 'nostr-tools'
 import { LinksViewerModal, LinksEditorModal } from '@/components/hub/LinksModal'
 import { PaytoModal } from '@/components/hub/PaytoModal'
 import { extractPaymentTargets } from '@/lib/nostr/payto'
@@ -158,6 +162,8 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
   const [profile, setProfileData] = useState<ProfileData>(EMPTY_PROFILE)
   const [editProfile, setEditProfile] = useState<ProfileData>(EMPTY_PROFILE)
   const [editing, setEditing] = useState(false)
+  // View-mode tabs: About / Short posts (kind 1) / Long posts (kind 30023) / Packs.
+  const [profileTab, setProfileTab] = useState<'about' | 'short' | 'long' | 'packs'>('about')
   // NIP-38 general status (kind 30315, d="general")
   const [status, setStatus] = useState('')
   const [editingStatus, setEditingStatus] = useState(false)
@@ -305,6 +311,18 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
   }, [showDropdown])
+
+  // Reset to the About tab whenever the modal opens or switches to a different person.
+  useEffect(() => { if (open) setProfileTab('about') }, [open, displayPubkey])
+
+  // Navigate into the Social feature (and close this modal) to view a note thread, an article, or the
+  // person's full social profile where they can post.
+  const goSocial = useCallback(() => { useNavigationStore.getState().setActivePage('social'); onClose() }, [onClose])
+  const openThread = useCallback((id: string) => { useSocialStore.getState().setActiveThread(id); goSocial() }, [goSocial])
+  const openArticle = useCallback((naddr: string) => { useSocialStore.getState().setActiveArticle(naddr); goSocial() }, [goSocial])
+  // Own-profile write shortcuts: the social feed holds the note composer, and long-form has its own write page.
+  const openFeedCompose = useCallback(() => { useSocialStore.getState().setActivePage('feed'); goSocial() }, [goSocial])
+  const openArticleCompose = useCallback(() => { useSocialStore.getState().setActivePage('longform-write'); goSocial() }, [goSocial])
 
   // Fetch profile on open
   useEffect(() => {
@@ -2150,77 +2168,101 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
                 {copied ? <Check size={11} className="text-emerald-400" /> : <Copy size={11} className="opacity-60 group-hover:opacity-100 transition-opacity" />}
               </button>
 
-              {/* Following button */}
-              {followingLoaded && followingPubkeys.length > 0 && (
-                <button
-                  onClick={() => setShowFollowingList(true)}
-                  className="flex items-center gap-1.5 px-2.5 py-1 mb-2 rounded-full bg-secondary/60 hover:bg-secondary text-xs text-muted-foreground hover:text-foreground transition-all cursor-pointer group"
-                >
-                  <Users size={11} className="opacity-60 group-hover:opacity-100 transition-opacity" />
-                  <span className="font-medium">{followingPubkeys.length}</span>
-                  <span>Following</span>
-                </button>
-              )}
+              {/* ── Tabs: About / Posts (kind 1) / Articles (kind 30023) / Packs ── */}
+              <div className="flex items-center border-b border-border mt-1 mb-3">
+                {([['about', 'About', User], ['short', 'Posts', MessageCircle], ['long', 'Articles', FileText], ['packs', 'Packs', Package]] as const).map(([id, label, Icon]) => (
+                  <button
+                    key={id}
+                    onClick={() => setProfileTab(id)}
+                    className={`relative flex items-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors cursor-pointer ${profileTab === id ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                  >
+                    <Icon size={13} /> {label}
+                    {profileTab === id && <span className="absolute bottom-0 left-2 right-2 h-0.5 rounded-full bg-primary" />}
+                  </button>
+                ))}
+              </div>
 
-              {/* Bio */}
-              {profile.about && (
-                <p className="text-sm text-foreground/85 whitespace-pre-wrap break-words leading-relaxed mb-2">{profile.about}</p>
-              )}
-
-              {/* Link tree + Payment targets — side by side. Editing each lives inside its own modal, so
-                  there's no separate edit pencil here. */}
-              {(hasLinks || hasPayto || isSelf) && (
-                <div className="flex items-center gap-1.5 mb-2">
-                  {(hasLinks || isSelf) && (
+              {profileTab === 'about' && (
+                <div>
+                  {/* Following button */}
+                  {followingLoaded && followingPubkeys.length > 0 && (
                     <button
-                      onClick={() => setShowLinksViewer(true)}
-                      className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-secondary/60 hover:bg-secondary border border-border text-xs font-medium text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                      onClick={() => setShowFollowingList(true)}
+                      className="flex items-center gap-1.5 px-2.5 py-1 mb-2 rounded-full bg-secondary/60 hover:bg-secondary text-xs text-muted-foreground hover:text-foreground transition-all cursor-pointer group"
                     >
-                      <TreePine size={13} /> Link tree
+                      <Users size={11} className="opacity-60 group-hover:opacity-100 transition-opacity" />
+                      <span className="font-medium">{followingPubkeys.length}</span>
+                      <span>Following</span>
                     </button>
                   )}
-                  {(hasPayto || isSelf) && (
-                    <button
-                      onClick={() => setShowPayto(true)}
-                      className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-secondary/60 hover:bg-secondary border border-border text-xs font-medium text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-                    >
-                      <HandCoins size={13} /> Payment targets
-                    </button>
+
+                  {/* Bio */}
+                  {profile.about && (
+                    <p className="text-sm text-foreground/85 whitespace-pre-wrap break-words leading-relaxed mb-2">{profile.about}</p>
+                  )}
+
+                  {/* Link tree + Payment targets — side by side. Editing each lives inside its own modal, so
+                      there's no separate edit pencil here. */}
+                  {(hasLinks || hasPayto || isSelf) && (
+                    <div className="flex items-center gap-1.5 mb-2">
+                      {(hasLinks || isSelf) && (
+                        <button
+                          onClick={() => setShowLinksViewer(true)}
+                          className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-secondary/60 hover:bg-secondary border border-border text-xs font-medium text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                        >
+                          <TreePine size={13} /> Link tree
+                        </button>
+                      )}
+                      {(hasPayto || isSelf) && (
+                        <button
+                          onClick={() => setShowPayto(true)}
+                          className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-secondary/60 hover:bg-secondary border border-border text-xs font-medium text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                        >
+                          <HandCoins size={13} /> Payment targets
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Metadata cards */}
+                  {(profile.nip05 || profile.website || profile.lud16) && (
+                    <div className="rounded-xl bg-secondary/30 border border-border/50 overflow-hidden divide-y divide-border/50">
+                      {profile.nip05 && (
+                        <DnnNip05Row pubkey={displayPubkey} nip05={profile.nip05} />
+                      )}
+                      {profile.website && (
+                        <MetadataRow icon={<Globe size={14} />} label="Website" value={profile.website} isLink />
+                      )}
+                      {profile.lud16 && (
+                        <MetadataRow icon={<Zap size={14} />} label="Lightning" value={profile.lud16} />
+                      )}
+                    </div>
+                  )}
+
+                  {/* ── Roles (owner gets an Edit button → Hub Settings › Members) ── */}
+                  {hubContext && displayPubkey && (
+                    <RoleAssignmentPanel
+                      hubDTag={hubContext.dTag}
+                      memberPubkey={displayPubkey}
+                      canEdit={!!isHubCreator}
+                      onEdit={() => {
+                        useNavigationStore.getState().setPendingHubMemberRoles({ dTag: hubContext.dTag, pubkey: displayPubkey })
+                        onClose()
+                      }}
+                    />
                   )}
                 </div>
               )}
 
-              {/* Metadata cards */}
-              {(profile.nip05 || profile.website || profile.lud16) && (
-                <div className="rounded-xl bg-secondary/30 border border-border/50 overflow-hidden divide-y divide-border/50">
-                  {profile.nip05 && (
-                    <DnnNip05Row pubkey={displayPubkey} nip05={profile.nip05} />
-                  )}
-                  {profile.website && (
-                    <MetadataRow icon={<Globe size={14} />} label="Website" value={profile.website} isLink />
-                  )}
-                  {profile.lud16 && (
-                    <MetadataRow icon={<Zap size={14} />} label="Lightning" value={profile.lud16} />
-                  )}
-                </div>
+              {profileTab === 'short' && displayPubkey && (
+                <ShortPostsTab pubkey={displayPubkey} isSelf={isSelf} onOpenThread={openThread} onWrite={openFeedCompose} />
               )}
 
-              {/* ── Roles (owner gets an Edit button → Hub Settings › Members) ── */}
-              {hubContext && displayPubkey && (
-                <RoleAssignmentPanel
-                  hubDTag={hubContext.dTag}
-                  memberPubkey={displayPubkey}
-                  canEdit={!!isHubCreator}
-                  onEdit={() => {
-                    useNavigationStore.getState().setPendingHubMemberRoles({ dTag: hubContext.dTag, pubkey: displayPubkey })
-                    onClose()
-                  }}
-                />
+              {profileTab === 'long' && displayPubkey && (
+                <LongPostsTab pubkey={displayPubkey} isSelf={isSelf} onOpenArticle={openArticle} onOpenProfile={(pk) => { useSocialStore.getState().setActiveProfile(pk); goSocial() }} onWrite={openArticleCompose} />
               )}
 
-              {/* ── Packs (emoji / sticker / GIF sets) — every profile, fetched on open like the profile itself.
-                    Sits under Roles when opened from a hub; last section everywhere else. ── */}
-              {displayPubkey && (
+              {profileTab === 'packs' && displayPubkey && (
                 <ProfilePacksSection pubkey={displayPubkey} open={open} />
               )}
             </div>
@@ -2538,6 +2580,142 @@ function MetadataRow({ icon, label, value, isLink }: { icon: React.ReactNode; la
       ) : (
         <span className="text-foreground truncate font-medium text-sm">{value}</span>
       )}
+    </div>
+  )
+}
+
+/** Compact relative time for post previews. */
+function timeAgo(createdAt: number): string {
+  const s = Math.max(0, Math.floor(Date.now() / 1000) - createdAt)
+  if (s < 60) return 'just now'
+  const m = Math.floor(s / 60); if (m < 60) return `${m}m ago`
+  const h = Math.floor(m / 60); if (h < 24) return `${h}h ago`
+  const d = Math.floor(h / 24); if (d < 30) return `${d}d ago`
+  return new Date(createdAt * 1000).toLocaleDateString()
+}
+
+/** Read-only preview list of a user's kind-1 notes; a note opens its thread in Social. */
+function ShortPostsTab({ pubkey, isSelf, onOpenThread, onWrite }: { pubkey: string; isSelf: boolean; onOpenThread: (id: string) => void; onWrite: () => void }) {
+  const PAGE = 20
+  const [notes, setNotes] = useState<Event[]>([])
+  const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [exhausted, setExhausted] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true); setNotes([]); setExhausted(false)
+    fetchEventsWide({ kinds: [1], authors: [pubkey], limit: PAGE }).then((events) => {
+      if (cancelled) return
+      const sorted = events.filter((e) => e.kind === 1).sort((a, b) => b.created_at - a.created_at)
+      setNotes(sorted)
+      setExhausted(sorted.length < PAGE)
+      setLoading(false)
+    }).catch(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [pubkey])
+
+  const loadMore = async () => {
+    if (loadingMore || notes.length === 0) return
+    setLoadingMore(true)
+    try {
+      const oldest = notes[notes.length - 1]
+      const events = await fetchEventsWide({ kinds: [1], authors: [pubkey], until: oldest.created_at, limit: PAGE })
+      const existing = new Set(notes.map((n) => n.id))
+      const fresh = events.filter((e) => e.kind === 1 && !existing.has(e.id)).sort((a, b) => b.created_at - a.created_at)
+      setNotes((prev) => [...prev, ...fresh])
+      if (fresh.length === 0) setExhausted(true)
+    } catch { /* ignore */ } finally { setLoadingMore(false) }
+  }
+
+  if (loading) return <div className="flex items-center justify-center py-10 text-muted-foreground"><Loader2 size={18} className="animate-spin" /></div>
+
+  if (notes.length === 0) {
+    return (
+      <div className="flex flex-col items-center text-center py-10 gap-2">
+        <MessageCircle size={24} className="text-muted-foreground/50" />
+        <p className="text-sm text-muted-foreground">{isSelf ? "You haven't posted any notes yet." : 'No posts yet.'}</p>
+        {isSelf && (
+          <button onClick={onWrite} className="mt-1 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 cursor-pointer">
+            <Plus size={13} /> Write a post
+          </button>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-2">
+      {isSelf && (
+        <button onClick={onWrite} className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-dashed border-border text-xs font-medium text-muted-foreground hover:text-foreground hover:border-solid transition-colors cursor-pointer">
+          <Plus size={13} /> Write a post
+        </button>
+      )}
+      {notes.map((note) => (
+        <div
+          key={note.id}
+          role="button"
+          onClick={() => onOpenThread(note.id)}
+          className="rounded-lg border border-border bg-secondary/30 hover:bg-secondary/50 p-3 cursor-pointer transition-colors"
+        >
+          <div className="text-[10px] text-muted-foreground mb-1">{timeAgo(note.created_at)}</div>
+          {/* pointer-events-none: the whole card opens the thread; inner links/media aren't interactive in the preview */}
+          <div className="text-sm text-foreground/90 break-words line-clamp-6 pointer-events-none">
+            <RichContent content={note.content} disableEmbeds />
+          </div>
+        </div>
+      ))}
+      {!exhausted && (
+        <button onClick={loadMore} disabled={loadingMore} className="w-full py-2 rounded-lg text-xs text-muted-foreground hover:text-foreground hover:bg-secondary/40 transition-colors cursor-pointer disabled:opacity-50">
+          {loadingMore ? 'Loading…' : 'Load more'}
+        </button>
+      )}
+    </div>
+  )
+}
+
+/** Read-only list of a user's long-form (kind 30023) articles; an article opens in the Social reader. */
+function LongPostsTab({ pubkey, isSelf, onOpenArticle, onOpenProfile, onWrite }: { pubkey: string; isSelf: boolean; onOpenArticle: (naddr: string) => void; onOpenProfile: (pk: string) => void; onWrite: () => void }) {
+  const [articles, setArticles] = useState<ArticleCard[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true); setArticles([])
+    fetchEventsWide({ kinds: [30023], authors: [pubkey], limit: 100 }).then((events) => {
+      if (cancelled) return
+      setArticles(dedupeAndFilter(events))
+      setLoading(false)
+    }).catch(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [pubkey])
+
+  if (loading) return <div className="flex items-center justify-center py-10 text-muted-foreground"><Loader2 size={18} className="animate-spin" /></div>
+
+  if (articles.length === 0) {
+    return (
+      <div className="flex flex-col items-center text-center py-10 gap-2">
+        <FileText size={24} className="text-muted-foreground/50" />
+        <p className="text-sm text-muted-foreground">{isSelf ? "You haven't written any articles yet." : 'No articles yet.'}</p>
+        {isSelf && (
+          <button onClick={onWrite} className="mt-1 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 cursor-pointer">
+            <Plus size={13} /> Write an article
+          </button>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-2">
+      {isSelf && (
+        <button onClick={onWrite} className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-dashed border-border text-xs font-medium text-muted-foreground hover:text-foreground hover:border-solid transition-colors cursor-pointer">
+          <Plus size={13} /> Write an article
+        </button>
+      )}
+      {articles.map((article) => (
+        <ArticleCardItem key={`${article.event.pubkey}:${article.dTag}`} article={article} onOpenArticle={onOpenArticle} onOpenProfile={onOpenProfile} />
+      ))}
     </div>
   )
 }
