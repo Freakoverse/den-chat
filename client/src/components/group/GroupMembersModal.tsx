@@ -57,7 +57,7 @@ export function GroupMembersModal({ dTag, onClose }: { dTag: string; isCreator?:
     setResolving(true); setError(null)
     try {
       const pk = await resolveIdentifier(customInput)
-      if (!pk) { setError('Could not resolve that. Use an npub, nprofile, hex pubkey, NIP-05 address, or DNN ID.'); return }
+      if (!pk) { setError('Could not resolve that. Use an npub, nprofile, hex pubkey, domain handle, or DNN ID.'); return }
       if (pk === myPubkey) { setError("That's you."); return }
       if (memberSet.has(pk)) { setError('Already a member.'); return }
       if (!selected.includes(pk)) toggle(pk)
@@ -142,7 +142,7 @@ export function GroupMembersModal({ dTag, onClose }: { dTag: string; isCreator?:
             </div>
           )}
           <div className="flex items-center gap-2">
-            <input value={customInput} onChange={(e) => setCustomInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') addCustom() }} placeholder="npub, NIP-05 address, or DNN ID" className={field} />
+            <input value={customInput} onChange={(e) => setCustomInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') addCustom() }} placeholder="npub, domain handle, or DNN ID" className={field} />
             <button onClick={addCustom} disabled={resolving || !customInput.trim()} className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary/60 cursor-pointer disabled:opacity-50">
               {resolving ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
             </button>

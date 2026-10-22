@@ -1996,7 +1996,7 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
                     rows={3}
                   />
                 </div>
-                <Field label="NIP-05" value={editProfile.nip05} onChange={(v) => setEditProfile({ ...editProfile, nip05: v })} placeholder="user@domain.com" />
+                <Field label="Domain handle" value={editProfile.nip05} onChange={(v) => setEditProfile({ ...editProfile, nip05: v })} placeholder="user@domain.com" />
                 <Field label="Website" value={editProfile.website} onChange={(v) => setEditProfile({ ...editProfile, website: v })} placeholder="https://..." />
                 <Field label="Lightning Address" value={editProfile.lud16} onChange={(v) => setEditProfile({ ...editProfile, lud16: v })} placeholder="user@wallet.com" />
               </div>
@@ -2512,7 +2512,7 @@ function DnnNip05Row({ pubkey, nip05 }: { pubkey: string | null; nip05: string }
     return (
       <div className="flex items-center gap-3 px-3.5 py-2.5 text-sm">
       <AtSign size={14} className="text-muted-foreground shrink-0" />
-        <span className="text-muted-foreground text-xs w-14 shrink-0">NIP-05</span>
+        <span className="text-muted-foreground text-xs w-24 shrink-0">Domain handle</span>
         <span className="text-primary truncate font-medium text-sm flex items-center gap-1">
           {formatDnnId(nip05)}
           <BadgeCheck size={12} className="text-primary shrink-0" />
@@ -2522,7 +2522,7 @@ function DnnNip05Row({ pubkey, nip05 }: { pubkey: string | null; nip05: string }
   }
 
   return (
-    <MetadataRow icon={<AtSign size={14} />} label="NIP-05" value={nip05} />
+    <MetadataRow icon={<AtSign size={14} />} label="Domain handle" value={nip05} />
   )
 }
 
@@ -2530,7 +2530,7 @@ function MetadataRow({ icon, label, value, isLink }: { icon: React.ReactNode; la
   return (
     <div className="flex items-center gap-3 px-3.5 py-2.5 text-sm">
       <span className="text-muted-foreground shrink-0">{icon}</span>
-      <span className="text-muted-foreground text-xs w-14 shrink-0">{label}</span>
+      <span className="text-muted-foreground text-xs w-24 shrink-0">{label}</span>
       {isLink ? (
         <a href={value.startsWith('http') ? value : `https://${value}`} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline truncate text-sm">
           {value}

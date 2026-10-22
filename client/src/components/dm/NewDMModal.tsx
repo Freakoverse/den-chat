@@ -232,7 +232,7 @@ export function NewDMModal({ open, onClose, onStartConversation }: Props) {
   const isLoading = tab === 'following' ? loading : publicSearching
   const emptyMessage = tab === 'following'
     ? (search ? 'No follows match your search.' : 'No follows yet.')
-    : (search ? (publicSearching ? '' : 'No users found.') : 'Search by npub or NIP-05 (user@domain.com)')
+    : (search ? (publicSearching ? '' : 'No users found.') : 'Search by npub or domain handle (user@domain.com)')
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center px-2 bg-black/60" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
@@ -273,8 +273,8 @@ export function NewDMModal({ open, onClose, onStartConversation }: Props) {
             <input
               type="text"
               placeholder={tab === 'following'
-                ? 'Search by name, npub, or NIP-05...'
-                : 'Paste npub or NIP-05 (user@domain.com)...'
+                ? 'Search by name, npub, or domain handle...'
+                : 'Paste npub or domain handle (user@domain.com)...'
               }
               value={search}
               onChange={(e) => setSearch(e.target.value)}
