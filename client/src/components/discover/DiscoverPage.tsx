@@ -2326,6 +2326,56 @@ export function DiscoverPage() {
             </div>
           )}
         </div>
+
+        {/* Warning dialogs — absolute so they cover only the Discover panel, not the whole app window. */}
+        {showAllOffConfirm && (
+          <div className="absolute inset-0 z-50 flex items-center justify-center px-2" onClick={() => setShowAllOffConfirm(false)}>
+            <div className="absolute inset-0 bg-black/60" />
+            <div className="relative z-10 w-full max-w-sm rounded-xl border border-border bg-background shadow-2xl p-6" onClick={(e) => e.stopPropagation()}>
+              <div className="flex flex-col items-center text-center gap-3">
+                <div className="w-12 h-12 rounded-full bg-amber-500/10 flex items-center justify-center"><AlertTriangle size={24} className="text-amber-500" /></div>
+                <h3 className="text-base font-semibold text-foreground">See every hub on the network?</h3>
+                <p className="text-sm text-muted-foreground leading-relaxed">DEN is a client for a permissionless, decentralized network, like a web browser. Hubs are created and hosted by their owners on relays and storage DEN does not run or control. This shows every discoverable hub with no curation, including content no one has vouched for: hubs that are not marked NSFW but should be, and hubs that may be illegal, scams, or spam. You hold responsibility for what you see. Turn it off any time to go back to recommendations.</p>
+                <div className="flex items-center gap-2 w-full mt-1">
+                  <button onClick={() => setShowAllOffConfirm(false)} className="flex-1 px-4 py-2 rounded-lg text-sm font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/50 cursor-pointer">Cancel</button>
+                  <button onClick={confirmAllOff} className="flex-1 px-4 py-2 rounded-lg text-sm font-medium bg-amber-500 text-white hover:bg-amber-600 cursor-pointer">I understand</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+        {showNsfwConfirm && (
+          <div className="absolute inset-0 z-50 flex items-center justify-center px-2" onClick={() => setShowNsfwConfirm(false)}>
+            <div className="absolute inset-0 bg-black/60" />
+            <div className="relative z-10 w-full max-w-sm rounded-xl border border-border bg-background shadow-2xl p-6" onClick={(e) => e.stopPropagation()}>
+              <div className="flex flex-col items-center text-center gap-3">
+                <div className="w-12 h-12 rounded-full bg-red-500/10 flex items-center justify-center"><AlertTriangle size={24} className="text-red-500" /></div>
+                <h3 className="text-base font-semibold text-foreground">Show NSFW hubs?</h3>
+                <p className="text-sm text-muted-foreground leading-relaxed">You already confirmed you are an adult when you started using DEN Chat, so this is just a reminder and a reconfirmation: you are an adult and you want to see hubs marked as NSFW. Turn it off any time.</p>
+                <div className="flex items-center gap-2 w-full mt-1">
+                  <button onClick={() => setShowNsfwConfirm(false)} className="flex-1 px-4 py-2 rounded-lg text-sm font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/50 cursor-pointer">Cancel</button>
+                  <button onClick={confirmNsfw} className="flex-1 px-4 py-2 rounded-lg text-sm font-medium bg-red-500 text-white hover:bg-red-600 cursor-pointer">I am an adult</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+        {showUnblurConfirm && (
+          <div className="absolute inset-0 z-50 flex items-center justify-center px-2" onClick={() => setShowUnblurConfirm(false)}>
+            <div className="absolute inset-0 bg-black/60" />
+            <div className="relative z-10 w-full max-w-sm rounded-xl border border-border bg-background shadow-2xl p-6" onClick={(e) => e.stopPropagation()}>
+              <div className="flex flex-col items-center text-center gap-3">
+                <div className="w-12 h-12 rounded-full bg-amber-500/10 flex items-center justify-center"><AlertTriangle size={24} className="text-amber-500" /></div>
+                <h3 className="text-base font-semibold text-foreground">Unblur uncurated media?</h3>
+                <p className="text-sm text-muted-foreground leading-relaxed">Recommended hubs already show sharp. This also unblurs banners and icons in "See everything", media from hubs no one has vouched for, which may be explicit or disturbing. You hold responsibility for what you see. Turn it off any time.</p>
+                <div className="flex items-center gap-2 w-full mt-1">
+                  <button onClick={() => setShowUnblurConfirm(false)} className="flex-1 px-4 py-2 rounded-lg text-sm font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/50 cursor-pointer">Cancel</button>
+                  <button onClick={confirmUnblur} className="flex-1 px-4 py-2 rounded-lg text-sm font-medium bg-amber-500 text-white hover:bg-amber-600 cursor-pointer">I understand</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Filter Modal */}
@@ -2357,54 +2407,6 @@ export function DiscoverPage() {
       <ManageRecommendationsModal open={showManageRecs} onClose={() => setShowManageRecs(false)} />
       <TrustedSourcesModal open={showSourceModal} onClose={() => setShowSourceModal(false)} />
       <IllegalHubGuideModal open={showGuide} onClose={() => setShowGuide(false)} />
-      {showAllOffConfirm && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center px-2" onClick={() => setShowAllOffConfirm(false)}>
-          <div className="absolute inset-0 bg-black/60" />
-          <div className="relative z-10 w-full max-w-sm rounded-xl border border-border bg-background shadow-2xl p-6" onClick={(e) => e.stopPropagation()}>
-            <div className="flex flex-col items-center text-center gap-3">
-              <div className="w-12 h-12 rounded-full bg-amber-500/10 flex items-center justify-center"><AlertTriangle size={24} className="text-amber-500" /></div>
-              <h3 className="text-base font-semibold text-foreground">See every hub on the network?</h3>
-              <p className="text-sm text-muted-foreground leading-relaxed">DEN is a client for a permissionless, decentralized network, like a web browser. Hubs are created and hosted by their owners on relays and storage DEN does not run or control. This shows every discoverable hub with no curation, including content no one has vouched for: hubs that are not marked NSFW but should be, and hubs that may be illegal, scams, or spam. You hold responsibility for what you see. Turn it off any time to go back to recommendations.</p>
-              <div className="flex items-center gap-2 w-full mt-1">
-                <button onClick={() => setShowAllOffConfirm(false)} className="flex-1 px-4 py-2 rounded-lg text-sm font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/50 cursor-pointer">Cancel</button>
-                <button onClick={confirmAllOff} className="flex-1 px-4 py-2 rounded-lg text-sm font-medium bg-amber-500 text-white hover:bg-amber-600 cursor-pointer">I understand</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-      {showNsfwConfirm && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center px-2" onClick={() => setShowNsfwConfirm(false)}>
-          <div className="absolute inset-0 bg-black/60" />
-          <div className="relative z-10 w-full max-w-sm rounded-xl border border-border bg-background shadow-2xl p-6" onClick={(e) => e.stopPropagation()}>
-            <div className="flex flex-col items-center text-center gap-3">
-              <div className="w-12 h-12 rounded-full bg-red-500/10 flex items-center justify-center"><AlertTriangle size={24} className="text-red-500" /></div>
-              <h3 className="text-base font-semibold text-foreground">Show NSFW hubs?</h3>
-              <p className="text-sm text-muted-foreground leading-relaxed">You already confirmed you are an adult when you started using DEN Chat, so this is just a reminder and a reconfirmation: you are an adult and you want to see hubs marked as NSFW. Turn it off any time.</p>
-              <div className="flex items-center gap-2 w-full mt-1">
-                <button onClick={() => setShowNsfwConfirm(false)} className="flex-1 px-4 py-2 rounded-lg text-sm font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/50 cursor-pointer">Cancel</button>
-                <button onClick={confirmNsfw} className="flex-1 px-4 py-2 rounded-lg text-sm font-medium bg-red-500 text-white hover:bg-red-600 cursor-pointer">I am an adult</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-      {showUnblurConfirm && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center px-2" onClick={() => setShowUnblurConfirm(false)}>
-          <div className="absolute inset-0 bg-black/60" />
-          <div className="relative z-10 w-full max-w-sm rounded-xl border border-border bg-background shadow-2xl p-6" onClick={(e) => e.stopPropagation()}>
-            <div className="flex flex-col items-center text-center gap-3">
-              <div className="w-12 h-12 rounded-full bg-amber-500/10 flex items-center justify-center"><AlertTriangle size={24} className="text-amber-500" /></div>
-              <h3 className="text-base font-semibold text-foreground">Unblur uncurated media?</h3>
-              <p className="text-sm text-muted-foreground leading-relaxed">Recommended hubs already show sharp. This also unblurs banners and icons in "See everything", media from hubs no one has vouched for, which may be explicit or disturbing. You hold responsibility for what you see. Turn it off any time.</p>
-              <div className="flex items-center gap-2 w-full mt-1">
-                <button onClick={() => setShowUnblurConfirm(false)} className="flex-1 px-4 py-2 rounded-lg text-sm font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/50 cursor-pointer">Cancel</button>
-                <button onClick={confirmUnblur} className="flex-1 px-4 py-2 rounded-lg text-sm font-medium bg-amber-500 text-white hover:bg-amber-600 cursor-pointer">I understand</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </>
   )
 }
