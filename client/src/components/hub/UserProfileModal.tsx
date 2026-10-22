@@ -2196,7 +2196,7 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
               {profileTab === 'about' && (
                 <div>
                   {/* Bio */}
-                  <div className="rounded-xl bg-secondary/30 border border-border/50 px-3.5 py-2.5 mb-2">
+                  <div className="rounded-xl bg-secondary/30 border border-border/50 px-3.5 py-2.5 mb-2 max-h-40 overflow-y-auto">
                     {profile.about ? (
                       <p className="text-sm text-foreground/85 whitespace-pre-wrap break-words leading-relaxed">{profile.about}</p>
                     ) : (
