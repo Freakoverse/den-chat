@@ -133,7 +133,6 @@ export function ProfilePacksSection({ pubkey, open }: { pubkey: string; open: bo
 
   useEffect(() => { if (!open) setTab('emoji') }, [open])
 
-  const anyLoading = emoji.loading || sticker.loading || gif.loading
 
   const tabs: { key: PackTab; label: string; icon: React.ReactNode; state: PagedPacks<unknown> }[] = [
     { key: 'emoji', label: 'Emoji', icon: <Smile size={12} />, state: emoji },
@@ -142,12 +141,8 @@ export function ProfilePacksSection({ pubkey, open }: { pubkey: string; open: bo
   ]
 
   return (
-    <div className="mt-4">
-      <div className="flex items-center gap-2 mb-2">
-        <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Packs</div>
-        {anyLoading && <Loader2 size={11} className="animate-spin text-muted-foreground" />}
-      </div>
-
+    <div>
+      {/* No "Packs" heading: the profile tab already labels this section. */}
       {/* One box: full-width tab strip (three equal cells, active one a rounded pill) over the list */}
       <div className="rounded-lg border border-border bg-secondary/10 overflow-hidden">
         <div className="grid grid-cols-3 gap-1 p-1.5 border-b border-border">
