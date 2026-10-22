@@ -2587,6 +2587,16 @@ function MetadataRow({ icon, label, value, isLink }: { icon: React.ReactNode; la
   )
 }
 
+/** A kind-1 note is a reply when it references another event as root/reply (NIP-10), or carries legacy
+ *  unmarked `e` tags. Quote-posts (marked `mention`) and plain notes are NOT replies. */
+function isReply(e: Event): boolean {
+  const eTags = e.tags.filter((t) => t[0] === 'e')
+  if (eTags.length === 0) return false
+  const marked = eTags.filter((t) => t[3])
+  if (marked.length > 0) return marked.some((t) => t[3] === 'root' || t[3] === 'reply')
+  return true // unmarked positional e tags = legacy reply
+}
+
 /** Compact relative time for post previews. */
 function timeAgo(createdAt: number): string {
   const s = Math.max(0, Math.floor(Date.now() / 1000) - createdAt)
@@ -2610,9 +2620,9 @@ function ShortPostsTab({ pubkey, isSelf, onOpenThread, onWrite }: { pubkey: stri
     setLoading(true); setNotes([]); setExhausted(false)
     fetchEventsWide({ kinds: [1], authors: [pubkey], limit: PAGE }).then((events) => {
       if (cancelled) return
-      const sorted = events.filter((e) => e.kind === 1).sort((a, b) => b.created_at - a.created_at)
+      const sorted = events.filter((e) => e.kind === 1 && !isReply(e)).sort((a, b) => b.created_at - a.created_at)
       setNotes(sorted)
-      setExhausted(sorted.length < PAGE)
+      setExhausted(events.length < PAGE)
       setLoading(false)
     }).catch(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
@@ -2625,9 +2635,9 @@ function ShortPostsTab({ pubkey, isSelf, onOpenThread, onWrite }: { pubkey: stri
       const oldest = notes[notes.length - 1]
       const events = await fetchEventsWide({ kinds: [1], authors: [pubkey], until: oldest.created_at, limit: PAGE })
       const existing = new Set(notes.map((n) => n.id))
-      const fresh = events.filter((e) => e.kind === 1 && !existing.has(e.id)).sort((a, b) => b.created_at - a.created_at)
+      const fresh = events.filter((e) => e.kind === 1 && !isReply(e) && !existing.has(e.id)).sort((a, b) => b.created_at - a.created_at)
       setNotes((prev) => [...prev, ...fresh])
-      if (fresh.length === 0) setExhausted(true)
+      if (events.length < PAGE) setExhausted(true)
     } catch { /* ignore */ } finally { setLoadingMore(false) }
   }
 
