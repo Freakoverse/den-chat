@@ -2159,14 +2159,26 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
                 </button>
               ) : null}
 
-              {/* npub */}
-              <button
-                onClick={handleCopyNpub}
-                className="flex items-center gap-1.5 px-2.5 py-1 mb-2 rounded-full bg-secondary/60 hover:bg-secondary text-xs text-muted-foreground hover:text-foreground transition-all cursor-pointer group"
-              >
-                <span className="font-mono text-[11px]">{truncateNpub(npub, 12)}</span>
-                {copied ? <Check size={11} className="text-emerald-400" /> : <Copy size={11} className="opacity-60 group-hover:opacity-100 transition-opacity" />}
-              </button>
+              {/* npub + following, side by side */}
+              <div className="flex items-center gap-1.5 flex-wrap mb-2">
+                <button
+                  onClick={handleCopyNpub}
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-secondary/60 hover:bg-secondary text-xs text-muted-foreground hover:text-foreground transition-all cursor-pointer group"
+                >
+                  <span className="font-mono text-[11px]">{truncateNpub(npub, 12)}</span>
+                  {copied ? <Check size={11} className="text-emerald-400" /> : <Copy size={11} className="opacity-60 group-hover:opacity-100 transition-opacity" />}
+                </button>
+                {followingLoaded && followingPubkeys.length > 0 && (
+                  <button
+                    onClick={() => setShowFollowingList(true)}
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-secondary/60 hover:bg-secondary text-xs text-muted-foreground hover:text-foreground transition-all cursor-pointer group"
+                  >
+                    <Users size={11} className="opacity-60 group-hover:opacity-100 transition-opacity" />
+                    <span className="font-medium">{followingPubkeys.length}</span>
+                    <span>Following</span>
+                  </button>
+                )}
+              </div>
 
               {/* ── Tabs: About / Posts (kind 1) / Articles (kind 30023) / Packs ── */}
               <div className="flex items-center gap-1 p-1 mt-1 mb-3 rounded-xl bg-black/20">
@@ -2183,18 +2195,6 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
 
               {profileTab === 'about' && (
                 <div>
-                  {/* Following button */}
-                  {followingLoaded && followingPubkeys.length > 0 && (
-                    <button
-                      onClick={() => setShowFollowingList(true)}
-                      className="flex items-center gap-1.5 px-2.5 py-1 mb-2 rounded-full bg-secondary/60 hover:bg-secondary text-xs text-muted-foreground hover:text-foreground transition-all cursor-pointer group"
-                    >
-                      <Users size={11} className="opacity-60 group-hover:opacity-100 transition-opacity" />
-                      <span className="font-medium">{followingPubkeys.length}</span>
-                      <span>Following</span>
-                    </button>
-                  )}
-
                   {/* Bio */}
                   {profile.about && (
                     <p className="text-sm text-foreground/85 whitespace-pre-wrap break-words leading-relaxed mb-2">{profile.about}</p>
