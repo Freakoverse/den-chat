@@ -1193,14 +1193,20 @@ function ManageRecommendationsModal({ open, onClose }: { open: boolean; onClose:
   const signer = useUserStore((s) => s.signer)
   const privateKey = useUserStore((s) => s.privateKey)
   const myRecs = useRecommendationStore((s) => s.myRecs)
-  const addRec = useRecommendationStore((s) => s.addRec)
-  const removeRec = useRecommendationStore((s) => s.removeRec)
+  const saveRecs = useRecommendationStore((s) => s.saveRecs)
   const hubEntries = useHubStore((s) => s.hubEntries)
   const hubsData = useHubStore((s) => s.hubs)
   const hubStatus = useHubStore((s) => s.hubStatus)
   const [addr, setAddr] = useState('')
   const [addErr, setAddErr] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
+  const [busy, setBusy] = useState(false) // resolving an add-by-address
+  const [saving, setSaving] = useState(false)
+  const [saveErr, setSaveErr] = useState<string | null>(null)
+  // Local draft: edits stay here until the user hits Publish. Seeded from the published list on open.
+  const [draft, setDraft] = useState<Map<string, HubRecRef>>(new Map())
+  useEffect(() => {
+    if (open) { setDraft(new Map(useRecommendationStore.getState().myRecs)); setSaveErr(null); setAddErr(null); setAddr('') }
+  }, [open])
   useEscToClose(onClose, open)
   if (!open) return null
 
@@ -1214,7 +1220,17 @@ function ManageRecommendationsModal({ open, onClose }: { open: boolean; onClose:
     .filter((h) => !!h && !!h.creatorPubkey && h.discoverable !== false)
     .map((h) => ({ dTag: h.dTag, name: h.name, icon: h.icon, banner: h.banner, creatorPubkey: h.creatorPubkey, relayHint: h.generalRelays?.[0], coord: hubCoord(h.creatorPubkey, h.dTag) }))
   const myHubCoords = new Set(myHubs.map((h) => h.coord))
-  const external = [...myRecs.values()].filter((r) => !myHubCoords.has(r.coord))
+  const external = [...draft.values()].filter((r) => !myHubCoords.has(r.coord))
+  // Dirty = the draft differs from the published list (covers both "first list" and "edited existing").
+  const dirty = draft.size !== myRecs.size || [...draft.keys()].some((k) => !myRecs.has(k))
+
+  const addToDraft = (ref: HubRecRef) => setDraft((prev) => { const n = new Map(prev); n.set(ref.coord, ref); return n })
+  const removeFromDraft = (coord: string) => setDraft((prev) => { const n = new Map(prev); n.delete(coord); return n })
+  const toggle = (ref: HubRecRef) => setDraft((prev) => {
+    const n = new Map(prev)
+    if (n.has(ref.coord)) n.delete(ref.coord); else n.set(ref.coord, ref)
+    return n
+  })
 
   const doAdd = async () => {
     setAddErr(null); setBusy(true)
@@ -1222,7 +1238,7 @@ function ManageRecommendationsModal({ open, onClose }: { open: boolean; onClose:
       const ref = await parseHubAddress(addr)
       if (!ref) { setAddErr('Not a valid hub address (npub/naddr, a 36942:... coordinate, or a share link).'); return }
       // Only recommend hubs their owner has opted into listing (f != off). Fetch the hub event and
-      // check before publishing, so you can't vouch for a hub that chose not to be discoverable.
+      // check before adding, so you can't vouch for a hub that chose not to be discoverable.
       const events = await fetchEvents({ kinds: [KINDS.HUB_EVENT], authors: [ref.pubkey], '#d': [ref.dTag] })
       const maxCreatedAt = nowSeconds() + 3600
       let hub: DiscoveredHub | null = null
@@ -1234,16 +1250,20 @@ function ManageRecommendationsModal({ open, onClose }: { open: boolean; onClose:
       }
       if (!hub) { setAddErr('Could not find that hub on the network.'); return }
       if (!hub.discoverable) { setAddErr('That hub has discovery turned off, so it cannot be recommended.'); return }
-      await addRec(ref, signer, privateKey)
+      addToDraft(ref)
       setAddr('')
     } catch (e) { setAddErr(e instanceof Error ? e.message : 'Failed to add') }
     finally { setBusy(false) }
   }
-  const toggle = async (ref: HubRecRef) => {
+
+  const doPublish = async () => {
+    if (!dirty || saving) return
+    setSaving(true); setSaveErr(null)
     try {
-      if (myRecs.has(ref.coord)) await removeRec(ref.coord, signer, privateKey)
-      else await addRec(ref, signer, privateKey)
-    } catch { /* store reverts on failure */ }
+      await saveRecs([...draft.values()], signer, privateKey)
+      onClose()
+    } catch (e) { setSaveErr(e instanceof Error ? e.message : 'Failed to publish') }
+    finally { setSaving(false) }
   }
 
   return (
@@ -1255,7 +1275,7 @@ function ManageRecommendationsModal({ open, onClose }: { open: boolean; onClose:
           <button onClick={onClose} className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary cursor-pointer"><X size={16} /></button>
         </div>
         <div className="px-5 py-4 overflow-y-auto space-y-4">
-          <p className="text-xs text-muted-foreground leading-relaxed">People who follow you see the hubs you recommend under their Discover <span className="font-medium text-foreground">Follows</span> tab. Only discoverable hubs are shown there.</p>
+          <p className="text-xs text-muted-foreground leading-relaxed">People who follow you see the hubs you recommend in their Discover (with <span className="font-medium text-foreground">Following recommendations</span> on). Only discoverable hubs are shown. Changes publish when you hit <span className="font-medium text-foreground">Publish</span>.</p>
           <div>
             <label className="text-xs font-medium text-foreground">Add by address</label>
             <div className="flex items-center gap-2 mt-1">
@@ -1278,7 +1298,7 @@ function ManageRecommendationsModal({ open, onClose }: { open: boolean; onClose:
               <p className="text-[11px] text-muted-foreground mt-0.5">Every hub in your list. Tap <span className="text-emerald-400">Recommend</span> to add one.</p>
               <div className="mt-1 space-y-1">
                 {myHubs.map((h) => {
-                  const on = myRecs.has(h.coord)
+                  const on = draft.has(h.coord)
                   return (
                     <div key={h.coord} className="relative flex items-center gap-2.5 p-1.5 rounded-lg border border-border overflow-hidden">
                       {h.banner && (
@@ -1316,15 +1336,28 @@ function ManageRecommendationsModal({ open, onClose }: { open: boolean; onClose:
                 {external.map((r) => (
                   <div key={r.coord} className="flex items-center justify-between gap-2 px-2 py-1.5 rounded-md hover:bg-secondary/40">
                     <span className="text-xs text-muted-foreground font-mono truncate">{r.dTag.slice(0, 8)} / {truncateNpub(nip19.npubEncode(r.pubkey), 10)}</span>
-                    <button onClick={() => removeRec(r.coord, signer, privateKey)} className="px-2 py-0.5 rounded text-[11px] font-medium bg-secondary text-muted-foreground hover:text-destructive cursor-pointer shrink-0">Remove</button>
+                    <button onClick={() => removeFromDraft(r.coord)} className="px-2 py-0.5 rounded text-[11px] font-medium bg-secondary text-muted-foreground hover:text-destructive cursor-pointer shrink-0">Remove</button>
                   </div>
                 ))}
               </div>
             </div>
           )}
-          {myRecs.size === 0 && myHubs.length === 0 && (
+          {draft.size === 0 && myHubs.length === 0 && (
             <p className="text-xs text-muted-foreground text-center py-4">You haven't recommended any hubs yet.</p>
           )}
+        </div>
+        <div className="px-5 py-3 border-t border-border shrink-0">
+          {saveErr && <p className="text-[11px] text-destructive mb-2">{saveErr}</p>}
+          <div className="flex items-center justify-end gap-2">
+            <button onClick={onClose} className="px-3 py-1.5 rounded-md border border-border text-xs text-muted-foreground hover:text-foreground hover:bg-secondary/50 cursor-pointer">Cancel</button>
+            <button
+              onClick={doPublish}
+              disabled={!dirty || saving}
+              className="flex items-center gap-1.5 px-4 py-1.5 rounded-md bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+            >
+              {saving ? <Loader2 size={13} className="animate-spin" /> : 'Publish'}
+            </button>
+          </div>
         </div>
       </div>
     </div>

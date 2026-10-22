@@ -79,6 +79,8 @@ interface RecState {
   hasRec: (coord: string) => boolean
   addRec: (ref: HubRecRef, signer: ISigner | null, privateKey: string | null) => Promise<void>
   removeRec: (coord: string, signer: ISigner | null, privateKey: string | null) => Promise<void>
+  /** Replace the whole recommendation list with `refs` and publish it once (the Manage modal's Save). */
+  saveRecs: (refs: HubRecRef[], signer: ISigner | null, privateKey: string | null) => Promise<void>
   /** Replace the trusted-source list (persists). */
   setTrustedSources: (list: TrustedSource[]) => void
   /** Toggle folding your follows' recommendations into the feed (persists). */
@@ -130,6 +132,19 @@ export const useRecommendationStore = create<RecState>((set, get) => ({
     const prev = get().myRecs
     const next = new Map(prev)
     next.delete(coord)
+    set({ myRecs: next }) // optimistic
+    try {
+      await publishHubRecommendations([...next.values()], signer, privateKey)
+    } catch (err) {
+      set({ myRecs: prev }) // revert on publish failure
+      throw err
+    }
+  }),
+
+  saveRecs: (refs, signer, privateKey) => withMutex(async () => {
+    const prev = get().myRecs
+    const next = new Map<string, HubRecRef>()
+    for (const r of refs) next.set(r.coord, r)
     set({ myRecs: next }) // optimistic
     try {
       await publishHubRecommendations([...next.values()], signer, privateKey)
