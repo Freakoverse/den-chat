@@ -2169,15 +2169,14 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
               </button>
 
               {/* ── Tabs: About / Posts (kind 1) / Articles (kind 30023) / Packs ── */}
-              <div className="flex items-center border-b border-border mt-1 mb-3">
+              <div className="flex items-center gap-1 p-1 mt-1 mb-3 rounded-xl bg-black/20">
                 {([['about', 'About', User], ['short', 'Posts', MessageCircle], ['long', 'Articles', FileText], ['packs', 'Packs', Package]] as const).map(([id, label, Icon]) => (
                   <button
                     key={id}
                     onClick={() => setProfileTab(id)}
-                    className={`relative flex items-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors cursor-pointer ${profileTab === id ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                    className={`flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer ${profileTab === id ? 'bg-secondary text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
                   >
-                    <Icon size={13} /> {label}
-                    {profileTab === id && <span className="absolute bottom-0 left-2 right-2 h-0.5 rounded-full bg-primary" />}
+                    <Icon size={13} className="shrink-0" /> <span className="truncate">{label}</span>
                   </button>
                 ))}
               </div>
@@ -2651,25 +2650,28 @@ function ShortPostsTab({ pubkey, isSelf, onOpenThread, onWrite }: { pubkey: stri
           <Plus size={13} /> Write a post
         </button>
       )}
-      {notes.map((note) => (
-        <div
-          key={note.id}
-          role="button"
-          onClick={() => onOpenThread(note.id)}
-          className="rounded-lg border border-border bg-secondary/30 hover:bg-secondary/50 p-3 cursor-pointer transition-colors"
-        >
-          <div className="text-[10px] text-muted-foreground mb-1">{timeAgo(note.created_at)}</div>
-          {/* pointer-events-none: the whole card opens the thread; inner links/media aren't interactive in the preview */}
-          <div className="text-sm text-foreground/90 break-words line-clamp-6 pointer-events-none">
-            <RichContent content={note.content} disableEmbeds />
+      {/* The reading list scrolls on its own, so the rest of the modal stays put. */}
+      <div className="max-h-[48vh] overflow-y-auto space-y-2 -mr-1 pr-1">
+        {notes.map((note) => (
+          <div
+            key={note.id}
+            role="button"
+            onClick={() => onOpenThread(note.id)}
+            className="rounded-lg border border-border bg-secondary/30 hover:bg-secondary/50 p-3 cursor-pointer transition-colors"
+          >
+            <div className="text-[10px] text-muted-foreground mb-1">{timeAgo(note.created_at)}</div>
+            {/* pointer-events-none: the whole card opens the thread; inner links/media aren't interactive in the preview */}
+            <div className="text-sm text-foreground/90 break-words line-clamp-6 pointer-events-none">
+              <RichContent content={note.content} disableEmbeds />
+            </div>
           </div>
-        </div>
-      ))}
-      {!exhausted && (
-        <button onClick={loadMore} disabled={loadingMore} className="w-full py-2 rounded-lg text-xs text-muted-foreground hover:text-foreground hover:bg-secondary/40 transition-colors cursor-pointer disabled:opacity-50">
-          {loadingMore ? 'Loading…' : 'Load more'}
-        </button>
-      )}
+        ))}
+        {!exhausted && (
+          <button onClick={loadMore} disabled={loadingMore} className="w-full py-2 rounded-lg text-xs text-muted-foreground hover:text-foreground hover:bg-secondary/40 transition-colors cursor-pointer disabled:opacity-50">
+            {loadingMore ? 'Loading…' : 'Load more'}
+          </button>
+        )}
+      </div>
     </div>
   )
 }
@@ -2713,9 +2715,11 @@ function LongPostsTab({ pubkey, isSelf, onOpenArticle, onOpenProfile, onWrite }:
           <Plus size={13} /> Write an article
         </button>
       )}
-      {articles.map((article) => (
-        <ArticleCardItem key={`${article.event.pubkey}:${article.dTag}`} article={article} onOpenArticle={onOpenArticle} onOpenProfile={onOpenProfile} />
-      ))}
+      <div className="max-h-[48vh] overflow-y-auto space-y-2 -mr-1 pr-1">
+        {articles.map((article) => (
+          <ArticleCardItem key={`${article.event.pubkey}:${article.dTag}`} article={article} onOpenArticle={onOpenArticle} onOpenProfile={onOpenProfile} />
+        ))}
+      </div>
     </div>
   )
 }
