@@ -2196,9 +2196,13 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
               {profileTab === 'about' && (
                 <div>
                   {/* Bio */}
-                  {profile.about && (
-                    <p className="text-sm text-foreground/85 whitespace-pre-wrap break-words leading-relaxed mb-2">{profile.about}</p>
-                  )}
+                  <div className="rounded-xl bg-secondary/30 border border-border/50 px-3.5 py-2.5 mb-2">
+                    {profile.about ? (
+                      <p className="text-sm text-foreground/85 whitespace-pre-wrap break-words leading-relaxed">{profile.about}</p>
+                    ) : (
+                      <p className="text-xs text-muted-foreground/50 text-center py-1">{isSelf ? "You haven't added a bio yet." : 'No bio.'}</p>
+                    )}
+                  </div>
 
                   {/* Link tree + Payment targets — side by side. Editing each lives inside its own modal, so
                       there's no separate edit pencil here. */}
