@@ -12,6 +12,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { fetchEvents } from '@/lib/nostr/relay-pool'
+import { fetchEventsWide } from '@/lib/nostr/readRelays'
 import { useDnnStore } from '@/stores/dnnStore'
 import { preCacheImage } from '@/lib/imageCache'
 import { getRenderLimit } from '@/lib/imageSizeGuard'
@@ -124,6 +125,24 @@ export async function hydrateProfilesFromDb(): Promise<void> {
       notifyListeners(row.pubkey)
     }
   } catch { /* ignore */ }
+}
+
+/**
+ * Phase-2 revalidation of a SINGLE profile across client + the user's own NIP-65 relays (getReadRelays),
+ * used for the user's OWN profile once the relay list is known. Applies the same version guard as the
+ * batched path — a strictly older copy never overwrites what we already hold — so a newer kind-0 that
+ * only survived on a user relay is recovered, while a stale client-relay copy can't downgrade it.
+ */
+export async function revalidateProfileWide(pubkey: string): Promise<void> {
+  try {
+    const events = await fetchEventsWide({ kinds: [0], authors: [pubkey] })
+    if (events.length === 0) return
+    const newest = events.reduce((a, b) => (b.created_at > a.created_at ? b : a))
+    const prev = profileCache.get(pubkey)
+    if (prev && !prev.empty && prev.createdAt != null && newest.created_at <= prev.createdAt) return
+    const profile: NostrProfile = JSON.parse(newest.content)
+    setCachedEntry(pubkey, profile, newest.created_at)
+  } catch { /* best-effort; phase-1 copy stands */ }
 }
 
 /** ── Batched profile fetching ──

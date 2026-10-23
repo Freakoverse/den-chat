@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { nowSeconds } from '@/lib/time/clockOffset'
 import { fetchEvents, publishToSpecificRelays } from '@/lib/nostr/relay-pool'
+import { fetchEventsWide } from '@/lib/nostr/readRelays'
 import { publishPersonal, getPublishRelays } from '@/stores/postingBehaviourStore'
 import { signWithSigner } from '@/lib/nostr/events'
 import { encryptNip04, decryptNip04 } from '@/lib/nostr/nip04dm'
@@ -20,8 +21,15 @@ export interface BlockState {
   otherTags: string[][]
   hideBlockedCompletely: boolean
   loaded: boolean
+  /** created_at of the loaded kind:10000 — guards the wide revalidation against a stale downgrade */
+  blockListCreatedAt: number
 
   loadBlockList: (pubkey: string, signer: ISigner | null, privateKey: string | null) => Promise<void>
+  /**
+   * Phase-2 revalidation: re-fetch the OWN mute/block list across client + the user's own NIP-65 relays
+   * once the relay list is known, applying it only if strictly newer than the phase-1 (client-only) copy.
+   */
+  revalidateBlockListWide: (pubkey: string, signer: ISigner | null, privateKey: string | null) => Promise<void>
   blockUser: (pubkey: string, myPubkey: string, signer: ISigner | null, privateKey: string | null, blockType: BlockType) => Promise<void>
   unblockUser: (pubkey: string, myPubkey: string, signer: ISigner | null, privateKey: string | null) => Promise<void>
   /** Change a block from public↔private without unblocking */
@@ -93,73 +101,101 @@ async function publishMuteList(
   await publishPersonal(signed)
 }
 
-export const useBlockStore = create<BlockState>((set, get) => ({
-  blockedPubkeys: new Set(),
-  blockTypes: new Map(),
-  mutedWords: new Set(),
-  otherTags: [],
-  hideBlockedCompletely: localStorage.getItem('den_hide_blocked_completely') === 'true',
-  loaded: false,
+/* ── Fetch + parse the latest kind:10000 mute list ──
+ * wide=false reads client relays only (fast, phase-1 bootstrap); wide=true reads client + the user's
+ * own NIP-65 relays (phase-2 revalidation, once the relay list is known). */
+async function fetchLatestMuteList(
+  pubkey: string,
+  wide: boolean,
+  signer: ISigner | null,
+  privateKey: string | null,
+): Promise<{ blocked: Set<string>; types: Map<string, BlockType>; words: Set<string>; other: string[][]; createdAt: number } | null> {
+  const filter = { kinds: [10000], authors: [pubkey], limit: 1 }
+  const events = wide ? await fetchEventsWide(filter) : await fetchEvents(filter)
+  if (events.length === 0) return null
 
-  loadBlockList: async (pubkey, signer, privateKey) => {
+  const latest = events.sort((a, b) => b.created_at - a.created_at)[0]
+  const blocked = new Set<string>()
+  const types = new Map<string, BlockType>()
+  const words = new Set<string>()
+  const other: string[][] = []
+
+  // Parse public tags — these are public blocks
+  for (const tag of latest.tags) {
+    if (tag[0] === 'p' && tag[1]) {
+      blocked.add(tag[1])
+      types.set(tag[1], 'public')
+    } else if (tag[0] === 'word' && tag[1]) {
+      words.add(tag[1].toLowerCase())
+    } else if (tag.length >= 2) {
+      other.push(tag)
+    }
+  }
+
+  // Decrypt and parse private tags from content
+  if (latest.content) {
     try {
-      const events = await fetchEvents({
-        kinds: [10000],
-        authors: [pubkey],
-        limit: 1,
-      })
-
-      if (events.length === 0) {
-        set({ loaded: true })
-        return
-      }
-
-      const latest = events.sort((a, b) => b.created_at - a.created_at)[0]
-      const blocked = new Set<string>()
-      const types = new Map<string, BlockType>()
-      const words = new Set<string>()
-      const other: string[][] = []
-
-      // Parse public tags — these are public blocks
-      for (const tag of latest.tags) {
+      const decrypted = await decryptNip04(latest.content, pubkey, signer, privateKey)
+      const privateTags: string[][] = JSON.parse(decrypted)
+      for (const tag of privateTags) {
         if (tag[0] === 'p' && tag[1]) {
           blocked.add(tag[1])
-          types.set(tag[1], 'public')
+          // Public takes precedence if somehow in both
+          if (!types.has(tag[1])) types.set(tag[1], 'private')
         } else if (tag[0] === 'word' && tag[1]) {
           words.add(tag[1].toLowerCase())
         } else if (tag.length >= 2) {
           other.push(tag)
         }
       }
+    } catch (err) {
+      console.warn('[blockStore] Failed to decrypt mute list content:', err)
+    }
+  }
 
-      // Decrypt and parse private tags from content
-      if (latest.content) {
-        try {
-          const decrypted = await decryptNip04(latest.content, pubkey, signer, privateKey)
-          const privateTags: string[][] = JSON.parse(decrypted)
-          for (const tag of privateTags) {
-            if (tag[0] === 'p' && tag[1]) {
-              blocked.add(tag[1])
-              // Only set as private if not already marked public
-              // (public takes precedence if somehow in both)
-              if (!types.has(tag[1])) {
-                types.set(tag[1], 'private')
-              }
-            } else if (tag[0] === 'word' && tag[1]) {
-              words.add(tag[1].toLowerCase())
-            } else if (tag.length >= 2) {
-              other.push(tag)
-            }
-          }
-        } catch (err) {
-          console.warn('[blockStore] Failed to decrypt mute list content:', err)
-        }
-      }
+  return { blocked, types, words, other, createdAt: latest.created_at }
+}
 
-      set({ blockedPubkeys: blocked, blockTypes: types, mutedWords: words, otherTags: other, loaded: true })
+export const useBlockStore = create<BlockState>((set, get) => ({
+  blockedPubkeys: new Set(),
+  blockTypes: new Map(),
+  mutedWords: new Set(),
+  otherTags: [],
+  blockListCreatedAt: 0,
+  hideBlockedCompletely: localStorage.getItem('den_hide_blocked_completely') === 'true',
+  loaded: false,
+
+  loadBlockList: async (pubkey, signer, privateKey) => {
+    try {
+      const parsed = await fetchLatestMuteList(pubkey, false, signer, privateKey)
+      if (!parsed) { set({ loaded: true }); return }
+      // Guard against a stale downgrade: if a wide phase-2 revalidation already applied a newer copy
+      // while this client-only load was in flight, keep it — just mark loaded.
+      set((s) => parsed.createdAt >= s.blockListCreatedAt
+        ? { blockedPubkeys: parsed.blocked, blockTypes: parsed.types, mutedWords: parsed.words, otherTags: parsed.other, blockListCreatedAt: parsed.createdAt, loaded: true }
+        : { loaded: true })
     } catch (err) {
       console.error('[blockStore] Failed to load block list:', err)
       set({ loaded: true })
+    }
+  },
+
+  revalidateBlockListWide: async (pubkey, signer, privateKey) => {
+    try {
+      const parsed = await fetchLatestMuteList(pubkey, true, signer, privateKey)
+      // Only apply a strictly newer copy — never downgrade what phase-1 already loaded.
+      if (parsed && parsed.createdAt > get().blockListCreatedAt) {
+        set({
+          blockedPubkeys: parsed.blocked,
+          blockTypes: parsed.types,
+          mutedWords: parsed.words,
+          otherTags: parsed.other,
+          blockListCreatedAt: parsed.createdAt,
+          loaded: true,
+        })
+      }
+    } catch (err) {
+      console.warn('[blockStore] Wide revalidation failed (keeping phase-1 copy):', err)
     }
   },
 

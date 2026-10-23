@@ -15,7 +15,7 @@ import { resetSignerGuard } from '@/lib/auth/signerGuard'
 import { discover } from '@/lib/auth/pc55'
 import { fetchReplaceable, fetchEvents, getRelays } from '@/lib/nostr/relay-pool'
 import { useRelayHealthStore } from '@/lib/nostr/relayHealthProbe'
-import { getCachedProfile, getCachedProfileCreatedAt, ensureProfile, subscribeProfile, seedProfile, hydrateProfilesFromDb } from '@/hooks/useProfileCache'
+import { getCachedProfile, getCachedProfileCreatedAt, ensureProfile, subscribeProfile, seedProfile, hydrateProfilesFromDb, revalidateProfileWide } from '@/hooks/useProfileCache'
 import { KINDS } from '@/lib/crypto/constants'
 import { useVoiceStore } from '@/stores/voiceStore'
 import { useCalendarStore } from '@/stores/calendarStore'
@@ -242,6 +242,16 @@ export function useStartup() {
         if (useDMStore.getState().subscription) useDMStore.getState().startSubscription(pubkey, signer, privateKey)
         if (useDM04Store.getState().subscription) useDM04Store.getState().startSubscription(pubkey, signer, privateKey)
         if (useMdmStore.getState().subscription) void useMdmStore.getState().startSubscription(pubkey, signer, privateKey)
+      }
+      // Phase-2 revalidation of our OWN identity events. Phase-1 read them from client relays only (above),
+      // which races the relay-list load; now that our NIP-65 relays are known, re-fetch our own profile +
+      // follow + mute across client + user relays and keep whichever copy is newest. Recovers a newer
+      // version a client relay dropped but a user relay kept. Each is guarded against a stale downgrade, so
+      // this never regresses the phase-1 copy. Best-effort and non-blocking.
+      if (learnedRelays) {
+        void revalidateProfileWide(pubkey)
+        void useFollowStore.getState().revalidateFollowListWide(pubkey)
+        void useBlockStore.getState().revalidateBlockListWide(pubkey, signer, privateKey)
       }
     }).catch(() => { /* non-critical — subscription still works on client + NIP-65 relays */ })
 

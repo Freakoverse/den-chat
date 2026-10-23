@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { nowSeconds } from '@/lib/time/clockOffset'
 import { fetchEvents, publishToSpecificRelays } from '@/lib/nostr/relay-pool'
+import { fetchEventsWide } from '@/lib/nostr/readRelays'
 import { publishPersonal, getPublishRelays } from '@/stores/postingBehaviourStore'
 import { signWithSigner } from '@/lib/nostr/events'
 import type { ISigner } from '@/stores/userStore'
@@ -22,6 +23,8 @@ export interface FollowState {
   followedPubkeys: Set<string>
   /** Preserved .content from kind:3 event (relay hints etc.) */
   followListContent: string
+  /** created_at of the loaded kind:3 — guards the wide revalidation against a stale downgrade */
+  followListCreatedAt: number
   loaded: boolean
   /** Granular load status for UI feedback */
   loadStatus: FollowLoadStatus
@@ -29,6 +32,12 @@ export interface FollowState {
   loadFollowList: (pubkey: string) => Promise<void>
   /** Manual retry — re-fetches from relays */
   refetchFollowList: (pubkey: string) => Promise<void>
+  /**
+   * Phase-2 revalidation: re-fetch the OWN follow list across client + the user's own NIP-65 relays
+   * (getReadRelays) once the relay list is known, and apply it only if it is strictly newer than what
+   * phase-1 (client-only) loaded. Recovers a newer copy a client relay dropped but a user relay kept.
+   */
+  revalidateFollowListWide: (pubkey: string) => Promise<void>
   followUser: (pubkey: string, myPubkey: string, signer: ISigner | null, privateKey: string | null) => Promise<void>
   unfollowUser: (pubkey: string, myPubkey: string, signer: ISigner | null, privateKey: string | null) => Promise<void>
   isFollowing: (pubkey: string) => boolean
@@ -52,13 +61,12 @@ function withMutex(fn: () => Promise<void>): Promise<void> {
   return next
 }
 
-/* ── Fetch latest kind:3 from relays ── */
-async function fetchLatestFollowList(pubkey: string): Promise<{ follows: Set<string>; content: string } | null> {
-  const events = await fetchEvents({
-    kinds: [3],
-    authors: [pubkey],
-    limit: 1,
-  })
+/* ── Fetch latest kind:3 from relays ──
+ * wide=false reads client relays only (fast, phase-1 bootstrap); wide=true reads client + the user's
+ * own NIP-65 relays (phase-2 revalidation, once the relay list is known). */
+async function fetchLatestFollowList(pubkey: string, wide = false): Promise<{ follows: Set<string>; content: string; createdAt: number } | null> {
+  const filter = { kinds: [3], authors: [pubkey], limit: 1 }
+  const events = wide ? await fetchEventsWide(filter) : await fetchEvents(filter)
   if (events.length === 0) return null
 
   const latest = events.sort((a, b) => b.created_at - a.created_at)[0]
@@ -66,7 +74,7 @@ async function fetchLatestFollowList(pubkey: string): Promise<{ follows: Set<str
   for (const tag of latest.tags) {
     if (tag[0] === 'p' && tag[1]) follows.add(tag[1])
   }
-  return { follows, content: latest.content || '' }
+  return { follows, content: latest.content || '', createdAt: latest.created_at }
 }
 
 /** Publish a kind:3 follow list */
@@ -92,14 +100,14 @@ async function publishFollowList(
 }
 
 /** Core fetch logic with retry (used by both load and refetch) */
-async function fetchWithRetry(pubkey: string, maxRetries = 2): Promise<{ follows: Set<string>; content: string }> {
+async function fetchWithRetry(pubkey: string, maxRetries = 2): Promise<{ follows: Set<string>; content: string; createdAt: number }> {
   let lastError: unknown = null
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       const result = await fetchLatestFollowList(pubkey)
       if (result) return result
       // No events found — not an error, just empty
-      return { follows: new Set<string>(), content: '' }
+      return { follows: new Set<string>(), content: '', createdAt: 0 }
     } catch (err) {
       lastError = err
       if (attempt < maxRetries) {
@@ -114,19 +122,19 @@ async function fetchWithRetry(pubkey: string, maxRetries = 2): Promise<{ follows
 export const useFollowStore = create<FollowState>((set, get) => ({
   followedPubkeys: new Set(),
   followListContent: '',
+  followListCreatedAt: 0,
   loaded: false,
   loadStatus: 'idle' as FollowLoadStatus,
 
   loadFollowList: async (pubkey) => {
     set({ loadStatus: 'loading' })
     try {
-      const { follows, content } = await fetchWithRetry(pubkey)
-      set({
-        followedPubkeys: follows,
-        followListContent: content,
-        loaded: true,
-        loadStatus: 'loaded',
-      })
+      const { follows, content, createdAt } = await fetchWithRetry(pubkey)
+      // Guard against a stale downgrade: if a wide phase-2 revalidation already applied a newer copy
+      // while this client-only load was in flight, keep it — just mark loaded.
+      set((s) => createdAt >= s.followListCreatedAt
+        ? { followedPubkeys: follows, followListContent: content, followListCreatedAt: createdAt, loaded: true, loadStatus: 'loaded' as FollowLoadStatus }
+        : { loaded: true, loadStatus: 'loaded' as FollowLoadStatus })
     } catch (err) {
       console.error('[followStore] Failed to load follow list after retries:', err)
       set({ loaded: true, loadStatus: 'error' })
@@ -136,16 +144,35 @@ export const useFollowStore = create<FollowState>((set, get) => ({
   refetchFollowList: async (pubkey) => {
     set({ loadStatus: 'loading' })
     try {
-      const { follows, content } = await fetchWithRetry(pubkey, 1)
+      const { follows, content, createdAt } = await fetchWithRetry(pubkey, 1)
       set({
         followedPubkeys: follows,
         followListContent: content,
+        followListCreatedAt: createdAt,
         loaded: true,
         loadStatus: 'loaded',
       })
     } catch (err) {
       console.error('[followStore] Refetch failed:', err)
       set({ loadStatus: 'error' })
+    }
+  },
+
+  revalidateFollowListWide: async (pubkey) => {
+    try {
+      const result = await fetchLatestFollowList(pubkey, true)
+      // Only apply a strictly newer copy — never downgrade what phase-1 already loaded.
+      if (result && result.createdAt > get().followListCreatedAt) {
+        set({
+          followedPubkeys: result.follows,
+          followListContent: result.content,
+          followListCreatedAt: result.createdAt,
+          loaded: true,
+          loadStatus: 'loaded',
+        })
+      }
+    } catch (err) {
+      console.warn('[followStore] Wide revalidation failed (keeping phase-1 copy):', err)
     }
   },
 
