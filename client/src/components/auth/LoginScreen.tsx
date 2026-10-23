@@ -19,7 +19,7 @@ import { PinInput } from '@/components/auth/PinInput'
 import { ImageCropModal } from '@/components/ui/ImageCropModal'
 import { QRCodeSVG } from 'qrcode.react'
 import { isValidMnemonic, generateSeedPhrase } from '@/lib/auth'
-import { uploadToBlossomServers, blossomServers as blossomServerManager } from '@/lib/blossom'
+import { uploadToBlossomServers, blossomServers as blossomServerManager, primaryBlossomServer } from '@/lib/blossom'
 import type { UploadProgress } from '@/lib/blossom'
 import { createUnsignedEvent, signWithSigner } from '@/lib/nostr/events'
 import {
@@ -1038,7 +1038,7 @@ export function LoginScreen() {
         (p) => setPicUploadProgress({ ...p }),
         () => { const c = new AbortController(); picAbortRef.current = c; return c.signal },
       )
-      const baseUrl = serverUrls[0] || 'https://blossom.primal.net'
+      const baseUrl = serverUrls[0]
       setProfilePicUrl(`${baseUrl}/${hash}`)
       setPicUploadStatus('success')
     } catch (err) {
@@ -3678,7 +3678,7 @@ function NoLocalSignerModal({ open, onClose, isDesktop }: { open: boolean; onClo
     const servers = blossomServerManager.getServers()
     const base = servers.length > 0
       ? servers[0].replace(/\/+$/, '')
-      : 'https://blossom.primal.net'
+      : primaryBlossomServer()
     return `${base}/${hash}.${ext}`
   }
 

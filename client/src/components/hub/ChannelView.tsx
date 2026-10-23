@@ -45,7 +45,7 @@ import { MarkdownToolbar } from '@/components/chat/MarkdownToolbar'
 import { hubTypingKey } from '@/stores/typingStore'
 import { setNameFromAddress } from '@/lib/customSets'
 import type { Channel, HubData, HubMember } from '@/stores/hubStore'
-import { uploadToBlossomServers, computeHash, blossomServers } from '@/lib/blossom'
+import { uploadToBlossomServers, computeHash, blossomServers, primaryBlossomServer } from '@/lib/blossom'
 import type { UploadProgress } from '@/lib/blossom'
 import { getUploadBlossoms } from '@/stores/postingBehaviourStore'
 import { isV2 } from '@/lib/hub/version'
@@ -3058,7 +3058,7 @@ export function AttachmentRenderer({ attachments, hubDTag, gifTags }: { attachme
     }
     return merged
   }, [hubServers, attachmentServers])
-  const baseUrl = allServers[0]?.replace(/\/+$/, '') || 'https://blossom.primal.net'
+  const baseUrl = allServers[0]?.replace(/\/+$/, '') || primaryBlossomServer()
   const [galleryIndex, setGalleryIndex] = useState<number | null>(null)
   const [favModalUrl, setFavModalUrl] = useState<string | null>(null)
 

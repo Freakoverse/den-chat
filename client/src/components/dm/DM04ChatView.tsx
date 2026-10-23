@@ -9,6 +9,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { nowSeconds } from '@/lib/time/clockOffset'
 import { createPortal } from 'react-dom'
 import { useUserStore } from '@/stores/userStore'
+import { primaryBlossomServer } from '@/lib/blossom'
 import { useDM04Store, type DM04Message, type DM04Reaction } from '@/stores/dm04Store'
 import { useBlockStore } from '@/stores/blockStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
@@ -415,7 +416,7 @@ export function DM04ChatView({ recipientPubkey, onSwitchProtocol, onBack }: { re
       // Use configured blossom server + file extension for maximum compatibility.
       // useBlossomMedia handles server failover across all configured servers.
       const servers = getUploadBlossoms()
-      const baseUrl = servers[0]?.replace(/\/+$/, '') || 'https://blossom.primal.net'
+      const baseUrl = servers[0]?.replace(/\/+$/, '') || primaryBlossomServer()
       const links = attachments.map((a) => {
         const url = `${baseUrl}/${a.hash}${mimeToExt(a.type)}`
         // Encrypted upload: carry the per-file AES key in a fragment so the
@@ -1652,7 +1653,7 @@ function DM04ThreadModal({ parentMsg, threadReplies, recipientPubkey, getProfile
     let content = text
     if (attachments && attachments.length > 0) {
       const servers = getUploadBlossoms()
-      const baseUrl = servers[0]?.replace(/\/+$/, '') || 'https://blossom.primal.net'
+      const baseUrl = servers[0]?.replace(/\/+$/, '') || primaryBlossomServer()
       const links = attachments.map((a) => {
         const url = `${baseUrl}/${a.hash}${mimeToExt(a.type)}`
         // Encrypted upload: carry the per-file AES key in a fragment so the

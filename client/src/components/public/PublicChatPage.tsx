@@ -9,6 +9,7 @@ import { getDraft, setDraft, clearDraft, pcDraftKey } from '@/stores/draftStore'
 import { usePublicChatStore, type PublicChatMessage, type PCStoredReaction } from '@/stores/publicChatStore'
 import { useNotificationStore } from '@/stores/notificationStore'
 import { useUserStore } from '@/stores/userStore'
+import { primaryBlossomServer } from '@/lib/blossom'
 import { useNavigationStore } from '@/stores/navigationStore'
 import { useBlockStore } from '@/stores/blockStore'
 import { useWotStore } from '@/stores/wotStore'
@@ -895,7 +896,7 @@ function PublicChatView({ topic, pendingHighlightId, onHighlightConsumed, onBack
       const links = attachments.map(a => {
         const ext = a.type ? `.${a.type.split('/')[1]?.split('+')[0] || 'bin'}` : ''
         // Link to a server that actually accepted the blob, not a hardcoded primal that may 404.
-        const base = a.serverUrls?.[0]?.replace(/\/+$/, '') || 'https://blossom.primal.net'
+        const base = a.serverUrls?.[0]?.replace(/\/+$/, '') || primaryBlossomServer()
         return `${base}/${a.hash}${ext}`
       })
       content = content ? `${content}\n${links.join('\n')}` : links.join('\n')

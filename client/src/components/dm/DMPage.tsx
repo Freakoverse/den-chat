@@ -15,6 +15,7 @@ import { nowSeconds } from '@/lib/time/clockOffset'
 import { getDraft, setDraft, clearDraft, dm17DraftKey } from '@/stores/draftStore'
 import { createPortal } from 'react-dom'
 import { useUserStore } from '@/stores/userStore'
+import { primaryBlossomServer } from '@/lib/blossom'
 import { useDMStore, type DMMessage } from '@/stores/dmStore'
 import { useGroupStore } from '@/stores/groupStore'
 import { GroupList } from '@/components/group/GroupList'
@@ -987,7 +988,7 @@ function DMChatView({ recipientPubkey, onSwitchProtocol, onBack }: { recipientPu
           // Build Blossom URL from the ciphertext hash
           // Prefer the server where the file was actually uploaded (from ChatInputBar)
           const uploadedServer = attachment.serverUrls?.[0]?.replace(/\/+$/, '')
-          const fallbackServer = blossomServers[0]?.replace(/\/+$/, '') || 'https://blossom.primal.net'
+          const fallbackServer = blossomServers[0]?.replace(/\/+$/, '') || primaryBlossomServer()
           const baseUrl = uploadedServer || fallbackServer
           const fileUrl = `${baseUrl}/${attachment.hash}`
 

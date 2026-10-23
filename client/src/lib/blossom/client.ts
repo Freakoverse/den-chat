@@ -178,6 +178,16 @@ export const blossomServers = {
   },
 }
 
+/**
+ * The primary Blossom server for building a URL when a context-specific list is empty — the first entry of
+ * the ONE list the user sees and edits in Settings → Network (getServers(), which itself falls back to the
+ * curated defaults, so this is never empty). Single source of truth: callers use this instead of hardcoding
+ * a server like blossom.primal.net.
+ */
+export function primaryBlossomServer(): string {
+  return blossomServers.getServers()[0]
+}
+
 // ─── Auth Header (BUD-01) ───
 
 /** Signs the kind-24242 Blossom auth event. v2 hubs pass a `P` sub-signer to avoid revealing `R`. */

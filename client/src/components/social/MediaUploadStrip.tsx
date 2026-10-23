@@ -8,7 +8,7 @@
 
 import { useState, useRef, useCallback } from 'react'
 import { Upload, Loader2, FileIcon, X, ImagePlus } from 'lucide-react'
-import { uploadToBlossomServers, computeHash, blossomServers } from '@/lib/blossom'
+import { uploadToBlossomServers, computeHash, blossomServers, primaryBlossomServer } from '@/lib/blossom'
 import type { UploadProgress } from '@/lib/blossom'
 import type { ISigner } from '@/stores/userStore'
 
@@ -56,7 +56,7 @@ const normServer = (u: string) => u.replace(/\/+$/, '').toLowerCase()
 function serveBase(serverUrls: string[]): string {
   const accepted = serverUrls.map(normServer).filter(Boolean)
   const configured = blossomServers.getServers().map(normServer)
-  return configured.find((s) => accepted.includes(s)) || accepted[0] || configured[0] || 'https://blossom.primal.net'
+  return configured.find((s) => accepted.includes(s)) || accepted[0] || configured[0] || primaryBlossomServer()
 }
 
 function formatFileSize(bytes: number) {
@@ -174,7 +174,7 @@ export function useMediaUpload(signer: ISigner | null | undefined, privateKey: s
       .filter((f) => f.status === 'success' && f.hash)
       .map((f) => {
         const ext = fileExt(f.file)
-        const base = (f.serveBase || 'https://blossom.primal.net').replace(/\/+$/, '')
+        const base = (f.serveBase || primaryBlossomServer()).replace(/\/+$/, '')
         return `${base}/${f.hash}${ext ? `.${ext}` : ''}`
       })
   }, [pendingFiles])
