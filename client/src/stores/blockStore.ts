@@ -99,6 +99,9 @@ async function publishMuteList(
 
   const signed = await signWithSigner(unsigned, signer, privateKey)
   await publishPersonal(signed)
+  // Advance the version stamp so a concurrent wide revalidation can't treat this just-published list as
+  // old and overwrite it. (Single publish chokepoint for all block/mute mutations.)
+  useBlockStore.setState((s) => signed.created_at >= s.blockListCreatedAt ? { blockListCreatedAt: signed.created_at } : {})
 }
 
 /* ── Fetch + parse the latest kind:10000 mute list ──

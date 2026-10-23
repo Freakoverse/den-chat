@@ -77,14 +77,15 @@ async function fetchLatestFollowList(pubkey: string, wide = false): Promise<{ fo
   return { follows, content: latest.content || '', createdAt: latest.created_at }
 }
 
-/** Publish a kind:3 follow list */
+/** Publish a kind:3 follow list. Returns the published event's created_at so callers can advance
+ *  followListCreatedAt — keeping the wide-revalidation guard from treating a just-published list as old. */
 async function publishFollowList(
   follows: Set<string>,
   content: string,
   myPubkey: string,
   signer: ISigner | null,
   privateKey: string | null,
-) {
+): Promise<number> {
   const tags = Array.from(follows).map((pk) => ['p', pk])
 
   const unsigned = {
@@ -97,6 +98,7 @@ async function publishFollowList(
 
   const signed = await signWithSigner(unsigned, signer, privateKey)
   await publishPersonal(signed)
+  return signed.created_at
 }
 
 /** Core fetch logic with retry (used by both load and refetch) */
@@ -208,8 +210,10 @@ export const useFollowStore = create<FollowState>((set, get) => ({
         // Update local state to the merged set
         set({ followedPubkeys: baseFollows, followListContent: content })
 
-        // Publish the merged result
-        await publishFollowList(baseFollows, content, myPubkey, signer, privateKey)
+        // Publish the merged result, then advance the version stamp so a concurrent wide revalidation
+        // can't treat this just-published list as old and overwrite it.
+        const publishedAt = await publishFollowList(baseFollows, content, myPubkey, signer, privateKey)
+        set((s) => publishedAt >= s.followListCreatedAt ? { followListCreatedAt: publishedAt } : {})
       } catch (err) {
         console.error('[followStore] Failed to publish follow:', err)
         // Revert to state before this operation
@@ -241,8 +245,9 @@ export const useFollowStore = create<FollowState>((set, get) => ({
         // Update local state to the merged set
         set({ followedPubkeys: baseFollows, followListContent: content })
 
-        // Publish the merged result
-        await publishFollowList(baseFollows, content, myPubkey, signer, privateKey)
+        // Publish the merged result, then advance the version stamp (see followUser).
+        const publishedAt = await publishFollowList(baseFollows, content, myPubkey, signer, privateKey)
+        set((s) => publishedAt >= s.followListCreatedAt ? { followListCreatedAt: publishedAt } : {})
       } catch (err) {
         console.error('[followStore] Failed to publish unfollow:', err)
         // Revert — add back
