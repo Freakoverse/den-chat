@@ -65,6 +65,12 @@ function BlossomBannerImg({ src }: { src: string }) {
   return <img src={blossom.src || src} alt="Banner" className="w-full h-full object-cover" />
 }
 
+/** Avatar image with blossom fallback (used in the edit preview so a flaky primary server still resolves). */
+function BlossomAvatarImg({ src }: { src: string }) {
+  const blossom = useBlossomMedia(src)
+  return <img src={blossom.src || src} alt="Avatar" className="w-full h-full object-cover" />
+}
+
 interface UserProfileModalProps {
   open: boolean
   onClose: () => void
@@ -245,12 +251,15 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
     try {
       const buffer = await file.arrayBuffer()
       const data = new Uint8Array(buffer)
-      const { hash } = await uploadToBlossomServers(
+      const { hash, serverUrls } = await uploadToBlossomServers(
         data, signer, privateKey, undefined, file.type,
         (p) => setProgressCb({ ...p }),
         () => { const c = new AbortController(); abortRef.current = c; return c.signal },
       )
-      const serverUrl = blossomServerManager.getServers()[0]
+      // Point the URL at a server that ACTUALLY accepted the blob (serverUrls[0]), not just the user's
+      // first configured server — otherwise the picture/banner URL can be dead for everyone (the server in
+      // getServers()[0] may have rejected the upload or be broken). Matches the login/chat/pack uploaders.
+      const serverUrl = serverUrls[0] || blossomServerManager.getServers()[0]
       setUrl(`${serverUrl}/${hash}`)
       setStatus('success')
     } catch {
@@ -1914,7 +1923,7 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
                       )}
                     >
                       {editProfile.banner ? (
-                        <img src={editProfile.banner} alt="Banner" className="w-full h-full object-cover" />
+                        <BlossomBannerImg src={editProfile.banner} />
                       ) : (
                         <div className="flex flex-col items-center gap-1 text-muted-foreground group-hover:text-primary/70">
                           <ImageIcon size={22} />
@@ -1968,7 +1977,7 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
                       )}
                     >
                       {editProfile.picture ? (
-                        <img src={editProfile.picture} alt="Avatar" className="w-full h-full object-cover" />
+                        <BlossomAvatarImg src={editProfile.picture} />
                       ) : (
                         <Camera size={18} className="text-muted-foreground group-hover:text-primary/70" />
                       )}
