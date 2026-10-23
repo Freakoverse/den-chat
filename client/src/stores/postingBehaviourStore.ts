@@ -184,6 +184,17 @@ export function getPublishRelays(hubRelays?: string[], opts?: { hubOnly?: boolea
   // (Was: hubOnly kept a P/O-authored event on the hub's relays only, to avoid a P→R footprint link.)
   void opts
 
+  // Order = fetch/failover preference: hub relays first (so hub content reaches the container's own
+  // relays before anything else), then client, then the user's NIP-65.
+
+  // Hub relays: exclude any the user disabled in client settings. Seeded by the hub d-tag (hubSeed) when
+  // provided, so every member converges on the same hub relays.
+  if (state.postToHubRelays && hubRelays && hubRelays.length > 0) {
+    const limit = state.limitHubRelays ? RELAY_PUBLISH_CAP : Infinity
+    const filtered = hubRelays.filter((r) => !disabledRelays.has(r.replace(/\/+$/, '')))
+    pickForPubkey(filtered, limit, hubSeed).forEach((r) => result.add(r))
+  }
+
   // Client relays (from relay-pool, which reads localStorage — already filtered to enabled)
   if (state.postToClientRelays) {
     const limit = state.limitClientRelays ? RELAY_PUBLISH_CAP : Infinity
@@ -196,14 +207,6 @@ export function getPublishRelays(hubRelays?: string[], opts?: { hubOnly?: boolea
     const userRelays = useUserListsStore.getState().userRelays
       .filter((r) => !disabledRelays.has(r.replace(/\/+$/, '')))
     pickForPubkey(userRelays, limit, me).forEach((r) => result.add(r))
-  }
-
-  // Hub relays: exclude any the user disabled in client settings. Seeded by the hub d-tag (hubSeed) when
-  // provided, so every member converges on the same hub relays.
-  if (state.postToHubRelays && hubRelays && hubRelays.length > 0) {
-    const limit = state.limitHubRelays ? RELAY_PUBLISH_CAP : Infinity
-    const filtered = hubRelays.filter((r) => !disabledRelays.has(r.replace(/\/+$/, '')))
-    pickForPubkey(filtered, limit, hubSeed).forEach((r) => result.add(r))
   }
 
   return Array.from(result)
@@ -289,10 +292,11 @@ export async function publishContent(
 
   const seed = getPublishRelays(hubRelays, { hubOnly: opts?.hubOnly, hubSeed })
 
+  // Pool order mirrors the seed (getPublishRelays): hub relays first, then client, then user NIP-65.
   const pool: string[] = []
+  if (state.postToHubRelays && hubRelays && hubRelays.length > 0) pool.push(...ringOrder(hubRelays.filter(notDisabled), hubSeed))
   if (state.postToClientRelays) pool.push(...ringOrder(getRelays(), me)) // enabled-only already
   if (state.postToUserRelays) pool.push(...ringOrder(useUserListsStore.getState().userRelays.filter(notDisabled), me))
-  if (state.postToHubRelays && hubRelays && hubRelays.length > 0) pool.push(...ringOrder(hubRelays.filter(notDisabled), hubSeed))
 
   // Default target: land on as many live relays as the seed (toggle + cap aware) selected — so the number
   // of copies tracks the user's own posting-behaviour settings (caps on = ~6 per list; caps off = all).
@@ -394,16 +398,23 @@ export function getUploadBlossoms(hubBlossoms?: string[], opts?: { hubOnly?: boo
     blossomServers.getList().filter((s) => !s.enabled).map((s) => s.url.replace(/\/+$/, ''))
   )
 
-  // hubOnly: a v2 hub media upload must go ONLY to the hub's blossom servers — not the user's personal
-  // (R-advertised, kind 10063) servers — so the blob's server footprint can't link the P-message that
-  // references it back to R. (The 24242 auth is already signed as P via hubBlossomAuthSigner.)
-  if (opts?.hubOnly) {
-    if (hubBlossoms && hubBlossoms.length > 0) {
-      const limit = state.limitHubBlossoms ? 3 : Infinity
-      const filtered = hubBlossoms.filter((s) => !disabledBlossoms.has(s.replace(/\/+$/, '')))
-      pickForPubkey(filtered, limit, me).forEach((s) => result.add(s))
-    }
-    return Array.from(result)
+  // `hubOnly` is now INERT — v2 (pseudonym-authored) hub media uploads over the SAME server set as v1
+  // (hub + client + user kind-10063), by explicit product decision, mirroring the relay side
+  // (getPublishRelays). The 'happenstance' obscurity we settled on makes the P->R footprint from a blob
+  // landing on the user's own advertised servers a non-issue (the upload is still P-signed). Kept in the
+  // signature so the hub-media call sites still compile; it no longer restricts.
+  // (Was: hubOnly uploaded a P/O-signed blob to the hub's servers ONLY, to avoid that footprint.)
+  void opts
+
+  // Order = fetch/failover preference: the hub's own servers first (preferred for hub-media
+  // discoverability and member reach), then client, then the user's kind-10063. The upload path walks
+  // this in sequence, so a fixed order gives every device the same failover ring.
+
+  // Hub blossom servers — respects the same toggle as hub relays, exclude disabled client servers
+  if (state.postToHubRelays && hubBlossoms && hubBlossoms.length > 0) {
+    const limit = state.limitHubBlossoms ? 3 : Infinity
+    const filtered = hubBlossoms.filter((s) => !disabledBlossoms.has(s.replace(/\/+$/, '')))
+    pickForPubkey(filtered, limit, me).forEach((s) => result.add(s))
   }
 
   // Client blossom servers — respects the same toggle as client relays (already filtered to enabled)
@@ -421,13 +432,6 @@ export function getUploadBlossoms(hubBlossoms?: string[], opts?: { hubOnly?: boo
     if (userBlossoms.length > 0) {
       pickForPubkey(userBlossoms, limit, me).forEach((s) => result.add(s))
     }
-  }
-
-  // Hub blossom servers — respects the same toggle as hub relays, exclude disabled client servers
-  if (state.postToHubRelays && hubBlossoms && hubBlossoms.length > 0) {
-    const limit = state.limitHubBlossoms ? 3 : Infinity
-    const filtered = hubBlossoms.filter((s) => !disabledBlossoms.has(s.replace(/\/+$/, '')))
-    pickForPubkey(filtered, limit, me).forEach((s) => result.add(s))
   }
 
   return Array.from(result)
