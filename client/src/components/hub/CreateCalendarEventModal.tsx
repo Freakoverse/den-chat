@@ -23,6 +23,8 @@ import { useUserStore } from '@/stores/userStore'
 import { uploadToBlossomServers } from '@/lib/blossom'
 import { useHubStore } from '@/stores/hubStore'
 import { hubBlossomAuthSigner } from '@/lib/hub/hubMemberSign'
+import { getUploadBlossoms } from '@/stores/postingBehaviourStore'
+import { isV2 } from '@/lib/hub/version'
 import type { UploadProgress } from '@/lib/blossom'
 import type { CalendarEventData, DecryptedCalendarEvent } from '@/hooks/useCalendar'
 
@@ -187,8 +189,10 @@ export function CreateCalendarEventModal({
       // this P-authored calendar event references isn't auth-linked to our real key.
       const activeHub = activeHubId ? useHubStore.getState().hubs[activeHubId] : null
       const imgAuthSigner = activeHub ? await hubBlossomAuthSigner(activeHub, { privateKey, signer }) : undefined
+      // Calendar-event media belongs on the hub's blossom servers (hubOnly for v2 to avoid a personal-server
+      // footprint that could link the P-authored event back to R), not the client default.
       const { hash, serverUrls } = await uploadToBlossomServers(
-        data, signer, privateKey, undefined, file.type,
+        data, signer, privateKey, getUploadBlossoms(activeHub?.blossomServers, { hubOnly: !!activeHub && isV2(activeHub) }), file.type,
         (p) => setUploadProgress({ ...p }),
         () => { const c = new AbortController(); uploadAbortRef.current = c; return c.signal },
         imgAuthSigner,

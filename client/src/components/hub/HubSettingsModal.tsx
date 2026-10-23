@@ -42,7 +42,7 @@ import { buildHubEvent } from '@/lib/hub/buildHubEvent'
 import { loadRemainingPageMembers } from '@/hooks/useHubLoader'
 import { mineAndSign } from '@/lib/nostr'
 import { publishToSpecificRelays, publishCriticalWithFailover, getRelayList } from '@/lib/nostr/relay-pool'
-import { getPublishRelays } from '@/stores/postingBehaviourStore'
+import { getPublishRelays, getUploadBlossoms } from '@/stores/postingBehaviourStore'
 import { KINDS } from '@/lib/crypto/constants'
 import { aesDecrypt } from '@/lib/crypto/aes'
 import { deriveChannelKey } from '@/lib/crypto/hkdf'
@@ -1659,8 +1659,10 @@ function GeneralPage({
         const { ChatContext } = await import('@/lib/crypto/skd')
         ownerAuth = makeSubkeySigner(ChatContext.owner(hub.dTag), { privateKey, signer }).signEvent
       }
+      // The hub icon/banner belongs on the hub's own blossom servers (hubOnly for v2 to avoid a personal-
+      // server footprint), not the client default, so members and Discover can load it.
       const { hash, serverUrls } = await uploadToBlossomServers(
-        data, signer, privateKey, undefined, file.type,
+        data, signer, privateKey, getUploadBlossoms(editBlossoms, { hubOnly: isV2(hub) }), file.type,
         (p) => setProgress({ ...p }),
         () => { const c = new AbortController(); abortRef.current = c; return c.signal },
         ownerAuth,

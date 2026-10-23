@@ -11,6 +11,7 @@ import { Upload, Loader2, FileIcon, X, ImagePlus } from 'lucide-react'
 import { uploadToBlossomServers, computeHash, blossomServers, primaryBlossomServer } from '@/lib/blossom'
 import type { UploadProgress } from '@/lib/blossom'
 import type { ISigner } from '@/stores/userStore'
+import { getUploadBlossoms } from '@/stores/postingBehaviourStore'
 
 /* ─── Types ─── */
 
@@ -141,7 +142,7 @@ export function useMediaUpload(signer: ISigner | null | undefined, privateKey: s
         const buffer = await pf.file.arrayBuffer()
         const data = new Uint8Array(buffer)
         const { hash, serverUrls } = await uploadToBlossomServers(
-          data, signer || null, privateKey || null, undefined, pf.file.type,
+          data, signer || null, privateKey || null, getUploadBlossoms(), pf.file.type,
           (progress) => {
             setPendingFiles((prev) => prev.map((f) => f.id === pf.id ? { ...f, progress: { ...progress } } : f))
           },

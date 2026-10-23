@@ -14,6 +14,7 @@ import { useEscToClose } from '@/hooks/useEscToClose'
 import { createPortal } from 'react-dom'
 import { useSocialStore } from '@/stores/socialStore'
 import { useNavigationStore } from '@/stores/navigationStore'
+import { getUploadBlossoms } from '@/stores/postingBehaviourStore'
 import { useForumStore, FORUM_DEFAULT_POW, MAX_FORUM_LIST } from '@/stores/forumStore'
 import { useUserStore } from '@/stores/userStore'
 import { useFollowStore } from '@/stores/followStore'
@@ -959,7 +960,7 @@ function MediaUploadField({ value, onChange, aspect, label }: {
     try {
       const data = new Uint8Array(await file.arrayBuffer())
       const { hash, serverUrls } = await uploadToBlossomServers(
-        data, signer, privateKey, undefined, file.type,
+        data, signer, privateKey, getUploadBlossoms(), file.type,
         (p) => setProgress({ ...p }),
         () => { const c = new AbortController(); abortRef.current = c; return c.signal },
       )

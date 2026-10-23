@@ -18,7 +18,7 @@ import { BlossomImage } from '@/components/ui/BlossomImage'
 import { useUserStore } from '@/stores/userStore'
 import { fetchEvents, publishToSpecificRelays } from '@/lib/nostr/relay-pool'
 import { signWithSigner } from '@/lib/nostr/events'
-import { publishPersonal, getPublishRelays, getDeletePublishRelays } from '@/stores/postingBehaviourStore'
+import { publishPersonal, getPublishRelays, getDeletePublishRelays, getUploadBlossoms } from '@/stores/postingBehaviourStore'
 import { uploadToBlossomServers } from '@/lib/blossom'
 import type { UploadProgress } from '@/lib/blossom'
 import type { Event } from 'nostr-tools'
@@ -397,7 +397,7 @@ export function LinksEditorModal({ open, onClose, onSaved }: LinksEditorModalPro
       const buffer = await file.arrayBuffer()
       const data = new Uint8Array(buffer)
       const { hash, serverUrls } = await uploadToBlossomServers(
-        data, signer, privateKey, undefined, file.type,
+        data, signer, privateKey, getUploadBlossoms(), file.type,
         (p) => setImgProgress({ ...p }),
         () => { const c = new AbortController(); imgAbortRef.current = c; return c.signal },
       )

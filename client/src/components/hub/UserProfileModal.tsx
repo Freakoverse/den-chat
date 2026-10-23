@@ -44,7 +44,7 @@ import { truncateNpub } from '@/lib/utils'
 import { fetchEvents, publishToSpecificRelays, publishCriticalWithFailover } from '@/lib/nostr/relay-pool'
 import { ProfilePacksSection } from '@/components/hub/ProfilePacksSection'
 import { historyReadFailure } from '@/lib/hub/historyGuard'
-import { publishPersonal, getPublishRelays } from '@/stores/postingBehaviourStore'
+import { publishPersonal, getPublishRelays, getUploadBlossoms } from '@/stores/postingBehaviourStore'
 import { signWithSigner } from '@/lib/nostr/events'
 import { nip19, type Event } from 'nostr-tools'
 import { LinksViewerModal, LinksEditorModal } from '@/components/hub/LinksModal'
@@ -251,8 +251,9 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
     try {
       const buffer = await file.arrayBuffer()
       const data = new Uint8Array(buffer)
+      // Upload to the user's own blossom list too (client + kind-10063, per Settings), not just client.
       const { hash, serverUrls } = await uploadToBlossomServers(
-        data, signer, privateKey, undefined, file.type,
+        data, signer, privateKey, getUploadBlossoms(), file.type,
         (p) => setProgressCb({ ...p }),
         () => { const c = new AbortController(); abortRef.current = c; return c.signal },
       )
