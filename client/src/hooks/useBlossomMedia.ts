@@ -13,7 +13,8 @@
  */
 
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
-import { blossomServers, downloadFromBlossom, computeHash } from '@/lib/blossom'
+import { downloadFromBlossom, computeHash } from '@/lib/blossom'
+import { getReadBlossoms } from '@/stores/postingBehaviourStore'
 import { parseDecryptionFragment, type FileDecryptionInfo } from '@/lib/blossom/encMediaUrl'
 import { decryptFile } from '@/lib/crypto/fileEncryption'
 import { getFromPersistentCache, putInPersistentCache } from '@/lib/cache/blossomMediaCache'
@@ -59,8 +60,9 @@ function parseBlossomUrl(url: string): BlossomParsed | null {
     const parsed = new URL(url)
     const hostname = parsed.hostname.replace('www.', '')
 
-    // Check if it's a known blossom host OR a user-configured server
-    const configuredServers = blossomServers.getServers()
+    // Check if it's a known blossom host OR one of our configured servers (client + user kind-10063),
+    // so a URL on the user's own personal server is recognized and gets the failover treatment too.
+    const configuredServers = getReadBlossoms()
     const isBlossomHost = KNOWN_BLOSSOM_HOSTS.includes(hostname) ||
       configuredServers.some(s => {
         try { return new URL(s).hostname.replace('www.', '') === hostname } catch { return false }
@@ -144,16 +146,12 @@ const decryptedMediaCache = new Map<string, string>()
 export function useBlossomMedia(originalUrl: string | undefined, maxSizeMB?: number): BlossomMediaState {
   const parsed = useMemo(() => originalUrl ? parseBlossomUrl(originalUrl) : null, [originalUrl])
 
-  // Build server list: origin first, then all configured servers (deduplicated)
+  // Build server list: origin first, then the client + user read net (deduplicated).
+  // getReadBlossoms() unions the shared client list with the user's own kind-10063 servers, so a blob
+  // an upload placed on a personal server (not in the client defaults) still resolves on failover.
   const servers = useMemo(() => {
     if (!parsed) return []
-    const all = blossomServers.getServers()
-    const ordered = [parsed.originServer]
-    for (const s of all) {
-      const norm = s.replace(/\/+$/, '')
-      if (!ordered.includes(norm)) ordered.push(norm)
-    }
-    return ordered
+    return getReadBlossoms([parsed.originServer])
   }, [parsed])
 
   const [currentSrc, setCurrentSrc] = useState('')

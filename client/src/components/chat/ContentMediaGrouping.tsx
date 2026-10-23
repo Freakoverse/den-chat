@@ -8,7 +8,8 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Star, Loader2, FileDown } from 'lucide-react'
 import { useBlossomMedia, parseBlossomUrl } from '@/hooks/useBlossomMedia'
-import { blossomServers, downloadFromBlossom } from '@/lib/blossom'
+import { downloadFromBlossom } from '@/lib/blossom'
+import { getReadBlossoms } from '@/stores/postingBehaviourStore'
 import { decryptFile } from '@/lib/crypto/fileEncryption'
 import { saveBlobAs } from '@/lib/saveFile'
 import { VerificationBadge } from '@/components/ui/VerificationBadge'
@@ -293,8 +294,9 @@ export function ContentMediaFile({ url }: { url: string }) {
     if (!parsed || busy) return
     setBusy(true); setFailed(false)
     try {
-      const servers = [parsed.originServer, ...blossomServers.getServers().map((s) => s.replace(/\/+$/, ''))]
-        .filter((s, i, a) => a.indexOf(s) === i)
+      // Read net = origin first, then client + user servers (getReadBlossoms), so a blob on one of the
+      // user's own kind-10063 servers still resolves when its origin host is down.
+      const servers = getReadBlossoms([parsed.originServer])
       let bytes = await downloadFromBlossom(parsed.hash, servers)
       if (parsed.enc) bytes = await decryptFile(bytes, parsed.enc.keyHex, parsed.enc.nonceHex)
       const blob = new Blob([bytes.slice() as Uint8Array<ArrayBuffer>], { type: 'application/octet-stream' })

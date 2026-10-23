@@ -432,3 +432,36 @@ export function getUploadBlossoms(hubBlossoms?: string[], opts?: { hubOnly?: boo
 
   return Array.from(result)
 }
+
+/**
+ * Compute the blossom server list to READ/resolve a blob from, as a failover ring.
+ *
+ * Reads are not uploads: here we want the widest reasonable net, so this returns the UNION of the
+ * client list (getServers(), the shared Settings → Network list) and the user's own kind-10063
+ * (`userBlossoms`) servers, minus any the user explicitly disabled. The post-to toggles are NOT
+ * consulted: those gate where we PUBLISH, not where we look. Including the user's own servers is what
+ * lets a blob that an upload placed on a personal server (one not in the client defaults) still
+ * resolve when its origin URL dies — the durability case for pfps/avatars/profile media.
+ *
+ * Privacy: reading from your OWN servers leaks nothing about you to third parties, so (unlike the
+ * upload path's R-footprint concern) there's no reason to hold the user's servers back on reads.
+ * Hub media is the exception and does NOT use this: v2 hub uploads are hubOnly, so a hub blob never
+ * lands on a personal server — hub reads stay on the hub's own + client servers.
+ *
+ * @param extra Optional servers to try first (e.g. the blob's origin host, or sender-named servers).
+ * @returns Deduplicated, normalized array: extra first, then client, then user servers.
+ */
+export function getReadBlossoms(extra?: string[]): string[] {
+  const norm = (s: string) => s.replace(/\/+$/, '')
+  const disabled = new Set(
+    blossomServers.getList().filter((s) => !s.enabled).map((s) => norm(s.url))
+  )
+  const result: string[] = []
+  const add = (s: string) => { const n = norm(s); if (n && !disabled.has(n) && !result.includes(n)) result.push(n) }
+  // extra (origin / sender-named) is intentionally added even if "disabled" as a client server — the
+  // blob's own URL host is always worth trying; disabled only suppresses it from the discovery net.
+  for (const s of extra ?? []) { const n = norm(s); if (n && !result.includes(n)) result.push(n) }
+  for (const s of blossomServers.getServers()) add(s)
+  for (const s of useUserListsStore.getState().userBlossoms) add(s)
+  return result
+}

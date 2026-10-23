@@ -39,7 +39,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { truncateNpub, formatTimestamp } from '@/lib/utils'
 import { getHour12 } from '@/stores/preferencesStore'
 import { nip19, type Event } from 'nostr-tools'
-import { getUploadBlossoms, getPublishRelays, getDMSelfCopyRelays } from '@/stores/postingBehaviourStore'
+import { getUploadBlossoms, getReadBlossoms, getPublishRelays, getDMSelfCopyRelays } from '@/stores/postingBehaviourStore'
 import {
   Search, Plus, MessageSquare, Loader2,
   Lock, Users, UserPlus, AlertCircle, X, ShieldBan, Eye, EyeOff, Ghost, Info, VenetianMask, MoreVertical,
@@ -2072,11 +2072,14 @@ function useDecryptedBlob(messageId: string, fileUrl: string, mimeType: string |
 
         // Extract hash from blossom URL and use multi-server failover download.
         // The fileUrl may point to a server that doesn't have the file (upload shuffles randomly),
-        // so downloadFromBlossom tries all configured servers.
+        // so downloadFromBlossom tries the origin host first, then the client + user read net
+        // (getReadBlossoms) — including the user's own kind-10063 servers a copy may live on.
         const urlHash = fileUrl.split('/').pop()?.replace(/\.[^.]+$/, '') // strip any extension
         let cipherBytes: Uint8Array
         if (urlHash && /^[a-f0-9]{64}$/i.test(urlHash)) {
-          cipherBytes = await downloadFromBlossom(urlHash)
+          let originHost: string | undefined
+          try { originHost = new URL(fileUrl).origin } catch { originHost = undefined }
+          cipherBytes = await downloadFromBlossom(urlHash, getReadBlossoms(originHost ? [originHost] : undefined))
         } else {
           // Fallback: direct fetch for non-blossom URLs
           const response = await fetch(fileUrl)
