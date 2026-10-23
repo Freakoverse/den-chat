@@ -15,6 +15,7 @@ import type { UploadProgress } from '@/lib/blossom'
 import { makeSubkeySigner } from '@/lib/nostr/v2send'
 import { ChatContext, canUseV2 } from '@/lib/crypto/skd'
 import { useUserStore } from '@/stores/userStore'
+import { getUploadBlossoms } from '@/stores/postingBehaviourStore'
 import { cn } from '@/lib/utils'
 
 const ACCEPTED_IMAGE_EXTENSIONS = '.png,.jpg,.jpeg,.gif,.webp'
@@ -134,7 +135,7 @@ export function GroupFaceEditor({ dTag, v2, initial, onChange, onError }: {
       let ownerAuthSigner: ((e: UnsignedEvent) => Promise<NostrEvent>) | undefined
       if (v2 && canUseV2({ privateKey, signer })) ownerAuthSigner = makeSubkeySigner(ChatContext.owner(dTag), { privateKey, signer }).signEvent
       const { hash, successCount, serverUrls } = await uploadToBlossomServers(
-        data, signer, privateKey, undefined, file.type,
+        data, signer, privateKey, getUploadBlossoms(), file.type,
         (progress) => set((s) => ({ ...s, progress: { ...progress } })),
         () => { const c = new AbortController(); abortRef.current = c; return c.signal },
         ownerAuthSigner,

@@ -8,6 +8,7 @@ import { useEffect, useRef, useState } from 'react'
 import { X, Loader2, ImageUp } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useUserStore } from '@/stores/userStore'
+import { getUploadBlossoms } from '@/stores/postingBehaviourStore'
 import { uploadToBlossomServers } from '@/lib/blossom/client'
 import {
   fetchVirtualAvatarCached,
@@ -57,7 +58,7 @@ export default function VirtualAvatarModal({ onClose }: { onClose: () => void })
     set((s) => ({ ...s, uploading: true, preview: localPreview }))
     try {
       const bytes = new Uint8Array(await file.arrayBuffer())
-      const { hash, serverUrls } = await uploadToBlossomServers(bytes, signer, privateKey, undefined, file.type)
+      const { hash, serverUrls } = await uploadToBlossomServers(bytes, signer, privateKey, getUploadBlossoms(), file.type)
       if (!serverUrls.length) throw new Error('no servers')
       // serverUrls are server BASE urls — the blob lives at <server>/<hash>.
       const url = `${serverUrls[0].replace(/\/+$/, '')}/${hash}`

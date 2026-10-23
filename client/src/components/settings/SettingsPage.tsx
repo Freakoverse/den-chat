@@ -29,7 +29,7 @@ import { getRelayList, getDefaultRelays, setRelays, publishToSpecificRelays, pub
 import { checkEventAvailability } from '@/lib/nostr/eventRedundancy'
 import { parseHubBackup } from '@/lib/hub/hubBackup'
 import { Button } from '@/components/ui/button'
-import { publishPersonal, getPublishRelays, getDeletePublishRelays } from '@/stores/postingBehaviourStore'
+import { publishPersonal, getPublishRelays, getDeletePublishRelays, getUploadBlossoms } from '@/stores/postingBehaviourStore'
 import { createUnsignedEvent, signWithSigner, mineAndSign, createHubListEvent, createDeletionEvent } from '@/lib/nostr/events'
 import { DeleteConfirmDialog } from '@/components/hub/ChannelView'
 import {
@@ -6010,6 +6010,10 @@ function RebroadcastHubTool() {
     try {
       // 1. Re-upload the member/Blossom blobs (individually — Blossom has no bundles).
       //    Byte-identical bytes ⇒ identical SHA-256 ⇒ the index's references resolve again.
+      //    Target the hub's OWN advertised servers (its `o` tags) so member references resolve, plus the
+      //    user's lists (client + kind-10063) for extra redundancy.
+      const hubBlossoms = event.tags.filter((t) => t[0] === 'o' && t[1]).map((t) => t[1])
+      const rebroadcastServers = getUploadBlossoms(hubBlossoms)
       let uploaded = 0
       if (blobs && blobs.size > 0) {
         let i = 0
@@ -6017,7 +6021,7 @@ function RebroadcastHubTool() {
           i++
           setProgress(`Uploading hub data to Blossom… ${i}/${blobs.size}`)
           try {
-            await uploadToBlossomServers(bytes, signer, privateKey, undefined, 'application/octet-stream')
+            await uploadToBlossomServers(bytes, signer, privateKey, rebroadcastServers, 'application/octet-stream')
             uploaded++
           } catch { /* try the rest; report the shortfall below */ }
         }
@@ -10665,11 +10669,11 @@ function BuildPlatformRow({ plat, onUpdate, onRemove, signer, privateKey }: {
       const buffer = await file.arrayBuffer()
       const data = new Uint8Array(buffer)
       const { hash, serverUrls, successCount } = await uploadToBlossomServers(
-        data, signer || null, privateKey || null, undefined, file.type,
+        data, signer || null, privateKey || null, getUploadBlossoms(), file.type,
         (p) => setProgress({ percent: p.percent, serverUrl: p.serverUrl, serverIndex: p.serverIndex, totalServers: p.totalServers }),
         () => { const c = new AbortController(); uploadAbortRef.current = c; return c.signal },
       )
-      const baseUrl = serverUrls[0] || 'https://blossom.primal.net'
+      const baseUrl = serverUrls[0]
       onUpdate({ url: `${baseUrl}/${hash}`, ext: fileExt, hash, originalFilename: file.name, size: file.size, mimeType: file.type })
       setProgress(null)
       setSuccessMsg(`Uploaded to ${successCount} server${successCount !== 1 ? 's' : ''}`)
@@ -10905,11 +10909,11 @@ function BuildSourceUploadField({ url, onUpdate, signer, privateKey }: {
       const buffer = await file.arrayBuffer()
       const data = new Uint8Array(buffer)
       const { hash, serverUrls, successCount } = await uploadToBlossomServers(
-        data, signer || null, privateKey || null, undefined, file.type || 'application/zip',
+        data, signer || null, privateKey || null, getUploadBlossoms(), file.type || 'application/zip',
         (p) => setProgress({ percent: p.percent, serverUrl: p.serverUrl, serverIndex: p.serverIndex, totalServers: p.totalServers }),
         () => { const c = new AbortController(); uploadAbortRef.current = c; return c.signal },
       )
-      const baseUrl = serverUrls[0] || 'https://blossom.primal.net'
+      const baseUrl = serverUrls[0]
       onUpdate(`${baseUrl}/${hash}`, fileExt)
       setProgress(null)
       setSuccessMsg(`Uploaded to ${successCount} server${successCount !== 1 ? 's' : ''}`)
