@@ -413,8 +413,6 @@ export function DM04ChatView({ recipientPubkey, onSwitchProtocol, onBack }: { re
 
     let content = text
     if (attachments && attachments.length > 0) {
-      // Use configured blossom server + file extension for maximum compatibility.
-      // useBlossomMedia handles server failover across all configured servers.
       const servers = getUploadBlossoms()
       const fallbackBase = servers[0]?.replace(/\/+$/, '') || primaryBlossomServer()
       const links = attachments.map((a) => {
