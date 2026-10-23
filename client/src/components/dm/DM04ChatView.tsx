@@ -416,9 +416,13 @@ export function DM04ChatView({ recipientPubkey, onSwitchProtocol, onBack }: { re
       // Use configured blossom server + file extension for maximum compatibility.
       // useBlossomMedia handles server failover across all configured servers.
       const servers = getUploadBlossoms()
-      const baseUrl = servers[0]?.replace(/\/+$/, '') || primaryBlossomServer()
+      const fallbackBase = servers[0]?.replace(/\/+$/, '') || primaryBlossomServer()
       const links = attachments.map((a) => {
-        const url = `${baseUrl}/${a.hash}${mimeToExt(a.type)}`
+        // Pin to the server that accepted THIS blob (ChatInputBar recorded it per attachment), not a
+        // shared target pick — the recipient resolves off their own read servers and can't fail over to
+        // ours, so the URL must name a server that actually holds the blob.
+        const base = a.serverUrls?.[0]?.replace(/\/+$/, '') || fallbackBase
+        const url = `${base}/${a.hash}${mimeToExt(a.type)}`
         // Encrypted upload: carry the per-file AES key in a fragment so the
         // recipient can decrypt. Stays private inside the NIP-04-encrypted body.
         return a.encryption ? appendDecryptionFragment(url, a.encryption) : url
@@ -1653,9 +1657,13 @@ function DM04ThreadModal({ parentMsg, threadReplies, recipientPubkey, getProfile
     let content = text
     if (attachments && attachments.length > 0) {
       const servers = getUploadBlossoms()
-      const baseUrl = servers[0]?.replace(/\/+$/, '') || primaryBlossomServer()
+      const fallbackBase = servers[0]?.replace(/\/+$/, '') || primaryBlossomServer()
       const links = attachments.map((a) => {
-        const url = `${baseUrl}/${a.hash}${mimeToExt(a.type)}`
+        // Pin to the server that accepted THIS blob (ChatInputBar recorded it per attachment), not a
+        // shared target pick — the recipient resolves off their own read servers and can't fail over to
+        // ours, so the URL must name a server that actually holds the blob.
+        const base = a.serverUrls?.[0]?.replace(/\/+$/, '') || fallbackBase
+        const url = `${base}/${a.hash}${mimeToExt(a.type)}`
         // Encrypted upload: carry the per-file AES key in a fragment so the
         // recipient can decrypt. Stays private inside the NIP-04-encrypted body.
         return a.encryption ? appendDecryptionFragment(url, a.encryption) : url
