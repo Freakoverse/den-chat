@@ -34,7 +34,7 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
-import { uploadToBlossomServers, blossomServers as blossomServerManager } from '@/lib/blossom'
+import { uploadToBlossomServers } from '@/lib/blossom'
 import { ImageCropModal } from '@/components/ui/ImageCropModal'
 import type { UploadProgress } from '@/lib/blossom'
 import { Button } from '@/components/ui/button'
@@ -257,10 +257,10 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
         () => { const c = new AbortController(); abortRef.current = c; return c.signal },
       )
       // Point the URL at a server that ACTUALLY accepted the blob (serverUrls[0]), not just the user's
-      // first configured server — otherwise the picture/banner URL can be dead for everyone (the server in
-      // getServers()[0] may have rejected the upload or be broken). Matches the login/chat/pack uploaders.
-      const serverUrl = serverUrls[0] || blossomServerManager.getServers()[0]
-      setUrl(`${serverUrl}/${hash}`)
+      // first configured server — otherwise the picture/banner URL can be dead for everyone. Matches the
+      // login/chat/pack uploaders. uploadToBlossomServers throws when no server accepts, so serverUrls[0]
+      // always exists here.
+      setUrl(`${serverUrls[0]}/${hash}`)
       setStatus('success')
     } catch {
       setStatus('error')
