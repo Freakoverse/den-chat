@@ -192,10 +192,11 @@ export function LongFormWritePage() {
     try {
       const servers = getUploadBlossoms()
       const data = new Uint8Array(await featuredFile.arrayBuffer())
-      const { hash } = await uploadToBlossomServers(data, signer, privateKey, servers, featuredFile.type,
+      const { hash, serverUrls } = await uploadToBlossomServers(data, signer, privateKey, servers, featuredFile.type,
         (progress) => setFeaturedProgress({ ...progress }),
         () => { const c = new AbortController(); featuredAbortRef.current = c; return c.signal })
-      setFeaturedImage(`${(servers[0] || '').replace(/\/+$/, '')}/${hash}`)
+      // Pin to a server that accepted the blob, not the first target (which may have rejected it).
+      setFeaturedImage(`${(serverUrls[0] || servers[0] || '').replace(/\/+$/, '')}/${hash}`)
       setFeaturedUploadDone(true)
     } catch { /* failed */ }
     finally { setFeaturedUploading(false); setFeaturedProgress(null) }
@@ -237,11 +238,12 @@ export function LongFormWritePage() {
       setPendingFiles(prev => prev.map(f => f.id === pf.id ? { ...f, status: 'uploading' as const } : f))
       try {
         const data = new Uint8Array(await pf.file.arrayBuffer())
-        const { hash } = await uploadToBlossomServers(data, signer, privateKey, servers, pf.file.type,
+        const { hash, serverUrls } = await uploadToBlossomServers(data, signer, privateKey, servers, pf.file.type,
           (progress) => setPendingFiles(prev => prev.map(f => f.id === pf.id ? { ...f, progress: { ...progress } } : f)),
           () => { const c = new AbortController(); uploadAbortRef.current = c; return c.signal })
         setPendingFiles(prev => prev.map(f => f.id === pf.id ? { ...f, status: 'success' as const, hash } : f))
-        const url = `${(servers[0] || '').replace(/\/+$/, '')}/${hash}`
+        // Pin to a server that accepted the blob, not the first target (which may have rejected it).
+        const url = `${(serverUrls[0] || servers[0] || '').replace(/\/+$/, '')}/${hash}`
         const md = pf.file.type.startsWith('image/') ? `![${pf.file.name}](${url})` : `[${pf.file.name}](${url})`
         setBody(prev => prev + (prev && !prev.endsWith('\n') ? '\n' : '') + md + '\n')
       } catch {

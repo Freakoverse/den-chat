@@ -29,6 +29,7 @@ import { orderByHealth } from '@/lib/nostr/relayHealthProbe'
 import { KINDS } from '@/lib/crypto/constants'
 import { coordinateShortTag } from '@/lib/nostr/nipShort'
 import { createAndUploadMemberFiles, createAndUploadMemberFilesV2, blossomServers as blossomServerManager, uploadToBlossomServers } from '@/lib/blossom'
+import { getUploadBlossoms } from '@/stores/postingBehaviourStore'
 import { makeSubkeySigner, mineAndSignAsSubkey } from '@/lib/nostr/v2send'
 import { ChatContext, canUseV2 } from '@/lib/crypto/skd'
 import { deriveHubContentKey, encryptHubContent, buildOwnerAttestation } from '@/lib/hub/hubContent'
@@ -146,6 +147,10 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
   const [iconStatus, setIconStatus] = useState<UploadStatus>('idle')
   const [iconProgress, setIconProgress] = useState<UploadProgress | null>(null)
   const [iconSuccessCount, setIconSuccessCount] = useState(0)
+  // The base URL of a server that actually ACCEPTED the icon upload (serverUrls[0]). The advertised
+  // iconUrl is built from this, not from the hub's selected-server[0], so the URL can't point at a
+  // server that never received the blob (the getServers()[0]-vs-serverUrls[0] class of dead-URL bug).
+  const [iconServerBase, setIconServerBase] = useState<string | null>(null)
   // Whether the uploaded image's Blossom auth was signed by the owner pseudonym O (v2) rather than the
   // real key R. Captured at upload time, so flipping the Private toggle afterwards can't retroactively
   // change it — it drives the "uploaded under your real key" warning below.
@@ -156,6 +161,7 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
   const [bannerStatus, setBannerStatus] = useState<UploadStatus>('idle')
   const [bannerProgress, setBannerProgress] = useState<UploadProgress | null>(null)
   const [bannerSuccessCount, setBannerSuccessCount] = useState(0)
+  const [bannerServerBase, setBannerServerBase] = useState<string | null>(null)
   const [bannerAuthedAsO, setBannerAuthedAsO] = useState(false)
 
   // Crop-editor targets — a freshly picked file opens the editor before uploading
@@ -303,8 +309,8 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
       setDescription('')
       setNsfw(false)
       setError(null)
-      setIconPreview(null); setIconHash(null); setIconStatus('idle'); setIconProgress(null); setIconSuccessCount(0); setIconAuthedAsO(false)
-      setBannerPreview(null); setBannerHash(null); setBannerStatus('idle'); setBannerProgress(null); setBannerSuccessCount(0); setBannerAuthedAsO(false)
+      setIconPreview(null); setIconHash(null); setIconStatus('idle'); setIconProgress(null); setIconSuccessCount(0); setIconAuthedAsO(false); setIconServerBase(null)
+      setBannerPreview(null); setBannerHash(null); setBannerStatus('idle'); setBannerProgress(null); setBannerSuccessCount(0); setBannerAuthedAsO(false); setBannerServerBase(null)
       setIconEditFile(null); setBannerEditFile(null) // else the crop editor re-pops on reopen
       // Fresh dTag for the NEXT hub — same reason: same dTag → same owner `O` → the new hub event
       // replaces the previous one on relays.
@@ -351,6 +357,7 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
     setSuccessCount: (n: number) => void,
     abortRef: React.MutableRefObject<AbortController | null>,
     setAuthedAsO: (v: boolean) => void,
+    setServerBase: (s: string | null) => void,
   ) => {
     // Enforce upload size limit from settings
     const limitMb = Number(localStorage.getItem('den-chat-upload-limit-mb')) || 10
@@ -377,12 +384,14 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
         const { ChatContext } = await import('@/lib/crypto/skd')
         ownerAuthSigner = makeSubkeySigner(ChatContext.owner(hubDTagRef.current), { privateKey, signer }).signEvent
       }
-      // Upload to 3 random Blossom servers sequentially
-      const { hash, successCount } = await uploadToBlossomServers(
+      // Upload to the servers the user picked for THIS hub, plus their own lists (client + kind-10063)
+      // for redundancy, same as the hub-edit path (HubSettingsModal). The advertised URL pins to
+      // serverUrls[0] below, so it always names a server that accepted the blob.
+      const { hash, successCount, serverUrls } = await uploadToBlossomServers(
         data,
         signer,
         privateKey,
-        undefined, // use default servers
+        getUploadBlossoms(getSelectedBlossoms()),
         file.type,
         (progress) => setProgress({ ...progress }),
         () => {
@@ -395,6 +404,7 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
       )
       setHash(hash)
       setSuccessCount(successCount)
+      setServerBase(serverUrls[0]?.replace(/\/+$/, '') || null)
       // Record the auth identity this blob was uploaded under (O when ownerAuthSigner was used, else R).
       setAuthedAsO(!!ownerAuthSigner)
       setStatus('success')
@@ -422,8 +432,8 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
     if (f.size > limitMb * 1024 * 1024) { setFileSizeWarning({ name: f.name, limitMb }); return }
     set(f)
   }
-  const uploadIcon = (f: File) => handleImageUpload(f, setIconPreview, setIconHash, setIconStatus, setIconProgress, setIconSuccessCount, iconAbortRef, setIconAuthedAsO)
-  const uploadBanner = (f: File) => handleImageUpload(f, setBannerPreview, setBannerHash, setBannerStatus, setBannerProgress, setBannerSuccessCount, bannerAbortRef, setBannerAuthedAsO)
+  const uploadIcon = (f: File) => handleImageUpload(f, setIconPreview, setIconHash, setIconStatus, setIconProgress, setIconSuccessCount, iconAbortRef, setIconAuthedAsO, setIconServerBase)
+  const uploadBanner = (f: File) => handleImageUpload(f, setBannerPreview, setBannerHash, setBannerStatus, setBannerProgress, setBannerSuccessCount, bannerAbortRef, setBannerAuthedAsO, setBannerServerBase)
 
   const removeImage = (
     setPreview: (v: null) => void,
@@ -431,12 +441,14 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
     setStatus: (s: UploadStatus) => void,
     setProgress: (p: null) => void,
     setSuccessCount: (n: number) => void,
+    setServerBase?: (s: string | null) => void,
   ) => {
     setPreview(null)
     setHash(null)
     setStatus('idle')
     setProgress(null)
     setSuccessCount(0)
+    setServerBase?.(null)
   }
 
   /** Progress indicator for an image upload */
@@ -567,8 +579,11 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
       // Build image URLs from Blossom hashes (dedup by normalized URL to avoid trailing-slash duplicates)
       const rawBlossoms = getSelectedBlossoms().length > 0 ? getSelectedBlossoms() : blossomServerManager.getServers().slice(0, 3)
       const blossomServerList = [...new Set(rawBlossoms.map(u => u.replace(/\/+$/, '')))]
-      const iconUrl = iconHash ? `${blossomServerList[0]}/${iconHash}` : undefined
-      const bannerUrl = bannerHash ? `${blossomServerList[0]}/${bannerHash}` : undefined
+      // Pin each image URL to a server that ACTUALLY accepted the blob (captured at upload time), not to
+      // the selected-server[0], which may never have received it. Fall back to the list only if the base
+      // is missing (shouldn't happen: the upload throws unless at least one server accepted).
+      const iconUrl = iconHash ? `${iconServerBase || blossomServerList[0]}/${iconHash}` : undefined
+      const bannerUrl = bannerHash ? `${bannerServerBase || blossomServerList[0]}/${bannerHash}` : undefined
 
       // JSON content per NIP-CHAT spec §6.1
       const contentObj = {
@@ -926,7 +941,7 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
                 <UploadStatusDisplay status={iconStatus} progress={iconProgress} successCount={iconSuccessCount} abortRef={iconAbortRef} />
                 {iconPreview && iconStatus !== 'uploading' && (
                   <button
-                    onClick={() => removeImage(setIconPreview, setIconHash, setIconStatus, setIconProgress, setIconSuccessCount)}
+                    onClick={() => removeImage(setIconPreview, setIconHash, setIconStatus, setIconProgress, setIconSuccessCount, setIconServerBase)}
                     className="text-xs text-destructive hover:underline cursor-pointer mt-0.5"
                   >
                     Remove
@@ -967,7 +982,7 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
                 <UploadStatusDisplay status={bannerStatus} progress={bannerProgress} successCount={bannerSuccessCount} abortRef={bannerAbortRef} />
                 {bannerPreview && bannerStatus !== 'uploading' && (
                   <button
-                    onClick={() => removeImage(setBannerPreview, setBannerHash, setBannerStatus, setBannerProgress, setBannerSuccessCount)}
+                    onClick={() => removeImage(setBannerPreview, setBannerHash, setBannerStatus, setBannerProgress, setBannerSuccessCount, setBannerServerBase)}
                     className="text-xs text-destructive hover:underline cursor-pointer mt-0.5"
                   >
                     Remove

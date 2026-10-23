@@ -1406,13 +1406,14 @@ function CreateForumPostModal({ onClose, sendMessage, canPublish, signer, privat
       const servers = getUploadBlossoms(hub?.blossomServers, { hubOnly: !!hub && isV2(hub) })
       const buffer = await featuredFile.arrayBuffer()
       const data = new Uint8Array(buffer)
-      const { hash } = await uploadToBlossomServers(
+      const { hash, serverUrls } = await uploadToBlossomServers(
         data, signer, privateKey, servers, featuredFile.type,
         (progress) => setFeaturedProgress({ ...progress }),
         () => { const c = new AbortController(); featuredAbortRef.current = c; return c.signal },
         hub ? await (await import('@/lib/hub/hubMemberSign')).hubBlossomAuthSigner(hub, { privateKey, signer }) : undefined,
       )
-      const serverUrl = (servers[0] || '').replace(/\/+$/, '')
+      // Pin to a server that accepted the blob, not the first target (which may have rejected it).
+      const serverUrl = (serverUrls[0] || servers[0] || '').replace(/\/+$/, '')
       setFeaturedImage(`${serverUrl}/${hash}`)
       setFeaturedUploadDone(true)
     } catch {
@@ -1531,7 +1532,7 @@ function CreateForumPostModal({ onClose, sendMessage, canPublish, signer, privat
       try {
         const buffer = await pf.file.arrayBuffer()
         const data = new Uint8Array(buffer)
-        const { hash } = await uploadToBlossomServers(
+        const { hash, serverUrls } = await uploadToBlossomServers(
           data, signer, privateKey, servers, pf.file.type,
           (progress) => {
             setPendingFiles((prev) => prev.map((f) => f.id === pf.id ? { ...f, progress: { ...progress } } : f))
@@ -1542,7 +1543,7 @@ function CreateForumPostModal({ onClose, sendMessage, canPublish, signer, privat
         setPendingFiles((prev) => prev.map((f) => f.id === pf.id ? { ...f, status: 'success' as const, hash, progress: undefined } : f))
 
         // Auto-insert markdown into body
-        const serverUrl = (servers[0] || '').replace(/\/+$/, '')
+        const serverUrl = (serverUrls[0] || servers[0] || '').replace(/\/+$/, '')
         const url = `${serverUrl}/${hash}`
         const isImage = pf.file.type.startsWith('image/')
         const md = isImage ? `![${pf.file.name}](${url})` : `[${pf.file.name}](${url})`
@@ -2040,13 +2041,14 @@ function EditForumPostModal({ post, onClose, editMessage, signer, privateKey, hu
       const servers = getUploadBlossoms(hub?.blossomServers, { hubOnly: !!hub && isV2(hub) })
       const buffer = await featuredFile.arrayBuffer()
       const data = new Uint8Array(buffer)
-      const { hash } = await uploadToBlossomServers(
+      const { hash, serverUrls } = await uploadToBlossomServers(
         data, signer, privateKey, servers, featuredFile.type,
         (progress) => setFeaturedProgress({ ...progress }),
         () => { const c = new AbortController(); featuredAbortRef.current = c; return c.signal },
         hub ? await (await import('@/lib/hub/hubMemberSign')).hubBlossomAuthSigner(hub, { privateKey, signer }) : undefined,
       )
-      const serverUrl = (servers[0] || '').replace(/\/+$/, '')
+      // Pin to a server that accepted the blob, not the first target (which may have rejected it).
+      const serverUrl = (serverUrls[0] || servers[0] || '').replace(/\/+$/, '')
       setFeaturedImage(`${serverUrl}/${hash}`)
       setFeaturedUploadDone(true)
     } catch {
@@ -2124,14 +2126,14 @@ function EditForumPostModal({ post, onClose, editMessage, signer, privateKey, hu
       try {
         const buffer = await pf.file.arrayBuffer()
         const data = new Uint8Array(buffer)
-        const { hash } = await uploadToBlossomServers(
+        const { hash, serverUrls } = await uploadToBlossomServers(
           data, signer, privateKey, servers, pf.file.type,
           (progress) => { setPendingFiles((prev) => prev.map((f) => f.id === pf.id ? { ...f, progress: { ...progress } } : f)) },
           () => { const c = new AbortController(); uploadAbortRef.current = c; return c.signal },
           hub ? await (await import('@/lib/hub/hubMemberSign')).hubBlossomAuthSigner(hub, { privateKey, signer }) : undefined,
         )
         setPendingFiles((prev) => prev.map((f) => f.id === pf.id ? { ...f, status: 'success' as const, hash, progress: undefined } : f))
-        const serverUrl = (servers[0] || '').replace(/\/+$/, '')
+        const serverUrl = (serverUrls[0] || servers[0] || '').replace(/\/+$/, '')
         const url = `${serverUrl}/${hash}`
         const isImage = pf.file.type.startsWith('image/')
         const md = isImage ? `![${pf.file.name}](${url})` : `[${pf.file.name}](${url})`
