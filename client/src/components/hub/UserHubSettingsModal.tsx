@@ -797,7 +797,7 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab, initialCh
         const signedEvent = await facSigner.signEvent({ ...unsignedEvent, pubkey: facP })
         // hub relays ONLY: this list JR is authored under the facilitator's pseudonym P_fac; publishing it
         // to their personal NIP-65 relays would correlate P_fac → R_fac by relay footprint.
-        await publishCriticalWithFailover(signedEvent, getPublishRelays([...hub.generalRelays], { hubOnly: true, hubSeed: hub.dTag }), [...hub.generalRelays])
+        await publishCriticalWithFailover(signedEvent, getPublishRelays([...hub.generalRelays], { hubSeed: hub.dTag  }), [...hub.generalRelays])
         setMeshListHash(newIndexHash)
         const nextVouched = [...meshMembers, memberR]
         setMeshMembers(nextVouched)
@@ -936,7 +936,7 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab, initialCh
         const { hash: newIndexHash } = await uploadToBlossomServers(encoder.encode(createIndexFile(newTreeHash, [], idx.historyHash || undefined)), signer, privateKey, hub.blossomServers, 'text/plain', undefined, undefined, facAuth)
         const signedEvent = await facSigner.signEvent({ ...createJoinRequest(hub.dTag, hub.creatorPubkey, newIndexHash), pubkey: facP })
         // hub relays ONLY (P_fac-authored list JR — keep it off the facilitator's personal relays).
-        await publishCriticalWithFailover(signedEvent, getPublishRelays([...hub.generalRelays], { hubOnly: true, hubSeed: hub.dTag }), [...hub.generalRelays])
+        await publishCriticalWithFailover(signedEvent, getPublishRelays([...hub.generalRelays], { hubSeed: hub.dTag  }), [...hub.generalRelays])
         setMeshListHash(newIndexHash)
         const remainingVouched = meshMembers.filter(pk => pk !== targetPubkey)
         setMeshMembers(remainingVouched)
@@ -1086,7 +1086,7 @@ export function UserHubSettingsModal({ open, onClose, hub, initialTab, initialCh
         const facP = await facSigner.getPublicKey()
         const unsigned = createJoinRequest(hub.dTag, hub.creatorPubkey, newIndexHash)
         const signed = await facSigner.signEvent({ ...unsigned, pubkey: facP })
-        await publishCriticalWithFailover(signed, getPublishRelays([...hub.generalRelays], { hubOnly: true, hubSeed: hub.dTag }), [...hub.generalRelays])
+        await publishCriticalWithFailover(signed, getPublishRelays([...hub.generalRelays], { hubSeed: hub.dTag  }), [...hub.generalRelays])
         // Persist the ban-exclusion ONLY after the rebuild + publish succeed. Doing it earlier means a
         // failed attempt drops the banned R from meshMembers, so a RETRY sees no banned members, passes
         // excludePfs=undefined, and re-keys the banned member's leaf back in under the new secret (ban

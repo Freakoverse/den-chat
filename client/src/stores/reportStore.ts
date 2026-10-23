@@ -365,7 +365,7 @@ export const useReportStore = create<ReportState>((set, get) => ({
     const signed = v2 && hub
       ? await signHubMemberEvent({ hub, unsigned, pubkey, privateKey, signer, minPow: minPow || 0, channelKey: key })
       : await mineAndSign(unsigned, minPow || 0, pubkey, signer, privateKey)
-    await publishContent(signed, relays, { hubOnly: v2 })
+    await publishContent(signed, relays)
 
     // Optimistic local update — add to myReportsByHub. Key by the WIRE author (P on v2) so it matches
     // what fetchMyReports enumerates.
@@ -419,7 +419,7 @@ export const useReportStore = create<ReportState>((set, get) => ({
     const signed = hub && isV2(hub)
       ? await signHubMemberEvent({ hub, unsigned, pubkey, privateKey, signer, minPow: minPow || 0, channelKey: key })
       : await mineAndSign(unsigned, minPow || 0, pubkey, signer, privateKey)
-    await publishContent(signed, relays, { hubOnly: !!hub && isV2(hub) })
+    await publishContent(signed, relays)
 
     // Optimistic local update — mark as retracted
     set((s) => ({

@@ -81,8 +81,8 @@ export async function republishV2HubIndex(opts: {
   // blobs to Blossom but its POINTER update (the hub event) landed on ZERO relays: the live event stayed on
   // the OLD index and the mutation silently didn't take (the owner saw a local-only "new version" that no
   // relay had). Seed the hub's normal publish relays, then route around dead ones via the client relay pool
-  // until enough accept. (`hubOnly` is inert now — v2 publishes over the same relay set as v1 by product
-  // decision, so this no longer restricts to hub relays.)
+  // until enough accept. (v2 publishes over the same relay set as v1 by product decision — hub + client
+  // + NIP-65, not hub relays only.)
   const targetedRelays = getPublishRelays([...hub.generalRelays])
   const pool = [...hub.generalRelays, ...getRelays()]
   const publishedRelays = await publishWithFailover(signed, targetedRelays, { pool })

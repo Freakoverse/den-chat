@@ -159,7 +159,7 @@ function hubDTagFromEvent(event: Event): string | undefined {
  * @param hubRelays Optional hub-specific relay list (from hub event)
  * @returns Deduplicated array of relay URLs to publish to
  */
-export function getPublishRelays(hubRelays?: string[], opts?: { hubOnly?: boolean; hubSeed?: string }): string[] {
+export function getPublishRelays(hubRelays?: string[], opts?: { hubSeed?: string }): string[] {
   const state = usePostingBehaviourStore.getState()
   const result = new Set<string>()
 
@@ -176,13 +176,9 @@ export function getPublishRelays(hubRelays?: string[], opts?: { hubOnly?: boolea
     getRelayList().filter((r) => !r.enabled).map((r) => r.url.replace(/\/+$/, ''))
   )
 
-  // `hubOnly` is now INERT — v2 (pseudonym-authored) events publish over the SAME relay set as v1
-  // (hub + client + NIP-65), by explicit product decision. The plausible deniability holds: the client
-  // relays are shared app defaults (not advertised as anyone's), and even a user's NIP-65 relays only
-  // prove they *relayed* the event, not that they authored it (anyone may publish anyone's event). The
-  // param is kept in the signature so the ~40 call sites still compile; it simply no longer restricts.
-  // (Was: hubOnly kept a P/O-authored event on the hub's relays only, to avoid a P→R footprint link.)
-  void opts
+  // v2 (pseudonym-authored) events publish over the SAME relay set as v1 (hub + client + NIP-65), by
+  // explicit product decision — there is no hub-only mode. Plausible deniability holds: client relays are
+  // shared app defaults, and a user's NIP-65 relays only prove they relayed the event, not authored it.
 
   // Order = fetch/failover preference: hub relays first (so hub content reaches the container's own
   // relays before anything else), then client, then the user's NIP-65.
@@ -262,7 +258,7 @@ type PublishProgress = (confirmed: number, total: number, acceptedRelays: string
  * Publish ANY user content (hub message, public-chat post, poll, calendar event, reaction, pin, report …)
  * with failover across the destinations enabled in Settings > Network > Behaviour.
  *
- * Drop-in replacement for `publishToSpecificRelays(getPublishRelays(hubRelays, { hubOnly }), signed)` and
+ * Drop-in replacement for `publishToSpecificRelays(getPublishRelays(hubRelays), signed)` and
  * for a fire-once `publishEventProgressive(signed, cb, getPublishRelays(hubRelays))`: it seeds with that
  * same toggle- and cap-aware pick, then routes around dead / write-rejecting relays across every enabled
  * category — client (postToClientRelays), user NIP-65 (postToUserRelays) and hub (postToHubRelays), each
@@ -270,14 +266,11 @@ type PublishProgress = (confirmed: number, total: number, acceptedRelays: string
  * selected. A category toggled OFF is never added, so this never publishes somewhere the user turned off.
  * This is what stops a deterministic pick that lands on dead relays from silently losing the event (the
  * "disappearing messages" bug) the way fire-once publishing did.
- *
- * `hubOnly` is accepted for call-site parity and passed through to getPublishRelays, where it is inert (v2
- * pseudonym events publish over the same relay set as v1, by product decision — see getPublishRelays).
  */
 export async function publishContent(
   event: Event,
   hubRelays?: string[],
-  opts?: { hubOnly?: boolean; onProgress?: PublishProgress; target?: number; hubDTag?: string },
+  opts?: { onProgress?: PublishProgress; target?: number; hubDTag?: string },
 ): Promise<string[]> {
   const state = usePostingBehaviourStore.getState()
   const norm = (u: string) => u.replace(/\/+$/, '')
@@ -290,7 +283,7 @@ export async function publishContent(
   // shared seed) it stays per-user (seeded by our pubkey), which is all that's available there.
   const hubSeed = (hubRelays && hubRelays.length > 0 ? (opts?.hubDTag || hubDTagFromEvent(event)) : '') || me
 
-  const seed = getPublishRelays(hubRelays, { hubOnly: opts?.hubOnly, hubSeed })
+  const seed = getPublishRelays(hubRelays, { hubSeed })
 
   // Pool order mirrors the seed (getPublishRelays): hub relays first, then client, then user NIP-65.
   const pool: string[] = []
@@ -350,10 +343,9 @@ export async function publishDM(
  *
  * @param hubRelays Optional hub-specific relay list (from the hub event)
  */
-export function getDeletePublishRelays(hubRelays?: string[], opts?: { hubOnly?: boolean }): string[] {
+export function getDeletePublishRelays(hubRelays?: string[]): string[] {
   const state = usePostingBehaviourStore.getState()
-  // `hubOnly` is inert here too (see getPublishRelays) — v2 deletes reach the same relays as v1.
-  void opts
+  // v2 deletes reach the same relays as v1 (no hub-only mode; see getPublishRelays).
   if (!state.bypassDeleteRelayLimits) return getPublishRelays(hubRelays)
 
   const result = new Set<string>()
@@ -383,7 +375,7 @@ export function getDeletePublishRelays(hubRelays?: string[], opts?: { hubOnly?: 
  * @param hubBlossoms Optional hub-specific blossom servers (from hub event)
  * @returns Deduplicated array of blossom server URLs
  */
-export function getUploadBlossoms(hubBlossoms?: string[], opts?: { hubOnly?: boolean }): string[] {
+export function getUploadBlossoms(hubBlossoms?: string[]): string[] {
   const state = usePostingBehaviourStore.getState()
   const result = new Set<string>()
 
@@ -398,13 +390,10 @@ export function getUploadBlossoms(hubBlossoms?: string[], opts?: { hubOnly?: boo
     blossomServers.getList().filter((s) => !s.enabled).map((s) => s.url.replace(/\/+$/, ''))
   )
 
-  // `hubOnly` is now INERT — v2 (pseudonym-authored) hub media uploads over the SAME server set as v1
-  // (hub + client + user kind-10063), by explicit product decision, mirroring the relay side
-  // (getPublishRelays). The 'happenstance' obscurity we settled on makes the P->R footprint from a blob
-  // landing on the user's own advertised servers a non-issue (the upload is still P-signed). Kept in the
-  // signature so the hub-media call sites still compile; it no longer restricts.
-  // (Was: hubOnly uploaded a P/O-signed blob to the hub's servers ONLY, to avoid that footprint.)
-  void opts
+  // v2 (pseudonym-authored) hub media uploads over the SAME server set as v1 (hub + client + user
+  // kind-10063), by explicit product decision, mirroring the relay side — there is no hub-only mode. The
+  // 'happenstance' obscurity we settled on makes the P->R footprint from a blob landing on the user's own
+  // advertised servers a non-issue (the upload is still P-signed).
 
   // Order = fetch/failover preference: the hub's own servers first (preferred for hub-media
   // discoverability and member reach), then client, then the user's kind-10063. The upload path walks
@@ -449,8 +438,8 @@ export function getUploadBlossoms(hubBlossoms?: string[], opts?: { hubOnly?: boo
  *
  * Privacy: reading from your OWN servers leaks nothing about you to third parties, so (unlike the
  * upload path's R-footprint concern) there's no reason to hold the user's servers back on reads.
- * Hub media is the exception and does NOT use this: v2 hub uploads are hubOnly, so a hub blob never
- * lands on a personal server — hub reads stay on the hub's own + client servers.
+ * Hub media reads are handled separately (ChannelView/useDecryptedMedia) off the hub's own + client +
+ * sender-named servers, so this read net is for non-hub media (profile/DM/social).
  *
  * @param extra Optional servers to try first (e.g. the blob's origin host, or sender-named servers).
  * @returns Deduplicated, normalized array: extra first, then client, then user servers.

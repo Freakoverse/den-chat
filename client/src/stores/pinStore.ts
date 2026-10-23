@@ -220,7 +220,7 @@ export const usePinStore = create<PinState>((set, get) => ({
     })
 
     // Publish with failover across the enabled Behaviour-toggle relays (client/user/hub).
-    await publishContent(signed, relays, { hubOnly: isV2(useHubStore.getState().hubs[hubDTag]) })
+    await publishContent(signed, relays)
   },
 
   unpinMessage: async (hubDTag, channelId, aRef, myPubkey, relays, signer, privateKey, authSigner) => {
@@ -245,6 +245,6 @@ export const usePinStore = create<PinState>((set, get) => ({
     })
 
     // Publish with failover across the enabled Behaviour-toggle relays (see pinMessage).
-    await publishContent(signed, relays, { hubOnly: isV2(useHubStore.getState().hubs[hubDTag]) })
+    await publishContent(signed, relays)
   },
 }))

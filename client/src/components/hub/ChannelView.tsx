@@ -591,7 +591,7 @@ export function ChannelDescriptionModal({ channelId, channelName, description, i
         publishedAt: hub.publishedAt,
         eventCreatedAt: hub.eventCreatedAt,
       }, { pubkey: useUserStore.getState().pubkey!, privateKey, signer, minPow: hub.minPow })
-      await publishCriticalWithFailover(signedEvent, getPublishRelays([...hub.generalRelays], { hubOnly: isV2(hub) }), [...hub.generalRelays])
+      await publishCriticalWithFailover(signedEvent, getPublishRelays([...hub.generalRelays]), [...hub.generalRelays])
 
       // Update local store
       setHubData(activeHubId, {
@@ -824,7 +824,7 @@ function MessageList({ hubDTag, channelId, channelName, optimisticMessages, setO
       const { signHubModEvent } = await import('@/lib/hub/hubMemberSign')
       const signed = hub ? await signHubModEvent({ hub, unsigned, pubkey: myPubkey!, privateKey, signer }) : await signFn(unsigned, signer, privateKey)
       const relays = hub ? [...hub.generalRelays] : []
-      await publishContent(signed, relays, { hubOnly: !!hub && isV2(hub) })
+      await publishContent(signed, relays)
       // Optimistic update
       useHubStore.getState().addHiddenMessage(hubDTag, {
         ref: targetRef,
@@ -847,7 +847,7 @@ function MessageList({ hubDTag, channelId, channelName, optimisticMessages, setO
       const { KINDS } = await import('@/lib/crypto/constants')
       const { signer, privateKey } = useUserStore.getState()
       const relays = hub ? [...hub.generalRelays] : []
-      const publishRelays = getDeletePublishRelays(relays, { hubOnly: !!hub && isV2(hub) })
+      const publishRelays = getDeletePublishRelays(relays)
 
       // Look up original hide event timestamp for created_at + 1 ordering
       const hideEntry = useHubStore.getState().hiddenMessages[hubDTag]?.[targetRef]
@@ -4910,7 +4910,7 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
   // ── Typing indicator heartbeat (NIP-CHAT §6.14) — main channel composer only ──
   const _hubForTyping = useHubStore((s) => s.hubs[hubDTag])
   const _typingRelays = useMemo(
-    () => getPublishRelays(_hubForTyping ? [..._hubForTyping.generalRelays] : [], { hubOnly: !!_hubForTyping && isV2(_hubForTyping) }),
+    () => getPublishRelays(_hubForTyping ? [..._hubForTyping.generalRelays] : []),
     [hubDTag, _hubForTyping?.generalRelays],
   )
   const typing = useTypingHeartbeat({ scope: 'hub', hubDTag, channelId, relays: _typingRelays })
@@ -5356,7 +5356,7 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
     if (toUpload.length === 0) return
     setIsUploading(true)
 
-    const servers = getUploadBlossoms(hub?.blossomServers, { hubOnly: !!hub && isV2(hub) })
+    const servers = getUploadBlossoms(hub?.blossomServers)
 
     for (const pf of toUpload) {
       setPendingFiles((prev) => prev.map((f) => f.id === pf.id ? { ...f, status: encryptUploads ? 'encrypting' as const : 'uploading' as const, progress: undefined } : f))

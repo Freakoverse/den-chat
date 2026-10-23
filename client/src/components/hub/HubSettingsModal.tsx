@@ -893,7 +893,7 @@ export function HubSettingsModal({ open, onClose, hub, initialPage, focusMemberP
       {
         // Zero relays accepted → fail loudly before advancing local state (publishToSpecificRelays returns
         // [] rather than throwing on total failure; a silent advance would split-brain the hub).
-        const accepted = await publishCriticalWithFailover(signedEvent, getPublishRelays([...editRelays], { hubOnly: isV2(hub) }), [...editRelays])
+        const accepted = await publishCriticalWithFailover(signedEvent, getPublishRelays([...editRelays]), [...editRelays])
         if (accepted.length === 0) throw new Error('The hub update was not accepted by any relay — please try again.')
       }
       markStepDone('Publishing to relays')
@@ -4182,7 +4182,7 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
       await casCheckIndex(hub.dTag, hub.creatorPubkey, hub.indexFileHash) // abort if another writer moved the index
       {
         // Fail loudly if no relay accepted, before the store advance + old-blob cleanup below.
-        const accepted = await publishCriticalWithFailover(signedEvent, getPublishRelays([...hub.generalRelays], { hubOnly: isV2(hub) }), [...hub.generalRelays])
+        const accepted = await publishCriticalWithFailover(signedEvent, getPublishRelays([...hub.generalRelays]), [...hub.generalRelays])
         if (accepted.length === 0) throw new Error('The hub update was not accepted by any relay — please try again.')
       }
       markDone('Publishing hub event')
@@ -4435,7 +4435,7 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
       await casCheckIndex(hub.dTag, hub.creatorPubkey, hub.indexFileHash) // abort if another writer moved the index
       {
         // Fail loudly if no relay accepted, before the store advance + old-blob cleanup below.
-        const accepted = await publishCriticalWithFailover(signedEvent, getPublishRelays([...hub.generalRelays], { hubOnly: isV2(hub) }), [...hub.generalRelays])
+        const accepted = await publishCriticalWithFailover(signedEvent, getPublishRelays([...hub.generalRelays]), [...hub.generalRelays])
         if (accepted.length === 0) throw new Error('The hub update was not accepted by any relay — please try again.')
       }
       markDone('Publishing hub event')
@@ -4763,7 +4763,7 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
                                             eventCreatedAt: hub.eventCreatedAt,
                                           }, { pubkey: pubkey!, privateKey, signer, minPow: hub.minPow })
                                           {
-                                            const accepted = await publishCriticalWithFailover(signed, getPublishRelays([...hub.generalRelays], { hubOnly: isV2(hub) }), [...hub.generalRelays])
+                                            const accepted = await publishCriticalWithFailover(signed, getPublishRelays([...hub.generalRelays]), [...hub.generalRelays])
                                             if (accepted.length === 0) throw new Error('The hub update was not accepted by any relay — please try again.')
                                           }
                                           useHubStore.getState().setHubData(hub.dTag, { ...hub, indexFileHash: newIdxHash, eventCreatedAt: signed.created_at })
@@ -6385,7 +6385,7 @@ function MembersPage({ hub, onFooterState, focusPubkey }: { hub: HubData; onFoot
         }, { pubkey: useUserStore.getState().pubkey!, privateKey, signer, minPow: hub.minPow })
         await casCheckIndex(hub.dTag, hub.creatorPubkey, hub.indexFileHash) // abort if another writer moved the index
         {
-          const accepted = await publishCriticalWithFailover(signedEvent, getPublishRelays([...hub.generalRelays], { hubOnly: isV2(hub) }), [...hub.generalRelays])
+          const accepted = await publishCriticalWithFailover(signedEvent, getPublishRelays([...hub.generalRelays]), [...hub.generalRelays])
           if (accepted.length === 0) throw new Error('The hub update was not accepted by any relay — please try again.')
         }
         lastPublishedCreatedAt = signedEvent.created_at
@@ -6788,7 +6788,7 @@ function MembersPage({ hub, onFooterState, focusPubkey }: { hub: HubData; onFoot
           {
             // Fail loudly if no relay accepted, BEFORE flushing group secrets + deleting old blobs below
             // (a zero-relay publish would otherwise brick the hub by dangling the live index pointer).
-            const accepted = await publishCriticalWithFailover(signedEvent, getPublishRelays([...hub.generalRelays], { hubOnly: isV2(hub) }), [...hub.generalRelays])
+            const accepted = await publishCriticalWithFailover(signedEvent, getPublishRelays([...hub.generalRelays]), [...hub.generalRelays])
             if (accepted.length === 0) throw new Error('The hub update was not accepted by any relay — please try again.')
           }
           lastPublishedCreatedAt = signedEvent.created_at

@@ -369,7 +369,7 @@ export function useCalendar(hubDTag: string | null) {
         : mineAndSign(unsigned, minPow, pubkey, signer, privateKey))
 
       const hubRelays = hub?.generalRelays || []
-      await publishContent(signed, hubRelays, { hubOnly: !!hub && isV2(hub) })
+      await publishContent(signed, hubRelays)
 
       // Add to local store immediately
       useCalendarStore.getState().addEvent({
@@ -447,7 +447,7 @@ export function useCalendar(hubDTag: string | null) {
         ? signHubMemberEvent({ hub, unsigned, pubkey: pubkey!, privateKey, signer, minPow, channelKey: key })
         : mineAndSign(unsigned, minPow, pubkey, signer, privateKey))
       const hubRelays = hubs[hubDTag]?.generalRelays || []
-      await publishContent(signed, hubRelays, { hubOnly: !!hub && isV2(hub) })
+      await publishContent(signed, hubRelays)
 
       // Update local store
       useCalendarStore.getState().addEvent({
@@ -497,7 +497,7 @@ export function useCalendar(hubDTag: string | null) {
         ? signHubMemberEvent({ hub, unsigned: deletedEvent, pubkey: pubkey!, privateKey, signer, channelKey: key })
         : signWithSigner(deletedEvent, signer, privateKey))
       const hubRelays = hub?.generalRelays || []
-      const publishRelays = getDeletePublishRelays(hubRelays, { hubOnly: !!hub && isV2(hub) })
+      const publishRelays = getDeletePublishRelays(hubRelays)
       await publishToSpecificRelays(publishRelays, signedDeleted)
 
       // 2. NIP-09 deletion request as fallback (authored by P in v2)
@@ -567,7 +567,7 @@ export function useCalendar(hubDTag: string | null) {
         ? signHubMemberEvent({ hub, unsigned, pubkey: pubkey!, privateKey, signer, minPow, channelKey: key })
         : mineAndSign(unsigned, minPow, pubkey, signer, privateKey))
       const hubRelays = hub?.generalRelays || []
-      await publishContent(signed, hubRelays, { hubOnly: !!hub && isV2(hub) })
+      await publishContent(signed, hubRelays)
 
       // Add to local store
       useCalendarStore.getState().addRsvp({
@@ -611,7 +611,7 @@ export function useCalendar(hubDTag: string | null) {
         ? signHubMemberEvent({ hub, unsigned: deletedEvent, pubkey: pubkey!, privateKey, signer, channelKey: key })
         : signWithSigner(deletedEvent, signer, privateKey))
       const hubRelays = hub?.generalRelays || []
-      const publishRelays = getDeletePublishRelays(hubRelays, { hubOnly: !!hub && isV2(hub) })
+      const publishRelays = getDeletePublishRelays(hubRelays)
       await publishToSpecificRelays(publishRelays, signedDeleted)
 
       // 2. NIP-09 deletion request as fallback (authored by P in v2)

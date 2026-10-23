@@ -454,8 +454,8 @@ export async function uploadToBlossomServers(
     //
     // Privacy: this targets blossomServers.getServers() — the SHARED client defaults, not the user's
     // kind-10063 (`userBlossoms`). Shared defaults aren't advertised as anyone's, so a P/O-signed
-    // tree upload landing there doesn't link a pseudonym to R (same reasoning that made relay
-    // `hubOnly` inert). A user-cancelled upload must NOT trigger a second round.
+    // tree upload landing there doesn't link a pseudonym to R (same reasoning as the relay publish
+    // path). A user-cancelled upload must NOT trigger a second round.
     if (!servers || servers.length === 0) throw primaryErr
     if (getAbortSignal?.()?.aborted) throw primaryErr
     const tried = new Set(servers.map(normalize))

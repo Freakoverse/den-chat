@@ -663,7 +663,7 @@ function ForumPostDetail({
       const { signHubModEvent } = await import('@/lib/hub/hubMemberSign')
       const signed = hub ? await signHubModEvent({ hub, unsigned, pubkey: pubkey!, privateKey: pk, signer: s }) : await signFn(unsigned, s, pk)
       const relays = hub ? [...hub.generalRelays] : []
-      await publishContent(signed, relays, { hubOnly: !!hub && isV2(hub) })
+      await publishContent(signed, relays)
       useHubStore.getState().addHiddenMessage(hubDTag, {
         ref: postRef,
         hiderPubkey: signed.pubkey,
@@ -688,7 +688,7 @@ function ForumPostDetail({
       const { KINDS } = await import('@/lib/crypto/constants')
       const { signer: s, privateKey: pk } = useUserStore.getState()
       const relays = hub ? [...hub.generalRelays] : []
-      const publishRelays = getDeletePublishRelays(relays, { hubOnly: !!hub && isV2(hub) })
+      const publishRelays = getDeletePublishRelays(relays)
       const hideEntry = useHubStore.getState().hiddenMessages[hubDTag]?.[postRef]
       const { signHubModEvent } = await import('@/lib/hub/hubMemberSign')
       const deletedHide = createDeletedHideEvent(hubDTag, postRef, hideEntry?.createdAt)
@@ -1179,7 +1179,7 @@ function ForumPostDetail({
                           // handler above) — otherwise this leaks the mod's real key R onto the wire.
                           const signed = hub ? await signHubModEvent({ hub, unsigned, pubkey: pubkey!, privateKey: pk, signer: s }) : await signFn(unsigned, s, pk)
                           const relays = hub ? [...hub.generalRelays] : []
-                          await publishContent(signed, relays, { hubOnly: !!hub && isV2(hub) })
+                          await publishContent(signed, relays)
                           useHubStore.getState().addHiddenMessage(hubDTag, {
                             ref: replyRef, hiderPubkey: signed.pubkey, kind: 36943, targetPubkey: reply.pubkey,
                             createdAt: Math.floor(Date.now() / 1000),
@@ -1194,7 +1194,7 @@ function ForumPostDetail({
                           const { KINDS } = await import('@/lib/crypto/constants')
                           const { signer: s, privateKey: pk } = useUserStore.getState()
                           const relays = hub ? [...hub.generalRelays] : []
-                          const publishRelays = getDeletePublishRelays(relays, { hubOnly: !!hub && isV2(hub) })
+                          const publishRelays = getDeletePublishRelays(relays)
                           const replyHideEntry = useHubStore.getState().hiddenMessages[hubDTag]?.[replyRef]
                           const deletedHide = createDeletedHideEvent(hubDTag, replyRef, replyHideEntry?.createdAt)
                           const signedDeleted = hub ? await signHubModEvent({ hub, unsigned: deletedHide, pubkey: pubkey!, privateKey: pk, signer: s }) : await signFn(deletedHide, s, pk)
@@ -1403,7 +1403,7 @@ function CreateForumPostModal({ onClose, sendMessage, canPublish, signer, privat
     setFeaturedUploading(true)
     setFeaturedProgress(null)
     try {
-      const servers = getUploadBlossoms(hub?.blossomServers, { hubOnly: !!hub && isV2(hub) })
+      const servers = getUploadBlossoms(hub?.blossomServers)
       const buffer = await featuredFile.arrayBuffer()
       const data = new Uint8Array(buffer)
       const { hash, serverUrls } = await uploadToBlossomServers(
@@ -2038,7 +2038,7 @@ function EditForumPostModal({ post, onClose, editMessage, signer, privateKey, hu
     setFeaturedUploading(true)
     setFeaturedProgress(null)
     try {
-      const servers = getUploadBlossoms(hub?.blossomServers, { hubOnly: !!hub && isV2(hub) })
+      const servers = getUploadBlossoms(hub?.blossomServers)
       const buffer = await featuredFile.arrayBuffer()
       const data = new Uint8Array(buffer)
       const { hash, serverUrls } = await uploadToBlossomServers(

@@ -28,7 +28,7 @@ async function emitJoinRequestDeletion(hub: HubData, pubkey: string, requireLive
   // v2: hub relays ONLY. The tombstone/deletion are authored by the throwaway `addr` key but name the
   // hub owner O; fanning them out to the user's personal NIP-65 relays would let an observer correlate
   // that addr key → R by relay footprint ("R withdrew a request to private hub X").
-  const publishRelays = getDeletePublishRelays(relays, { hubOnly: v2 })
+  const publishRelays = getDeletePublishRelays(relays)
 
   const isTombstoned = (tags: string[][]) => tags?.some((t) => t[0] === 'deleted' && t[1] === 'true')
 

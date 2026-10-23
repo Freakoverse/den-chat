@@ -38,8 +38,8 @@ function current(dTag: string): { g: GroupData; secret: Uint8Array; members: Hub
 }
 
 /** Publish a signed group event to its relays with failover, then apply it locally. */
-async function publishAndApply(signed: import('nostr-tools').Event, relays: string[], v2: boolean) {
-  const accepted = await publishCriticalWithFailover(signed, getPublishRelays([...relays], { hubOnly: v2 }), [...relays])
+async function publishAndApply(signed: import('nostr-tools').Event, relays: string[]) {
+  const accepted = await publishCriticalWithFailover(signed, getPublishRelays([...relays]), [...relays])
   if (accepted.length === 0) throw new Error('No relay accepted the group event — please try again.')
   const k = keys()
   await applyGroupEvent(signed, k.me, { privateKey: k.privateKey, signer: k.signer })
@@ -104,7 +104,7 @@ export async function createGroup(opts: {
     version: opts.version, signerScheme: opts.version === 2 ? 'skd:1' : undefined,
     treeText: joinTreeText(tree, roster), history, settings, secret, keys: k,
   })
-  await publishAndApply(signed, opts.relays, opts.version === 2)
+  await publishAndApply(signed, opts.relays)
 
   const g = useGroupStore.getState().groups[dTag]
   if (!g) throw new Error('Group did not load after publish')
@@ -124,7 +124,7 @@ export async function addMember(dTag: string, memberR: string): Promise<void> {
     ...republishOptions(g, { treeText: joinTreeText(tree, roster), history: g.history, settings }),
     secret, keys: k,
   })
-  await publishAndApply(signed, g.relays, isGroupV2(g))
+  await publishAndApply(signed, g.relays)
 }
 
 /** Add several members in ONE republish (approving join requests). Skips keys already in the tree. */
@@ -146,7 +146,7 @@ export async function addMembers(dTag: string, memberRs: string[]): Promise<void
     ...republishOptions(g, { treeText: joinTreeText(tree, roster), history: g.history, settings }),
     secret, keys: k,
   })
-  await publishAndApply(signed, g.relays, isGroupV2(g))
+  await publishAndApply(signed, g.relays)
 }
 
 export async function removeMember(dTag: string, member: HubMember): Promise<void> {
@@ -159,7 +159,7 @@ export async function removeMember(dTag: string, member: HubMember): Promise<voi
     ...republishOptions(g, { treeText: joinTreeText(res.tree, res.roster), history: res.history, settings, epoch: res.newEpoch }),
     secret: res.newSecret, keys: k,
   })
-  await publishAndApply(signed, g.relays, isGroupV2(g))
+  await publishAndApply(signed, g.relays)
 }
 
 // ─── Edit / delete (creator only) ───
@@ -183,7 +183,7 @@ export async function updateGroup(dTag: string, patch: {
     joinMinPow: patch.joinMinPow ?? g.joinMinPow,
     secret, keys: k,
   })
-  await publishAndApply(signed, patch.relays ?? g.relays, isGroupV2(g))
+  await publishAndApply(signed, patch.relays ?? g.relays)
 }
 
 /** Tombstone (blanks the tree so the event stops distributing the secret) + NIP-09, then drop from the list. */
@@ -194,7 +194,7 @@ export async function deleteGroup(dTag: string): Promise<void> {
     ...republishOptions(g, { treeText: '', history: '', settings: {} }),
     deleted: true, secret, keys: k,
   })
-  await publishCriticalWithFailover(signed, getPublishRelays([...g.relays], { hubOnly: isGroupV2(g) }), [...g.relays])
+  await publishCriticalWithFailover(signed, getPublishRelays([...g.relays]), [...g.relays])
   // NIP-09 request as well (relays that honour it drop the coordinate entirely)
   try {
     const { createDeletionEvent, signWithSigner } = await import('@/lib/nostr/events')
@@ -202,7 +202,7 @@ export async function deleteGroup(dTag: string): Promise<void> {
     if (isGroupV2(g)) {
       const owner = makeSubkeySigner(ChatContext.owner(g.dTag), { privateKey: k.privateKey, signer: k.signer })
       const signedDel = await owner.signEvent(del)
-      await publishCriticalWithFailover(signedDel, getPublishRelays([...g.relays], { hubOnly: true }), [...g.relays])
+      await publishCriticalWithFailover(signedDel, getPublishRelays([...g.relays]), [...g.relays])
     } else {
       const signedDel = await signWithSigner(del, k.signer, k.privateKey)
       await publishCriticalWithFailover(signedDel, getPublishRelays([...g.relays]), [...g.relays])

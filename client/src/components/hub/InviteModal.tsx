@@ -76,7 +76,6 @@ export function InviteModal({ open, onClose, hub }: InviteModalProps) {
       const { signHubEventForPublish } = await import('@/lib/hub/buildHubEvent')
       const { publishCriticalWithFailover } = await import('@/lib/nostr/relay-pool')
       const { getPublishRelays } = await import('@/stores/postingBehaviourStore')
-      const { isV2 } = await import('@/lib/hub/version')
       const signed = await signHubEventForPublish(hub, {
         dTag: hub.dTag, name: hub.name, description: hub.description || undefined,
         epoch: hub.epoch, icon: hub.icon || undefined, banner: hub.banner || undefined,
@@ -90,7 +89,7 @@ export function InviteModal({ open, onClose, hub }: InviteModalProps) {
         groupedRoles: hub.groupedRoles && hub.groupedRoles.length ? hub.groupedRoles : undefined,
         publishedAt: hub.publishedAt, eventCreatedAt: hub.eventCreatedAt,
       }, { pubkey: myPubkey, privateKey, signer, minPow: hub.minPow })
-      await publishCriticalWithFailover(signed, getPublishRelays([...hub.generalRelays], { hubOnly: isV2(hub) }), [...hub.generalRelays])
+      await publishCriticalWithFailover(signed, getPublishRelays([...hub.generalRelays]), [...hub.generalRelays])
       const code = coordinateShortTag(KINDS.HUB_EVENT, hub.creatorPubkey, hub.dTag)[1]
       setHubData(hub.dTag, { ...hub, eventCreatedAt: signed.created_at, shortCode: code })
     } catch (err: any) {

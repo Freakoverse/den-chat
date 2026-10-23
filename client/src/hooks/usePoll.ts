@@ -11,7 +11,6 @@ import { useUserStore } from '@/stores/userStore'
 import { usePollStore } from '@/stores/pollStore'
 import { createPollEvent, createVoteEvent, mineAndSign } from '@/lib/nostr/events'
 import { signHubMemberEvent } from '@/lib/hub/hubMemberSign'
-import { isV2 } from '@/lib/hub/version'
 import { stampHubExpiration } from '@/lib/hub/messageExpiration'
 import { aesEncrypt } from '@/lib/crypto/aes'
 import { deriveChannelKey } from '@/lib/crypto/hkdf'
@@ -136,7 +135,7 @@ export function usePoll(hubDTag: string | null, channelId: string | null) {
       : mineAndSign(unsigned, minPow, pubkey, signer, privateKey))
 
     const hubRelays = hub?.generalRelays || []
-    await publishContent(signed, hubRelays, { hubOnly: !!hub && isV2(hub) })
+    await publishContent(signed, hubRelays)
 
     // Add to local store immediately
     usePollStore.getState().addPoll({
@@ -191,7 +190,7 @@ export function usePoll(hubDTag: string | null, channelId: string | null) {
       : mineAndSign(unsigned, minPow, pubkey, signer, privateKey))
 
     const hubRelays = hub?.generalRelays || []
-    await publishContent(signed, hubRelays, { hubOnly: !!hub && isV2(hub) })
+    await publishContent(signed, hubRelays)
 
     // Add to local store immediately
     usePollStore.getState().addVote({

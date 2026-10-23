@@ -557,9 +557,8 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
               const oldRelays = oldHubData
                 ? [...new Set(oldHubData.generalRelays)].filter(Boolean)
                 : []
-              // v2: hub relays ONLY (P/O-authored "left" presence — keep it off R's personal relays).
-              const { isV2: isV2Old } = await import('@/lib/hub/version')
-              await publishToSpecificRelays(getPublishRelays(oldRelays, { hubOnly: !!oldHubData && isV2Old(oldHubData) }), signed)
+              // P/O-authored "left" presence; v2 publishes over the same relay set as v1 (see getPublishRelays).
+              await publishToSpecificRelays(getPublishRelays(oldRelays), signed)
               console.log('[VoiceStore] Published "left" for old channel before switching')
             }
           } catch (err) {
@@ -1588,10 +1587,8 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
       signVoicePresence(currentHubDTag, tags, effectiveSigner, effectivePrivateKey)
         .then(async (signed) => {
           if (!signed) return
-          // v2: hub relays ONLY (P/O-authored "left" presence — keep it off R's personal relays).
-          const { isV2: isV2Lv } = await import('@/lib/hub/version')
-          const lvHub = (await import('@/stores/hubStore')).useHubStore.getState().hubs[currentHubDTag]
-          const publishRelays = getPublishRelays(effectiveRelays, { hubOnly: !!lvHub && isV2Lv(lvHub) })
+          // P/O-authored "left" presence; v2 publishes over the same relay set as v1 (see getPublishRelays).
+          const publishRelays = getPublishRelays(effectiveRelays)
           return publishToSpecificRelays(publishRelays, signed)
         })
         .catch((err) => console.warn('[VoiceStore] Failed to publish leave:', err))
@@ -2360,10 +2357,10 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
       signed = await signWithSigner(unsigned, signer, privateKey)
     }
 
-    // v2: hub relays ONLY — the host event is authored under P/O; publishing it to the user's personal
-    // relays would tie that pseudonym to R by relay footprint. (Empty relays + hubOnly ⇒ nothing published,
-    // which is correct — there's nowhere hub-scoped to send it.)
-    await publishToSpecificRelays(getPublishRelays(relays, { hubOnly: !!hub && isV2(hub) }), signed)
+    // The host event is authored under P/O. v2 publishes it over the SAME relay set as v1 (hub + client
+    // + NIP-65) by product decision — the P->R relay footprint is accepted (plausible deniability: a
+    // relay only proves it relayed the event, not that you authored it).
+    await publishToSpecificRelays(getPublishRelays(relays), signed)
   },
 
   // ── DataChannel state broadcast (replaces heartbeat) ──
@@ -2490,10 +2487,8 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
         // Null ⇒ v2 hub with a non-SKD signer ⇒ nothing to publish (voice won't work for them).
         const signed = await signVoicePresence(hubDTag, tags, signer, privateKey)
         if (!signed) return
-        // v2: hub relays ONLY (P/O-authored presence keepalive — keep it off R's personal relays).
-        const { isV2: isV2Ka } = await import('@/lib/hub/version')
-        const kaHub = (await import('@/stores/hubStore')).useHubStore.getState().hubs[hubDTag]
-        await publishToSpecificRelays(getPublishRelays(relays, { hubOnly: !!kaHub && isV2Ka(kaHub) }), signed)
+        // P/O-authored presence keepalive; v2 publishes over the same relay set as v1 (see getPublishRelays).
+        await publishToSpecificRelays(getPublishRelays(relays), signed)
       } catch (err) {
         console.warn('[VoiceStore] Keepalive publish failed:', err)
       }

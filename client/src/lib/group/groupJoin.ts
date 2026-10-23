@@ -64,7 +64,7 @@ export async function requestJoinGroup(g: GroupData, note = ''): Promise<void> {
     signed = await mineAndSign(unsigned, g.joinMinPow || 0, k.me, k.signer, k.privateKey)
   }
   // v2: the group's relays only, so the addr key never lands on the requester's own NIP-65 relays.
-  const accepted = await publishCriticalWithFailover(signed, getPublishRelays(relays, { hubOnly: isGroupV2(g), hubSeed: g.dTag }), relays)
+  const accepted = await publishCriticalWithFailover(signed, getPublishRelays(relays, { hubSeed: g.dTag  }), relays)
   if (accepted.length === 0) throw new Error('No relay accepted the join request. Please try again.')
 }
 
@@ -141,7 +141,7 @@ export async function withdrawGroupJoinRequest(g: GroupData, opts: { requireLive
   const coord = groupCoord(g)
   const relays = [...g.relays]
   const v2 = isGroupV2(g)
-  const publishRelays = getDeletePublishRelays(relays, { hubOnly: v2 })
+  const publishRelays = getDeletePublishRelays(relays)
   const queryRelays = [...new Set([...relays, ...getRelays()])]
   const live = (e: Event | undefined) => !!e && !e.tags.some((t) => t[0] === 'deleted' && t[1] === 'true')
 

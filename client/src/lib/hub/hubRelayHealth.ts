@@ -215,7 +215,7 @@ export async function republishHubWithRelays(
 
   // Seed the publish with the NEW relay list (plus failover) so the update lands on the relays we're
   // keeping, not the old broken ones. Zero relays accepted => fail loudly rather than split-brain the hub.
-  const accepted = await publishCriticalWithFailover(signed, getPublishRelays([...relays], { hubOnly: isV2(hub) }), [...relays])
+  const accepted = await publishCriticalWithFailover(signed, getPublishRelays([...relays]), [...relays])
   if (accepted.length === 0) throw new Error('The hub update was not accepted by any relay. Please try again.')
 
   useHubStore.getState().setHubData(hub.dTag, { ...hub, generalRelays: relays, eventCreatedAt: signed.created_at })

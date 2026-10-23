@@ -236,7 +236,7 @@ export async function republishHubWithBlossomServers(
   }
 
   // Zero relays accepted → fail loudly rather than advance local state and split-brain the hub.
-  const accepted = await publishCriticalWithFailover(signed, getPublishRelays([...hub.generalRelays], { hubOnly: isV2(hub) }), [...hub.generalRelays])
+  const accepted = await publishCriticalWithFailover(signed, getPublishRelays([...hub.generalRelays]), [...hub.generalRelays])
   if (accepted.length === 0) throw new Error('The hub update was not accepted by any relay — please try again.')
 
   useHubStore.getState().setHubData(hub.dTag, { ...hub, blossomServers: newServers, eventCreatedAt: signed.created_at })

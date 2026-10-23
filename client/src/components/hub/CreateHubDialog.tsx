@@ -754,7 +754,7 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
       }
       markDone('signing-event')
 
-      // Publish the hub event. v2 uses the SAME relay flow as v1 (NOT hubOnly): the O-authored event
+      // Publish the hub event. v2 uses the SAME relay flow as v1: the O-authored event
       // goes to the hub's own relays + the creator's client + NIP-65 relays. This is a deliberate choice
       // for discoverability/reliability — the plausible deniability holds (a hub event on your relays only
       // shows you RELAYED it, not that you authored it; anyone can publish anyone's hub event). Failover
@@ -762,7 +762,7 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
       setCreationStep('publishing-hub')
       const accepted = await publishWithFailover(
         signed,
-        getPublishRelays([...relays], { hubOnly: false }),
+        getPublishRelays([...relays]),
         { pool: [...relays, ...getRelays(), ...userRelays], target: 3 },
       )
       if (accepted.length === 0) {

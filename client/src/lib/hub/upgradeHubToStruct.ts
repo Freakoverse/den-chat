@@ -107,7 +107,7 @@ export async function upgradeHubToStruct(opts: {
   await casCheckIndex(hub.dTag, hub.creatorPubkey, hub.indexFileHash)
 
   const accepted = await publishCriticalWithFailover(
-    signed, getPublishRelays([...hub.generalRelays], { hubOnly: isV2(hub) }), [...hub.generalRelays],
+    signed, getPublishRelays([...hub.generalRelays]), [...hub.generalRelays],
   )
   if (accepted.length === 0) throw new Error('The hub upgrade was not accepted by any relay, please try again.')
 

@@ -869,7 +869,7 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
     // Progress callbacks update relay indicators; if ALL relays reject,
     // the onPhase callback notifies the component to show a failed state.
     const hubRelays = hub?.generalRelays || []
-    const publishRelays = getPublishRelays(hubRelays, { hubOnly: !!hub && isV2(hub) })
+    const publishRelays = getPublishRelays(hubRelays)
     const { setRelayProgress, clearRelayProgress } = useMessageStore.getState()
 
     // Seed relay progress at 0/N immediately so the counter is visible
@@ -880,7 +880,6 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
     ;(async () => {
       try {
         const accepted = await publishContent(signed, hubRelays, {
-          hubOnly: !!hub && isV2(hub),
           onProgress: (confirmed, total, acceptedRelays) => {
             setRelayProgress(eventId, confirmed, total, acceptedRelays)
             onPhase?.('publishing', { confirmed, total })
@@ -1031,7 +1030,7 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
       : mineAndSign(unsigned, minPow, pubkey, signer, privateKey))
     const eventId = signed.id
     const hubRelays = useHubStore.getState().hubs[hubDTag!]?.generalRelays || []
-    const publishRelays = getPublishRelays(hubRelays, { hubOnly: !!hub && isV2(hub) })
+    const publishRelays = getPublishRelays(hubRelays)
 
     // Optimistic local update — immediately reflect the edit in the UI
     // Uses the new event ID so RelayProgressIndicator can track publish progress
@@ -1107,7 +1106,6 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
     ;(async () => {
       try {
         const editAccepted = await publishContent(signed, hubRelays, {
-          hubOnly: !!hub && isV2(hub),
           onProgress: (confirmed, total, acceptedRelays) => {
             setRelayProgress(eventId, confirmed, total, acceptedRelays)
           },
@@ -1156,8 +1154,8 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
       ? signHubMemberEvent({ hub, unsigned: deletedEvent, pubkey: pubkey!, privateKey, signer, channelKey: key })
       : signWithSigner(deletedEvent, signer, privateKey))
     const hubRelays = useHubStore.getState().hubs[hubDTag!]?.generalRelays || []
-    const publishRelays = getPublishRelays(hubRelays, { hubOnly: !!hub && isV2(hub) })
-    const deleteRelays = getDeletePublishRelays(hubRelays, { hubOnly: !!hub && isV2(hub) })
+    const publishRelays = getPublishRelays(hubRelays)
+    const deleteRelays = getDeletePublishRelays(hubRelays)
     await publishToSpecificRelays(deleteRelays, signedDeleted)
 
     // 2. NIP-09 deletion request as fallback (authored by P in v2 so relays honor it)
@@ -1265,7 +1263,7 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
     // Mark as processed to avoid dedup with subscription
     useMessageStore.getState().markReactionProcessed(signed.id)
 
-    await publishContent(signed, hubRelays, { hubOnly: !!hub && isV2(hub) })
+    await publishContent(signed, hubRelays)
   }, [hubDTag, channelId, signer, privateKey, getChannelKey])
 
   // Unreact — send kind 5 deletion request only
@@ -1276,7 +1274,7 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
 
     const hub = useHubStore.getState().hubs[hubDTag!]
     const hubRelays = hub?.generalRelays || []
-    const publishRelays = getDeletePublishRelays(hubRelays, { hubOnly: !!hub && isV2(hub) })
+    const publishRelays = getDeletePublishRelays(hubRelays)
 
     // Kind 5 deletion request for the reaction event (authored by P in v2)
     const deletionEvent = createDeletionEvent([reactionEventId], [], 'User removed reaction')
