@@ -1659,14 +1659,14 @@ function GeneralPage({
         const { ChatContext } = await import('@/lib/crypto/skd')
         ownerAuth = makeSubkeySigner(ChatContext.owner(hub.dTag), { privateKey, signer }).signEvent
       }
-      const { hash } = await uploadToBlossomServers(
+      const { hash, serverUrls } = await uploadToBlossomServers(
         data, signer, privateKey, undefined, file.type,
         (p) => setProgress({ ...p }),
         () => { const c = new AbortController(); abortRef.current = c; return c.signal },
         ownerAuth,
       )
-      const serverUrl = blossomServerManager.getServers()[0]
-      setUrl(`${serverUrl}/${hash}`)
+      // URL must point at a server that accepted the blob, not just the first configured one (else dead URL).
+      setUrl(`${serverUrls[0]}/${hash}`)
       setStatus('success')
     } catch {
       setStatus('error')

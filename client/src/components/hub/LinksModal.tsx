@@ -396,14 +396,13 @@ export function LinksEditorModal({ open, onClose, onSaved }: LinksEditorModalPro
     try {
       const buffer = await file.arrayBuffer()
       const data = new Uint8Array(buffer)
-      const { hash } = await uploadToBlossomServers(
+      const { hash, serverUrls } = await uploadToBlossomServers(
         data, signer, privateKey, undefined, file.type,
         (p) => setImgProgress({ ...p }),
         () => { const c = new AbortController(); imgAbortRef.current = c; return c.signal },
       )
-      // Use hash URL — BlossomImage will resolve with failover
-      const firstServer = (await import('@/lib/blossom')).blossomServers.getServers()[0]
-      updateSet(setIdx, { image: `${firstServer}/${hash}` })
+      // Point the URL at a server that accepted the blob (BlossomImage still resolves with failover on read).
+      updateSet(setIdx, { image: `${serverUrls[0]}/${hash}` })
     } catch (err) {
       console.error('Image upload failed:', err)
     } finally {

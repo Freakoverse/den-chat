@@ -20,7 +20,7 @@ import { DatePicker } from '@/components/ui/DatePicker'
 import { TimePicker, format24hPreview } from '@/components/ui/TimePicker'
 import { cn } from '@/lib/utils'
 import { useUserStore } from '@/stores/userStore'
-import { uploadToBlossomServers, blossomServers as blossomServerManager } from '@/lib/blossom'
+import { uploadToBlossomServers } from '@/lib/blossom'
 import { useHubStore } from '@/stores/hubStore'
 import { hubBlossomAuthSigner } from '@/lib/hub/hubMemberSign'
 import type { UploadProgress } from '@/lib/blossom'
@@ -187,14 +187,14 @@ export function CreateCalendarEventModal({
       // this P-authored calendar event references isn't auth-linked to our real key.
       const activeHub = activeHubId ? useHubStore.getState().hubs[activeHubId] : null
       const imgAuthSigner = activeHub ? await hubBlossomAuthSigner(activeHub, { privateKey, signer }) : undefined
-      const { hash } = await uploadToBlossomServers(
+      const { hash, serverUrls } = await uploadToBlossomServers(
         data, signer, privateKey, undefined, file.type,
         (p) => setUploadProgress({ ...p }),
         () => { const c = new AbortController(); uploadAbortRef.current = c; return c.signal },
         imgAuthSigner,
       )
-      const serverUrl = blossomServerManager.getServers()[0]
-      setImageUrl(`${serverUrl}/${hash}`)
+      // URL must point at a server that accepted the blob, not just the first configured one (else dead URL).
+      setImageUrl(`${serverUrls[0]}/${hash}`)
       setUploadStatus('success')
     } catch {
       setUploadStatus('error')
