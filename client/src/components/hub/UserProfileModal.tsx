@@ -178,7 +178,6 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
   const [statusSaving, setStatusSaving] = useState(false)
   const [publishing, setPublishing] = useState(false)
   const [copied, setCopied] = useState(false)
-  const [loaded, setLoaded] = useState(false)
   const [followLoading, setFollowLoading] = useState(false)
   const [showDropdown, setShowDropdown] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
@@ -335,35 +334,44 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
   const openFeedCompose = useCallback(() => { useSocialStore.getState().setActivePage('feed'); goSocial() }, [goSocial])
   const openArticleCompose = useCallback(() => { useSocialStore.getState().setActivePage('longform-write'); goSocial() }, [goSocial])
 
-  // Fetch profile on open
+  // Load the profile whenever the modal opens OR the target changes. Keying on displayPubkey
+  // (not a one-shot `loaded` flag) is what fixes switching people: the moment the target
+  // changes we clear the previous person's data and seed the new one, so A's profile never
+  // lingers while B loads. `cancelled` drops a slow response for a target we've moved off.
   useEffect(() => {
-    if (!open || !displayPubkey || loaded) return
+    if (!open || !displayPubkey) return
+    let cancelled = false
 
-    // Seed instantly from the shared profile cache (stale-while-revalidate): show the name,
-    // avatar and bio we already have the moment the modal opens, instead of flashing empty
-    // while the kind-0 fetch below runs. The fetch then revalidates and grabs the raw event.
-    // Runs only on open (the `loaded` guard above keeps it from re-seeding once fetched).
+    // Seed instantly from the shared cache (stale-while-revalidate), or clear to empty if we
+    // have nothing cached for this person — either way the previous target's data is replaced
+    // immediately, not left on screen until the fetch below resolves. Per-target derived
+    // state (status / links / payto / follows) is cleared too so none of A's bleeds onto B.
     const cached = getProfile(displayPubkey)
-    if (cached) {
-      const seed: ProfileData = {
-        name: cached.name || '',
-        display_name: cached.display_name || '',
-        about: cached.about || '',
-        picture: cached.picture || '',
-        banner: cached.banner || '',
-        nip05: cached.nip05 || '',
-        website: cached.website || '',
-        lud16: cached.lud16 || '',
-      }
-      setProfileData(seed)
-      setEditProfile(seed)
-    }
+    const seed: ProfileData = cached ? {
+      name: cached.name || '',
+      display_name: cached.display_name || '',
+      about: cached.about || '',
+      picture: cached.picture || '',
+      banner: cached.banner || '',
+      nip05: cached.nip05 || '',
+      website: cached.website || '',
+      lud16: cached.lud16 || '',
+    } : EMPTY_PROFILE
+    setProfileData(seed)
+    setEditProfile(seed)
+    setRawProfileEventJson(null)
+    setStatus('')
+    setHasLinks(false)
+    setHasPayto(false)
+    setFollowingPubkeys([])
+    setFollowingLoaded(false)
 
     fetchEvents({
       kinds: [0],
       authors: [displayPubkey],
       limit: 1,
     }).then((events) => {
+      if (cancelled) return
       if (events.length > 0) {
         const latest = events.sort((a, b) => b.created_at - a.created_at)[0]
         setRawProfileEventJson(JSON.stringify(latest, null, 2))
@@ -385,11 +393,11 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
           updateCachedProfile(displayPubkey, parsed)
         } catch { /* ignore */ }
       }
-      setLoaded(true)
     })
 
     // Fetch NIP-38 general status (kind 30315, d="general")
     fetchEvents({ kinds: [30315], authors: [displayPubkey], '#d': ['general'], limit: 1 }).then((events) => {
+      if (cancelled) return
       if (events.length > 0) {
         const latest = events.sort((a, b) => b.created_at - a.created_at)[0]
         setStatus(latest.content || '')
@@ -398,18 +406,21 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
 
     // Fetch link sets to know if "Links" button should show
     fetchEvents({ kinds: [30003], authors: [displayPubkey] }).then((events) => {
+      if (cancelled) return
       const linkSets = events.filter((ev) => ev.tags.some((t) => t[0] === 'd' && t[1]?.startsWith('links-')))
       setHasLinks(linkSets.some((ev) => ev.tags.some((t) => t[0] === 'r' && t[1])))
     })
 
     // Fetch payment targets (kind 10133) to know if the "Payment targets" button should show
     fetchEvents({ kinds: [STANDARD_KINDS.PAYTO], authors: [displayPubkey], limit: 1 }).then((events) => {
+      if (cancelled) return
       const latest = events.sort((a, b) => b.created_at - a.created_at)[0]
       setHasPayto(extractPaymentTargets(latest).length > 0)
     }).catch(() => { /* non-critical */ })
 
     // Fetch target user's follow list (kind 3) for the "Following" button
     fetchEvents({ kinds: [3], authors: [displayPubkey], limit: 1 }).then((events) => {
+      if (cancelled) return
       if (events.length > 0) {
         const latest = events.sort((a, b) => b.created_at - a.created_at)[0]
         const follows: string[] = []
@@ -419,8 +430,10 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
         setFollowingPubkeys(follows)
       }
       setFollowingLoaded(true)
-    }).catch(() => setFollowingLoaded(true))
-  }, [open, displayPubkey, loaded, isSelf, myPubkey, getProfile])
+    }).catch(() => { if (!cancelled) setFollowingLoaded(true) })
+
+    return () => { cancelled = true }
+  }, [open, displayPubkey, getProfile])
 
   // Reset on close / auto-enter edit mode
   useEffect(() => {
@@ -428,7 +441,6 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
       setProfileData(EMPTY_PROFILE)
       setEditProfile(EMPTY_PROFILE)
       setEditing(false)
-      setLoaded(false)
       setShowDropdown(false)
       setRawProfileEventJson(null)
       setShowRawEvent(false)
