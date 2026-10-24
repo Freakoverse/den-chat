@@ -387,14 +387,17 @@ export function useBlossomMedia(originalUrl: string | undefined, maxSizeMB?: num
           const actualHash = await hashBlob(blob)
           if (actualHash === parsed.hash) {
             // Verified! Cache it (in-memory server hint + session blob + persistent on-disk blob)
-            verifiedCache.set(parsed.hash, { serverUrl: baseUrl, blobUrl: URL.createObjectURL(blob) })
+            const objUrl = URL.createObjectURL(blob)
+            verifiedCache.set(parsed.hash, { serverUrl: baseUrl, blobUrl: objUrl })
             putInPersistentCache(parsed.hash, blob).catch(() => {})
             if (!cancelRef.current) {
-              // If verified from a different server, update src to the verified one
-              if (i !== fromIdx) {
-                setCurrentSrc(srcUrl)
-                setServerIdx(i)
-              }
+              // Show the bytes we just downloaded rather than waiting on the separate optimistic <img>
+              // request for the same (possibly large) file — a big banner otherwise downloads twice in
+              // parallel (once for display, once to cache), each slower for competing. Switching src to
+              // the local blob cancels the browser's in-flight request and renders from memory.
+              setCurrentSrc(objUrl)
+              setServerIdx(i)
+              setLoading(false)
               setVerified('verified')
             }
             verifyingRef.current = false
