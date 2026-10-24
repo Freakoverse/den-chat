@@ -575,9 +575,21 @@ export function useBlossomMedia(originalUrl: string | undefined, maxSizeMB?: num
     }
   }
 
+  // Synchronous first-paint source, so the <img> renders in the SAME render pass instead of waiting for
+  // an async state update — the async cache read / server probe resolves fine in isolation, but its
+  // callback gets starved behind heavy synchronous work on a busy screen (e.g. a hub opening: group
+  // decryption + event processing), leaving the icon/banner on a skeleton for seconds. Prefer the async
+  // result (currentSrc) once it lands; before that, fall back to the session's in-memory verified blob
+  // (instant, offline-capable), then — only for un-sized media like hub icons/banners — the origin URL so
+  // the browser can start loading it off the main thread right away (it's superseded when the blob lands).
+  // Size-limited media (chat images/stickers) keep the gated path: no optimistic origin URL before the
+  // size check, only a blob we already verified+cached.
+  const warmBlobUrl = verifiedCache.get(parsed.hash)?.blobUrl
+  const optimisticUrl = limitBytes ? '' : buildUrl(0)
+  const displaySrc = sizeExceeded ? '' : (currentSrc || warmBlobUrl || optimisticUrl)
   return {
-    src: sizeExceeded ? '' : currentSrc,
-    loading,
+    src: displaySrc,
+    loading: displaySrc ? false : loading,
     verified,
     error,
     serverIndex: serverIdx,
