@@ -612,6 +612,7 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
           src={hub.banner}
           alt={`${hub.name} banner`}
           className="w-full h-28 object-cover"
+          servers={hub.blossomServers}
           fallback={<img src={HUB_BANNER_PLACEHOLDER} alt="" className="w-full h-28 object-cover" />}
         />
         {/* Bottom gradient so the hub name stays readable over the banner */}

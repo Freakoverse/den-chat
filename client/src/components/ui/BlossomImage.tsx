@@ -24,10 +24,13 @@ interface BlossomImageProps {
   maxSizeMB?: number
   /** Use object-contain instead of the default object-cover (e.g. stickers/emojis that must not crop) */
   contain?: boolean
+  /** Extra Blossom servers to recognize/failover to (e.g. a hub's advertised servers for its icon/banner),
+   *  so media hosted on a server that isn't a known host or in the user's list still uses the cache-first path. */
+  servers?: string[]
 }
 
-export function BlossomImage({ src, alt, className, imgClassName, fallback, maxSizeMB, contain }: BlossomImageProps) {
-  const blossom = useBlossomMedia(src, maxSizeMB)
+export function BlossomImage({ src, alt, className, imgClassName, fallback, maxSizeMB, contain, servers }: BlossomImageProps) {
+  const blossom = useBlossomMedia(src, maxSizeMB, servers)
   const [loaded, setLoaded] = useState(false)
   const [imgError, setImgError] = useState(false)
   const [overridden, setOverridden] = useState(false)

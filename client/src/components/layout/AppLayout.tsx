@@ -571,7 +571,7 @@ function AwaitingApprovalOverlay({ dTag }: { dTag: string | null }) {
         {/* Hub identity */}
         <div className="mx-auto w-20 h-20 rounded-2xl overflow-hidden bg-secondary border border-border flex items-center justify-center">
           {hub?.icon ? (
-            <BlossomImage src={hub.icon} alt={hub?.name || 'Hub'} className="w-full h-full" imgClassName="object-cover" />
+            <BlossomImage src={hub.icon} alt={hub?.name || 'Hub'} servers={hub?.blossomServers} className="w-full h-full" imgClassName="object-cover" />
           ) : (
             <Home size={28} className="text-muted-foreground" />
           )}

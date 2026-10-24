@@ -208,7 +208,7 @@ export function HubInfoModal({ open, onClose, hub, blurMedia, onCreatorClick }: 
         {/* Banner */}
         {hub.banner ? (
           <div className="h-32 w-full">
-            <BlossomImage src={hub.banner} alt="" className={`w-full h-full object-cover${blurMedia ? ' blur-lg' : ''}`} fallback={
+            <BlossomImage src={hub.banner} alt="" servers={hub.blossomServers} className={`w-full h-full object-cover${blurMedia ? ' blur-lg' : ''}`} fallback={
               <div className="w-full h-full bg-gradient-to-br from-primary/30 to-primary/10" />
             } />
           </div>
@@ -258,7 +258,7 @@ export function HubInfoModal({ open, onClose, hub, blurMedia, onCreatorClick }: 
         <div className="px-5 -mt-10 relative">
           <div className="w-20 h-20 rounded-2xl bg-secondary border-4 border-background overflow-hidden">
             {hub.icon ? (
-              <BlossomImage src={hub.icon} alt={hub.name} className={`w-full h-full object-cover${blurMedia ? ' blur-sm' : ''}`} fallback={
+              <BlossomImage src={hub.icon} alt={hub.name} servers={hub.blossomServers} className={`w-full h-full object-cover${blurMedia ? ' blur-sm' : ''}`} fallback={
                 <div className="w-full h-full flex items-center justify-center text-xl font-bold text-muted-foreground">
                   {hub.name.slice(0, 2).toUpperCase()}
                 </div>

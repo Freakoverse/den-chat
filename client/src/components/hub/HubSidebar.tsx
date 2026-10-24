@@ -230,7 +230,7 @@ export function HubSidebar({ activePage, onNavigate, compact = false }: { active
                     loadingEvent={!hub && !status}
                   >
                     {hub?.icon ? (
-                      <BlossomImage src={hub.icon} alt={hub.name} className="absolute inset-0 w-full h-full object-cover" fallback={
+                      <BlossomImage src={hub.icon} alt={hub.name} servers={hub.blossomServers} className="absolute inset-0 w-full h-full object-cover" fallback={
                         <span className="text-sm font-semibold">{(hub?.name ?? entry.dTag).slice(0, 2).toUpperCase()}</span>
                       } />
                     ) : (
@@ -318,7 +318,7 @@ export function HubSidebar({ activePage, onNavigate, compact = false }: { active
                             loadingEvent={!hub && !status}
                           >
                             {hub?.icon ? (
-                              <BlossomImage src={hub.icon} alt={hub.name} className="absolute inset-0 w-full h-full object-cover" fallback={
+                              <BlossomImage src={hub.icon} alt={hub.name} servers={hub.blossomServers} className="absolute inset-0 w-full h-full object-cover" fallback={
                                 <span className="text-xs font-semibold">{(hub?.name ?? entry.dTag).slice(0, 2).toUpperCase()}</span>
                               } />
                             ) : (
@@ -343,7 +343,7 @@ export function HubSidebar({ activePage, onNavigate, compact = false }: { active
                   isPreview
                 >
                   {hubs[previewHubId]?.icon ? (
-                    <BlossomImage src={hubs[previewHubId].icon!} alt={hubs[previewHubId].name} className="absolute inset-0 w-full h-full object-cover" fallback={
+                    <BlossomImage src={hubs[previewHubId].icon!} alt={hubs[previewHubId].name} servers={hubs[previewHubId].blossomServers} className="absolute inset-0 w-full h-full object-cover" fallback={
                       <span className="text-sm font-semibold">{hubs[previewHubId].name.slice(0, 2).toUpperCase()}</span>
                     } />
                   ) : (

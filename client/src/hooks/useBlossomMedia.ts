@@ -55,16 +55,19 @@ const EXT_MIME: Record<string, string> = {
  *   https://blossom.primal.net/<sha256>.jpg
  *   https://any-configured-server/<sha256>
  */
-function parseBlossomUrl(url: string): BlossomParsed | null {
+function parseBlossomUrl(url: string, extraServers: string[] = []): BlossomParsed | null {
   try {
     const parsed = new URL(url)
     const hostname = parsed.hostname.replace('www.', '')
 
-    // Check if it's a known blossom host OR one of our configured servers (client + user kind-10063),
-    // so a URL on the user's own personal server is recognized and gets the failover treatment too.
+    // Recognized hosts: known blossom hosts, the user's own configured servers (client + kind-10063),
+    // and any extra servers the caller vouches for. The last lets a hub's icon/banner — which live on
+    // the hub's OWN advertised Blossom server (often neither a known host nor in the user's list) — go
+    // through the cache-first + persistent-cache path instead of a plain <img> that re-downloads from
+    // the network on every load. Unrecognized hosts return null and render as a bare URL as before.
     const configuredServers = getReadBlossoms()
     const isBlossomHost = KNOWN_BLOSSOM_HOSTS.includes(hostname) ||
-      configuredServers.some(s => {
+      [...configuredServers, ...extraServers].some(s => {
         try { return new URL(s).hostname.replace('www.', '') === hostname } catch { return false }
       })
 
@@ -143,16 +146,18 @@ const decryptedMediaCache = new Map<string, string>()
  * Hook that provides optimistic blossom media rendering with background hash verification.
  * Returns a direct URL immediately so the browser can render/stream natively.
  */
-export function useBlossomMedia(originalUrl: string | undefined, maxSizeMB?: number): BlossomMediaState {
-  const parsed = useMemo(() => originalUrl ? parseBlossomUrl(originalUrl) : null, [originalUrl])
+export function useBlossomMedia(originalUrl: string | undefined, maxSizeMB?: number, extraServers?: string[]): BlossomMediaState {
+  // Stable key so a fresh array identity from the caller each render doesn't thrash the memos.
+  const extraServersKey = (extraServers ?? []).join(',')
+  const parsed = useMemo(() => originalUrl ? parseBlossomUrl(originalUrl, extraServers ?? []) : null, [originalUrl, extraServersKey])
 
-  // Build server list: origin first, then the client + user read net (deduplicated).
-  // getReadBlossoms() unions the shared client list with the user's own kind-10063 servers, so a blob
-  // an upload placed on a personal server (not in the client defaults) still resolves on failover.
+  // Build server list: origin first, then any caller-vouched servers (e.g. a hub's), then the client +
+  // user read net (deduplicated). getReadBlossoms() unions the shared client list with the user's own
+  // kind-10063 servers, so a blob an upload placed on a personal server still resolves on failover.
   const servers = useMemo(() => {
     if (!parsed) return []
-    return getReadBlossoms([parsed.originServer])
-  }, [parsed])
+    return getReadBlossoms([parsed.originServer, ...(extraServers ?? [])])
+  }, [parsed, extraServersKey])
 
   const [currentSrc, setCurrentSrc] = useState('')
   const [verified, setVerified] = useState<VerificationStatus>('pending')
