@@ -135,7 +135,11 @@ export type BlossomMediaState = {
 }
 
 // ── Global cache for verified hashes (avoid re-verifying the same file) ──
-const verifiedCache = new Map<string, { serverUrl: string }>()
+// `blobUrl` is a session object URL for the already-downloaded bytes, so a second BlossomImage for the
+// same image (e.g. Hub Settings showing an icon the sidebar already loaded) renders it synchronously
+// instead of re-GETting from the server or re-reading the persistent cache. Session-scoped (lost on
+// reload, where the persistent cache takes over); never revoked, like decryptedMediaCache below.
+const verifiedCache = new Map<string, { serverUrl: string; blobUrl?: string }>()
 
 // ── Global cache for decrypted attachments (ciphertextHash → blob: URL) ──
 // Object URLs live for the session (mirrors NIP-17's decrypted-blob cache) so
@@ -249,10 +253,11 @@ export function useBlossomMedia(originalUrl: string | undefined, maxSizeMB?: num
     cancelRef.current = false
     verifyingRef.current = false
 
-    // Check if already verified in cache
+    // Check if already verified in cache — prefer the in-memory blob (instant, no network) over a
+    // fresh server URL, so a repeat view of an already-loaded image doesn't re-download.
     const cached = verifiedCache.get(parsed.hash)
     if (cached) {
-      const cachedUrl = `${cached.serverUrl.replace(/\/+$/, '')}/${parsed.hash}${parsed.ext}`
+      const cachedUrl = cached.blobUrl || `${cached.serverUrl.replace(/\/+$/, '')}/${parsed.hash}${parsed.ext}`
       setCurrentSrc(cachedUrl)
       setVerified('verified')
       setLoading(false)
@@ -361,8 +366,8 @@ export function useBlossomMedia(originalUrl: string | undefined, maxSizeMB?: num
 
           const actualHash = await hashBlob(blob)
           if (actualHash === parsed.hash) {
-            // Verified! Cache it (in-memory server hint + persistent on-disk blob)
-            verifiedCache.set(parsed.hash, { serverUrl: baseUrl })
+            // Verified! Cache it (in-memory server hint + session blob + persistent on-disk blob)
+            verifiedCache.set(parsed.hash, { serverUrl: baseUrl, blobUrl: URL.createObjectURL(blob) })
             putInPersistentCache(parsed.hash, blob).catch(() => {})
             if (!cancelRef.current) {
               // If verified from a different server, update src to the verified one
@@ -396,7 +401,6 @@ export function useBlossomMedia(originalUrl: string | undefined, maxSizeMB?: num
 
     // Persistent (on-disk) cache hit → serve instantly with no network round-trip.
     // Falls back to the server-probe flow on a miss.
-    let cachedObjectUrl: string | null = null
     ;(async () => {
       const cachedBlob = await getFromPersistentCache(parsed.hash)
       if (cancelRef.current) return
@@ -407,8 +411,12 @@ export function useBlossomMedia(originalUrl: string | undefined, maxSizeMB?: num
           setLoading(false)
           return
         }
-        cachedObjectUrl = URL.createObjectURL(cachedBlob)
-        setCurrentSrc(cachedObjectUrl)
+        // Share the object URL for the session so other instances (and the next time this image is
+        // viewed this session) reuse it synchronously via the verifiedCache branch above, rather than
+        // each re-reading the persistent cache. Shared → not revoked on unmount.
+        const objUrl = URL.createObjectURL(cachedBlob)
+        verifiedCache.set(parsed.hash, { serverUrl: parsed.originServer, blobUrl: objUrl })
+        setCurrentSrc(objUrl)
         setVerified('verified')
         setLoading(false)
         return
@@ -418,7 +426,6 @@ export function useBlossomMedia(originalUrl: string | undefined, maxSizeMB?: num
 
     return () => {
       cancelRef.current = true
-      if (cachedObjectUrl) URL.revokeObjectURL(cachedObjectUrl)
     }
   }, [parsed, servers, buildUrl, limitBytes, originalUrl])
 
@@ -453,7 +460,7 @@ export function useBlossomMedia(originalUrl: string | undefined, maxSizeMB?: num
 
           const actualHash = await hashBlob(blob)
           if (actualHash === parsed.hash) {
-            verifiedCache.set(parsed.hash, { serverUrl: baseUrl })
+            verifiedCache.set(parsed.hash, { serverUrl: baseUrl, blobUrl: URL.createObjectURL(blob) })
             if (!cancelRef.current) {
               setCurrentSrc(srcUrl)
               setServerIdx(i)
@@ -482,7 +489,7 @@ export function useBlossomMedia(originalUrl: string | undefined, maxSizeMB?: num
     setCurrentSrc(blobUrl)
     setVerified('verified')
     if (parsed) {
-      verifiedCache.set(parsed.hash, { serverUrl: 'blob' })
+      verifiedCache.set(parsed.hash, { serverUrl: 'blob', blobUrl })
     }
   }, [parsed])
 
