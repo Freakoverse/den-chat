@@ -55,7 +55,7 @@ import {
   Copy, Check, Lock, FileDown, AlertTriangle, X, RotateCcw, RefreshCw, Rocket, FileUp,
   Loader2, Send, HelpCircle, XCircle, UserMinus, ShieldOff, Tag, Download, QrCode,
   GripVertical, FolderPlus, ChevronDown, ChevronRight, Pencil, ListPlus, Upload, Undo2,
-  BookOpen, Mic, Volume2, Camera, MonitorPlay, Megaphone, Crown, Sparkles, Zap, Palette as PaletteIcon, BadgeCheck, MessageCircleOff, ArrowUp, ArrowDown, Heart, LogOut, Gamepad2, Activity, Save, MoreVertical, ListMinus,
+  BookOpen, Mic, Volume2, Camera, MonitorPlay, Megaphone, Crown, Sparkles, Zap, Palette as PaletteIcon, BadgeCheck, MessageCircleOff, ArrowUp, ArrowDown, Heart, LogOut, Gamepad2, Activity, Save, MoreVertical, ListMinus, Server,
 } from 'lucide-react'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -88,7 +88,7 @@ import { MAX_HUB_LIST_ENTRIES, MAX_HUB_FOLDERS, FOLDER_NAME_MAX } from '@/lib/hu
 
 /* ─────────── types ─────────── */
 
-type Tab = 'general' | 'preferences' | 'voice-video' | 'network' | 'keybinds' | 'game-chat' | 'my-hubs' | 'social-network' | 'moderation' | 'security' | 'dnn' | 'updates' | 'about' | 'faq' | 'guides' | 'advertisements' | 'premium' | 'admin'
+type Tab = 'general' | 'preferences' | 'voice-video' | 'network' | 'keybinds' | 'game-chat' | 'my-hubs' | 'social-network' | 'moderation' | 'security' | 'dnn' | 'updates' | 'about' | 'faq' | 'guides' | 'server-rent' | 'advertisements' | 'premium' | 'admin'
 
 const TABS: { id: Tab; label: string; icon: React.ReactNode; separatorBefore?: boolean; tooltip?: string }[] = [
   { id: 'general', label: 'General', icon: <Settings size={18} />, tooltip: 'Profile, language, and appearance' },
@@ -105,6 +105,7 @@ const TABS: { id: Tab; label: string; icon: React.ReactNode; separatorBefore?: b
   { id: 'updates', label: 'Updates', icon: <Download size={18} />, separatorBefore: true, tooltip: 'Available builds and downloads' },
   { id: 'faq', label: 'FAQ', icon: <HelpCircle size={18} />, tooltip: 'Frequently asked questions' },
   { id: 'guides', label: 'Guides', icon: <BookOpen size={18} />, tooltip: 'Video tutorials and walkthroughs' },
+  { id: 'server-rent', label: 'Server Rent', icon: <Server size={18} />, tooltip: 'Rent dedicated relay and Blossom servers' },
   { id: 'about', label: 'About', icon: <Info size={18} />, tooltip: 'App info and credits' },
   { id: 'advertisements', label: 'Advertisements', icon: <Megaphone size={18} />, tooltip: 'Ad preferences and opt-out' },
   { id: 'premium', label: 'Premium', icon: <Crown size={18} />, tooltip: 'Subscription benefits' },
@@ -270,6 +271,7 @@ export function SettingsPage() {
             {tab === 'updates' && <UpdatesTab />}
             {tab === 'faq' && <FaqTab />}
             {tab === 'guides' && <GuidesTab />}
+            {tab === 'server-rent' && <ServerRentTab />}
             {tab === 'about' && <AboutTab />}
             {tab === 'advertisements' && <AdvertisementsTab />}
             {tab === 'premium' && <PremiumTab />}
@@ -6868,6 +6870,20 @@ function DnnTab() {
       <h2 className="text-lg font-semibold text-foreground mb-2">Decentralized Node Network</h2>
       <p className="text-sm text-muted-foreground max-w-sm">
         Coming soon. DNN settings and node management will be available here in a future update.
+      </p>
+    </div>
+  )
+}
+
+function ServerRentTab() {
+  return (
+    <div className="flex flex-col items-center justify-center py-24 px-6 text-center">
+      <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center mb-4">
+        <Server size={28} className="text-primary" />
+      </div>
+      <h2 className="text-lg font-semibold text-foreground mb-2">Server Rent</h2>
+      <p className="text-sm text-muted-foreground max-w-sm">
+        Coming soon. A marketplace to rent and order a dedicated, self-hosted Nostr relay and Blossom servers for your hubs.
       </p>
     </div>
   )
