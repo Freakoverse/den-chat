@@ -160,6 +160,7 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
   const blockUser = useBlockStore((s) => s.blockUser)
   const unblockUser = useBlockStore((s) => s.unblockUser)
   const followStoreState = useFollowStore()
+  const { getProfile } = useProfileCache()
 
   // Determine which pubkey to show
   const displayPubkey = targetPubkey || myPubkey
@@ -338,6 +339,26 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
   useEffect(() => {
     if (!open || !displayPubkey || loaded) return
 
+    // Seed instantly from the shared profile cache (stale-while-revalidate): show the name,
+    // avatar and bio we already have the moment the modal opens, instead of flashing empty
+    // while the kind-0 fetch below runs. The fetch then revalidates and grabs the raw event.
+    // Runs only on open (the `loaded` guard above keeps it from re-seeding once fetched).
+    const cached = getProfile(displayPubkey)
+    if (cached) {
+      const seed: ProfileData = {
+        name: cached.name || '',
+        display_name: cached.display_name || '',
+        about: cached.about || '',
+        picture: cached.picture || '',
+        banner: cached.banner || '',
+        nip05: cached.nip05 || '',
+        website: cached.website || '',
+        lud16: cached.lud16 || '',
+      }
+      setProfileData(seed)
+      setEditProfile(seed)
+    }
+
     fetchEvents({
       kinds: [0],
       authors: [displayPubkey],
@@ -399,7 +420,7 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
       }
       setFollowingLoaded(true)
     }).catch(() => setFollowingLoaded(true))
-  }, [open, displayPubkey, loaded, isSelf, myPubkey])
+  }, [open, displayPubkey, loaded, isSelf, myPubkey, getProfile])
 
   // Reset on close / auto-enter edit mode
   useEffect(() => {
