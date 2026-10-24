@@ -7,16 +7,12 @@
 
 import { useState, useRef, useEffect, useMemo } from 'react'
 import { CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { cn, formatDateNumeric } from '@/lib/utils'
 
 const DAYS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa']
 const MONTHS = [
   'January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December',
-]
-const SHORT_MONTHS = [
-  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
 ]
 
 interface DatePickerProps {
@@ -113,7 +109,7 @@ export function DatePicker({ value, onChange, placeholder = 'Select date', minDa
 
   // Display value
   const displayText = selected
-    ? `${SHORT_MONTHS[selected.month]} ${selected.day}, ${selected.year}`
+    ? formatDateNumeric(new Date(selected.year, selected.month, selected.day))
     : placeholder
 
   return (

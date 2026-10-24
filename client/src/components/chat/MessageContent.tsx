@@ -10,7 +10,7 @@
 import { useState, useEffect, useMemo, memo, useCallback, useRef, Children, isValidElement, cloneElement } from 'react'
 import { Download, Loader2, Check, Copy, Hash, Link as LinkIcon, Eye, Lock } from 'lucide-react'
 import { useBlossomMedia, shareableMediaUrl } from '@/hooks/useBlossomMedia'
-import { formatDateNumeric } from '@/lib/utils'
+import { formatDateNumeric, formatDateTimeNumeric } from '@/lib/utils'
 import { VerificationBadge } from '@/components/ui/VerificationBadge'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
 import Markdown from 'react-markdown'
@@ -313,7 +313,7 @@ export function TimestampToken({ unix }: { unix: number }) {
   return (
     <span
       className="inline-block bg-primary/10 text-primary rounded-sm px-1 py-0.5 text-xs font-medium cursor-default"
-      title={dt.toISOString()}
+      title={formatDateTimeNumeric(dt)}
     >
       {datePart} – {timePart} ({relative})
     </span>

@@ -16,7 +16,7 @@ import { CreateCalendarEventModal } from '@/components/hub/CreateCalendarEventMo
 import { Pagination } from '@/components/ui/Pagination'
 import { X, CalendarDays, Plus, ChevronLeft, ChevronRight, Loader2, Radio, Clock, History } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { cn } from '@/lib/utils'
+import { cn, formatDateNumeric } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
 import { usePermissions, getPermissionsForUser } from '@/lib/hub/permissions'
 import { useHubStore } from '@/stores/hubStore'
@@ -487,7 +487,7 @@ export function CalendarPanel({ hubDTag, open, onClose }: CalendarPanelProps) {
                 {selectedDay !== null && (
                   <div className="mt-3 border-t border-border/30 pt-3">
                     <h5 className="text-xs font-medium text-muted-foreground mb-2">
-                      {MONTHS[viewMonth]} {selectedDay}, {viewYear}
+                      {formatDateNumeric(new Date(viewYear, viewMonth, selectedDay))}
                       {selectedDayEvents.length > 0 && (
                         <span className="ml-1 text-muted-foreground/50">
                           · {selectedDayEvents.length} event{selectedDayEvents.length !== 1 ? 's' : ''}
