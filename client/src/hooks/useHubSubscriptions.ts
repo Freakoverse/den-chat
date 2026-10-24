@@ -132,6 +132,29 @@ function parseMessage(event: Event): ChatMessage | null {
 }
 
 /**
+ * Buffered message ingest. Collects messages from a subscription and flushes them to the store in ONE
+ * batch (addMessages) instead of one addMessage per event. A history page / catch-up streams dozens of
+ * events in a burst, and per-event addMessage re-sorted the channel and re-rendered every time — O(n^2)
+ * work plus a re-render storm that froze the main thread on hub open (so nothing, images included, could
+ * paint). Flushes on a short debounce, when the buffer grows, and must be flushed on EOSE/completion.
+ */
+function createBufferedIngest() {
+  const buffer: ChatMessage[] = []
+  let timer: ReturnType<typeof setTimeout> | null = null
+  const flush = () => {
+    if (timer) { clearTimeout(timer); timer = null }
+    if (buffer.length === 0) return
+    useMessageStore.getState().addMessages(buffer.splice(0))
+  }
+  const push = (msg: ChatMessage) => {
+    buffer.push(msg)
+    if (buffer.length >= 50) flush()
+    else if (!timer) timer = setTimeout(flush, 120)
+  }
+  return { push, flush }
+}
+
+/**
  * Fetch older messages for a specific hub+channel for history pagination.
  * Queries relays for messages created before `untilTimestamp` with limit: PAGE_SIZE.
  * Returns a promise that resolves with the count of messages received.
@@ -145,7 +168,7 @@ export function fetchOlderMessages(
   const hub = hubs[hubDTag]
   if (!hub) return Promise.resolve(0)
 
-  const addMessage = useMessageStore.getState().addMessage
+  const ingest = createBufferedIngest()
   const minPow = hub.minPow || 0
 
   // Collect relays for this hub
@@ -170,12 +193,13 @@ export function fetchOlderMessages(
         // Validate PoW
         if (minPow > 0 && countLeadingZeroBits(event.id) < minPow) return
 
-        addMessage(msg)
+        ingest.push(msg)
         cacheMessageIfVerified(msg).catch(() => {})
         count++
       },
       () => {
         // EOSE — all stored events received, close the subscription
+        ingest.flush()
         sub.close()
         console.log(`[HubSubs] History fetch complete: ${count} messages (until: ${new Date(untilTimestamp * 1000).toISOString()})`)
         resolve(count)
@@ -184,6 +208,7 @@ export function fetchOlderMessages(
 
     // Safety timeout — resolve after 15s even if EOSE never fires
     setTimeout(() => {
+      ingest.flush()
       sub.close()
       resolve(count)
     }, 15000)
@@ -823,15 +848,18 @@ export function useHubSubscriptions() {
 
     const ingestCached = (cached: import('@/stores/messageStore').ChatMessage[]) => {
       const nowSec = Math.floor(Date.now() / 1000)
-      for (const msg of cached) {
+      const toAdd = cached.filter((msg) => {
         const hub = hubsRef.current[msg.hubDTag]
         const minPow = hub?.minPow || 0
-        if (minPow > 0 && countLeadingZeroBits(msg.id) < minPow) continue
+        if (minPow > 0 && countLeadingZeroBits(msg.id) < minPow) return false
         // Disappearing messages: don't load an already-expired cached message into
         // the store (pruneAll physically removes it from IndexedDB separately).
-        if (msg.expiration && msg.expiration <= nowSec) continue
-        addMessageRef.current(msg)
-      }
+        if (msg.expiration && msg.expiration <= nowSec) return false
+        return true
+      })
+      // ONE bulk merge instead of addMessage-per-message: loading a hub's cached history was the big
+      // startup/open burst — N re-sorts + N re-renders froze the main thread so nothing could paint.
+      if (toAdd.length > 0) useMessageStore.getState().addMessages(toAdd)
     }
 
     // Phase 1: Load active hub first (fast, indexed read)

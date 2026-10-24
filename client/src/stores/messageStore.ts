@@ -135,6 +135,10 @@ interface MessageState {
 
   /** Add a single message — inserts sorted by createdAt, deduplicates by id */
   addMessage: (msg: ChatMessage) => void
+  /** Bulk-merge many messages in ONE state update (same replace-if-newer / dedupe / sort / cap rules as
+   *  addMessage). Use this for bursts — history loads, cache seeds, subscription batches — so N messages
+   *  cost one re-sort + one re-render instead of N, which is what froze the UI on hub open. */
+  addMessages: (msgs: ChatMessage[]) => void
   /** Bulk set messages for a specific channel (e.g. history load) */
   setMessages: (hubDTag: string, channelId: string, msgs: ChatMessage[]) => void
   /** Remove a message locally (by d-tag) */
@@ -257,6 +261,82 @@ export const useMessageStore = create<MessageState>((set, get) => ({
       }
 
       return { messages: newMessages, _insertionOrder: insertionOrder, reactions: newReactions }
+    }),
+
+  addMessages: (msgs) =>
+    set((state) => {
+      if (msgs.length === 0) return state
+
+      const messages: Record<string, Record<string, ChatMessage[]>> = { ...state.messages }
+      // Working copy per touched channel, keyed hub\0channel (null byte can't appear in either id).
+      const working = new Map<string, ChatMessage[]>()
+      const keyOf = (h: string, c: string) => `${h}\u0000${c}`
+      const seenIds = new Set(state._insertionOrder)
+      const newIds: string[] = []
+
+      for (const msg of msgs) {
+        const k = keyOf(msg.hubDTag, msg.channelId)
+        let arr = working.get(k)
+        if (!arr) {
+          arr = [...((messages[msg.hubDTag] || {})[msg.channelId] || [])]
+          working.set(k, arr)
+        }
+        // Addressable replacement: same dTag + pubkey = updated message, newest wins.
+        const existingIdx = arr.findIndex((m) => m.dTag === msg.dTag && m.pubkey === msg.pubkey)
+        if (existingIdx !== -1) {
+          const existing = arr[existingIdx]
+          const msgEventTs = msg.eventCreatedAt || msg.createdAt
+          const existingEventTs = existing.eventCreatedAt || existing.createdAt
+          if (msgEventTs <= existingEventTs) continue // stale version
+          arr[existingIdx] = {
+            ...msg,
+            createdAt: Math.min(existing.createdAt, msg.createdAt),
+            edited: true,
+          }
+          continue
+        }
+        if (arr.some((m) => m.id === msg.id)) continue // dedupe by id
+        arr.push(msg)
+        if (!seenIds.has(msg.id)) { seenIds.add(msg.id); newIds.push(msg.id) }
+      }
+
+      // Commit each touched channel once: sort + reply-order + per-channel cap.
+      for (const [k, arrRaw] of working) {
+        const sep = k.indexOf('\u0000')
+        const hubDTag = k.slice(0, sep)
+        const channelId = k.slice(sep + 1)
+        let sorted = enforceReplyOrder(arrRaw.sort((a, b) => a.createdAt - b.createdAt))
+        if (sorted.length > MAX_PER_CHANNEL) sorted = sorted.slice(sorted.length - MAX_PER_CHANNEL)
+        messages[hubDTag] = { ...(messages[hubDTag] || {}), [channelId]: sorted }
+      }
+
+      // Insertion order + global FIFO cap (same eviction as addMessage).
+      let insertionOrder = [...state._insertionOrder, ...newIds]
+      let newReactions = state.reactions
+      if (insertionOrder.length > MAX_GLOBAL) {
+        const excess = insertionOrder.length - MAX_GLOBAL
+        const toEvict = new Set(insertionOrder.slice(0, excess))
+        insertionOrder = insertionOrder.slice(excess)
+        for (const [hd, channels] of Object.entries(messages)) {
+          for (const [ch, chMsgs] of Object.entries(channels)) {
+            const filtered = chMsgs.filter((m) => !toEvict.has(m.id))
+            if (filtered.length !== chMsgs.length) {
+              messages[hd] = { ...channels, [ch]: filtered }
+            }
+          }
+        }
+        newReactions = { ...state.reactions }
+        for (const [hd, hubReactions] of Object.entries(newReactions)) {
+          const cleaned = { ...hubReactions }
+          let changed = false
+          for (const msgId of Object.keys(cleaned)) {
+            if (toEvict.has(msgId)) { delete cleaned[msgId]; changed = true }
+          }
+          if (changed) newReactions[hd] = cleaned
+        }
+      }
+
+      return { messages, _insertionOrder: insertionOrder, reactions: newReactions }
     }),
 
   setMessages: (hubDTag, channelId, msgs) =>
