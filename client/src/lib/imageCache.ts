@@ -33,6 +33,28 @@ const listeners = new Map<string, Set<() => void>>()
 /** URLs that failed to fetch (CORS, network errors) — don't retry */
 const failedUrls = new Set<string>()
 
+/** url → persistent-cache key, memoized (hashing the URL isn't free). */
+const keyCache = new Map<string, string>()
+
+/**
+ * Persistent-cache key for a URL. Content-addressed Blossom URLs key by their SHA-256 content hash
+ * (so the same blob on different servers dedupes to one entry). Everything else — avatars/banners on
+ * plain CDN or image-proxy URLs with no hash in the path — keys by a digest of the URL string, so it
+ * persists across restarts too instead of being re-downloaded every launch. The `u_` prefix can't
+ * collide with a 64-hex content hash.
+ */
+async function cacheKeyFor(url: string): Promise<string> {
+  const hit = keyCache.get(url)
+  if (hit) return hit
+  let key = extractBlossomHash(url)
+  if (!key) {
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(url))
+    key = 'u_' + Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, '0')).join('')
+  }
+  keyCache.set(url, key)
+  return key
+}
+
 /**
  * Check if a URL should be cached (only remote HTTP/HTTPS URLs).
  */
@@ -76,31 +98,30 @@ export function fetchAndCacheImage(url: string, onCached: () => void): void {
   }
 }
 
-/** Internal: perform the actual fetch and cache (with persistent L2 layer) */
+/** Internal: perform the actual fetch and cache (persistent L2 layer, keyed by cacheKeyFor) */
 function _doFetch(url: string, maxBytes?: number): void {
   pendingFetches.add(url)
 
   const doFetch = async () => {
     try {
-      // ── L2: Check persistent Blossom cache before network ──
-      const blossomHash = extractBlossomHash(url)
-      if (blossomHash) {
-        const cachedBlob = await getFromPersistentCache(blossomHash)
-        if (cachedBlob) {
-          // Persistent cache hit — create blob URL and store in memory
-          if (maxBytes && cachedBlob.size > maxBytes) {
-            blobCache.set(url, IMAGE_TOO_LARGE)
-            _notifyListeners(url)
-            return
-          }
-          const blobUrl = URL.createObjectURL(cachedBlob)
-          blobCache.set(url, blobUrl)
+      const cacheKey = await cacheKeyFor(url)
+
+      // ── L2: Check the persistent on-disk cache before the network (survives restart). A hit lets
+      // the caller render the local copy; the slow network <img> it may have started is superseded.
+      const cachedBlob = await getFromPersistentCache(cacheKey)
+      if (cachedBlob) {
+        if (maxBytes && cachedBlob.size > maxBytes) {
+          blobCache.set(url, IMAGE_TOO_LARGE)
           _notifyListeners(url)
           return
         }
+        blobCache.set(url, URL.createObjectURL(cachedBlob))
+        _notifyListeners(url)
+        return
       }
 
-      // ── L3: Network fetch ──
+      // ── L3: Network fetch (write-through to the persistent cache for ALL urls, not just hash
+      // ones, so plain CDN/proxy avatars and banners also load locally on the next launch) ──
       const res = await fetch(url, { mode: 'cors' })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
 
@@ -137,14 +158,9 @@ function _doFetch(url: string, maxBytes?: number): void {
         }
 
         const blob = new Blob(chunks)
-        const blobUrl = URL.createObjectURL(blob)
-        blobCache.set(url, blobUrl)
+        blobCache.set(url, URL.createObjectURL(blob))
         _notifyListeners(url)
-
-        // Write-through to persistent cache for Blossom URLs
-        if (blossomHash) {
-          putInPersistentCache(blossomHash, blob).catch(() => {})
-        }
+        putInPersistentCache(cacheKey, blob).catch(() => {})
         return
       }
 
@@ -155,14 +171,9 @@ function _doFetch(url: string, maxBytes?: number): void {
         _notifyListeners(url)
         return
       }
-      const blobUrl = URL.createObjectURL(blob)
-      blobCache.set(url, blobUrl)
+      blobCache.set(url, URL.createObjectURL(blob))
       _notifyListeners(url)
-
-      // Write-through to persistent cache for Blossom URLs
-      if (blossomHash) {
-        putInPersistentCache(blossomHash, blob).catch(() => {})
-      }
+      putInPersistentCache(cacheKey, blob).catch(() => {})
     } catch {
       failedUrls.add(url)
     } finally {
