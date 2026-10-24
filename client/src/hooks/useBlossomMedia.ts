@@ -19,6 +19,7 @@ import { parseDecryptionFragment, type FileDecryptionInfo } from '@/lib/blossom/
 import { decryptFile } from '@/lib/crypto/fileEncryption'
 import { getFromPersistentCache, putInPersistentCache } from '@/lib/cache/blossomMediaCache'
 import { setCachedSize, hasSizeOverride, checkImageSize as headCheckSize } from '@/lib/imageSizeGuard'
+import { isTauri } from '@/lib/utils'
 
 // ── Blossom URL detection ──
 
@@ -97,6 +98,25 @@ async function hashBlob(blob: Blob): Promise<string> {
   const buf = await blob.arrayBuffer()
   const digest = await crypto.subtle.digest('SHA-256', buf)
   return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('')
+}
+
+/**
+ * Fetch media bytes for hashing + caching. On desktop uses the Tauri native HTTP client, which is
+ * CORS-free, so hosts that don't send CORS headers — e.g. blossom.primal.net redirecting to a CORS-less
+ * CDN — can still be downloaded and written to the persistent cache. On web (and if the native fetch is
+ * unavailable or fails) it falls back to the browser fetch, which is CORS-bound. The <img> tag never
+ * needed CORS, which is why these images always DISPLAYED but, before this, could never be cached — so
+ * they re-downloaded on every launch. Verification by content hash makes the native path safe.
+ */
+async function fetchMediaResponse(url: string, signal?: AbortSignal): Promise<Response> {
+  if (isTauri()) {
+    try {
+      const mod = await import('@tauri-apps/plugin-http')
+      const res = await (mod.fetch as typeof fetch)(url, signal ? { signal } : undefined)
+      if (res.ok) return res
+    } catch { /* native unavailable/denied — fall back to the browser fetch below */ }
+  }
+  return fetch(url, signal ? { signal } : undefined)
 }
 
 // ── Types ──
@@ -354,7 +374,7 @@ export function useBlossomMedia(originalUrl: string | undefined, maxSizeMB?: num
         try {
           const controller = new AbortController()
           const timer = setTimeout(() => controller.abort(), 30000)
-          const res = await fetch(srcUrl, { signal: controller.signal })
+          const res = await fetchMediaResponse(srcUrl, controller.signal)
           clearTimeout(timer)
           if (!res.ok) continue
 
@@ -451,7 +471,7 @@ export function useBlossomMedia(originalUrl: string | undefined, maxSizeMB?: num
         try {
           const controller = new AbortController()
           const timer = setTimeout(() => controller.abort(), 30000)
-          const res = await fetch(srcUrl, { signal: controller.signal })
+          const res = await fetchMediaResponse(srcUrl, controller.signal)
           clearTimeout(timer)
           if (!res.ok) continue
 
