@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { saveTextAs } from '@/lib/saveFile'
 import { useEscToClose } from '@/hooks/useEscToClose'
 import { useUserStore, type ISigner } from '@/stores/userStore'
-import { isTauri, isMobileOS } from '@/lib/utils'
+import { isTauri, isMobileOS, formatDateNumeric } from '@/lib/utils'
 import { ADMIN_PUBKEY, StorageKey } from '@/lib/constants'
 import { fetchReplaceable, fetchEvents, publishToSpecificRelays, getRelayList } from '@/lib/nostr/relay-pool'
 import { orderByHealth } from '@/lib/nostr/relayHealthProbe'
@@ -3427,7 +3427,7 @@ function GuideModal({ open, onClose, isDesktop, isMobile, onGenerate, onLocalSig
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-semibold text-foreground">{latestBuild.version}</span>
                     <span className="text-xs text-muted-foreground">
-                      {new Date(latestBuild.published_at * 1000).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}
+                      {formatDateNumeric(new Date(latestBuild.published_at * 1000))}
                     </span>
                   </div>
                   {latestBuild.platforms.length > 0 ? (
@@ -3786,8 +3786,8 @@ function NoLocalSignerModal({ open, onClose, isDesktop }: { open: boolean; onClo
                 builds.map((build, idx) => {
                   const isOpen = openBuildIdx === idx
                   const dateStr = build.pub_date
-                    ? new Date(build.pub_date).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
-                    : new Date(build.created_at * 1000).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+                    ? formatDateNumeric(new Date(build.pub_date))
+                    : formatDateNumeric(new Date(build.created_at * 1000))
                   return (
                     <div key={build.version} className="rounded-lg border border-border overflow-hidden bg-secondary/20">
                       <button

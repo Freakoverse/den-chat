@@ -29,7 +29,7 @@ import { useEscToClose, useEscBlock } from '@/hooks/useEscToClose'
 import { createPortal } from 'react-dom'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import { truncateNpub, formatTimestamp, cn, npubShort } from '@/lib/utils'
+import { truncateNpub, formatTimestamp, cn, npubShort, formatDateNumeric, formatDateTimeNumeric } from '@/lib/utils'
 import { getHour12 } from '@/stores/preferencesStore'
 import { nip19 } from 'nostr-tools'
 import EmojiPickerReact, { EmojiStyle, Theme } from 'emoji-picker-react'
@@ -677,7 +677,8 @@ const EMPTY_HIDDEN: Record<string, any> = {}
 
 function formatFullDate(ts: number): string {
   const d = new Date(ts * 1000)
-  return d.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
+  const weekday = d.toLocaleDateString(undefined, { weekday: 'long' })
+  return `${weekday}, ${formatDateNumeric(d)}`
     + ' ' + d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: getHour12() })
 }
 
@@ -689,7 +690,7 @@ function formatDaySeparator(ts: number): string {
 
   if (d.toDateString() === today.toDateString()) return 'Today'
   if (d.toDateString() === yesterday.toDateString()) return 'Yesterday'
-  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' })
+  return formatDateNumeric(d)
 }
 
 function isDifferentDay(ts1: number, ts2: number): boolean {
@@ -6959,13 +6960,7 @@ export function MessageHistoryModal({ pubkey, dTag, hubDTag, channelId, onClose 
     return () => { cancelled = true }
   }, [pubkey, dTag, hubDTag, channelId, hubs, hubSecrets, epochSecrets, groupSecrets, groupEpochSecrets])
 
-  const formatDate = (ts: number) => {
-    const d = new Date(ts * 1000)
-    return d.toLocaleString(undefined, {
-      month: 'short', day: 'numeric', year: 'numeric',
-      hour: 'numeric', minute: '2-digit',
-    })
-  }
+  const formatDate = (ts: number) => formatDateTimeNumeric(new Date(ts * 1000))
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
@@ -7715,7 +7710,7 @@ function HubTimestampPickerPopover({
     if (!unix) { setPreviewText(''); return }
     const update = () => {
       const dt = new Date(unix * 1000)
-      const datePart = dt.toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' })
+      const datePart = formatDateNumeric(dt)
       const timePart = dt.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
       const diffMs = dt.getTime() - Date.now()
       const absDiffMs = Math.abs(diffMs)

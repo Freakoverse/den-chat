@@ -1,5 +1,6 @@
 import { ArrowUp, X } from 'lucide-react'
 import { getHour12 } from '@/stores/preferencesStore'
+import { formatMonthDayNumeric } from '@/lib/utils'
 
 interface UnreadBannerProps {
   count: number
@@ -51,6 +52,6 @@ function formatSince(ts: number): string {
   if (d.toDateString() === yesterday.toDateString()) {
     return 'yesterday ' + d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: getHour12() })
   }
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) +
+  return formatMonthDayNumeric(d) +
     ' ' + d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: getHour12() })
 }

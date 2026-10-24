@@ -21,7 +21,7 @@ import {
   Hash,
   Users,
 } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { cn, formatDateNumeric } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import type { TxItem } from '@/stores/walletStore'
 import type { Chain } from '@/lib/crypto/derive'
@@ -150,14 +150,9 @@ export function TransactionDetailModal({
 
   // ── Date formatting ──
 
-  const formattedDate = new Date(tx.timestamp * 1000).toLocaleString(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  })
+  const _txDate = new Date(tx.timestamp * 1000)
+  const formattedDate = formatDateNumeric(_txDate) + ' ' +
+    _txDate.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 
   // ── Truncate txid ──
 

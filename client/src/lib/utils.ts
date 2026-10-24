@@ -77,25 +77,59 @@ export function npubShort(pubkey: string, chars = 8): string {
   }
 }
 
-import { getHour12 } from '@/stores/preferencesStore'
+import { getHour12, getDateFormat } from '@/stores/preferencesStore'
+
+/**
+ * Numeric date in the user's chosen order (Settings > Preferences > Date Format).
+ * Default DMY = DD/MM/YYYY. Slash-separated, zero-padded, 4-digit year. Used app-wide
+ * so date ordering is consistent regardless of the viewer's browser locale.
+ */
+export function formatDateNumeric(date: Date): string {
+  const dd = String(date.getDate()).padStart(2, '0')
+  const mm = String(date.getMonth() + 1).padStart(2, '0')
+  const yyyy = String(date.getFullYear())
+  switch (getDateFormat()) {
+    case 'YMD': return `${yyyy}/${mm}/${dd}`
+    case 'MDY': return `${mm}/${dd}/${yyyy}`
+    default:    return `${dd}/${mm}/${yyyy}` // DMY
+  }
+}
+
+/**
+ * Numeric day+month pair without a year, in the user's chosen order. Used for compact
+ * recent-activity labels. The year-first order has no year to lead with, so it falls
+ * back to month/day.
+ */
+export function formatMonthDayNumeric(date: Date): string {
+  const dd = String(date.getDate()).padStart(2, '0')
+  const mm = String(date.getMonth() + 1).padStart(2, '0')
+  return getDateFormat() === 'DMY' ? `${dd}/${mm}` : `${mm}/${dd}`
+}
+
+/** Time-only string honoring the 12/24h preference. */
+export function formatTime(date: Date): string {
+  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: getHour12() })
+}
+
+/** Numeric date + time, e.g. "02/10/2026 14:30". */
+export function formatDateTimeNumeric(date: Date): string {
+  return `${formatDateNumeric(date)} ${formatTime(date)}`
+}
 
 export function formatTimestamp(timestamp: number): string {
-  const hour12 = getHour12()
   const date = new Date(timestamp * 1000)
   const now = new Date()
   const isToday = date.toDateString() === now.toDateString()
-  const timeOpts: Intl.DateTimeFormatOptions = { hour: '2-digit', minute: '2-digit', hour12 }
 
   if (isToday) {
-    return date.toLocaleTimeString([], timeOpts)
+    return formatTime(date)
   }
 
   const yesterday = new Date(now)
   yesterday.setDate(yesterday.getDate() - 1)
   if (date.toDateString() === yesterday.toDateString()) {
-    return `Yesterday ${date.toLocaleTimeString([], timeOpts)}`
+    return `Yesterday ${formatTime(date)}`
   }
 
-  return date.toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' }) +
-    ' ' + date.toLocaleTimeString([], timeOpts)
+  return formatDateTimeNumeric(date)
 }

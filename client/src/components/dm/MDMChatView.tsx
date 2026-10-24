@@ -20,7 +20,7 @@ import { useEscToClose } from '@/hooks/useEscToClose'
 import { UserProfileModal } from '@/components/hub/UserProfileModal'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
-import { truncateNpub, formatTimestamp } from '@/lib/utils'
+import { truncateNpub, formatTimestamp, formatDateNumeric } from '@/lib/utils'
 import { getHour12 } from '@/stores/preferencesStore'
 
 import { nip19 } from 'nostr-tools'
@@ -82,7 +82,7 @@ function formatDaySeparator(ts: number): string {
 
   if (d.toDateString() === today.toDateString()) return 'Today'
   if (d.toDateString() === yesterday.toDateString()) return 'Yesterday'
-  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' })
+  return formatDateNumeric(d)
 }
 
 function formatShortTime(ts: number): string {

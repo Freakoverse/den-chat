@@ -35,7 +35,7 @@ import { useUserStore } from '@/stores/userStore'
 import { BlossomImage } from '@/components/ui/BlossomImage'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import { truncateNpub, npubShort } from '@/lib/utils'
+import { truncateNpub, npubShort, formatDateNumeric, formatDateTimeNumeric } from '@/lib/utils'
 import { uploadToBlossomServers, blossomServers as blossomServerManager } from '@/lib/blossom'
 import type { UploadProgress } from '@/lib/blossom'
 import { buildHubEvent } from '@/lib/hub/buildHubEvent'
@@ -5511,7 +5511,7 @@ function HiddenMessagesPage({ hub, onClose }: { hub: HubData; onClose: () => voi
     if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
     if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
     if (diff < 2592000) return `${Math.floor(diff / 86400)}d ago`
-    return new Date(ts * 1000).toLocaleDateString()
+    return formatDateNumeric(new Date(ts * 1000))
   }
 
   // Jump to message in channel view
@@ -6094,7 +6094,7 @@ function ReportCard({ report, getProfile, hub, onClose }: { report: HubReport; g
       )}
       {/* Timestamp */}
       <p className="text-[10px] text-muted-foreground mt-1.5">
-        {new Date(report.createdAt * 1000).toLocaleString()}
+        {formatDateTimeNumeric(new Date(report.createdAt * 1000))}
       </p>
       {/* Profile modal */}
       {profilePubkey && createPortal(

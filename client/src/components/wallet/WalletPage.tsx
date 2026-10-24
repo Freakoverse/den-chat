@@ -19,7 +19,7 @@ import {
   ExternalLink, AlertTriangle, Settings, Info, ChevronDown, ChevronUp,
   QrCode, Send, Download, Coins, ChevronRight, ShieldAlert,
 } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { cn, formatDateNumeric } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { ResizablePanel } from '@/components/ui/ResizablePanel'
 import { UserPanel } from '@/components/ui/UserPanel'
@@ -797,7 +797,7 @@ function WalletDetailView({
                     {tx.type === 'in' ? '+' : '-'}{tx.amount} {displaySymbol}
                   </p>
                   <p className="text-[10px] text-muted-foreground">
-                    {new Date(tx.timestamp * 1000).toLocaleDateString()}
+                    {formatDateNumeric(new Date(tx.timestamp * 1000))}
                   </p>
                 </div>
                 <ChevronRight size={14} className="text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />

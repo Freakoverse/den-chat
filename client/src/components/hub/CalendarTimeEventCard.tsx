@@ -25,7 +25,7 @@ import { KINDS } from '@/lib/crypto/constants'
 import { aesDecrypt } from '@/lib/crypto/aes'
 import { deriveEventsKey } from '@/lib/crypto/hkdf'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import { truncateNpub } from '@/lib/utils'
+import { truncateNpub, formatMonthDayNumeric } from '@/lib/utils'
 import { nip19 } from 'nostr-tools'
 import {
   CalendarDays, Clock, MapPin, Lock, Loader2, AlertTriangle, ExternalLink, Globe,
@@ -53,7 +53,7 @@ interface FetchedEvent {
 function formatShortDateTime(ts: number): string {
   const d = new Date(ts * 1000)
   const hour12 = getHour12()
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) +
+  return formatMonthDayNumeric(d) +
     ', ' + d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', ...(hour12 !== undefined ? { hour12 } : {}) })
 }
 

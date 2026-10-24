@@ -14,7 +14,7 @@ import { Separator } from '@/components/ui/separator'
 import { BlossomImage } from '@/components/ui/BlossomImage'
 import { RawEventModal } from '@/components/social/SocialPost'
 import { useHubStore, type HubData } from '@/stores/hubStore'
-import { truncateNpub } from '@/lib/utils'
+import { truncateNpub, formatDateTimeNumeric } from '@/lib/utils'
 import { fetchEvents, fetchReplaceable } from '@/lib/nostr/relay-pool'
 import { checkEventAvailability, type RelayAvailability } from '@/lib/nostr/eventRedundancy'
 import { checkBlossomFileAvailability, directUploadHubFiles, type BlossomFileAvailability } from '@/lib/blossom/blossomRedundancy'
@@ -377,7 +377,7 @@ export function HubInfoModal({ open, onClose, hub, blurMedia, onCreatorClick }: 
               <div className="flex-1 min-w-0">
                 <div className="text-sm font-medium text-foreground font-mono truncate">{liveVersion ?? '—'}</div>
                 <div className="text-xs text-muted-foreground truncate">
-                  {liveVersion != null ? new Date(liveVersion * 1000).toLocaleString() : 'Unknown'}
+                  {liveVersion != null ? formatDateTimeNumeric(new Date(liveVersion * 1000)) : 'Unknown'}
                 </div>
               </div>
               <TooltipProvider delayDuration={300}>

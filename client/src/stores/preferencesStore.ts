@@ -9,6 +9,9 @@ export type LanguageCode = 'en' | 'ja' | 'zh-CN' | 'ar' | 'de' | 'pt' | 'ro' | '
 
 export type TimeFormat = 'auto' | '12h' | '24h'
 
+/** Numeric date ordering. DMY = DD/MM/YYYY (default), YMD = YYYY/MM/DD, MDY = MM/DD/YYYY. */
+export type DateFormat = 'DMY' | 'YMD' | 'MDY'
+
 export interface SearchEngine {
   id: string
   /** Display name shown in the right-click "search selection" menu, e.g. "Google". */
@@ -20,6 +23,8 @@ export interface SearchEngine {
 interface PreferencesState {
   language: LanguageCode
   timeFormat: TimeFormat
+  /** Numeric date ordering applied globally via formatDateNumeric / formatTimestamp — default DMY (DD/MM/YYYY) */
+  dateFormat: DateFormat
   /** Global toggle for link previews & embeds (YouTube, Twitch, etc.) — default ON */
   showEmbeds: boolean
   /** Global toggle for OpenGraph link preview cards — default ON (desktop only) */
@@ -38,6 +43,7 @@ interface PreferencesState {
   searchEngines: SearchEngine[]
   setLanguage: (lang: LanguageCode) => void
   setTimeFormat: (format: TimeFormat) => void
+  setDateFormat: (format: DateFormat) => void
   setShowEmbeds: (v: boolean) => void
   setShowLinkPreviews: (v: boolean) => void
   setHideMutedWords: (v: boolean) => void
@@ -53,7 +59,7 @@ interface PreferencesState {
 
 const STORAGE_KEY = 'den-chat-preferences'
 
-type PrefsData = { language: LanguageCode; timeFormat: TimeFormat; showEmbeds: boolean; showLinkPreviews: boolean; hideMutedWords: boolean; showMedia: boolean; showCustomEmojis: boolean; voiceNoteMaxDuration: number; voiceNoteBitrate: number; searchEngines: SearchEngine[] }
+type PrefsData = { language: LanguageCode; timeFormat: TimeFormat; dateFormat: DateFormat; showEmbeds: boolean; showLinkPreviews: boolean; hideMutedWords: boolean; showMedia: boolean; showCustomEmojis: boolean; voiceNoteMaxDuration: number; voiceNoteBitrate: number; searchEngines: SearchEngine[] }
 
 function loadPrefs(): PrefsData {
   try {
@@ -63,6 +69,7 @@ function loadPrefs(): PrefsData {
       return {
         language: parsed.language || 'en',
         timeFormat: parsed.timeFormat || 'auto',
+        dateFormat: parsed.dateFormat || 'DMY',
         showEmbeds: parsed.showEmbeds !== false,
         showLinkPreviews: parsed.showLinkPreviews !== false,
         hideMutedWords: parsed.hideMutedWords !== false,
@@ -74,7 +81,7 @@ function loadPrefs(): PrefsData {
       }
     }
   } catch { /* ignore */ }
-  return { language: 'en', timeFormat: 'auto', showEmbeds: true, showLinkPreviews: true, hideMutedWords: true, showMedia: true, showCustomEmojis: true, voiceNoteMaxDuration: 30, voiceNoteBitrate: 32000, searchEngines: [] }
+  return { language: 'en', timeFormat: 'auto', dateFormat: 'DMY', showEmbeds: true, showLinkPreviews: true, hideMutedWords: true, showMedia: true, showCustomEmojis: true, voiceNoteMaxDuration: 30, voiceNoteBitrate: 32000, searchEngines: [] }
 }
 
 function savePrefs(prefs: PrefsData) {
@@ -94,6 +101,10 @@ export const usePreferencesStore = create<PreferencesState>((set, get) => {
     setTimeFormat: (timeFormat) => {
       set({ timeFormat })
       savePrefs({ ...get(), timeFormat })
+    },
+    setDateFormat: (dateFormat) => {
+      set({ dateFormat })
+      savePrefs({ ...get(), dateFormat })
     },
     setShowEmbeds: (showEmbeds) => {
       set({ showEmbeds })
@@ -167,4 +178,9 @@ export function getHour12(): boolean | undefined {
   if (tf === '12h') return true
   if (tf === '24h') return false
   return undefined // 'auto' — let browser locale decide
+}
+
+/** Current numeric date ordering. Read non-reactively; mirrors getHour12. */
+export function getDateFormat(): DateFormat {
+  return usePreferencesStore.getState().dateFormat
 }

@@ -35,7 +35,7 @@ import {
   type OptimisticMessage, type ReplyContext, type Reaction,
 } from '@/components/hub/ChannelView'
 import { cn } from '@/lib/utils'
-import { truncateNpub, formatTimestamp } from '@/lib/utils'
+import { truncateNpub, formatTimestamp, formatDateNumeric } from '@/lib/utils'
 import { nip19 } from 'nostr-tools'
 import {
   MessagesSquare, Search, Plus, LayoutGrid, List, ChevronLeft, ChevronRight,
@@ -523,7 +523,7 @@ function ForumPostCard({ post, onClick, isHidden }: { post: ForumPost; onClick: 
               {post.replyCount}
             </span>
             <span className="text-[11px]">
-              {new Date(post.timestamp * 1000).toLocaleDateString()}
+              {formatDateNumeric(new Date(post.timestamp * 1000))}
             </span>
           </div>
         </div>
@@ -564,7 +564,7 @@ function ForumPostRow({ post, onClick, isHidden }: { post: ForumPost; onClick: (
         )}
         <div className="flex items-center gap-3 mt-1.5 text-[11px] text-muted-foreground">
           <span className="truncate">{displayName}</span>
-          <span>{new Date(post.timestamp * 1000).toLocaleDateString()}</span>
+          <span>{formatDateNumeric(new Date(post.timestamp * 1000))}</span>
           {post.forumTags && post.forumTags.length > 0 && (
             <div className="flex items-center gap-1">
               {post.forumTags.slice(0, 2).map(t => (
@@ -849,7 +849,7 @@ function ForumPostDetail({
 
   const formatDate = (ts: number) => {
     const d = new Date(ts * 1000)
-    return d.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })
+    return formatDateNumeric(d)
       + ' at ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
   }
 

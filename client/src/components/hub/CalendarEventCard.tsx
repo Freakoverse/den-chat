@@ -12,7 +12,7 @@ import { useProfileCache } from '@/hooks/useProfileCache'
 import type { DecryptedCalendarEvent } from '@/hooks/useCalendar'
 import { isEventLive } from '@/hooks/useCalendar'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import { truncateNpub } from '@/lib/utils'
+import { truncateNpub, formatMonthDayNumeric } from '@/lib/utils'
 import { CalendarDays, MapPin, Clock, Pencil } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
@@ -27,22 +27,18 @@ interface CalendarEventCardProps {
 function formatShortTime(ts: number): string {
   const d = new Date(ts * 1000)
   const hour12 = getHour12()
-  return d.toLocaleString(undefined, {
-    month: 'short',
-    day: 'numeric',
+  const time = d.toLocaleTimeString(undefined, {
     hour: 'numeric',
     minute: '2-digit',
     ...(hour12 !== undefined ? { hour12 } : {}),
   })
+  return `${formatMonthDayNumeric(d)} ${time}`
 }
 
 function formatShortDate(ts: number): string {
   const d = new Date(ts * 1000)
-  return d.toLocaleDateString(undefined, {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-  })
+  const weekday = d.toLocaleDateString(undefined, { weekday: 'short' })
+  return `${weekday}, ${formatMonthDayNumeric(d)}`
 }
 
 export function CalendarEventCard({ event, onClick, onEdit }: CalendarEventCardProps) {

@@ -59,7 +59,7 @@ import {
 } from 'lucide-react'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import { truncateNpub } from '@/lib/utils'
+import { truncateNpub, formatDateNumeric } from '@/lib/utils'
 import { Input } from '@/components/ui/input'
 import { rustBackend, vaultBackend } from '@/lib/auth/authBackend'
 import { PinInput } from '@/components/auth/PinInput'
@@ -428,6 +428,9 @@ function PreferencesTab() {
   // Time format
   const timeFormat = usePreferencesStore((s) => s.timeFormat)
   const setTimeFormat = usePreferencesStore((s) => s.setTimeFormat)
+  // Date format
+  const dateFormat = usePreferencesStore((s) => s.dateFormat)
+  const setDateFormat = usePreferencesStore((s) => s.setDateFormat)
 
   return (
     <div>
@@ -495,6 +498,34 @@ function PreferencesTab() {
           </div>
           <p className="text-[11px] text-muted-foreground">
             {timeFormat === 'auto' ? 'Using your browser\'s locale setting' : timeFormat === '24h' ? 'Example: 14:30' : 'Example: 2:30 PM'}
+          </p>
+        </div>
+
+        {/* Date format */}
+        <div className="space-y-2">
+          <label className="text-sm font-medium text-foreground">Date Format</label>
+          <p className="text-xs text-muted-foreground">How dates are displayed throughout the app</p>
+          <div className="flex gap-2">
+            {([
+              { value: 'DMY' as const, label: 'DD/MM/YYYY' },
+              { value: 'YMD' as const, label: 'YYYY/MM/DD' },
+              { value: 'MDY' as const, label: 'MM/DD/YYYY' },
+            ]).map((o) => (
+              <button
+                key={o.value}
+                onClick={() => setDateFormat(o.value)}
+                className={`px-4 py-2 rounded-lg border text-sm transition-all cursor-pointer
+                  ${dateFormat === o.value
+                    ? 'border-primary bg-primary/10 text-primary font-medium'
+                    : 'border-border bg-secondary/30 text-muted-foreground hover:text-foreground hover:bg-secondary/60'
+                  }`}
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            {`Example: ${dateFormat === 'YMD' ? '2026/03/09' : dateFormat === 'MDY' ? '03/09/2026' : '09/03/2026'}`}
           </p>
         </div>
 
@@ -6932,7 +6963,7 @@ function UpdatesTab() {
                 <button onClick={() => toggle(idx)} className="flex items-center justify-between w-full px-4 py-3 text-left cursor-pointer hover:bg-secondary/40 transition-colors">
                   <div className="flex items-center gap-3 pr-4">
                     <span className="text-sm font-semibold text-foreground">v{build.version.replace(/^v/i, '')}</span>
-                    <span className="text-xs text-muted-foreground">{date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}</span>
+                    <span className="text-xs text-muted-foreground">{formatDateNumeric(date)}</span>
                   </div>
                   <svg className={`w-4 h-4 text-muted-foreground shrink-0 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
@@ -10186,7 +10217,7 @@ function AdminGuidesSection({ pubkey, signer, privateKey }: { pubkey: string | n
                     <span className="text-sm font-medium text-foreground block">{g.title}</span>
                     {g.summary && <span className="text-[11px] text-muted-foreground mt-0.5 block line-clamp-2">{g.summary}</span>}
                     <span className="text-[10px] text-muted-foreground/50 mt-1 block">
-                      {new Date(g.publishedAt * 1000).toLocaleDateString()}
+                      {formatDateNumeric(new Date(g.publishedAt * 1000))}
                     </span>
                   </button>
                 ))

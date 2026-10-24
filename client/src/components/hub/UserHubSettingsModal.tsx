@@ -20,7 +20,7 @@ import { useUserStore } from '@/stores/userStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { useMyVoicePubkey } from '@/hooks/useVoiceDisplayPubkey'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import { truncateNpub, cn } from '@/lib/utils'
+import { truncateNpub, cn, formatDateNumeric, formatDateTimeNumeric } from '@/lib/utils'
 import { nip19 } from 'nostr-tools'
 import {
   X, Loader2, Check, Copy, AlertTriangle, SlidersHorizontal, UserCheck, Shield, ShieldOff, ShieldBan, Lock, LockOpen,
@@ -2743,7 +2743,7 @@ function MyReportCard({ report, violatorProfile, violatorName, typeColor, hub, r
       {/* Footer: timestamp + retract */}
       <div className="flex items-center justify-between mt-2">
         <p className="text-[10px] text-muted-foreground">
-          {new Date(report.createdAt * 1000).toLocaleString()}
+          {formatDateTimeNumeric(new Date(report.createdAt * 1000))}
         </p>
         {report.status === 'open' && (
           <button
@@ -2892,7 +2892,7 @@ function ModHiddenMessagesTab({ hub, onClose }: { hub: HubData; onClose: () => v
     if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
     if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
     if (diff < 2592000) return `${Math.floor(diff / 86400)}d ago`
-    return new Date(ts * 1000).toLocaleDateString()
+    return formatDateNumeric(new Date(ts * 1000))
   }
 
   // Jump to message in channel view

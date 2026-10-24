@@ -40,7 +40,7 @@ import type { UploadProgress } from '@/lib/blossom'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import { truncateNpub } from '@/lib/utils'
+import { truncateNpub, formatDateNumeric } from '@/lib/utils'
 import { fetchEvents, publishToSpecificRelays, publishCriticalWithFailover } from '@/lib/nostr/relay-pool'
 import { ProfilePacksSection } from '@/components/hub/ProfilePacksSection'
 import { historyReadFailure } from '@/lib/hub/historyGuard'
@@ -2614,7 +2614,7 @@ function timeAgo(createdAt: number): string {
   const m = Math.floor(s / 60); if (m < 60) return `${m}m ago`
   const h = Math.floor(m / 60); if (h < 24) return `${h}h ago`
   const d = Math.floor(h / 24); if (d < 30) return `${d}d ago`
-  return new Date(createdAt * 1000).toLocaleDateString()
+  return formatDateNumeric(new Date(createdAt * 1000))
 }
 
 /** Read-only preview list of a user's kind-1 notes; a note opens its thread in Social. */

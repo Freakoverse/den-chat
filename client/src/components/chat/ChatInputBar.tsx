@@ -15,6 +15,7 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { getFileDraft, setFileDraft, clearFileDraft } from '@/stores/draftStore'
+import { formatDateNumeric } from '@/lib/utils'
 import {
   Send, Smile, Bold, Italic, Strikethrough,
   Heading1, Heading2, Heading3, Heading4, Heading5, Heading6,
@@ -1350,7 +1351,7 @@ export function TimestampPickerPopover({
     if (!unix) { setPreviewText(''); return }
     const update = () => {
       const dt = new Date(unix * 1000)
-      const datePart = dt.toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' })
+      const datePart = formatDateNumeric(dt)
       const timePart = dt.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
       const diffMs = dt.getTime() - Date.now()
       const absDiffMs = Math.abs(diffMs)

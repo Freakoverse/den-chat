@@ -15,7 +15,7 @@ import { useUserStore } from '@/stores/userStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
-import { truncateNpub } from '@/lib/utils'
+import { truncateNpub, formatMonthDayNumeric } from '@/lib/utils'
 import { nip19 } from 'nostr-tools'
 import { useMessages, type ChatMessage } from '@/hooks/useMessages'
 import { useEscToClose } from '@/hooks/useEscToClose'
@@ -235,7 +235,7 @@ export function PinModal({ hubDTag, channelId, onClose, onJumpToMessage }: PinMo
               <div className="flex items-center gap-1.5 mb-0.5">
                 <span className="text-xs font-medium text-foreground">{msgName}</span>
                 <span className="text-[10px] text-muted-foreground">
-                  {new Date(msg.timestamp * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                  {formatMonthDayNumeric(new Date(msg.timestamp * 1000))}
                 </span>
               </div>
               <p className="text-xs text-muted-foreground line-clamp-2 break-words">

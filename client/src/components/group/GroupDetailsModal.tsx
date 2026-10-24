@@ -28,7 +28,7 @@ import { fetchGroupJoinRequests, readGroupJoinNote, type GroupJoinRequest } from
 import { sendGroupInviteDMs } from '@/lib/group/groupInvite'
 import { GROUP_NAME_MAX, GROUP_ABOUT_MAX, GROUP_DESCRIPTION_MAX, GROUP_MAX_MEMBERS, GROUP_MAX_EPOCHS } from '@/lib/group/groupEvent'
 import { HUB_BANNER_PLACEHOLDER } from '@/lib/constants'
-import { cn, truncateNpub } from '@/lib/utils'
+import { cn, truncateNpub, formatDateNumeric } from '@/lib/utils'
 
 export function GroupDetailsModal({ dTag, isCreator, onClose }: { dTag: string; isCreator: boolean; onClose: () => void }) {
   const hub = useHubStore((s) => s.hubs[dTag])
@@ -375,7 +375,7 @@ export function GroupDetailsModal({ dTag, isCreator, onClose }: { dTag: string; 
                             </Avatar>
                             <div className="flex-1 min-w-0">
                               <p className="text-sm text-foreground truncate">{label}</p>
-                              <p className="text-[11px] text-muted-foreground font-mono truncate">{truncateNpub(npub, 6)} · {new Date(r.createdAt * 1000).toLocaleDateString()}{r.powBits > 0 ? ` · PoW ${r.powBits}` : ''}</p>
+                              <p className="text-[11px] text-muted-foreground font-mono truncate">{truncateNpub(npub, 6)} · {formatDateNumeric(new Date(r.createdAt * 1000))}{r.powBits > 0 ? ` · PoW ${r.powBits}` : ''}</p>
                             </div>
                             {hasNote && (
                               <button onClick={() => openNote(r)} className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] text-muted-foreground hover:text-foreground hover:bg-secondary/60 cursor-pointer shrink-0">

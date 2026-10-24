@@ -20,7 +20,7 @@ import { DnnBadge } from '@/components/ui/DnnBadge'
 import { ContentMediaImage } from '@/components/chat/ContentMediaGrouping'
 import { aesDecrypt } from '@/lib/crypto/aes'
 import { deriveChannelKey } from '@/lib/crypto/hkdf'
-import { truncateNpub, cn } from '@/lib/utils'
+import { truncateNpub, cn, formatDateNumeric } from '@/lib/utils'
 import { useDnnStore } from '@/stores/dnnStore'
 import { getHour12 } from '@/stores/preferencesStore'
 import { nip19 } from 'nostr-tools'
@@ -373,7 +373,7 @@ export function ChannelSearchModal({ hubDTag, channelId, onClose }: ChannelSearc
     const time = d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: getHour12() })
     if (d.toDateString() === today.toDateString()) return `Today at ${time}`
     if (d.toDateString() === yesterday.toDateString()) return `Yesterday at ${time}`
-    return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) + ` at ${time}`
+    return formatDateNumeric(d) + ` at ${time}`
   }
 
   // Highlight matching text in results

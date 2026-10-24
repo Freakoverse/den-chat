@@ -10,6 +10,7 @@
 import { useState, useEffect, useMemo, memo, useCallback, useRef, Children, isValidElement, cloneElement } from 'react'
 import { Download, Loader2, Check, Copy, Hash, Link as LinkIcon, Eye, Lock } from 'lucide-react'
 import { useBlossomMedia, shareableMediaUrl } from '@/hooks/useBlossomMedia'
+import { formatDateNumeric } from '@/lib/utils'
 import { VerificationBadge } from '@/components/ui/VerificationBadge'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
 import Markdown from 'react-markdown'
@@ -290,7 +291,7 @@ export function TimestampToken({ unix }: { unix: number }) {
   }, [])
 
   const dt = new Date(unix * 1000)
-  const datePart = dt.toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' })
+  const datePart = formatDateNumeric(dt)
   const timePart = dt.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
 
   const diffMs = dt.getTime() - Date.now()

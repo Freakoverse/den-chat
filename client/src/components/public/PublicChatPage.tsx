@@ -36,7 +36,7 @@ import { publishGifFavorites } from '@/lib/nostr/customGif'
 import { Plus, Info, Hash, X, Loader2, MessagesSquare, Trash2, Reply, ArrowDown, Shield, Smile, Zap, MoreVertical, Copy, Code, Check, Filter, Minus, RotateCcw, Eye, EyeOff, AlertTriangle, ImageOff, LinkIcon, Sticker, Crown, BadgeCheck, Users, MessageCircleOff, Bell, ChevronLeft, ChevronRight, Star } from 'lucide-react'
 import { DoodleBackground } from '@/components/ui/DoodleBackground'
 import { nip19 } from 'nostr-tools'
-import { cn, truncateNpub, formatTimestamp } from '@/lib/utils'
+import { cn, truncateNpub, formatTimestamp, formatDateNumeric } from '@/lib/utils'
 import { useMobile } from '@/hooks/useMobile'
 
 import { getEmojiMap } from '@/stores/emojiStore'
@@ -644,7 +644,7 @@ function formatDaySeparator(ts: number): string {
   yesterday.setDate(yesterday.getDate() - 1)
   if (d.toDateString() === today.toDateString()) return 'Today'
   if (d.toDateString() === yesterday.toDateString()) return 'Yesterday'
-  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' })
+  return formatDateNumeric(d)
 }
 
 function formatShortTime(ts: number): string {
@@ -653,7 +653,8 @@ function formatShortTime(ts: number): string {
 
 function formatFullDate(ts: number): string {
   const d = new Date(ts * 1000)
-  return d.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
+  const weekday = d.toLocaleDateString(undefined, { weekday: 'long' })
+  return `${weekday}, ${formatDateNumeric(d)}`
     + ' ' + d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: getHour12() })
 }
 

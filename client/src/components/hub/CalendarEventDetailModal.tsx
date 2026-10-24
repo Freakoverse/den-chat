@@ -16,7 +16,7 @@ import type { DecryptedCalendarEvent, DecryptedRsvp } from '@/hooks/useCalendar'
 import { isEventLive } from '@/hooks/useCalendar'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
-import { truncateNpub, formatTimestamp } from '@/lib/utils'
+import { truncateNpub, formatTimestamp, formatDateNumeric } from '@/lib/utils'
 import { DeleteConfirmDialog } from '@/components/hub/ChannelView'
 import {
   X, CalendarDays, MapPin, Clock, Users, Check, XIcon,
@@ -45,15 +45,13 @@ interface CalendarEventDetailModalProps {
 function formatEventTime(ts: number): string {
   const d = new Date(ts * 1000)
   const hour12 = getHour12()
-  return d.toLocaleString(undefined, {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
+  const weekday = d.toLocaleDateString(undefined, { weekday: 'short' })
+  const time = d.toLocaleTimeString(undefined, {
     hour: 'numeric',
     minute: '2-digit',
     ...(hour12 !== undefined ? { hour12 } : {}),
   })
+  return `${weekday}, ${formatDateNumeric(d)} ${time}`
 }
 
 function formatEventTimeUtc(ts: number): string {

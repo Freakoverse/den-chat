@@ -36,7 +36,7 @@ import { UserPanel } from '@/components/ui/UserPanel'
 import { ResizablePanel } from '@/components/ui/ResizablePanel'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
-import { truncateNpub, formatTimestamp } from '@/lib/utils'
+import { truncateNpub, formatTimestamp, formatDateNumeric, formatDateTimeNumeric } from '@/lib/utils'
 import { getHour12 } from '@/stores/preferencesStore'
 import { nip19, type Event } from 'nostr-tools'
 import { getUploadBlossoms, getReadBlossoms, getPublishRelays, getDMSelfCopyRelays } from '@/stores/postingBehaviourStore'
@@ -195,7 +195,7 @@ function formatDMDaySeparator(ts: number): string {
 
   if (d.toDateString() === today.toDateString()) return 'Today'
   if (d.toDateString() === yesterday.toDateString()) return 'Yesterday'
-  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' })
+  return formatDateNumeric(d)
 }
 
 function formatDMTimestamp(ts: number): string {
@@ -1682,7 +1682,7 @@ function PeerDMRelayListModal({ info, displayName, refreshing, onRefresh, onClos
           )}
           {info && !refreshing && (
             <p className="text-[10px] text-muted-foreground/60">
-              Published {new Date(info.createdAt * 1000).toLocaleString()}
+              Published {formatDateTimeNumeric(new Date(info.createdAt * 1000))}
             </p>
           )}
         </div>

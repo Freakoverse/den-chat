@@ -8,7 +8,7 @@ import { useEscToClose } from '@/hooks/useEscToClose'
 import { X, Smile, Code, MoreVertical } from 'lucide-react'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import { truncateNpub } from '@/lib/utils'
+import { truncateNpub, formatDateNumeric } from '@/lib/utils'
 import { nip19 } from 'nostr-tools'
 import { getEmojiMap } from '@/stores/emojiStore'
 import { RawEventModal } from '@/components/social/SocialPost'
@@ -220,5 +220,5 @@ function formatTimestamp(unixSeconds: number): string {
   if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
   if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
   if (diff < 604800) return `${Math.floor(diff / 86400)}d ago`
-  return new Date(unixSeconds * 1000).toLocaleDateString()
+  return formatDateNumeric(new Date(unixSeconds * 1000))
 }
