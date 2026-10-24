@@ -16,7 +16,7 @@ import { fetchEventsWide } from '@/lib/nostr/readRelays'
 import { useDnnStore } from '@/stores/dnnStore'
 import { preCacheImage } from '@/lib/imageCache'
 import { getRenderLimit } from '@/lib/imageSizeGuard'
-import { putProfileDb, getAllProfilesDb } from '@/lib/cache/profileCacheDb'
+import { putProfileDb, getProfileDb, getAllProfilesDb } from '@/lib/cache/profileCacheDb'
 
 /** Avatar pre-fetch respects the Settings "Profile Pictures" render-size limit (0 = no auto-download). */
 function profilePictureMaxBytes(): number | undefined {
@@ -242,6 +242,35 @@ function scheduleFetchProfile(pubkey: string) {
   }
 }
 
+/** Per-key disk reads in flight, so a profile isn't read from IndexedDB twice at once. */
+const dbReadInFlight = new Set<string>()
+
+/**
+ * Resolve a cache miss. Before the bulk hydrate has finished, read THIS pubkey's row from
+ * IndexedDB directly — it resolves in ~ms, so a visible name/avatar shows from disk instead
+ * of waiting for the bulk getAllProfilesDb (which reads every stored profile) or a relay
+ * round-trip. On a disk miss, or once the bulk hydrate is done (the Map already reflects
+ * disk), fall through to the network. A stale disk hit still revalidates (SWR).
+ */
+function resolveMiss(pubkey: string) {
+  if (hydrated) { scheduleFetchProfile(pubkey); return }
+  if (dbReadInFlight.has(pubkey)) return
+  dbReadInFlight.add(pubkey)
+  getProfileDb(pubkey)
+    .then((row) => {
+      dbReadInFlight.delete(pubkey)
+      if (profileCache.has(pubkey)) return
+      if (row) {
+        profileCache.set(pubkey, { profile: row.profile || {}, fetchedAt: row.fetchedAt || 0, createdAt: row.createdAt })
+        notifyListeners(pubkey)
+        if (Date.now() - (row.fetchedAt || 0) > PROFILE_TTL_MS) scheduleFetchProfile(pubkey)
+      } else {
+        scheduleFetchProfile(pubkey)
+      }
+    })
+    .catch(() => { dbReadInFlight.delete(pubkey); scheduleFetchProfile(pubkey) })
+}
+
 /**
  * Hook that returns a profile lookup function.
  * Components using this will re-render when new profiles are fetched.
@@ -267,9 +296,10 @@ export function useProfileCache() {
       if (!listeners.has(pubkey)) listeners.set(pubkey, new Set())
       listeners.get(pubkey)!.add(cb)
 
-      // Trigger batched background fetch if not already in progress
+      // Resolve from disk first (fast per-key read), falling back to the network — instead of
+      // going straight to a relay fetch, which is what left cached names/avatars blank for seconds.
       if (!pendingFetches.has(pubkey)) {
-        scheduleFetchProfile(pubkey)
+        resolveMiss(pubkey)
       }
 
       return undefined

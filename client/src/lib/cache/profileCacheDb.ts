@@ -75,6 +75,20 @@ export async function putProfileDb(entry: StoredProfile): Promise<void> {
   } catch { /* IndexedDB unavailable (private mode, etc.) — ignore */ }
 }
 
+/** Read one profile by pubkey, or undefined. Fast path for a visible profile on launch,
+ *  so it resolves from disk in ms instead of waiting for the bulk getAllProfilesDb. */
+export async function getProfileDb(pubkey: string): Promise<StoredProfile | undefined> {
+  try {
+    const db = await openDb()
+    return await new Promise<StoredProfile | undefined>((res) => {
+      const tx = db.transaction(STORE, 'readonly')
+      const r = tx.objectStore(STORE).get(pubkey)
+      r.onsuccess = () => res(r.result as StoredProfile | undefined)
+      r.onerror = () => res(undefined)
+    })
+  } catch { return undefined }
+}
+
 /** Read every stored profile (for launch hydration). Returns [] on any failure. */
 export async function getAllProfilesDb(): Promise<StoredProfile[]> {
   try {
