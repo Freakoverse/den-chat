@@ -14,7 +14,7 @@ import { parseJoinNoteTag } from '@/lib/hub/joinNote'
 import { isDedicatedTag } from '@/lib/hub/dedicated'
 import { useUserStore } from '@/stores/userStore'
 import { fetchEvents, fetchEventsProgressive } from '@/lib/nostr/relay-pool'
-import { getAllHubEvents } from '@/lib/cache/hubEventCache'
+import { getAllHubEvents, touchHubEvents, pruneHubEvents } from '@/lib/cache/hubEventCache'
 import { KINDS } from '@/lib/crypto/constants'
 import { getTrustedCreator } from '@/lib/hub/hubCreatorGuard'
 import { downloadTextFromBlossom, parseIndexFile, decryptHubSecret, decryptGroupSecret, downloadBanList } from '@/lib/blossom'
@@ -979,6 +979,7 @@ export async function loadModBanLists(
  */
 export function useHubLoader() {
   const hubEntries = useHubStore((s) => s.hubEntries)
+  const hubListLoaded = useHubStore((s) => s.hubListLoaded)
   const hubs = useHubStore((s) => s.hubs)
   const hubSecrets = useHubStore((s) => s.hubSecrets)
   const hubPrefs = useHubStore((s) => s.hubPrefs)
@@ -1050,6 +1051,16 @@ export function useHubLoader() {
     }
     prevAuthRef.current = authKey
   }, [pubkey, privateKey, signer])
+
+  // Retention: scope the durable hub-event cache to the hubs you're actually in. Once the
+  // hub list is loaded, touch the listed hubs (bump their cachedAt so they're kept) and prune
+  // events for hubs long gone from every list — hubs you left, and Discover/invite previews.
+  // Account-safe: each account refreshes its own hubs when active. See lib/cache/hubEventCache.
+  useEffect(() => {
+    if (!hubListLoaded) return
+    const dTags = hubEntries.map((e) => e.dTag)
+    touchHubEvents(dTags).then(() => pruneHubEvents()).catch(() => {})
+  }, [hubListLoaded, hubEntries])
 
   useEffect(() => {
     if (hubEntries.length === 0) return
