@@ -80,6 +80,11 @@ export function nowMs(): number { return Date.now() + offsetMs }
  */
 /** Ephemeral kinds (typing, edit hints) are stamped constantly; keep them out of the log. */
 const QUIET_KINDS = new Set([26943, 26950])
+/** Per-stamp logging is OFF by default: nowSeconds() runs for every timestamp (per event, per
+ *  recency check, per tag), so logging each call floods the console and — with DevTools open, where
+ *  console.log is synchronous and slow — adds real main-thread cost on busy screens like a hub open.
+ *  Re-enable for clock debugging with localStorage['den-debug-clock'] = '1'. */
+const CLOCK_DEBUG = (() => { try { return localStorage.getItem('den-debug-clock') === '1' } catch { return false } })()
 export function nowSeconds(kind?: number): number {
   absorbClockJump()
   const raw = Math.floor(Date.now() / 1000)
@@ -87,7 +92,7 @@ export function nowSeconds(kind?: number): number {
   let v = c
   const held = c < lastIssued && (lastIssued - c) * 1000 < HOLD_BACK_MAX_MS
   if (held) v = lastIssued
-  if (kind === undefined || !QUIET_KINDS.has(kind)) {
+  if (CLOCK_DEBUG && (kind === undefined || !QUIET_KINDS.has(kind))) {
     console.log(`[Clock] stamping${kind !== undefined ? ` kind ${kind}` : ''} created_at ${v} (${new Date(v * 1000).toISOString()}) | device ${raw} | offset ${Math.round(offsetMs / 1000)}s${held ? ` | held at last issued ${lastIssued}` : ''}`)
   }
   if (v > lastIssued) {

@@ -325,13 +325,6 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
     if (!hub || !pubkey) return false
     const hosts = hostsByHub[hub.dTag] || []
     const myHosts = hosts.filter((h) => h.pubkey === myVoicePubkey)
-    if (myHosts.length > 0) {
-      console.log(`[EpochCheck] myHosts for ${hub.dTag.slice(0, 8)}:`, myHosts.map(h => ({
-        groupId: h.groupId?.slice(0, 8) || 'hub-wide',
-        hostEpoch: h.epoch,
-        groupEpoch: h.groupId ? hub.groupedRoles?.find(g => g.groupId === h.groupId)?.epoch : hub.epoch,
-      })))
-    }
     return myHosts.some((h) => {
       if (h.epoch === 0) return false
       if (h.groupId) {
