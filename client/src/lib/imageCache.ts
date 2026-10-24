@@ -17,6 +17,25 @@ import {
   getFromPersistentCache,
   putInPersistentCache,
 } from '@/lib/cache/blossomMediaCache'
+import { isTauri } from '@/lib/utils'
+
+/**
+ * Fetch image bytes for caching. On desktop uses the Tauri native HTTP client (CORS-free), so media on
+ * hosts that don't send CORS headers — most avatar CDNs and blossom.primal.net's CORS-less CDN redirect
+ * — can be downloaded and cached instead of failing with a CORS error on every load and never caching.
+ * Falls back to the browser fetch on web (and if native is unavailable). The <img> tag never needed
+ * CORS, so these images always DISPLAYED; this is only about getting the bytes to store them.
+ */
+async function mediaFetch(url: string, signal?: AbortSignal): Promise<Response> {
+  if (isTauri()) {
+    try {
+      const mod = await import('@tauri-apps/plugin-http')
+      const res = await (mod.fetch as typeof fetch)(url, signal ? { signal } : undefined)
+      if (res.ok) return res
+    } catch { /* native unavailable/denied — fall back to the browser fetch below */ }
+  }
+  return fetch(url, { mode: 'cors', signal })
+}
 
 /** Remote URL → blob URL (or TOO_LARGE sentinel) */
 const blobCache = new Map<string, string>()
@@ -121,8 +140,10 @@ function _doFetch(url: string, maxBytes?: number): void {
       }
 
       // ── L3: Network fetch (write-through to the persistent cache for ALL urls, not just hash
-      // ones, so plain CDN/proxy avatars and banners also load locally on the next launch) ──
-      const res = await fetch(url, { mode: 'cors' })
+      // ones, so plain CDN/proxy avatars and banners also load locally on the next launch). Uses the
+      // native HTTP client on desktop so CORS-less hosts (most avatar CDNs) can actually be cached
+      // rather than failing CORS on every load. ──
+      const res = await mediaFetch(url)
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
 
       // Check Content-Length header first (cheap)
