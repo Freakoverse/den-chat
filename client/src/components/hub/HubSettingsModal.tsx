@@ -4896,6 +4896,70 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
 
 // ── Network Page (Relays + Blossom Servers) ──
 
+// "Don't show again" state for the mark-dedicated confirmation, tracked locally and
+// independently per kind: dismissing it for relays does NOT dismiss it for Blossom servers.
+const DEDICATED_CONFIRM_DISMISS_KEY = {
+  relay: 'den_dedicated_confirm_dismissed_relay',
+  blossom: 'den_dedicated_confirm_dismissed_blossom',
+} as const
+
+function isDedicatedConfirmDismissed(kind: 'relay' | 'blossom'): boolean {
+  try { return localStorage.getItem(DEDICATED_CONFIRM_DISMISS_KEY[kind]) === '1' } catch { return false }
+}
+function setDedicatedConfirmDismissed(kind: 'relay' | 'blossom'): void {
+  try { localStorage.setItem(DEDICATED_CONFIRM_DISMISS_KEY[kind], '1') } catch { /* storage unavailable: just show it next time */ }
+}
+
+// Confirmation shown before marking a relay/Blossom server as dedicated (not when un-marking).
+function DedicatedConfirmModal({ kind, onConfirm, onCancel }: {
+  kind: 'relay' | 'blossom'
+  onConfirm: (dontShowAgain: boolean) => void
+  onCancel: () => void
+}) {
+  const [dontShowAgain, setDontShowAgain] = useState(false)
+  useEscToClose(onCancel)
+  const label = kind === 'relay' ? 'relay' : 'Blossom server'
+  const plural = kind === 'relay' ? 'relays' : 'Blossom servers'
+  const retains = kind === 'relay' ? "your hub's message history" : "your hub's media and vital hub files (the member list, structure, and key material)"
+  return createPortal(
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[60]" onClick={onCancel}>
+      <div className="bg-card border border-border rounded-lg p-6 max-w-md w-full mx-4 shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-2 mb-2">
+          <ShieldCheck size={18} className="text-emerald-400 shrink-0" />
+          <h3 className="text-lg font-semibold text-foreground">Mark this {label} as dedicated?</h3>
+        </div>
+        <p className="text-sm text-muted-foreground mb-3 leading-relaxed">
+          Only do this for a {label} <span className="font-semibold text-foreground">you set up or rent yourself</span> for this hub, not a shared public one. Marking it dedicated tells members this {label} commits to retaining {retains}.
+        </p>
+        <div className="flex items-start gap-2 px-3 py-2 mb-4 rounded-lg bg-amber-500/10 border border-amber-500/30">
+          <AlertTriangle size={14} className="text-amber-500 shrink-0 mt-0.5" />
+          <p className="text-xs text-amber-500/90 leading-relaxed">Marking a public {label} you don't control gives members a false sense of reliability.</p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setDontShowAgain((v) => !v)}
+          className="flex items-center gap-2 mb-4 cursor-pointer select-none text-left"
+        >
+          <span
+            className={cn(
+              'h-4 w-4 rounded border flex items-center justify-center shrink-0 transition-colors',
+              dontShowAgain ? 'bg-primary border-primary text-primary-foreground' : 'bg-secondary border-border',
+            )}
+          >
+            {dontShowAgain && <Check size={12} strokeWidth={3} />}
+          </span>
+          <span className="text-xs text-muted-foreground">Don't show this again for {plural}</span>
+        </button>
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" onClick={onCancel}>Cancel</Button>
+          <Button onClick={() => onConfirm(dontShowAgain)}>Mark dedicated</Button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  )
+}
+
 function NetworkPage({ hub, editRelays, setEditRelays, editBlossoms, setEditBlossoms, editDedicatedRelays, setEditDedicatedRelays, editDedicatedBlossoms, setEditDedicatedBlossoms }: {
   hub: HubData
   editRelays: string[]
@@ -4907,10 +4971,25 @@ function NetworkPage({ hub, editRelays, setEditRelays, editBlossoms, setEditBlos
   editDedicatedBlossoms: string[]
   setEditDedicatedBlossoms: (blossoms: string[]) => void
 }) {
-  const toggleDedicatedRelay = (url: string) =>
-    setEditDedicatedRelays(editDedicatedRelays.includes(url) ? editDedicatedRelays.filter((r) => r !== url) : [...editDedicatedRelays, url])
-  const toggleDedicatedBlossom = (url: string) =>
-    setEditDedicatedBlossoms(editDedicatedBlossoms.includes(url) ? editDedicatedBlossoms.filter((s) => s !== url) : [...editDedicatedBlossoms, url])
+  // url of a server awaiting mark-dedicated confirmation (null = no prompt open)
+  const [confirmDedicated, setConfirmDedicated] = useState<{ kind: 'relay' | 'blossom'; url: string } | null>(null)
+
+  const markDedicatedRelay = (url: string) =>
+    setEditDedicatedRelays(editDedicatedRelays.includes(url) ? editDedicatedRelays : [...editDedicatedRelays, url])
+  const markDedicatedBlossom = (url: string) =>
+    setEditDedicatedBlossoms(editDedicatedBlossoms.includes(url) ? editDedicatedBlossoms : [...editDedicatedBlossoms, url])
+
+  // Un-marking is immediate; marking prompts for confirmation unless dismissed for this kind.
+  const toggleDedicatedRelay = (url: string) => {
+    if (editDedicatedRelays.includes(url)) setEditDedicatedRelays(editDedicatedRelays.filter((r) => r !== url))
+    else if (isDedicatedConfirmDismissed('relay')) markDedicatedRelay(url)
+    else setConfirmDedicated({ kind: 'relay', url })
+  }
+  const toggleDedicatedBlossom = (url: string) => {
+    if (editDedicatedBlossoms.includes(url)) setEditDedicatedBlossoms(editDedicatedBlossoms.filter((s) => s !== url))
+    else if (isDedicatedConfirmDismissed('blossom')) markDedicatedBlossom(url)
+    else setConfirmDedicated({ kind: 'blossom', url })
+  }
   const hasDedicatedRelay = editRelays.some((r) => editDedicatedRelays.includes(r))
   const hasDedicatedBlossom = editBlossoms.some((s) => editDedicatedBlossoms.includes(s))
   const userRelays = useUserListsStore((s) => s.userRelays)
@@ -5365,6 +5444,19 @@ function NetworkPage({ hub, editRelays, setEditRelays, editBlossoms, setEditBlos
           Removing blossom servers may prevent members from downloading hub files needed to join or participate. Only change these if you know what you're doing.
         </p>
       </div>
+
+      {confirmDedicated && (
+        <DedicatedConfirmModal
+          kind={confirmDedicated.kind}
+          onCancel={() => setConfirmDedicated(null)}
+          onConfirm={(dontShowAgain) => {
+            if (dontShowAgain) setDedicatedConfirmDismissed(confirmDedicated.kind)
+            if (confirmDedicated.kind === 'relay') markDedicatedRelay(confirmDedicated.url)
+            else markDedicatedBlossom(confirmDedicated.url)
+            setConfirmDedicated(null)
+          }}
+        />
+      )}
     </div>
   )
 }
