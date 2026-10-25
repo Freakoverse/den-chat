@@ -26,7 +26,7 @@ import { ADMIN_PUBKEY } from '@/lib/constants'
 import { useFollowStore } from '@/stores/followStore'
 import { useRecommendationStore, type TrustedSource } from '@/stores/recommendationStore'
 import { fetchRecommendationRefs, hubCoord, parseHubCoord, type HubRecRef } from '@/lib/hub/hubRecommendations'
-import { resolveShortAddress, looksLikeShortAddress, SHORT_ADDRESS_PATTERN } from '@/lib/nostr/nipShort'
+import { resolveShortAddress, looksLikeShortAddress, SHORT_ADDRESS_PATTERN, parseShortAddress, authorityToPubkey, resolveAuthorityPubkey, shortCodeOf } from '@/lib/nostr/nipShort'
 import { countLeadingZeroBits } from '@/lib/pow/pow'
 import { MAX_HUB_LIST_ENTRIES } from '@/lib/hub/hubLimits'
 
@@ -1817,6 +1817,20 @@ export function DiscoverPage() {
             isDirectLookup = false
             // Invalid npub — just use filter tags
           }
+        } else if (looksLikeShortAddress(q)) {
+          // NIP-SHORT address → resolve the authority (npub or DNN) to a pubkey and query that
+          // author's hub carrying the `s` code. `#s` is a relay-indexed single-letter tag filter.
+          isDirectLookup = true
+          const parsed = parseShortAddress(q)
+          const pubkey = parsed ? await resolveAuthorityPubkey(parsed.authority) : null
+          if (parsed && pubkey) {
+            filter.authors = [pubkey]
+            filter['#s'] = [parsed.code]
+          } else {
+            // Unresolvable authority — fall back to a name search rather than a blank query.
+            isDirectLookup = false
+            filter['#n'] = [q]
+          }
         } else {
           // Name → try #n exact match
           filter['#n'] = [q]
@@ -1889,6 +1903,15 @@ export function DiscoverPage() {
           }
         } catch {
           // Invalid npub — fall through to normal filtering
+        }
+      } else if (looksLikeShortAddress(q)) {
+        // NIP-SHORT address → author (npub) + `s` code. For an npub authority we have the pubkey
+        // with no network, so we can filter the firehose locally right away; a DNN authority needs
+        // an async resolve, so it falls through here and is resolved on the relays via the Search button.
+        const parsed = parseShortAddress(q)
+        const pk = parsed && authorityToPubkey(parsed.authority)
+        if (parsed && pk) {
+          return hubs.filter(h => h.creatorPubkey === pk && shortCodeOf(h.event) === parsed.code)
         }
       }
     }
@@ -2046,7 +2069,7 @@ export function DiscoverPage() {
                     <Search size={15} className="text-muted-foreground shrink-0" />
                     <input
                       type="text"
-                      placeholder="Search hubs by name or npub..."
+                      placeholder="Search hubs by name, npub, or share link..."
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
                       onKeyDown={(e) => { if (e.key === 'Enter') searchRelays() }}
