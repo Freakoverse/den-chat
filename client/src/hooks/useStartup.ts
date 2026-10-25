@@ -34,6 +34,7 @@ import { useBlockStore } from '@/stores/blockStore'
 import { useFollowStore } from '@/stores/followStore'
 import { useUserListsStore } from '@/stores/userListsStore'
 import { useEmojiStore } from '@/stores/emojiStore'
+import { useRecommendationStore } from '@/stores/recommendationStore'
 import { useStickerStore } from '@/stores/stickerStore'
 import { fetchMyEmojiSets, fetchEmojiSubscriptions, fetchEmojiSetByAddress } from '@/lib/nostr/customEmoji'
 import { fetchMyStickerSets, fetchStickerSubscriptions, fetchStickerSetByAddress } from '@/lib/nostr/customSticker'
@@ -458,7 +459,7 @@ export function useStartup() {
         ensureAddressableRedundancy(STANDARD_KINDS.BLOSSOM_SERVER_LIST, pubkey)     // kind 10063 — blossom servers
         ensureAddressableRedundancy(KINDS.USER_HUB_LIST, pubkey, undefined, useHubStore.getState().hubListCreatedAt) // kind 16942 — hub list (version-aware)
         ensureAddressableRedundancy(STANDARD_KINDS.USER_STATUS, pubkey, 'general')  // kind 30315 — NIP-38 general status
-        ensureAddressableRedundancy(STANDARD_KINDS.APP_DATA, pubkey, APP_DATA_DTAGS.HUB_RECOMMENDATIONS) // kind 30078 — hub recommendations (Discover)
+        ensureAddressableRedundancy(STANDARD_KINDS.APP_DATA, pubkey, APP_DATA_DTAGS.HUB_RECOMMENDATIONS, useRecommendationStore.getState().myRecsCreatedAt || undefined) // kind 30078: hub recommendations (Discover, version-aware)
 
         // Emoji sets (kind 30030) — user's own sets, dynamic d-tags
         for (const set of useEmojiStore.getState().myEmojiSets) {

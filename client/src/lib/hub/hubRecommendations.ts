@@ -67,10 +67,11 @@ export function parseHubRecommendationRefs(event: Event): HubRecRef[] {
   return out
 }
 
-/** The current user's own recommendation list (newest replaceable), or [] if none. */
-export async function fetchMyRecommendations(myPubkey: string): Promise<HubRecRef[]> {
+/** The current user's own recommendation list (newest replaceable). `createdAt` is the event's
+ *  timestamp (0 when none is found), used to drive version-aware redundancy. */
+export async function fetchMyRecommendations(myPubkey: string): Promise<{ refs: HubRecRef[]; createdAt: number }> {
   const ev = await fetchReplaceable(myPubkey, STANDARD_KINDS.APP_DATA, DTAG)
-  return ev ? parseHubRecommendationRefs(ev) : []
+  return { refs: ev ? parseHubRecommendationRefs(ev) : [], createdAt: ev?.created_at ?? 0 }
 }
 
 /** Recommendation refs from a set of authors (newest per author), deduped across authors by coord. */
@@ -94,12 +95,14 @@ export async function fetchRecommendationRefs(authors: string[]): Promise<HubRec
   return out
 }
 
-/** Sign + publish the user's full recommendation list (personal, R-authored, failover publish). */
+/** Sign + publish the user's full recommendation list (personal, R-authored, failover publish).
+ *  Returns the published event's `created_at` so callers can track the latest version. */
 export async function publishHubRecommendations(
   refs: HubRecRef[],
   signer: ISigner | null,
   privateKey: string | null,
-): Promise<void> {
+): Promise<number> {
   const signed = await signWithSigner(buildHubRecommendationEvent(refs), signer, privateKey)
   await publishPersonal(signed)
+  return signed.created_at
 }

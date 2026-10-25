@@ -66,6 +66,8 @@ interface RecState {
   /** The user's own recommended hubs, keyed by coordinate (retains relay hints). */
   myRecs: Map<string, HubRecRef>
   myRecsLoaded: boolean
+  /** created_at of the user's own recommendation event (0 if none), for version-aware redundancy. */
+  myRecsCreatedAt: number
   /** Trusted recommendation sources (local, per device). */
   trustedSources: TrustedSource[]
   /** Include recommendations from people you follow in the feed (local, per device, default on). */
@@ -94,6 +96,7 @@ interface RecState {
 export const useRecommendationStore = create<RecState>((set, get) => ({
   myRecs: new Map(),
   myRecsLoaded: false,
+  myRecsCreatedAt: 0,
   trustedSources: loadTrusted(),
   followRecs: loadBool(FOLLOWRECS_KEY, true),
   sourceRecs: loadBool(SOURCERECS_KEY, true),
@@ -102,10 +105,10 @@ export const useRecommendationStore = create<RecState>((set, get) => ({
 
   loadMyRecs: async (myPubkey) => {
     try {
-      const refs = await fetchMyRecommendations(myPubkey)
+      const { refs, createdAt } = await fetchMyRecommendations(myPubkey)
       const map = new Map<string, HubRecRef>()
       for (const r of refs) map.set(r.coord, r)
-      set({ myRecs: map, myRecsLoaded: true })
+      set({ myRecs: map, myRecsLoaded: true, myRecsCreatedAt: createdAt })
     } catch {
       set({ myRecsLoaded: true })
     }
@@ -120,7 +123,8 @@ export const useRecommendationStore = create<RecState>((set, get) => ({
     next.set(ref.coord, ref)
     set({ myRecs: next }) // optimistic
     try {
-      await publishHubRecommendations([...next.values()], signer, privateKey)
+      const createdAt = await publishHubRecommendations([...next.values()], signer, privateKey)
+      set({ myRecsCreatedAt: createdAt })
     } catch (err) {
       set({ myRecs: prev }) // revert on publish failure
       throw err
@@ -134,7 +138,8 @@ export const useRecommendationStore = create<RecState>((set, get) => ({
     next.delete(coord)
     set({ myRecs: next }) // optimistic
     try {
-      await publishHubRecommendations([...next.values()], signer, privateKey)
+      const createdAt = await publishHubRecommendations([...next.values()], signer, privateKey)
+      set({ myRecsCreatedAt: createdAt })
     } catch (err) {
       set({ myRecs: prev }) // revert on publish failure
       throw err
@@ -147,7 +152,8 @@ export const useRecommendationStore = create<RecState>((set, get) => ({
     for (const r of refs) next.set(r.coord, r)
     set({ myRecs: next }) // optimistic
     try {
-      await publishHubRecommendations([...next.values()], signer, privateKey)
+      const createdAt = await publishHubRecommendations([...next.values()], signer, privateKey)
+      set({ myRecsCreatedAt: createdAt })
     } catch (err) {
       set({ myRecs: prev }) // revert on publish failure
       throw err
