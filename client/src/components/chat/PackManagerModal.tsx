@@ -258,7 +258,7 @@ function PackAddForm({ limitBytes, namePlaceholder, itemNoun, sanitize, onUpload
           (p) => setItemProgress((prev) => ({ ...prev, [it.id]: p })),
         )
         const ext = it.file.type.split('/')[1]?.split('+')[0] || 'png'
-        const url = `${serverUrls[0] || 'https://blossom.primal.net'}/${hash}.${ext}`
+        const url = `${serverUrls[0]}/${hash}.${ext}`
         successes.push({ url, name: (sanitize ? sanitize(it.name) : it.name.trim()).slice(0, 60), nsfw: it.nsfw })
         setDoneIds((prev) => new Set(prev).add(it.id))
       } catch {
