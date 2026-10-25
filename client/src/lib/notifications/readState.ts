@@ -13,7 +13,8 @@ import { type Event, type UnsignedEvent } from 'nostr-tools'
 import { STANDARD_KINDS, APP_DATA_DTAGS } from '@/lib/crypto/constants'
 import { StorageKey } from '@/lib/constants'
 import { createUnsignedEvent, signWithSigner } from '@/lib/nostr/events'
-import { fetchReplaceable, publishEvent } from '@/lib/nostr/relay-pool'
+import { fetchReplaceable } from '@/lib/nostr/relay-pool'
+import { publishPersonal } from '@/stores/postingBehaviourStore'
 import type { ISigner } from '@/stores/userStore'
 
 // ── Types ──
@@ -414,7 +415,9 @@ export async function signAndPublishReadState(
   }
 
   try {
-    await publishEvent(signedEvent)
+    // publishPersonal: failover across the destinations enabled in Settings > Network > Behaviour,
+    // consistent with every other personal event (profile, follows, relay list, recommendations).
+    await publishPersonal(signedEvent)
     _lastPublished[domain] = now
     return true
   } catch (err) {
