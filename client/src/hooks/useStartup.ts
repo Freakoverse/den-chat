@@ -45,7 +45,7 @@ import { useDMStore } from '@/stores/dmStore'
 import { useDM04Store } from '@/stores/dm04Store'
 import { useMdmStore } from '@/stores/dmMdmStore'
 import { useNotificationStore } from '@/stores/notificationStore'
-import { STANDARD_KINDS } from '@/lib/crypto/constants'
+import { STANDARD_KINDS, APP_DATA_DTAGS } from '@/lib/crypto/constants'
 import { ADMIN_PUBKEY } from '@/lib/constants'
 
 export function useStartup() {
@@ -458,6 +458,7 @@ export function useStartup() {
         ensureAddressableRedundancy(STANDARD_KINDS.BLOSSOM_SERVER_LIST, pubkey)     // kind 10063 — blossom servers
         ensureAddressableRedundancy(KINDS.USER_HUB_LIST, pubkey, undefined, useHubStore.getState().hubListCreatedAt) // kind 16942 — hub list (version-aware)
         ensureAddressableRedundancy(STANDARD_KINDS.USER_STATUS, pubkey, 'general')  // kind 30315 — NIP-38 general status
+        ensureAddressableRedundancy(STANDARD_KINDS.APP_DATA, pubkey, APP_DATA_DTAGS.HUB_RECOMMENDATIONS) // kind 30078 — hub recommendations (Discover)
 
         // Emoji sets (kind 30030) — user's own sets, dynamic d-tags
         for (const set of useEmojiStore.getState().myEmojiSets) {
