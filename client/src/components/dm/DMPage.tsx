@@ -39,7 +39,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { truncateNpub, formatTimestamp, formatDateNumeric, formatDateTimeNumeric } from '@/lib/utils'
 import { getHour12 } from '@/stores/preferencesStore'
 import { nip19, type Event } from 'nostr-tools'
-import { getUploadBlossoms, getReadBlossoms, getPublishRelays, getDMSelfCopyRelays } from '@/stores/postingBehaviourStore'
+import { getUploadBlossoms, getReadBlossoms, getPublishRelays, getDMSelfCopyRelays, publishDM } from '@/stores/postingBehaviourStore'
 import {
   Search, Plus, MessageSquare, Loader2,
   Lock, Users, UserPlus, AlertCircle, X, ShieldBan, Eye, EyeOff, Ghost, Info, VenetianMask, MoreVertical,
@@ -67,7 +67,7 @@ import { downloadFromBlossom } from '@/lib/blossom/client'
 import { CustomAudioPlayer } from '@/components/ui/CustomAudioPlayer'
 import { createFileGiftWrap } from '@/lib/nostr/nip17'
 
-import { publishToSpecificRelays } from '@/lib/nostr/relay-pool'
+import { publishWithFailover } from '@/lib/nostr/relay-pool'
 import { useNotificationStore } from '@/stores/notificationStore'
 import { useUnreadDivider } from '@/hooks/useUnreadDivider'
 import { NewMessagesDivider } from '@/components/chat/NewMessagesDivider'
@@ -974,11 +974,9 @@ function DMChatView({ recipientPubkey, onSwitchProtocol, onBack }: { recipientPu
       if (hasFiles) {
         const publishRelays = getPublishRelays()
 
-        // Discover recipient's preferred relays (NIP-65 + DM relay list + DNN metadata)
+        // Discover recipient's preferred relays (NIP-65 + DM relay list + DNN metadata); publishDM
+        // merges these with our own pool and fails over, so no separate recipientRelays union is needed.
         const extraRelays = await discoverRecipientRelays(recipientPubkey, publishRelays)
-        const recipientRelays = extraRelays.length > 0
-          ? [...publishRelays, ...extraRelays]
-          : publishRelays
 
         const blossomServers = getUploadBlossoms()
 
@@ -1010,10 +1008,13 @@ function DMChatView({ recipientPubkey, onSwitchProtocol, onBack }: { recipientPu
             privateKey,
           )
 
-          // Publish gift wraps for kind 15
-          await publishToSpecificRelays(recipientRelays, fileWraps.wrapForRecipient as unknown as Event)
-          // Self copy also goes to the user's own kind-10050 inbox relays (same rule as text sends)
-          await publishToSpecificRelays(getDMSelfCopyRelays(), fileWraps.wrapForSelf as unknown as Event)
+          // Publish gift wraps for kind 15, with failover so a dead/write-rejecting relay can't silently
+          // strand a file the way fire-once did (DM text already fails over; this brings files to parity).
+          // Recipient copy: recipient inbox + our relays (publishDM's recipient-scoped pool).
+          await publishDM(fileWraps.wrapForRecipient as unknown as Event, extraRelays)
+          // Self copy: our own relays + kind-10050 DM inbox (getDMSelfCopyRelays), seeded by the publish
+          // pick and failing over across that set so read-back on other devices survives a dead relay.
+          await publishWithFailover(fileWraps.wrapForSelf as unknown as Event, getPublishRelays(), { pool: getDMSelfCopyRelays() })
         }
       }
 
