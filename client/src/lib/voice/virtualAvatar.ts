@@ -109,7 +109,7 @@ export async function loadAvatarBlobUrl(url: string | undefined): Promise<string
     const bytes = await downloadFromBlossom(parsed.hash, [parsed.origin])
     const limitBytes = getRenderLimit('profile') * 1024 * 1024
     if (bytes.byteLength > limitBytes) return null
-    return URL.createObjectURL(new Blob([bytes], { type: sniffImageMime(bytes) }))
+    return URL.createObjectURL(new Blob([bytes as BlobPart], { type: sniffImageMime(bytes) }))
   } catch {
     return null
   }

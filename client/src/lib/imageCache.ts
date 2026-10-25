@@ -178,7 +178,7 @@ function _doFetch(url: string, maxBytes?: number): void {
           chunks.push(value)
         }
 
-        const blob = new Blob(chunks)
+        const blob = new Blob(chunks as BlobPart[])
         blobCache.set(url, URL.createObjectURL(blob))
         _notifyListeners(url)
         putInPersistentCache(cacheKey, blob).catch(() => {})

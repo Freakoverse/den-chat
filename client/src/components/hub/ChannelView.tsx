@@ -3597,7 +3597,7 @@ export function ChatMessageRow({
     () => (msg.decrypted && !msg.deleted && !shouldBlurMsg) ? extractContentMediaGroups(baseContent) : { groups: [], strippedContent: baseContent },
     [baseContent, msg.decrypted, msg.deleted, shouldBlurMsg]
   )
-  const allContentImages = useMemo(() => contentMediaGroups.flatMap(g => g.urls), [contentMediaGroups])
+  const allContentImages = useMemo(() => contentMediaGroups.flatMap(g => g.kind === 'image-group' ? g.urls : []), [contentMediaGroups])
   const [contentGalleryIndex, setContentGalleryIndex] = useState<number | null>(null)
   const openContentGallery = useCallback((url: string) => {
     const idx = allContentImages.indexOf(url)

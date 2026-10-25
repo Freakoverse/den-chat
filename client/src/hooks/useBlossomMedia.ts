@@ -235,7 +235,7 @@ export function useBlossomMedia(originalUrl: string | undefined, maxSizeMB?: num
           cipherBytes = new Uint8Array(await cachedCipher.arrayBuffer())
         } else {
           cipherBytes = await downloadFromBlossom(cipherHash, servers)
-          putInPersistentCache(cipherHash, new Blob([cipherBytes])).catch(() => {})
+          putInPersistentCache(cipherHash, new Blob([cipherBytes as BlobPart])).catch(() => {})
         }
         if (cancelled) return
         const plainBytes = await decryptFile(cipherBytes, enc.keyHex, enc.nonceHex)

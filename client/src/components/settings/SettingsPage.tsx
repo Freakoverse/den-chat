@@ -11073,7 +11073,7 @@ interface TierData {
 type SponsorsData = Record<SponsorTier, TierData>
 
 function emptySponsorsData(): SponsorsData {
-  return Object.fromEntries(SPONSOR_TIERS.map(t => [t, { sponsors: [], anonymous: 0 }])) as SponsorsData
+  return Object.fromEntries(SPONSOR_TIERS.map(t => [t, { sponsors: [] as SponsorEntry[], anonymous: 0 }])) as SponsorsData
 }
 
 function sponsorsToJson(year: number, data: SponsorsData): string {

@@ -1841,8 +1841,8 @@ export function DiscoverPage() {
 
   // ── Deep link: auto-search when navigated here via denchat://hub/<naddr> ──
   useEffect(() => {
-    const handler = (e: Event) => {
-      const detail = (e as CustomEvent).detail as { naddr: string } | undefined
+    const handler = (e: globalThis.Event) => {
+      const detail = (e as CustomEvent<{ naddr: string }>).detail as { naddr: string } | undefined
       if (detail?.naddr) {
         setSearchQuery(detail.naddr)
         // Trigger search on next tick after state update

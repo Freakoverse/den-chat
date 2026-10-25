@@ -234,7 +234,7 @@ interface HubSettingsModalProps {
 
 export type SettingsPage = 'general' | 'channels' | 'roles' | 'members' | 'network' | 'security' | 'banned' | 'hidden' | 'reports' | 'dangerous'
 
-const PAGES: { id: SettingsPage; label: string; icon: React.ElementType; danger?: boolean; creatorOnly?: boolean }[] = [
+const PAGES: { id: SettingsPage; label: string; icon: React.ComponentType<{ size?: number; className?: string }>; danger?: boolean; creatorOnly?: boolean }[] = [
   { id: 'general', label: 'General', icon: Settings },
   { id: 'channels', label: 'Channels', icon: Hash },
   { id: 'roles', label: 'Roles', icon: Shield },
@@ -1662,7 +1662,7 @@ function GeneralPage({
       // Upload to the hub's advertised servers plus the user's own lists (client + kind-10063) for
       // redundancy, so members and Discover can load the icon/banner; URL pins to serverUrls[0] below.
       const { hash, serverUrls } = await uploadToBlossomServers(
-        data, signer, privateKey, getUploadBlossoms(editBlossoms), file.type,
+        data, signer, privateKey, getUploadBlossoms(hub.blossomServers), file.type,
         (p) => setProgress({ ...p }),
         () => { const c = new AbortController(); abortRef.current = c; return c.signal },
         ownerAuth,

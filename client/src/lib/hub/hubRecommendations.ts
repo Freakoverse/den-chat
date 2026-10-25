@@ -44,7 +44,7 @@ export function parseHubCoord(coord: string, relayHint?: string): HubRecRef | nu
 /** Build an unsigned kind-30078 recommendation event from refs (deduped by coord, order preserved). */
 export function buildHubRecommendationEvent(refs: HubRecRef[]): UnsignedEvent {
   const seen = new Set<string>()
-  const tags: string[][] = [['d', DTAG]]
+  const tags: [string, ...string[]][] = [['d', DTAG]]
   for (const r of refs) {
     if (seen.has(r.coord)) continue
     seen.add(r.coord)

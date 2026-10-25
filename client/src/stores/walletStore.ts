@@ -283,8 +283,8 @@ async function fetchBtcTransactions(address: string): Promise<TxItem[]> {
     }
     const netAmount = isOutgoing ? sent - received : received
     // Collect unique from/to addresses
-    const fromAddrs = [...new Set((tx.vin || []).map((v: any) => v.prevout?.scriptpubkey_address).filter(Boolean))]
-    const toAddrs = [...new Set((tx.vout || []).map((v: any) => v.scriptpubkey_address).filter(Boolean))]
+    const fromAddrs = [...new Set((tx.vin || []).map((v: any) => v.prevout?.scriptpubkey_address).filter(Boolean))] as string[]
+    const toAddrs = [...new Set((tx.vout || []).map((v: any) => v.scriptpubkey_address).filter(Boolean))] as string[]
     items.push({
       txid: tx.txid,
       type: isOutgoing ? 'out' : 'in',

@@ -219,7 +219,7 @@ export async function streamGuardedFetch(
     }
 
     // Within limit — build blob URL
-    const blob = new Blob(chunks)
+    const blob = new Blob(chunks as BlobPart[])
     sizeCache.set(url, totalBytes)
     return { ok: true, blobUrl: URL.createObjectURL(blob), size: totalBytes }
   } catch {

@@ -582,7 +582,7 @@ export function VideoEmbed({ src }: { src: string }) {
 
     if (signal.aborted) return null
 
-    const blob = new Blob(chunks, { type: contentType })
+    const blob = new Blob(chunks as BlobPart[], { type: contentType })
     return URL.createObjectURL(blob)
   }
 

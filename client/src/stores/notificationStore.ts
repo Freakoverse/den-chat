@@ -538,7 +538,7 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
     }
 
     // Parse DM — content is encrypted (NIP-44 self-encryption, NIP-04 legacy fallback)
-    let dmState: DmReadState = { dm17: {}, dm04: {} }
+    let dmState: DmReadState = { dm17: {}, dm04: {}, mdm: {} }
     if (dmEvent?.content) {
       let dmDecrypted = false
       // Try NIP-44 decryption first (modern standard)
