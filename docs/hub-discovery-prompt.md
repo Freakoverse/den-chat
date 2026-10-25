@@ -28,9 +28,12 @@ Some older hubs put the face inside `event.content` as JSON instead of in tags:
 `JSON.parse(event.content).settings` may hold `.icon`, `.banner`, `.description`. Prefer the
 tags above when present, otherwise fall back to these content fields.
 
-=== DELETED HUBS + ALWAYS THE LATEST VERSION ===
+=== DELETED, UNDISCOVERABLE, + ALWAYS THE LATEST VERSION ===
 - Never show a hub whose event carries a `["deleted","true"]` tag. Drop it entirely, even if
   an older non-deleted copy of the same hub is also received.
+- Never show a hub that has opted out of discovery: an `f` tag whose value is `off`
+  (i.e. `["f","off"]`). No `f` tag, or any other value, means discoverable. (As with deletion,
+  judge this on the NEWEST revision of the hub, below.)
 - Never show an event that has no `d` tag.
 - A hub is identified by its coordinate `kind:pubkey:d` (here `36942:<pubkey>:<d>`). Relays
   and searches will hand you several revisions of the same hub. ALWAYS keep and show only the
