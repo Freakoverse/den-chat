@@ -29,6 +29,7 @@ import { fetchRecommendationRefs, hubCoord, parseHubCoord, REC_AUTHOR_CHUNK, typ
 import { resolveShortAddress, looksLikeShortAddress, SHORT_ADDRESS_PATTERN, parseShortAddress, authorityToPubkey, resolveAuthorityPubkey, shortCodeOf } from '@/lib/nostr/nipShort'
 import { countLeadingZeroBits } from '@/lib/pow/pow'
 import { MAX_HUB_LIST_ENTRIES } from '@/lib/hub/hubLimits'
+import hubDiscoveryPrompt from '@/assets/hubDiscoveryPrompt.txt?raw'
 
 import { truncateNpub, cn, chunkArray } from '@/lib/utils'
 import { nip19 } from 'nostr-tools'
@@ -45,7 +46,7 @@ import {
   Compass, Search, Loader2, Hash, Info, UserPlus, Check, AlertTriangle,
   X, SlidersHorizontal, ChevronLeft, ChevronRight, Plus,
   Gamepad2, Package, Globe, Monitor, ChevronDown, Settings, ShieldCheck,
-  Sparkles,
+  Sparkles, Copy,
 } from 'lucide-react'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import type { Event } from 'nostr-tools'
@@ -1590,6 +1591,64 @@ function IllegalHubGuideModal({ open, onClose }: { open: boolean; onClose: () =>
   )
 }
 
+// Explains why only recommended hubs render their banner/icon, with an advanced "build it yourself" escape
+// hatch (a copy-pasteable prompt to generate a standalone viewer).
+function ImagesInfoModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [advanced, setAdvanced] = useState(false)
+  const [copied, setCopied] = useState(false)
+  useEscToClose(onClose, open)
+  useEffect(() => { if (!open) { setAdvanced(false); setCopied(false) } }, [open])
+  if (!open) return null
+  const copyPrompt = async () => {
+    try {
+      await navigator.clipboard.writeText(hubDiscoveryPrompt)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch { /* clipboard unavailable */ }
+  }
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center px-2">
+      <div className="absolute inset-0 bg-black/60" onClick={onClose} />
+      <div className="relative z-10 w-full max-w-md max-h-[85vh] flex flex-col rounded-xl border border-border bg-background shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
+          <h2 className="font-semibold text-foreground">Why some images don't load</h2>
+          <button onClick={onClose} className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary cursor-pointer"><X size={16} /></button>
+        </div>
+        <div className="px-5 py-4 overflow-y-auto text-sm text-muted-foreground leading-relaxed space-y-3">
+          <p>DEN only renders the banner and icon of hubs that come from the recommendations of people you follow or sources you trust. Every other hub shows a neutral placeholder, and its media is never fetched.</p>
+          <p>Decentralized systems are still widely misunderstood, by individuals and legal systems alike. Automatically pulling in images from hubs no one has vouched for invites misplaced responsibility and criticism onto DEN for content it neither hosts nor controls, and it can scare people away from the network entirely. So we opted out of rendering that media by default, which keeps the client neutral and keeps you in control of what you load onto your screen.</p>
+          <p>DEN is a viewer for a permissionless network, the same way a web browser is for the web. It cannot host, moderate, or remove what lives on the independent relays and Blossom servers behind each hub.</p>
+
+          {/* Advanced escape hatch: a prompt to build your own full-media viewer */}
+          <div className="rounded-lg border border-border overflow-hidden">
+            <button
+              onClick={() => setAdvanced((v) => !v)}
+              className="flex items-center justify-between w-full px-3 py-2.5 text-left text-xs font-medium text-foreground hover:bg-secondary/50 transition-colors cursor-pointer"
+            >
+              <span>Advanced: see them anyway</span>
+              <ChevronDown size={14} className={`shrink-0 transition-transform ${advanced ? 'rotate-180' : ''}`} />
+            </button>
+            {advanced && (
+              <div className="px-3 pb-3 pt-1 space-y-2.5 border-t border-border">
+                <p className="text-xs">If you still want to browse every discoverable hub with its real banner and icon, you can have an AI build you a standalone single-file HTML page for it: copy the prompt below, paste it into any capable AI, and open the file it produces. <span className="text-amber-500 font-medium">Do this at your own risk.</span> That page renders media from hubs no one has vouched for, which may be explicit or disturbing, and it is entirely separate from DEN.</p>
+                <div className="relative">
+                  <button
+                    onClick={copyPrompt}
+                    className="absolute top-2 right-2 z-10 flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer"
+                  >
+                    {copied ? <><Check size={12} /> Copied</> : <><Copy size={12} /> Copy</>}
+                  </button>
+                  <pre className="max-h-48 overflow-auto rounded-md bg-secondary/60 border border-border p-3 pt-9 text-[10px] leading-relaxed text-muted-foreground whitespace-pre-wrap break-words">{hubDiscoveryPrompt}</pre>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // Session-scoped cache of the fetched discover feeds. AppLayout renders DiscoverPage in two separate
 // subtrees (mobile vs desktop), so crossing the responsive breakpoint REMOUNTS this component. Without a
 // cache every remount (e.g. a window resize) refetches every hub. We hydrate state from here on mount and
@@ -1663,6 +1722,7 @@ export function DiscoverPage() {
   const [showManageRecs, setShowManageRecs] = useState(false)
   const [showSourceModal, setShowSourceModal] = useState(false)
   const [showGuide, setShowGuide] = useState(false)
+  const [showImagesInfo, setShowImagesInfo] = useState(false)
   const [showAllOffConfirm, setShowAllOffConfirm] = useState(false)
   // "See everything" (firehose) toggle. Turning it ON needs confirmation; OFF is immediate.
   const toggleAllOff = useCallback(() => {
@@ -2364,6 +2424,20 @@ export function DiscoverPage() {
                     </TooltipContent>
                   </Tooltip>
 
+                  {/* Why unrecommended hubs show placeholders instead of their real banner/icon */}
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        onClick={() => setShowImagesInfo(true)}
+                        className="flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-dashed border-border text-[11px] font-medium text-muted-foreground hover:text-foreground hover:border-solid transition-colors cursor-pointer"
+                      >
+                        <Info size={12} className="shrink-0" />
+                        Loading Images?
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" className="text-xs">Why hubs you don't follow show placeholders</TooltipContent>
+                  </Tooltip>
+
                   {/* Guide: what DEN is, and what to do about a hub you believe is illegal */}
                   <Tooltip>
                     <TooltipTrigger asChild>
@@ -2594,6 +2668,7 @@ export function DiscoverPage() {
       <ManageRecommendationsModal open={showManageRecs} onClose={() => setShowManageRecs(false)} />
       <TrustedSourcesModal open={showSourceModal} onClose={() => setShowSourceModal(false)} />
       <IllegalHubGuideModal open={showGuide} onClose={() => setShowGuide(false)} />
+      <ImagesInfoModal open={showImagesInfo} onClose={() => setShowImagesInfo(false)} />
     </>
   )
 }
