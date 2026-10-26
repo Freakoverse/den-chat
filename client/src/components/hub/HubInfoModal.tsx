@@ -29,8 +29,9 @@ interface HubInfoModalProps {
   open: boolean
   onClose: () => void
   hub: HubData
-  /** When true, banner & icon images are heavily blurred (used on Discover page for safety) */
-  blurMedia?: boolean
+  /** When false, the banner & icon are not fetched at all and the placeholders are shown instead (used on
+   *  Discover for hubs no one has recommended). Defaults to showing the media. */
+  showMedia?: boolean
   /** Called when the user clicks the creator's avatar or name */
   onCreatorClick?: (pubkey: string) => void
 }
@@ -42,7 +43,7 @@ interface CreatorProfile {
   npub: string
 }
 
-export function HubInfoModal({ open, onClose, hub, blurMedia, onCreatorClick }: HubInfoModalProps) {
+export function HubInfoModal({ open, onClose, hub, showMedia, onCreatorClick }: HubInfoModalProps) {
   useEscToClose(onClose, open)
   const [creator, setCreator] = useState<CreatorProfile | null>(null)
   const [copied, setCopied] = useState(false)
@@ -206,9 +207,9 @@ export function HubInfoModal({ open, onClose, hub, blurMedia, onCreatorClick }: 
 
       <div className="relative z-10 w-full max-w-md rounded-lg border border-border bg-background shadow-lg animate-in fade-in-0 zoom-in-95 overflow-hidden">
         {/* Banner */}
-        {hub.banner ? (
+        {hub.banner && showMedia !== false ? (
           <div className="h-32 w-full">
-            <BlossomImage src={hub.banner} alt="" servers={hub.blossomServers} className={`w-full h-full object-cover${blurMedia ? ' blur-lg' : ''}`} fallback={
+            <BlossomImage src={hub.banner} alt="" servers={hub.blossomServers} className="w-full h-full object-cover" fallback={
               <div className="w-full h-full bg-gradient-to-br from-primary/30 to-primary/10" />
             } />
           </div>
@@ -257,8 +258,8 @@ export function HubInfoModal({ open, onClose, hub, blurMedia, onCreatorClick }: 
         {/* Icon overlapping banner/content boundary */}
         <div className="px-5 -mt-10 relative">
           <div className="w-20 h-20 rounded-2xl bg-secondary border-4 border-background overflow-hidden">
-            {hub.icon ? (
-              <BlossomImage src={hub.icon} alt={hub.name} servers={hub.blossomServers} className={`w-full h-full object-cover${blurMedia ? ' blur-sm' : ''}`} fallback={
+            {hub.icon && showMedia !== false ? (
+              <BlossomImage src={hub.icon} alt={hub.name} servers={hub.blossomServers} className="w-full h-full object-cover" fallback={
                 <div className="w-full h-full flex items-center justify-center text-xl font-bold text-muted-foreground">
                   {hub.name.slice(0, 2).toUpperCase()}
                 </div>

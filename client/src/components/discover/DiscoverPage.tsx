@@ -368,9 +368,6 @@ interface FilterModalProps {
   showNsfw: boolean
   /** Shared with the quick toggle: enabling asks for confirmation first (not batched behind Apply). */
   onRequestNsfw: (next: boolean) => void
-  unblurMedia: boolean
-  /** Shared with the quick toggle: enabling asks for confirmation first (not batched behind Apply). */
-  onRequestUnblur: (next: boolean) => void
   powMin: number
   setPowMin: (v: number) => void
   powMax: number
@@ -390,7 +387,7 @@ interface FilterModalProps {
   onApplySearch?: () => void
 }
 
-function FilterModal({ open, onClose, showNsfw, onRequestNsfw, unblurMedia, onRequestUnblur, powMin, setPowMin, powMax, setPowMax, requireMessagePow, setRequireMessagePow, joinPowMin, setJoinPowMin, joinPowMax, setJoinPowMax, requireJoinPow, setRequireJoinPow, filterTags, setFilterTags, filterClientTags, setFilterClientTags, onApplySearch }: FilterModalProps) {
+function FilterModal({ open, onClose, showNsfw, onRequestNsfw, powMin, setPowMin, powMax, setPowMax, requireMessagePow, setRequireMessagePow, joinPowMin, setJoinPowMin, joinPowMax, setJoinPowMax, requireJoinPow, setRequireJoinPow, filterTags, setFilterTags, filterClientTags, setFilterClientTags, onApplySearch }: FilterModalProps) {
   const [localPowMin, setLocalPowMin] = useState(powMin)
   const [localPowMax, setLocalPowMax] = useState(powMax)
   const [localRequireMessagePow, setLocalRequireMessagePow] = useState(requireMessagePow)
@@ -426,7 +423,7 @@ function FilterModal({ open, onClose, showNsfw, onRequestNsfw, unblurMedia, onRe
       const combined = new Set([...DEFAULT_CLIENT_OPTIONS, ...filterClientTags])
       setClientTagOptions([...combined])
     }
-  }, [open, showNsfw, unblurMedia, powMin, powMax, requireMessagePow, joinPowMin, joinPowMax, requireJoinPow, filterTags, filterClientTags])
+  }, [open, showNsfw, powMin, powMax, requireMessagePow, joinPowMin, joinPowMax, requireJoinPow, filterTags, filterClientTags])
 
   useEscToClose(onClose, open)
 
@@ -471,7 +468,6 @@ function FilterModal({ open, onClose, showNsfw, onRequestNsfw, unblurMedia, onRe
 
   const handleReset = () => {
     onRequestNsfw(false)
-    onRequestUnblur(false)
     setLocalPowMin(15)
     setLocalPowMax(25)
     setLocalRequireMessagePow(false)
@@ -485,7 +481,7 @@ function FilterModal({ open, onClose, showNsfw, onRequestNsfw, unblurMedia, onRe
     setClientTagOptions([...DEFAULT_CLIENT_OPTIONS])
   }
 
-  const hasChanges = showNsfw || unblurMedia || localPowMin !== 15 || localPowMax !== 25 || localRequireMessagePow !== false || localJoinPowMin !== 15 || localJoinPowMax !== 25 || localRequireJoinPow !== false || localTags.length > 0 || localClientTags.length > 0
+  const hasChanges = showNsfw || localPowMin !== 15 || localPowMax !== 25 || localRequireMessagePow !== false || localJoinPowMin !== 15 || localJoinPowMax !== 25 || localRequireJoinPow !== false || localTags.length > 0 || localClientTags.length > 0
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center px-2" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
@@ -520,22 +516,6 @@ function FilterModal({ open, onClose, showNsfw, onRequestNsfw, unblurMedia, onRe
             >
               <div className={`absolute top-[3px] w-4 h-4 rounded-full bg-white shadow transition-transform
                 ${showNsfw ? 'translate-x-[22px]' : 'translate-x-[3px]'}`} />
-            </button>
-          </div>
-
-          {/* Unblur media toggle (shared with the quick toggle; enabling asks for confirmation, applies immediately) */}
-          <div className="flex items-center justify-between">
-            <div>
-              <label className="text-sm font-medium text-foreground">Unblur "See everything" media</label>
-              <p className="text-xs text-muted-foreground mt-0.5">Recommended hubs always show sharp. This unblurs media in the uncurated feed too.</p>
-            </div>
-            <button
-              onClick={() => onRequestUnblur(!unblurMedia)}
-              className={`relative w-10 h-[22px] rounded-full transition-colors cursor-pointer shrink-0
-                ${unblurMedia ? 'bg-primary' : 'bg-muted-foreground/30'}`}
-            >
-              <div className={`absolute top-[3px] w-4 h-4 rounded-full bg-white shadow transition-transform
-                ${unblurMedia ? 'translate-x-[22px]' : 'translate-x-[3px]'}`} />
             </button>
           </div>
 
@@ -768,7 +748,7 @@ function FilterModal({ open, onClose, showNsfw, onRequestNsfw, unblurMedia, onRe
 }
 
 // ── Hub Discovery Card ──
-function DiscoverHubCard({ hub, unblur }: { hub: DiscoveredHub; unblur?: boolean }) {
+function DiscoverHubCard({ hub, showMedia }: { hub: DiscoveredHub; showMedia?: boolean }) {
   const myPubkey = useUserStore((s) => s.pubkey)
   const signer = useUserStore((s) => s.signer)
   const privateKey = useUserStore((s) => s.privateKey)
@@ -909,9 +889,10 @@ function DiscoverHubCard({ hub, unblur }: { hub: DiscoveredHub; unblur?: boolean
     <div className="rounded-xl border border-border overflow-hidden bg-card hover:border-primary/30 transition-all duration-200 group flex flex-col">
       {/* Banner */}
       <div className="relative h-28 overflow-hidden bg-gradient-to-br from-primary/20 via-primary/5 to-secondary">
-        {hub.banner ? (
-          <BannerImage src={hub.banner} alt={hub.name} unblur={unblur} />
+        {hub.banner && showMedia ? (
+          <BannerImage src={hub.banner} alt={hub.name} />
         ) : (
+          // No banner, or a hub no one has recommended: show our placeholder and never fetch its media.
           <img src={HUB_BANNER_PLACEHOLDER} alt="" className="w-full h-full object-cover" loading="lazy" />
         )}
         <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent" />
@@ -959,9 +940,9 @@ function DiscoverHubCard({ hub, unblur }: { hub: DiscoveredHub; unblur?: boolean
       <div className="p-3.5 flex flex-col gap-2.5 flex-1">
         {/* Hub identity */}
         <div className="flex items-center gap-2.5 -mt-6 relative z-10">
-          {hub.icon ? (
+          {hub.icon && showMedia ? (
             <div className="w-11 h-11 rounded-xl overflow-hidden shrink-0 bg-secondary border-2 border-card shadow-lg">
-              <IconImage src={hub.icon} name={hub.name} unblur={unblur} />
+              <IconImage src={hub.icon} name={hub.name} />
             </div>
           ) : (
             <div className="w-11 h-11 rounded-xl bg-primary/20 flex items-center justify-center shrink-0 border-2 border-card shadow-lg">
@@ -1080,7 +1061,7 @@ function DiscoverHubCard({ hub, unblur }: { hub: DiscoveredHub; unblur?: boolean
           categories: [], roles: [], minPow: hub.minPow, joinMinPow: hub.joinMinPow, nsfw: hub.nsfw, discoverable: hub.discoverable,
           joinNote: hub.joinNote, eventCreatedAt: hub.event.created_at,
         }}
-        blurMedia={!unblur}
+        showMedia={showMedia}
         onCreatorClick={() => {
           setShowInfoModal(false)
           setShowCreatorProfile(true)
@@ -1141,17 +1122,17 @@ function DiscoverHubCard({ hub, unblur }: { hub: DiscoveredHub; unblur?: boolean
 }
 
 // ── Blossom image helpers ──
-function BannerImage({ src, alt, unblur }: { src: string; alt: string; unblur?: boolean }) {
+function BannerImage({ src, alt }: { src: string; alt: string }) {
   const blossom = useBlossomMedia(src)
   const [imgError, setImgError] = useState(false)
   useEffect(() => { setImgError(false) }, [src, blossom.src])
   if (blossom.loading) return <div className="w-full h-full bg-secondary animate-pulse" />
-  // Unreachable / broken banner → DEN placeholder (ours, so no blur needed)
+  // Unreachable / broken banner → DEN placeholder
   if (blossom.error || imgError) return <img src={HUB_BANNER_PLACEHOLDER} alt="" className="w-full h-full object-cover" loading="lazy" />
-  return <img src={blossom.src || src} alt={alt} className={`w-full h-full object-cover ${unblur ? '' : 'blur-lg'}`} loading="lazy" onError={() => { blossom.onImgError(); setImgError(true) }} />
+  return <img src={blossom.src || src} alt={alt} className="w-full h-full object-cover" loading="lazy" onError={() => { blossom.onImgError(); setImgError(true) }} />
 }
 
-function IconImage({ src, name, unblur }: { src: string; name: string; unblur?: boolean }) {
+function IconImage({ src, name }: { src: string; name: string }) {
   const blossom = useBlossomMedia(src)
   if (blossom.error || blossom.loading) {
     return (
@@ -1160,7 +1141,7 @@ function IconImage({ src, name, unblur }: { src: string; name: string; unblur?: 
       </div>
     )
   }
-  return <img src={blossom.src || src} alt="" className={`w-full h-full object-cover ${unblur ? '' : 'blur-sm'}`} loading="lazy" />
+  return <img src={blossom.src || src} alt="" className="w-full h-full object-cover" loading="lazy" />
 }
 
 // Parse a hub "address" the user pastes: an naddr1, a raw "36942:pubkey:dTag" coordinate, or a NIP-SHORT
@@ -1303,13 +1284,13 @@ function ManageRecommendationsModal({ open, onClose }: { open: boolean; onClose:
                     <div key={h.coord} className="relative flex items-center gap-2.5 p-1.5 rounded-lg border border-border overflow-hidden">
                       {h.banner && (
                         <div className="absolute inset-0 opacity-25 pointer-events-none">
-                          <BannerImage src={h.banner} alt="" unblur />
+                          <BannerImage src={h.banner} alt="" />
                         </div>
                       )}
                       <div className="absolute inset-0 bg-gradient-to-r from-background/75 via-background/85 to-background/95 pointer-events-none" />
                       <div className="relative w-9 h-9 rounded-md overflow-hidden shrink-0 bg-secondary">
                         {h.icon ? (
-                          <IconImage src={h.icon} name={h.name || h.dTag} unblur />
+                          <IconImage src={h.icon} name={h.name || h.dTag} />
                         ) : (
                           <div className="w-full h-full flex items-center justify-center text-xs font-semibold text-primary bg-primary/20">
                             {(h.name || h.dTag).slice(0, 2).toUpperCase()}
@@ -1487,7 +1468,7 @@ function IllegalHubGuideModal({ open, onClose }: { open: boolean; onClose: () =>
               <p>If you would rather not come across hubs like this, the default settings already protect you, you only see risky content when you choose to:</p>
               <ul className="list-disc pl-5 space-y-1.5">
                 <li>Keep <span className="text-foreground font-medium">See everything</span> off, so you only see hubs recommended by DEN, people you follow, and sources you trust.</li>
-                <li>Keep <span className="text-foreground font-medium">Unblur media</span> off, so banners and icons in the uncurated feed stay blurred.</li>
+                <li>Only hubs someone has recommended show their banner and icon. Every other hub shows a neutral placeholder, so you never load media from a hub no one has vouched for.</li>
                 <li>Keep <span className="text-foreground font-medium">NSFW hubs</span> off.</li>
               </ul>
               <p>With those left at their defaults, the curated feed is the only thing you see, and its hubs have been vouched for.</p>
@@ -1530,7 +1511,6 @@ export function DiscoverPage() {
 
   // Filter state (defaults: NSFW off, PoW 15-25, no tags)
   const [showNsfw, setShowNsfw] = useState(false)
-  const [unblurMedia, setUnblurMedia] = useState(false)
 
   // Recommendation-driven hub feed (no more Follows/Perspective tabs): hubs come from the recommendation
   // lists of your trusted sources plus, when enabled, the people you follow. "See everything" turns the
@@ -1570,14 +1550,6 @@ export function DiscoverPage() {
     setSeeEverything(true)
     setShowAllOffConfirm(false)
   }, [setSeeEverything])
-  // Unblur toggle (quick toggle + Filters modal share this). Recommended hubs are always shown sharp;
-  // this flag only unblurs the uncurated "See everything" feed, so enabling it asks for confirmation.
-  const [showUnblurConfirm, setShowUnblurConfirm] = useState(false)
-  const requestUnblur = useCallback((next: boolean) => {
-    if (next && !unblurMedia) setShowUnblurConfirm(true)
-    else setUnblurMedia(next)
-  }, [unblurMedia])
-  const confirmUnblur = useCallback(() => { setUnblurMedia(true); setShowUnblurConfirm(false) }, [])
   // NSFW toggle (quick toggle + Filters modal share this). Enabling re-confirms the viewer is an adult.
   const [showNsfwConfirm, setShowNsfwConfirm] = useState(false)
   const requestNsfw = useCallback((next: boolean) => {
@@ -1758,7 +1730,7 @@ export function DiscoverPage() {
   }, [])
 
   // (Re)load recommended hubs whenever the active author set changes. We load them even in "See everything"
-  // mode (which displays `hubs`) so the recommended-coord set is known and those hubs stay unblurred there.
+  // mode (which displays `hubs`) so the recommended-coord set is known and those hubs show their media there.
   useEffect(() => {
     if (discoverTab !== 'hubs') return
     loadRecHubs(recAuthors)
@@ -1906,7 +1878,8 @@ export function DiscoverPage() {
   // The active hub source: the resolved recommendation list, or the raw firehose (`hubs`) under See everything.
   const sourceHubs = seeEverything ? hubs : recHubs
   const sourceLoading = seeEverything ? loading : recLoading
-  // Coords of the currently recommended hubs, so they stay unblurred even inside the See everything firehose.
+  // Coords of the currently recommended hubs. Only these fetch and show their real banner/icon; every other
+  // hub (the uncurated "See everything" firehose, unrecommended search hits) shows the placeholder instead.
   const recommendedCoords = useMemo(() => new Set(recHubs.map((h) => hubCoord(h.creatorPubkey, h.dTag))), [recHubs])
 
   const filteredHubs = useMemo(() => {
@@ -2032,7 +2005,7 @@ export function DiscoverPage() {
   }, [seeEverything, currentPage, totalPages, exhausted, loading, hubs.length, loadMoreHubs])
 
   // Active filter indicator count
-  const activeFilterCount = (showNsfw ? 1 : 0) + (unblurMedia ? 1 : 0) + (requireMessagePow ? 1 : 0) + ((powMin !== 15 || powMax !== 25) ? 1 : 0) + ((joinPowMin !== 15 || joinPowMax !== 25) ? 1 : 0) + (requireJoinPow ? 1 : 0) + (filterTags.length > 0 ? 1 : 0) + (filterClientTags.length > 0 ? 1 : 0)
+  const activeFilterCount = (showNsfw ? 1 : 0) + (requireMessagePow ? 1 : 0) + ((powMin !== 15 || powMax !== 25) ? 1 : 0) + ((joinPowMin !== 15 || joinPowMax !== 25) ? 1 : 0) + (requireJoinPow ? 1 : 0) + (filterTags.length > 0 ? 1 : 0) + (filterClientTags.length > 0 ? 1 : 0)
 
   const LeftPanel = (
     <ResizablePanel id="discover" defaultWidth={280} minWidth={200} maxWidth={420} className="flex flex-col bg-background pr-2 py-2 gap-2 max-[1080px]:hidden">
@@ -2228,25 +2201,6 @@ export function DiscoverPage() {
                     </TooltipContent>
                   </Tooltip>
 
-                  {/* Unblur media (only affects "See everything"; recommended hubs always show sharp) */}
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        onClick={() => requestUnblur(!unblurMedia)}
-                        className={`flex items-center gap-2 pl-1 pr-2 py-1 rounded-full border text-[11px] font-medium transition-colors cursor-pointer
-                          ${unblurMedia ? 'bg-amber-500/10 border-amber-500/40 text-amber-400' : 'bg-secondary/60 border-border text-muted-foreground hover:text-foreground'}`}
-                      >
-                        <span className={`relative inline-block w-7 h-4 rounded-full transition-colors shrink-0 ${unblurMedia ? 'bg-amber-500' : 'bg-muted-foreground/30'}`}>
-                          <span className={`absolute top-[2px] left-0 block w-3 h-3 rounded-full bg-white shadow transition-transform ${unblurMedia ? 'translate-x-[14px]' : 'translate-x-[2px]'}`} />
-                        </span>
-                        Unblur media
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom" className="text-xs">
-                      {unblurMedia ? 'Media in See everything is shown sharp' : 'Recommended hubs are always sharp; this unblurs the uncurated feed too'}
-                    </TooltipContent>
-                  </Tooltip>
-
                   {/* Guide: what DEN is, and what to do about a hub you believe is illegal */}
                   <Tooltip>
                     <TooltipTrigger asChild>
@@ -2323,7 +2277,7 @@ export function DiscoverPage() {
                 {pagedHubs.length > 0 && (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                     {pagedHubs.map(hub => (
-                      <DiscoverHubCard key={hub.dTag} hub={hub} unblur={!seeEverything || unblurMedia || recommendedCoords.has(hubCoord(hub.creatorPubkey, hub.dTag))} />
+                      <DiscoverHubCard key={hub.dTag} hub={hub} showMedia={recommendedCoords.has(hubCoord(hub.creatorPubkey, hub.dTag))} />
                     ))}
                   </div>
                 )}
@@ -2448,22 +2402,6 @@ export function DiscoverPage() {
             </div>
           </div>
         )}
-        {showUnblurConfirm && (
-          <div className="absolute inset-0 z-50 flex items-center justify-center px-2" onClick={() => setShowUnblurConfirm(false)}>
-            <div className="absolute inset-0 bg-black/60" />
-            <div className="relative z-10 w-full max-w-sm rounded-xl border border-border bg-background shadow-2xl p-6" onClick={(e) => e.stopPropagation()}>
-              <div className="flex flex-col items-center text-center gap-3">
-                <div className="w-12 h-12 rounded-full bg-amber-500/10 flex items-center justify-center"><AlertTriangle size={24} className="text-amber-500" /></div>
-                <h3 className="text-base font-semibold text-foreground">Unblur uncurated media?</h3>
-                <p className="text-sm text-muted-foreground leading-relaxed">Recommended hubs already show sharp. This also unblurs banners and icons in "See everything", media from hubs no one has vouched for, which may be explicit or disturbing. You hold responsibility for what you see. Turn it off any time.</p>
-                <div className="flex items-center gap-2 w-full mt-1">
-                  <button onClick={() => setShowUnblurConfirm(false)} className="flex-1 px-4 py-2 rounded-lg text-sm font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/50 cursor-pointer">Cancel</button>
-                  <button onClick={confirmUnblur} className="flex-1 px-4 py-2 rounded-lg text-sm font-medium bg-amber-500 text-white hover:bg-amber-600 cursor-pointer">I understand</button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
 
       {/* Filter Modal */}
@@ -2472,8 +2410,6 @@ export function DiscoverPage() {
         onClose={() => setShowFilterModal(false)}
         showNsfw={showNsfw}
         onRequestNsfw={requestNsfw}
-        unblurMedia={unblurMedia}
-        onRequestUnblur={requestUnblur}
         powMin={powMin}
         setPowMin={setPowMin}
         powMax={powMax}
