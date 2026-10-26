@@ -25,12 +25,12 @@ import { KINDS } from '@/lib/crypto/constants'
 import { ADMIN_PUBKEY } from '@/lib/constants'
 import { useFollowStore } from '@/stores/followStore'
 import { useRecommendationStore, type TrustedSource } from '@/stores/recommendationStore'
-import { fetchRecommendationRefs, hubCoord, parseHubCoord, type HubRecRef } from '@/lib/hub/hubRecommendations'
+import { fetchRecommendationRefs, hubCoord, parseHubCoord, REC_AUTHOR_CHUNK, type HubRecRef } from '@/lib/hub/hubRecommendations'
 import { resolveShortAddress, looksLikeShortAddress, SHORT_ADDRESS_PATTERN, parseShortAddress, authorityToPubkey, resolveAuthorityPubkey, shortCodeOf } from '@/lib/nostr/nipShort'
 import { countLeadingZeroBits } from '@/lib/pow/pow'
 import { MAX_HUB_LIST_ENTRIES } from '@/lib/hub/hubLimits'
 
-import { truncateNpub, cn } from '@/lib/utils'
+import { truncateNpub, cn, chunkArray } from '@/lib/utils'
 import { nip19 } from 'nostr-tools'
 import { UserPanel } from '@/components/ui/UserPanel'
 import { ResizablePanel } from '@/components/ui/ResizablePanel'
@@ -1537,6 +1537,9 @@ export function DiscoverPage() {
   // whole feed into the raw "all discoverable" firehose.
   const [recHubs, setRecHubs] = useState<DiscoveredHub[]>([])
   const [recLoading, setRecLoading] = useState(false)
+  // Bumped on every (re)load so a superseded in-flight load (author set changed, tab left) stops writing
+  // its late chunks into the current feed.
+  const recLoadGen = useRef(0)
   const followedPubkeys = useFollowStore((s) => s.followedPubkeys)
   const trustedSources = useRecommendationStore((s) => s.trustedSources)
   const followRecs = useRecommendationStore((s) => s.followRecs)
@@ -1692,36 +1695,65 @@ export function DiscoverPage() {
   // collect the referenced hub coordinates, fetch those hubs' 36942 events, keep only discoverable ones
   // (newest per coord), and apply the same forged-preview guard as the firehose.
   const loadRecHubs = useCallback(async (authors: string[]) => {
-    if (authors.length === 0) { setRecHubs([]); return }
+    const gen = ++recLoadGen.current
+    if (authors.length === 0) { setRecHubs([]); setRecLoading(false); return }
     setRecLoading(true)
-    try {
-      const refs = await fetchRecommendationRefs(authors)
-      if (refs.length === 0) { setRecHubs([]); return }
-      const wantCoords = new Set(refs.map((r) => r.coord))
-      const pubkeys = [...new Set(refs.map((r) => r.pubkey))]
-      const dTags = [...new Set(refs.map((r) => r.dTag))]
-      // authors x #d is a superset of the exact coords; we filter down to wantCoords below.
-      const events = await fetchEvents({ kinds: [KINDS.HUB_EVENT], authors: pubkeys, '#d': dTags })
-      const maxCreatedAt = nowSeconds() + 3600
-      const byCoord = new Map<string, { hub: DiscoveredHub; createdAt: number }>()
-      for (const ev of events) {
-        if (ev.created_at > maxCreatedAt) continue // forged far-future guard
-        const d = ev.tags.find((t) => t[0] === 'd')?.[1]
-        if (!d) continue
-        const coord = `${KINDS.HUB_EVENT}:${ev.pubkey}:${d}`
-        if (!wantCoords.has(coord)) continue
-        const prev = byCoord.get(coord)
-        if (prev && ev.created_at <= prev.createdAt) continue
-        const h = parseHubEventForDiscover(ev)
-        if (!h || !h.discoverable) continue
-        byCoord.set(coord, { hub: h, createdAt: ev.created_at })
-      }
+    // Running accumulation, rendered progressively: the first chunk of recommendation authors paints its
+    // hubs immediately while the remaining chunks keep resolving and appending in the background.
+    const byCoord = new Map<string, { hub: DiscoveredHub; createdAt: number }>()
+    const resolvedCoords = new Set<string>()
+    const maxCreatedAt = nowSeconds() + 3600
+    const flush = () => {
       setRecHubs([...byCoord.values()].map((x) => x.hub).sort((a, b) => b.publishedAt - a.publishedAt))
+    }
+    // Each recommendation-author chunk kicks off a hub-event fetch; we track them so the empty-state check
+    // and the spinner only settle once every hub fetch has resolved, not just the recommendation lists.
+    const pending: Promise<void>[] = []
+    try {
+      await fetchRecommendationRefs(authors, (refs) => {
+        if (gen !== recLoadGen.current) return // superseded by a newer load
+        // Only hubs we haven't already fetched (coords can repeat across recommenders).
+        const fresh = refs.filter((r) => !resolvedCoords.has(r.coord))
+        for (const r of fresh) resolvedCoords.add(r.coord)
+        if (fresh.length === 0) return
+        const wantCoords = new Set(fresh.map((r) => r.coord))
+        const pubkeys = [...new Set(fresh.map((r) => r.pubkey))]
+        const dTags = [...new Set(fresh.map((r) => r.dTag))]
+        // authors x #d is a superset of the exact coords (filtered to wantCoords below). Chunk the pubkeys
+        // too so a popular recommender's long list never sends an oversized author filter.
+        pending.push(
+          Promise.all(
+            chunkArray(pubkeys, REC_AUTHOR_CHUNK).map((chunk) =>
+              fetchEvents({ kinds: [KINDS.HUB_EVENT], authors: chunk, '#d': dTags }),
+            ),
+          ).then((batches) => {
+            if (gen !== recLoadGen.current) return
+            let changed = false
+            for (const ev of batches.flat()) {
+              if (ev.created_at > maxCreatedAt) continue // forged far-future guard
+              const d = ev.tags.find((t) => t[0] === 'd')?.[1]
+              if (!d) continue
+              const coord = `${KINDS.HUB_EVENT}:${ev.pubkey}:${d}`
+              if (!wantCoords.has(coord)) continue
+              const prev = byCoord.get(coord)
+              if (prev && ev.created_at <= prev.createdAt) continue
+              const h = parseHubEventForDiscover(ev)
+              if (!h || !h.discoverable) continue
+              byCoord.set(coord, { hub: h, createdAt: ev.created_at })
+              changed = true
+            }
+            if (changed) flush() // progressive paint as each batch lands
+          }).catch((err) => console.error('Failed to load recommended hubs batch:', err)),
+        )
+      })
+      // Wait for the per-chunk hub fetches to settle before deciding the feed is empty.
+      await Promise.all(pending)
+      if (gen === recLoadGen.current && byCoord.size === 0) setRecHubs([])
     } catch (err) {
       console.error('Failed to load recommended hubs:', err)
-      setRecHubs([])
+      if (gen === recLoadGen.current) setRecHubs([])
     } finally {
-      setRecLoading(false)
+      if (gen === recLoadGen.current) setRecLoading(false)
     }
   }, [])
 

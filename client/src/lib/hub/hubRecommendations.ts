@@ -14,8 +14,19 @@ import { fetchReplaceable } from '@/lib/nostr/relay-pool'
 import { fetchEventsWide } from '@/lib/nostr/readRelays'
 import { publishPersonal } from '@/stores/postingBehaviourStore'
 import type { ISigner } from '@/stores/userStore'
+import { chunkArray } from '@/lib/utils'
 
 const DTAG = APP_DATA_DTAGS.HUB_RECOMMENDATIONS
+
+/**
+ * How many recommendation authors go into a single relay filter. A large follow list (1000+) sent as one
+ * REQ with ~1000 authors is the kind of oversized filter some relays reject or silently truncate, which
+ * would make recommendations come back empty or partial with no error. We chunk instead. Amethyst avoids a
+ * flat cap entirely via the outbox model (authors partitioned by their own write relays) and, where it does
+ * chunk a flat author list against one relay, uses 500; we keep it smaller so the first chunk resolves and
+ * renders sooner while the rest stream in behind it.
+ */
+export const REC_AUTHOR_CHUNK = 100
 
 export interface HubRecRef {
   coord: string       // "36942:<pubkey>:<dTag>"
@@ -74,24 +85,56 @@ export async function fetchMyRecommendations(myPubkey: string): Promise<{ refs: 
   return { refs: ev ? parseHubRecommendationRefs(ev) : [], createdAt: ev?.created_at ?? 0 }
 }
 
-/** Recommendation refs from a set of authors (newest per author), deduped across authors by coord. */
-export async function fetchRecommendationRefs(authors: string[]): Promise<HubRecRef[]> {
-  if (authors.length === 0) return []
-  const events = await fetchEventsWide({ kinds: [STANDARD_KINDS.APP_DATA], authors, '#d': [DTAG] })
+/** Parse the newest recommendation list per author out of a batch of events, into deduped refs. */
+function refsFromEvents(events: Event[]): HubRecRef[] {
   const newest = new Map<string, Event>()
   for (const e of events) {
     const prev = newest.get(e.pubkey)
     if (!prev || e.created_at > prev.created_at) newest.set(e.pubkey, e)
   }
   const seen = new Set<string>()
-  const out: HubRecRef[] = []
+  const refs: HubRecRef[] = []
   for (const e of newest.values()) {
     for (const ref of parseHubRecommendationRefs(e)) {
       if (seen.has(ref.coord)) continue
       seen.add(ref.coord)
-      out.push(ref)
+      refs.push(ref)
     }
   }
+  return refs
+}
+
+/**
+ * Recommendation refs from a set of authors (newest per author), deduped across authors by coord. Authors
+ * are chunked ({@link REC_AUTHOR_CHUNK}) so a big follow list never becomes one oversized filter. When
+ * `onBatch` is supplied it is called with each chunk's refs as that chunk resolves, so callers can render
+ * the first results while the rest load; the returned array is the full deduped set once all chunks finish.
+ */
+export async function fetchRecommendationRefs(
+  authors: string[],
+  onBatch?: (refs: HubRecRef[]) => void,
+): Promise<HubRecRef[]> {
+  if (authors.length === 0) return []
+  const seen = new Set<string>()
+  const out: HubRecRef[] = []
+  await Promise.all(
+    chunkArray(authors, REC_AUTHOR_CHUNK).map(async (chunk) => {
+      const events = await fetchEventsWide({
+        kinds: [STANDARD_KINDS.APP_DATA],
+        authors: chunk,
+        '#d': [DTAG],
+        limit: chunk.length, // one replaceable list per author at most
+      })
+      const refs = refsFromEvents(events)
+      // Dedup into the shared result (microtask bodies don't interleave, so this is race-free).
+      for (const ref of refs) {
+        if (seen.has(ref.coord)) continue
+        seen.add(ref.coord)
+        out.push(ref)
+      }
+      if (onBatch) onBatch(refs)
+    }),
+  )
   return out
 }
 
