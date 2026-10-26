@@ -215,10 +215,13 @@ export function HubInfoModal({ open, onClose, hub, showMedia, onCreatorClick }: 
             } />
           </div>
         ) : (
-          // No banner, or a hub no one has recommended: show the same placeholder the Discover card uses and
-          // never fetch its media.
-          <div className="h-32 w-full">
+          // No banner, or a hub no one has recommended: show the same placeholder the Discover card uses (and
+          // never fetch its media), with the hub name laid over it as a secondary layer.
+          <div className="h-32 w-full relative">
             <img src={HUB_BANNER_PLACEHOLDER} alt="" className="w-full h-full object-cover" loading="lazy" />
+            <div className="absolute inset-0 flex items-center justify-center px-4 pointer-events-none">
+              <span className="text-base font-bold text-white/90 text-center line-clamp-2 drop-shadow-md">{hub.name}</span>
+            </div>
           </div>
         )}
 

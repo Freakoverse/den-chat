@@ -952,6 +952,12 @@ function DiscoverHubCard({ hub, showMedia, recommenders }: { hub: DiscoveredHub;
           <img src={HUB_BANNER_PLACEHOLDER} alt="" className="w-full h-full object-cover" loading="lazy" />
         )}
         <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent" />
+        {/* On the placeholder, lay the hub name over it as a secondary layer (same idea as the icon initials). */}
+        {!(hub.banner && showMedia) && (
+          <div className="absolute inset-0 flex items-center justify-center px-3 pointer-events-none">
+            <span className="text-sm font-bold text-white/90 text-center line-clamp-2 drop-shadow-md">{hub.name || hub.dTag}</span>
+          </div>
+        )}
 
         {/* Badges — 7. No bolt icon on PoW */}
         <div className="absolute top-2 right-2 flex items-center gap-1">
@@ -1013,8 +1019,9 @@ function DiscoverHubCard({ hub, showMedia, recommenders }: { hub: DiscoveredHub;
               <IconImage src={hub.icon} name={hub.name} />
             </div>
           ) : (
-            <div className="w-11 h-11 rounded-xl bg-primary/20 flex items-center justify-center shrink-0 border-2 border-card shadow-lg">
-              <Hash size={16} className="text-primary" />
+            // No icon, or a hub no one has recommended: initials placeholder (matches the info modal).
+            <div className="w-11 h-11 rounded-xl bg-primary/20 flex items-center justify-center shrink-0 border-2 border-card shadow-lg text-xs font-semibold text-primary">
+              {(hub.name || hub.dTag).slice(0, 2).toUpperCase()}
             </div>
           )}
           <div className="flex-1 min-w-0 pt-4">
