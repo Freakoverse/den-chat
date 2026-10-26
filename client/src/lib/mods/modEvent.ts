@@ -38,10 +38,19 @@ export function getModRelays(): string[] {
   return out
 }
 
-/** DEG MODS admin (NIP-78 moderation defaults — excluded tags). */
+/**
+ * DEG MODS admin — the default moderation authority. It publishes three NIP-78 / NIP-51 lists that
+ * discovery honors: excluded tags (kind 30078, d:moderation-excluded-tags), blocked mods (kind 30078,
+ * d:blocked-mods), and blocked users (kind 10000 mute list). The authority is swappable in the Mods
+ * filters, so treat this only as the default (see modModerationStore).
+ */
 export const MOD_ADMIN_PUBKEY = 'f4bf1fb5ba8be839f70c7331733e309f780822b311f63e01f9dc8abbb428f8d5'
 export const MOD_ADMIN_KIND = 30078
 export const MODERATION_EXCLUDED_TAGS_DTAG = 'moderation-excluded-tags'
+/** Admin's blocked-mods list: `a` tags are mod coords; a third element `block` marks view-blocked. */
+export const BLOCKED_MODS_DTAG = 'blocked-mods'
+/** NIP-51 mute list (kind 10000): the admin's blocked users. */
+export const MOD_MUTE_LIST_KIND = 10000
 
 export interface Mod {
   id: string

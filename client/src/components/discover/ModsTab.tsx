@@ -9,7 +9,7 @@ import { useEscToClose } from '@/hooks/useEscToClose'
 import { nip19 } from 'nostr-tools'
 import {
   Package, Loader2, ChevronLeft, ChevronRight, SlidersHorizontal, X, ExternalLink,
-  Plus, Repeat2, Gamepad2, ImageOff,
+  Plus, Repeat2, Gamepad2, ImageOff, AlertTriangle, ShieldAlert, EyeOff,
 } from 'lucide-react'
 import { cn, truncateNpub, openExternalUrl, formatTimestamp } from '@/lib/utils'
 import { BlossomImage } from '@/components/ui/BlossomImage'
@@ -18,8 +18,9 @@ import { useProfileCache } from '@/hooks/useProfileCache'
 import { usePreferencesStore } from '@/stores/preferencesStore'
 import { useModFeed } from '@/hooks/useModFeed'
 import { applyModFilters } from '@/lib/mods/filterMods'
-import { buildModOpenUrl, type Mod, MOD_ADMIN_PUBKEY, MOD_ADMIN_KIND, MODERATION_EXCLUDED_TAGS_DTAG, getModRelays } from '@/lib/mods/modEvent'
-import { fetchEventsFromRelays } from '@/lib/nostr/relay-pool'
+import { buildModOpenUrl, type Mod, MOD_ADMIN_PUBKEY } from '@/lib/mods/modEvent'
+import { useModModerationStore } from '@/stores/modModerationStore'
+import { useModerationFilter, useModStatus } from '@/hooks/useModModeration'
 import {
   useModFiltersStore, useModOpenTargetsStore, BUILTIN_SOURCES, UNTAGGED, DEFAULT_MIN_POW,
   type NsfwMode, type RepostMode, type EmulationMode, type SourceEntry,
@@ -38,29 +39,22 @@ function useModAuthor(pubkey: string) {
 
 export function ModsTab() {
   const feed = useModFeed()
-  const { nsfwMode, sources, searchTags, excludedTags, repostMode, emulationMode, minPow, applyExcludedTagsDefaults } = useModFiltersStore()
+  const { nsfwMode, sources, searchTags, excludedTags, repostMode, emulationMode, minPow } = useModFiltersStore()
   const [page, setPage] = useState(1)
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [openMod, setOpenMod] = useState<Mod | null>(null)
 
-  // Auto-fill excluded tags from the DEG MODS admin moderation list (NIP-78),
-  // unless the user has customized them.
-  useEffect(() => {
-    let cancelled = false
-    fetchEventsFromRelays(getModRelays(), { kinds: [MOD_ADMIN_KIND], authors: [MOD_ADMIN_PUBKEY], '#d': [MODERATION_EXCLUDED_TAGS_DTAG], limit: 1 })
-      .then((events) => {
-        if (cancelled || events.length === 0) return
-        const newest = events.sort((a, b) => b.created_at - a.created_at)[0]
-        const tags = newest.tags.filter((t) => t[0] === 't' && t[1]).map((t) => t[1].toLowerCase())
-        if (tags.length > 0) applyExcludedTagsDefaults(tags)
-      })
-      .catch(() => {})
-    return () => { cancelled = true }
-  }, [applyExcludedTagsDefaults])
+  // Sync the moderation authority's lists (excluded tags, blocked mods, blocked users) from the mod
+  // relays, re-running when the authority is swapped. Soft/hard moderation then act on these.
+  const syncModeration = useModModerationStore((s) => s.syncModeration)
+  const adminPubkey = useModModerationStore((s) => s.adminPubkey)
+  useEffect(() => { void syncModeration() }, [syncModeration, adminPubkey])
 
+  // Soft moderation: drop the authority's blocked mods/users from the listing (author-exempt).
+  const moderate = useModerationFilter()
   const filtered = useMemo(
-    () => applyModFilters(feed.mods, { nsfwMode, minPow, sources, searchTags, excludedTags, repostMode, emulationMode }),
-    [feed.mods, nsfwMode, minPow, sources, searchTags, excludedTags, repostMode, emulationMode],
+    () => moderate(applyModFilters(feed.mods, { nsfwMode, minPow, sources, searchTags, excludedTags, repostMode, emulationMode })),
+    [moderate, feed.mods, nsfwMode, minPow, sources, searchTags, excludedTags, repostMode, emulationMode],
   )
 
   // Discovered client sources (for the "add source" helper).
@@ -176,7 +170,23 @@ export function ModsTab() {
 export function ModCard({ mod, onOpen, compact }: { mod: Mod; onOpen: () => void; compact?: boolean }) {
   const author = useModAuthor(mod.pubkey)
   const showMedia = usePreferencesStore((s) => s.showMedia)
+  const { moderated, blockRender } = useModStatus(mod.aTag, mod.pubkey)
   const nsfw = !!mod.contentWarning
+
+  // Hard moderation: the authority marked this mod view-blocked. Show a notice instead of its content.
+  if (blockRender) {
+    return (
+      <div className="flex flex-col rounded-xl border border-red-500/30 bg-red-500/5 overflow-hidden">
+        <div className="relative w-full aspect-video flex items-center justify-center bg-secondary/40">
+          <div className="flex flex-col items-center gap-1.5 text-center px-4">
+            <ShieldAlert size={22} className="text-red-400" />
+            <span className="text-xs font-semibold text-foreground">Hidden by moderation</span>
+            <span className="text-[10px] text-muted-foreground">Turn off hard moderation in Filters to view.</span>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <button onClick={onOpen}
@@ -196,6 +206,7 @@ export function ModCard({ mod, onOpen, compact }: { mod: Mod; onOpen: () => void
         )}
         {nsfw && <span className="absolute top-2 left-2 px-1.5 py-0.5 rounded bg-red-500/90 text-white text-[10px] font-semibold">NSFW</span>}
         {mod.isRepost && <span className="absolute top-2 right-2 flex items-center gap-1 px-1.5 py-0.5 rounded bg-black/60 text-white/90 text-[10px]"><Repeat2 size={10} /> Repost</span>}
+        {moderated && <span className="absolute bottom-2 left-2 flex items-center gap-1 px-1.5 py-0.5 rounded bg-yellow-500/90 text-black text-[10px] font-semibold"><EyeOff size={10} /> Moderated</span>}
       </div>
 
       {/* Content */}
@@ -347,6 +358,9 @@ function ModFiltersModal({ availableClients, onClose }: { availableClients: stri
             </div>
           </div>
 
+          {/* Admin moderation: soft/hard toggles + a swappable moderation authority */}
+          <ModerationEditor />
+
           {/* DEG MODS source relays */}
           <DegRelaysEditor />
 
@@ -451,6 +465,82 @@ function SourcesEditor({ availableClients }: { availableClients: string[] }) {
           placeholder="Add a source (client name)…"
           className="flex-1 h-8 px-2.5 rounded-md text-xs bg-muted/30 border border-border text-foreground placeholder:text-muted-foreground focus:outline-none" />
         <button onClick={() => add(draft)} disabled={!draft.trim()} className="h-8 px-2.5 rounded-md text-xs bg-secondary/60 text-foreground hover:bg-secondary disabled:opacity-40 cursor-pointer"><Plus size={13} /></button>
+      </div>
+    </div>
+  )
+}
+
+function ModToggleRow({ label, desc, checked, onChange }: { label: string; desc: string; checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-md bg-secondary/40 border border-border">
+      <div className="min-w-0">
+        <div className="text-xs text-foreground">{label}</div>
+        <div className="text-[10px] text-muted-foreground leading-snug">{desc}</div>
+      </div>
+      <button onClick={() => onChange(!checked)}
+        className={cn('relative w-9 h-5 rounded-full transition-colors shrink-0 cursor-pointer', checked ? 'bg-primary' : 'bg-muted-foreground/30')}>
+        <div className={cn('absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform', checked ? 'translate-x-[18px]' : 'translate-x-[2px]')} />
+      </button>
+    </div>
+  )
+}
+
+function ModerationEditor() {
+  const { adminPubkey, softModeration, hardModeration, setSoftModeration, setHardModeration, setAdminPubkey, resetAdminPubkey } = useModModerationStore()
+  const [draft, setDraft] = useState('')
+  const [err, setErr] = useState<string | null>(null)
+
+  const currentNpub = useMemo(() => { try { return nip19.npubEncode(adminPubkey) } catch { return adminPubkey } }, [adminPubkey])
+  const isDefault = adminPubkey === MOD_ADMIN_PUBKEY
+
+  const apply = () => {
+    const v = draft.trim()
+    if (!v) return
+    let hex = ''
+    try {
+      if (v.startsWith('npub1')) { const d = nip19.decode(v); if (d.type === 'npub') hex = d.data as string }
+      else if (/^[0-9a-f]{64}$/i.test(v)) hex = v.toLowerCase()
+    } catch { /* invalid — handled below */ }
+    if (!hex) { setErr('Enter a valid npub or 64-character hex pubkey.'); return }
+    setErr(null)
+    setAdminPubkey(hex)
+    setDraft('')
+  }
+
+  return (
+    <div className="space-y-2.5">
+      <div className="text-xs font-medium text-foreground">Admin moderation</div>
+      <div className="text-[11px] text-muted-foreground -mt-1">
+        A moderation authority publishes lists of hidden mods and users. You can opt out, or follow a different authority, at your own risk.
+      </div>
+
+      <div className="flex flex-col gap-1.5 pt-1">
+        <ModToggleRow label="Soft moderation" desc="Hide this authority's flagged mods and users from the listing." checked={softModeration} onChange={setSoftModeration} />
+        <ModToggleRow label="Hard moderation" desc="Block rendering of mods the authority marked view-blocked, even when shown." checked={hardModeration} onChange={setHardModeration} />
+      </div>
+
+      {(!softModeration || !hardModeration) && (
+        <div className="flex items-start gap-2 rounded-lg bg-yellow-500/10 border border-yellow-500/20 px-3 py-2">
+          <AlertTriangle size={13} className="text-yellow-500 shrink-0 mt-0.5" />
+          <p className="text-[11px] text-yellow-400/90 leading-snug">With moderation off you may see mods flagged as spam, non-mods, illegal, or otherwise removed from discovery.</p>
+        </div>
+      )}
+
+      <div className="pt-1">
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] font-medium text-foreground">Moderation authority</span>
+          {!isDefault && <button onClick={resetAdminPubkey} className="text-[10px] text-primary hover:underline cursor-pointer">Reset to default</button>}
+        </div>
+        <div className="mt-1 text-[10px] font-mono text-muted-foreground break-all">
+          {currentNpub}{isDefault && <span className="ml-1">(DEG MODS)</span>}
+        </div>
+        <div className="flex gap-2 mt-1.5">
+          <input value={draft} onChange={(e) => { setDraft(e.target.value); setErr(null) }} onKeyDown={(e) => { if (e.key === 'Enter') apply() }}
+            placeholder="npub1… or hex pubkey"
+            className="flex-1 h-8 px-2.5 rounded-md text-xs bg-muted/30 border border-border text-foreground placeholder:text-muted-foreground focus:outline-none" />
+          <button onClick={apply} disabled={!draft.trim()} className="h-8 px-2.5 rounded-md text-xs bg-secondary/60 text-foreground hover:bg-secondary disabled:opacity-40 cursor-pointer">Set</button>
+        </div>
+        {err && <p className="text-[10px] text-red-400 mt-1">{err}</p>}
       </div>
     </div>
   )
