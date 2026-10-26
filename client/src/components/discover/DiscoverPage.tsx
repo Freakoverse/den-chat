@@ -1584,15 +1584,37 @@ function IllegalHubGuideModal({ open, onClose }: { open: boolean; onClose: () =>
   )
 }
 
+// Session-scoped cache of the fetched discover feeds. AppLayout renders DiscoverPage in two separate
+// subtrees (mobile vs desktop), so crossing the responsive breakpoint REMOUNTS this component. Without a
+// cache every remount (e.g. a window resize) refetches every hub. We hydrate state from here on mount and
+// only hit relays when the cache is empty or stale (or the recommendation author set changed). A manual
+// refresh or the TTL still gets fresh data. Lives for the browser session; not persisted.
+interface DiscoverFeedCache {
+  hubs: DiscoveredHub[]
+  exhausted: boolean
+  hubsAt: number // when the firehose was last fetched (0 = never)
+  currentPage: number
+  recHubs: DiscoveredHub[]
+  recommenders: Record<string, string[]>
+  recKey: string // signature of the recommendation author set the cached recs are for
+  recAt: number  // when recommendations were last fetched (0 = never)
+}
+const discoverFeedCache: DiscoverFeedCache = {
+  hubs: [], exhausted: false, hubsAt: 0, currentPage: 1,
+  recHubs: [], recommenders: {}, recKey: '', recAt: 0,
+}
+const DISCOVER_CACHE_TTL_MS = 5 * 60 * 1000
+const recAuthorsSig = (authors: string[]) => [...authors].sort().join(',')
+
 // ── Main Page Component ──
 export function DiscoverPage() {
   const [discoverTab, setDiscoverTab] = useState<DiscoverTab>('hubs')
-  const [hubs, setHubs] = useState<DiscoveredHub[]>([])
+  const [hubs, setHubs] = useState<DiscoveredHub[]>(() => discoverFeedCache.hubs)
   const [loading, setLoading] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
   const [searching, setSearching] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
-  const [exhausted, setExhausted] = useState(false) // true when relays have no more results
+  const [exhausted, setExhausted] = useState(() => discoverFeedCache.exhausted) // true when relays have no more results
   const loadingMoreRef = useRef(false)
 
   // Reactive block + WoT state for filtering
@@ -1606,11 +1628,11 @@ export function DiscoverPage() {
   // Recommendation-driven hub feed (no more Follows/Perspective tabs): hubs come from the recommendation
   // lists of your trusted sources plus, when enabled, the people you follow. "See everything" turns the
   // whole feed into the raw "all discoverable" firehose.
-  const [recHubs, setRecHubs] = useState<DiscoveredHub[]>([])
+  const [recHubs, setRecHubs] = useState<DiscoveredHub[]>(() => discoverFeedCache.recHubs)
   const [recLoading, setRecLoading] = useState(false)
   // hub coord -> the recommender pubkeys who vouch for it, used by the "Recommended" pill / who-recommended
   // modal. Accumulated as recommendation chunks resolve in loadRecHubs.
-  const [recommendersByCoord, setRecommendersByCoord] = useState<Record<string, string[]>>({})
+  const [recommendersByCoord, setRecommendersByCoord] = useState<Record<string, string[]>>(() => discoverFeedCache.recommenders)
   // Bumped on every (re)load so a superseded in-flight load (author set changed, tab left) stops writing
   // its late chunks into the current feed.
   const recLoadGen = useRef(0)
@@ -1674,7 +1696,14 @@ export function DiscoverPage() {
   const [showFilterModal, setShowFilterModal] = useState(false)
 
   // Pagination
-  const [currentPage, setCurrentPage] = useState(1)
+  const [currentPage, setCurrentPage] = useState(() => discoverFeedCache.currentPage)
+
+  // Keep the session cache in sync with the live feeds so a remount (mobile<->desktop breakpoint) restores
+  // them without refetching. Timestamps are stamped by the loaders, not here, so freshness tracks the last
+  // real fetch rather than the last resize.
+  useEffect(() => { discoverFeedCache.hubs = hubs; discoverFeedCache.exhausted = exhausted }, [hubs, exhausted])
+  useEffect(() => { discoverFeedCache.currentPage = currentPage }, [currentPage])
+  useEffect(() => { discoverFeedCache.recHubs = recHubs; discoverFeedCache.recommenders = recommendersByCoord }, [recHubs, recommendersByCoord])
 
   // Deduplicate and merge new events into existing hubs
   const mergeHubs = useCallback((existing: DiscoveredHub[], newEvents: Event[], skipDiscoverableCheck = false): DiscoveredHub[] => {
@@ -1739,6 +1768,7 @@ export function DiscoverPage() {
 
   // Initial load
   const loadHubs = useCallback(async () => {
+    discoverFeedCache.hubsAt = Date.now() // mark a real firehose fetch so remounts reuse it within the TTL
     setLoading(true)
     setExhausted(false)
     try {
@@ -1762,6 +1792,9 @@ export function DiscoverPage() {
   // (newest per coord), and apply the same forged-preview guard as the firehose.
   const loadRecHubs = useCallback(async (authors: string[]) => {
     const gen = ++recLoadGen.current
+    // Mark a real recommendation fetch for this author set so a remount reuses it within the TTL.
+    discoverFeedCache.recKey = recAuthorsSig(authors)
+    discoverFeedCache.recAt = Date.now()
     if (authors.length === 0) { setRecHubs([]); setRecommendersByCoord({}); setRecLoading(false); return }
     setRecLoading(true)
     // Running accumulation, rendered progressively: the first chunk of recommendation authors paints its
@@ -1837,8 +1870,13 @@ export function DiscoverPage() {
 
   // (Re)load recommended hubs whenever the active author set changes. We load them even in "See everything"
   // mode (which displays `hubs`) so the recommended-coord set is known and those hubs show their media there.
+  // A remount with the same author set and a fresh cache reuses the cached recs instead of refetching.
   useEffect(() => {
     if (discoverTab !== 'hubs') return
+    const fresh = discoverFeedCache.recAt > 0
+      && discoverFeedCache.recKey === recAuthorsSig(recAuthors)
+      && Date.now() - discoverFeedCache.recAt < DISCOVER_CACHE_TTL_MS
+    if (fresh) return
     loadRecHubs(recAuthors)
   }, [discoverTab, recAuthors, loadRecHubs])
 
@@ -1960,6 +1998,11 @@ export function DiscoverPage() {
   }, [searchQuery, searching, filterTags, powMin, powMax, mergeHubs])
 
   useEffect(() => {
+    // Reuse a fresh firehose cache across a remount (e.g. a mobile<->desktop resize) instead of refetching.
+    const fresh = discoverFeedCache.hubsAt > 0
+      && discoverFeedCache.hubs.length > 0
+      && Date.now() - discoverFeedCache.hubsAt < DISCOVER_CACHE_TTL_MS
+    if (fresh) return
     loadHubs()
   }, [loadHubs])
 
