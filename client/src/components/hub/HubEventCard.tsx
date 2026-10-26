@@ -293,7 +293,14 @@ export function HubEventCard({ identifier, pubkey, relays }: HubEventCardProps) 
   const visibleTags = hubData.tags?.slice(0, 3) || []
   const hiddenTagCount = (hubData.tags?.length || 0) - 3
 
-  const creatorName = creatorProfile?.display_name || creatorProfile?.name || truncateNpub(nip19.npubEncode(pubkey), 10)
+  // A real display name, if the profile has one. When it is missing we fall back to the shortened
+  // address below and skip the secondary npub chip (no point showing the address twice).
+  const creatorDisplayName = creatorProfile?.display_name || creatorProfile?.name || ''
+  const creatorNpub = nip19.npubEncode(pubkey)
+  // "npub" + 2 chars ... last 4, e.g. npub1q...xyz9. Shown beside the name so you can always eyeball
+  // the author even when the name is squished (the name truncates, this chip does not).
+  const creatorNpubShort = `${creatorNpub.slice(0, 6)}...${creatorNpub.slice(-4)}`
+  const creatorName = creatorDisplayName || truncateNpub(creatorNpub, 10)
 
   return (
     <div
@@ -363,7 +370,10 @@ export function HubEventCard({ identifier, pubkey, relays }: HubEventCardProps) 
           )}
           <div className="flex-1 min-w-0">
             <h4 className="text-sm font-semibold text-foreground truncate">{hubData.name}</h4>
-            <p className="text-[10px] text-muted-foreground">by {creatorName}</p>
+            <p className="text-[10px] text-muted-foreground flex items-baseline gap-1 min-w-0">
+              <span className="truncate">by {creatorName}</span>
+              {creatorDisplayName && <span className="shrink-0">({creatorNpubShort})</span>}
+            </p>
           </div>
         </div>
 

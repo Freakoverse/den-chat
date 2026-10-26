@@ -10,7 +10,7 @@
  * Fetches kind 36942 events with #f=on from general relays.
  */
 
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo, type ReactNode } from 'react'
 import { HUB_BANNER_PLACEHOLDER } from '@/lib/constants'
 import { useEscToClose } from '@/hooks/useEscToClose'
 import { useHubStore, type HubData } from '@/stores/hubStore'
@@ -834,7 +834,14 @@ function DiscoverHubCard({ hub, showMedia, recommenders }: { hub: DiscoveredHub;
   // LKH tree) or our pubkey is a member leaf on our page of the tree.
   const isMember = !!hubSecret || (!!myPubkey && (hubMembers?.some(m => m.pubkey === myPubkey) ?? false))
   const creatorProfile = getProfile(hub.creatorPubkey)
-  const creatorName = creatorProfile?.display_name || creatorProfile?.name || truncateNpub(nip19.npubEncode(hub.creatorPubkey), 10)
+  // A real display name, if the profile has one. When it is missing we fall back to the shortened
+  // address below and skip the secondary npub chip (no point showing the address twice).
+  const creatorDisplayName = creatorProfile?.display_name || creatorProfile?.name || ''
+  const creatorNpub = nip19.npubEncode(hub.creatorPubkey)
+  // "npub" + 2 chars ... last 4, e.g. npub1q...xyz9. Shown beside the name so you can always eyeball
+  // the author even when the name is squished (the name truncates, this chip does not).
+  const creatorNpubShort = `${creatorNpub.slice(0, 6)}...${creatorNpub.slice(-4)}`
+  const creatorName = creatorDisplayName || truncateNpub(creatorNpub, 10)
 
   const handleShowInfo = () => {
     setShowInfoModal(true)
@@ -943,7 +950,7 @@ function DiscoverHubCard({ hub, showMedia, recommenders }: { hub: DiscoveredHub;
   }
 
   return (
-    <div className="rounded-xl border border-border overflow-hidden bg-card hover:border-primary/30 transition-all duration-200 group flex flex-col">
+    <div className="rounded-xl overflow-hidden bg-secondary/30 shadow-md transition-all duration-200 group flex flex-col">
       {/* Banner */}
       <div className="relative h-28 overflow-hidden bg-gradient-to-br from-primary/20 via-primary/5 to-secondary">
         {hub.banner && showMedia ? (
@@ -1033,7 +1040,10 @@ function DiscoverHubCard({ hub, showMedia, recommenders }: { hub: DiscoveredHub;
           )}
           <div className="flex-1 min-w-0 pt-4">
             <h4 className="text-sm font-semibold text-foreground truncate">{hub.name}</h4>
-            <p className="text-[10px] text-muted-foreground truncate">by {creatorName}</p>
+            <p className="text-[10px] text-muted-foreground flex items-baseline gap-1 min-w-0">
+              <span className="truncate">by {creatorName}</span>
+              {creatorDisplayName && <span className="shrink-0">({creatorNpubShort})</span>}
+            </p>
           </div>
         </div>
 
@@ -1526,23 +1536,112 @@ function TrustedSourcesModal({ open, onClose }: { open: boolean; onClose: () => 
   )
 }
 
-// Explains DEN's neutral-client stance and how to deal with hubs a user believes are illegal.
-function IllegalHubGuideModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const [tab, setTab] = useState<'explanation' | 'cope' | 'reporting'>('explanation')
+// Persisted (localStorage) advanced override that renders media for EVERY hub, not just recommended ones.
+// Off by default; it lives behind a display:none, acknowledgement-gated control in AllHubsInfoModal.
+const FORCE_ALL_MEDIA_KEY = 'den-discover-force-all-media'
+// The exact phrase a user must type to arm the override toggle. One place to edit the wording.
+const MEDIA_ACK_PHRASE = "I'm responsible for potentially downloading illegal media material"
+function readForceAllMedia(): boolean {
+  try { return localStorage.getItem(FORCE_ALL_MEDIA_KEY) === '1' } catch { return false }
+}
+function writeForceAllMedia(v: boolean): void {
+  try { if (v) localStorage.setItem(FORCE_ALL_MEDIA_KEY, '1'); else localStorage.removeItem(FORCE_ALL_MEDIA_KEY) } catch { /* storage unavailable */ }
+}
+
+// Info + settings behind the "Show all hubs" gear. Two tabs:
+//  - "Illegal Hub?": DEN's neutral-client stance as three expandable points.
+//  - "Loading Images?": why unrecommended hubs show placeholders, the build-it-yourself escape hatch, and
+//    an acknowledgement-gated in-app override to render all media. That override is intentionally hidden
+//    (display:none) so only a user who inspects and un-hides the DOM, i.e. a technical user, can arm it.
+function AllHubsInfoModal({
+  open, onClose, forceAllMedia, onForceAllMediaChange,
+}: {
+  open: boolean
+  onClose: () => void
+  forceAllMedia: boolean
+  onForceAllMediaChange: (v: boolean) => void
+}) {
+  const [tab, setTab] = useState<'illegal' | 'images'>('illegal')
+  const [openPoints, setOpenPoints] = useState<Set<string>>(() => new Set(['client']))
+  const [advanced, setAdvanced] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const [ack, setAck] = useState('')
   useEscToClose(onClose, open)
-  useEffect(() => { if (open) setTab('explanation') }, [open])
+  useEffect(() => {
+    if (open) { setTab('illegal'); setOpenPoints(new Set(['client'])); setAdvanced(false); setCopied(false); setAck('') }
+  }, [open])
   if (!open) return null
+
+  const togglePoint = (id: string) => setOpenPoints((prev) => {
+    const next = new Set(prev)
+    if (next.has(id)) next.delete(id); else next.add(id)
+    return next
+  })
+  const copyPrompt = async () => {
+    try { await navigator.clipboard.writeText(hubDiscoveryPrompt); setCopied(true); setTimeout(() => setCopied(false), 2000) } catch { /* clipboard unavailable */ }
+  }
+
+  const ackMatches = ack.trim() === MEDIA_ACK_PHRASE
+  // The toggle can be flipped ON only once the acknowledgement matches; it can always be flipped OFF.
+  const toggleDisabled = !ackMatches && !forceAllMedia
+
+  const POINTS: { id: string; title: string; body: ReactNode }[] = [
+    {
+      id: 'client',
+      title: 'DEN is a client, not a host',
+      body: (
+        <>
+          <p>DEN Chat is a <span className="text-foreground font-medium">client</span>, a viewer for a permissionless, decentralized network, the same way a web browser like Brave, Firefox, or Chrome is a viewer for the web.</p>
+          <p>A browser does not block or delete the websites you visit, and its maker is not responsible for what those sites host. It simply renders what already exists on the network.</p>
+          <p>DEN works the same way. It does not host, control, or moderate hubs. Every hub is created by its owner and stored on independent Nostr relays and Blossom servers that DEN does not run or operate.</p>
+          <p>So just as Brave cannot take down a website, DEN cannot take down a hub. Turning on <span className="text-foreground font-medium">Show all hubs</span> shows the raw network with no curation, which is why it is off by default and asks you to confirm.</p>
+        </>
+      ),
+    },
+    {
+      id: 'avoid',
+      title: 'How to avoid hubs like this',
+      body: (
+        <>
+          <p>If you would rather not come across hubs like this, the default settings already protect you, you only see risky content when you choose to:</p>
+          <ul className="list-disc pl-5 space-y-1.5">
+            <li>Keep <span className="text-foreground font-medium">Show all hubs</span> off, so you only see hubs recommended by DEN, people you follow, and sources you trust.</li>
+            <li>Only hubs someone has recommended show their banner and icon. Every other hub shows a neutral placeholder, so you never load media from a hub no one has vouched for.</li>
+            <li>Keep <span className="text-foreground font-medium">NSFW hubs</span> off.</li>
+          </ul>
+          <p>With those left at their defaults, the curated feed is the only thing you see, and its hubs have been vouched for.</p>
+        </>
+      ),
+    },
+    {
+      id: 'report',
+      title: 'How to report a hub',
+      body: (
+        <>
+          <p>Report it to the parties with the authority to act, <span className="text-foreground font-medium">not to DEN</span>. DEN cannot remove a hub any more than a web browser can remove a website.</p>
+          <p>Work out where the hub and its media actually live, then report the details to those operators:</p>
+          <ul className="list-disc pl-5 space-y-1.5">
+            <li>The <span className="text-foreground font-medium">Nostr relays</span> carrying the hub's events.</li>
+            <li>The <span className="text-foreground font-medium">Blossom servers</span> hosting its images and files.</li>
+            <li>Any <span className="text-foreground font-medium">domain or hosting provider / DNS registrar</span> behind a link it uses.</li>
+            <li>The relevant <span className="text-foreground font-medium">legal authorities</span>.</li>
+          </ul>
+          <p>Reporting to the hosts and registrars is what actually gets content taken down. This is exactly how you would handle finding such content through a web browser: you report it to whoever hosts it and to the authorities, not to the maker of the browser.</p>
+        </>
+      ),
+    },
+  ]
 
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center px-2">
       <div className="absolute inset-0 bg-black/60" onClick={onClose} />
       <div className="relative z-10 w-full max-w-md max-h-[85vh] flex flex-col rounded-xl border border-border bg-background shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
-          <h2 className="font-semibold text-foreground">Found a hub you think is illegal?</h2>
+          <h2 className="font-semibold text-foreground">Show all hubs</h2>
           <button onClick={onClose} className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary cursor-pointer"><X size={16} /></button>
         </div>
         <div className="flex items-center gap-1 px-3 pt-3 shrink-0">
-          {([['explanation', 'Explanation'], ['cope', 'Cope'], ['reporting', 'Reporting']] as const).map(([id, label]) => (
+          {([['illegal', 'Illegal Hub?'], ['images', 'Loading Images?']] as const).map(([id, label]) => (
             <button
               key={id}
               onClick={() => setTab(id)}
@@ -1552,97 +1651,84 @@ function IllegalHubGuideModal({ open, onClose }: { open: boolean; onClose: () =>
             </button>
           ))}
         </div>
-        <div className="px-5 py-4 overflow-y-auto text-sm text-muted-foreground leading-relaxed space-y-3">
-          {tab === 'explanation' && (
-            <>
-              <p>DEN Chat is a <span className="text-foreground font-medium">client</span>, a viewer for a permissionless, decentralized network, the same way a web browser like Brave, Firefox, or Chrome is a viewer for the web.</p>
-              <p>A browser does not block or delete the websites you visit, and its maker is not responsible for what those sites host. It simply renders what already exists on the network.</p>
-              <p>DEN works the same way. It does not host, control, or moderate hubs. Every hub is created by its owner and stored on independent Nostr relays and Blossom servers that DEN does not run or operate.</p>
-              <p>So just as Brave cannot take down a website, DEN cannot take down a hub. Turning on <span className="text-foreground font-medium">See everything</span> shows the raw network with no curation, which is why it is off by default and asks you to confirm.</p>
-            </>
-          )}
-          {tab === 'cope' && (
-            <>
-              <p>If you would rather not come across hubs like this, the default settings already protect you, you only see risky content when you choose to:</p>
-              <ul className="list-disc pl-5 space-y-1.5">
-                <li>Keep <span className="text-foreground font-medium">See everything</span> off, so you only see hubs recommended by DEN, people you follow, and sources you trust.</li>
-                <li>Only hubs someone has recommended show their banner and icon. Every other hub shows a neutral placeholder, so you never load media from a hub no one has vouched for.</li>
-                <li>Keep <span className="text-foreground font-medium">NSFW hubs</span> off.</li>
-              </ul>
-              <p>With those left at their defaults, the curated feed is the only thing you see, and its hubs have been vouched for.</p>
-            </>
-          )}
-          {tab === 'reporting' && (
-            <>
-              <p>Report it to the parties with the authority to act, <span className="text-foreground font-medium">not to DEN</span>. DEN cannot remove a hub any more than a web browser can remove a website.</p>
-              <p>Work out where the hub and its media actually live, then report the details to those operators:</p>
-              <ul className="list-disc pl-5 space-y-1.5">
-                <li>The <span className="text-foreground font-medium">Nostr relays</span> carrying the hub's events.</li>
-                <li>The <span className="text-foreground font-medium">Blossom servers</span> hosting its images and files.</li>
-                <li>Any <span className="text-foreground font-medium">domain or hosting provider / DNS registrar</span> behind a link it uses.</li>
-                <li>The relevant <span className="text-foreground font-medium">legal authorities</span>.</li>
-              </ul>
-              <p>Reporting to the hosts and registrars is what actually gets content taken down. This is exactly how you would handle finding such content through a web browser: you report it to whoever hosts it and to the authorities, not to the maker of the browser.</p>
-            </>
-          )}
-        </div>
-      </div>
-    </div>
-  )
-}
 
-// Explains why only recommended hubs render their banner/icon, with an advanced "build it yourself" escape
-// hatch (a copy-pasteable prompt to generate a standalone viewer).
-function ImagesInfoModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const [advanced, setAdvanced] = useState(false)
-  const [copied, setCopied] = useState(false)
-  useEscToClose(onClose, open)
-  useEffect(() => { if (!open) { setAdvanced(false); setCopied(false) } }, [open])
-  if (!open) return null
-  const copyPrompt = async () => {
-    try {
-      await navigator.clipboard.writeText(hubDiscoveryPrompt)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    } catch { /* clipboard unavailable */ }
-  }
-  return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center px-2">
-      <div className="absolute inset-0 bg-black/60" onClick={onClose} />
-      <div className="relative z-10 w-full max-w-md max-h-[85vh] flex flex-col rounded-xl border border-border bg-background shadow-2xl" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
-          <h2 className="font-semibold text-foreground">Why some images don't load</h2>
-          <button onClick={onClose} className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary cursor-pointer"><X size={16} /></button>
-        </div>
         <div className="px-5 py-4 overflow-y-auto text-sm text-muted-foreground leading-relaxed space-y-3">
-          <p>DEN only renders the banner and icon of hubs that come from the recommendations of people you follow or sources you trust. Every other hub shows a neutral placeholder, and its media is never fetched.</p>
-          <p>Decentralized systems are still widely misunderstood, by individuals and legal systems alike. Automatically pulling in images from hubs no one has vouched for invites misplaced responsibility and criticism onto DEN for content it neither hosts nor controls, and it can scare people away from the network entirely. So we opted out of rendering that media by default, which keeps the client neutral and keeps you in control of what you load onto your screen.</p>
-          <p>DEN is a viewer for a permissionless network, the same way a web browser is for the web. It cannot host, moderate, or remove what lives on the independent relays and Blossom servers behind each hub.</p>
-
-          {/* Advanced escape hatch: a prompt to build your own full-media viewer */}
-          <div className="rounded-lg border border-border overflow-hidden">
-            <button
-              onClick={() => setAdvanced((v) => !v)}
-              className="flex items-center justify-between w-full px-3 py-2.5 text-left text-xs font-medium text-foreground hover:bg-secondary/50 transition-colors cursor-pointer"
-            >
-              <span>Advanced: see them anyway</span>
-              <ChevronDown size={14} className={`shrink-0 transition-transform ${advanced ? 'rotate-180' : ''}`} />
-            </button>
-            {advanced && (
-              <div className="px-3 pb-3 pt-1 space-y-2.5 border-t border-border">
-                <p className="text-xs">If you still want to browse every discoverable hub with its real banner and icon, you can have an AI build you a standalone single-file HTML page for it: copy the prompt below, paste it into any capable AI, and open the file it produces. <span className="text-amber-500 font-medium">Do this at your own risk.</span> That page renders media from hubs no one has vouched for, which may be explicit or disturbing, and it is entirely separate from DEN.</p>
-                <div className="relative">
+          {tab === 'illegal' && (
+            <div className="space-y-2">
+              {POINTS.map((pt) => (
+                <div key={pt.id} className="rounded-lg border border-border overflow-hidden">
                   <button
-                    onClick={copyPrompt}
-                    className="absolute top-2 right-2 z-10 flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer"
+                    onClick={() => togglePoint(pt.id)}
+                    className="flex items-center justify-between w-full px-3 py-2.5 text-left text-xs font-medium text-foreground hover:bg-secondary/50 transition-colors cursor-pointer"
                   >
-                    {copied ? <><Check size={12} /> Copied</> : <><Copy size={12} /> Copy</>}
+                    <span>{pt.title}</span>
+                    <ChevronDown size={14} className={`shrink-0 transition-transform ${openPoints.has(pt.id) ? 'rotate-180' : ''}`} />
                   </button>
-                  <pre className="max-h-48 overflow-auto rounded-md bg-secondary/60 border border-border p-3 pt-9 text-[10px] leading-relaxed text-muted-foreground whitespace-pre-wrap break-words">{hubDiscoveryPrompt}</pre>
+                  {openPoints.has(pt.id) && (
+                    <div className="px-3 pb-3 pt-1 space-y-3 border-t border-border">{pt.body}</div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {tab === 'images' && (
+            <>
+              <p>DEN only renders the banner and icon of hubs that come from the recommendations of people you follow or sources you trust. Every other hub shows a neutral placeholder, and its media is never fetched.</p>
+              <p>Decentralized systems are still widely misunderstood, by individuals and legal systems alike. Automatically pulling in images from hubs no one has vouched for invites misplaced responsibility and criticism onto DEN for content it neither hosts nor controls, and it can scare people away from the network entirely. So we opted out of rendering that media by default, which keeps the client neutral and keeps you in control of what you load onto your screen.</p>
+              <p>DEN is a viewer for a permissionless network, the same way a web browser is for the web. It cannot host, moderate, or remove what lives on the independent relays and Blossom servers behind each hub.</p>
+
+              {/* Advanced escape hatch: a prompt to build your own full-media viewer */}
+              <div className="rounded-lg border border-border overflow-hidden">
+                <button
+                  onClick={() => setAdvanced((v) => !v)}
+                  className="flex items-center justify-between w-full px-3 py-2.5 text-left text-xs font-medium text-foreground hover:bg-secondary/50 transition-colors cursor-pointer"
+                >
+                  <span>Advanced: see them anyway</span>
+                  <ChevronDown size={14} className={`shrink-0 transition-transform ${advanced ? 'rotate-180' : ''}`} />
+                </button>
+                {advanced && (
+                  <div className="px-3 pb-3 pt-1 space-y-2.5 border-t border-border">
+                    <p className="text-xs">If you still want to browse every discoverable hub with its real banner and icon, you can have an AI build you a standalone single-file HTML page for it: copy the prompt below, paste it into any capable AI, and open the file it produces. <span className="text-amber-500 font-medium">Do this at your own risk.</span> That page renders media from hubs no one has vouched for, which may be explicit or disturbing, and it is entirely separate from DEN.</p>
+                    <div className="relative">
+                      <button
+                        onClick={copyPrompt}
+                        className="absolute top-2 right-2 z-10 flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer"
+                      >
+                        {copied ? <><Check size={12} /> Copied</> : <><Copy size={12} /> Copy</>}
+                      </button>
+                      <pre className="max-h-48 overflow-auto rounded-md bg-secondary/60 border border-border p-3 pt-9 text-[10px] leading-relaxed text-muted-foreground whitespace-pre-wrap break-words">{hubDiscoveryPrompt}</pre>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Acknowledgement-gated in-app override. Intentionally display:none so only a user who inspects
+                  and un-hides it (a technical user who understands what they are enabling) can reach it. */}
+              <div style={{ display: 'none' }} data-advanced-media-override>
+                <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 space-y-2 mt-1">
+                  <label className="text-xs font-semibold text-foreground block">Render media for every hub (in-app)</label>
+                  <p className="text-[11px] text-muted-foreground leading-snug">Fetches and renders the banner and icon of every hub in Discover and its info modal, including hubs no one has vouched for. This loads media directly onto your screen from servers DEN does not operate, which may be explicit, disturbing, or illegal. To arm the toggle, type the exact acknowledgement below.</p>
+                  <input
+                    value={ack}
+                    onChange={(e) => setAck(e.target.value)}
+                    placeholder={MEDIA_ACK_PHRASE}
+                    className="w-full px-2.5 py-1.5 rounded-md bg-secondary/60 border border-border text-xs text-foreground placeholder:text-muted-foreground outline-none"
+                  />
+                  <div className="flex items-center gap-2 pt-1">
+                    <button
+                      disabled={toggleDisabled}
+                      onClick={() => onForceAllMediaChange(!forceAllMedia)}
+                      className={`relative inline-block w-7 h-4 rounded-full transition-colors shrink-0 ${forceAllMedia ? 'bg-amber-500' : 'bg-muted-foreground/30'} ${toggleDisabled ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}
+                    >
+                      <span className={`absolute top-[2px] left-0 block w-3 h-3 rounded-full bg-white shadow transition-transform ${forceAllMedia ? 'translate-x-[14px]' : 'translate-x-[2px]'}`} />
+                    </button>
+                    <span className="text-xs text-foreground">{forceAllMedia ? 'Media enabled for all hubs' : 'Enable media for all hubs'}</span>
+                  </div>
                 </div>
               </div>
-            )}
-          </div>
+            </>
+          )}
         </div>
       </div>
     </div>
@@ -1721,8 +1807,10 @@ export function DiscoverPage() {
   const myPubkey = useUserStore((s) => s.pubkey)
   const [showManageRecs, setShowManageRecs] = useState(false)
   const [showSourceModal, setShowSourceModal] = useState(false)
-  const [showGuide, setShowGuide] = useState(false)
-  const [showImagesInfo, setShowImagesInfo] = useState(false)
+  const [showAllHubsInfo, setShowAllHubsInfo] = useState(false)
+  // Advanced, persisted override: render media for EVERY hub (see AllHubsInfoModal's hidden control).
+  const [forceAllMedia, setForceAllMediaState] = useState(() => readForceAllMedia())
+  const setForceAllMedia = useCallback((v: boolean) => { setForceAllMediaState(v); writeForceAllMedia(v) }, [])
   const [showAllOffConfirm, setShowAllOffConfirm] = useState(false)
   // "See everything" (firehose) toggle. Turning it ON needs confirmation; OFF is immediate.
   const toggleAllOff = useCallback(() => {
@@ -2405,52 +2493,35 @@ export function DiscoverPage() {
                     </Tooltip>
                   </div>
 
-                  {/* See everything (firehose), independent of the recommendation toggles */}
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        onClick={toggleAllOff}
-                        className={`flex items-center gap-2 pl-1 pr-2 py-1 rounded-full border text-[11px] font-medium transition-colors cursor-pointer
-                          ${seeEverything ? 'bg-amber-500/10 border-amber-500/40 text-amber-400' : 'bg-secondary/60 border-border text-muted-foreground hover:text-foreground'}`}
-                      >
-                        <span className={`relative inline-block w-7 h-4 rounded-full transition-colors shrink-0 ${seeEverything ? 'bg-amber-500' : 'bg-muted-foreground/30'}`}>
-                          <span className={`absolute top-[2px] left-0 block w-3 h-3 rounded-full bg-white shadow transition-transform ${seeEverything ? 'translate-x-[14px]' : 'translate-x-[2px]'}`} />
-                        </span>
-                        See everything
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom" className="text-xs">
-                      {seeEverything ? 'Showing every discoverable hub. Toggle off to go back to recommendations.' : 'Ignore recommendations and browse every discoverable hub'}
-                    </TooltipContent>
-                  </Tooltip>
-
-                  {/* Why unrecommended hubs show placeholders instead of their real banner/icon */}
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        onClick={() => setShowImagesInfo(true)}
-                        className="flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-dashed border-border text-[11px] font-medium text-muted-foreground hover:text-foreground hover:border-solid transition-colors cursor-pointer"
-                      >
-                        <Info size={12} className="shrink-0" />
-                        Loading Images?
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom" className="text-xs">Why hubs you don't follow show placeholders</TooltipContent>
-                  </Tooltip>
-
-                  {/* Guide: what DEN is, and what to do about a hub you believe is illegal */}
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        onClick={() => setShowGuide(true)}
-                        className="flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-dashed border-border text-[11px] font-medium text-muted-foreground hover:text-foreground hover:border-solid transition-colors cursor-pointer"
-                      >
-                        <Info size={12} className="shrink-0" />
-                        Illegal hub?
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom" className="text-xs">How DEN handles content, and how to report a hub</TooltipContent>
-                  </Tooltip>
+                  {/* Show all hubs (firehose) toggle + a gear for its info/settings (Illegal Hub? / Loading Images?) */}
+                  <div className={`flex items-center rounded-full border text-[11px] font-medium transition-colors
+                    ${seeEverything ? 'bg-amber-500/10 border-amber-500/40' : 'bg-secondary/60 border-border'}`}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button onClick={toggleAllOff} className={`flex items-center gap-2 pl-1 pr-2 py-1 rounded-l-full cursor-pointer ${seeEverything ? 'text-amber-400' : 'text-muted-foreground hover:text-foreground'}`}>
+                          <span className={`relative inline-block w-7 h-4 rounded-full transition-colors shrink-0 ${seeEverything ? 'bg-amber-500' : 'bg-muted-foreground/30'}`}>
+                            <span className={`absolute top-[2px] left-0 block w-3 h-3 rounded-full bg-white shadow transition-transform ${seeEverything ? 'translate-x-[14px]' : 'translate-x-[2px]'}`} />
+                          </span>
+                          Show all hubs
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom" className="text-xs">
+                        {seeEverything ? 'Showing every discoverable hub. Toggle off to go back to recommendations.' : 'Ignore recommendations and browse every discoverable hub'}
+                      </TooltipContent>
+                    </Tooltip>
+                    <span className={`w-px self-stretch my-1 shrink-0 ${seeEverything ? 'bg-amber-500/50' : 'bg-foreground/15'}`} />
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          onClick={() => setShowAllHubsInfo(true)}
+                          className={`flex items-center px-2 py-1 rounded-r-full transition-colors cursor-pointer ${seeEverything ? 'text-amber-400' : 'text-muted-foreground hover:text-foreground'}`}
+                        >
+                          <Settings size={13} />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom" className="text-xs">Illegal hub? Loading images? Read more</TooltipContent>
+                    </Tooltip>
+                  </div>
                 </div>
               </div>
 
@@ -2505,7 +2576,7 @@ export function DiscoverPage() {
                         ? `No hubs match "${searchQuery}". Try a different search or adjust filters.`
                         : seeEverything
                           ? 'No discoverable hubs match the current filters. Try adjusting your filter settings.'
-                          : 'No recommendations yet. Add a source with the cogwheel, enable Following recommendations, or turn on See everything to browse every discoverable hub.'}
+                          : 'No recommendations yet. Add a source with the cogwheel, enable Following recommendations, or turn on Show all hubs to browse every discoverable hub.'}
                     </p>
                   </div>
                 )}
@@ -2514,7 +2585,7 @@ export function DiscoverPage() {
                 {pagedHubs.length > 0 && (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                     {pagedHubs.map(hub => (
-                      <DiscoverHubCard key={hub.dTag} hub={hub} showMedia={recommendedCoords.has(hubCoord(hub.creatorPubkey, hub.dTag))} recommenders={recommendersByCoord[hubCoord(hub.creatorPubkey, hub.dTag)]} />
+                      <DiscoverHubCard key={hub.dTag} hub={hub} showMedia={forceAllMedia || recommendedCoords.has(hubCoord(hub.creatorPubkey, hub.dTag))} recommenders={recommendersByCoord[hubCoord(hub.creatorPubkey, hub.dTag)]} />
                     ))}
                   </div>
                 )}
@@ -2667,8 +2738,7 @@ export function DiscoverPage() {
       />
       <ManageRecommendationsModal open={showManageRecs} onClose={() => setShowManageRecs(false)} />
       <TrustedSourcesModal open={showSourceModal} onClose={() => setShowSourceModal(false)} />
-      <IllegalHubGuideModal open={showGuide} onClose={() => setShowGuide(false)} />
-      <ImagesInfoModal open={showImagesInfo} onClose={() => setShowImagesInfo(false)} />
+      <AllHubsInfoModal open={showAllHubsInfo} onClose={() => setShowAllHubsInfo(false)} forceAllMedia={forceAllMedia} onForceAllMediaChange={setForceAllMedia} />
     </>
   )
 }
