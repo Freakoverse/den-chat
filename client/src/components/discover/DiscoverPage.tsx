@@ -1001,13 +1001,19 @@ function DiscoverHubCard({ hub, showMedia, recommenders }: { hub: DiscoveredHub;
         {/* Recommended pill (bottom-right): present only when someone has vouched for this hub. Opens the
             who-recommended modal. */}
         {recommenders && recommenders.length > 0 && (
-          <button
-            onClick={(e) => { e.stopPropagation(); setShowRecommendedBy(true) }}
-            className="absolute bottom-2 right-2 flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-semibold text-white bg-primary/80 hover:bg-primary backdrop-blur-sm shadow cursor-pointer transition-colors"
-            title={`Recommended by ${recommenders.length} ${recommenders.length === 1 ? 'person' : 'people'}`}
-          >
-            <Sparkles size={10} /> Recommended
-          </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={(e) => { e.stopPropagation(); setShowRecommendedBy(true) }}
+                className="absolute bottom-2 right-2 flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-semibold text-white bg-primary/80 hover:bg-primary backdrop-blur-sm shadow cursor-pointer transition-colors"
+              >
+                <Sparkles size={10} /> Recommended
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="text-xs">
+              Recommended by {recommenders.length} {recommenders.length === 1 ? 'person' : 'people'}. Tap to see who.
+            </TooltipContent>
+          </Tooltip>
         )}
       </div>
 
@@ -1592,18 +1598,19 @@ function IllegalHubGuideModal({ open, onClose }: { open: boolean; onClose: () =>
 interface DiscoverFeedCache {
   hubs: DiscoveredHub[]
   exhausted: boolean
-  hubsAt: number // when the firehose was last fetched (0 = never)
+  hubsLoaded: boolean // a firehose load has completed at least once this session
   currentPage: number
   recHubs: DiscoveredHub[]
   recommenders: Record<string, string[]>
   recKey: string // signature of the recommendation author set the cached recs are for
-  recAt: number  // when recommendations were last fetched (0 = never)
+  recLoaded: boolean // a recommendation load has completed for recKey
 }
 const discoverFeedCache: DiscoverFeedCache = {
-  hubs: [], exhausted: false, hubsAt: 0, currentPage: 1,
-  recHubs: [], recommenders: {}, recKey: '', recAt: 0,
+  hubs: [], exhausted: false, hubsLoaded: false, currentPage: 1,
+  recHubs: [], recommenders: {}, recKey: '', recLoaded: false,
 }
-const DISCOVER_CACHE_TTL_MS = 5 * 60 * 1000
+// Signature of the recommendation author set, so a genuine change (follow/unfollow, toggling sources) still
+// refetches while a plain remount does not.
 const recAuthorsSig = (authors: string[]) => [...authors].sort().join(',')
 
 // ── Main Page Component ──
@@ -1768,18 +1775,19 @@ export function DiscoverPage() {
 
   // Initial load
   const loadHubs = useCallback(async () => {
-    discoverFeedCache.hubsAt = Date.now() // mark a real firehose fetch so remounts reuse it within the TTL
     setLoading(true)
     setExhausted(false)
     try {
       const events = await fetchBatch()
       const parsed = mergeHubs([], events)
+      const exhaustedNow = events.length < 20 // few results → relays are likely exhausted
       setHubs(parsed)
-
-      // If we got very few results, relays are likely exhausted
-      if (events.length < 20) {
-        setExhausted(true)
-      }
+      if (exhaustedNow) setExhausted(true)
+      // Record on the cache directly (not only via the sync effect) so a completed load counts even if a
+      // resize unmounted the component mid-fetch.
+      discoverFeedCache.hubs = parsed
+      discoverFeedCache.exhausted = exhaustedNow
+      discoverFeedCache.hubsLoaded = true
     } catch (err) {
       console.error('Failed to load discoverable hubs:', err)
     } finally {
@@ -1792,10 +1800,12 @@ export function DiscoverPage() {
   // (newest per coord), and apply the same forged-preview guard as the firehose.
   const loadRecHubs = useCallback(async (authors: string[]) => {
     const gen = ++recLoadGen.current
-    // Mark a real recommendation fetch for this author set so a remount reuses it within the TTL.
-    discoverFeedCache.recKey = recAuthorsSig(authors)
-    discoverFeedCache.recAt = Date.now()
-    if (authors.length === 0) { setRecHubs([]); setRecommendersByCoord({}); setRecLoading(false); return }
+    if (authors.length === 0) {
+      setRecHubs([]); setRecommendersByCoord({}); setRecLoading(false)
+      discoverFeedCache.recHubs = []; discoverFeedCache.recommenders = {}
+      discoverFeedCache.recKey = ''; discoverFeedCache.recLoaded = true
+      return
+    }
     setRecLoading(true)
     // Running accumulation, rendered progressively: the first chunk of recommendation authors paints its
     // hubs immediately while the remaining chunks keep resolving and appending in the background.
@@ -1859,7 +1869,14 @@ export function DiscoverPage() {
       })
       // Wait for the per-chunk hub fetches to settle before deciding the feed is empty.
       await Promise.all(pending)
-      if (gen === recLoadGen.current && byCoord.size === 0) setRecHubs([])
+      if (gen === recLoadGen.current) {
+        if (byCoord.size === 0) setRecHubs([])
+        // Persist the completed result + mark it loaded so a remount reuses it instead of refetching.
+        discoverFeedCache.recHubs = [...byCoord.values()].map((x) => x.hub).sort((a, b) => b.publishedAt - a.publishedAt)
+        discoverFeedCache.recommenders = Object.fromEntries([...recByCoord].map(([c, s]) => [c, [...s]]))
+        discoverFeedCache.recKey = recAuthorsSig(authors)
+        discoverFeedCache.recLoaded = true
+      }
     } catch (err) {
       console.error('Failed to load recommended hubs:', err)
       if (gen === recLoadGen.current) setRecHubs([])
@@ -1873,10 +1890,9 @@ export function DiscoverPage() {
   // A remount with the same author set and a fresh cache reuses the cached recs instead of refetching.
   useEffect(() => {
     if (discoverTab !== 'hubs') return
-    const fresh = discoverFeedCache.recAt > 0
-      && discoverFeedCache.recKey === recAuthorsSig(recAuthors)
-      && Date.now() - discoverFeedCache.recAt < DISCOVER_CACHE_TTL_MS
-    if (fresh) return
+    // Reuse cached recs across a remount; only (re)fetch when the recommendation author set actually changed
+    // (a real action) or nothing has loaded yet. A plain resize never refetches.
+    if (discoverFeedCache.recLoaded && discoverFeedCache.recKey === recAuthorsSig(recAuthors)) return
     loadRecHubs(recAuthors)
   }, [discoverTab, recAuthors, loadRecHubs])
 
@@ -1998,11 +2014,9 @@ export function DiscoverPage() {
   }, [searchQuery, searching, filterTags, powMin, powMax, mergeHubs])
 
   useEffect(() => {
-    // Reuse a fresh firehose cache across a remount (e.g. a mobile<->desktop resize) instead of refetching.
-    const fresh = discoverFeedCache.hubsAt > 0
-      && discoverFeedCache.hubs.length > 0
-      && Date.now() - discoverFeedCache.hubsAt < DISCOVER_CACHE_TTL_MS
-    if (fresh) return
+    // A remount (e.g. a mobile<->desktop resize) is not a refresh: reuse whatever we already loaded. Only
+    // fetch when nothing has loaded yet this session. The refresh button still forces a reload.
+    if (discoverFeedCache.hubsLoaded) return
     loadHubs()
   }, [loadHubs])
 
