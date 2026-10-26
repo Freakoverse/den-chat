@@ -85,8 +85,12 @@ export async function fetchMyRecommendations(myPubkey: string): Promise<{ refs: 
   return { refs: ev ? parseHubRecommendationRefs(ev) : [], createdAt: ev?.created_at ?? 0 }
 }
 
-/** Parse the newest recommendation list per author out of a batch of events, into deduped refs. */
-function refsFromEvents(events: Event[]): HubRecRef[] {
+/**
+ * Parse a batch of recommendation events into the newest list per author, yielding both the deduped refs
+ * and an attribution map (hub coord -> the recommender pubkeys who vouch for it). The recommender is the
+ * list's author (`event.pubkey`), distinct from the hub's on-wire author carried in each ref.
+ */
+function parseChunkRefs(events: Event[]): { refs: HubRecRef[]; recommenders: Map<string, string[]> } {
   const newest = new Map<string, Event>()
   for (const e of events) {
     const prev = newest.get(e.pubkey)
@@ -94,25 +98,30 @@ function refsFromEvents(events: Event[]): HubRecRef[] {
   }
   const seen = new Set<string>()
   const refs: HubRecRef[] = []
+  const recommenders = new Map<string, string[]>()
   for (const e of newest.values()) {
     for (const ref of parseHubRecommendationRefs(e)) {
+      const who = recommenders.get(ref.coord)
+      if (who) { if (!who.includes(e.pubkey)) who.push(e.pubkey) }
+      else recommenders.set(ref.coord, [e.pubkey])
       if (seen.has(ref.coord)) continue
       seen.add(ref.coord)
       refs.push(ref)
     }
   }
-  return refs
+  return { refs, recommenders }
 }
 
 /**
  * Recommendation refs from a set of authors (newest per author), deduped across authors by coord. Authors
  * are chunked ({@link REC_AUTHOR_CHUNK}) so a big follow list never becomes one oversized filter. When
- * `onBatch` is supplied it is called with each chunk's refs as that chunk resolves, so callers can render
- * the first results while the rest load; the returned array is the full deduped set once all chunks finish.
+ * `onBatch` is supplied it is called with each chunk's refs (and the chunk's coord -> recommenders map) as
+ * that chunk resolves, so callers can render the first results and attribute them while the rest load; the
+ * returned array is the full deduped set once all chunks finish.
  */
 export async function fetchRecommendationRefs(
   authors: string[],
-  onBatch?: (refs: HubRecRef[]) => void,
+  onBatch?: (refs: HubRecRef[], recommenders: Map<string, string[]>) => void,
 ): Promise<HubRecRef[]> {
   if (authors.length === 0) return []
   const seen = new Set<string>()
@@ -125,14 +134,14 @@ export async function fetchRecommendationRefs(
         '#d': [DTAG],
         limit: chunk.length, // one replaceable list per author at most
       })
-      const refs = refsFromEvents(events)
+      const { refs, recommenders } = parseChunkRefs(events)
       // Dedup into the shared result (microtask bodies don't interleave, so this is race-free).
       for (const ref of refs) {
         if (seen.has(ref.coord)) continue
         seen.add(ref.coord)
         out.push(ref)
       }
-      if (onBatch) onBatch(refs)
+      if (onBatch) onBatch(refs, recommenders)
     }),
   )
   return out

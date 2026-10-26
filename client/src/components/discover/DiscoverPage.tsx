@@ -34,6 +34,7 @@ import { truncateNpub, cn, chunkArray } from '@/lib/utils'
 import { nip19 } from 'nostr-tools'
 import { UserPanel } from '@/components/ui/UserPanel'
 import { ResizablePanel } from '@/components/ui/ResizablePanel'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { HubInfoModal } from '@/components/hub/HubInfoModal'
 import { UserProfileModal } from '@/components/hub/UserProfileModal'
 import { HubJoinWarningModal } from '@/components/hub/HubJoinWarningModal'
@@ -44,6 +45,7 @@ import {
   Compass, Search, Loader2, Hash, Info, UserPlus, Check, AlertTriangle,
   X, SlidersHorizontal, ChevronLeft, ChevronRight, Plus,
   Gamepad2, Package, Globe, Monitor, ChevronDown, Settings, ShieldCheck,
+  Sparkles,
 } from 'lucide-react'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import type { Event } from 'nostr-tools'
@@ -747,8 +749,59 @@ function FilterModal({ open, onClose, showNsfw, onRequestNsfw, powMin, setPowMin
   )
 }
 
+// ── Who-recommended modal ──
+// One row per recommender (avatar + name + npub); tapping a row opens that person's profile.
+function RecommenderRow({ pubkey, onSelect }: { pubkey: string; onSelect: (pk: string) => void }) {
+  const { getProfile } = useProfileCache()
+  const profile = getProfile(pubkey)
+  const npub = nip19.npubEncode(pubkey)
+  const name = profile?.display_name || profile?.name || truncateNpub(npub, 10)
+  return (
+    <button
+      onClick={() => onSelect(pubkey)}
+      className="flex items-center gap-3 w-full px-2 py-2 rounded-lg hover:bg-secondary/60 transition-colors cursor-pointer text-left"
+    >
+      <Avatar className="w-9 h-9">
+        <AvatarImage src={profile?.picture} maxSizeMB={2} />
+        <AvatarFallback className="text-xs bg-primary/20 text-primary">{name.slice(0, 2).toUpperCase()}</AvatarFallback>
+      </Avatar>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium text-foreground truncate">{name}</p>
+        <p className="text-[10px] text-muted-foreground truncate">{truncateNpub(npub, 12)}</p>
+      </div>
+    </button>
+  )
+}
+
+function RecommendedByModal({ open, onClose, pubkeys, hubName, onSelect }: { open: boolean; onClose: () => void; pubkeys: string[]; hubName: string; onSelect: (pk: string) => void }) {
+  useEscToClose(onClose, open)
+  if (!open) return null
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-2" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/70" />
+      <div className="relative z-10 w-full max-w-sm max-h-[70vh] flex flex-col rounded-xl border border-border bg-background shadow-2xl animate-in fade-in-0 zoom-in-95" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-3.5 border-b border-border">
+          <div className="flex items-center gap-2 min-w-0">
+            <Sparkles size={15} className="text-primary shrink-0" />
+            <h3 className="text-sm font-semibold text-foreground truncate">Recommended by</h3>
+          </div>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground cursor-pointer"><X size={16} /></button>
+        </div>
+        <p className="px-5 pt-2.5 text-xs text-muted-foreground">People you follow or trust who vouch for <span className="text-foreground font-medium">{hubName}</span>.</p>
+        <div className="px-3 py-2 overflow-y-auto flex-1 min-h-0">
+          {pubkeys.length === 0 ? (
+            <p className="px-2 py-6 text-center text-xs text-muted-foreground">No recommenders.</p>
+          ) : (
+            pubkeys.map((pk) => <RecommenderRow key={pk} pubkey={pk} onSelect={onSelect} />)
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Hub Discovery Card ──
-function DiscoverHubCard({ hub, showMedia }: { hub: DiscoveredHub; showMedia?: boolean }) {
+function DiscoverHubCard({ hub, showMedia, recommenders }: { hub: DiscoveredHub; showMedia?: boolean; recommenders?: string[] }) {
   const myPubkey = useUserStore((s) => s.pubkey)
   const signer = useUserStore((s) => s.signer)
   const privateKey = useUserStore((s) => s.privateKey)
@@ -771,6 +824,9 @@ function DiscoverHubCard({ hub, showMedia }: { hub: DiscoveredHub; showMedia?: b
   const [showCreatorProfile, setShowCreatorProfile] = useState(false)
   const [showJoinWarning, setShowJoinWarning] = useState(false)
   const [showHubLimitModal, setShowHubLimitModal] = useState(false)
+  const [showRecommendedBy, setShowRecommendedBy] = useState(false)
+  // A recommender the user tapped in the who-recommended modal, whose profile is then shown.
+  const [recommenderProfile, setRecommenderProfile] = useState<string | null>(null)
 
   const isAlreadyInList = hubEntries.some(e => e.dTag === hub.dTag)
   // "Actually in the hub" — not merely listed: we hold the secret (decrypted from the
@@ -935,6 +991,18 @@ function DiscoverHubCard({ hub, showMedia }: { hub: DiscoveredHub; showMedia?: b
             </span>
           )}
         </div>
+
+        {/* Recommended pill (bottom-right): present only when someone has vouched for this hub. Opens the
+            who-recommended modal. */}
+        {recommenders && recommenders.length > 0 && (
+          <button
+            onClick={(e) => { e.stopPropagation(); setShowRecommendedBy(true) }}
+            className="absolute bottom-2 right-2 flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-semibold text-white bg-primary/80 hover:bg-primary backdrop-blur-sm shadow cursor-pointer transition-colors"
+            title={`Recommended by ${recommenders.length} ${recommenders.length === 1 ? 'person' : 'people'}`}
+          >
+            <Sparkles size={10} /> Recommended
+          </button>
+        )}
       </div>
 
       <div className="p-3.5 flex flex-col gap-2.5 flex-1">
@@ -1073,6 +1141,22 @@ function DiscoverHubCard({ hub, showMedia }: { hub: DiscoveredHub; showMedia?: b
         open={showCreatorProfile}
         onClose={() => setShowCreatorProfile(false)}
         targetPubkey={hub.creatorPubkey}
+      />
+
+      {/* Who recommended this hub */}
+      <RecommendedByModal
+        open={showRecommendedBy}
+        onClose={() => setShowRecommendedBy(false)}
+        pubkeys={recommenders || []}
+        hubName={hub.name}
+        onSelect={(pk) => { setShowRecommendedBy(false); setRecommenderProfile(pk) }}
+      />
+
+      {/* A recommender's profile, opened from the who-recommended modal */}
+      <UserProfileModal
+        open={!!recommenderProfile}
+        onClose={() => setRecommenderProfile(null)}
+        targetPubkey={recommenderProfile}
       />
 
       {/* Join warning modal */}
@@ -1517,6 +1601,9 @@ export function DiscoverPage() {
   // whole feed into the raw "all discoverable" firehose.
   const [recHubs, setRecHubs] = useState<DiscoveredHub[]>([])
   const [recLoading, setRecLoading] = useState(false)
+  // hub coord -> the recommender pubkeys who vouch for it, used by the "Recommended" pill / who-recommended
+  // modal. Accumulated as recommendation chunks resolve in loadRecHubs.
+  const [recommendersByCoord, setRecommendersByCoord] = useState<Record<string, string[]>>({})
   // Bumped on every (re)load so a superseded in-flight load (author set changed, tab left) stops writing
   // its late chunks into the current feed.
   const recLoadGen = useRef(0)
@@ -1668,12 +1755,14 @@ export function DiscoverPage() {
   // (newest per coord), and apply the same forged-preview guard as the firehose.
   const loadRecHubs = useCallback(async (authors: string[]) => {
     const gen = ++recLoadGen.current
-    if (authors.length === 0) { setRecHubs([]); setRecLoading(false); return }
+    if (authors.length === 0) { setRecHubs([]); setRecommendersByCoord({}); setRecLoading(false); return }
     setRecLoading(true)
     // Running accumulation, rendered progressively: the first chunk of recommendation authors paints its
     // hubs immediately while the remaining chunks keep resolving and appending in the background.
     const byCoord = new Map<string, { hub: DiscoveredHub; createdAt: number }>()
     const resolvedCoords = new Set<string>()
+    // hub coord -> recommenders, accumulated across chunks for the "Recommended" pill / who-recommended modal.
+    const recByCoord = new Map<string, Set<string>>()
     const maxCreatedAt = nowSeconds() + 3600
     const flush = () => {
       setRecHubs([...byCoord.values()].map((x) => x.hub).sort((a, b) => b.publishedAt - a.publishedAt))
@@ -1682,8 +1771,18 @@ export function DiscoverPage() {
     // and the spinner only settle once every hub fetch has resolved, not just the recommendation lists.
     const pending: Promise<void>[] = []
     try {
-      await fetchRecommendationRefs(authors, (refs) => {
+      await fetchRecommendationRefs(authors, (refs, recommenders) => {
         if (gen !== recLoadGen.current) return // superseded by a newer load
+        // Merge this chunk's attribution (coord -> recommenders) and publish it for the pill / modal.
+        let recsChanged = false
+        for (const [coord, who] of recommenders) {
+          let set = recByCoord.get(coord)
+          if (!set) { set = new Set(); recByCoord.set(coord, set) }
+          for (const pk of who) { if (!set.has(pk)) { set.add(pk); recsChanged = true } }
+        }
+        if (recsChanged) {
+          setRecommendersByCoord(Object.fromEntries([...recByCoord].map(([c, s]) => [c, [...s]])))
+        }
         // Only hubs we haven't already fetched (coords can repeat across recommenders).
         const fresh = refs.filter((r) => !resolvedCoords.has(r.coord))
         for (const r of fresh) resolvedCoords.add(r.coord)
@@ -2277,7 +2376,7 @@ export function DiscoverPage() {
                 {pagedHubs.length > 0 && (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                     {pagedHubs.map(hub => (
-                      <DiscoverHubCard key={hub.dTag} hub={hub} showMedia={recommendedCoords.has(hubCoord(hub.creatorPubkey, hub.dTag))} />
+                      <DiscoverHubCard key={hub.dTag} hub={hub} showMedia={recommendedCoords.has(hubCoord(hub.creatorPubkey, hub.dTag))} recommenders={recommendersByCoord[hubCoord(hub.creatorPubkey, hub.dTag)]} />
                     ))}
                   </div>
                 )}

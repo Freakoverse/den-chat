@@ -12,6 +12,7 @@ import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/comp
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Separator } from '@/components/ui/separator'
 import { BlossomImage } from '@/components/ui/BlossomImage'
+import { HUB_BANNER_PLACEHOLDER } from '@/lib/constants'
 import { RawEventModal } from '@/components/social/SocialPost'
 import { useHubStore, type HubData } from '@/stores/hubStore'
 import { truncateNpub, formatDateTimeNumeric } from '@/lib/utils'
@@ -214,7 +215,11 @@ export function HubInfoModal({ open, onClose, hub, showMedia, onCreatorClick }: 
             } />
           </div>
         ) : (
-          <div className="h-20 w-full bg-gradient-to-br from-primary/30 to-primary/10" />
+          // No banner, or a hub no one has recommended: show the same placeholder the Discover card uses and
+          // never fetch its media.
+          <div className="h-32 w-full">
+            <img src={HUB_BANNER_PLACEHOLDER} alt="" className="w-full h-full object-cover" loading="lazy" />
+          </div>
         )}
 
         {/* Top-right actions: 3-dot menu + close */}
