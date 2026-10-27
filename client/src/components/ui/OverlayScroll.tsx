@@ -34,6 +34,7 @@ export function OverlayScroll({
   const hideTimer = useRef<number | undefined>(undefined)
   const rafId = useRef<number | undefined>(undefined)
   const dragging = useRef<{ startY: number; startScroll: number } | null>(null)
+  const overThumb = useRef(false) // keep the thumb up while the pointer rests on it
 
   const recompute = useCallback(() => {
     const el = viewport.current
@@ -55,7 +56,7 @@ export function OverlayScroll({
   const flash = useCallback(() => {
     setVisible(true)
     window.clearTimeout(hideTimer.current)
-    hideTimer.current = window.setTimeout(() => { if (!dragging.current) setVisible(false) }, HIDE_DELAY)
+    hideTimer.current = window.setTimeout(() => { if (!dragging.current && !overThumb.current) setVisible(false) }, HIDE_DELAY)
   }, [])
 
   const setViewport = useCallback((el: HTMLDivElement | null) => {
@@ -109,6 +110,8 @@ export function OverlayScroll({
       </div>
       {thumb && (
         <div
+          onMouseEnter={() => { overThumb.current = true; window.clearTimeout(hideTimer.current); setVisible(true) }}
+          onMouseLeave={() => { overThumb.current = false; flash() }}
           onMouseDown={(e) => {
             const el = viewport.current
             if (!el) return
