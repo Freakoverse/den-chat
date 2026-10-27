@@ -7,11 +7,12 @@
  * Plaintext on purpose: the whole point is that others can read what you recommend.
  */
 
-import type { Event, UnsignedEvent } from 'nostr-tools'
+import { nip19, type Event, type UnsignedEvent } from 'nostr-tools'
 import { STANDARD_KINDS, KINDS, APP_DATA_DTAGS } from '@/lib/crypto/constants'
 import { createUnsignedEvent, signWithSigner } from '@/lib/nostr/events'
 import { fetchReplaceable } from '@/lib/nostr/relay-pool'
 import { fetchEventsWide } from '@/lib/nostr/readRelays'
+import { resolveShortAddress, looksLikeShortAddress, SHORT_ADDRESS_PATTERN } from '@/lib/nostr/nipShort'
 import { publishPersonal } from '@/stores/postingBehaviourStore'
 import type { ISigner } from '@/stores/userStore'
 import { chunkArray } from '@/lib/utils'
@@ -38,6 +39,34 @@ export interface HubRecRef {
 /** Build the "36942:<pubkey>:<dTag>" coordinate for a hub. */
 export function hubCoord(pubkey: string, dTag: string): string {
   return `${KINDS.HUB_EVENT}:${pubkey}:${dTag}`
+}
+
+/**
+ * Parse a hub "address" the user pastes: an naddr1, a raw "36942:pubkey:dTag" coordinate, or a NIP-SHORT
+ * share address (including inside a denchat.top/#hub/<short> link). Returns a recommendation ref or null.
+ * Shared by Discover's Manage-recommendations picker and the profile modal's Hubs tab.
+ */
+export async function parseHubAddress(input: string): Promise<HubRecRef | null> {
+  const raw = input.trim().replace(/^nostr:/, '')
+  if (!raw) return null
+  try {
+    const dec = nip19.decode(raw)
+    if (dec.type === 'naddr') {
+      const a = dec.data as { kind: number; pubkey: string; identifier: string }
+      if (a.kind === KINDS.HUB_EVENT && a.pubkey && a.identifier) return { coord: hubCoord(a.pubkey, a.identifier), pubkey: a.pubkey, dTag: a.identifier }
+    }
+  } catch { /* not an naddr */ }
+  const direct = parseHubCoord(raw)
+  if (direct) return direct
+  const short = input.match(SHORT_ADDRESS_PATTERN)?.[0]
+  if (short && looksLikeShortAddress(short)) {
+    const res = await resolveShortAddress(short)
+    if (res.status === 'resolved' && res.event.kind === KINDS.HUB_EVENT) {
+      const d = res.event.tags.find((t) => t[0] === 'd')?.[1]
+      if (d) return { coord: hubCoord(res.event.pubkey, d), pubkey: res.event.pubkey, dTag: d }
+    }
+  }
+  return null
 }
 
 /** Parse a coordinate string into a ref, or null if it isn't a hub-event coordinate. */

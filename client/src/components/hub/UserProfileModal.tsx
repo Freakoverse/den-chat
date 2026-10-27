@@ -30,7 +30,7 @@ import {
   MoreVertical, ShieldBan, ShieldCheck, MessageCircle,
   Globe, Zap, AtSign, Camera, ImageIcon, Loader2, XCircle, AlertTriangle,
   Flag, BadgeCheck, RotateCw, Users, TreePine, HandCoins, Code,
-  Plus, FileText, Package, User,
+  Plus, FileText, Package, User, Compass, Settings2,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
@@ -58,6 +58,11 @@ import { isDnnId } from '@/lib/dnn/dnnUtils'
 import { formatDnnId } from '@/lib/dnn/formatDnnId'
 import { getPermissionsForUser } from '@/lib/hub/permissions'
 import { useProfileCache, updateCachedProfile } from '@/hooks/useProfileCache'
+import { ManageRecommendationsModal } from '@/components/discover/ManageRecommendationsModal'
+import { BannerImage as HubBannerImage, IconImage as HubIconImage } from '@/components/discover/hubCardImages'
+import { fetchRecommendationRefs, type HubRecRef } from '@/lib/hub/hubRecommendations'
+import { useRecommendationStore } from '@/stores/recommendationStore'
+import { KINDS } from '@/lib/crypto/constants'
 
 /** Banner image with blossom fallback */
 function BlossomBannerImg({ src }: { src: string }) {
@@ -169,8 +174,10 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
   const [profile, setProfileData] = useState<ProfileData>(EMPTY_PROFILE)
   const [editProfile, setEditProfile] = useState<ProfileData>(EMPTY_PROFILE)
   const [editing, setEditing] = useState(false)
-  // View-mode tabs: About / Short posts (kind 1) / Long posts (kind 30023) / Packs.
-  const [profileTab, setProfileTab] = useState<'about' | 'short' | 'long' | 'packs'>('about')
+  // View-mode tabs: About / Short posts (kind 1) / Long posts (kind 30023) / Packs / Hubs (recommended).
+  const [profileTab, setProfileTab] = useState<'about' | 'short' | 'long' | 'packs' | 'hubs'>('about')
+  // "Manage recommendations" popup (same one Discover uses), opened from the Hubs tab for the logged-in user.
+  const [showManageRecs, setShowManageRecs] = useState(false)
   // NIP-38 general status (kind 30315, d="general")
   const [status, setStatus] = useState('')
   const [editingStatus, setEditingStatus] = useState(false)
@@ -455,6 +462,7 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
       setStatus('')
       setEditingStatus(false)
       setStatusDraft('')
+      setShowManageRecs(false)
     } else if (startEditingProp && isSelf) {
       setEditing(true)
     }
@@ -2223,13 +2231,13 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
                 )}
               </div>
 
-              {/* ── Tabs: About / Posts (kind 1) / Articles (kind 30023) / Packs ── */}
-              <div className="flex items-center gap-1 p-1 mt-1 mb-3 rounded-xl bg-black/20">
-                {([['about', 'About', User], ['short', 'Posts', MessageCircle], ['long', 'Articles', FileText], ['packs', 'Packs', Package]] as const).map(([id, label, Icon]) => (
+              {/* ── Tabs: About / Posts (kind 1) / Articles (kind 30023) / Packs / Hubs (recommended) ── */}
+              <div className="flex flex-wrap items-center gap-1 p-1 mt-1 mb-3 rounded-xl bg-black/20">
+                {([['about', 'About', User], ['short', 'Posts', MessageCircle], ['long', 'Articles', FileText], ['packs', 'Packs', Package], ['hubs', 'Hubs', Compass]] as const).map(([id, label, Icon]) => (
                   <button
                     key={id}
                     onClick={() => setProfileTab(id)}
-                    className={`flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer ${profileTab === id ? 'bg-secondary text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                    className={`flex-1 min-w-[72px] flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer ${profileTab === id ? 'bg-secondary text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
                   >
                     <Icon size={13} className="shrink-0" /> <span className="truncate">{label}</span>
                   </button>
@@ -2311,6 +2319,16 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
               {profileTab === 'packs' && displayPubkey && (
                 <ProfilePacksSection pubkey={displayPubkey} open={open} />
               )}
+
+              {profileTab === 'hubs' && displayPubkey && (
+                <RecommendedHubsTab
+                  pubkey={displayPubkey}
+                  isSelf={isSelf}
+                  active={open && profileTab === 'hubs'}
+                  onManage={() => setShowManageRecs(true)}
+                  onOpenHub={() => onClose()}
+                />
+              )}
             </div>
           )}
         </div>
@@ -2326,6 +2344,9 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
           </div>
         )}
       </div>
+
+      {/* Manage hub recommendations (self only) — the same popup Discover uses. */}
+      {isSelf && <ManageRecommendationsModal open={showManageRecs} onClose={() => setShowManageRecs(false)} />}
 
       {/* Links modals */}
       {displayPubkey && (
@@ -2651,6 +2672,180 @@ function timeAgo(createdAt: number): string {
 }
 
 /** Read-only preview list of a user's kind-1 notes; a note opens its thread in Social. */
+/** One recommended hub, resolved to its public face for the Hubs tab. `resolved` is false when the hub
+ *  event couldn't be fetched (offline / deleted / unreachable) — we still show a minimal row for it. */
+interface RecHubDisplay {
+  coord: string
+  dTag: string
+  creatorPubkey: string
+  name: string
+  icon?: string
+  banner?: string
+  nsfw: boolean
+  resolved: boolean
+}
+
+/** Pull a hub's public face from its kind-36942 event. v2 and v1 struct-blob hubs carry it in plaintext
+ *  tags (picture/banner/n); older v1 hubs carry icon/banner inside content.settings. Mirrors
+ *  parseHubEventForDiscover's face logic, kept local so this file needn't import DiscoverPage. */
+function parseHubFaceFromEvent(ev: Event): { name: string; icon?: string; banner?: string; nsfw: boolean } {
+  const name = ev.tags.find((t) => t[0] === 'n')?.[1] || ''
+  let icon = ev.tags.find((t) => t[0] === 'picture')?.[1]
+  let banner = ev.tags.find((t) => t[0] === 'banner')?.[1]
+  const nsfw = ev.tags.some((t) => t[0] === 'content-warning')
+  try {
+    const c = JSON.parse(ev.content)
+    if (!icon) icon = c?.settings?.icon
+    if (!banner) banner = c?.settings?.banner
+  } catch { /* v2 (encrypted) / struct-blob (empty) content — face is in the tags above */ }
+  return { name, icon, banner, nsfw }
+}
+
+/**
+ * Hubs tab — the hubs this person publicly recommends (kind-30078 list, see lib/hub/hubRecommendations).
+ * For the logged-in user it reads the live store list and offers a Manage button that opens the SAME
+ * popup Discover uses; for anyone else it fetches their published list. Tapping a hub opens it when you've
+ * already joined it, otherwise it drops you on Discover to find it.
+ */
+function RecommendedHubsTab({ pubkey, isSelf, active, onManage, onOpenHub }: {
+  pubkey: string; isSelf: boolean; active: boolean; onManage: () => void; onOpenHub: () => void
+}) {
+  const hubEntries = useHubStore((s) => s.hubEntries)
+  const myRecs = useRecommendationStore((s) => s.myRecs)
+  const [hubs, setHubs] = useState<RecHubDisplay[] | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  // The logged-in user's own list may not be loaded yet (if Discover was never opened this session).
+  useEffect(() => {
+    if (isSelf && active && pubkey && !useRecommendationStore.getState().myRecsLoaded) {
+      useRecommendationStore.getState().loadMyRecs(pubkey)
+    }
+  }, [isSelf, active, pubkey])
+
+  useEffect(() => {
+    if (!active) return
+    let cancelled = false
+    setLoading(true)
+    ;(async () => {
+      try {
+        // Own list comes straight from the store (the Manage popup keeps it in sync); others' is fetched.
+        const refs: HubRecRef[] = isSelf
+          ? [...useRecommendationStore.getState().myRecs.values()]
+          : await fetchRecommendationRefs([pubkey])
+        if (refs.length === 0) { if (!cancelled) { setHubs([]); setLoading(false) } return }
+
+        // Resolve each ref's hub face in one batched query (newest event per coordinate).
+        const authors = [...new Set(refs.map((r) => r.pubkey))]
+        const dTags = [...new Set(refs.map((r) => r.dTag))]
+        const events = await fetchEvents({ kinds: [KINDS.HUB_EVENT], authors, '#d': dTags })
+        const maxCreatedAt = nowSeconds() + 3600
+        const newest = new Map<string, Event>()
+        for (const ev of events) {
+          if (ev.created_at > maxCreatedAt) continue
+          const d = ev.tags.find((t) => t[0] === 'd')?.[1]
+          if (!d) continue
+          const coord = `${KINDS.HUB_EVENT}:${ev.pubkey}:${d}`
+          const prev = newest.get(coord)
+          if (!prev || ev.created_at > prev.created_at) newest.set(coord, ev)
+        }
+        const out: RecHubDisplay[] = refs.map((r) => {
+          const ev = newest.get(r.coord)
+          if (ev && !ev.tags.some((t) => t[0] === 'deleted' && t[1] === 'true')) {
+            const face = parseHubFaceFromEvent(ev)
+            return { coord: r.coord, dTag: r.dTag, creatorPubkey: r.pubkey, resolved: true, name: face.name, icon: face.icon, banner: face.banner, nsfw: face.nsfw }
+          }
+          return { coord: r.coord, dTag: r.dTag, creatorPubkey: r.pubkey, name: '', nsfw: false, resolved: false }
+        })
+        if (!cancelled) { setHubs(out); setLoading(false) }
+      } catch { if (!cancelled) { setHubs([]); setLoading(false) } }
+    })()
+    return () => { cancelled = true }
+    // Re-resolve when the person changes, or (for self) whenever the published list changes.
+  }, [pubkey, isSelf, active, isSelf ? myRecs : null])
+
+  const openHub = (h: RecHubDisplay) => {
+    if (hubEntries.some((e) => e.dTag === h.dTag)) {
+      useHubStore.getState().setActiveHub(h.dTag)
+      useNavigationStore.getState().setActivePage('hubs')
+    } else {
+      // Not joined → send them to Discover, where they can find and join it.
+      useNavigationStore.getState().setActivePage('discover')
+    }
+    onOpenHub()
+  }
+
+  const manageButton = isSelf ? (
+    <button
+      onClick={onManage}
+      className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-dashed border-border text-xs font-medium text-muted-foreground hover:text-foreground hover:border-solid transition-colors cursor-pointer"
+    >
+      <Settings2 size={13} /> Manage recommendations
+    </button>
+  ) : null
+
+  if (loading) {
+    return (
+      <div className="space-y-2">
+        {manageButton}
+        <div className="flex items-center justify-center py-10 text-muted-foreground"><Loader2 size={18} className="animate-spin" /></div>
+      </div>
+    )
+  }
+
+  if (!hubs || hubs.length === 0) {
+    return (
+      <div className="flex flex-col items-center text-center py-10 gap-2">
+        <Compass size={24} className="text-muted-foreground/50" />
+        <p className="text-sm text-muted-foreground">{isSelf ? "You haven't recommended any hubs yet." : "This person hasn't recommended any hubs."}</p>
+        {isSelf && (
+          <button onClick={onManage} className="mt-1 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 cursor-pointer">
+            <Settings2 size={13} /> Manage recommendations
+          </button>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-2">
+      {manageButton}
+      <div className="max-h-[48vh] overflow-y-auto space-y-1.5 -mr-1 pr-1">
+        {hubs.map((h) => (
+          <button
+            key={h.coord}
+            onClick={() => openHub(h)}
+            className="relative w-full flex items-center gap-2.5 p-1.5 rounded-lg border border-border overflow-hidden text-left hover:border-primary/40 transition-colors cursor-pointer group"
+          >
+            {h.banner && (
+              <div className="absolute inset-0 opacity-25 pointer-events-none">
+                <HubBannerImage src={h.banner} alt="" />
+              </div>
+            )}
+            <div className="absolute inset-0 bg-gradient-to-r from-background/75 via-background/85 to-background/95 pointer-events-none" />
+            <div className="relative w-9 h-9 rounded-md overflow-hidden shrink-0 bg-secondary">
+              {h.icon ? (
+                <HubIconImage src={h.icon} name={h.name || h.dTag} />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center text-xs font-semibold text-primary bg-primary/20">
+                  {(h.name || h.dTag).slice(0, 2).toUpperCase()}
+                </div>
+              )}
+            </div>
+            <div className="relative flex-1 min-w-0">
+              <div className="flex items-center gap-1.5">
+                <span className="text-sm font-medium text-foreground truncate">{h.name || (h.resolved ? h.dTag.slice(0, 8) : 'Unknown hub')}</span>
+                {h.nsfw && <span className="shrink-0 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-destructive/20 text-destructive">18+</span>}
+              </div>
+              <span className="block text-[10px] text-muted-foreground font-mono truncate">{truncateNpub(nip19.npubEncode(h.creatorPubkey), 12)}</span>
+            </div>
+            <ExternalLink size={13} className="relative shrink-0 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function ShortPostsTab({ pubkey, isSelf, onOpenThread, onWrite }: { pubkey: string; isSelf: boolean; onOpenThread: (id: string) => void; onWrite: () => void }) {
   const PAGE = 20
   const [notes, setNotes] = useState<Event[]>([])
