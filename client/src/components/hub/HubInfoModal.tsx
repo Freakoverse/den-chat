@@ -209,26 +209,8 @@ export function HubInfoModal({ open, onClose, hub, showMedia, onCreatorClick }: 
     <div className="fixed inset-0 z-50 flex items-center justify-center px-2">
       <div className="absolute inset-0 bg-black/80" onClick={onClose} />
 
-      <div className="relative z-10 w-full max-w-md rounded-lg border border-border bg-background shadow-lg animate-in fade-in-0 zoom-in-95 overflow-hidden">
-        {/* Banner */}
-        {hub.banner && showMedia !== false ? (
-          <div className="h-32 w-full">
-            <BlossomImage src={hub.banner} alt="" servers={hub.blossomServers} className="w-full h-full object-cover" fallback={
-              <div className="w-full h-full bg-gradient-to-br from-primary/30 to-primary/10" />
-            } />
-          </div>
-        ) : (
-          // No banner, or a hub no one has recommended: show the same placeholder the Discover card uses (and
-          // never fetch its media), with the hub name laid over it as a secondary layer.
-          <div className="h-32 w-full relative">
-            <img src={HUB_BANNER_PLACEHOLDER} alt="" className="w-full h-full object-cover" loading="lazy" />
-            <div className="absolute inset-0 flex items-center justify-center px-4 pointer-events-none">
-              <span className="text-base font-bold text-white/90 text-center line-clamp-2 drop-shadow-md">{hub.name}</span>
-            </div>
-          </div>
-        )}
-
-        {/* Top-right actions: 3-dot menu + close */}
+      <div className="relative z-10 w-full max-w-md max-h-[90vh] flex flex-col rounded-lg border border-border bg-background shadow-lg animate-in fade-in-0 zoom-in-95 overflow-hidden">
+        {/* Top-right actions: 3-dot menu + close. Kept outside the scroll area so they stay pinned. */}
         <div className="absolute top-2 right-2 flex items-center gap-1.5 z-20">
           <div className="relative" ref={menuRef}>
             <button
@@ -265,6 +247,25 @@ export function HubInfoModal({ open, onClose, hub, showMedia, onCreatorClick }: 
             <X size={14} />
           </button>
         </div>
+
+        <div className="overflow-y-auto min-h-0">
+        {/* Banner */}
+        {hub.banner && showMedia !== false ? (
+          <div className="h-32 w-full">
+            <BlossomImage src={hub.banner} alt="" servers={hub.blossomServers} className="w-full h-full object-cover" fallback={
+              <div className="w-full h-full bg-gradient-to-br from-primary/30 to-primary/10" />
+            } />
+          </div>
+        ) : (
+          // No banner, or a hub no one has recommended: show the same placeholder the Discover card uses (and
+          // never fetch its media), with the hub name laid over it as a secondary layer.
+          <div className="h-32 w-full relative">
+            <img src={HUB_BANNER_PLACEHOLDER} alt="" className="w-full h-full object-cover" loading="lazy" />
+            <div className="absolute inset-0 flex items-center justify-center px-4 pointer-events-none">
+              <span className="text-base font-bold text-white/90 text-center line-clamp-2 drop-shadow-md">{hub.name}</span>
+            </div>
+          </div>
+        )}
 
         {/* Icon overlapping banner/content boundary */}
         <div className="px-5 -mt-10 relative">
@@ -459,6 +460,7 @@ export function HubInfoModal({ open, onClose, hub, showMedia, onCreatorClick }: 
               </div>
             )}
           </div>
+        </div>
         </div>
       </div>
 
