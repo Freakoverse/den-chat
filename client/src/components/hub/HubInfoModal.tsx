@@ -76,6 +76,9 @@ export function HubInfoModal({ open, onClose, hub, showMedia, onCreatorClick }: 
   const [versionCopied, setVersionCopied] = useState(false)
   const [fetchingLatest, setFetchingLatest] = useState(false)
 
+  // ── Advanced (processing difficulty) accordion, collapsed by default ──
+  const [showAdvanced, setShowAdvanced] = useState(false)
+
   // v2: the hub is authored by the owner pseudonym O (creatorPubkey), but members legitimately know
   // the real owner (from the owner attestation / roster), so the creator CARD shows that real
   // identity. Everything wire-level (raw event, backup, naddr) still uses creatorPubkey = O.
@@ -413,8 +416,48 @@ export function HubInfoModal({ open, onClose, hub, showMedia, onCreatorClick }: 
               </button>
             </div>
             <p className="text-[11px] text-muted-foreground mt-1.5 leading-snug">
-              This is the hub event's timestamp. If members see different channels or content, compare this number — the highest is newest — and fetch the latest.
+              This is the hub event's timestamp. If members see different channels or content, compare this number. The highest is newest. Fetch the latest to update.
             </p>
+          </div>
+
+          <Separator />
+
+          {/* Advanced — processing (proof-of-work) difficulty. Collapsed by default. */}
+          <div>
+            <button
+              type="button"
+              onClick={() => setShowAdvanced((v) => !v)}
+              className="flex items-center justify-between w-full text-xs font-semibold uppercase tracking-wider text-muted-foreground cursor-pointer"
+            >
+              <span>Advanced</span>
+              <ChevronDown size={14} className={`transition-transform ${showAdvanced ? '' : '-rotate-90'}`} />
+            </button>
+            {showAdvanced && (
+              <div className="mt-3 flex flex-col gap-3">
+                <div className="p-3 rounded-lg bg-secondary/50 border border-border/50">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="text-sm font-medium text-foreground">Join processing</span>
+                    <span className="text-sm font-mono font-semibold text-foreground">{hub.joinMinPow && hub.joinMinPow > 0 ? hub.joinMinPow : 'None'}</span>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground mt-1 leading-snug">
+                    {hub.joinMinPow && hub.joinMinPow > 0
+                      ? `Your device computes proof-of-work before a join request is sent (${hub.joinMinPow} leading-zero bits). This costs a few seconds of work per attempt, which deters spam and bulk joins.`
+                      : 'No proof-of-work is required to request to join this hub.'}
+                  </p>
+                </div>
+                <div className="p-3 rounded-lg bg-secondary/50 border border-border/50">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="text-sm font-medium text-foreground">Message processing</span>
+                    <span className="text-sm font-mono font-semibold text-foreground">{hub.minPow && hub.minPow > 0 ? hub.minPow : 'None'}</span>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground mt-1 leading-snug">
+                    {hub.minPow && hub.minPow > 0
+                      ? `Each message you post is mined to proof-of-work (${hub.minPow} leading-zero bits) before it is sent. This raises the cost of flooding the hub with messages.`
+                      : 'No proof-of-work is required to post messages in this hub.'}
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>

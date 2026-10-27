@@ -967,7 +967,7 @@ function DiscoverHubCard({ hub, showMedia, recommenders }: { hub: DiscoveredHub;
           </div>
         )}
 
-        {/* Badges — 7. No bolt icon on PoW */}
+        {/* Badges. Processing (PoW) difficulty lives in the hub info modal's Advanced section, not here. */}
         <div className="absolute top-2 right-2 flex items-center gap-1">
           {(hub.dedicatedRelay || hub.dedicatedBlossom) && (
             <Tooltip>
@@ -993,16 +993,6 @@ function DiscoverHubCard({ hub, showMedia, recommenders }: { hub: DiscoveredHub;
           </Tooltip>
           {hub.nsfw && (
             <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-red-500/80 text-white backdrop-blur-sm">NSFW</span>
-          )}
-          {hub.minPow > 0 && (
-            <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-amber-500/80 text-white backdrop-blur-sm">
-              PoW {hub.minPow}
-            </span>
-          )}
-          {hub.joinMinPow > 0 && (
-            <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-amber-500/80 text-white backdrop-blur-sm">
-              Join PoW {hub.joinMinPow}
-            </span>
           )}
         </div>
 

@@ -1,7 +1,8 @@
 /**
  * HubEventCard — Inline card for rendering hub event links (naddr for kind 36942)
  *
- * Displays hub banner, icon, name, description, tags, NSFW badge, PoW difficulty.
+ * Displays hub banner, icon, name, description, tags, NSFW badge. Processing (PoW)
+ * difficulty is shown in the hub info modal's Advanced section, not on the card.
  * Buttons: "Preview" (ephemeral sidebar add) and "Request Join" (publish kind 36944 + add to hub list).
  */
 
@@ -347,11 +348,6 @@ export function HubEventCard({ identifier, pubkey, relays }: HubEventCardProps) 
           </Tooltip>
           {hubData.nsfw && (
             <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-red-500/80 text-white backdrop-blur-sm">NSFW</span>
-          )}
-          {hubData.joinMinPow > 0 && (
-            <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium bg-amber-500/80 text-white backdrop-blur-sm">
-              Processing needed: {hubData.joinMinPow}
-            </span>
           )}
         </div>
       </div>
