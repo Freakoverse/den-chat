@@ -6,6 +6,7 @@ import { useNavigationStore } from '@/stores/navigationStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { UserProfileModal } from '@/components/hub/UserProfileModal'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { OverlayScroll } from '@/components/ui/OverlayScroll'
 import { truncateNpub, cn } from '@/lib/utils'
 import { nip19 } from 'nostr-tools'
 import { useState, useMemo } from 'react'
@@ -228,11 +229,11 @@ export function MemberList() {
         )}
       </div>
 
-      {/* Member list. No TOP padding on the scroll container: overflow clips at the padding box, so a top
-          pad would leave a strip above the sticky role headers where scrolling members peek through. Also
-          no SIDE padding here, so the sticky role bars span full width (no left/right gap); the member rows
-          carry their own px-1 instead, keeping their inset. Only bottom breathing room (pb-1) lives here. */}
-      <div className="flex flex-col overflow-y-auto scrollbar-hide pb-1">
+      {/* Member list. Overlay scrollbar (drawn over content, no reserved gutter) so the full-bleed role
+          bars keep full width. No TOP padding on the viewport: overflow clips at the padding box, so a top
+          pad would leave a strip above the sticky role headers where scrolling members peek through. No SIDE
+          padding either, so the sticky bars span full width; member rows carry their own px-1 inset. */}
+      <OverlayScroll className="flex-1 min-h-0" viewportClassName="flex flex-col pb-1">
         {filtered.length === 0 ? (
           <p className="text-xs text-muted-foreground text-center py-4">
             {searchQuery ? 'No matching members' : 'Loading members...'}
@@ -266,7 +267,7 @@ export function MemberList() {
                   </span>
                 </button>
                 {!isCollapsed && (
-                  <div className="flex flex-col gap-0.5 px-1">
+                  <div className="flex flex-col gap-0.5 px-1 pt-1">
                     {group.members.map((member) => (
                       <MemberCard
                         key={member.pubkey}
@@ -297,7 +298,7 @@ export function MemberList() {
             ))}
           </div>
         )}
-      </div>
+      </OverlayScroll>
 
       {/* Profile modal */}
       <UserProfileModal
