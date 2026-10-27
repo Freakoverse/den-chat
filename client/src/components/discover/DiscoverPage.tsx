@@ -1540,7 +1540,7 @@ function writeForceAllMedia(v: boolean): void {
 
 // Info + settings behind the "Show all hubs" gear. Two tabs:
 //  - "Illegal Hub?": DEN's neutral-client stance as three expandable points.
-//  - "Loading Images?": why unrecommended hubs show placeholders, the build-it-yourself escape hatch, and
+//  - "No images?": why unrecommended hubs show placeholders, the build-it-yourself escape hatch, and
 //    an acknowledgement-gated in-app override to render all media. That override is intentionally hidden
 //    (display:none) so only a user who inspects and un-hides the DOM, i.e. a technical user, can arm it.
 function AllHubsInfoModal({
@@ -1593,7 +1593,7 @@ function AllHubsInfoModal({
       title: 'How to avoid hubs like this',
       body: (
         <>
-          <p>If you would rather not come across hubs like this, the default settings already protect you, you only see risky content when you choose to:</p>
+          <p>If you would rather not come across hubs like this, the defaults already protect you. Risky content never reaches you unless you deliberately opt into it, so keep these settings as they are:</p>
           <ul className="list-disc pl-5 space-y-1.5">
             <li>Keep <span className="text-foreground font-medium">Show all hubs</span> off, so you only see hubs recommended by DEN, people you follow, and sources you trust.</li>
             <li>Only hubs someone has recommended show their banner and icon. Every other hub shows a neutral placeholder, so you never load media from a hub no one has vouched for.</li>
@@ -1631,7 +1631,7 @@ function AllHubsInfoModal({
           <button onClick={onClose} className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary cursor-pointer"><X size={16} /></button>
         </div>
         <div className="flex items-center gap-1 px-3 pt-3 shrink-0">
-          {([['illegal', 'Illegal Hub?'], ['images', 'Loading Images?']] as const).map(([id, label]) => (
+          {([['illegal', 'Illegal Hub?'], ['images', 'No images?']] as const).map(([id, label]) => (
             <button
               key={id}
               onClick={() => setTab(id)}
