@@ -9,9 +9,10 @@ import { useEscToClose } from '@/hooks/useEscToClose'
 import { nip19 } from 'nostr-tools'
 import {
   Package, Loader2, ChevronLeft, ChevronRight, SlidersHorizontal, X, ExternalLink,
-  Plus, Repeat2, Gamepad2, ImageOff, AlertTriangle, ShieldAlert, EyeOff,
+  Plus, Repeat2, Gamepad2, AlertTriangle, ShieldAlert, EyeOff,
 } from 'lucide-react'
 import { cn, truncateNpub, openExternalUrl, formatTimestamp } from '@/lib/utils'
+import { HUB_BANNER_PLACEHOLDER } from '@/lib/constants'
 import { BlossomImage } from '@/components/ui/BlossomImage'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { useProfileCache } from '@/hooks/useProfileCache'
@@ -111,8 +112,8 @@ export function ModsTab() {
 
         {/* Grid */}
         {feed.loading ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {Array.from({ length: 6 }).map((_, i) => (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {Array.from({ length: 8 }).map((_, i) => (
               <div key={i} className="rounded-xl border border-border bg-card overflow-hidden">
                 <div className="aspect-video bg-secondary animate-pulse" />
                 <div className="p-3 space-y-2">
@@ -123,7 +124,7 @@ export function ModsTab() {
             ))}
           </div>
         ) : paginated.length > 0 ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {paginated.map((mod) => <ModCard key={mod.aTag} mod={mod} onOpen={() => setOpenMod(mod)} />)}
           </div>
         ) : (
@@ -170,8 +171,14 @@ export function ModsTab() {
 export function ModCard({ mod, onOpen, compact }: { mod: Mod; onOpen: () => void; compact?: boolean }) {
   const author = useModAuthor(mod.pubkey)
   const showMedia = usePreferencesStore((s) => s.showMedia)
+  const blurThumbnails = useModFiltersStore((s) => s.blurThumbnails)
+  const downloadThumbnails = useModFiltersStore((s) => s.downloadThumbnails)
   const { moderated, blockRender } = useModStatus(mod.aTag, mod.pubkey)
   const nsfw = !!mod.contentWarning
+  // Fetch the featured image only when the global media pref AND the Mods "Download thumbnail" toggle
+  // are both on. Otherwise show the DEN placeholder and load nothing. Blur when NSFW or the blur toggle is on.
+  const fetchImage = !!mod.featuredImageUrl && showMedia && downloadThumbnails
+  const blurred = fetchImage && (nsfw || blurThumbnails)
 
   // Hard moderation: the authority marked this mod view-blocked. Show a notice instead of its content.
   if (blockRender) {
@@ -193,16 +200,12 @@ export function ModCard({ mod, onOpen, compact }: { mod: Mod; onOpen: () => void
       className="group flex flex-col text-left rounded-xl border border-border bg-card overflow-hidden hover:border-primary/30 hover:shadow-lg transition-all cursor-pointer">
       {/* Featured image */}
       <div className="relative w-full aspect-video overflow-hidden bg-secondary">
-        {mod.featuredImageUrl && showMedia ? (
+        {fetchImage ? (
           <BlossomImage src={mod.featuredImageUrl} alt={mod.title}
-            className={cn('w-full h-full object-cover group-hover:scale-[1.02] transition-transform duration-300', nsfw && 'blur-lg')}
+            className={cn('w-full h-full object-cover group-hover:scale-[1.02] transition-transform duration-300', blurred && 'blur-lg')}
             fallback={<PlaceholderArt />} />
         ) : (
-          <div className="w-full h-full flex items-center justify-center">
-            {mod.featuredImageUrl && !showMedia
-              ? <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground"><ImageOff size={13} /> Media hidden</span>
-              : <PlaceholderArt />}
-          </div>
+          <PlaceholderArt />
         )}
         {nsfw && <span className="absolute top-2 left-2 px-1.5 py-0.5 rounded bg-red-500/90 text-white text-[10px] font-semibold">NSFW</span>}
         {mod.isRepost && <span className="absolute top-2 right-2 flex items-center gap-1 px-1.5 py-0.5 rounded bg-black/60 text-white/90 text-[10px]"><Repeat2 size={10} /> Repost</span>}
@@ -232,7 +235,9 @@ export function ModCard({ mod, onOpen, compact }: { mod: Mod; onOpen: () => void
 }
 
 function PlaceholderArt() {
-  return <div className="w-full h-full bg-gradient-to-br from-primary/15 via-transparent to-secondary flex items-center justify-center"><Package size={28} className="text-muted-foreground/40" /></div>
+  // The same DEN placeholder used for unrecommended hub cards. Shown when a mod has no image, when
+  // "Download thumbnail" is off, or when the real image fails to load.
+  return <img src={HUB_BANNER_PLACEHOLDER} alt="" className="w-full h-full object-cover" loading="lazy" />
 }
 
 // ─── Open-in modal ───
@@ -340,6 +345,8 @@ function ModFiltersModal({ availableClients, onClose }: { availableClients: stri
           <SegRow label="Reposts" value={s.repostMode} options={REPOST_OPTS} onChange={s.setRepostMode} />
           <SegRow label="Emulation" value={s.emulationMode} options={EMU_OPTS} onChange={s.setEmulationMode} />
 
+          <ModDivider />
+
           {/* PoW */}
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0">
@@ -358,14 +365,33 @@ function ModFiltersModal({ availableClients, onClose }: { availableClients: stri
             </div>
           </div>
 
+          <ModDivider />
+
+          {/* Thumbnails: blur + whether to fetch mod featured images at all */}
+          <div className="space-y-2.5">
+            <div className="text-xs font-medium text-foreground">Thumbnails</div>
+            <div className="flex flex-col gap-1.5">
+              <ModToggleRow label="Blur thumbnail" desc="Blur each mod's featured image on the card." checked={s.blurThumbnails} onChange={s.setBlurThumbnails} />
+              <ModToggleRow label="Download thumbnail" desc="Fetch and show each mod's featured image. Off shows a placeholder and loads no media." checked={s.downloadThumbnails} onChange={s.setDownloadThumbnails} />
+            </div>
+          </div>
+
+          <ModDivider />
+
           {/* Admin moderation: soft/hard toggles + a swappable moderation authority */}
           <ModerationEditor />
+
+          <ModDivider />
 
           {/* DEG MODS source relays */}
           <DegRelaysEditor />
 
+          <ModDivider />
+
           {/* Sources */}
           <SourcesEditor availableClients={availableClients} />
+
+          <ModDivider />
 
           {/* Tags + excluded tags */}
           <TagEditor label="Tags" hint="Show only mods with these tags" values={s.searchTags} onChange={s.setSearchTags} />
@@ -378,6 +404,11 @@ function ModFiltersModal({ availableClients, onClose }: { availableClients: stri
       </div>
     </div>
   )
+}
+
+/** Full-width section divider inside the filters modal body (p-4, so -mx-4 reaches the edges). */
+function ModDivider() {
+  return <div className="h-px bg-border -mx-4" />
 }
 
 function SegRow<T extends string>({ label, value, options, onChange }: { label: string; value: T; options: { v: T; label: string }[]; onChange: (v: T) => void }) {

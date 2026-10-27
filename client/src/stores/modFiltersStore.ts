@@ -55,6 +55,10 @@ interface ModFiltersState {
   minPow: number
   /** DEG MODS source relays, queried alongside the user's own relays. */
   degRelays: RelayToggle[]
+  /** Blur mod featured images until opened (on by default). */
+  blurThumbnails: boolean
+  /** Fetch/show mod featured images. Off (default) shows the DEN placeholder and loads no media. */
+  downloadThumbnails: boolean
 
   setNsfwMode: (m: NsfwMode) => void
   setRepostMode: (m: RepostMode) => void
@@ -64,6 +68,8 @@ interface ModFiltersState {
   setExcludedTags: (t: string[]) => void
   setMinPow: (n: number) => void
   setDegRelays: (r: RelayToggle[]) => void
+  setBlurThumbnails: (v: boolean) => void
+  setDownloadThumbnails: (v: boolean) => void
   /** Apply moderation defaults, but only if the user hasn't customized. */
   applyExcludedTagsDefaults: (defaults: string[]) => void
 }
@@ -80,6 +86,8 @@ export const useModFiltersStore = create<ModFiltersState>()(
       emulationMode: 'show',
       minPow: DEFAULT_MIN_POW,
       degRelays: DEFAULT_DEG_RELAYS,
+      blurThumbnails: true,
+      downloadThumbnails: false,
 
       setNsfwMode: (nsfwMode) => set({ nsfwMode }),
       setRepostMode: (repostMode) => set({ repostMode }),
@@ -89,6 +97,8 @@ export const useModFiltersStore = create<ModFiltersState>()(
       setExcludedTags: (excludedTags) => set({ excludedTags, excludedTagsTouched: true }),
       setMinPow: (minPow) => set({ minPow: Math.max(0, Math.floor(minPow)) }),
       setDegRelays: (degRelays) => set({ degRelays }),
+      setBlurThumbnails: (blurThumbnails) => set({ blurThumbnails }),
+      setDownloadThumbnails: (downloadThumbnails) => set({ downloadThumbnails }),
       applyExcludedTagsDefaults: (defaults) => {
         if (!get().excludedTagsTouched) set({ excludedTags: defaults })
       },
