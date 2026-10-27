@@ -228,8 +228,10 @@ export function MemberList() {
         )}
       </div>
 
-      {/* Member list */}
-      <div className="flex flex-col overflow-y-auto scrollbar-hide py-1 px-1">
+      {/* Member list. No TOP padding on the scroll container: overflow clips at the padding box, so a top
+          pad would leave a strip above the sticky role headers where scrolling members peek through. The
+          first header therefore sits flush under the search bar; bottom breathing room stays via pb-1. */}
+      <div className="flex flex-col overflow-y-auto scrollbar-hide px-1 pb-1">
         {filtered.length === 0 ? (
           <p className="text-xs text-muted-foreground text-center py-4">
             {searchQuery ? 'No matching members' : 'Loading members...'}
@@ -240,7 +242,7 @@ export function MemberList() {
             if (group.members.length === 0) return null
             const isCollapsed = collapsedSections.has(group.label)
             return (
-              <div key={group.label} className="mb-1">
+              <div key={group.label} className="pb-1">
                 <button
                   onClick={() => toggleSection(group.label)}
                   className="sticky top-0 z-10 flex items-center gap-1 w-full px-2 py-1.5 text-left cursor-pointer group/section bg-secondary/80 backdrop-blur-sm"
