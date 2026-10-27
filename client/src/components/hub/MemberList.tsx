@@ -229,9 +229,10 @@ export function MemberList() {
       </div>
 
       {/* Member list. No TOP padding on the scroll container: overflow clips at the padding box, so a top
-          pad would leave a strip above the sticky role headers where scrolling members peek through. The
-          first header therefore sits flush under the search bar; bottom breathing room stays via pb-1. */}
-      <div className="flex flex-col overflow-y-auto scrollbar-hide px-1 pb-1">
+          pad would leave a strip above the sticky role headers where scrolling members peek through. Also
+          no SIDE padding here, so the sticky role bars span full width (no left/right gap); the member rows
+          carry their own px-1 instead, keeping their inset. Only bottom breathing room (pb-1) lives here. */}
+      <div className="flex flex-col overflow-y-auto scrollbar-hide pb-1">
         {filtered.length === 0 ? (
           <p className="text-xs text-muted-foreground text-center py-4">
             {searchQuery ? 'No matching members' : 'Loading members...'}
@@ -265,7 +266,7 @@ export function MemberList() {
                   </span>
                 </button>
                 {!isCollapsed && (
-                  <div className="flex flex-col gap-0.5">
+                  <div className="flex flex-col gap-0.5 px-1">
                     {group.members.map((member) => (
                       <MemberCard
                         key={member.pubkey}
@@ -283,7 +284,7 @@ export function MemberList() {
           })
         ) : (
           // Flat display (no hoisted roles)
-          <div className="flex flex-col gap-0.5">
+          <div className="flex flex-col gap-0.5 px-1">
             {filtered.map((member) => (
               <MemberCard
                 key={member.pubkey}
