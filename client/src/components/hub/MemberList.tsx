@@ -243,7 +243,7 @@ export function MemberList() {
               <div key={group.label} className="mb-1">
                 <button
                   onClick={() => toggleSection(group.label)}
-                  className="flex items-center gap-1 w-full px-2 py-1.5 text-left cursor-pointer group/section"
+                  className="sticky top-0 z-10 flex items-center gap-1 w-full px-2 py-1.5 text-left cursor-pointer group/section bg-secondary/80 backdrop-blur-sm"
                 >
                   <ChevronDown
                     size={10}
