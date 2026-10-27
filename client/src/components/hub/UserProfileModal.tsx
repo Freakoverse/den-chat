@@ -2678,6 +2678,7 @@ interface RecHubDisplay {
   coord: string
   dTag: string
   creatorPubkey: string
+  relayHint?: string
   name: string
   icon?: string
   banner?: string
@@ -2752,9 +2753,9 @@ function RecommendedHubsTab({ pubkey, isSelf, active, onManage, onOpenHub }: {
           const ev = newest.get(r.coord)
           if (ev && !ev.tags.some((t) => t[0] === 'deleted' && t[1] === 'true')) {
             const face = parseHubFaceFromEvent(ev)
-            return { coord: r.coord, dTag: r.dTag, creatorPubkey: r.pubkey, resolved: true, name: face.name, icon: face.icon, banner: face.banner, nsfw: face.nsfw }
+            return { coord: r.coord, dTag: r.dTag, creatorPubkey: r.pubkey, relayHint: r.relayHint, resolved: true, name: face.name, icon: face.icon, banner: face.banner, nsfw: face.nsfw }
           }
-          return { coord: r.coord, dTag: r.dTag, creatorPubkey: r.pubkey, name: '', nsfw: false, resolved: false }
+          return { coord: r.coord, dTag: r.dTag, creatorPubkey: r.pubkey, relayHint: r.relayHint, name: '', nsfw: false, resolved: false }
         })
         if (!cancelled) { setHubs(out); setLoading(false) }
       } catch { if (!cancelled) { setHubs([]); setLoading(false) } }
@@ -2768,8 +2769,14 @@ function RecommendedHubsTab({ pubkey, isSelf, active, onManage, onOpenHub }: {
       useHubStore.getState().setActiveHub(h.dTag)
       useNavigationStore.getState().setActivePage('hubs')
     } else {
-      // Not joined → send them to Discover, where they can find and join it.
+      // Not joined → open Discover and seed its search with this hub's naddr, so it resolves straight to
+      // the hub (not a blank page). Reuses the same 'deep-link-hub-search' path denchat://hub links use:
+      // navigate first, then dispatch after a short delay so Discover has mounted its listener.
       useNavigationStore.getState().setActivePage('discover')
+      try {
+        const naddr = nip19.naddrEncode({ identifier: h.dTag, pubkey: h.creatorPubkey, kind: KINDS.HUB_EVENT, relays: h.relayHint ? [h.relayHint] : [] })
+        setTimeout(() => window.dispatchEvent(new CustomEvent('deep-link-hub-search', { detail: { naddr } })), 300)
+      } catch { /* non-encodable ref — Discover still opens, just without a pre-filled search */ }
     }
     onOpenHub()
   }
