@@ -232,7 +232,7 @@ export function MemberList() {
           clips at the padding box, so a top pad would leave a strip above the sticky role headers where
           scrolling members peek through. No SIDE padding either, so the sticky bars span the full content
           width (up to the scrollbar gutter); member rows carry their own px-1 inset. */}
-      <div className="flex-1 min-h-0 flex flex-col overflow-y-auto pb-1">
+      <div className="flex-1 min-h-0 flex flex-col overflow-y-auto scrollbar-hide-mobile pb-1">
         {filtered.length === 0 ? (
           <p className="text-xs text-muted-foreground text-center py-4">
             {searchQuery ? 'No matching members' : 'Loading members...'}

@@ -841,7 +841,7 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
         </div>
       ) : editingLayout ? (
         /* ── Edit mode: lightweight reorder view (creator, desktop) ── */
-        <div className="flex-1 min-h-0 overflow-y-auto scrollbar-hide rounded-lg bg-secondary/50 shadow-md p-2 space-y-2">
+        <div className="flex-1 min-h-0 overflow-y-auto scrollbar-hide-mobile rounded-lg bg-secondary/50 shadow-md p-2 space-y-2">
           <p className="text-[10px] text-muted-foreground leading-snug px-1">
             Use ▲ ▼ to reorder and the dropdown to move a channel between categories. On desktop you can also drag rows and drop a channel on a category header.
           </p>
@@ -911,7 +911,7 @@ export function ChannelList({ isModBanned = false, isMobile = false }: { isModBa
         </div>
       ) : (
         <div className="flex-1 min-h-0 relative">
-        <div ref={channelScrollRef} className="h-full overflow-y-auto py-2 scrollbar-hide rounded-lg bg-secondary/50 shadow-md">
+        <div ref={channelScrollRef} className="h-full overflow-y-auto py-2 scrollbar-hide-mobile rounded-lg bg-secondary/50 shadow-md">
           {uncategorized.map((channel) => {
             const gid = getChannelGroupId(channel)
             const locked = !hasGroupAccess(gid)

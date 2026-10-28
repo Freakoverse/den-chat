@@ -204,6 +204,19 @@ html {
   display: none;
 }
 
+/* Hide the scrollbar only on mobile (<=1080px, matching the useMobile breakpoint) while keeping the
+   app-wide custom scrollbar and its gutter on desktop. Touch layouts don't need a visible bar or the
+   reserved space it takes. */
+@media (max-width: 1080px) {
+  .scrollbar-hide-mobile {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-hide-mobile::-webkit-scrollbar {
+    display: none;
+  }
+}
+
 /* Invisible scrollbar — takes layout space but fully transparent */
 .scrollbar-invisible {
   scrollbar-color: transparent transparent;
