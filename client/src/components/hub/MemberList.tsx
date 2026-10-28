@@ -6,7 +6,6 @@ import { useNavigationStore } from '@/stores/navigationStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { UserProfileModal } from '@/components/hub/UserProfileModal'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import { OverlayScroll } from '@/components/ui/OverlayScroll'
 import { truncateNpub, cn } from '@/lib/utils'
 import { nip19 } from 'nostr-tools'
 import { useState, useMemo } from 'react'
@@ -229,11 +228,11 @@ export function MemberList() {
         )}
       </div>
 
-      {/* Member list. Overlay scrollbar (drawn over content, no reserved gutter) so the full-bleed role
-          bars keep full width. No TOP padding on the viewport: overflow clips at the padding box, so a top
-          pad would leave a strip above the sticky role headers where scrolling members peek through. No SIDE
-          padding either, so the sticky bars span full width; member rows carry their own px-1 inset. */}
-      <OverlayScroll className="flex-1 min-h-0" viewportClassName="flex flex-col pb-1">
+      {/* Member list. Native scrollbar in its own gutter (app-wide custom style). No TOP padding: overflow
+          clips at the padding box, so a top pad would leave a strip above the sticky role headers where
+          scrolling members peek through. No SIDE padding either, so the sticky bars span the full content
+          width (up to the scrollbar gutter); member rows carry their own px-1 inset. */}
+      <div className="flex-1 min-h-0 flex flex-col overflow-y-auto pb-1">
         {filtered.length === 0 ? (
           <p className="text-xs text-muted-foreground text-center py-4">
             {searchQuery ? 'No matching members' : 'Loading members...'}
@@ -298,7 +297,7 @@ export function MemberList() {
             ))}
           </div>
         )}
-      </OverlayScroll>
+      </div>
 
       {/* Profile modal */}
       <UserProfileModal
