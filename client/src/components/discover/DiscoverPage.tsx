@@ -4,7 +4,7 @@
  * Layout: Left sidebar nav (compact) + main content area with:
  *   - Hero banner ("Find Your Community")
  *   - Search bar (name / npub only)
- *   - Filter modal (NSFW toggle, min PoW slider, tag input)
+ *   - Filter modal (min PoW slider, tag input)
  *   - Hub card grid (3 columns, 15 per page, numbered pagination)
  *
  * Fetches kind 36942 events with #f=on from general relays.
@@ -369,9 +369,6 @@ function PowRangeSlider({
 interface FilterModalProps {
   open: boolean
   onClose: () => void
-  showNsfw: boolean
-  /** Shared with the quick toggle: enabling asks for confirmation first (not batched behind Apply). */
-  onRequestNsfw: (next: boolean) => void
   powMin: number
   setPowMin: (v: number) => void
   powMax: number
@@ -391,7 +388,7 @@ interface FilterModalProps {
   onApplySearch?: () => void
 }
 
-function FilterModal({ open, onClose, showNsfw, onRequestNsfw, powMin, setPowMin, powMax, setPowMax, requireMessagePow, setRequireMessagePow, joinPowMin, setJoinPowMin, joinPowMax, setJoinPowMax, requireJoinPow, setRequireJoinPow, filterTags, setFilterTags, filterClientTags, setFilterClientTags, onApplySearch }: FilterModalProps) {
+function FilterModal({ open, onClose, powMin, setPowMin, powMax, setPowMax, requireMessagePow, setRequireMessagePow, joinPowMin, setJoinPowMin, joinPowMax, setJoinPowMax, requireJoinPow, setRequireJoinPow, filterTags, setFilterTags, filterClientTags, setFilterClientTags, onApplySearch }: FilterModalProps) {
   const [localPowMin, setLocalPowMin] = useState(powMin)
   const [localPowMax, setLocalPowMax] = useState(powMax)
   const [localRequireMessagePow, setLocalRequireMessagePow] = useState(requireMessagePow)
@@ -427,7 +424,7 @@ function FilterModal({ open, onClose, showNsfw, onRequestNsfw, powMin, setPowMin
       const combined = new Set([...DEFAULT_CLIENT_OPTIONS, ...filterClientTags])
       setClientTagOptions([...combined])
     }
-  }, [open, showNsfw, powMin, powMax, requireMessagePow, joinPowMin, joinPowMax, requireJoinPow, filterTags, filterClientTags])
+  }, [open, powMin, powMax, requireMessagePow, joinPowMin, joinPowMax, requireJoinPow, filterTags, filterClientTags])
 
   useEscToClose(onClose, open)
 
@@ -471,7 +468,6 @@ function FilterModal({ open, onClose, showNsfw, onRequestNsfw, powMin, setPowMin
   }
 
   const handleReset = () => {
-    onRequestNsfw(false)
     setLocalPowMin(15)
     setLocalPowMax(25)
     setLocalRequireMessagePow(false)
@@ -485,7 +481,7 @@ function FilterModal({ open, onClose, showNsfw, onRequestNsfw, powMin, setPowMin
     setClientTagOptions([...DEFAULT_CLIENT_OPTIONS])
   }
 
-  const hasChanges = showNsfw || localPowMin !== 15 || localPowMax !== 25 || localRequireMessagePow !== false || localJoinPowMin !== 15 || localJoinPowMax !== 25 || localRequireJoinPow !== false || localTags.length > 0 || localClientTags.length > 0
+  const hasChanges = localPowMin !== 15 || localPowMax !== 25 || localRequireMessagePow !== false || localJoinPowMin !== 15 || localJoinPowMax !== 25 || localRequireJoinPow !== false || localTags.length > 0 || localClientTags.length > 0
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center px-2" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
@@ -507,22 +503,6 @@ function FilterModal({ open, onClose, showNsfw, onRequestNsfw, powMin, setPowMin
 
         {/* Body */}
         <div className="px-5 py-5 space-y-6 overflow-y-auto flex-1 min-h-0">
-          {/* NSFW toggle */}
-          <div className="flex items-center justify-between">
-            <div>
-              <label className="text-sm font-medium text-foreground">Show NSFW Hubs</label>
-              <p className="text-xs text-muted-foreground mt-0.5">Include hubs marked as sensitive content</p>
-            </div>
-            <button
-              onClick={() => onRequestNsfw(!showNsfw)}
-              className={`relative w-10 h-[22px] rounded-full transition-colors cursor-pointer shrink-0
-                ${showNsfw ? 'bg-red-500' : 'bg-muted-foreground/30'}`}
-            >
-              <div className={`absolute top-[3px] w-4 h-4 rounded-full bg-white shadow transition-transform
-                ${showNsfw ? 'translate-x-[22px]' : 'translate-x-[3px]'}`} />
-            </button>
-          </div>
-
           {/* Multi-tag filter */}
           <div>
             <label className="text-sm font-medium text-foreground block mb-1">Filter by Tags</label>
@@ -2087,7 +2067,7 @@ export function DiscoverPage() {
   }, [seeEverything, currentPage, totalPages, exhausted, loading, hubs.length, loadMoreHubs])
 
   // Active filter indicator count
-  const activeFilterCount = (showNsfw ? 1 : 0) + (requireMessagePow ? 1 : 0) + ((powMin !== 15 || powMax !== 25) ? 1 : 0) + ((joinPowMin !== 15 || joinPowMax !== 25) ? 1 : 0) + (requireJoinPow ? 1 : 0) + (filterTags.length > 0 ? 1 : 0) + (filterClientTags.length > 0 ? 1 : 0)
+  const activeFilterCount = (requireMessagePow ? 1 : 0) + ((powMin !== 15 || powMax !== 25) ? 1 : 0) + ((joinPowMin !== 15 || joinPowMax !== 25) ? 1 : 0) + (requireJoinPow ? 1 : 0) + (filterTags.length > 0 ? 1 : 0) + (filterClientTags.length > 0 ? 1 : 0)
 
   const LeftPanel = (
     <ResizablePanel id="discover" defaultWidth={280} minWidth={200} maxWidth={420} className="flex flex-col bg-background pr-2 py-2 gap-2 max-[1080px]:hidden">
@@ -2487,8 +2467,6 @@ export function DiscoverPage() {
       <FilterModal
         open={showFilterModal}
         onClose={() => setShowFilterModal(false)}
-        showNsfw={showNsfw}
-        onRequestNsfw={requestNsfw}
         powMin={powMin}
         setPowMin={setPowMin}
         powMax={powMax}
