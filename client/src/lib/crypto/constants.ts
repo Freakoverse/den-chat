@@ -87,5 +87,5 @@ export const APP_DATA_DTAGS = {
   GROUP_READ_STATE: 'den-group-read-state',
   /** Hub recommendations (Discover): a user's PUBLIC, plaintext list of recommended hubs as `a` tags,
    *  read by their followers and by trusted-source curation in the Discover page. */
-  HUB_RECOMMENDATIONS: 'den-hub-recommendations',
+  HUB_RECOMMENDATIONS: '36942-hub-recommendations',
 } as const

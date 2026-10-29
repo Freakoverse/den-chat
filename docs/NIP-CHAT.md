@@ -2905,6 +2905,48 @@ Unlike the Message Edit Hint, a typing signal triggers **no downstream relay que
 
 ---
 
+### 6.15 Hub Recommendations — Kind `30078` (NIP-78)
+
+A user publicly vouches for hubs by publishing a **NIP-78 Application-Specific Data** event (kind `30078`, replaceable) listing the hubs they recommend. Any client can read another user's list and render it — a follow-graph Discover feed, a trusted-curator feed, a "hubs I run / endorse" section on a website, etc.
+
+The event is authored by the user's **real** key (like their follow list or hub list) and is plaintext on purpose: the whole point is that others can read what you recommend.
+
+**Addressing.** The `d` tag is `36942-hub-recommendations` — deliberately **unbranded**: it names the recommended event kind (`36942`, the hub event), not any client, so every NIP-CHAT client reads and writes the *same* list rather than a per-app one. It is specific enough (kind-qualified) not to collide with unrelated NIP-78 data.
+
+| Tag | Required | Description |
+|-----|----------|-------------|
+| `d` | Yes | `36942-hub-recommendations` (fixed — this is what makes the event a hub-recommendation list). |
+| `a` | Yes (≥1) | One per recommended hub: `["a", "36942:<hubPubkey>:<hubDTag>", "<relayHint>"]`. `<hubPubkey>` is the hub event's **on-wire author** (the real creator `R` on v1, the owner pseudonym `O` on v2). The `<relayHint>` (optional 3rd element) is a relay the hub event can be fetched from. |
+
+**Order is meaning.** The `a` tags are kept in **display order — first = highest priority**. A client curating the list controls ranking by ordering the tags; readers MUST preserve that order. Coordinates are **deduplicated** (first occurrence wins). A client MAY cap how many it displays (e.g. a website section showing the top 5); the list itself has no fixed maximum.
+
+**Recommend only discoverable hubs.** A client SHOULD only add a hub whose current event is discoverable (`f` ≠ `off`, §6.1) — recommending an opted-out hub would leak it. Readers already filter undiscoverable hubs out of public UIs.
+
+**Reading & rendering (2 fetches, no decryption):**
+
+1. Fetch the newest list: `{ "kinds":[30078], "authors":[<userPubkey>], "#d":["36942-hub-recommendations"], "limit":1 }`.
+2. For each `a` coordinate, fetch the hub event `{ "kinds":[36942], "authors":[<hubPubkey>], "#d":[<hubDTag>], "limit":1 }` (newest `created_at`, ignoring far-future timestamps), then render from its **public face** — the `n`, `picture`, `banner`, `about`, and `t` tags (§6.1). This face is plaintext and **identical for v1 and v2**, so a reader needs no hub secret. (Older v1 hubs that predate the plaintext face carry `icon`/`banner`/`description` inside `content.settings` instead; read `content.settings.*` first, then override with the `picture`/`banner`/`about` tags when present — one path covers both.)
+
+**Example:**
+
+```json
+{
+  "kind": 30078,
+  "pubkey": "<recommender real pubkey>",
+  "tags": [
+    ["d", "36942-hub-recommendations"],
+    ["a", "36942:3bf0c63f…:degmods", "wss://relay.example.com"],
+    ["a", "36942:9a1b2c3d…:linux", "wss://relay.example.com"],
+    ["a", "36942:7e4f5a6b…:gaming"]
+  ],
+  "content": ""
+}
+```
+
+To open a recommended hub in a client, build the standard hub address from the coordinate: `naddr` = `nip19.naddrEncode({ kind:36942, pubkey:<hubPubkey>, identifier:<hubDTag>, relays:[…] })` (relays from the hub event's `r` tags and/or the `a` relay hint).
+
+---
+
 ## 7. Member List Mechanics
 
 > [!IMPORTANT]
@@ -3417,6 +3459,7 @@ Clients MUST hide any hub carrying a `new_hub` tag from search/browse/discovery.
 | `1312` | Public Chat Message | Regular | User's relays (§17) |
 | `30078` | Public Chat Topic List (NIP-78) | Addressable Replaceable | User's own relays (§17) |
 | `30078` | Join Read-State (`den-join-read-state`, NIP-78, self-encrypted) | Addressable Replaceable | Creator's own relays (§6.3) |
+| `30078` | Hub Recommendations (`36942-hub-recommendations`, NIP-78, §6.15) | Addressable Replaceable | User's own relays |
 | `14` | DM Rumor (NIP-17) | Unsigned (inside seal) | Never published directly (§18) |
 | `15` | DM File (NIP-17) | Unsigned (inside seal) | Never published directly (§18) |
 | `13` | Seal (NIP-17) | Signed | Never published directly (inside gift wrap) |

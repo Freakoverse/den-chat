@@ -1,10 +1,12 @@
 /**
  * Hub recommendations (Discover). A user publishes a PUBLIC NIP-78 list (kind 30078, d-tag
- * `den-hub-recommendations`) of hubs they vouch for, one `a` tag per hub:
+ * `36942-hub-recommendations`) of hubs they vouch for, one `a` tag per hub:
  *   ["a", "36942:<hubCreatorPubkey>:<dTag>", "<relayHint>"]
- * The list is authored by the user's real key R (a personal list, like the follow/hub lists) and read back
- * by their followers (the Discover "Follows" tab) and by trusted-source curation (the "Perspective" tab).
- * Plaintext on purpose: the whole point is that others can read what you recommend.
+ * The d-tag is non-branded on purpose (it names the recommended hub-event kind, 36942, not the client) so
+ * any NIP-CHAT client can read/write the same list; see NIP-CHAT §6.15. The list is authored by the user's
+ * real key R (a personal list, like the follow/hub lists) and read back by their followers (the Discover
+ * "Follows" tab) and by trusted-source curation (the "Perspective" tab). The `a` tags are in display order
+ * (first = highest priority). Plaintext on purpose: the whole point is that others can read what you recommend.
  */
 
 import { nip19, type Event, type UnsignedEvent } from 'nostr-tools'
