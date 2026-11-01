@@ -23,7 +23,7 @@ import { HubBlossomHealthBanner } from '@/components/hub/HubBlossomHealthBanner'
 import { HubRelayHealthBanner } from '@/components/hub/HubRelayHealthBanner'
 import { HubUpgradeBanner } from '@/components/hub/HubUpgradeBanner'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
-import { Hash, Megaphone, Users, Pin, PinOff, Bell, Search, Send, Plus, Smile, Check, X, RotateCcw, Pencil, Reply, MoreVertical, Copy, MessageSquarePlus, Trash2, Loader2, Zap, Code, Bold, Italic, Strikethrough, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, ListTodo, Link, CodeSquare, ALargeSmall, Clipboard, ClipboardCheck, ClipboardPaste, Upload, FileIcon, Download, Image, Paperclip, AlertTriangle, AlertCircle, Eye, EyeOff, ShieldBan, ShieldAlert, ShieldOff, Lock, LockOpen, Settings, ArrowDown, ArrowLeft, Star, Vote, Clock, Flag, Shield, Globe, Radio, History, BadgeCheck, Mic, WifiOff, Scissors, Type } from 'lucide-react'
+import { Hash, Megaphone, Users, Pin, PinOff, Bell, Search, Send, Plus, Smile, Check, X, RotateCcw, Pencil, Reply, MoreVertical, Copy, MessageSquarePlus, Trash2, Loader2, Zap, Code, Bold, Italic, Strikethrough, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, ListTodo, Quote, Link, CodeSquare, ALargeSmall, Clipboard, ClipboardCheck, ClipboardPaste, Upload, FileIcon, Download, Image, Paperclip, AlertTriangle, AlertCircle, Eye, EyeOff, ShieldBan, ShieldAlert, ShieldOff, Lock, LockOpen, Settings, ArrowDown, ArrowLeft, Star, Vote, Clock, Flag, Shield, Globe, Radio, History, BadgeCheck, Mic, WifiOff, Scissors, Type } from 'lucide-react'
 import { useState, useEffect, useRef, useCallback, memo, useMemo, Fragment } from 'react'
 import { useEscToClose, useEscBlock } from '@/hooks/useEscToClose'
 import { createPortal } from 'react-dom'
@@ -5276,14 +5276,18 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
     const ta = textareaRef.current
     if (!ta) return
     const start = ta.selectionStart
+    const end = ta.selectionEnd
     const lineStart = message.lastIndexOf('\n', start - 1) + 1
-    const before = message.substring(0, lineStart)
-    const after = message.substring(lineStart)
-    const newText = `${before}${prefix}${after}`
-    setMessage(newText)
+    // When the selection ends right after a newline, don't prefix the empty next line it dips into.
+    const blockEnd = end > lineStart && message[end - 1] === '\n' ? end - 1 : end
+    const block = message.substring(lineStart, blockEnd)
+    const prefixed = block.replace(/^/gm, prefix) // prefix every line in the selection
+    const added = prefixed.length - block.length
+    setMessage(`${message.substring(0, lineStart)}${prefixed}${message.substring(blockEnd)}`)
     requestAnimationFrame(() => {
       ta.focus()
-      ta.setSelectionRange(start + prefix.length, start + prefix.length)
+      if (start === end) ta.setSelectionRange(start + prefix.length, start + prefix.length)
+      else ta.setSelectionRange(lineStart, end + added)
       autoResize(ta)
     })
   }, [message, autoResize])
@@ -5932,6 +5936,7 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
                 { icon: List, action: () => insertLinePrefix('- '), tip: 'Bullet List' },
                 { icon: ListOrdered, action: () => insertLinePrefix('1. '), tip: 'Numbered List' },
                 { icon: ListTodo, action: () => insertLinePrefix('- [ ] '), tip: 'Checklist' },
+                { icon: Quote, action: () => insertLinePrefix('> '), tip: 'Quote' },
                 { icon: Link, action: () => insertMarkdown('[', '](url)', 'text'), tip: 'Link' },
                 { icon: Code, action: () => insertMarkdown('`', '`', 'code'), tip: 'Inline Code' },
                 { icon: CodeSquare, action: () => insertMarkdown('```\n', '\n```', 'code'), tip: 'Code Block' },

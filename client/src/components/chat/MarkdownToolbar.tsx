@@ -6,7 +6,7 @@
 import { useRef, useState } from 'react'
 import {
   Bold, Italic, Strikethrough, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6,
-  List, ListOrdered, ListTodo, Link, Code, CodeSquare, Eye, Clock,
+  List, ListOrdered, ListTodo, Quote, Link, Code, CodeSquare, Eye, Clock,
 } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { TimestampPickerPopover } from '@/components/chat/ChatInputBar'
@@ -40,11 +40,18 @@ export function MarkdownToolbar({ textareaRef, value, onChange, autoResize, clas
     const ta = textareaRef.current
     if (!ta) return
     const start = ta.selectionStart
+    const end = ta.selectionEnd
     const lineStart = value.lastIndexOf('\n', start - 1) + 1
-    onChange(`${value.substring(0, lineStart)}${prefix}${value.substring(lineStart)}`)
+    // When the selection ends right after a newline, don't prefix the empty next line it dips into.
+    const blockEnd = end > lineStart && value[end - 1] === '\n' ? end - 1 : end
+    const block = value.substring(lineStart, blockEnd)
+    const prefixed = block.replace(/^/gm, prefix) // prefix every line in the selection
+    const added = prefixed.length - block.length
+    onChange(`${value.substring(0, lineStart)}${prefixed}${value.substring(blockEnd)}`)
     requestAnimationFrame(() => {
       ta.focus()
-      ta.setSelectionRange(start + prefix.length, start + prefix.length)
+      if (start === end) ta.setSelectionRange(start + prefix.length, start + prefix.length)
+      else ta.setSelectionRange(lineStart, end + added)
       autoResize?.(ta)
     })
   }
@@ -81,6 +88,7 @@ export function MarkdownToolbar({ textareaRef, value, onChange, autoResize, clas
     { icon: List, action: () => insertLinePrefix('- '), tip: 'Bullet List' },
     { icon: ListOrdered, action: () => insertLinePrefix('1. '), tip: 'Numbered List' },
     { icon: ListTodo, action: () => insertLinePrefix('- [ ] '), tip: 'Checklist' },
+    { icon: Quote, action: () => insertLinePrefix('> '), tip: 'Quote' },
     { icon: Link, action: () => insertMarkdown('[', '](url)', 'text'), tip: 'Link' },
     { icon: Code, action: () => insertMarkdown('`', '`', 'code'), tip: 'Inline Code' },
     { icon: CodeSquare, action: () => insertMarkdown('```\n', '\n```', 'code'), tip: 'Code Block' },
