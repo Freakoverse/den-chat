@@ -3,13 +3,20 @@
  *
  *   s<authority><code>[-<selector>]
  *
- * `authority` is the author (an `npub1…`, or a DNN ID which resolves to one), `code` is the first
- * 6 hex characters of SHA-256 over a canonical input, and the optional `-selector` continues that
- * same hash to break a collision.
+ * `code` is the first 6 hex characters of SHA-256 over a canonical input, and the optional
+ * `-selector` continues that same hash to break a collision.
+ *
+ * `authority` is the author. The spec's canonical form is `key36` — the author's pubkey in base 36,
+ * exactly 50 characters (see toKey36/fromKey36). That is what we WRITE. For reading we also accept two
+ * other forms so nothing already shared breaks: a legacy `npub1…` (what this client used to emit) and a
+ * DNN ID (a DEN extension that resolves to a pubkey, the kind of shorter identifier the spec explicitly
+ * leaves room for). The three are told apart with no ambiguity: key36 is exactly 50 base-36 chars that
+ * decode below 2²⁵⁶; npub starts with `npub1`; a DNN ID is neither and matches the DNN grammar.
  *
  * The code lives in the event as a single-letter `["s", code]` tag, so it is relay-indexed and
  * signed — there is no side mapping to publish or keep alive. The canonical input deliberately
- * excludes tags, which is what lets the code be one of them.
+ * excludes tags, which is what lets the code be one of them. The author encoding lives only in the
+ * shareable string, never in the hash, so switching npub → key36 does not change any code.
  *
  * Ported from DEG Mods' implementation (byte-compatible codes). Spec:
  * git.nostrdev.com/freakoverse/DNN → docs/NIPS/NIP-SHORT.md
@@ -26,14 +33,16 @@ export const SHORT_CODE_LENGTH = 6
 
 const CODE_RE = /^[0-9a-f]{6}$/
 const SUFFIX_RE = /^[0-9a-f]+$/
+const KEY36_RE = /^[0-9a-z]{50}$/
 
 /**
- * Text-scanner candidate for a short address: `s` marker + an authority that starts with `n`
- * (npub1… or a DNN ID) + 6-hex code, optional `-selector`. Deliberately loose — every hit MUST be
- * confirmed with looksLikeShortAddress() (valid code, decodable npub or well-formed DNN ID), since
- * an ordinary word like "snapshot" also starts with "sn".
+ * Text-scanner candidate for a short address: `s` marker + an authority (key36, npub1…, or a DNN ID)
+ * + 6-hex code, optional `-selector`. Deliberately loose — base 36 has no distinctive prefix the way
+ * `npub1` does, so the marker alone cannot be the gate. Every hit MUST be confirmed with
+ * looksLikeShortAddress() (valid 6-hex code AND an authority that decodes to a pubkey — key36 or npub —
+ * or is a well-formed DNN ID), since an ordinary word like "snapshot" also starts with "s".
  */
-export const SHORT_ADDRESS_PATTERN = /(?:nostr:)?\bsn[a-zA-Z0-9.]{7,}(?:-[0-9a-f]{1,8})?\b/g
+export const SHORT_ADDRESS_PATTERN = /(?:nostr:)?\bs[a-zA-Z0-9.]{8,}(?:-[0-9a-f]{1,8})?\b/g
 
 /** The identity-determining fields a code is derived from. Never tags. */
 export interface CodeSource {
@@ -119,10 +128,34 @@ export function shortCodeOf(event: Event): string | null {
   return v && CODE_RE.test(v) ? v : null
 }
 
+// ─── Author key encoding (key36) ────────────────────────────────────
+
+/**
+ * Pubkey (64-char lowercase hex) → key36: the 256-bit key as one base-36 integer, left-padded with
+ * `0` to exactly 50 chars. Lossless and exact; this is the author form we write into new addresses.
+ */
+export function toKey36(pubkeyHex: string): string {
+  return BigInt(`0x${pubkeyHex}`).toString(36).padStart(50, '0')
+}
+
+/**
+ * key36 → 64-char lowercase hex pubkey, or null when it isn't a valid key36: wrong length/charset, or
+ * a value ≥ 2²⁵⁶ (those 50-char strings correspond to no pubkey). The strict 50-char gate is also what
+ * lets us tell a key36 authority apart from a (short) DNN ID without a delimiter.
+ */
+export function fromKey36(key36: string): string | null {
+  const k = key36.toLowerCase()
+  if (!KEY36_RE.test(k)) return null
+  let n = 0n
+  for (const c of k) n = n * 36n + BigInt(parseInt(c, 36))
+  if (n >= 1n << 256n) return null
+  return n.toString(16).padStart(64, '0')
+}
+
 // ─── Addresses ──────────────────────────────────────────────────────
 
 export interface ShortAddress {
-  authority: string // npub1… or a DNN ID
+  authority: string // key36 (50 base-36 chars), a legacy npub1…, or a DNN ID
   code: string
   suffix: string // '' when absent
 }
@@ -151,7 +184,11 @@ export function parseShortAddress(input: string): ShortAddress | null {
   return { authority, code, suffix }
 }
 
-/** Hex pubkey for an npub authority, or null when it isn't a decodable npub. */
+/**
+ * Hex pubkey for an authority that resolves with no network: a key36 (50 base-36 chars, value < 2²⁵⁶)
+ * or a legacy `npub1…`. Null for anything else (a DNN ID needs the async resolver). key36 is tried via
+ * its strict length/value gate, so a short DNN ID never matches here by accident.
+ */
 export function authorityToPubkey(authority: string): string | null {
   if (/^npub1/i.test(authority)) {
     try {
@@ -159,17 +196,18 @@ export function authorityToPubkey(authority: string): string | null {
       return d.type === 'npub' ? (d.data as string) : null
     } catch { return null }
   }
-  return null
+  return fromKey36(authority)
 }
 
 export function isDnnAuthority(authority: string): boolean {
-  return !/^npub1/i.test(authority) && isValidDnnFormat(authority)
+  // Not a key36 and not an npub (both decode locally); otherwise a well-formed DNN ID.
+  return authorityToPubkey(authority) === null && isValidDnnFormat(authority)
 }
 
 /**
- * Does this look like a short address rather than a bare npub / DNN ID / ordinary word?
- * Requires a well-formed 6-hex code AND an authority that is either a decodable npub or a
- * well-formed DNN ID — the grammar alone ("sn…") is far too loose for free text.
+ * Does this look like a short address rather than a bare npub / key36 / DNN ID / ordinary word?
+ * Requires a well-formed 6-hex code AND an authority that decodes to a pubkey (key36 or npub) or is a
+ * well-formed DNN ID — the grammar alone ("s…") is far too loose for free text.
  */
 export function looksLikeShortAddress(input: string): boolean {
   const parsed = parseShortAddress(input)
@@ -206,7 +244,7 @@ export function verifyShortCode(event: Event): boolean {
 export function verifiedShortAddress(event: Event, authority?: string): string | null {
   const stored = shortCodeOf(event)
   if (!stored || stored !== computeShortCode(event)) return null
-  return formatShortAddress(authority || nip19.npubEncode(event.pubkey), stored)
+  return formatShortAddress(authority || toKey36(event.pubkey), stored)
 }
 
 /**
@@ -217,7 +255,7 @@ export function verifiedShortAddress(event: Event, authority?: string): string |
 export async function shareableShortAddress(event: Event, authority?: string, relays?: string[]): Promise<string | null> {
   const code = shortCodeOf(event) ?? computeShortCode(event)
   if (!CODE_RE.test(code)) return null
-  const auth = authority || nip19.npubEncode(event.pubkey)
+  const auth = authority || toKey36(event.pubkey)
 
   let others: Event[] = []
   try {

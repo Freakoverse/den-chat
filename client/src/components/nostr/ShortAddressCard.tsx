@@ -39,9 +39,10 @@ export function ShortAddressCard({ address, href, disableHubInviteCards }: {
 
   if (!data || data.status === 'not-found' || data.status === 'bad-address') {
     const parsed = parseShortAddress(address)
-    // A DNN-authority token is what the text scanner can mistake an ordinary word for (anything
-    // "sn…" ending in six hex-looking letters). When it doesn't resolve, give the text back rather
-    // than stamping a "not found" badge on what may just be a word.
+    // A DNN-authority token is what the text scanner can mistake an ordinary word for (an "s…" word
+    // ending in six hex-looking letters that also parses as a DNN id). When it doesn't resolve, give
+    // the text back rather than stamping a "not found" badge on what may just be a word. (A key36 or
+    // npub authority is a strict decode, so a false positive there is effectively impossible.)
     if (parsed && isDnnAuthority(parsed.authority)) return <span>{address}</span>
     return <ShortFallback label="Short address not found" address={address} />
   }

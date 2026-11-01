@@ -1598,10 +1598,12 @@ function emojifyTimestampAndMention(text: string, eventEmojiTags?: [string, stri
 const NOSTR_PATTERN = /(?:nostr:)?@?(?:npub1|nprofile1|note1|nevent1|naddr1)[a-zA-Z0-9]+/g
 const URL_SPAN_PATTERN = /https?:\/\/[^\s<]+/g
 
-/** True when a URL carries a nostr address in it (https://degmods.com/mod/naddr1…, njump.me/nevent1…, …/snpub1…f3c49d). */
+/** True when a URL carries a nostr address in it (https://degmods.com/mod/naddr1…, njump.me/nevent1…,
+ *  …/s<key36>…1f4c2a, …/snpub1…f3c49d). The short-address segment has no fixed prefix (key36 can start
+ *  with any base-36 char), so the path match is loose and gated by looksLikeShortAddress. */
 export function urlHasNostrAddress(url: string): boolean {
   if (/(?:npub1|nprofile1|note1|nevent1|naddr1)[a-zA-Z0-9]{20,}/.test(url)) return true
-  const short = url.match(/\/(sn[a-zA-Z0-9.]{7,}(?:-[0-9a-f]{1,8})?)(?:[/?#]|$)/)
+  const short = url.match(/\/(s[a-zA-Z0-9.]{8,}(?:-[0-9a-f]{1,8})?)(?:[/?#]|$)/)
   return !!short && looksLikeShortAddress(short[1])
 }
 
@@ -1638,8 +1640,8 @@ function splitNostr(content: string): NostrSegment[] {
     if (inCode(match.index)) continue
     // Strip nostr: and @ prefixes if present
     const raw = match[0].replace('nostr:', '').replace(/^@/, '')
-    // A "sn…" hit is only a NIP-SHORT address if its code and authority check out; otherwise it's
-    // an ordinary word ("snapshot") and stays text.
+    // An "s…" hit is only a NIP-SHORT address if its code and authority check out; otherwise it's
+    // an ordinary word ("snapshot", "software") and stays text.
     if (raw.startsWith('s') && !looksLikeShortAddress(raw)) continue
     const span = spanAt(match.index)
     if (span) {

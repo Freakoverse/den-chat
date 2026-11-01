@@ -1881,8 +1881,8 @@ export function DiscoverPage() {
             // Invalid npub — just use filter tags
           }
         } else if (looksLikeShortAddress(q)) {
-          // NIP-SHORT address → resolve the authority (npub or DNN) to a pubkey and query that
-          // author's hub carrying the `s` code. `#s` is a relay-indexed single-letter tag filter.
+          // NIP-SHORT address → resolve the authority (key36, legacy npub, or DNN) to a pubkey and
+          // query that author's hub carrying the `s` code. `#s` is a relay-indexed single-letter filter.
           isDirectLookup = true
           const parsed = parseShortAddress(q)
           const pubkey = parsed ? await resolveAuthorityPubkey(parsed.authority) : null
@@ -1972,9 +1972,9 @@ export function DiscoverPage() {
           // Invalid npub — fall through to normal filtering
         }
       } else if (looksLikeShortAddress(q)) {
-        // NIP-SHORT address → author (npub) + `s` code. For an npub authority we have the pubkey
-        // with no network, so we can filter the firehose locally right away; a DNN authority needs
-        // an async resolve, so it falls through here and is resolved on the relays via the Search button.
+        // NIP-SHORT address → author + `s` code. A key36 or legacy npub authority decodes to the
+        // pubkey with no network, so we can filter the firehose locally right away; a DNN authority
+        // needs an async resolve, so it falls through here and is resolved on the relays via Search.
         const parsed = parseShortAddress(q)
         const pk = parsed && authorityToPubkey(parsed.authority)
         if (parsed && pk) {

@@ -96,9 +96,9 @@ function parseContent(content: string): ContentSegment[] {
 
     const matched = match[0]
 
-    // A "sn…" hit is only a NIP-SHORT address if its code and authority check out; otherwise it's
-    // an ordinary word ("snapshot") and stays text.
-    if (/^(?:nostr:)?sn/i.test(matched) && !looksLikeShortAddress(matched)) {
+    // An "s…" hit is only a NIP-SHORT address if its code and authority check out; otherwise it's
+    // an ordinary word ("snapshot", "software") and stays text.
+    if (/^(?:nostr:)?s/i.test(matched) && !looksLikeShortAddress(matched)) {
       segments.push({ type: 'text', value: matched })
       lastIndex = match.index + matched.length
       continue

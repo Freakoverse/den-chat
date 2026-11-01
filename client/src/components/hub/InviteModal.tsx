@@ -17,7 +17,7 @@ import { nip19 } from 'nostr-tools'
 import { X, Search, Copy, Check, Send, Link, Loader2, Sparkles } from 'lucide-react'
 import { type HubData, useHubStore } from '@/stores/hubStore'
 import { useDnnStore } from '@/stores/dnnStore'
-import { formatShortAddress, coordinateShortTag } from '@/lib/nostr/nipShort'
+import { formatShortAddress, coordinateShortTag, toKey36 } from '@/lib/nostr/nipShort'
 import { KINDS } from '@/lib/crypto/constants'
 import { useEscToClose } from '@/hooks/useEscToClose'
 
@@ -57,13 +57,14 @@ export function InviteModal({ open, onClose, hub }: InviteModalProps) {
 
   // ── NIP-SHORT addresses ──
   // The hub's short address exists once its event carries the `s` tag (hub.shortCode). The address is
-  // `s<authority><code>`: authority is the creator's npub, or their DNN id when they have a verified one
-  // (dramatically shorter). A hub whose event predates short addresses shows a "create one" action.
-  const creatorNpub = useMemo(() => nip19.npubEncode(hub.creatorPubkey), [hub.creatorPubkey])
+  // `s<authority><code>`: authority is the creator's key36 (their pubkey in base 36, the NIP-SHORT
+  // canonical form), or their DNN id when they have a verified one (shorter still). A hub whose event
+  // predates short addresses shows a "create one" action.
+  const creatorKey36 = useMemo(() => toKey36(hub.creatorPubkey), [hub.creatorPubkey])
   const verifiedDnn = useDnnStore((s) => s.verified)
   const dnnId = useMemo(() => useDnnStore.getState().getVerifiedDnnId(hub.creatorPubkey), [hub.creatorPubkey, verifiedDnn])
   const shortCode = hub.shortCode
-  const shortAddr = shortCode ? formatShortAddress(creatorNpub, shortCode) : null
+  const shortAddr = shortCode ? formatShortAddress(creatorKey36, shortCode) : null
   const shortDnnAddr = shortCode && dnnId ? formatShortAddress(dnnId, shortCode) : null
   const hubLink = (addr: string) => `https://denchat.top/#hub/${addr}`
   // Only the owner can republish the hub event to mint the short address.
