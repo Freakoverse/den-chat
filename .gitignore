@@ -11,8 +11,8 @@ landing/
 # ── Vault (separate repo + origin — vault.denchat.top) ──
 vault/
 
-# ── Relay + Blossom server (separate repo + origin) ──
-relay/
+# ── Relay + Blossom server (REBLOS, separate repo + origin) ──
+REBLOS/
 
 # ── Versioned design docs (kept local, not in the repo) ──
 docs/v1/
