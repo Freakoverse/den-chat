@@ -650,22 +650,19 @@ function ConversationList({
         </div>
       </div>
 
-      {/* Hide low effort DMs — PoW gate on the Other tab (toggle + info/adjust modal) */}
-      <div className="shrink-0 flex items-center gap-2 px-0.5">
+      {/* Hide low effort DMs — PoW gate on the Other tab (label opens the info/adjust modal) */}
+      <div className="shrink-0 flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-secondary/50 border border-border">
+        <button
+          onClick={() => setShowSpamFilterModal(true)}
+          className="inline-flex items-center gap-1.5 min-w-0 text-xs text-foreground hover:text-primary transition-colors cursor-pointer"
+        >
+          <span className="truncate">Hide low-effort DMs <span className="text-muted-foreground">(≥{spamFilterThreshold})</span></span>
+          <Info size={12} className="opacity-60 shrink-0" />
+        </button>
         <DmPowToggle
           checked={spamFilterEnabled}
           onChange={useDmSpamFilterStore.getState().setEnabled}
         />
-        <button
-          onClick={() => setShowSpamFilterModal(true)}
-          className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-        >
-          hide low effort DMs
-          <Info size={11} className="opacity-70" />
-        </button>
-        {spamFilterEnabled && (
-          <span className="ml-auto text-[10px] font-mono text-muted-foreground/60">≥{spamFilterThreshold}</span>
-        )}
       </div>
 
       {showSpamFilterModal && <DmPowModal onClose={() => setShowSpamFilterModal(false)} />}
@@ -1547,19 +1544,30 @@ function DmPowModal({ onClose }: { onClose: () => void }) {
           </div>
 
           <div className={`space-y-2 transition-opacity ${enabled ? '' : 'opacity-50 pointer-events-none'}`}>
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-muted-foreground">Minimum proof-of-work</span>
-              <span className="text-xs font-mono text-foreground">{threshold} bits</span>
+            <span className="text-xs text-muted-foreground">Minimum proof-of-work</span>
+            {/* Slider — same design as the client Settings sliders (custom track + invisible range input) */}
+            <div className="flex items-center gap-4 px-2 py-1 rounded-sm bg-secondary">
+              <div className="flex-1 relative h-6 flex items-center">
+                <div className="absolute left-0 right-0 h-2 rounded-full overflow-hidden">
+                  <div className="absolute inset-0 bg-muted-foreground/20" />
+                  <div className="absolute inset-y-0 left-0 bg-primary" style={{ width: `${((threshold - DM_POW_MIN) / (DM_POW_MAX - DM_POW_MIN)) * 100}%` }} />
+                </div>
+                <div
+                  className="absolute w-5 h-5 rounded-full bg-primary border-2 border-background shadow-lg pointer-events-none transition-all"
+                  style={{ left: `calc(${((threshold - DM_POW_MIN) / (DM_POW_MAX - DM_POW_MIN)) * 100}% - 10px)` }}
+                />
+                <input
+                  type="range"
+                  min={DM_POW_MIN}
+                  max={DM_POW_MAX}
+                  step={1}
+                  value={threshold}
+                  onChange={(e) => setThreshold(Number(e.target.value))}
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                />
+              </div>
+              <span className="text-sm font-medium tabular-nums min-w-[48px] text-right text-foreground">{threshold} bits</span>
             </div>
-            <input
-              type="range"
-              min={DM_POW_MIN}
-              max={DM_POW_MAX}
-              step={1}
-              value={threshold}
-              onChange={(e) => setThreshold(Number(e.target.value))}
-              className="w-full accent-primary cursor-pointer"
-            />
             <div className="flex items-center justify-between text-[10px] text-muted-foreground/60">
               <span>lenient ({DM_POW_MIN})</span>
               <span>strict ({DM_POW_MAX})</span>
