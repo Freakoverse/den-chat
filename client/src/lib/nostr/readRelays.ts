@@ -72,14 +72,13 @@ export function fetchDMInbox(filter: Filter | Filter[]): Promise<Event[]> {
 
 /**
  * Real-time subscription across the gift-wrap inbox read set (getDMReadRelays).
- * Pass `opts.onauth` (see lib/nostr/relayAuth.ts) so relays that NIP-42-gate kind-1059 reads — which
- * NIP-17 recommends — actually serve the user's own inbox instead of silently CLOSEing the sub.
+ * Read unauthenticated — DEN Chat never answers NIP-42 AUTH (it would tie the user's key to the
+ * connection IP). A relay that gates kind-1059 reads behind AUTH will yield nothing here by design.
  */
 export function subscribeDMInbox(
   filter: Filter,
   onEvent: (event: Event) => void,
   onEose?: () => void,
-  opts?: Parameters<typeof subscribeToRelays>[4],
 ): { close: () => void } {
-  return subscribeToRelays(getDMReadRelays(), filter, onEvent, onEose, opts)
+  return subscribeToRelays(getDMReadRelays(), filter, onEvent, onEose)
 }

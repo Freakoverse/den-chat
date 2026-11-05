@@ -585,23 +585,16 @@ export function subscribeToRelays(
   filter: Filter,
   onEvent: (event: Event) => void,
   onEose?: () => void,
-  opts?: {
-    /**
-     * NIP-42: called when a relay demands authentication (AUTH challenge / CLOSED auth-required).
-     * nostr-tools builds the kind-22242 template (relay + challenge tags); we sign it. The pool sends
-     * the AUTH and re-issues the subscription on its own. Omit for subscriptions that must never
-     * reveal the user's real key to the relay (see lib/nostr/relayAuth.ts for the guarded signer).
-     */
-    onauth?: NonNullable<Parameters<typeof pool.subscribeMany>[2]['onauth']>
-  },
 ): { close: () => void } {
+  // No `onauth`: DEN Chat never answers a relay's NIP-42 AUTH challenge. Proving ownership of the
+  // user's key to a relay cryptographically ties that npub to the connection's IP (even over VPN/Tor),
+  // which is a privacy loss, not a gain. A relay that NIP-42-gates reads will simply serve nothing.
   const sub = pool.subscribeMany(
     relays,
     filter,
     {
       onevent: onEvent,
       oneose: onEose,
-      onauth: opts?.onauth,
     }
   )
 

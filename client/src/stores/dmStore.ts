@@ -15,7 +15,6 @@ import { publishWithFailover, getRelays } from '@/lib/nostr/relay-pool'
 import { useUserListsStore } from '@/stores/userListsStore'
 import { STANDARD_KINDS } from '@/lib/crypto/constants'
 import { createGiftWrap, unwrapGiftWrap, computeRumorId, foreignKindWrapIds, type UnwrappedDM } from '@/lib/nostr/nip17'
-import { makeRelayAuthSigner } from '@/lib/nostr/relayAuth'
 import { useBlockStore } from '@/stores/blockStore'
 import { useNotificationStore } from '@/stores/notificationStore'
 import { useWotStore } from '@/stores/wotStore'
@@ -376,9 +375,10 @@ export const useDMStore = create<DMState>((set, get) => ({
     let failed = 0
     let foreign = 0 // decrypted fine but not a DM (reactions, Vector signals, …) — never retried
 
-    // NIP-42: answer relay AUTH challenges as the logged-in user (guarded — see relayAuth.ts) so relays
-    // that gate kind-1059 reads actually return the inbox, including our own self-copies.
-    const onauth = makeRelayAuthSigner(signer, privateKey)
+    // DEN Chat deliberately NEVER answers a relay's NIP-42 AUTH challenge: proving ownership of the
+    // real key to a relay ties that npub to the connection's IP — a privacy loss even over VPN/Tor —
+    // so the inbox is read unauthenticated. A relay that gates kind-1059 reads behind AUTH simply
+    // yields nothing here; use a relay that doesn't.
 
     // One line so "is my 10050 actually being read?" is answerable from the console.
     const readSet = getDMReadRelays()
@@ -484,7 +484,6 @@ export const useDMStore = create<DMState>((set, get) => ({
 
         recalcUnreads()
       },
-      { onauth },
     )
 
     set({ subscription: sub })
