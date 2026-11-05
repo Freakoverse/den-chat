@@ -188,9 +188,12 @@ async function publishRecipientCopy(progressId: string, wrap: Event, relays: str
 /** Fade the indicator after a few seconds — unless the self copy landed nowhere, which stays pinned. */
 function scheduleProgressClear(progressId: string) {
   setTimeout(() => {
-    const p = useDMStore.getState().relayProgress[progressId]
-    if (p?.self && p.self.settled && p.self.confirmed === 0) return
-    useDMStore.getState().clearRelayProgress(progressId)
+    const st = useDMStore.getState()
+    const p = st.relayProgress[progressId]
+    if (p?.self && p.self.settled && p.self.confirmed === 0) return // self saved nowhere → keep pinned
+    const issue = st.deliveryIssue[progressId]
+    if (issue && !issue.dismissed && (issue.recipientMissing || issue.selfMissing)) return // unresolved delivery issue → keep the popover reachable
+    st.clearRelayProgress(progressId)
   }, 5000)
 }
 
@@ -788,8 +791,10 @@ export const useDMStore = create<DMState>((set, get) => ({
   clearRelayProgress: (eventId) =>
     set((state) => {
       selfCopyWraps.delete(eventId)
+      recipientWraps.delete(eventId)
       const { [eventId]: _, ...rest } = state.relayProgress
-      return { relayProgress: rest }
+      const { [eventId]: _i, ...restIssue } = state.deliveryIssue
+      return { relayProgress: rest, deliveryIssue: restIssue }
     }),
 
   setDeliveryIssue: (eventId, issue) =>
@@ -807,7 +812,19 @@ export const useDMStore = create<DMState>((set, get) => ({
     if (!wrap) return 0
     const relays = target === 'client' ? getRelays() : useUserListsStore.getState().userRelays
     if (relays.length === 0) return 0
-    const accepted = await publishWrapTo(wrap, relays)
+
+    // Mirror the fallback publish into the SAME counters the popover shows, so a successful
+    // fallback updates "N/N" instead of staying at 0/0.
+    let accepted: string[]
+    if (which === 'message') {
+      get().setRelayProgress(eventId, 0, relays.length, [])
+      accepted = await publishWrapTo(wrap, relays, (c, t, a) => get().setRelayProgress(eventId, c, t, a))
+      get().setRelayProgress(eventId, accepted.length, Math.max(accepted.length, relays.length), accepted)
+    } else {
+      get().setSelfCopyProgress(eventId, { confirmed: 0, total: relays.length, acceptedRelays: [], settled: false, retrying: false })
+      accepted = await publishWrapTo(wrap, relays, (c, t, a) => get().setSelfCopyProgress(eventId, { confirmed: c, total: t, acceptedRelays: a, settled: false, retrying: false }))
+      get().setSelfCopyProgress(eventId, { confirmed: accepted.length, total: Math.max(accepted.length, relays.length), acceptedRelays: accepted, settled: true, retrying: false })
+    }
     if (accepted.length > 0) {
       // Clear the corresponding "missing" flag so the prompt reflects what's now been sent.
       set((state) => {
