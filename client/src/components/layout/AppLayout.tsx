@@ -27,6 +27,8 @@ import { useVoicePresence } from '@/hooks/useVoicePresence'
 import { useUserStore } from '@/stores/userStore'
 import { useBlockStore } from '@/stores/blockStore'
 import { useWotStore } from '@/stores/wotStore'
+import { useFollowStore } from '@/stores/followStore'
+import { useDmSpamFilterStore, conversationClearsDmPow } from '@/stores/dmSpamFilterStore'
 import { useMobile } from '@/hooks/useMobile'
 import { useMemo, useEffect, useState } from 'react'
 import { ShieldAlert, LogOut, Plus, MessageSquare, MessageSquareText, MessagesSquare, AtSign, Compass, Settings, Home, X, Wallet, Loader2, MoreHorizontal, UserMinus, UserCheck, Copy, Check, Lock, RotateCw } from 'lucide-react'
@@ -73,17 +75,23 @@ export function AppLayout() {
   const mdmConvos = useMdmStore((s) => s.conversations)
   const blockedPubkeys = useBlockStore((s) => s.blockedPubkeys)
   const wotShouldHide = useWotStore((s) => s.shouldHide)
+  const followedPubkeys = useFollowStore((s) => s.followedPubkeys)
+  const spamFilterEnabled = useDmSpamFilterStore((s) => s.enabled)
+  const spamFilterThreshold = useDmSpamFilterStore((s) => s.threshold)
   const dmTotalUnread = useMemo(() => {
     if (!notifInitialized) return 0
     let total = 0
     for (const convos of [nip17Convos, nip04Convos, mdmConvos]) {
       for (const [pk, conv] of convos) {
         if (blockedPubkeys.has(pk) || wotShouldHide(pk, 'dms')) continue
+        // "Hide low effort DMs": a below-threshold Other conversation is hidden from the list, so it
+        // must not drive the badge either. Following is never filtered.
+        if (spamFilterEnabled && !followedPubkeys.has(pk) && !conversationClearsDmPow(conv.messages, spamFilterThreshold)) continue
         total += conv.unread
       }
     }
     return total
-  }, [nip17Convos, nip04Convos, mdmConvos, blockedPubkeys, wotShouldHide, notifInitialized])
+  }, [nip17Convos, nip04Convos, mdmConvos, blockedPubkeys, wotShouldHide, notifInitialized, followedPubkeys, spamFilterEnabled, spamFilterThreshold])
   const pcMessages = usePublicChatStore((s) => s.messages)
   const pcTopics = usePublicChatStore((s) => s.topics)
   const pcReadTimes = useNotificationStore((s) => s.pcReadTimes)

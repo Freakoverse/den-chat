@@ -41,6 +41,7 @@ import { getHour12 } from '@/stores/preferencesStore'
 import { nip19, type Event } from 'nostr-tools'
 import { getUploadBlossoms, getReadBlossoms, usePostingBehaviourStore } from '@/stores/postingBehaviourStore'
 import { useUserListsStore } from '@/stores/userListsStore'
+import { useDmSpamFilterStore, conversationClearsDmPow, DEFAULT_DM_POW_THRESHOLD, DM_POW_MIN, DM_POW_MAX } from '@/stores/dmSpamFilterStore'
 import {
   Search, Plus, MessageSquare, Loader2,
   Lock, Users, UserPlus, AlertCircle, X, ShieldBan, Eye, EyeOff, Ghost, Info, VenetianMask, MoreVertical,
@@ -470,6 +471,11 @@ function ConversationList({
   const [search, setSearch] = useState('')
   const [showProtocolInfo, setShowProtocolInfo] = useState(false)
 
+  // "Hide low effort DMs" — NIP-13 PoW gate on the Other tab (see dmSpamFilterStore).
+  const spamFilterEnabled = useDmSpamFilterStore((s) => s.enabled)
+  const spamFilterThreshold = useDmSpamFilterStore((s) => s.threshold)
+  const [showSpamFilterModal, setShowSpamFilterModal] = useState(false)
+
   // Get conversations from the active protocol's store
   const { following, other } = useMemo(
     () => dmProtocol === 'nip04'
@@ -481,7 +487,13 @@ function ConversationList({
     [followSet, dmProtocol, nip17Conversations, nip17Pending, nip04Conversations, nip04Pending, mdmConversations, mdmPending, blockedPubkeys],
   )
 
-  const activeList = tab === 'following' ? following : other
+  // Apply the "hide low effort DMs" PoW gate to the Other tab only (Following is never filtered).
+  const visibleOther = useMemo(
+    () => spamFilterEnabled ? other.filter((conv) => conversationClearsDmPow(conv.messages, spamFilterThreshold)) : other,
+    [other, spamFilterEnabled, spamFilterThreshold],
+  )
+
+  const activeList = tab === 'following' ? following : visibleOther
 
   // Filter by search
   const filteredList = useMemo(() => {
@@ -620,7 +632,7 @@ function ConversationList({
           className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-medium rounded-lg transition-colors cursor-pointer
             ${tab === 'other' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-secondary/50'}`}
         >
-          <UserPlus size={13} /> Other {other.length > 0 && `(${other.length})`}
+          <UserPlus size={13} /> Other {visibleOther.length > 0 && `(${visibleOther.length})`}
         </button>
       </div>
 
@@ -637,6 +649,26 @@ function ConversationList({
           />
         </div>
       </div>
+
+      {/* Hide low effort DMs — PoW gate on the Other tab (toggle + info/adjust modal) */}
+      <div className="shrink-0 flex items-center gap-2 px-0.5">
+        <DmPowToggle
+          checked={spamFilterEnabled}
+          onChange={useDmSpamFilterStore.getState().setEnabled}
+        />
+        <button
+          onClick={() => setShowSpamFilterModal(true)}
+          className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+        >
+          hide low effort DMs
+          <Info size={11} className="opacity-70" />
+        </button>
+        {spamFilterEnabled && (
+          <span className="ml-auto text-[10px] font-mono text-muted-foreground/60">≥{spamFilterThreshold}</span>
+        )}
+      </div>
+
+      {showSpamFilterModal && <DmPowModal onClose={() => setShowSpamFilterModal(false)} />}
 
       {/* Conversation list */}
       <div className="flex-1 overflow-y-auto min-h-0">
@@ -1471,6 +1503,80 @@ function DMEmptyState() {
 /* ═══════════════════════════════════════════ */
 /*  DM RELAY PROGRESS INDICATOR                */
 /* ═══════════════════════════════════════════ */
+
+/** Small on/off switch for the "hide low effort DMs" control. */
+function DmPowToggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button
+      role="switch"
+      aria-checked={checked}
+      aria-label="Hide low effort DMs"
+      onClick={() => onChange(!checked)}
+      className={`relative w-7 h-[16px] rounded-full transition-colors shrink-0 cursor-pointer ${checked ? 'bg-primary' : 'bg-muted-foreground/30'}`}
+    >
+      <span className={`absolute top-[3px] w-2.5 h-2.5 rounded-full bg-white shadow transition-all duration-200 ${checked ? 'left-[15px]' : 'left-[3px]'}`} />
+    </button>
+  )
+}
+
+/** Explain the PoW gate + let the user enable it and adjust the threshold (with a reset to default). */
+function DmPowModal({ onClose }: { onClose: () => void }) {
+  const enabled = useDmSpamFilterStore((s) => s.enabled)
+  const threshold = useDmSpamFilterStore((s) => s.threshold)
+  const setEnabled = useDmSpamFilterStore((s) => s.setEnabled)
+  const setThreshold = useDmSpamFilterStore((s) => s.setThreshold)
+  const resetThreshold = useDmSpamFilterStore((s) => s.resetThreshold)
+  return createPortal(
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="w-full max-w-sm rounded-xl border border-border bg-card shadow-xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-3.5 border-b border-border">
+          <h3 className="text-sm font-semibold text-foreground flex items-center gap-2"><ShieldBan size={15} /> Hide low effort DMs</h3>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors cursor-pointer"><X size={16} /></button>
+        </div>
+        <div className="px-5 py-4 space-y-4">
+          <p className="text-sm text-muted-foreground leading-relaxed">
+            DM spam is cheap because sending a message costs the sender nothing. This hides DMs in your <span className="text-foreground font-medium">Other</span> tab from senders who didn&apos;t attach enough <span className="text-foreground font-medium">proof-of-work</span> (NIP-13): a one-off computation that proves a message wasn&apos;t mass-produced. One genuine DM is trivial to mine; thousands of spam DMs are not.
+          </p>
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            It never affects <span className="text-foreground font-medium">Following</span>, and nothing is deleted: lowering the bar or turning this off brings hidden conversations straight back. Heads up: many clients don&apos;t attach proof-of-work yet, so some genuine DMs can be hidden while this is on.
+          </p>
+
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-foreground">Enabled</span>
+            <DmPowToggle checked={enabled} onChange={setEnabled} />
+          </div>
+
+          <div className={`space-y-2 transition-opacity ${enabled ? '' : 'opacity-50 pointer-events-none'}`}>
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-muted-foreground">Minimum proof-of-work</span>
+              <span className="text-xs font-mono text-foreground">{threshold} bits</span>
+            </div>
+            <input
+              type="range"
+              min={DM_POW_MIN}
+              max={DM_POW_MAX}
+              step={1}
+              value={threshold}
+              onChange={(e) => setThreshold(Number(e.target.value))}
+              className="w-full accent-primary cursor-pointer"
+            />
+            <div className="flex items-center justify-between text-[10px] text-muted-foreground/60">
+              <span>lenient ({DM_POW_MIN})</span>
+              <span>strict ({DM_POW_MAX})</span>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between pt-1">
+            <button onClick={resetThreshold} className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
+              <RefreshCw size={12} /> Reset to default ({DEFAULT_DM_POW_THRESHOLD})
+            </button>
+            <button onClick={onClose} className="px-3 py-1.5 rounded-lg text-sm font-medium bg-secondary hover:bg-secondary/70 text-foreground transition-colors cursor-pointer">Done</button>
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body)
+}
 
 function DMRelayProgressIndicator({ eventId }: { eventId: string }) {
   const progress = useDMStore((s) => s.relayProgress[eventId])
