@@ -187,12 +187,14 @@ export function getPublishRelays(hubRelays?: string[], opts?: { hubSeed?: string
   // Order = fetch/failover preference: hub relays first (so hub content reaches the container's own
   // relays before anything else), then client, then the user's NIP-65.
 
-  // Hub relays: exclude any the user disabled in client settings. Seeded by the hub d-tag (hubSeed) when
-  // provided, so every member converges on the same hub relays.
+  // Hub relays: governed by the postToHubRelays toggle ALONE, not the client-relay
+  // enabled/disabled flags (those control only the client source). So disabling all your
+  // client relays never suppresses a hub's own relays while "post to hub relays" is on,
+  // even when a hub relay URL also appears (disabled) in your client list. Seeded by the
+  // hub d-tag (hubSeed) so every member converges on the same subset.
   if (state.postToHubRelays && hubRelays && hubRelays.length > 0) {
     const limit = state.limitHubRelays ? RELAY_PUBLISH_CAP : Infinity
-    const filtered = hubRelays.filter((r) => !disabledRelays.has(r.replace(/\/+$/, '')))
-    pickForPubkey(filtered, limit, hubSeed).forEach((r) => result.add(r))
+    pickForPubkey(hubRelays, limit, hubSeed).forEach((r) => result.add(r))
   }
 
   // Client relays (from relay-pool, which reads localStorage — already filtered to enabled)
@@ -290,8 +292,10 @@ export async function publishContent(
   const seed = getPublishRelays(hubRelays, { hubSeed })
 
   // Pool order mirrors the seed (getPublishRelays): hub relays first, then client, then user NIP-65.
+  // Hub relays are governed by the postToHubRelays toggle alone, NOT the client-relay disabled flags
+  // (same as getPublishRelays), so disabling your client relays never drops a hub's own relays.
   const pool: string[] = []
-  if (state.postToHubRelays && hubRelays && hubRelays.length > 0) pool.push(...ringOrder(hubRelays.filter(notDisabled), hubSeed))
+  if (state.postToHubRelays && hubRelays && hubRelays.length > 0) pool.push(...ringOrder(hubRelays, hubSeed))
   if (state.postToClientRelays) pool.push(...ringOrder(getRelays(), me)) // enabled-only already
   if (state.postToUserRelays) pool.push(...ringOrder(useUserListsStore.getState().userRelays.filter(notDisabled), me))
 
@@ -363,11 +367,10 @@ export function getDeletePublishRelays(hubRelays?: string[]): string[] {
   useUserListsStore.getState().userRelays
     .filter((r) => !disabledRelays.has(r.replace(/\/+$/, '')))
     .forEach((r) => result.add(r))
-  // Hub relays, minus any disabled in client settings
+  // Hub relays: a delete must reach where the content lives, and hub relays are governed by
+  // the hub source, not the client-relay disabled flags — so don't filter them here.
   if (hubRelays && hubRelays.length > 0) {
-    hubRelays
-      .filter((r) => !disabledRelays.has(r.replace(/\/+$/, '')))
-      .forEach((r) => result.add(r))
+    hubRelays.forEach((r) => result.add(r))
   }
 
   return Array.from(result)
