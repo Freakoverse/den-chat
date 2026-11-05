@@ -6,7 +6,8 @@ import { isTauri, isMobileOS, formatDateNumeric } from '@/lib/utils'
 import { ADMIN_PUBKEY, StorageKey } from '@/lib/constants'
 import { fetchReplaceable, fetchEvents, publishToSpecificRelays, getRelayList } from '@/lib/nostr/relay-pool'
 import { orderByHealth } from '@/lib/nostr/relayHealthProbe'
-import { MonitorSmartphone, Import, Plus, Loader2, AlertCircle, Link2, KeyRound, Copy, Check, AppWindow, ChevronDown, ChevronLeft, ChevronRight, X, Shield, ExternalLink, User, Lock, Eye, EyeOff, GitBranch, Sprout, KeySquare, Download, FileUp, BookOpen, Camera, Settings2, XCircle, FileText, Package, LockOpen, Globe, RefreshCw, Rocket, QrCode, Info, Gauge, Brush } from 'lucide-react'
+import { MonitorSmartphone, Import, Plus, Loader2, AlertCircle, Link2, KeyRound, Copy, Check, AppWindow, ChevronDown, ChevronLeft, ChevronRight, X, Shield, ExternalLink, User, Lock, Eye, EyeOff, GitBranch, Sprout, KeySquare, Download, FileUp, BookOpen, Camera, Settings2, XCircle, FileText, Package, LockOpen, Globe, RefreshCw, Rocket, QrCode, Info, Gauge, BrushCleaning } from 'lucide-react'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { BlossomImage } from '@/components/ui/BlossomImage'
 import { Button } from '@/components/ui/button'
@@ -86,9 +87,9 @@ export function LoginScreen() {
   // Label for the Local button: one signer → name it; several → generic (the click opens a picker).
   const localSignerLabel =
     availableSigners.length === 1
-      ? `Locally login with ${availableSigners[0].name.length > 18 ? availableSigners[0].name.slice(0, 18) + '…' : availableSigners[0].name}`
+      ? `login locally with ${availableSigners[0].name.length > 18 ? availableSigners[0].name.slice(0, 18) + '…' : availableSigners[0].name}`
       : availableSigners.length > 1
-        ? 'Locally login'
+        ? 'login locally'
         : 'Local'
 
   // Import
@@ -2658,16 +2659,22 @@ export function LoginScreen() {
                       {localSignerLabel}
                     </Button>
                     {hasStoredSigner && (
-                      <Button
-                        variant="outline"
-                        onClick={() => setShowForgetSignerModal(true)}
-                        className="px-2.5 shrink-0"
-                        disabled={loading === 'lrs'}
-                        aria-label="Reset local signer connection"
-                        title="Reset local signer connection"
-                      >
-                        <Brush size={14} />
-                      </Button>
+                      <TooltipProvider delayDuration={200}>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="outline"
+                              onClick={() => setShowForgetSignerModal(true)}
+                              className="px-2.5 shrink-0"
+                              disabled={loading === 'lrs'}
+                              aria-label="Reset local signer connection"
+                            >
+                              <BrushCleaning size={14} />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent side="top" className="text-xs">Reset local signer connection</TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
                     )}
                   </div>
                 )}
@@ -2784,7 +2791,7 @@ export function LoginScreen() {
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={() => setShowForgetSignerModal(false)}>
           <div className="w-full max-w-sm rounded-xl border border-border bg-card shadow-xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between px-5 py-3.5 border-b border-border">
-              <h3 className="text-sm font-semibold text-foreground flex items-center gap-2"><Brush size={15} /> Reset local signer connection</h3>
+              <h3 className="text-sm font-semibold text-foreground flex items-center gap-2"><BrushCleaning size={15} /> Reset local signer connection</h3>
               <button onClick={() => setShowForgetSignerModal(false)} className="text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
                 <X size={16} />
               </button>
@@ -2810,7 +2817,7 @@ export function LoginScreen() {
                   onClick={handleForgetSigner}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors cursor-pointer"
                 >
-                  <Brush size={14} /> Reset connection
+                  <BrushCleaning size={14} /> Reset connection
                 </button>
               </div>
             </div>

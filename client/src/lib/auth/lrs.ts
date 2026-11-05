@@ -68,11 +68,12 @@ function buildBunkerUrl(transportPubkey: string, port: number): string {
   return `bunker://${transportPubkey}?relay=${encodeURIComponent(`ws://127.0.0.1:${port}`)}`
 }
 
-/** App metadata sent on the first connect so the signer labels us by name, not origin/key (§6.1). */
+/** App metadata sent on the first connect so the signer can label/brand us by name + logo, not
+ *  origin/key (§6.1). The image is origin-relative so it resolves to wherever the app is served. */
 function buildMetadata(): Record<string, unknown> {
-  let url = ''
-  try { url = typeof location !== 'undefined' ? location.origin : '' } catch { /* no window */ }
-  return { name: 'DEN Chat', ...(url ? { url } : {}) }
+  let origin = ''
+  try { origin = typeof location !== 'undefined' ? location.origin : '' } catch { /* no window */ }
+  return { name: 'DEN Chat', ...(origin ? { url: origin, image: `${origin}/app-icon.png` } : {}) }
 }
 
 /* ─── Discovery ─── */
