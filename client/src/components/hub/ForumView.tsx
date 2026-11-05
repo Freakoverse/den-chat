@@ -29,6 +29,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { UserProfileModal } from '@/components/hub/UserProfileModal'
 import { ReportModal } from '@/components/hub/ReportModal'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
+import { Mouth } from '@/components/ui/MouthIcon'
 import {
   ChatMessageRow, MessageInput, DeleteConfirmDialog, RawEventModal,
   useDecryptedReactions,
@@ -1953,8 +1954,8 @@ function CreateForumPostModal({ onClose, sendMessage, canPublish, signer, privat
                 </Tooltip>
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <button type="button" onClick={() => setIsNsfw(!isNsfw)} className={cn('p-1.5 rounded cursor-pointer transition-colors text-xs font-bold', isNsfw ? 'text-red-400 bg-red-400/10' : 'text-muted-foreground hover:text-foreground hover:bg-accent/50')}>
-                      NSFW
+                    <button type="button" onClick={() => setIsNsfw(!isNsfw)} className={cn('p-1.5 rounded cursor-pointer transition-colors', isNsfw ? 'text-red-400 bg-red-400/10' : 'text-muted-foreground hover:text-foreground hover:bg-accent/50')}>
+                      <Mouth size={16} />
                     </button>
                   </TooltipTrigger>
                   <TooltipContent side="top" className="text-xs">Mark as NSFW</TooltipContent>
@@ -2485,8 +2486,8 @@ function EditForumPostModal({ post, onClose, editMessage, signer, privateKey, hu
                 </Tooltip>
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <button type="button" onClick={() => setIsNsfw(!isNsfw)} className={cn('p-1.5 rounded cursor-pointer transition-colors text-xs font-bold', isNsfw ? 'text-red-400 bg-red-400/10' : 'text-muted-foreground hover:text-foreground hover:bg-accent/50')}>
-                      NSFW
+                    <button type="button" onClick={() => setIsNsfw(!isNsfw)} className={cn('p-1.5 rounded cursor-pointer transition-colors', isNsfw ? 'text-red-400 bg-red-400/10' : 'text-muted-foreground hover:text-foreground hover:bg-accent/50')}>
+                      <Mouth size={16} />
                     </button>
                   </TooltipTrigger>
                   <TooltipContent side="top" className="text-xs">Mark as NSFW</TooltipContent>
