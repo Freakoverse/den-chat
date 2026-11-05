@@ -16,7 +16,11 @@ export {
   // Types
   type StoredAccount, type StoredSeed,
 } from './secure-storage'
-export { discover, PC55Signer, type DiscoverResult } from './pc55'
+export {
+  discoverLocalSigners, findRememberedSigner, LrsSigner, fingerprint,
+  loadLrsState, clearLrsState,
+  type LrsSignerInfo, type LrsState,
+} from './lrs'
 export { BunkerSigner } from './bunker'
 export { NostrConnectSigner, generateNostrConnectDetails } from './nostr-connect'
 export { Nip07Signer, hasNip07Extension } from './nip07'

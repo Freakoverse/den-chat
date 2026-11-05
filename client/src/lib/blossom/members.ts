@@ -10,7 +10,7 @@
  * - Local key (nsec/seed): nostr-tools nip04.encrypt/decrypt
  * - NIP-07 (browser ext): signer.nip04.encrypt/decrypt
  * - NIP-46 (Nostr Connect): signer.nip04.encrypt/decrypt
- * - NIP-PC55 (DENOS): signer.nip04Encrypt/nip04Decrypt
+ * - NIP-LRS (local signer, e.g. DENOS): signer.nip04Encrypt/nip04Decrypt
  * - NIP-UPV2: signer.nip04.encrypt/decrypt
  */
 

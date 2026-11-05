@@ -15,7 +15,7 @@ import type { ISigner } from '@/stores/userStore'
 
 /**
  * Encrypt content for a NIP-04 DM.
- * Handles all signer paths: raw key, NIP-07, NIP-46, PC55, UPV2.
+ * Handles all signer paths: raw key, NIP-07, NIP-46, LRS/local, UPV2.
  * Remote signers are protected by SignerGuard (backoff + circuit breaker).
  */
 export async function encryptNip04(
@@ -29,7 +29,7 @@ export async function encryptNip04(
 
 /**
  * Decrypt content from a NIP-04 DM.
- * Handles all signer paths: raw key, NIP-07, NIP-46, PC55, UPV2.
+ * Handles all signer paths: raw key, NIP-07, NIP-46, LRS/local, UPV2.
  * Remote signers are protected by SignerGuard (backoff + circuit breaker).
  */
 export async function decryptNip04(

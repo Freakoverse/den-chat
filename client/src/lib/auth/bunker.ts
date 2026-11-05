@@ -27,9 +27,13 @@ export class BunkerSigner {
    * Login with a bunker:// URL.
    * @param bunker - bunker:// URL string
    * @param isInitialConnection - whether to send connect handshake
+   * @param metadata - optional app metadata ({name,url,image}) sent with the FIRST connect so the
+   *                   signer can label the connection with a real app name instead of a key/origin.
+   *                   Used by the LRS (local) path, which has no pasted nostrconnect:// URI to carry
+   *                   it; harmless for ordinary bunker:// (a signer keeps its stored name on reconnect).
    * @returns The user's Nostr pubkey
    */
-  async login(bunker: string, isInitialConnection = true): Promise<string> {
+  async login(bunker: string, isInitialConnection = true, metadata?: Record<string, unknown>): Promise<string> {
     const bunkerPointer = await parseBunkerInput(bunker)
     if (!bunkerPointer) {
       throw new Error('Invalid bunker URL')
@@ -48,7 +52,7 @@ export class BunkerSigner {
     })
 
     if (isInitialConnection) {
-      await this.signer.connect()
+      await this.signer.connect(metadata)
     }
 
     this.pubkey = await this.signer.getPublicKey()

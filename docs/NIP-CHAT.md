@@ -351,7 +351,7 @@ Hub events reference Blossom servers via `o` tags.
 NIP-CHAT uses a **Logical Key Hierarchy (LKH)** — a balanced binary tree of symmetric keys — to distribute hub secrets to members. This approach provides:
 
 - **O(log N) secret rotation** when members are removed (vs. O(N) with flat per-member encryption)
-- **Remote signer compatibility** — NIP-04 is used only at the leaf level, making it work with NIP-46, NIP-PC55, NIP-UPV2, and NIP-07 signers
+- **Remote signer compatibility** — NIP-04 is used only at the leaf level, making it work with NIP-46, NIP-LRS, NIP-UPV2, and NIP-07 signers
 - **Zero signer calls during re-keying** — internal tree operations use symmetric AES-256-GCM
 
 ```

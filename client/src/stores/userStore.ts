@@ -3,7 +3,7 @@ import { setDraftUser } from '@/stores/draftStore'
 import { resetSession } from '@/lib/session/resetSession'
 import { StorageKey } from '@/lib/constants'
 
-export type AuthMethod = 'upv2' | 'pc55' | 'nip46' | 'nsec' | 'seed' | 'vault' | null
+export type AuthMethod = 'upv2' | 'lrs' | 'nip46' | 'nsec' | 'seed' | 'vault' | null
 
 /**
  * Generic signer interface — any auth method that can sign events
@@ -36,7 +36,7 @@ export interface UserState {
   avatar: string | null
   authMethod: AuthMethod
   localSignerName: string | null
-  /** Active signer instance (PC55, Bunker, NostrConnect, UPV2) */
+  /** Active signer instance (LRS/local, Bunker, NostrConnect, UPV2) */
   signer: ISigner | null
   seedPhrase: string | null
   accountIndex: number

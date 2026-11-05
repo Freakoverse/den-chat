@@ -576,7 +576,7 @@ class UPV2Service {
   }
 
   // ── NIP-SKD (§7 methods over UPV2) — derive + act as v2-hub pseudonyms via DENOS ──
-  // UPV2 is bespoke, so (unlike NIP-46/PC55's positional array) the params are a JSON OBJECT:
+  // UPV2 is bespoke, so (unlike NIP-46/LRS's positional array) the params are a JSON OBJECT:
   // { context, peerPub?, nonce, + event | (recipientPub, plaintext) | (senderPub, ciphertext) }.
   // Matches DENOS's handle_skd (upv2.rs): session-authenticated (no challenge_signature), the
   // sign op replies with a 'signed_event' { event } and the rest echo their own action + { result }.

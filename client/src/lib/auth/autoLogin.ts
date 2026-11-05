@@ -16,7 +16,8 @@ import { StorageKey } from '@/lib/constants'
 export type RememberedMethod =
   | 'bunker'        // NIP-46 bunker:// — silent reconnect from the stored bunker url + client secret
   | 'nostrconnect'  // NIP-46 nostrconnect:// — becomes a bunker connection; resumes via the bunker keys
-  | 'pc55'          // DENOS "Local" (ws://localhost:7777) — silent if DENOS is running
+  | 'lrs'           // NIP-LRS "Local" (loopback NIP-46 relay) — silent if a pinned signer is running
+  | 'pc55'          // DEPRECATED alias of 'lrs' — kept so pre-LRS remembered logins still resume
   | 'nip07'         // browser extension — silent if the extension is present + still authorized
   | 'upv2'          // password login — CANNOT silently resume (needs the password); pre-fills identifier
   | 'vault'         // PWA iframe vault — re-locks on reload; resumes to its PIN overlay

@@ -29,7 +29,7 @@ import { rustBackend, vaultBackend, applyLogin } from '@/lib/auth/authBackend'
 import { rememberLogin, getRememberedLogin } from '@/lib/auth/autoLogin'
 import { verifyBackupMatches } from '@/lib/auth/backupCrypto'
 import { QRScanner } from '@/components/auth/QRScanner'
-import { PC55Signer, discover } from '@/lib/auth/pc55'
+import { discoverLocalSigners, findRememberedSigner, LrsSigner, fingerprint, loadLrsState, type LrsSignerInfo } from '@/lib/auth/lrs'
 import { BunkerSigner } from '@/lib/auth/bunker'
 import { NostrConnectSigner, generateNostrConnectDetails } from '@/lib/auth/nostr-connect'
 import { Nip07Signer } from '@/lib/auth/nip07'
@@ -63,6 +63,8 @@ export function LoginScreen() {
   const [loading, setLoading] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [showLocalSignerModal, setShowLocalSignerModal] = useState(false)
+  // NIP-LRS: >1 local signer found on scan → show a picker (name + transport-key fingerprint).
+  const [discoveredSigners, setDiscoveredSigners] = useState<LrsSignerInfo[] | null>(null)
 
   // Import
   const [importWords, setImportWords] = useState('')
@@ -374,18 +376,21 @@ export function LoginScreen() {
             if (url && secret) await resumeBunker(url, secret)
             break
           }
-          case 'pc55': {
-            // DENOS "Local" — silent only if the signer app is running; fail quietly otherwise.
+          case 'lrs':
+          case 'pc55': { // 'pc55' is the deprecated alias — old remembered logins resume as LRS
+            // NIP-LRS "Local" — silent only if the PINNED signer is running; fail quietly otherwise.
+            const state = loadLrsState()
+            if (!state) { clearError(); return } // pre-LRS session: user clicks Local to re-pair
             setError('Connecting to local signer…')
-            const info = await discover()
+            // Resume ONLY to the pinned transport key — never to a different signer on the old port.
+            const info = await findRememberedSigner(state)
             if (stop()) return
-            if (!info) { clearError(); return }
-            const signer = new PC55Signer()
-            await signer.init()
-            const pubkey = await signer.getPublicKey()
+            if (!info) { clearError(); return } // signer offline — stay on the login screen
+            const signer = new LrsSigner(info)
+            const pubkey = await signer.connect()
             if (stop()) return
             setSigner(signer)
-            login(pubkey, 'pc55')
+            login(pubkey, 'lrs')
             clearError()
             break
           }
@@ -580,35 +585,48 @@ export function LoginScreen() {
     }
   }
 
-  // ─── PC55 Login (detect-on-click) ───
+  // ─── NIP-LRS Local Signer (detect-on-click) ───
   const handleLocalLogin = async () => {
     bunkerTakeoverRef.current = true // cancel any in-flight auto-resume
-    setLoading('pc55')
+    setLoading('lrs')
     clearError()
     try {
-      // Step 1: Try to discover the signer first. Retry a few times before giving up —
-      // right after a logout, the signer app (e.g. DENOS) may still be releasing DEN
-      // Chat's previous WebSocket, and a single 2s probe fired into that window can
-      // spuriously miss a signer that's actually running. Quick re-probes let it recover
-      // without the user having to click Local twice. A genuinely-absent signer fails
-      // fast (connection refused), so this adds little delay when there's nothing there.
-      let info = await discover()
-      for (let attempt = 0; attempt < 3 && !info; attempt++) {
-        await new Promise((r) => setTimeout(r, 500))
-        info = await discover()
-      }
-      if (!info) {
-        // No signer found — show the friendly modal
-        setShowLocalSignerModal(true)
+      // Scan the loopback port range for a signer (fast-pathing the remembered one). discoverLocalSigners
+      // already retries each probe and re-scans a few rounds, so a signer that's briefly RST-ing its
+      // HTTP endpoint (a known ~40% failure) or still releasing our previous socket after a logout is
+      // not spuriously missed. A genuinely-absent signer fails fast, so this adds little delay.
+      const signers = await discoverLocalSigners(loadLrsState())
+      if (signers.length === 0) {
+        setShowLocalSignerModal(true) // none found — show the friendly download/help modal
         return
       }
-      // Step 2: Signer found — proceed with login
-      const signer = new PC55Signer()
-      await signer.init()
-      const pubkey = await signer.getPublicKey()
+      if (signers.length > 1) {
+        // More than one signer running — the name is untrusted and may collide, so let the user pick
+        // by name + transport-key fingerprint (§5.2 / §8). connectToLrs finishes the chosen one.
+        setDiscoveredSigners(signers)
+        setLoading(null)
+        return
+      }
+      await connectToLrs(signers[0])
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to connect to local signer')
+    } finally {
+      setLoading(null)
+    }
+  }
+
+  // Connect to a specific discovered signer (single match, or the one chosen in the picker).
+  const connectToLrs = async (info: LrsSignerInfo) => {
+    setDiscoveredSigners(null)
+    setLoading('lrs')
+    clearError()
+    try {
+      const signer = new LrsSigner(info)
+      // First connect blocks on in-app approval in the signer's own window (no auth URL) — expected.
+      const pubkey = await signer.connect()
       setSigner(signer)
-      login(pubkey, 'pc55')
-      rememberLogin({ method: 'pc55', pubkey })
+      login(pubkey, 'lrs')
+      rememberLogin({ method: 'lrs', pubkey })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to connect to local signer')
     } finally {
@@ -2587,15 +2605,15 @@ export function LoginScreen() {
             {/* External signer row — Local | Extension (both hidden on mobile OS) */}
             {!isMobile && (
               <div className="w-full flex flex-wrap gap-2">
-                {/* NIP-PC55: Local Signer — hidden on mobile OS */}
+                {/* NIP-LRS: Local Signer — hidden on mobile OS */}
                 {!isMobile && (
                   <Button
                     variant="outline"
                     onClick={handleLocalLogin}
                     className="grow gap-1.5 text-xs"
-                    disabled={loading === 'pc55'}
+                    disabled={loading === 'lrs'}
                   >
-                    {loading === 'pc55' ? (
+                    {loading === 'lrs' ? (
                       <Loader2 size={14} className="animate-spin" />
                     ) : (
                       <MonitorSmartphone size={14} />
@@ -2710,6 +2728,40 @@ export function LoginScreen() {
       />
       <ExtensionGuideModal open={showExtensionGuide} onClose={() => setShowExtensionGuide(false)} />
       <NoLocalSignerModal open={showLocalSignerModal} onClose={() => setShowLocalSignerModal(false)} isDesktop={isDesktop} />
+
+      {/* ── NIP-LRS: choose among multiple local signers (name is untrusted → show key fingerprint) ── */}
+      {discoveredSigners && discoveredSigners.length > 1 && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={() => setDiscoveredSigners(null)}>
+          <div className="w-full max-w-sm rounded-xl border border-border bg-card shadow-xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-3.5 border-b border-border">
+              <h3 className="text-sm font-semibold text-foreground">Choose a local signer</h3>
+              <button onClick={() => setDiscoveredSigners(null)} className="text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="px-5 py-3">
+              <p className="text-xs text-muted-foreground leading-relaxed mb-3">
+                More than one signer is running. Names are self-declared and can repeat, so confirm by the key fingerprint.
+              </p>
+              <div className="space-y-1.5">
+                {discoveredSigners.map((s) => (
+                  <button
+                    key={s.transportPubkey}
+                    onClick={() => connectToLrs(s)}
+                    className="w-full flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg border border-border bg-secondary/30 hover:bg-secondary/60 transition-colors cursor-pointer text-left"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-foreground truncate">{s.name}</p>
+                      <p className="text-[10px] font-mono text-muted-foreground">{fingerprint(s.transportPubkey)} · :{s.port}</p>
+                    </div>
+                    <MonitorSmartphone size={15} className="text-muted-foreground shrink-0" />
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
 
       {/* ── Pending Deletion Modal ── */}
@@ -3722,7 +3774,7 @@ function NoLocalSignerModal({ open, onClose, isDesktop }: { open: boolean; onClo
           {view === 'info' ? (
             <div className="space-y-4">
               <p className="text-sm text-muted-foreground leading-relaxed">
-                No local signer was detected. The Local login connects to a NIP-PC55 signer application
+                No local signer was detected. The Local login connects to a NIP-LRS signer application
                 (like <span className="text-foreground font-medium">DENOS</span>) running on your device.
               </p>
 
@@ -3731,7 +3783,7 @@ function NoLocalSignerModal({ open, onClose, isDesktop }: { open: boolean; onClo
                 <div className="space-y-1.5">
                   <div className="flex items-start gap-2 text-xs text-muted-foreground">
                     <span className="text-primary font-semibold mt-0.5">1.</span>
-                    <span>Download and install <span className="text-foreground font-medium">DENOS</span> or another NIP-PC55 compatible signer</span>
+                    <span>Download and install <span className="text-foreground font-medium">DENOS</span> or another NIP-LRS compatible signer</span>
                   </div>
                   <div className="flex items-start gap-2 text-xs text-muted-foreground">
                     <span className="text-primary font-semibold mt-0.5">2.</span>

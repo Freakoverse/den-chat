@@ -67,7 +67,7 @@ export function signEvent(unsignedEvent: UnsignedEvent, privateKeyHex: string): 
 }
 
 /**
- * Sign an event using any ISigner (PC55, NIP-46, UPV2, NIP-07, etc.).
+ * Sign an event using any ISigner (LRS/local, NIP-46, UPV2, NIP-07, etc.).
  * Falls back to local private key signing if a privateKey is provided.
  */
 export async function signWithSigner(

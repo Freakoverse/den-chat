@@ -7,7 +7,7 @@
  * without an internal timer. `notifyStop()` (on send / clear / blur / unmount)
  * emits a one-shot stop signal so receivers clear instantly.
  *
- * Broadcasting works with any available signer (local key, PC55, NIP-07
+ * Broadcasting works with any available signer (local key, LRS/local, NIP-07
  * extension, or a remote signer like Bunker/UPV2). Remote signers will ask to
  * approve each ~3s beat unless the user enables auto-approve on their end. An
  * in-flight guard keeps pings from piling up on a slow signer; users with no
