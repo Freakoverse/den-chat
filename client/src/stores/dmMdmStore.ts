@@ -18,7 +18,7 @@ import { create } from 'zustand'
 import type { Event, Filter } from 'nostr-tools'
 import { subscribeEventsWide } from '@/lib/nostr/readRelays'
 import { publishWithFailover, getRelays } from '@/lib/nostr/relay-pool'
-import { publishPersonal } from '@/stores/postingBehaviourStore'
+import { publishPersonal, usePostingBehaviourStore } from '@/stores/postingBehaviourStore'
 import { discoverRecipientRelays } from '@/lib/nostr/relayDiscovery'
 import { nowSeconds } from '@/lib/time/clockOffset'
 import { useBlockStore } from '@/stores/blockStore'
@@ -288,7 +288,9 @@ export const useMdmStore = create<MdmState>((set, get) => ({
     set((s) => { const conversations = new Map(s.conversations); upsertMessage(conversations, recipientPubkey, real, toMessage(real, payload, recipientPubkey, myPubkey, true, true), s.activeConversation); return { conversations } })
 
     onPhase?.('publishing')
-    const recipientRelays = await discoverRecipientRelays(recipientPubkey, getRelays()).catch(() => [] as string[])
+    const recipientRelays = usePostingBehaviourStore.getState().postToRecipientRelays
+      ? await discoverRecipientRelays(recipientPubkey, getRelays()).catch(() => [] as string[])
+      : []
     const realPool = [...recipientRelays, ...getRelays()]
     const realSeed = recipientRelays.length > 0 ? recipientRelays : getRelays()
     const target = Math.min(new Set(realPool.map(norm)).size || 1, 4)

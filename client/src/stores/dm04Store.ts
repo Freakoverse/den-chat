@@ -522,7 +522,9 @@ export const useDM04Store = create<DM04State>((set, get) => ({
 
       // Start relay discovery in parallel with encryption (non-blocking)
       const publishRelays = getPublishRelays()
-      const relayDiscoveryPromise = discoverRecipientRelays(recipientPubkey, publishRelays)
+      const relayDiscoveryPromise = usePostingBehaviourStore.getState().postToRecipientRelays
+        ? discoverRecipientRelays(recipientPubkey, publishRelays)
+        : Promise.resolve([] as string[])
 
       const encrypted = await encryptNip04(content, recipientPubkey, signer, privateKey)
 

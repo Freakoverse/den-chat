@@ -10,7 +10,7 @@
 import { create } from 'zustand'
 import { nowSeconds } from '@/lib/time/clockOffset'
 import { fetchDMInbox, subscribeDMInbox, getDMReadRelays } from '@/lib/nostr/readRelays'
-import { getPublishRelays, getDMSelfCopyRelays, publishDM } from '@/stores/postingBehaviourStore'
+import { getPublishRelays, getDMSelfCopyRelays, publishDM, usePostingBehaviourStore } from '@/stores/postingBehaviourStore'
 import { STANDARD_KINDS } from '@/lib/crypto/constants'
 import { createGiftWrap, unwrapGiftWrap, computeRumorId, foreignKindWrapIds, type UnwrappedDM } from '@/lib/nostr/nip17'
 import { makeRelayAuthSigner } from '@/lib/nostr/relayAuth'
@@ -552,7 +552,9 @@ export const useDMStore = create<DMState>((set, get) => ({
 
       // Start relay discovery in parallel with gift-wrap creation (non-blocking)
       const publishRelays = getPublishRelays()
-      const relayDiscoveryPromise = discoverRecipientRelays(recipientPubkey, publishRelays)
+      const relayDiscoveryPromise = usePostingBehaviourStore.getState().postToRecipientRelays
+        ? discoverRecipientRelays(recipientPubkey, publishRelays)
+        : Promise.resolve([] as string[])
 
       const wraps = await createGiftWrap(
         content,

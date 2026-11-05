@@ -2989,6 +2989,7 @@ function PostingBehaviourSection() {
     postToClientRelays, setPostToClientRelays,
     postToUserRelays, setPostToUserRelays,
     postToHubRelays, setPostToHubRelays,
+    postToRecipientRelays, setPostToRecipientRelays,
     limitClientRelays, setLimitClientRelays,
     limitUserRelays, setLimitUserRelays,
     limitHubRelays, setLimitHubRelays,
@@ -3033,6 +3034,23 @@ function PostingBehaviourSection() {
               <AlertTriangle size={12} className="text-amber-500 shrink-0 mt-0.5" />
               <p className="text-[11px] text-amber-500/90 leading-tight">
                 Other hub members who only subscribe to hub relays may not see your messages.
+              </p>
+            </div>
+          )}
+        </div>
+        <div className={`px-3 py-2 rounded-lg border ${!postToRecipientRelays ? 'border-amber-500/30 bg-amber-500/5' : 'border-border bg-secondary/30'}`}>
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-foreground">Post to recipient relays</p>
+              <p className="text-xs text-muted-foreground">Deliver DMs to the recipient's own discovered relays (their NIP-65 / DM inbox)</p>
+            </div>
+            <ToggleSwitch checked={postToRecipientRelays} onChange={setPostToRecipientRelays} />
+          </div>
+          {!postToRecipientRelays && (
+            <div className="flex items-start gap-1.5 mt-2 pt-2 border-t border-amber-500/20">
+              <AlertTriangle size={12} className="text-amber-500 shrink-0 mt-0.5" />
+              <p className="text-[11px] text-amber-500/90 leading-tight">
+                DMs will only go to your own relays, so the recipient may never receive them.
               </p>
             </div>
           )}
