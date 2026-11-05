@@ -1462,18 +1462,9 @@ function DMEmptyState() {
 function DMRelayProgressIndicator({ eventId }: { eventId: string }) {
   const progress = useDMStore((s) => s.relayProgress[eventId])
   const retrySelfCopy = useDMStore((s) => s.retrySelfCopy)
-  const issue = useDMStore((s) => s.deliveryIssue[eventId])
-  const publishDMFallback = useDMStore((s) => s.publishDMFallback)
   const [showPopover, setShowPopover] = useState(false)
-  const [fbBusy, setFbBusy] = useState<string | null>(null)
   const popRef = useRef<HTMLDivElement>(null)
   const btnRef = useRef<HTMLButtonElement>(null)
-
-  const runFallback = async (which: 'message' | 'self', target: 'client' | 'user') => {
-    const key = `${which}:${target}`
-    setFbBusy(key)
-    try { await publishDMFallback(eventId, which, target) } finally { setFbBusy(null) }
-  }
 
   useEffect(() => {
     if (!showPopover) return
@@ -1498,11 +1489,8 @@ function DMRelayProgressIndicator({ eventId }: { eventId: string }) {
   // won't come back after a reload, this state stays pinned (the store skips the auto-clear).
   const selfFailed = !!self && self.settled && self.confirmed === 0
   const done = recipientDone && !selfPending
-  // Any unresolved delivery problem (a copy saved nowhere, or a missing kind-10050 list) turns the
-  // single indicator amber with a warning glyph, so there is one obvious thing to click.
-  const hasIssue = selfFailed || !!issue?.recipientMissing || !!issue?.selfMissing
 
-  const tone = hasIssue
+  const tone = selfFailed
     ? 'text-amber-400 hover:text-amber-300'
     : done ? 'text-muted-foreground/40 hover:text-muted-foreground' : 'text-muted-foreground/70 hover:text-muted-foreground'
 
@@ -1525,26 +1513,6 @@ function DMRelayProgressIndicator({ eventId }: { eventId: string }) {
     </div>
   )
 
-  // Best-effort fallback publish buttons (client / NIP-65) shown when a kind-10050 list was missing.
-  const fallbackButtons = (which: 'message' | 'self') => (
-    <div className="mt-1.5 flex flex-col gap-1">
-      {(['client', 'user'] as const).map((target) => {
-        const key = `${which}:${target}`
-        return (
-          <button
-            key={key}
-            onClick={() => runFallback(which, target)}
-            disabled={fbBusy !== null}
-            className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-medium bg-secondary hover:bg-secondary/70 text-foreground border border-border/50 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-default"
-          >
-            {fbBusy === key ? <Loader2 size={9} className="animate-spin" /> : <Send size={9} />}
-            {which === 'message' ? 'Send' : 'Save'} to {target === 'client' ? 'client relays' : 'your relays (NIP-65)'}
-          </button>
-        )
-      })}
-    </div>
-  )
-
   return (
     <span className="relative inline-flex items-center">
       <button
@@ -1552,8 +1520,8 @@ function DMRelayProgressIndicator({ eventId }: { eventId: string }) {
         onClick={(e) => { e.stopPropagation(); setShowPopover(!showPopover) }}
         className={`text-[10px] inline-flex items-center gap-1 ml-1 cursor-pointer transition-colors ${tone}`}
       >
-        {!done && !hasIssue && <Loader2 size={9} className="animate-spin" />}
-        {hasIssue && <AlertTriangle size={9} />}
+        {!done && <Loader2 size={9} className="animate-spin" />}
+        {selfFailed && <AlertTriangle size={9} />}
         {progress.confirmed}/{progress.total}
         {self && (
           <span className={selfFailed ? '' : 'opacity-70'}>
@@ -1585,14 +1553,6 @@ function DMRelayProgressIndicator({ eventId }: { eventId: string }) {
         >
           <p className="text-[10px] font-medium text-foreground mb-1.5">To them</p>
           {relayRows(progress.acceptedRelays, progress.total - progress.confirmed, !recipientDone)}
-          {issue?.recipientMissing && (
-            <div className="mt-1.5 pt-1.5 border-t border-border/40">
-              <p className="text-[10px] text-amber-400/90 leading-snug">
-                Recipient has no DM relay list (kind 10050), so this wasn&apos;t delivered. Try publishing to different relays:
-              </p>
-              {fallbackButtons('message')}
-            </div>
-          )}
 
           {self && (
             <>
@@ -1613,10 +1573,6 @@ function DMRelayProgressIndicator({ eventId }: { eventId: string }) {
                     {self.retrying ? <Loader2 size={9} className="animate-spin" /> : <RefreshCw size={9} />}
                     {self.retrying ? 'Retrying…' : 'Retry'}
                   </button>
-                  <div className="pt-1.5 mt-0.5 border-t border-border/40">
-                    <p className="text-[10px] text-muted-foreground leading-snug">Or try publishing to different relays:</p>
-                    {fallbackButtons('self')}
-                  </div>
                 </div>
               ) : (
                 relayRows(self.acceptedRelays, self.total - self.confirmed, !self.settled)

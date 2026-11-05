@@ -78,8 +78,6 @@ interface DMState {
    *  user's own copy, tracked separately because it answers a different question: will this
    *  message still be here after a reload? (see SelfCopyProgress) */
   relayProgress: Record<string, { confirmed: number; total: number; acceptedRelays: string[]; self?: SelfCopyProgress }>
-  /** Per sent-message NIP-17 delivery issues (a missing kind-10050 list) + whether the prompt was dismissed. */
-  deliveryIssue: Record<string, DeliveryIssue>
 
   setActiveConversation: (pubkey: string | null) => void
   addPendingConversation: (pubkey: string) => void
@@ -117,19 +115,6 @@ interface DMState {
   /** Re-publish the self copy of a message whose first attempt no relay accepted (wrap kept in memory). */
   retrySelfCopy: (eventId: string) => Promise<void>
   clearRelayProgress: (eventId: string) => void
-  setDeliveryIssue: (eventId: string, issue: DeliveryIssue) => void
-  dismissDeliveryIssue: (eventId: string) => void
-  /** Fallback publish of a sent message's recipient copy ('message') or self copy ('self') to the
-   *  user's client or NIP-65 ('user') relays, when a kind-10050 list was missing. Returns accepted count. */
-  publishDMFallback: (eventId: string, which: 'message' | 'self', target: 'client' | 'user') => Promise<number>
-}
-
-/** NIP-17 delivery problem for one sent message: a kind-10050 list was missing, so a copy had
- *  nowhere spec-compliant to go. The composer offers a manual client/NIP-65 fallback. */
-export interface DeliveryIssue {
-  recipientMissing: boolean // recipient has no kind-10050 → their copy wasn't delivered
-  selfMissing: boolean      // we have no kind-10050 → our copy won't survive a reload
-  dismissed: boolean
 }
 
 /** Publish progress of the user's OWN gift-wrap copy of a sent NIP-17 message.
@@ -145,8 +130,6 @@ export interface SelfCopyProgress {
 
 /** Self-copy wraps kept for Retry, keyed by progress id (the self wrap's event id). */
 const selfCopyWraps = new Map<string, Event>()
-/** Recipient wraps kept for the delivery-fallback prompt, keyed by the same progress id. */
-const recipientWraps = new Map<string, Event>()
 
 /**
  * Publish a gift wrap to EXACTLY the given relays (no client/NIP-65 mixing) with failover among
@@ -188,12 +171,9 @@ async function publishRecipientCopy(progressId: string, wrap: Event, relays: str
 /** Fade the indicator after a few seconds — unless the self copy landed nowhere, which stays pinned. */
 function scheduleProgressClear(progressId: string) {
   setTimeout(() => {
-    const st = useDMStore.getState()
-    const p = st.relayProgress[progressId]
+    const p = useDMStore.getState().relayProgress[progressId]
     if (p?.self && p.self.settled && p.self.confirmed === 0) return // self saved nowhere → keep pinned
-    const issue = st.deliveryIssue[progressId]
-    if (issue && !issue.dismissed && (issue.recipientMissing || issue.selfMissing)) return // unresolved delivery issue → keep the popover reachable
-    st.clearRelayProgress(progressId)
+    useDMStore.getState().clearRelayProgress(progressId)
   }, 5000)
 }
 
@@ -270,7 +250,6 @@ export const useDMStore = create<DMState>((set, get) => ({
   processedWrapIds: new Set(),
   subscription: null,
   relayProgress: {},
-  deliveryIssue: {},
 
   setActiveConversation: (pubkey) => {
     set((s) => {
@@ -585,14 +564,21 @@ export const useDMStore = create<DMState>((set, get) => ({
         }
       }
 
-      // NIP-17 delivery is spec-scoped to kind-10050 DM relays: the recipient's for their copy,
-      // the user's own for the self copy. Start the recipient 10050 fetch now (non-blocking); the
-      // "post to recipient relays" toggle can suppress recipient delivery entirely.
+      // Strict NIP-17: DMs go ONLY to kind-10050 DM relays (recipient's for their copy, ours for the
+      // self copy). If either party lacks a usable 10050 list the message cannot be delivered/saved
+      // per spec, so fail the send up front (no fallback to client/NIP-65 relays). The precondition
+      // is checked BEFORE any wrap is built or the message is shown, so nothing is published.
       const postRecip = usePostingBehaviourStore.getState().postToRecipientRelays
-      const recipient10050Promise: Promise<string[]> = postRecip
-        ? fetchDMRelayList(recipientPubkey).then((i) => i?.relays ?? []).catch(() => [])
-        : Promise.resolve([])
       const myDMRelays = useUserListsStore.getState().userDMRelays
+      if (myDMRelays.length === 0) {
+        throw new Error('You have no DM relay list (NIP-17 kind 10050). Add one in Settings → Network before sending private DMs.')
+      }
+      const recipient10050 = postRecip
+        ? await fetchDMRelayList(recipientPubkey).then((i) => i?.relays ?? []).catch(() => [])
+        : []
+      if (postRecip && recipient10050.length === 0) {
+        throw new Error('This person has no DM relay list (NIP-17 kind 10050), so they cannot receive private DMs.')
+      }
 
       const wraps = await createGiftWrap(
         content,
@@ -672,35 +658,22 @@ export const useDMStore = create<DMState>((set, get) => ({
       const progressId = wrapSelfId || 'self'
       const wrapForSelf = wraps.wrapForSelf as unknown as Event
       const wrapForRecipient = wraps.wrapForRecipient as unknown as Event
-      // Keep both wraps for the delivery-fallback prompt (re-publish to other relays on demand).
+      // Keep the self wrap for Retry (re-publish to our own 10050 if it's rejected).
       selfCopyWraps.set(progressId, wrapForSelf)
-      recipientWraps.set(progressId, wrapForRecipient)
-      get().setRelayProgress(progressId, 0, 0, [])
+      get().setRelayProgress(progressId, 0, postRecip ? recipient10050.length : 0, [])
       get().setSelfCopyProgress(progressId, { confirmed: 0, total: myDMRelays.length, acceptedRelays: [], settled: false, retrying: false })
       onProgress?.('publishing')
 
       ;(async () => {
         try {
-          const recipient10050 = await recipient10050Promise
-          // Spec-compliant NIP-17: recipient copy → recipient's kind-10050 ONLY; self copy → our
-          // kind-10050 ONLY. Nothing to client/NIP-65 relays (that is the manual fallback prompt).
-          const recipientMissing = postRecip && recipient10050.length === 0
-          const selfMissing = myDMRelays.length === 0
-
-          onProgress?.('publishing')
+          // Strict NIP-17: recipient copy → recipient's kind-10050 ONLY; self copy → our kind-10050
+          // ONLY. Both lists were verified non-empty above, so there is no fallback path here.
           await Promise.all([
             postRecip
               ? publishRecipientCopy(progressId, wrapForRecipient, recipient10050).then((c) => onProgress?.('publishing', { confirmed: c, total: recipient10050.length }))
               : Promise.resolve(get().setRelayProgress(progressId, 0, 0, [])),
             publishSelfCopy(progressId, wrapForSelf, myDMRelays, false),
           ])
-
-          // Surface a fallback prompt when a 10050 list is missing (so delivery / self-save had nowhere
-          // spec-compliant to go). The user can then opt into client / NIP-65 relays per copy.
-          if (recipientMissing || selfMissing) {
-            get().setDeliveryIssue(progressId, { recipientMissing, selfMissing, dismissed: false })
-          }
-
           scheduleProgressClear(progressId)
         } catch (err) {
           console.error('[DM] Relay publish failed:', err)
@@ -791,51 +764,9 @@ export const useDMStore = create<DMState>((set, get) => ({
   clearRelayProgress: (eventId) =>
     set((state) => {
       selfCopyWraps.delete(eventId)
-      recipientWraps.delete(eventId)
       const { [eventId]: _, ...rest } = state.relayProgress
-      const { [eventId]: _i, ...restIssue } = state.deliveryIssue
-      return { relayProgress: rest, deliveryIssue: restIssue }
+      return { relayProgress: rest }
     }),
-
-  setDeliveryIssue: (eventId, issue) =>
-    set((state) => ({ deliveryIssue: { ...state.deliveryIssue, [eventId]: issue } })),
-
-  dismissDeliveryIssue: (eventId) =>
-    set((state) => {
-      const cur = state.deliveryIssue[eventId]
-      if (!cur) return {}
-      return { deliveryIssue: { ...state.deliveryIssue, [eventId]: { ...cur, dismissed: true } } }
-    }),
-
-  publishDMFallback: async (eventId, which, target) => {
-    const wrap = which === 'message' ? recipientWraps.get(eventId) : selfCopyWraps.get(eventId)
-    if (!wrap) return 0
-    const relays = target === 'client' ? getRelays() : useUserListsStore.getState().userRelays
-    if (relays.length === 0) return 0
-
-    // Mirror the fallback publish into the SAME counters the popover shows, so a successful
-    // fallback updates "N/N" instead of staying at 0/0.
-    let accepted: string[]
-    if (which === 'message') {
-      get().setRelayProgress(eventId, 0, relays.length, [])
-      accepted = await publishWrapTo(wrap, relays, (c, t, a) => get().setRelayProgress(eventId, c, t, a))
-      get().setRelayProgress(eventId, accepted.length, Math.max(accepted.length, relays.length), accepted)
-    } else {
-      get().setSelfCopyProgress(eventId, { confirmed: 0, total: relays.length, acceptedRelays: [], settled: false, retrying: false })
-      accepted = await publishWrapTo(wrap, relays, (c, t, a) => get().setSelfCopyProgress(eventId, { confirmed: c, total: t, acceptedRelays: a, settled: false, retrying: false }))
-      get().setSelfCopyProgress(eventId, { confirmed: accepted.length, total: Math.max(accepted.length, relays.length), acceptedRelays: accepted, settled: true, retrying: false })
-    }
-    if (accepted.length > 0) {
-      // Clear the corresponding "missing" flag so the prompt reflects what's now been sent.
-      set((state) => {
-        const cur = state.deliveryIssue[eventId]
-        if (!cur) return {}
-        const next = which === 'message' ? { ...cur, recipientMissing: false } : { ...cur, selfMissing: false }
-        return { deliveryIssue: { ...state.deliveryIssue, [eventId]: next } }
-      })
-    }
-    return accepted.length
-  },
 }))
 
 /* ─── Helpers ─── */
