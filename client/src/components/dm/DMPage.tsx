@@ -39,7 +39,8 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { truncateNpub, formatTimestamp, formatDateNumeric, formatDateTimeNumeric } from '@/lib/utils'
 import { getHour12 } from '@/stores/preferencesStore'
 import { nip19, type Event } from 'nostr-tools'
-import { getUploadBlossoms, getReadBlossoms, getPublishRelays, getDMSelfCopyRelays, publishDM } from '@/stores/postingBehaviourStore'
+import { getUploadBlossoms, getReadBlossoms, usePostingBehaviourStore } from '@/stores/postingBehaviourStore'
+import { useUserListsStore } from '@/stores/userListsStore'
 import {
   Search, Plus, MessageSquare, Loader2,
   Lock, Users, UserPlus, AlertCircle, X, ShieldBan, Eye, EyeOff, Ghost, Info, VenetianMask, MoreVertical,
@@ -72,7 +73,6 @@ import { useNotificationStore } from '@/stores/notificationStore'
 import { useUnreadDivider } from '@/hooks/useUnreadDivider'
 import { NewMessagesDivider } from '@/components/chat/NewMessagesDivider'
 import { UnreadBanner } from '@/components/chat/UnreadBanner'
-import { discoverRecipientRelays } from '@/lib/nostr/relayDiscovery'
 
 /* ═══════════════════════════════════════════ */
 /*  HELPERS                                    */
@@ -973,11 +973,13 @@ function DMChatView({ recipientPubkey, onSwitchProtocol, onBack }: { recipientPu
       // Files are already encrypted + uploaded by ChatInputBar (encryptBeforeUpload).
       // We only need to create the kind 15 gift wraps with the stored metadata.
       if (hasFiles) {
-        const publishRelays = getPublishRelays()
-
-        // Discover recipient's preferred relays (NIP-65 + DM relay list + DNN metadata); publishDM
-        // merges these with our own pool and fails over, so no separate recipientRelays union is needed.
-        const extraRelays = await discoverRecipientRelays(recipientPubkey, publishRelays)
+        // Strict NIP-17, same rule as the text path: kind-15 file wraps go ONLY to kind-10050 DM
+        // relays — recipient's first, our own copy only if that reached ≥1 relay. No client/NIP-65.
+        const postRecip = usePostingBehaviourStore.getState().postToRecipientRelays
+        const myDMRelays = useUserListsStore.getState().userDMRelays
+        const recipient10050 = postRecip
+          ? await fetchDMRelayList(recipientPubkey).then((i) => i?.relays ?? []).catch(() => [])
+          : []
 
         const blossomServers = getUploadBlossoms()
 
@@ -1009,13 +1011,24 @@ function DMChatView({ recipientPubkey, onSwitchProtocol, onBack }: { recipientPu
             privateKey,
           )
 
-          // Publish gift wraps for kind 15, with failover so a dead/write-rejecting relay can't silently
-          // strand a file the way fire-once did (DM text already fails over; this brings files to parity).
-          // Recipient copy: recipient inbox + our relays (publishDM's recipient-scoped pool).
-          await publishDM(fileWraps.wrapForRecipient as unknown as Event, extraRelays)
-          // Self copy: our own relays + kind-10050 DM inbox (getDMSelfCopyRelays), seeded by the publish
-          // pick and failing over across that set so read-back on other devices survives a dead relay.
-          await publishWithFailover(fileWraps.wrapForSelf as unknown as Event, getPublishRelays(), { pool: getDMSelfCopyRelays() })
+          const wrapRecip = fileWraps.wrapForRecipient as unknown as Event
+          const wrapSelf = fileWraps.wrapForSelf as unknown as Event
+
+          // Recipient copy FIRST (recipient's kind-10050 only, with failover among them).
+          if (postRecip) {
+            const accepted = recipient10050.length === 0
+              ? []
+              : await publishWithFailover(wrapRecip, recipient10050, { pool: recipient10050, target: recipient10050.length })
+            if (accepted.length === 0) {
+              // Reached no relay → don't keep a self copy of a file the recipient never got.
+              console.warn('[DM] file recipient copy reached 0 relays — self copy skipped (strict NIP-17: recipient first, then a copy)')
+              continue
+            }
+          }
+          // Our own copy (our kind-10050 only), only now that the recipient copy landed.
+          if (myDMRelays.length > 0) {
+            await publishWithFailover(wrapSelf, myDMRelays, { pool: myDMRelays, target: myDMRelays.length })
+          }
         }
       }
 
@@ -1461,7 +1474,7 @@ function DMEmptyState() {
 
 function DMRelayProgressIndicator({ eventId }: { eventId: string }) {
   const progress = useDMStore((s) => s.relayProgress[eventId])
-  const retrySelfCopy = useDMStore((s) => s.retrySelfCopy)
+  const retryDelivery = useDMStore((s) => s.retryDelivery)
   const [showPopover, setShowPopover] = useState(false)
   const popRef = useRef<HTMLDivElement>(null)
   const btnRef = useRef<HTMLButtonElement>(null)
@@ -1483,14 +1496,17 @@ function DMRelayProgressIndicator({ eventId }: { eventId: string }) {
 
   if (!progress) return null
   const self = progress.self
-  const recipientDone = progress.confirmed >= progress.total
-  const selfPending = !!self && !self.settled
-  // "Saved nowhere": every relay answered and none kept our copy. The message is on screen now but
-  // won't come back after a reload, this state stays pinned (the store skips the auto-clear).
-  const selfFailed = !!self && self.settled && self.confirmed === 0
-  const done = recipientDone && !selfPending
+  const recipientDone = !!progress.recipientSettled || progress.confirmed >= progress.total
+  // Recipient copy finished and reached no relay → per strict NIP-17 the self copy is skipped.
+  const recipientFailed = !!progress.recipientSettled && progress.confirmed === 0 && progress.total > 0
+  const selfSkipped = !!self && self.skipped
+  const selfPending = !!self && !self.settled && !selfSkipped
+  // "Saved nowhere": our relays all answered and none kept the copy. Pinned (store skips auto-clear).
+  const selfFailed = !!self && self.settled && self.confirmed === 0 && !selfSkipped
+  const failed = recipientFailed || selfSkipped || selfFailed
+  const done = !failed && recipientDone && !selfPending
 
-  const tone = selfFailed
+  const tone = failed
     ? 'text-amber-400 hover:text-amber-300'
     : done ? 'text-muted-foreground/40 hover:text-muted-foreground' : 'text-muted-foreground/70 hover:text-muted-foreground'
 
@@ -1520,12 +1536,16 @@ function DMRelayProgressIndicator({ eventId }: { eventId: string }) {
         onClick={(e) => { e.stopPropagation(); setShowPopover(!showPopover) }}
         className={`text-[10px] inline-flex items-center gap-1 ml-1 cursor-pointer transition-colors ${tone}`}
       >
-        {!done && <Loader2 size={9} className="animate-spin" />}
-        {selfFailed && <AlertTriangle size={9} />}
+        {!done && !failed && <Loader2 size={9} className="animate-spin" />}
+        {failed && <AlertTriangle size={9} />}
         {progress.confirmed}/{progress.total}
         {self && (
-          <span className={selfFailed ? '' : 'opacity-70'}>
-            · {selfFailed ? 'not saved' : 'you'} {self.confirmed}/{self.total}
+          <span className={failed ? '' : 'opacity-70'}>
+            {selfSkipped
+              ? '· copy skipped'
+              : selfFailed
+                ? `· not saved ${self.confirmed}/${self.total}`
+                : `· you ${self.confirmed}/${self.total}`}
           </span>
         )}
       </button>
@@ -1553,11 +1573,30 @@ function DMRelayProgressIndicator({ eventId }: { eventId: string }) {
         >
           <p className="text-[10px] font-medium text-foreground mb-1.5">To them</p>
           {relayRows(progress.acceptedRelays, progress.total - progress.confirmed, !recipientDone)}
+          {recipientFailed && (
+            <p className="text-[10px] text-amber-400/90 leading-relaxed mt-1.5">
+              Couldn&rsquo;t reach them on {progress.total === 1 ? 'their relay' : `any of their ${progress.total} relays`}.
+            </p>
+          )}
 
           {self && (
             <>
               <p className="text-[10px] font-medium text-foreground mt-2.5 mb-1.5">Your copy</p>
-              {selfFailed ? (
+              {selfSkipped ? (
+                <div className="space-y-2">
+                  <p className="text-[10px] text-amber-400/90 leading-relaxed">
+                    Not saved. A copy is only kept once the message reaches them (strict NIP-17: recipient first, then a copy). It shows here now but will be gone after a reload.
+                  </p>
+                  <button
+                    onClick={() => retryDelivery(eventId)}
+                    disabled={self.retrying}
+                    className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-medium bg-secondary hover:bg-secondary/70 text-foreground border border-border/50 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-default"
+                  >
+                    {self.retrying ? <Loader2 size={9} className="animate-spin" /> : <RefreshCw size={9} />}
+                    {self.retrying ? 'Retrying…' : 'Retry delivery'}
+                  </button>
+                </div>
+              ) : selfFailed ? (
                 <div className="space-y-2">
                   <p className="text-[10px] text-amber-400/90 leading-relaxed">
                     {self.total === 0
@@ -1566,7 +1605,7 @@ function DMRelayProgressIndicator({ eventId }: { eventId: string }) {
                     {' '}It shows here now but will be gone after a reload.
                   </p>
                   <button
-                    onClick={() => retrySelfCopy(eventId)}
+                    onClick={() => retryDelivery(eventId)}
                     disabled={self.retrying}
                     className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-medium bg-secondary hover:bg-secondary/70 text-foreground border border-border/50 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-default"
                   >

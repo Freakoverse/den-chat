@@ -76,8 +76,10 @@ interface DMState {
   /** Relay publish progress per event ID (for inline indicators on real messages).
    *  `confirmed/total/acceptedRelays` is the RECIPIENT copy (did it reach them?); `self` is the
    *  user's own copy, tracked separately because it answers a different question: will this
-   *  message still be here after a reload? (see SelfCopyProgress) */
-  relayProgress: Record<string, { confirmed: number; total: number; acceptedRelays: string[]; self?: SelfCopyProgress }>
+   *  message still be here after a reload? (see SelfCopyProgress)
+   *  `recipientSettled` flips true once the recipient publish has finished (success OR failure), so
+   *  the UI can tell a finished 0/N (failed) from an in-flight one. */
+  relayProgress: Record<string, { confirmed: number; total: number; acceptedRelays: string[]; recipientSettled?: boolean; self?: SelfCopyProgress }>
 
   setActiveConversation: (pubkey: string | null) => void
   addPendingConversation: (pubkey: string) => void
@@ -111,9 +113,11 @@ interface DMState {
     other: Conversation[]
   }
   setRelayProgress: (eventId: string, confirmed: number, total: number, acceptedRelays?: string[]) => void
+  setRecipientSettled: (eventId: string, settled: boolean) => void
   setSelfCopyProgress: (eventId: string, self: SelfCopyProgress) => void
-  /** Re-publish the self copy of a message whose first attempt no relay accepted (wrap kept in memory). */
-  retrySelfCopy: (eventId: string) => Promise<void>
+  /** Re-run strict delivery (recipient's 10050 first, then our own copy) for a message whose first
+   *  attempt failed. Both wraps are kept in memory; the recipient list is re-resolved on retry. */
+  retryDelivery: (eventId: string) => Promise<void>
   clearRelayProgress: (eventId: string) => void
 }
 
@@ -126,10 +130,21 @@ export interface SelfCopyProgress {
   acceptedRelays: string[]
   settled: boolean
   retrying: boolean
+  /** True when the self copy was deliberately NOT attempted because the recipient copy reached no
+   *  relay. Strict NIP-17 + user rule: a copy is only kept once the message actually reaches them. */
+  skipped?: boolean
 }
 
-/** Self-copy wraps kept for Retry, keyed by progress id (the self wrap's event id). */
-const selfCopyWraps = new Map<string, Event>()
+/** Everything needed to (re-)run strict delivery for one sent message, keyed by progress id
+ *  (the self wrap's event id). Kept until the indicator is cleared. */
+interface PendingDelivery {
+  selfWrap: Event
+  recipientWrap: Event
+  recipientPubkey: string
+  recipientRelays: string[] // resolved at send time; a retry re-resolves (either side may have fixed their list)
+  postRecip: boolean
+}
+const pendingDeliveries = new Map<string, PendingDelivery>()
 
 /**
  * Publish a gift wrap to EXACTLY the given relays (no client/NIP-65 mixing) with failover among
@@ -156,16 +171,50 @@ async function publishSelfCopy(progressId: string, wrap: Event, relays: string[]
   return accepted.length
 }
 
-/** Publish the recipient copy to the recipient's kind-10050 relays only, mirroring the main progress counter. */
-async function publishRecipientCopy(progressId: string, wrap: Event, relays: string[]): Promise<number> {
-  const { setRelayProgress } = useDMStore.getState()
-  if (relays.length === 0) { setRelayProgress(progressId, 0, 0, []); return 0 }
-  setRelayProgress(progressId, 0, relays.length, [])
-  const accepted = await publishWrapTo(wrap, relays, (confirmed, total, acceptedRelays) => {
-    setRelayProgress(progressId, confirmed, total, acceptedRelays)
-  })
-  setRelayProgress(progressId, accepted.length, Math.max(accepted.length, relays.length), accepted)
-  return accepted.length
+/**
+ * Strict NIP-17 ordered delivery for one sent message.
+ *
+ * The recipient's kind-10050 copy goes out FIRST. The user's own copy is published ONLY if that
+ * recipient copy reached at least one relay — a message the recipient will never receive is not
+ * worth keeping a self copy of. (If recipient delivery is turned off entirely, we just keep the
+ * self copy.) The recipient list is taken from `pendingDeliveries` on the first attempt and
+ * re-resolved from the network on a retry, in case either side fixed their 10050 since.
+ */
+async function deliverStrict(
+  progressId: string,
+  retrying: boolean,
+  onProgress?: (phase: 'publishing', relayProgress?: { confirmed: number; total: number }) => void,
+): Promise<void> {
+  const d = pendingDeliveries.get(progressId)
+  if (!d) return
+  const store = useDMStore.getState()
+  const myDMRelays = useUserListsStore.getState().userDMRelays
+
+  if (d.postRecip) {
+    const recipientRelays = retrying
+      ? await fetchDMRelayList(d.recipientPubkey).then((i) => i?.relays ?? []).catch(() => [])
+      : d.recipientRelays
+    store.setRelayProgress(progressId, 0, recipientRelays.length, [])
+    store.setRecipientSettled(progressId, false)
+    const accepted = recipientRelays.length === 0
+      ? []
+      : await publishWrapTo(d.recipientWrap, recipientRelays, (confirmed, total, acceptedRelays) => {
+          store.setRelayProgress(progressId, confirmed, total, acceptedRelays)
+        })
+    store.setRelayProgress(progressId, accepted.length, Math.max(accepted.length, recipientRelays.length), accepted)
+    store.setRecipientSettled(progressId, true)
+    onProgress?.('publishing', { confirmed: accepted.length, total: recipientRelays.length })
+
+    if (accepted.length === 0) {
+      // Recipient copy reached NO relay → do not save a self copy (strict NIP-17: recipient first).
+      store.setSelfCopyProgress(progressId, { confirmed: 0, total: myDMRelays.length, acceptedRelays: [], settled: true, retrying: false, skipped: true })
+      console.warn(`[DM] ${progressId.slice(0, 8)}…: recipient copy reached 0 relays — self copy skipped (strict NIP-17: recipient first, then a copy)`)
+      return
+    }
+  }
+
+  // Recipient copy landed on ≥1 relay (or recipient delivery is off) → now keep our own copy.
+  await publishSelfCopy(progressId, d.selfWrap, myDMRelays, retrying)
 }
 
 /** Fade the indicator after a few seconds — unless the self copy landed nowhere, which stays pinned. */
@@ -658,22 +707,17 @@ export const useDMStore = create<DMState>((set, get) => ({
       const progressId = wrapSelfId || 'self'
       const wrapForSelf = wraps.wrapForSelf as unknown as Event
       const wrapForRecipient = wraps.wrapForRecipient as unknown as Event
-      // Keep the self wrap for Retry (re-publish to our own 10050 if it's rejected).
-      selfCopyWraps.set(progressId, wrapForSelf)
+      // Keep both wraps + the recipient list for strict ordered delivery and Retry.
+      pendingDeliveries.set(progressId, { selfWrap: wrapForSelf, recipientWrap: wrapForRecipient, recipientPubkey, recipientRelays: recipient10050, postRecip })
       get().setRelayProgress(progressId, 0, postRecip ? recipient10050.length : 0, [])
       get().setSelfCopyProgress(progressId, { confirmed: 0, total: myDMRelays.length, acceptedRelays: [], settled: false, retrying: false })
       onProgress?.('publishing')
 
       ;(async () => {
         try {
-          // Strict NIP-17: recipient copy → recipient's kind-10050 ONLY; self copy → our kind-10050
-          // ONLY. Both lists were verified non-empty above, so there is no fallback path here.
-          await Promise.all([
-            postRecip
-              ? publishRecipientCopy(progressId, wrapForRecipient, recipient10050).then((c) => onProgress?.('publishing', { confirmed: c, total: recipient10050.length }))
-              : Promise.resolve(get().setRelayProgress(progressId, 0, 0, [])),
-            publishSelfCopy(progressId, wrapForSelf, myDMRelays, false),
-          ])
+          // Strict NIP-17, recipient FIRST then a copy: the recipient's kind-10050 copy is published
+          // first; our own copy follows ONLY if that reached ≥1 relay. No fallback, no client/NIP-65.
+          await deliverStrict(progressId, false, onProgress)
           scheduleProgressClear(progressId)
         } catch (err) {
           console.error('[DM] Relay publish failed:', err)
@@ -737,10 +781,18 @@ export const useDMStore = create<DMState>((set, get) => ({
     set((state) => ({
       relayProgress: {
         ...state.relayProgress,
-        // Preserve `self` — the recipient-copy counter and the self-copy counter update independently
+        // Preserve `self` + `recipientSettled` — the recipient-copy and self-copy counters, and the
+        // settled flag, all update independently of this per-relay counter.
         [eventId]: { ...state.relayProgress[eventId], confirmed, total, acceptedRelays: acceptedRelays || [] },
       },
     })),
+
+  setRecipientSettled: (eventId, recipientSettled) =>
+    set((state) => {
+      const cur = state.relayProgress[eventId]
+      if (!cur) return {} // already cleared — nothing to attach to
+      return { relayProgress: { ...state.relayProgress, [eventId]: { ...cur, recipientSettled } } }
+    }),
 
   setSelfCopyProgress: (eventId, self) =>
     set((state) => {
@@ -749,21 +801,24 @@ export const useDMStore = create<DMState>((set, get) => ({
       return { relayProgress: { ...state.relayProgress, [eventId]: { ...cur, self } } }
     }),
 
-  retrySelfCopy: async (eventId) => {
-    const wrap = selfCopyWraps.get(eventId)
+  retryDelivery: async (eventId) => {
     const cur = get().relayProgress[eventId]
-    if (!wrap || !cur?.self || cur.self.retrying) return
-    // Re-read our kind-10050 list rather than reusing the failed one: the user may have fixed their
-    // relay config (or a relay came back) since the first attempt. Spec-scoped to 10050.
-    const relays = useUserListsStore.getState().userDMRelays
-    get().setSelfCopyProgress(eventId, { ...cur.self, settled: false, retrying: true })
-    const accepted = await publishSelfCopy(eventId, wrap, relays, true)
-    if (accepted > 0) scheduleProgressClear(eventId)
+    if (!pendingDeliveries.has(eventId) || !cur?.self || cur.self.retrying) return
+    // Clear the failed/skipped state and re-run the whole strict sequence (recipient first, then a
+    // copy). deliverStrict re-resolves the recipient's 10050 and re-reads our own, so a fix on
+    // either side is picked up. Stays pinned if it fails again (scheduleProgressClear checks that).
+    get().setSelfCopyProgress(eventId, { ...cur.self, settled: false, retrying: true, skipped: false })
+    try {
+      await deliverStrict(eventId, true)
+    } catch (err) {
+      console.error('[DM] Retry delivery failed:', err)
+    }
+    scheduleProgressClear(eventId)
   },
 
   clearRelayProgress: (eventId) =>
     set((state) => {
-      selfCopyWraps.delete(eventId)
+      pendingDeliveries.delete(eventId)
       const { [eventId]: _, ...rest } = state.relayProgress
       return { relayProgress: rest }
     }),
