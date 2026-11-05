@@ -18,7 +18,7 @@ export {
 } from './secure-storage'
 export {
   discoverLocalSigners, findRememberedSigner, LrsSigner, fingerprint,
-  loadLrsState, clearLrsState,
+  loadLrsState, hasStoredLocalSigner, forgetLocalSigners,
   type LrsSignerInfo, type LrsState,
 } from './lrs'
 export { BunkerSigner } from './bunker'

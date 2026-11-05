@@ -12,7 +12,6 @@ import { initClockSync } from '@/lib/time/clockOffset'
 import { useUserStore } from '@/stores/userStore'
 import { useHubStore, type HubEntry, type HubFolder } from '@/stores/hubStore'
 import { resetSignerGuard } from '@/lib/auth/signerGuard'
-import { discoverLocalSigners, loadLrsState } from '@/lib/auth/lrs'
 import { fetchReplaceable, fetchEvents, getRelays } from '@/lib/nostr/relay-pool'
 import { useRelayHealthStore } from '@/lib/nostr/relayHealthProbe'
 import { getCachedProfile, getCachedProfileCreatedAt, ensureProfile, subscribeProfile, seedProfile, hydrateProfilesFromDb, revalidateProfileWide } from '@/hooks/useProfileCache'
@@ -50,7 +49,6 @@ import { STANDARD_KINDS, APP_DATA_DTAGS } from '@/lib/crypto/constants'
 import { ADMIN_PUBKEY } from '@/lib/constants'
 
 export function useStartup() {
-  const setLocalSigner = useUserStore((s) => s.setLocalSigner)
   const isAuthenticated = useUserStore((s) => s.isAuthenticated)
   const pubkey = useUserStore((s) => s.pubkey)
   const activeHubId = useHubStore((s) => s.activeHubId)
@@ -61,17 +59,7 @@ export function useStartup() {
   const loadBlockList = useBlockStore((s) => s.loadBlockList)
   const loadFollowList = useFollowStore((s) => s.loadFollowList)
 
-  // Discover local signer (NIP-LRS) on startup — only for the login-screen display name, and ONLY when
-  // the user has paired a local signer before (remembered state). Skipping the scan otherwise avoids a
-  // futile loopback port sweep on every launch for the majority who never use a local signer; those
-  // users still get a full scan when they actually click "Local".
-  useEffect(() => {
-    const state = loadLrsState()
-    if (!state) return
-    discoverLocalSigners(state).then((signers) => {
-      if (signers.length > 0) setLocalSigner(signers[0].name)
-    }).catch(() => { /* signer offline / scan blocked — non-fatal */ })
-  }, [])
+  // (Local-signer discovery lives in LoginScreen now — it owns the login-screen label + picker.)
 
   // Hydrate the shared profile cache (kind-0 names/avatars) from IndexedDB once at launch, so profiles
   // render instantly on restart and still revalidate via stale-while-revalidate on access.

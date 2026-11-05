@@ -6,7 +6,7 @@ import { isTauri, isMobileOS, formatDateNumeric } from '@/lib/utils'
 import { ADMIN_PUBKEY, StorageKey } from '@/lib/constants'
 import { fetchReplaceable, fetchEvents, publishToSpecificRelays, getRelayList } from '@/lib/nostr/relay-pool'
 import { orderByHealth } from '@/lib/nostr/relayHealthProbe'
-import { MonitorSmartphone, Import, Plus, Loader2, AlertCircle, Link2, KeyRound, Copy, Check, AppWindow, ChevronDown, ChevronLeft, ChevronRight, X, Shield, ExternalLink, User, Lock, Eye, EyeOff, GitBranch, Sprout, KeySquare, Download, FileUp, BookOpen, Camera, Settings2, XCircle, FileText, Package, LockOpen, Globe, RefreshCw, Rocket, QrCode, Info, Gauge } from 'lucide-react'
+import { MonitorSmartphone, Import, Plus, Loader2, AlertCircle, Link2, KeyRound, Copy, Check, AppWindow, ChevronDown, ChevronLeft, ChevronRight, X, Shield, ExternalLink, User, Lock, Eye, EyeOff, GitBranch, Sprout, KeySquare, Download, FileUp, BookOpen, Camera, Settings2, XCircle, FileText, Package, LockOpen, Globe, RefreshCw, Rocket, QrCode, Info, Gauge, Brush } from 'lucide-react'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { BlossomImage } from '@/components/ui/BlossomImage'
 import { Button } from '@/components/ui/button'
@@ -29,7 +29,7 @@ import { rustBackend, vaultBackend, applyLogin } from '@/lib/auth/authBackend'
 import { rememberLogin, getRememberedLogin } from '@/lib/auth/autoLogin'
 import { verifyBackupMatches } from '@/lib/auth/backupCrypto'
 import { QRScanner } from '@/components/auth/QRScanner'
-import { discoverLocalSigners, findRememberedSigner, LrsSigner, fingerprint, loadLrsState, type LrsSignerInfo } from '@/lib/auth/lrs'
+import { discoverLocalSigners, findRememberedSigner, LrsSigner, fingerprint, loadLrsState, hasStoredLocalSigner, forgetLocalSigners, type LrsSignerInfo } from '@/lib/auth/lrs'
 import { BunkerSigner } from '@/lib/auth/bunker'
 import { NostrConnectSigner, generateNostrConnectDetails } from '@/lib/auth/nostr-connect'
 import { Nip07Signer } from '@/lib/auth/nip07'
@@ -53,7 +53,6 @@ export function LoginScreen() {
   const login = useUserStore((s) => s.login)
   const setSeedPhrase = useUserStore((s) => s.setSeedPhrase)
   const setSigner = useUserStore((s) => s.setSigner)
-  const localSignerName = useUserStore((s) => s.localSignerName)
   const isDesktop = isTauri()
   const isMobile = isMobileOS()
 
@@ -65,6 +64,32 @@ export function LoginScreen() {
   const [showLocalSignerModal, setShowLocalSignerModal] = useState(false)
   // NIP-LRS: >1 local signer found on scan → show a picker (name + transport-key fingerprint).
   const [discoveredSigners, setDiscoveredSigners] = useState<LrsSignerInfo[] | null>(null)
+  // NIP-LRS: signers detected on mount (best-effort, quick scan) — drives the "Local" button label.
+  const [availableSigners, setAvailableSigners] = useState<LrsSignerInfo[]>([])
+  // Whether DEN Chat has a saved local-signer connection to reset (shows the brush/reset button).
+  const [hasStoredSigner, setHasStoredSigner] = useState(false)
+  const [showForgetSignerModal, setShowForgetSignerModal] = useState(false)
+
+  // Quick, best-effort local-signer discovery on mount, only to label the "Local" button (desktop
+  // only — the button is hidden on mobile). The click handler re-scans for real, so a signer the
+  // quick pass misses is still found; this never blocks and never sweeps hard on a signer-less machine.
+  useEffect(() => {
+    if (isMobile) return
+    let alive = true
+    setHasStoredSigner(hasStoredLocalSigner())
+    discoverLocalSigners(loadLrsState(), { quick: true })
+      .then((signers) => { if (alive) setAvailableSigners(signers) })
+      .catch(() => { /* non-fatal */ })
+    return () => { alive = false }
+  }, [isMobile])
+
+  // Label for the Local button: one signer → name it; several → generic (the click opens a picker).
+  const localSignerLabel =
+    availableSigners.length === 1
+      ? `Locally login with ${availableSigners[0].name.length > 18 ? availableSigners[0].name.slice(0, 18) + '…' : availableSigners[0].name}`
+      : availableSigners.length > 1
+        ? 'Locally login'
+        : 'Local'
 
   // Import
   const [importWords, setImportWords] = useState('')
@@ -591,11 +616,12 @@ export function LoginScreen() {
     setLoading('lrs')
     clearError()
     try {
-      // Scan the loopback port range for a signer (fast-pathing the remembered one). discoverLocalSigners
-      // already retries each probe and re-scans a few rounds, so a signer that's briefly RST-ing its
-      // HTTP endpoint (a known ~40% failure) or still releasing our previous socket after a logout is
-      // not spuriously missed. A genuinely-absent signer fails fast, so this adds little delay.
-      const signers = await discoverLocalSigners(loadLrsState())
+      // Prefer the signers already found by the mount scan (so the click matches the button label);
+      // otherwise do a full, resilient scan. discoverLocalSigners retries each probe and re-scans a
+      // few rounds, so a signer briefly RST-ing its HTTP endpoint (a known ~40% failure) or still
+      // releasing our previous socket after a logout is not spuriously missed; an absent signer fails
+      // fast, so this adds little delay.
+      const signers = availableSigners.length > 0 ? availableSigners : await discoverLocalSigners(loadLrsState())
       if (signers.length === 0) {
         setShowLocalSignerModal(true) // none found — show the friendly download/help modal
         return
@@ -632,6 +658,15 @@ export function LoginScreen() {
     } finally {
       setLoading(null)
     }
+  }
+
+  // Forget DEN Chat's saved local-signer connection(s). Next local login mints a fresh client key, so
+  // the signer treats it as a new client (re-approval, and a chance to pick a different account).
+  const handleForgetSigner = () => {
+    forgetLocalSigners()
+    setHasStoredSigner(false)
+    setShowForgetSignerModal(false)
+    clearError()
   }
 
   // ─── NIP-07 Login (Browser Extension) ───
@@ -2605,21 +2640,36 @@ export function LoginScreen() {
             {/* External signer row — Local | Extension (both hidden on mobile OS) */}
             {!isMobile && (
               <div className="w-full flex flex-wrap gap-2">
-                {/* NIP-LRS: Local Signer — hidden on mobile OS */}
+                {/* NIP-LRS: Local Signer (+ reset-connection brush) — hidden on mobile OS. The brush is
+                    a separate button that only appears when there's a saved connection to reset. */}
                 {!isMobile && (
-                  <Button
-                    variant="outline"
-                    onClick={handleLocalLogin}
-                    className="grow gap-1.5 text-xs"
-                    disabled={loading === 'lrs'}
-                  >
-                    {loading === 'lrs' ? (
-                      <Loader2 size={14} className="animate-spin" />
-                    ) : (
-                      <MonitorSmartphone size={14} />
+                  <div className="flex grow gap-1.5">
+                    <Button
+                      variant="outline"
+                      onClick={handleLocalLogin}
+                      className="grow gap-1.5 text-xs"
+                      disabled={loading === 'lrs'}
+                    >
+                      {loading === 'lrs' ? (
+                        <Loader2 size={14} className="animate-spin" />
+                      ) : (
+                        <MonitorSmartphone size={14} />
+                      )}
+                      {localSignerLabel}
+                    </Button>
+                    {hasStoredSigner && (
+                      <Button
+                        variant="outline"
+                        onClick={() => setShowForgetSignerModal(true)}
+                        className="px-2.5 shrink-0"
+                        disabled={loading === 'lrs'}
+                        aria-label="Reset local signer connection"
+                        title="Reset local signer connection"
+                      >
+                        <Brush size={14} />
+                      </Button>
                     )}
-                    Local
-                  </Button>
+                  </div>
                 )}
 
                 {/* NIP-07: Browser Extension — browser only, hidden on mobile OS */}
@@ -2728,6 +2778,45 @@ export function LoginScreen() {
       />
       <ExtensionGuideModal open={showExtensionGuide} onClose={() => setShowExtensionGuide(false)} />
       <NoLocalSignerModal open={showLocalSignerModal} onClose={() => setShowLocalSignerModal(false)} isDesktop={isDesktop} />
+
+      {/* ── NIP-LRS: reset the saved local-signer connection (explain, then confirm) ── */}
+      {showForgetSignerModal && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={() => setShowForgetSignerModal(false)}>
+          <div className="w-full max-w-sm rounded-xl border border-border bg-card shadow-xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-3.5 border-b border-border">
+              <h3 className="text-sm font-semibold text-foreground flex items-center gap-2"><Brush size={15} /> Reset local signer connection</h3>
+              <button onClick={() => setShowForgetSignerModal(false)} className="text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="px-5 py-4 space-y-3">
+              <p className="text-sm text-muted-foreground leading-relaxed">
+                This clears the connection DEN Chat saved to your local signer on this device.
+              </p>
+              <p className="text-sm text-muted-foreground leading-relaxed">
+                The next time you log in locally, your signer will ask you to <span className="text-foreground font-medium">approve a new connection</span>, and you can choose a different account. Use this to switch accounts, or after you&apos;ve removed this connection in the signer itself.
+              </p>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                It doesn&apos;t delete anything in your signer and doesn&apos;t affect your Nostr account.
+              </p>
+              <div className="flex items-center justify-end gap-2 pt-1">
+                <button
+                  onClick={() => setShowForgetSignerModal(false)}
+                  className="px-3 py-1.5 rounded-lg text-sm text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleForgetSigner}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors cursor-pointer"
+                >
+                  <Brush size={14} /> Reset connection
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── NIP-LRS: choose among multiple local signers (name is untrusted → show key fingerprint) ── */}
       {discoveredSigners && discoveredSigners.length > 1 && (

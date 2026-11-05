@@ -108,25 +108,25 @@ async function probeOnce(port: number): Promise<LrsSignerInfo | null> {
 }
 
 /** Probe a port with retry: a fast failure is retried (possible RST), a timeout gives up for now. */
-async function probePort(port: number): Promise<LrsSignerInfo | null> {
-  for (let attempt = 0; attempt < PROBE_ATTEMPTS; attempt++) {
+async function probePort(port: number, attempts = PROBE_ATTEMPTS): Promise<LrsSignerInfo | null> {
+  for (let attempt = 0; attempt < attempts; attempt++) {
     try {
       return await probeOnce(port) // reachable: signer info, or null (not a signer) — don't retry
     } catch (err) {
       // AbortError = our timeout → the port is slow/hanging; stop retrying it this round.
       if ((err as { name?: string })?.name === 'AbortError') return null
       // Otherwise a fast failure: could be a genuine RST on a live signer → retry with a short backoff.
-      if (attempt < PROBE_ATTEMPTS - 1) await sleep(120)
+      if (attempt < attempts - 1) await sleep(120)
     }
   }
   return null
 }
 
 /** Scan the whole range once, in parallel. Returns signers deduped by transport key (lowest port). */
-async function scanOnce(): Promise<LrsSignerInfo[]> {
+async function scanOnce(attempts: number): Promise<LrsSignerInfo[]> {
   const ports: number[] = []
   for (let p = LRS_PORT_START; p <= LRS_PORT_END; p++) ports.push(p)
-  const results = await Promise.all(ports.map((p) => probePort(p)))
+  const results = await Promise.all(ports.map((p) => probePort(p, attempts)))
   const byKey = new Map<string, LrsSignerInfo>()
   for (const r of results) {
     if (!r) continue
@@ -142,18 +142,27 @@ async function scanOnce(): Promise<LrsSignerInfo[]> {
  * Fast path: if `remembered` is given, try its last-known port first and return immediately when the
  * marker there still matches the remembered transport key.
  *
- * Otherwise scan the range a few times (resilience against the RST flakiness) and return every signer
- * found. Callers pick: one → use it; many → show a chooser (name + fingerprint); none → "no signer".
+ * Otherwise scan the range and return every signer found. The default is resilient (several rounds,
+ * per-probe retry) for the user-driven login click; pass `quick` for the startup label hint, which is
+ * best-effort (one round, one attempt per port) so it never spends seconds sweeping a signer-less
+ * machine on every launch — a signer missed by the quick pass is still caught by the full scan on click.
+ *
+ * Callers pick: one → use it; many → show a chooser (name + fingerprint); none → "no signer".
  */
-export async function discoverLocalSigners(remembered?: LrsState | null): Promise<LrsSignerInfo[]> {
+export async function discoverLocalSigners(
+  remembered?: LrsState | null,
+  opts?: { quick?: boolean },
+): Promise<LrsSignerInfo[]> {
+  const rounds = opts?.quick ? 1 : SCAN_ROUNDS
+  const attempts = opts?.quick ? 1 : PROBE_ATTEMPTS
   if (remembered) {
-    const hit = await probePort(remembered.lastPort)
+    const hit = await probePort(remembered.lastPort, attempts)
     if (hit && hit.transportPubkey === remembered.transportPubkey) return [hit]
   }
-  for (let round = 0; round < SCAN_ROUNDS; round++) {
-    const found = await scanOnce()
+  for (let round = 0; round < rounds; round++) {
+    const found = await scanOnce(attempts)
     if (found.length > 0) return found
-    if (round < SCAN_ROUNDS - 1) await sleep(200)
+    if (round < rounds - 1) await sleep(200)
   }
   return []
 }
@@ -181,8 +190,36 @@ function saveLrsState(state: LrsState): void {
   try { localStorage.setItem(LRS_STATE_KEY, JSON.stringify(state)) } catch { /* storage blocked */ }
 }
 
-export function clearLrsState(): void {
-  try { localStorage.removeItem(LRS_STATE_KEY) } catch { /* storage blocked */ }
+/** True if DEN Chat holds any saved local-signer connection (a client key and/or the reconnection
+ *  pin). Drives whether the "reset connection" control is shown. */
+export function hasStoredLocalSigner(): boolean {
+  try {
+    if (localStorage.getItem(LRS_STATE_KEY)) return true
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i)
+      if (k && k.startsWith(CLIENT_SECRET_PREFIX)) return true
+    }
+  } catch { /* storage blocked */ }
+  return false
+}
+
+/**
+ * Forget DEN Chat's saved connection to local signers: delete every per-signer client key AND the
+ * reconnection pin. Nothing on the signer is touched. The NEXT local login therefore mints a fresh
+ * client key, so the signer sees a brand-new client and asks for approval again (and can offer a
+ * different account) — this is how a user switches accounts on, or re-pairs with, the same signer,
+ * and how they recover cleanly after deleting the connection on the signer side.
+ */
+export function forgetLocalSigners(): void {
+  try {
+    const toRemove: string[] = []
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i)
+      if (k && k.startsWith(CLIENT_SECRET_PREFIX)) toRemove.push(k)
+    }
+    for (const k of toRemove) localStorage.removeItem(k)
+    localStorage.removeItem(LRS_STATE_KEY)
+  } catch { /* storage blocked */ }
 }
 
 /** One persisted client key per signer, keyed by its transport key. Returns the hex secret and
