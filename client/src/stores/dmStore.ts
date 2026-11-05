@@ -23,6 +23,7 @@ import { playSoundEffect } from '@/lib/voice/soundEffects'
 import type { ISigner } from '@/stores/userStore'
 import type { Event } from 'nostr-tools'
 import { fetchDMRelayList } from '@/lib/nostr/relayDiscovery'
+import { getExpirationFromTags } from '@/lib/hub/messageExpiration'
 
 /** Unix timestamp (seconds) of when this session started — sounds only play for messages after this */
 const dmSessionStartTime = nowSeconds()
@@ -37,6 +38,7 @@ export interface DMMessage {
   createdAt: number // rumor timestamp (real ordering)
   wrapCreatedAt: number // gift wrap timestamp (for pagination cursor)
   isMine: boolean
+  expiration?: number // NIP-40 expiration (unix seconds) — disappearing message
   clientTag?: string // from ["client", "..."] tag on the rumor
   emojiTags?: [string, string, string?][]    // [shortcode, url, set-ref?] from rumor tags
   stickerTags?: [string, string, string?][]  // [shortcode, url, set-ref?] from rumor tags
@@ -663,6 +665,7 @@ export const useDMStore = create<DMState>((set, get) => ({
         createdAt: sendTime,
         wrapCreatedAt: sendTime,
         isMine: true,
+        expiration: expirationSeconds && expirationSeconds > 0 ? sendTime + expirationSeconds : undefined,
         clientTag: typeof window !== 'undefined' && localStorage.getItem('den-chat-client-tag') !== 'false' ? 'DEN Chat' : undefined,
         emojiTags: emojiTags?.map((t) => [t[1], t[2], t[3] || undefined] as [string, string, string?]),
         stickerTags: stickerTags?.map((t) => [t[1], t[2], t[3] || undefined] as [string, string, string?]),
@@ -951,6 +954,7 @@ function addDMToConversations(
     createdAt: dm.rumor.created_at,
     wrapCreatedAt: dm.wrapCreatedAt,
     isMine,
+    expiration: getExpirationFromTags(dm.rumor.tags),
     clientTag: clientTagVal,
     emojiTags: emojiTags.length > 0 ? emojiTags : undefined,
     stickerTags: stickerTags.length > 0 ? stickerTags : undefined,

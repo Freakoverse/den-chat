@@ -29,6 +29,7 @@ import {
   Check, RotateCcw, Star, ChevronLeft,
 } from 'lucide-react'
 import { MessageContent } from '@/components/chat/MessageContent'
+import { MessageExpiryNote } from '@/components/chat/MessageExpiryNote'
 import { ContentMediaGroupsWithGallery, extractContentMediaGroups } from '@/components/chat/ContentMediaGrouping'
 import { DnnBadge } from '@/components/ui/DnnBadge'
 import { useGifStore } from '@/stores/gifStore'
@@ -1267,6 +1268,7 @@ function DM04MessageRow({
             {msg.clientTag && (
               <span className="text-[10px] text-muted-foreground/50">· via {msg.clientTag}</span>
             )}
+            {msg.expiration && <MessageExpiryNote expiration={msg.expiration} createdAt={msg.createdAt} className="text-[10px] text-muted-foreground/50 cursor-default" />}
           </div>
         )}
 

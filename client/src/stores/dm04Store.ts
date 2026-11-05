@@ -35,6 +35,7 @@ import type { Attachment } from '@/stores/messageStore'
 import type { Event } from 'nostr-tools'
 import { playSoundEffect } from '@/lib/voice/soundEffects'
 import { discoverRecipientRelays } from '@/lib/nostr/relayDiscovery'
+import { getExpirationFromTags } from '@/lib/hub/messageExpiration'
 
 /** Unix timestamp (seconds) of when this session started — DM sounds only play for messages after this */
 const dm04SessionStartTime = nowSeconds()
@@ -52,6 +53,7 @@ export interface DM04Message {
   rootRef?: string       // event id of thread root
   isThread?: boolean     // true = thread reply (hidden from main, shown in thread modal)
   deleted?: boolean
+  expiration?: number    // NIP-40 expiration (unix seconds) — disappearing message
   clientTag?: string
   rawEvent?: string      // raw event JSON for "View Raw"
   emojiTags?: [string, string, string?][]    // decrypted [shortcode, url, set-ref?]
@@ -628,6 +630,7 @@ export const useDM04Store = create<DM04State>((set, get) => ({
         replyTo,
         rootRef,
         isThread,
+        expiration: expirationSeconds && expirationSeconds > 0 ? sendTime + expirationSeconds : undefined,
         clientTag: typeof window !== 'undefined' && localStorage.getItem('den-chat-client-tag') !== 'false' ? 'DEN Chat' : undefined,
         rawEvent: JSON.stringify(signed),
         emojiTags: emojiTags?.map((t) => [t[1], t[2], t[3] || undefined] as [string, string, string?]),
@@ -955,6 +958,7 @@ async function processNip04Event(
     rootRef,
     isThread,
     deleted,
+    expiration: getExpirationFromTags(event.tags),
     clientTag,
     rawEvent: JSON.stringify(event),
     emojiTags,
@@ -1069,6 +1073,7 @@ async function processNip04EventBuffered(
     rootRef,
     isThread,
     deleted,
+    expiration: getExpirationFromTags(event.tags),
     clientTag,
     rawEvent: JSON.stringify(event),
     emojiTags,

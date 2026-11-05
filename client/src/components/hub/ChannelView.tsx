@@ -54,6 +54,7 @@ import { isV2 } from '@/lib/hub/version'
 import { ImageGallery } from '@/components/social/RichContent'
 import { extractContentMediaGroups, ContentMediaGroups, ContentMediaImage, type ContentMediaGroup } from '@/components/chat/ContentMediaGrouping'
 import { MessageContent } from '@/components/chat/MessageContent'
+import { MessageExpiryNote } from '@/components/chat/MessageExpiryNote'
 import { DnnBadge } from '@/components/ui/DnnBadge'
 import { EmojiPickerPopover, EmojiDiscoveryModal } from '@/components/chat/EmojiPickerPopover'
 import { StickerDiscoveryModal } from '@/components/chat/StickerPickerPopover'
@@ -4065,16 +4066,7 @@ export function ChatMessageRow({
                   </TooltipContent>
                 </Tooltip>
               )}
-              {msg.expiration && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <span className="text-muted-foreground/50 cursor-default"> · disappears after {formatDuration(Math.max(0, msg.expiration - msg.timestamp))}</span>
-                  </TooltipTrigger>
-                  <TooltipContent side="top" className="text-xs">
-                    Best-effort disappearing message. Relays that honor the expiration tag delete it around {formatFullDate(msg.expiration)}; clients hide and purge it locally.
-                  </TooltipContent>
-                </Tooltip>
-              )}
+              {msg.expiration && <MessageExpiryNote expiration={msg.expiration} createdAt={msg.timestamp} />}
               {isHidden && canHide && (
                 <button
                   onClick={() => setHiddenPreviewRevealed(false)}

@@ -40,22 +40,23 @@ export function getHubExpirationTimer(hubDTag: string): number {
  * @param anchorAt  optional alternative anchor (unix seconds). For time-bound
  *                  events (calendar), pass the event's END time so a future event
  *                  survives until it is over: expiry = max(created_at, anchorAt) + timer.
- * @param overrideSeconds  optional per-message duration chosen in the composer. When
- *                  > 0 it WINS over the hub policy (expiry = created_at + it); 0 or
- *                  undefined falls through to the hub policy. It never removes a
- *                  hub-mandated timer, it only sets/overrides the duration.
+ * @param overrideSeconds  optional per-message duration chosen in the composer (the fire-icon
+ *                  picker). Precedence: a hub-mandated timer OVERRIDES the user's choice, EXCEPT when
+ *                  the user's is shorter, in which case the user's (the shorter one) wins — i.e. the
+ *                  effective duration is min(hub, user). If only one of the two is set, that one
+ *                  applies. The user can never extend a message past the hub's mandated lifetime, only
+ *                  shorten it.
  */
 export function stampHubExpiration(unsigned: UnsignedEvent, hubDTag: string, anchorAt?: number, overrideSeconds?: number): void {
   if (unsigned.tags.some((t) => t[0] === 'expiration')) return
-  if (typeof overrideSeconds === 'number' && overrideSeconds > 0) {
-    unsigned.tags = [...unsigned.tags, ['expiration', Math.floor(unsigned.created_at + overrideSeconds).toString()]]
-    return
-  }
-  const timer = getHubExpirationTimer(hubDTag)
-  if (timer <= 0) return
+  const hubTimer = getHubExpirationTimer(hubDTag)
+  const userTimer = typeof overrideSeconds === 'number' && overrideSeconds > 0 ? overrideSeconds : 0
+  // Both set → the shorter wins (hub overrides the user unless the user asked for sooner). Only one
+  // set → that one applies. Neither → no expiration.
+  const effective = hubTimer > 0 && userTimer > 0 ? Math.min(hubTimer, userTimer) : Math.max(hubTimer, userTimer)
+  if (effective <= 0) return
   const base = typeof anchorAt === 'number' && anchorAt > unsigned.created_at ? anchorAt : unsigned.created_at
-  const expiry = Math.floor(base + timer)
-  unsigned.tags = [...unsigned.tags, ['expiration', expiry.toString()]]
+  unsigned.tags = [...unsigned.tags, ['expiration', Math.floor(base + effective).toString()]]
 }
 
 /**

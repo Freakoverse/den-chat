@@ -23,6 +23,7 @@ import type { UploadProgress } from '@/lib/blossom'
 import { getUploadBlossoms } from '@/stores/postingBehaviourStore'
 import { ChatInputBar, type FileAttachment } from '@/components/chat/ChatInputBar'
 import { MessageContent } from '@/components/chat/MessageContent'
+import { MessageExpiryNote } from '@/components/chat/MessageExpiryNote'
 import { BlossomImage } from '@/components/ui/BlossomImage'
 import { DnnBadge } from '@/components/ui/DnnBadge'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -988,6 +989,7 @@ function ForumPostDetail({
                         </TooltipContent>
                       </Tooltip>
                     )}
+                    {post.expiration && <MessageExpiryNote expiration={post.expiration} createdAt={post.timestamp} />}
                   </div>
                 </div>
               </div>

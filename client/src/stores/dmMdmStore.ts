@@ -20,6 +20,7 @@ import { subscribeEventsWide } from '@/lib/nostr/readRelays'
 import { publishWithFailover, getRelays } from '@/lib/nostr/relay-pool'
 import { publishPersonal, usePostingBehaviourStore } from '@/stores/postingBehaviourStore'
 import { discoverRecipientRelays } from '@/lib/nostr/relayDiscovery'
+import { getExpirationFromTags } from '@/lib/hub/messageExpiration'
 import { nowSeconds } from '@/lib/time/clockOffset'
 import { useBlockStore } from '@/stores/blockStore'
 import { useWotStore } from '@/stores/wotStore'
@@ -404,6 +405,7 @@ function toMessage(
     recipientPubkey: isMine ? counterparty : myPubkey,
     createdAt: real.created_at,
     isMine,
+    expiration: getExpirationFromTags(real.tags),
     deleted: payload.deleted,
     replyTo: payload.reply ? coordToId.get(payload.reply) : undefined,
     rootRef: payload.rootRef ? coordToId.get(payload.rootRef) : undefined,

@@ -50,6 +50,7 @@ import {
 import { useEscToClose } from '@/hooks/useEscToClose'
 import { fetchDMRelayList, type DMRelayListInfo } from '@/lib/nostr/relayDiscovery'
 import { MessageContent } from '@/components/chat/MessageContent'
+import { MessageExpiryNote } from '@/components/chat/MessageExpiryNote'
 import { ScrollableContent } from '../chat/ScrollableContent'
 import { ContentMediaGroupsWithGallery, extractContentMediaGroups } from '@/components/chat/ContentMediaGrouping'
 import { ImageGallery } from '@/components/social/RichContent'
@@ -1968,6 +1969,7 @@ function DMMessageRow({ msg, showDateSep, isGrouped, senderProfile, displayName,
               {msg.clientTag && (
                 <span className="text-[10px] text-muted-foreground/50">· via {msg.clientTag}</span>
               )}
+              {msg.expiration && <MessageExpiryNote expiration={msg.expiration} createdAt={msg.createdAt} className="text-[10px] text-muted-foreground/50 cursor-default" />}
             </div>
           )}
           <ScrollableContent>
@@ -2138,6 +2140,7 @@ function DMMessageContent({ msg, showDateSep, isGrouped, senderProfile, displayN
               {msg.clientTag && (
                 <span className="text-[10px] text-muted-foreground/50">· via {msg.clientTag}</span>
               )}
+              {msg.expiration && <MessageExpiryNote expiration={msg.expiration} createdAt={msg.createdAt} className="text-[10px] text-muted-foreground/50 cursor-default" />}
             </div>
           )}
           <ScrollableContent>
