@@ -1855,7 +1855,14 @@ function PublicMessageActions({ msg, onReply, onRequestDelete, onAddReaction, re
               <button onClick={() => setShowRaw(false)} className="text-muted-foreground hover:text-foreground cursor-pointer"><X size={16} /></button>
             </div>
             <pre className="flex-1 overflow-auto text-xs text-foreground bg-secondary/50 rounded-lg p-3 font-mono whitespace-pre-wrap break-all">
-              {JSON.stringify({ id: msg.id, pubkey: msg.pubkey, created_at: msg.createdAt, kind: 1312, content: msg.content, topic: msg.topic, pow: msg.pow, nsfw: msg.nsfw, clientTag: msg.clientTag, replyTo: msg.replyTo, rootRef: msg.rootRef }, null, 2)}
+              {(() => {
+                // Show the ACTUAL signed event (tags incl. the NIP-13 nonce, sig, …). Fall back to the
+                // parsed fields only for an old cached message that predates rawEvent being stored.
+                if (msg.rawEvent) {
+                  try { return JSON.stringify(JSON.parse(msg.rawEvent), null, 2) } catch { /* fall through */ }
+                }
+                return JSON.stringify({ id: msg.id, pubkey: msg.pubkey, created_at: msg.createdAt, kind: 1312, content: msg.content, pow: msg.pow }, null, 2)
+              })()}
             </pre>
           </div>
         </div>

@@ -46,6 +46,7 @@ export interface PublicChatMessage {
   pow: number            // computed difficulty of this event's ID
   clientTag?: string     // from ["client", "..."] tag
   nsfw?: boolean         // from ["content-warning", ...] tag (NIP-36)
+  rawEvent?: string      // the full signed event JSON, for the "View Raw" viewer (incl. tags/sig/nonce)
   emojiTags?: [string, string, string?][]    // [shortcode, url, setRef?]
   stickerTags?: [string, string, string?][]  // [shortcode, url, setRef?]
   gifTags?: [string, string, string][]       // [name, url, nsfw-flag]
@@ -253,6 +254,7 @@ function parsePublicChatEvent(event: Event): PublicChatMessage | null {
     pow,
     clientTag,
     nsfw: nsfw || undefined,
+    rawEvent: JSON.stringify(event),
     emojiTags: emojiTags.length > 0 ? emojiTags : undefined,
     stickerTags: stickerTags.length > 0 ? stickerTags : undefined,
     gifTags: gifTags.length > 0 ? gifTags : undefined,
