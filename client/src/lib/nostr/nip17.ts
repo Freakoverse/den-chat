@@ -129,12 +129,22 @@ export async function createGiftWrap(
   signer: ISigner | null,
   privateKey: string | null,
   tags: string[][] = [],
+  expirationSeconds?: number,
 ): Promise<{ wrapForRecipient: Record<string, unknown>; wrapForSelf: Record<string, unknown>; rumor: DMRumor }> {
+
+  // Per-message auto-delete (NIP-40). Absolute expiry = real now + chosen duration
+  // (corrected clock, NOT the wrap's randomized created_at). Stamped on BOTH the outer
+  // gift wraps (so NIP-40 relays delete them) and the rumor (so a decrypting client can
+  // hide/purge it). Best-effort — deletion is never guaranteed.
+  const expTag: string[] | null = (expirationSeconds && expirationSeconds > 0)
+    ? ['expiration', Math.floor(nowSeconds() + expirationSeconds).toString()]
+    : null
 
   // 1. Create the rumor (kind 14, unsigned)
   const rumorTags: string[][] = [
     ['p', recipientPubkey],
     ...tags,
+    ...(expTag ? [expTag] : []),
   ]
 
   // Add client tag if enabled in preferences
@@ -156,11 +166,12 @@ export async function createGiftWrap(
   const sealForRecipient = await createSeal(rumorJson, senderPubkey, recipientPubkey, signer, privateKey)
 
   // 3. Gift-wrap the seal for recipient (kind 1059, throwaway key)
-  const wrapForRecipient = createWrapEnvelope(JSON.stringify(sealForRecipient), recipientPubkey)
+  const wrapTags = expTag ? [expTag] : []
+  const wrapForRecipient = createWrapEnvelope(JSON.stringify(sealForRecipient), recipientPubkey, wrapTags)
 
   // 4. Also create a copy gift-wrapped for self (so sender can read their own DMs)
   const sealForSelf = await createSeal(rumorJson, senderPubkey, senderPubkey, signer, privateKey)
-  const wrapForSelf = createWrapEnvelope(JSON.stringify(sealForSelf), senderPubkey)
+  const wrapForSelf = createWrapEnvelope(JSON.stringify(sealForSelf), senderPubkey, wrapTags)
 
   return { wrapForRecipient, wrapForSelf, rumor }
 }
@@ -295,6 +306,7 @@ async function createSeal(
 function createWrapEnvelope(
   sealJson: string,
   recipientPubkey: string,
+  wrapTags: string[][] = [],
 ): Record<string, unknown> {
   const throwawayPriv = generateRandomPrivateKey()
   const throwawayPub = getPublicKey(throwawayPriv)
@@ -306,7 +318,7 @@ function createWrapEnvelope(
     kind: STANDARD_KINDS.GIFT_WRAP,
     pubkey: throwawayPub,
     created_at: randomizedTimestamp(),
-    tags: [['p', recipientPubkey]],
+    tags: [['p', recipientPubkey], ...wrapTags],
     content: encryptedSeal,
   }
 

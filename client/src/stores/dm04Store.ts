@@ -136,6 +136,7 @@ interface DM04State {
     emojiTags?: [string, string, string, string][],
     stickerTags?: [string, string, string, string][],
     gifTags?: [string, string, string, string][],
+    expirationSeconds?: number,
   ) => Promise<void>
   deleteMessage: (
     eventId: string,
@@ -511,7 +512,7 @@ export const useDM04Store = create<DM04State>((set, get) => ({
     }
   },
 
-  sendMessage: async (recipientPubkey, content, myPubkey, signer, privateKey, replyTo, rootRef, isThread, onPhase, emojiTags, stickerTags, gifTags) => {
+  sendMessage: async (recipientPubkey, content, myPubkey, signer, privateKey, replyTo, rootRef, isThread, onPhase, emojiTags, stickerTags, gifTags, expirationSeconds) => {
     if (!privateKey && !signer?.nip04) {
       throw new Error('NIP-04 encryption is not available with your current login method.')
     }
@@ -594,6 +595,12 @@ export const useDM04Store = create<DM04State>((set, get) => ({
       // Client tag
       if (typeof window !== 'undefined' && localStorage.getItem('den-chat-client-tag') !== 'false') {
         tags.push(['client', 'DEN Chat'])
+      }
+
+      // Per-message auto-delete (NIP-40): expiry = send time + chosen duration. Public
+      // tag on the kind-4 event so NIP-40 relays delete it (best-effort).
+      if (expirationSeconds && expirationSeconds > 0) {
+        tags.push(['expiration', Math.floor(sendTime + expirationSeconds).toString()])
       }
 
       const unsigned = createUnsignedEvent(STANDARD_KINDS.NIP04_DM, encrypted, tags)

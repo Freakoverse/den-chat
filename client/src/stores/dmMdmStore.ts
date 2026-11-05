@@ -90,6 +90,7 @@ interface MdmState {
     replyTo?: string, rootRef?: string, isThread?: boolean,
     onPhase?: (phase: 'publishing', relayProgress?: { confirmed: number; total: number }) => void,
     emojiTags?: Tuple4[], stickerTags?: Tuple4[], gifTags?: Tuple4[], attachments?: Attachment[],
+    expirationSeconds?: number,
   ) => Promise<void>
   deleteMessage: (eventId: string, myPubkey: string, signer: ISigner | null, privateKey: string | null) => Promise<void>
   addReaction: (
@@ -268,7 +269,7 @@ export const useMdmStore = create<MdmState>((set, get) => ({
 
   stopSubscription: () => { get().subscription?.close(); set({ subscription: null }) },
 
-  sendMessage: async (recipientPubkey, content, myPubkey, signer, privateKey, replyTo, rootRef, isThread, onPhase, emojiTags, stickerTags, gifTags, attachments) => {
+  sendMessage: async (recipientPubkey, content, myPubkey, signer, privateKey, replyTo, rootRef, isThread, onPhase, emojiTags, stickerTags, gifTags, attachments, expirationSeconds) => {
     const keys: MdmKeys = { privateKey, signer }
     if (!mdmSupported(keys)) throw new Error('Masked DMs need a local key or a signer with NIP-SKD support.')
     const body: MdmBody = {
@@ -281,7 +282,7 @@ export const useMdmStore = create<MdmState>((set, get) => ({
       gif: drop4(gifTags) as [string, string, string][] | undefined,
       attachments: attachments && attachments.length ? attachments : undefined,
     }
-    const { real, selfCopy } = await buildMdmMessage({ recipientRootPub: recipientPubkey, myRootPub: myPubkey, body, keys })
+    const { real, selfCopy } = await buildMdmMessage({ recipientRootPub: recipientPubkey, myRootPub: myPubkey, body, keys, expirationSeconds })
 
     const payload = { v: 1 as const, from: myPubkey, ...body }
     set((s) => { const conversations = new Map(s.conversations); upsertMessage(conversations, recipientPubkey, real, toMessage(real, payload, recipientPubkey, myPubkey, true, true), s.activeConversation); return { conversations } })

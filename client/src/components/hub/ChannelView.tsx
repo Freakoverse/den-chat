@@ -23,7 +23,7 @@ import { HubBlossomHealthBanner } from '@/components/hub/HubBlossomHealthBanner'
 import { HubRelayHealthBanner } from '@/components/hub/HubRelayHealthBanner'
 import { HubUpgradeBanner } from '@/components/hub/HubUpgradeBanner'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
-import { Hash, Megaphone, Users, Pin, PinOff, Bell, Search, Send, Plus, Smile, Check, X, RotateCcw, Pencil, Reply, MoreVertical, Copy, MessageSquarePlus, Trash2, Loader2, Zap, Code, Bold, Italic, Strikethrough, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, ListTodo, Quote, Link, CodeSquare, ALargeSmall, Clipboard, ClipboardCheck, ClipboardPaste, Upload, FileIcon, Download, Image, Paperclip, AlertTriangle, AlertCircle, Eye, EyeOff, ShieldBan, ShieldAlert, ShieldOff, Lock, LockOpen, Settings, ArrowDown, ArrowLeft, Star, Vote, Clock, Flag, Shield, Globe, Radio, History, BadgeCheck, Mic, WifiOff, Scissors, Type } from 'lucide-react'
+import { Hash, Megaphone, Users, Pin, PinOff, Bell, Search, Send, Plus, Smile, Check, X, RotateCcw, Pencil, Reply, MoreVertical, Copy, MessageSquarePlus, Trash2, Loader2, Zap, Code, Bold, Italic, Strikethrough, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, ListTodo, Quote, Link, CodeSquare, ALargeSmall, Clipboard, ClipboardCheck, ClipboardPaste, Upload, FileIcon, Download, Image, Paperclip, AlertTriangle, AlertCircle, Eye, EyeOff, ShieldBan, ShieldAlert, ShieldOff, Lock, LockOpen, Settings, ArrowDown, ArrowLeft, Star, Vote, Clock, Flame, Flag, Shield, Globe, Radio, History, BadgeCheck, Mic, WifiOff, Scissors, Type } from 'lucide-react'
 import { useState, useEffect, useRef, useCallback, memo, useMemo, Fragment } from 'react'
 import { useEscToClose, useEscBlock } from '@/hooks/useEscToClose'
 import { createPortal } from 'react-dom'
@@ -42,6 +42,7 @@ import { getPublishRelays } from '@/stores/postingBehaviourStore'
 import { useTypingHeartbeat } from '@/hooks/useTypingHeartbeat'
 import { TypingIndicator } from '@/components/chat/TypingIndicator'
 import { MarkdownToolbar } from '@/components/chat/MarkdownToolbar'
+import { ExpirationPickerPopover } from '@/components/chat/ChatInputBar'
 import { hubTypingKey } from '@/stores/typingStore'
 import { setNameFromAddress } from '@/lib/customSets'
 import type { Channel, HubData, HubMember } from '@/stores/hubStore'
@@ -4894,6 +4895,20 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
   const [showToolbar, setShowToolbar] = useState(false)
   const [showTimestamp, setShowTimestamp] = useState(false)
   const [isNsfw, setIsNsfw] = useState(false)
+  // Per-message auto-delete (NIP-40), remembered per channel/thread composer.
+  const [showExpiration, setShowExpiration] = useState(false)
+  const expirationButtonRef = useRef<HTMLButtonElement>(null)
+  const expirationStorageKey = `den-chat-msg-expiration:${draftKey}`
+  const [expirationSeconds, setExpirationSeconds] = useState<number>(() => {
+    try { const n = parseInt(localStorage.getItem(`den-chat-msg-expiration:${draftKey}`) || '', 10); return Number.isFinite(n) && n > 0 ? n : 0 } catch { return 0 }
+  })
+  useEffect(() => {
+    try { const n = parseInt(localStorage.getItem(expirationStorageKey) || '', 10); setExpirationSeconds(Number.isFinite(n) && n > 0 ? n : 0) } catch { setExpirationSeconds(0) }
+  }, [expirationStorageKey])
+  const updateExpiration = useCallback((s: number) => {
+    setExpirationSeconds(s)
+    try { localStorage.setItem(expirationStorageKey, String(s)) } catch { /* ignore */ }
+  }, [expirationStorageKey])
   const [encryptUploads, setEncryptUploads] = useState(() => localStorage.getItem('den-chat-encrypt-uploads') === 'true')
   const toggleEncryptUploads = useCallback(() => {
     setEncryptUploads((prev) => {
@@ -5549,7 +5564,8 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
           : undefined,
         sentGifs.length > 0
           ? sentGifs.map((g): [string, string, string, string] => ['j', g.name, g.url, g.nsfw ? 'nsfw' : 'sfw'])
-          : undefined
+          : undefined,
+        expirationSeconds > 0 ? expirationSeconds : undefined
       )
       // All relays responded — mark as published.
       // Cleanup happens via the reconciliation effect when the real
@@ -5562,7 +5578,7 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
         prev.map((m) => (m.tempId === tempId ? { ...m, status: 'failed' as const } : m))
       )
     }
-  }, [message, sendMessage, setOptimisticMessages, replyContext, onCancelReply, pendingFiles, allFilesSuccess, pendingStickers, pendingGifs])
+  }, [message, sendMessage, setOptimisticMessages, replyContext, onCancelReply, pendingFiles, allFilesSuccess, pendingStickers, pendingGifs, expirationSeconds])
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     // @mention autocomplete keyboard handling
@@ -6201,6 +6217,31 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
                 <TooltipContent side="top" className="text-xs">Attach files</TooltipContent>
               </Tooltip>
             )}
+            {/* Auto-delete (NIP-40 expiration) — fire button, left of the formatting toggle */}
+            <div className="relative">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    ref={expirationButtonRef}
+                    onClick={() => setShowExpiration((v) => !v)}
+                    className={`p-1 cursor-pointer transition-colors ${expirationSeconds > 0 ? 'text-orange-500' : 'text-muted-foreground hover:text-foreground'}`}
+                  >
+                    <Flame size={20} />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="text-xs">
+                  {expirationSeconds > 0 ? `Auto-delete: ${formatDuration(expirationSeconds)}` : 'Auto-delete after a while'}
+                </TooltipContent>
+              </Tooltip>
+              {showExpiration && (
+                <ExpirationPickerPopover
+                  triggerRef={expirationButtonRef}
+                  seconds={expirationSeconds}
+                  onChange={updateExpiration}
+                  onClose={() => setShowExpiration(false)}
+                />
+              )}
+            </div>
             <Tooltip>
               <TooltipTrigger asChild>
                 <button onClick={() => setShowToolbar(!showToolbar)} className={`p-1 cursor-pointer transition-colors ${showToolbar ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}`}>

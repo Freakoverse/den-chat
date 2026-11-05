@@ -102,6 +102,7 @@ interface DMState {
     stickerTags?: [string, string, string, string][],
     gifTags?: [string, string, string, string][],
     onProgress?: (phase: 'encrypting' | 'publishing', relayProgress?: { confirmed: number; total: number }) => void,
+    expirationSeconds?: number,
   ) => Promise<{ rumorId: string }>
   getFilteredConversations: (followList: Set<string>) => {
     following: Conversation[]
@@ -520,7 +521,7 @@ export const useDMStore = create<DMState>((set, get) => ({
     }
   },
 
-  sendMessage: async (recipientPubkey, content, myPubkey, signer, privateKey, emojiTags, stickerTags, gifTags, onProgress) => {
+  sendMessage: async (recipientPubkey, content, myPubkey, signer, privateKey, emojiTags, stickerTags, gifTags, onProgress, expirationSeconds) => {
     // Capability check
     if (!privateKey && !signer?.nip44) {
       throw new Error('NIP-44 encryption is not available with your current login method. DMs require NIP-44 support.')
@@ -560,6 +561,7 @@ export const useDMStore = create<DMState>((set, get) => ({
         signer,
         privateKey,
         extraTags,
+        expirationSeconds,
       )
 
       // Compute the rumor ID (deterministic hash of the unsigned kind-14 event)

@@ -44,9 +44,11 @@ import {
   Calendar, User, Check, MessageSquarePlus, Copy, Flag, EyeOff,
   Bold, Italic, Strikethrough, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6,
   List as ListIcon, ListOrdered, ListTodo, Link, Code, CodeSquare, Eye, Smile, ALargeSmall,
-  Upload, FileIcon,
+  Upload, FileIcon, Flame,
 } from 'lucide-react'
 import { EmojiPickerPopover } from '@/components/chat/EmojiPickerPopover'
+import { ExpirationPickerPopover } from '@/components/chat/ChatInputBar'
+import { formatDuration } from '@/lib/hub/messageExpiration'
 import type { Attachment } from '@/stores/messageStore'
 import { useMessageStore } from '@/stores/messageStore'
 import { usePermissions, getPermissionsForUser } from '@/lib/hub/permissions'
@@ -1377,6 +1379,17 @@ function CreateForumPostModal({ onClose, sendMessage, canPublish, signer, privat
   const emojiButtonRef = useRef<HTMLButtonElement>(null)
   const bodyFileInputRef = useRef<HTMLInputElement>(null)
   const featuredFileInputRef = useRef<HTMLInputElement>(null)
+  // Per-message auto-delete (NIP-40) for the forum post.
+  const [showExpiration, setShowExpiration] = useState(false)
+  const expirationButtonRef = useRef<HTMLButtonElement>(null)
+  const expirationStorageKey = `den-chat-msg-expiration:${_forumKey}`
+  const [expirationSeconds, setExpirationSeconds] = useState<number>(() => {
+    try { const n = parseInt(localStorage.getItem(`den-chat-msg-expiration:${_forumKey}`) || '', 10); return Number.isFinite(n) && n > 0 ? n : 0 } catch { return 0 }
+  })
+  const updateExpiration = useCallback((s: number) => {
+    setExpirationSeconds(s)
+    try { localStorage.setItem(expirationStorageKey, String(s)) } catch { /* ignore */ }
+  }, [expirationStorageKey])
 
   // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Featured image: separate, independent upload state ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
   const [featuredPreview, setFeaturedPreview] = useState<string | null>(null)
@@ -1609,7 +1622,10 @@ function CreateForumPostModal({ onClose, sendMessage, canPublish, signer, privat
         undefined, // isThread
         undefined, // encrypted
         undefined, // facilitator
-        { title, featuredImage: featuredImage || undefined, tags: tags.length > 0 ? tags : undefined }
+        { title, featuredImage: featuredImage || undefined, tags: tags.length > 0 ? tags : undefined },
+        undefined, // stickerTags
+        undefined, // gifTags
+        expirationSeconds > 0 ? expirationSeconds : undefined
       )
       // Clean up file previews + clear draft
       clearDraft(_forumKey)
@@ -1619,7 +1635,7 @@ function CreateForumPostModal({ onClose, sendMessage, canPublish, signer, privat
     } finally {
       setPublishing(false)
     }
-  }, [title, body, featuredImage, tags, isNsfw, canPublish, sendMessage, onClose, pendingFiles, featuredPreview])
+  }, [title, body, featuredImage, tags, isNsfw, canPublish, sendMessage, onClose, pendingFiles, featuredPreview, expirationSeconds])
 
   const hasPendingOrUploading = pendingFiles.some(f => f.status === 'pending' || f.status === 'uploading') || featuredUploading || (!!featuredFile && !featuredUploadDone && !featuredImage)
 
@@ -1901,6 +1917,32 @@ function CreateForumPostModal({ onClose, sendMessage, canPublish, signer, privat
                   </TooltipTrigger>
                   <TooltipContent side="top" className="text-xs">Attach files</TooltipContent>
                 </Tooltip>
+                {/* Auto-delete (NIP-40 expiration) — fire button, left of the formatting toggle */}
+                <div className="relative">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        ref={expirationButtonRef}
+                        onClick={() => setShowExpiration((v) => !v)}
+                        className={cn('p-1.5 rounded cursor-pointer transition-colors', expirationSeconds > 0 ? 'text-orange-500' : 'text-muted-foreground hover:text-foreground hover:bg-accent/50')}
+                      >
+                        <Flame size={16} />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" className="text-xs">
+                      {expirationSeconds > 0 ? `Auto-delete: ${formatDuration(expirationSeconds)}` : 'Auto-delete after a while'}
+                    </TooltipContent>
+                  </Tooltip>
+                  {showExpiration && (
+                    <ExpirationPickerPopover
+                      triggerRef={expirationButtonRef}
+                      seconds={expirationSeconds}
+                      onChange={updateExpiration}
+                      onClose={() => setShowExpiration(false)}
+                    />
+                  )}
+                </div>
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <button type="button" onClick={() => setShowToolbar(!showToolbar)} className={cn('p-1.5 rounded cursor-pointer transition-colors', showToolbar ? 'text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-accent/50')}>

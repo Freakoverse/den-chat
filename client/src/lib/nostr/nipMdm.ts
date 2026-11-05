@@ -148,10 +148,15 @@ export async function buildMdmSelfCopy(real: Event, keys: MdmKeys, dSelf?: strin
   const [cFrom, cTo] = await Promise.all([fromSigner.getPublicKey(), makeSubkeySigner(MDM_COPY_TO, keys).getPublicKey()])
   const payload: MdmSelfCopyPayload = { v: 1, event: real }
   const content = await fromSigner.nip44Encrypt(cTo, JSON.stringify(payload))
+  const tags: string[][] = [['d', dSelf ?? randomD()], ['p', cTo]]
+  // Carry the real message's NIP-40 expiration onto the self-copy so the sender's own
+  // copy auto-deletes on the same schedule.
+  const exp = real.tags.find((t) => t[0] === 'expiration')
+  if (exp) tags.push(exp)
   const unsigned: UnsignedEvent = {
     kind: MDM_KIND,
     created_at: real.created_at, // SAME created_at as the real message (docs §3.4)
-    tags: [['d', dSelf ?? randomD()], ['p', cTo]],
+    tags,
     content,
     pubkey: cFrom,
   }
@@ -173,15 +178,22 @@ export async function buildMdmMessage(opts: {
   d?: string
   createdAt?: number
   dSelf?: string
+  /** Per-message auto-delete (NIP-40): stamp expiry = created_at + this (seconds) on the real event. */
+  expirationSeconds?: number
 }): Promise<{ real: Event; selfCopy: Event; maskedPub: string }> {
   const mSigner = maskedSigner(opts.recipientRootPub, opts.keys)
   const maskedPub = await mSigner.getPublicKey()
   const payload: MdmPayload = { v: 1, from: opts.myRootPub, ...opts.body }
   const content = await mSigner.nip44Encrypt(opts.recipientRootPub, JSON.stringify(payload))
+  const createdAt = opts.createdAt ?? nowSeconds()
+  const tags: string[][] = [['d', opts.d ?? randomD()], ['p', opts.recipientRootPub]]
+  if (opts.expirationSeconds && opts.expirationSeconds > 0) {
+    tags.push(['expiration', Math.floor(createdAt + opts.expirationSeconds).toString()])
+  }
   const unsigned: UnsignedEvent = {
     kind: MDM_KIND,
-    created_at: opts.createdAt ?? nowSeconds(),
-    tags: [['d', opts.d ?? randomD()], ['p', opts.recipientRootPub]],
+    created_at: createdAt,
+    tags,
     content,
     pubkey: maskedPub,
   }

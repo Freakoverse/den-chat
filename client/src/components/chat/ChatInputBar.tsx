@@ -21,8 +21,9 @@ import {
   Heading1, Heading2, Heading3, Heading4, Heading5, Heading6,
   List, ListOrdered, ListTodo, Link, Code, CodeSquare, ALargeSmall, Eye,
   Plus, Upload, Loader2, FileIcon, X, AlertTriangle,
-  Clock, Mic, Lock, LockOpen, Scissors, ClipboardPaste, Copy, Type,
+  Clock, Mic, Lock, LockOpen, Scissors, ClipboardPaste, Copy, Type, Flame,
 } from 'lucide-react'
+import { EXPIRATION_PRESETS, formatDuration } from '@/lib/hub/messageExpiration'
 import { MediaPickerPopover } from '@/components/chat/MediaPickerPopover'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { uploadToBlossomServers, computeHash } from '@/lib/blossom'
@@ -86,8 +87,12 @@ interface ChatInputBarProps {
   message: string
   /** Update the message text */
   onMessageChange: (msg: string) => void
-  /** Called when user presses Send. Receives file attachments if any were uploaded. */
-  onSend: (attachments?: FileAttachment[]) => void
+  /**
+   * Called when user presses Send. Receives file attachments if any were uploaded, and
+   * (when enableExpiration is on) the per-message auto-delete duration in seconds the
+   * user picked (0 = off). The caller stamps a NIP-40 `expiration` tag from it.
+   */
+  onSend: (attachments?: FileAttachment[], expirationSeconds?: number) => void
   /** Placeholder text for the textarea */
   placeholder?: string
   /** Whether the input is disabled */
@@ -147,6 +152,13 @@ interface ChatInputBarProps {
   draftKey?: string
   /** Drop the px-2 pb-2 root padding so the bar sits flush (e.g. below a bordered chat card) */
   bare?: boolean
+  /**
+   * Show the per-message "delete later" (NIP-40 expiration) control: a fire-icon button
+   * left of the formatting-toolbar toggle that opens a small picker (on/off + duration).
+   * The chosen duration (seconds, 0 = off) is passed to onSend and persists per draftKey.
+   * Off by default; DMs, hub chat and hub forum posts opt in.
+   */
+  enableExpiration?: boolean
 }
 
 /* ─── Helpers ─── */
@@ -194,14 +206,17 @@ export function ChatInputBar({
   forceEncrypt = false,
   draftKey,
   bare = false,
+  enableExpiration = false,
 }: ChatInputBarProps) {
   const [showEmoji, setShowEmoji] = useState(false)
   const [showVoiceNote, setShowVoiceNote] = useState(false)
   const [showToolbar, setShowToolbar] = useState(false)
   const [showTimestamp, setShowTimestamp] = useState(false)
+  const [showExpiration, setShowExpiration] = useState(false)
   const internalTextareaRef = useRef<HTMLTextAreaElement>(null)
   const emojiButtonRef = useRef<HTMLButtonElement>(null)
   const timestampButtonRef = useRef<HTMLButtonElement>(null)
+  const expirationButtonRef = useRef<HTMLButtonElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const uploadAbortRef = useRef<AbortController | null>(null)
 
@@ -265,6 +280,28 @@ export function ChatInputBar({
       return next
     })
   }, [forceEncrypt])
+
+  // ─── Per-message auto-delete (NIP-40 expiration) ───
+  // Duration in seconds (0 = off), remembered per conversation so a disappearing-
+  // messages choice sticks until the user changes it (Signal-style).
+  const expirationStorageKey = `den-chat-msg-expiration:${draftKey ?? '_'}`
+  const readStoredExpiration = useCallback((key: string) => {
+    try {
+      const n = parseInt(localStorage.getItem(key) || '', 10)
+      return Number.isFinite(n) && n > 0 ? n : 0
+    } catch { return 0 }
+  }, [])
+  const [expirationSeconds, setExpirationSeconds] = useState<number>(() =>
+    enableExpiration ? readStoredExpiration(`den-chat-msg-expiration:${draftKey ?? '_'}`) : 0)
+  // Re-sync when switching conversations (draftKey change).
+  useEffect(() => {
+    if (!enableExpiration) return
+    setExpirationSeconds(readStoredExpiration(expirationStorageKey))
+  }, [enableExpiration, expirationStorageKey, readStoredExpiration])
+  const updateExpiration = useCallback((s: number) => {
+    setExpirationSeconds(s)
+    try { localStorage.setItem(expirationStorageKey, String(s)) } catch { /* ignore */ }
+  }, [expirationStorageKey])
 
   // Auto-resize textarea to fit content, up to 500px
   const autoResize = useCallback((el: HTMLTextAreaElement) => {
@@ -512,7 +549,7 @@ export function ChatInputBar({
         ...(f.encryption ? { encryption: f.encryption } : {}),
       }))
 
-    onSend(attachments.length > 0 ? attachments : undefined)
+    onSend(attachments.length > 0 ? attachments : undefined, enableExpiration ? expirationSeconds : undefined)
 
     // Clean up files after send
     if (attachments.length > 0) {
@@ -521,7 +558,8 @@ export function ChatInputBar({
       knownHashesRef.current.clear()
       if (draftKey) clearFileDraft(draftKey)
     }
-  }, [onSend, pendingFiles, draftKey])
+    // The expiration choice is intentionally NOT reset — it sticks for the conversation.
+  }, [onSend, pendingFiles, draftKey, enableExpiration, expirationSeconds])
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     // :emoji: autocomplete keyboard handling
@@ -1113,6 +1151,34 @@ export function ChatInputBar({
           {/* Left actions (hub: NSFW toggle, etc.) */}
           {leftActions}
 
+          {/* Auto-delete (NIP-40 expiration) — fire button, left of the formatting toggle */}
+          {enableExpiration && (
+            <div className="relative">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    ref={expirationButtonRef}
+                    onClick={() => setShowExpiration((v) => !v)}
+                    className={`p-1 cursor-pointer transition-colors ${expirationSeconds > 0 ? 'text-orange-500' : 'text-muted-foreground hover:text-foreground'}`}
+                  >
+                    <Flame size={20} />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="text-xs">
+                  {expirationSeconds > 0 ? `Auto-delete: ${formatDuration(expirationSeconds)}` : 'Auto-delete after a while'}
+                </TooltipContent>
+              </Tooltip>
+              {showExpiration && (
+                <ExpirationPickerPopover
+                  triggerRef={expirationButtonRef}
+                  seconds={expirationSeconds}
+                  onChange={updateExpiration}
+                  onClose={() => setShowExpiration(false)}
+                />
+              )}
+            </div>
+          )}
+
           {/* Toolbar toggle */}
           <Tooltip>
             <TooltipTrigger asChild>
@@ -1419,6 +1485,94 @@ export function TimestampPickerPopover({
       >
         Add Timestamp
       </button>
+    </div>
+  )
+}
+
+/* ─── ExpirationPickerPopover ─── */
+
+/** Default duration when toggling auto-delete ON from off (1 day). */
+const DEFAULT_EXPIRATION_SECONDS = 24 * 60 * 60
+
+/**
+ * ExpirationPickerPopover — the composer's per-message "delete later" control. An
+ * on/off toggle plus duration presets; the chosen duration (0 = off) is reported via
+ * onChange. The message carries a NIP-40 `expiration` tag of send-time + duration.
+ * Shared by ChatInputBar and the hub-chat MessageInput.
+ */
+export function ExpirationPickerPopover({
+  triggerRef,
+  seconds,
+  onChange,
+  onClose,
+}: {
+  triggerRef: React.RefObject<HTMLButtonElement | null>
+  seconds: number
+  onChange: (seconds: number) => void
+  onClose: () => void
+}) {
+  const ref = useRef<HTMLDivElement>(null)
+  const on = seconds > 0
+  const presets = EXPIRATION_PRESETS.filter((p) => p.seconds > 0)
+
+  // Close on outside click (exclude the trigger so it can toggle).
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (triggerRef.current?.contains(e.target as Node)) return
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose()
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [onClose, triggerRef])
+
+  return (
+    <div
+      ref={ref}
+      className="absolute bottom-full left-0 mb-2 z-[60] w-[260px] bg-card border border-border rounded-xl shadow-2xl p-4 space-y-3"
+    >
+      <div className="flex items-center justify-between gap-2">
+        <h4 className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+          <Flame size={13} className="text-orange-500" />
+          Delete message later
+        </h4>
+        {/* On/off toggle */}
+        <button
+          type="button"
+          onClick={() => onChange(on ? 0 : DEFAULT_EXPIRATION_SECONDS)}
+          aria-label={on ? 'Turn auto-delete off' : 'Turn auto-delete on'}
+          className={`relative w-9 h-5 rounded-full shrink-0 transition-colors ${on ? 'bg-orange-500' : 'bg-muted-foreground/30'}`}
+        >
+          <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${on ? 'translate-x-[18px]' : 'translate-x-0.5'}`} />
+        </button>
+      </div>
+
+      {on && (
+        <>
+          <div className="grid grid-cols-2 gap-1.5">
+            {presets.map((p) => (
+              <button
+                key={p.seconds}
+                type="button"
+                onClick={() => onChange(p.seconds)}
+                className={`px-2 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer border ${
+                  seconds === p.seconds
+                    ? 'border-orange-500/50 bg-orange-500/10 text-orange-500'
+                    : 'border-border text-muted-foreground hover:text-foreground hover:border-border'
+                }`}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            New messages delete {formatDuration(seconds)} after sending.
+          </p>
+        </>
+      )}
+
+      <p className="text-[10px] text-muted-foreground leading-snug border-t border-border/50 pt-2">
+        Adds an expiration tag to the message. Deletion is best-effort: relays and clients that honor it remove the message after the time, but it is not guaranteed.
+      </p>
     </div>
   )
 }

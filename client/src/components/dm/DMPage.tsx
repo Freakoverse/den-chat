@@ -879,7 +879,7 @@ function DMChatView({ recipientPubkey, onSwitchProtocol, onBack }: { recipientPu
     }
   }, [optimisticMessages.length])
 
-  const handleSend = useCallback(async (attachments?: FileAttachment[]) => {
+  const handleSend = useCallback(async (attachments?: FileAttachment[], expirationSeconds?: number) => {
     const text = message.trim()
     if (!text && !attachments?.length && pendingStickers.length === 0 && pendingGifs.length === 0) return
     if (!myPubkey || sending) return
@@ -960,6 +960,7 @@ function DMChatView({ recipientPubkey, onSwitchProtocol, onBack }: { recipientPu
               })
             )
           },
+          expirationSeconds,
         )
 
         // Use the actual rumor ID from createGiftWrap for e-tag linking
@@ -1299,6 +1300,7 @@ function DMChatView({ recipientPubkey, onSwitchProtocol, onBack }: { recipientPu
         onGifSelect={(gif) => setPendingGifs((prev) => [...prev, gif])}
         encryptBeforeUpload
         forceEncrypt
+        enableExpiration
       />
 
       {/* Profile modal */}

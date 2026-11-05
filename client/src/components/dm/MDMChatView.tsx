@@ -370,7 +370,7 @@ export function MDMChatView({ recipientPubkey, onSwitchProtocol, onBack }: { rec
     setThreadModalParent(msg)
   }, [])
 
-  const handleSend = useCallback(async (attachments?: FileAttachment[]) => {
+  const handleSend = useCallback(async (attachments?: FileAttachment[], expirationSeconds?: number) => {
     const text = message.trim()
     if (!text && !attachments?.length && pendingStickers.length === 0 && pendingGifs.length === 0) return
     if (!myPubkey || sending) return
@@ -459,6 +459,7 @@ export function MDMChatView({ recipientPubkey, onSwitchProtocol, onBack }: { rec
           ? pendingGifs.map((g): [string, string, string, string] => ['j', g.name, g.url, g.nsfw ? 'nsfw' : 'sfw'])
           : undefined,
         mdmAttachments,
+        expirationSeconds,
       )
       setReplyContext(null)
       setPendingStickers([])
@@ -842,6 +843,7 @@ export function MDMChatView({ recipientPubkey, onSwitchProtocol, onBack }: { rec
         dragContainerRef={chatContainerRef}
         onStickerSelect={(sticker) => setPendingStickers((prev) => [...prev, sticker])}
         onGifSelect={(gif) => setPendingGifs((prev) => [...prev, gif])}
+        enableExpiration
       />
 
       {/* Profile modal */}
@@ -1615,7 +1617,7 @@ function DM04ThreadModal({ parentMsg, threadReplies, recipientPubkey, getProfile
     </div>
   ) : null
 
-  const handleSend = useCallback(async (attachments?: FileAttachment[]) => {
+  const handleSend = useCallback(async (attachments?: FileAttachment[], expirationSeconds?: number) => {
     const text = message.trim()
     if (!text && !attachments?.length) return
     if (!myPubkey || sending) return
@@ -1674,6 +1676,7 @@ function DM04ThreadModal({ parentMsg, threadReplies, recipientPubkey, getProfile
         undefined, // stickerTags
         undefined, // gifTags
         mdmAttachments,
+        expirationSeconds,
       )
       setInThreadReply(null)
       setTimeout(() => {
@@ -1972,6 +1975,7 @@ function DM04ThreadModal({ parentMsg, threadReplies, recipientPubkey, getProfile
           getUploadAuthSigner={async () => mdmBlossomAuthSigner(recipientPubkey, { privateKey, signer })}
           encryptBeforeUpload
           dragContainerRef={modalContainerRef}
+          enableExpiration
         />
       </div>
     </div>,

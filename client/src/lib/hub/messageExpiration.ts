@@ -40,14 +40,44 @@ export function getHubExpirationTimer(hubDTag: string): number {
  * @param anchorAt  optional alternative anchor (unix seconds). For time-bound
  *                  events (calendar), pass the event's END time so a future event
  *                  survives until it is over: expiry = max(created_at, anchorAt) + timer.
+ * @param overrideSeconds  optional per-message duration chosen in the composer. When
+ *                  > 0 it WINS over the hub policy (expiry = created_at + it); 0 or
+ *                  undefined falls through to the hub policy. It never removes a
+ *                  hub-mandated timer, it only sets/overrides the duration.
  */
-export function stampHubExpiration(unsigned: UnsignedEvent, hubDTag: string, anchorAt?: number): void {
+export function stampHubExpiration(unsigned: UnsignedEvent, hubDTag: string, anchorAt?: number, overrideSeconds?: number): void {
+  if (unsigned.tags.some((t) => t[0] === 'expiration')) return
+  if (typeof overrideSeconds === 'number' && overrideSeconds > 0) {
+    unsigned.tags = [...unsigned.tags, ['expiration', Math.floor(unsigned.created_at + overrideSeconds).toString()]]
+    return
+  }
   const timer = getHubExpirationTimer(hubDTag)
   if (timer <= 0) return
-  if (unsigned.tags.some((t) => t[0] === 'expiration')) return
   const base = typeof anchorAt === 'number' && anchorAt > unsigned.created_at ? anchorAt : unsigned.created_at
   const expiry = Math.floor(base + timer)
   unsigned.tags = [...unsigned.tags, ['expiration', expiry.toString()]]
+}
+
+/**
+ * Stamp a per-message NIP-40 `expiration` tag onto an unsigned event, in place, for
+ * the composer's "delete this message later" toggle. No-op when seconds <= 0 or an
+ * `expiration` tag is already present. Used by the non-hub paths (DMs), where there
+ * is no hub policy to fall back on. MUST be called BEFORE signing.
+ */
+export function stampExpiration(unsigned: UnsignedEvent, seconds: number): void {
+  if (seconds <= 0) return
+  if (unsigned.tags.some((t) => t[0] === 'expiration')) return
+  unsigned.tags = [...unsigned.tags, ['expiration', Math.floor(unsigned.created_at + seconds).toString()]]
+}
+
+/**
+ * Build a NIP-40 `expiration` tag for a message to be deleted `seconds` from base,
+ * or null when seconds <= 0. For paths that assemble a tag array directly (e.g. the
+ * gift-wrap envelope) rather than mutating an unsigned event.
+ */
+export function expirationTag(baseUnix: number, seconds: number): string[] | null {
+  if (seconds <= 0) return null
+  return ['expiration', Math.floor(baseUnix + seconds).toString()]
 }
 
 /** Read the NIP-40 expiration (unix seconds) from an event's tags, or undefined. */

@@ -674,7 +674,8 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
     facilitator?: string,
     forumFields?: { title: string; featuredImage?: string; tags?: string[] },
     stickerTags?: [string, string, string, string][],
-    gifTags?: [string, string, string, string][]
+    gifTags?: [string, string, string, string][],
+    expirationSeconds?: number
   ) => {
     if (!hubDTag || !channelId || (!signer && !privateKey)) return
 
@@ -770,8 +771,9 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
     }
 
     // Disappearing messages: stamp NIP-40 expiration BEFORE mining (the tag is
-    // part of the id the PoW is mined over).
-    stampHubExpiration(unsigned, hubDTag!)
+    // part of the id the PoW is mined over). A per-message composer choice
+    // (expirationSeconds) overrides the hub's policy when set.
+    stampHubExpiration(unsigned, hubDTag!, undefined, expirationSeconds)
 
     // Mine PoW + sign. v2 hubs author under the member pseudonym P with a
     // per-message identity attestation; v1 authors under the real key.
