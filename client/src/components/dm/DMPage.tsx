@@ -1969,7 +1969,6 @@ function DMMessageRow({ msg, showDateSep, isGrouped, senderProfile, displayName,
               {msg.clientTag && (
                 <span className="text-[10px] text-muted-foreground/50">· via {msg.clientTag}</span>
               )}
-              {msg.expiration && <MessageExpiryNote expiration={msg.expiration} createdAt={msg.createdAt} className="text-[10px] text-muted-foreground/50 cursor-default" />}
             </div>
           )}
           <ScrollableContent>
@@ -1999,7 +1998,7 @@ function DMMessageRow({ msg, showDateSep, isGrouped, senderProfile, displayName,
                   <>
                     {filteredContent && (
                       <div className="text-base text-foreground/90 break-words [&_p]:m-0 [&_pre]:my-1 [&_code]:text-xs">
-                        <MessageContent content={filteredContent} emojiTags={msg.emojiTags} mutedWords={mutedWords} suffix={msg.isMine ? <DMRelayProgressIndicator eventId={msg.id} /> : undefined} />
+                        <MessageContent content={filteredContent} emojiTags={msg.emojiTags} mutedWords={mutedWords} suffix={<>{msg.isMine ? <DMRelayProgressIndicator eventId={msg.id} /> : null}{msg.expiration ? <MessageExpiryNote expiration={msg.expiration} createdAt={msg.createdAt} className="text-[10px] text-muted-foreground/50 cursor-default" /> : null}</>} />
                       </div>
                     )}
                     {mediaGroups.length > 0 && (
@@ -2140,7 +2139,6 @@ function DMMessageContent({ msg, showDateSep, isGrouped, senderProfile, displayN
               {msg.clientTag && (
                 <span className="text-[10px] text-muted-foreground/50">· via {msg.clientTag}</span>
               )}
-              {msg.expiration && <MessageExpiryNote expiration={msg.expiration} createdAt={msg.createdAt} className="text-[10px] text-muted-foreground/50 cursor-default" />}
             </div>
           )}
           <ScrollableContent>

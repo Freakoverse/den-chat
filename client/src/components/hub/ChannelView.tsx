@@ -3788,6 +3788,7 @@ export function ChatMessageRow({
                 <MessageContent content={contentForRender} onProfileClick={onOpenProfile} emojiTags={msg.emojiTags} mutedWords={mutedWords} disableLinkPreviews={!authorCanEmbed} disableHubInviteCards={!authorCanInvite} hubRoleNames={hubRoleNames} hubChannels={hubChannels} suffix={
                   <>
                     {msg.edited && <span className="text-[10px] text-muted-foreground ml-1"> (edited)</span>}
+                    {msg.expiration && <MessageExpiryNote expiration={msg.expiration} createdAt={msg.timestamp} className="text-[10px] text-muted-foreground/50 cursor-default" />}
                     {mobileGroupedTime}
                     <RelayProgressIndicator eventId={msg.id} />
                   </>
@@ -4066,7 +4067,6 @@ export function ChatMessageRow({
                   </TooltipContent>
                 </Tooltip>
               )}
-              {msg.expiration && <MessageExpiryNote expiration={msg.expiration} createdAt={msg.timestamp} />}
               {isHidden && canHide && (
                 <button
                   onClick={() => setHiddenPreviewRevealed(false)}
@@ -4099,6 +4099,7 @@ export function ChatMessageRow({
                 <MessageContent content={contentForRender} onProfileClick={onOpenProfile} emojiTags={msg.emojiTags} mutedWords={mutedWords} disableLinkPreviews={!authorCanEmbed} disableHubInviteCards={!authorCanInvite} hubRoleNames={hubRoleNames} hubChannels={hubChannels} suffix={
                   <>
                     {msg.edited && <span className="text-[10px] text-muted-foreground ml-1"> (edited)</span>}
+                    {msg.expiration && <MessageExpiryNote expiration={msg.expiration} createdAt={msg.timestamp} className="text-[10px] text-muted-foreground/50 cursor-default" />}
                     {mobileGroupedTime}
                     <RelayProgressIndicator eventId={msg.id} />
                   </>

@@ -1268,7 +1268,6 @@ function DM04MessageRow({
             {msg.clientTag && (
               <span className="text-[10px] text-muted-foreground/50">· via {msg.clientTag}</span>
             )}
-            {msg.expiration && <MessageExpiryNote expiration={msg.expiration} createdAt={msg.createdAt} className="text-[10px] text-muted-foreground/50 cursor-default" />}
           </div>
         )}
 
@@ -1299,7 +1298,7 @@ function DM04MessageRow({
                 <>
                   {filteredContent && (
                     <div className={`text-base text-foreground/90 break-words [&_p]:m-0 [&_pre]:my-1 [&_code]:text-xs transition-opacity ${relayPending ? 'opacity-50' : ''}`}>
-                      <MessageContent content={filteredContent} emojiTags={msg.emojiTags} mutedWords={mutedWords} suffix={msg.isMine ? <DM04RelayProgressIndicator eventId={msg.id} /> : undefined} />
+                      <MessageContent content={filteredContent} emojiTags={msg.emojiTags} mutedWords={mutedWords} suffix={<>{msg.isMine ? <DM04RelayProgressIndicator eventId={msg.id} /> : null}{msg.expiration ? <MessageExpiryNote expiration={msg.expiration} createdAt={msg.createdAt} className="text-[10px] text-muted-foreground/50 cursor-default" /> : null}</>} />
                     </div>
                   )}
                   {mediaGroups.length > 0 && (
