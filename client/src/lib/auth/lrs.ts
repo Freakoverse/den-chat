@@ -250,14 +250,12 @@ export class LrsSigner {
   readonly transportPubkey: string
   readonly port: number
   private bunker: BunkerSigner
-  private isFirstConnect: boolean
 
   constructor(info: LrsSignerInfo) {
     this.name = info.name
     this.transportPubkey = info.transportPubkey
     this.port = info.port
-    const { secret, isNew } = loadOrCreateClientSecret(info.transportPubkey)
-    this.isFirstConnect = isNew
+    const { secret } = loadOrCreateClientSecret(info.transportPubkey)
     this.bunker = new BunkerSigner(secret)
   }
 
@@ -265,8 +263,10 @@ export class LrsSigner {
    *  URL, no client-side timeout — see bunker.ts / nostr-tools). Returns the account pubkey. */
   async connect(): Promise<string> {
     const url = buildBunkerUrl(this.transportPubkey, this.port)
-    // Metadata only on first connect; a known client key resumes silently with its stored name (§6.1).
-    const pubkey = await this.bunker.login(url, true, this.isFirstConnect ? buildMetadata() : undefined)
+    // Always send app metadata (name/url/logo). It's spec-safe on reconnect — the signer keeps the
+    // name it stored at first approval (§6.1) — and it means a connection the signer has forgotten (or
+    // that predates our metadata) still gets branded with the real app name + logo rather than a raw origin.
+    const pubkey = await this.bunker.login(url, true, buildMetadata())
     saveLrsState({ transportPubkey: this.transportPubkey, accountPubkey: pubkey, lastPort: this.port })
     return pubkey
   }
