@@ -175,10 +175,9 @@ export function getPublishRelays(hubRelays?: string[], opts?: { hubSeed?: string
   // hub converges on the same subset of the hub's relays (client/user relays stay per-user).
   const hubSeed = opts?.hubSeed || me
 
-  // Build exclusion set: relays the user explicitly disabled in client settings
-  const disabledRelays = new Set(
-    getRelayList().filter((r) => !r.enabled).map((r) => r.url.replace(/\/+$/, ''))
-  )
+  // The client-relay enabled/disabled flags govern ONLY the client source (getRelays() is
+  // already enabled-only). Every other source (hub, user NIP-65, recipient) is governed by
+  // its own post-to-X toggle, so disabling your client relays never suppresses them.
 
   // v2 (pseudonym-authored) events publish over the SAME relay set as v1 (hub + client + NIP-65), by
   // explicit product decision — there is no hub-only mode. Plausible deniability holds: client relays are
@@ -203,11 +202,11 @@ export function getPublishRelays(hubRelays?: string[], opts?: { hubSeed?: string
     pickForPubkey(getRelays(), limit, me).forEach((r) => result.add(r))
   }
 
-  // User relays (NIP-65) — exclude any the user disabled in client settings
+  // User relays (NIP-65): governed by the postToUserRelays toggle alone, NOT the
+  // client-relay disabled flags (those control only the client source).
   if (state.postToUserRelays) {
     const limit = state.limitUserRelays ? RELAY_PUBLISH_CAP : Infinity
     const userRelays = useUserListsStore.getState().userRelays
-      .filter((r) => !disabledRelays.has(r.replace(/\/+$/, '')))
     pickForPubkey(userRelays, limit, me).forEach((r) => result.add(r))
   }
 
@@ -226,12 +225,11 @@ export function getPublishRelays(hubRelays?: string[], opts?: { hubSeed?: string
  */
 export function getDMSelfCopyRelays(): string[] {
   const norm = (u: string) => u.replace(/\/+$/, '')
-  const disabled = new Set(getRelayList().filter((r) => !r.enabled).map((r) => norm(r.url)))
   const seen = new Set<string>()
   const out: string[] = []
   const add = (u: string) => {
     const n = norm(u)
-    if (!n || seen.has(n) || disabled.has(n)) return
+    if (!n || seen.has(n)) return
     seen.add(n)
     out.push(u)
   }
@@ -250,11 +248,9 @@ export function getDMSelfCopyRelays(): string[] {
  */
 export async function publishPersonal(event: Event, target = 3): Promise<string[]> {
   const state = usePostingBehaviourStore.getState()
-  const norm = (u: string) => u.replace(/\/+$/, '')
-  const disabled = new Set(getRelayList().filter((r) => !r.enabled).map((r) => norm(r.url)))
   const pool: string[] = []
   if (state.postToClientRelays) pool.push(...getRelays()) // getRelays() is already enabled-only
-  if (state.postToUserRelays) pool.push(...useUserListsStore.getState().userRelays.filter((u) => !disabled.has(norm(u))))
+  if (state.postToUserRelays) pool.push(...useUserListsStore.getState().userRelays) // NIP-65: own toggle, not client flags
   return publishWithFailover(event, getPublishRelays(), { pool, target })
 }
 
@@ -280,8 +276,6 @@ export async function publishContent(
 ): Promise<string[]> {
   const state = usePostingBehaviourStore.getState()
   const norm = (u: string) => u.replace(/\/+$/, '')
-  const disabled = new Set(getRelayList().filter((r) => !r.enabled).map((r) => norm(r.url)))
-  const notDisabled = (u: string) => !disabled.has(norm(u))
   const me = useUserStore.getState().pubkey ?? ''
 
   // For hub content, seed the HUB relay pick + failover order by the hub's d-tag (derived from the event),
@@ -297,7 +291,7 @@ export async function publishContent(
   const pool: string[] = []
   if (state.postToHubRelays && hubRelays && hubRelays.length > 0) pool.push(...ringOrder(hubRelays, hubSeed))
   if (state.postToClientRelays) pool.push(...ringOrder(getRelays(), me)) // enabled-only already
-  if (state.postToUserRelays) pool.push(...ringOrder(useUserListsStore.getState().userRelays.filter(notDisabled), me))
+  if (state.postToUserRelays) pool.push(...ringOrder(useUserListsStore.getState().userRelays, me)) // NIP-65: own toggle
 
   // Default target: land on as many live relays as the seed (toggle + cap aware) selected — so the number
   // of copies tracks the user's own posting-behaviour settings (caps on = ~6 per list; caps off = all).
@@ -322,14 +316,15 @@ export async function publishDM(
 ): Promise<string[]> {
   const state = usePostingBehaviourStore.getState()
   const norm = (u: string) => u.replace(/\/+$/, '')
-  const disabled = new Set(getRelayList().filter((r) => !r.enabled).map((r) => norm(r.url)))
-  const notDisabled = (u: string) => !disabled.has(norm(u))
-  const recip = recipientRelays.filter(notDisabled)
+  // Only the client source is gated by the client-relay flags (getRelays is enabled-only);
+  // the recipient's relays, the user's NIP-65 and the user's own DM inbox are each their own
+  // source and are NOT filtered by the client flags.
+  const recip = recipientRelays
 
   const pool: string[] = []
   if (state.postToClientRelays) pool.push(...getRelays()) // enabled-only already
-  if (state.postToUserRelays) pool.push(...useUserListsStore.getState().userRelays.filter(notDisabled))
-  pool.push(...useUserListsStore.getState().userDMRelays.filter(notDisabled)) // own inbox: read-back (always-on)
+  if (state.postToUserRelays) pool.push(...useUserListsStore.getState().userRelays)
+  pool.push(...useUserListsStore.getState().userDMRelays) // own inbox: read-back (always-on)
   pool.push(...recip) // recipient delivery (always-on)
 
   const seed = [...getPublishRelays(), ...recip]
@@ -345,7 +340,8 @@ export async function publishDM(
  * publish to EVERY relay available — all client relays, the full NIP-65 user list, and
  * the hub's relays — ignoring both the per-list 3-relay caps and the post-to-X
  * destination toggles, so the request reaches any relay that might hold the original.
- * Relays the user explicitly disabled in settings are still excluded.
+ * The client-relay disabled flags gate only the client source; the NIP-65 and hub
+ * sources are governed by their own lists, not those flags.
  *
  * With the toggle off, deletions fall back to the normal getPublishRelays() behaviour.
  *
@@ -357,16 +353,11 @@ export function getDeletePublishRelays(hubRelays?: string[]): string[] {
   if (!state.bypassDeleteRelayLimits) return getPublishRelays(hubRelays)
 
   const result = new Set<string>()
-  const disabledRelays = new Set(
-    getRelayList().filter((r) => !r.enabled).map((r) => r.url.replace(/\/+$/, ''))
-  )
 
   // Client relays (getRelays already returns enabled-only)
   getRelays().forEach((r) => result.add(r))
-  // Full NIP-65 user list, minus any disabled in client settings
-  useUserListsStore.getState().userRelays
-    .filter((r) => !disabledRelays.has(r.replace(/\/+$/, '')))
-    .forEach((r) => result.add(r))
+  // Full NIP-65 user list: governed by its own source, not the client-relay flags.
+  useUserListsStore.getState().userRelays.forEach((r) => result.add(r))
   // Hub relays: a delete must reach where the content lives, and hub relays are governed by
   // the hub source, not the client-relay disabled flags — so don't filter them here.
   if (hubRelays && hubRelays.length > 0) {
