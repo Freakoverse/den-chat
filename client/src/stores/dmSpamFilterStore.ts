@@ -24,7 +24,7 @@ export const DM_POW_MIN = 1
 export const DM_POW_MAX = 30
 
 interface DmSpamFilterState {
-  /** Whether the "Other" tab + badge hide below-threshold DMs. Default off (opt-in). */
+  /** Whether the "Other" tab + badge hide below-threshold DMs. Default ON (opt-out). */
   enabled: boolean
   /** Minimum NIP-13 leading-zero bits an incoming DM must have to show in "Other". */
   threshold: number
@@ -45,12 +45,13 @@ function load(): { enabled: boolean; threshold: number } {
     if (raw) {
       const d = JSON.parse(raw) as { enabled?: unknown; threshold?: unknown }
       return {
-        enabled: d.enabled === true,
+        // Default ON: only an explicit stored `false` disables it (so a user who turned it off stays off).
+        enabled: d.enabled !== false,
         threshold: typeof d.threshold === 'number' ? clampThreshold(d.threshold) : DEFAULT_DM_POW_THRESHOLD,
       }
     }
   } catch { /* storage blocked / corrupt */ }
-  return { enabled: false, threshold: DEFAULT_DM_POW_THRESHOLD }
+  return { enabled: true, threshold: DEFAULT_DM_POW_THRESHOLD }
 }
 
 function persist(enabled: boolean, threshold: number): void {
