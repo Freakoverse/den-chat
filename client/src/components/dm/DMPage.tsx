@@ -43,7 +43,7 @@ import { getUploadBlossoms, getReadBlossoms, getPublishRelays, getDMSelfCopyRela
 import {
   Search, Plus, MessageSquare, Loader2,
   Lock, Users, UserPlus, AlertCircle, X, ShieldBan, Eye, EyeOff, Ghost, Info, VenetianMask, MoreVertical,
-  AlertTriangle, Download, Star, ChevronLeft, Check, NotebookPen, RefreshCw, Radio,
+  AlertTriangle, Download, Star, ChevronLeft, Check, NotebookPen, RefreshCw, Radio, Send,
 } from 'lucide-react'
 import { useEscToClose } from '@/hooks/useEscToClose'
 import { fetchDMRelayList, type DMRelayListInfo } from '@/lib/nostr/relayDiscovery'
@@ -1586,6 +1586,127 @@ function DMRelayProgressIndicator({ eventId }: { eventId: string }) {
   )
 }
 
+/**
+ * DMDeliveryIssueMarker — a small amber warning on an own message whose NIP-17 delivery hit a missing
+ * kind-10050 list (recipient's and/or ours). Clicking opens a compact prompt (portal) offering a
+ * best-effort fallback: publish the recipient copy and/or the self copy to your client or NIP-65
+ * relays. An X dismisses it. Nothing is sent to non-10050 relays without this explicit opt-in.
+ */
+function DMDeliveryIssueMarker({ eventId }: { eventId: string }) {
+  const issue = useDMStore((s) => s.deliveryIssue[eventId])
+  const dismissDeliveryIssue = useDMStore((s) => s.dismissDeliveryIssue)
+  const publishDMFallback = useDMStore((s) => s.publishDMFallback)
+  const [showPopover, setShowPopover] = useState(false)
+  const [busy, setBusy] = useState<string | null>(null)
+  const [done, setDone] = useState<Record<string, boolean>>({})
+  const popRef = useRef<HTMLDivElement>(null)
+  const btnRef = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => {
+    if (!showPopover) return
+    const handler = (e: MouseEvent) => {
+      if (btnRef.current?.contains(e.target as Node)) return
+      if (popRef.current && !popRef.current.contains(e.target as Node)) setShowPopover(false)
+    }
+    const close = () => setShowPopover(false)
+    document.addEventListener('mousedown', handler)
+    window.addEventListener('scroll', close, true)
+    return () => {
+      document.removeEventListener('mousedown', handler)
+      window.removeEventListener('scroll', close, true)
+    }
+  }, [showPopover])
+
+  if (!issue || issue.dismissed || (!issue.recipientMissing && !issue.selfMissing)) return null
+
+  const run = async (which: 'message' | 'self', target: 'client' | 'user') => {
+    const key = `${which}:${target}`
+    setBusy(key)
+    try {
+      const n = await publishDMFallback(eventId, which, target)
+      if (n > 0) setDone((d) => ({ ...d, [key]: true }))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const FallbackBtn = ({ which, target, label }: { which: 'message' | 'self'; target: 'client' | 'user'; label: string }) => {
+    const key = `${which}:${target}`
+    return (
+      <button
+        onClick={() => run(which, target)}
+        disabled={busy !== null || done[key]}
+        className="flex items-center gap-1.5 w-full px-2 py-1 rounded-md text-[11px] text-foreground/80 border border-border/60 hover:border-[#404040] hover:bg-accent/40 cursor-pointer disabled:opacity-50 disabled:cursor-default transition-colors"
+      >
+        {busy === key ? <Loader2 size={11} className="animate-spin" /> : done[key] ? <Check size={11} className="text-success" /> : <Send size={11} />}
+        {done[key] ? 'Sent' : label}
+      </button>
+    )
+  }
+
+  return (
+    <span className="relative inline-flex items-center">
+      <button
+        ref={btnRef}
+        onClick={(e) => { e.stopPropagation(); setShowPopover(!showPopover) }}
+        title="Delivery issue — click for options"
+        className="ml-1 inline-flex items-center text-amber-400 hover:text-amber-300 cursor-pointer"
+      >
+        <AlertTriangle size={11} />
+      </button>
+      {showPopover && createPortal(
+        <div
+          ref={(el) => {
+            popRef.current = el
+            if (!el || !btnRef.current) return
+            const b = btnRef.current.getBoundingClientRect()
+            const r = el.getBoundingClientRect()
+            let left = b.left
+            if (left + r.width > window.innerWidth - 4) left = window.innerWidth - r.width - 4
+            if (left < 4) left = 4
+            let top = b.top - r.height - 4
+            if (top < 4) top = b.bottom + 4
+            el.style.left = `${left}px`
+            el.style.top = `${top}px`
+            el.style.opacity = '1'
+          }}
+          className="fixed z-[9999] w-[250px] bg-popover border border-border rounded-lg shadow-xl p-2.5 space-y-2"
+          style={{ left: -9999, top: -9999, opacity: 0 }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[11px] font-semibold text-amber-400 inline-flex items-center gap-1">
+              <AlertTriangle size={11} /> Delivery issue
+            </p>
+            <button onClick={() => { dismissDeliveryIssue(eventId); setShowPopover(false) }} title="Dismiss" className="text-muted-foreground hover:text-foreground cursor-pointer">
+              <X size={12} />
+            </button>
+          </div>
+          {issue.recipientMissing && (
+            <div className="space-y-1">
+              <p className="text-[10px] text-muted-foreground leading-snug">
+                The recipient has no DM relay list (kind 10050), so the message wasn&apos;t delivered. Send it anyway to:
+              </p>
+              <FallbackBtn which="message" target="client" label="Your client relays" />
+              <FallbackBtn which="message" target="user" label="Your relays (NIP-65)" />
+            </div>
+          )}
+          {issue.selfMissing && (
+            <div className="space-y-1">
+              <p className="text-[10px] text-muted-foreground leading-snug">
+                You have no DM relay list (kind 10050), so your copy won&apos;t survive a reload. Save a copy to:
+              </p>
+              <FallbackBtn which="self" target="client" label="Your client relays" />
+              <FallbackBtn which="self" target="user" label="Your relays (NIP-65)" />
+            </div>
+          )}
+        </div>,
+        document.body
+      )}
+    </span>
+  )
+}
+
 /* ═══════════════════════════════════════════ */
 /*  PEER DM RELAY LIST (kind 10050) PILL       */
 /* ═══════════════════════════════════════════ */
@@ -1836,7 +1957,7 @@ function DMMessageRow({ msg, showDateSep, isGrouped, senderProfile, displayName,
                   <>
                     {filteredContent && (
                       <div className="text-base text-foreground/90 break-words [&_p]:m-0 [&_pre]:my-1 [&_code]:text-xs">
-                        <MessageContent content={filteredContent} emojiTags={msg.emojiTags} mutedWords={mutedWords} suffix={msg.isMine ? <DMRelayProgressIndicator eventId={msg.id} /> : undefined} />
+                        <MessageContent content={filteredContent} emojiTags={msg.emojiTags} mutedWords={mutedWords} suffix={msg.isMine ? <><DMRelayProgressIndicator eventId={msg.id} /><DMDeliveryIssueMarker eventId={msg.id} /></> : undefined} />
                       </div>
                     )}
                     {mediaGroups.length > 0 && (
@@ -1993,7 +2114,7 @@ function DMMessageContent({ msg, showDateSep, isGrouped, senderProfile, displayN
               <>
                 {filteredContent && (
                   <div className={`text-base text-foreground/90 break-words [&_p]:m-0 [&_pre]:my-1 [&_code]:text-xs transition-opacity ${relayPending ? 'opacity-50' : ''}`}>
-                    <MessageContent content={filteredContent} emojiTags={msg.emojiTags} mutedWords={mutedWords} suffix={msg.isMine ? <DMRelayProgressIndicator eventId={msg.id} /> : undefined} />
+                    <MessageContent content={filteredContent} emojiTags={msg.emojiTags} mutedWords={mutedWords} suffix={msg.isMine ? <><DMRelayProgressIndicator eventId={msg.id} /><DMDeliveryIssueMarker eventId={msg.id} /></> : undefined} />
                   </div>
                 )}
                 {mediaGroups.length > 0 && (
