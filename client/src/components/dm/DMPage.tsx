@@ -650,20 +650,22 @@ function ConversationList({
         </div>
       </div>
 
-      {/* Hide low effort DMs — PoW gate on the Other tab (label opens the info/adjust modal) */}
-      <div className="shrink-0 flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-secondary/50 border border-border">
-        <button
-          onClick={() => setShowSpamFilterModal(true)}
-          className="inline-flex items-center gap-1.5 min-w-0 text-xs text-foreground hover:text-primary transition-colors cursor-pointer"
-        >
-          <span className="truncate">Hide low-effort DMs <span className="text-muted-foreground">(≥{spamFilterThreshold})</span></span>
-          <Info size={12} className="opacity-60 shrink-0" />
-        </button>
-        <DmPowToggle
-          checked={spamFilterEnabled}
-          onChange={useDmSpamFilterStore.getState().setEnabled}
-        />
-      </div>
+      {/* Hide low effort DMs — PoW gate, shown only on the Other tab (label opens the info/adjust modal) */}
+      {tab === 'other' && (
+        <div className="shrink-0 flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-secondary/50 border border-border">
+          <button
+            onClick={() => setShowSpamFilterModal(true)}
+            className="inline-flex items-center gap-1.5 min-w-0 text-xs text-foreground hover:text-primary transition-colors cursor-pointer"
+          >
+            <span className="truncate">Hide low-effort DMs <span className="text-muted-foreground">(≥{spamFilterThreshold})</span></span>
+            <Info size={12} className="opacity-60 shrink-0" />
+          </button>
+          <DmPowToggle
+            checked={spamFilterEnabled}
+            onChange={useDmSpamFilterStore.getState().setEnabled}
+          />
+        </div>
+      )}
 
       {showSpamFilterModal && <DmPowModal onClose={() => setShowSpamFilterModal(false)} />}
 
@@ -1572,6 +1574,11 @@ function DmPowModal({ onClose }: { onClose: () => void }) {
               <span>lenient ({DM_POW_MIN})</span>
               <span>strict ({DM_POW_MAX})</span>
             </div>
+            {threshold > 20 && (
+              <p className="text-[11px] text-amber-500/90 leading-relaxed pt-0.5">
+                Above 20 bits is extremely demanding. Very few people&apos;s clients attach this much proof-of-work to a message, and it&apos;s far slower to produce on phones, so at this level you will likely hide almost every DM in Other, genuine ones included.
+              </p>
+            )}
           </div>
 
           <div className="flex items-center justify-between pt-1">
