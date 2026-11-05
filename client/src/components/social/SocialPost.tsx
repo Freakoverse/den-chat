@@ -258,6 +258,7 @@ export function SocialPost({ event, onOpenProfile, onOpenThread, compact, isBook
   const isOwnPost = !!myPubkey && event.pubkey === myPubkey
   const reactionBtnRef = useRef<HTMLButtonElement>(null)
   const dotMenuRef = useRef<HTMLDivElement>(null)
+  const dotMenuPopRef = useRef<HTMLDivElement>(null)
 
   // NIP-SHORT: the author's verified DNN id (shorter authority), and a copy handler. Feedback flag
   // distinguishes the two menu items. Addresses themselves are computed lazily in the open menu.
@@ -271,16 +272,21 @@ export function SocialPost({ event, onOpenProfile, onOpenThread, compact, isBook
     setTimeout(() => setShortCopied(null), 1500)
   }
 
-  // Close dot menu on outside click
+  // Close dot menu on outside click (the menu renders in a portal, so check it too)
   useEffect(() => {
     if (!showDotMenu) return
     const handler = (e: MouseEvent) => {
-      if (dotMenuRef.current && !dotMenuRef.current.contains(e.target as Node)) {
-        setShowDotMenu(false)
-      }
+      if (dotMenuRef.current?.contains(e.target as Node)) return
+      if (dotMenuPopRef.current?.contains(e.target as Node)) return
+      setShowDotMenu(false)
     }
+    const close = () => setShowDotMenu(false)
     document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
+    window.addEventListener('scroll', close, true)
+    return () => {
+      document.removeEventListener('mousedown', handler)
+      window.removeEventListener('scroll', close, true)
+    }
   }, [showDotMenu])
 
   const handleEmojiReact = useCallback(async (emoji: string) => {
@@ -488,8 +494,28 @@ export function SocialPost({ event, onOpenProfile, onOpenThread, compact, isBook
             >
               <MoreVertical size={14} />
             </button>
-            {showDotMenu && (
-              <div className="absolute right-0 top-full mt-1 w-44 bg-popover/95 backdrop-blur-md border border-border rounded-xl shadow-xl p-1 flex flex-col gap-1 z-50 animate-in fade-in-0 zoom-in-95">
+            {showDotMenu && createPortal(
+              <div
+                ref={(el) => {
+                  dotMenuPopRef.current = el
+                  if (!el || !dotMenuRef.current) return
+                  // Fixed-position below the trigger, right-aligned, clamped to the
+                  // viewport and rendered in a portal so the post card's overflow can't
+                  // clip it. Flips above when there is no room below.
+                  const b = dotMenuRef.current.getBoundingClientRect()
+                  const r = el.getBoundingClientRect()
+                  let left = b.right - r.width
+                  if (left + r.width > window.innerWidth - 4) left = window.innerWidth - r.width - 4
+                  if (left < 4) left = 4
+                  let top = b.bottom + 4
+                  if (top + r.height > window.innerHeight - 4) top = b.top - r.height - 4
+                  if (top < 4) top = 4
+                  el.style.left = `${left}px`
+                  el.style.top = `${top}px`
+                  el.style.opacity = '1'
+                }}
+                style={{ left: -9999, top: -9999, opacity: 0 }}
+                className="fixed w-44 bg-popover/95 backdrop-blur-md border border-border rounded-xl shadow-xl p-1 flex flex-col gap-1 z-[300] animate-in fade-in-0 zoom-in-95">
                 <button
                   onClick={copyEventId}
                   className="flex items-center gap-2 w-full px-3 py-1.5 text-sm text-foreground/80 hover:bg-accent/50 cursor-pointer transition-colors rounded-md"
@@ -526,7 +552,8 @@ export function SocialPost({ event, onOpenProfile, onOpenThread, compact, isBook
                     <Trash2 size={13} /> Request Delete
                   </button>
                 )}
-              </div>
+              </div>,
+              document.body
             )}
           </div>
         </div>
