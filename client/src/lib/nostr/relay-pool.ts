@@ -124,7 +124,9 @@ function mergeMissingDefaults(
 
 /**
  * Load enabled relays from localStorage.
- * Falls back to DEFAULT_RELAYS if nothing stored or all disabled.
+ * Falls back to DEFAULT_RELAYS only when NOTHING is stored (first run). A stored list
+ * is authoritative even when the user has disabled every relay: that returns an empty
+ * set (go dark), it does NOT silently revert to the defaults.
  */
 function loadRelays(): string[] {
   try {
@@ -133,8 +135,7 @@ function loadRelays(): string[] {
     if (stored) {
       const parsed = JSON.parse(stored) as { url: string; enabled: boolean }[]
       const merged = mergeMissingDefaults(parsed)
-      const enabled = merged.filter((r) => r.enabled).map((r) => r.url)
-      if (enabled.length > 0) return enabled
+      return merged.filter((r) => r.enabled).map((r) => r.url)
     }
   } catch { /* ignore */ }
   return [...DEFAULT_RELAYS]
@@ -157,8 +158,9 @@ export function getRelays(): string[] {
  */
 export function setRelays(list: { url: string; enabled: boolean }[]) {
   localStorage.setItem(StorageKey.CLIENT_RELAYS, JSON.stringify(list))
-  const enabled = list.filter((r) => r.enabled).map((r) => r.url)
-  activeRelaysCache = enabled.length > 0 ? enabled : [...DEFAULT_RELAYS]
+  // Honor the user's explicit choice, even when they disable every relay (empty set):
+  // do NOT fall back to the defaults, or "disable all" would silently keep publishing.
+  activeRelaysCache = list.filter((r) => r.enabled).map((r) => r.url)
 }
 
 /**
