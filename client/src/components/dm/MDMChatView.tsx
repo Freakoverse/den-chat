@@ -1037,14 +1037,21 @@ function DM04RelayProgressIndicator({ eventId }: { eventId: string }) {
   const progress = useMdmStore((s) => s.relayProgress[eventId])
   const [showPopover, setShowPopover] = useState(false)
   const popRef = useRef<HTMLDivElement>(null)
+  const btnRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
     if (!showPopover) return
     const handler = (e: MouseEvent) => {
+      if (btnRef.current?.contains(e.target as Node)) return
       if (popRef.current && !popRef.current.contains(e.target as Node)) setShowPopover(false)
     }
+    const close = () => setShowPopover(false)
     document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
+    window.addEventListener('scroll', close, true)
+    return () => {
+      document.removeEventListener('mousedown', handler)
+      window.removeEventListener('scroll', close, true)
+    }
   }, [showPopover])
 
   if (!progress) return null
@@ -1052,14 +1059,34 @@ function DM04RelayProgressIndicator({ eventId }: { eventId: string }) {
   return (
     <span className="relative inline-flex items-center">
       <button
+        ref={btnRef}
         onClick={(e) => { e.stopPropagation(); setShowPopover(!showPopover) }}
         className={`text-[10px] inline-flex items-center gap-1 ml-1 cursor-pointer hover:text-muted-foreground transition-colors ${done ? 'text-muted-foreground/40' : 'text-muted-foreground/70'}`}
       >
         {!done && <Loader2 size={9} className="animate-spin" />}
         {progress.confirmed}/{progress.total}
       </button>
-      {showPopover && (
-        <div ref={popRef} className="absolute bottom-full left-0 mb-1 z-50 bg-popover border border-border rounded-lg shadow-xl p-2.5 min-w-[200px]" onClick={(e) => e.stopPropagation()}>
+      {showPopover && createPortal(
+        <div
+          ref={(el) => {
+            popRef.current = el
+            if (!el || !btnRef.current) return
+            // Fixed-position in a portal so the chat's overflow-scroll can't clip it.
+            const b = btnRef.current.getBoundingClientRect()
+            const r = el.getBoundingClientRect()
+            let left = b.left
+            if (left + r.width > window.innerWidth - 4) left = window.innerWidth - r.width - 4
+            if (left < 4) left = 4
+            let top = b.top - r.height - 4
+            if (top < 4) top = b.bottom + 4
+            el.style.left = `${left}px`
+            el.style.top = `${top}px`
+            el.style.opacity = '1'
+          }}
+          className="fixed z-[9999] bg-popover border border-border rounded-lg shadow-xl p-2.5 min-w-[200px] max-w-[280px]"
+          style={{ left: -9999, top: -9999, opacity: 0 }}
+          onClick={(e) => e.stopPropagation()}
+        >
           <p className="text-[10px] font-medium text-foreground mb-1.5">Relay Status</p>
           <div className="space-y-1">
             {progress.acceptedRelays.map((url) => (
@@ -1075,7 +1102,8 @@ function DM04RelayProgressIndicator({ eventId }: { eventId: string }) {
               </div>
             )}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </span>
   )
