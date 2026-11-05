@@ -1649,10 +1649,10 @@ function DMDeliveryIssueMarker({ eventId }: { eventId: string }) {
       <button
         ref={btnRef}
         onClick={(e) => { e.stopPropagation(); setShowPopover(!showPopover) }}
-        title="Delivery issue — click for options"
-        className="ml-1 inline-flex items-center text-amber-400 hover:text-amber-300 cursor-pointer"
+        title="Publish this message to other relays"
+        className="ml-1.5 pl-1.5 border-l border-border/50 inline-flex items-center gap-1 text-[10px] text-amber-400 hover:text-amber-300 cursor-pointer"
       >
-        <AlertTriangle size={11} />
+        <AlertTriangle size={10} /> Try publishing to different relays?
       </button>
       {showPopover && createPortal(
         <div
