@@ -540,7 +540,3 @@ Pf_pub (facilitator: getPeerBlindedPubkeyViaBlinded, base = R_f_pub, IKM = ecdh_
 
 The shared and blinded forms feed the **raw** ECDH x-coordinate into HKDF (as NIP-44 does), **not**
 `sha256(x)` — a signer implementation must match this to reproduce the vectors.
-
-> **Companion example (non-normative).** A worked end-to-end walkthrough of all three forms, as used
-> by one group-chat consumer, is kept separately in `NIP-SKD-nipchat-example.md`, to keep this document
-> a standalone standard.
