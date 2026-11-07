@@ -540,3 +540,34 @@ Pf_pub (facilitator: getPeerBlindedPubkeyViaBlinded, base = R_f_pub, IKM = ecdh_
 
 The shared and blinded forms feed the **raw** ECDH x-coordinate into HKDF (as NIP-44 does), **not**
 `sha256(x)` — a signer implementation must match this to reproduce the vectors.
+
+## 9. Worked example (self + blinded)
+
+A representative consumer is a group-chat protocol: each group is authored under a derived owner
+pseudonym, and each member acts under a per-group pseudonym derived from their own key, so real
+identities never appear in public. It uses **self** (for the owner) and **blinded** (for members,
+facilitated users, and the join address); it does **not** use the `shared` form. Let `group_id` be the
+group's stable identifier.
+
+- **Owner pseudonym `O`** (self): `context = "example-chat:v2:owner-pseudonym:" + group_id`, `IKM =
+  owner_root_priv`. The group is authored by `O`, so the creator's real key never appears publicly.
+- **Member pseudonym `P`** (blinded): `context = "example-chat:v2:member-pseudonym:" + group_id`, base =
+  the member's real key `R`, peer = `O_pub`. The member holds `P_priv = R_priv + t` and signs as `P`. The
+  owner re-derives the same `P_pub` via **`getPeerBlindedPubkeyViaSelf`** (`viaContext` = the
+  owner-pseudonym context, `context` = the member-pseudonym context, `peer` = `R_pub`), where the ECDH runs
+  on the owner's **pseudonym** `O`, not the owner's root (§1.2). The owner uses this for verification and
+  placement but **cannot** obtain `P_priv`, so cannot impersonate the member.
+- **Facilitated pseudonym `Pf`** (blinded): the same construction one level down. Base = the facilitated
+  user's real key `R_f`, peer = the facilitator's member pseudonym `P_fac`. The facilitator re-derives
+  `Pf_pub` via **`getPeerBlindedPubkeyViaBlinded`** (`viaContext` = the facilitator's member-pseudonym
+  context, `viaPeer` = `O_pub`, `context` = the facilitated-pseudonym context, `peer` = `R_f_pub`) but
+  cannot act as `Pf`.
+- **Join address** (blinded): a per-join key, base = the applicant's real key `R`, peer = `O_pub`. The
+  owner re-derives it from `R_pub` (after opening the sealed `R`) via `getPeerBlindedPubkeyViaSelf` (the
+  member case, with the join-address context) to confirm the applicant controls `R`.
+
+The member **and** owner sides, and the facilitated **and** facilitator sides, all run through the §2
+sub-signer operations on remote/browser signers, or are derived directly on a local key. The composed
+verifier ops (§1.2) are what let the **owner** (ViaSelf) and **facilitator** (ViaBlinded) roles run on a
+remote/browser signer and not only on a local key: the intermediate pseudonym private key (`O` / `P_fac`)
+is derived inside the signer and never leaves it.
