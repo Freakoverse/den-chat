@@ -7,6 +7,8 @@ import { useDMStore } from '@/stores/dmStore'
 import { useDM04Store } from '@/stores/dm04Store'
 import { useMdmStore } from '@/stores/dmMdmStore'
 import { useBlockStore } from '@/stores/blockStore'
+import { useFollowStore } from '@/stores/followStore'
+import { useDmSpamFilterStore, conversationClearsDmPow } from '@/stores/dmSpamFilterStore'
 import { useWotStore } from '@/stores/wotStore'
 import { usePublicChatStore } from '@/stores/publicChatStore'
 import { Plus, Pencil, MessageSquare, MessagesSquare, Settings, AtSign, Compass, XCircle, FolderClosed, Search, Sparkles, X, Volume2, RefreshCw, Loader2, Wallet, Unplug, Download } from 'lucide-react'
@@ -61,17 +63,23 @@ export function HubSidebar({ activePage, onNavigate, compact = false }: { active
   const mdmConversations = useMdmStore((s) => s.conversations)
   const blockedPubkeys = useBlockStore((s) => s.blockedPubkeys)
   const wotShouldHide = useWotStore((s) => s.shouldHide)
+  const followedPubkeys = useFollowStore((s) => s.followedPubkeys)
+  const spamFilterEnabled = useDmSpamFilterStore((s) => s.enabled)
+  const spamFilterThreshold = useDmSpamFilterStore((s) => s.threshold)
   const dmTotalUnread = useMemo(() => {
     if (!notifInitialized) return 0
     let total = 0
     for (const convos of [nip17Conversations, nip04Conversations, mdmConversations]) {
       for (const [pk, conv] of convos) {
         if (blockedPubkeys.has(pk) || wotShouldHide(pk, 'dms')) continue
+        // "Hide low effort DMs": a below-threshold Other conversation is hidden from the list, so it
+        // must not drive the nav badge either. Following is never filtered. (Mirrors AppLayout.)
+        if (spamFilterEnabled && !followedPubkeys.has(pk) && !conversationClearsDmPow(conv.messages, spamFilterThreshold)) continue
         total += conv.unread
       }
     }
     return total
-  }, [nip17Conversations, nip04Conversations, mdmConversations, blockedPubkeys, wotShouldHide, notifInitialized])
+  }, [nip17Conversations, nip04Conversations, mdmConversations, blockedPubkeys, wotShouldHide, notifInitialized, followedPubkeys, spamFilterEnabled, spamFilterThreshold])
 
   // Public Chat unread totals
   const pcMessages = usePublicChatStore((s) => s.messages)
