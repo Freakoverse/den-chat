@@ -330,7 +330,7 @@ Blossom servers store files that are too large for Nostr relays:
 
 Hub events reference Blossom servers via `o` tags.
 
-- Recommended: at least 3 Blossom servers for redundancy
+- Recommended: at least 3 Blossom servers for redundancy. A client MUST upload the hub's core structure files to **all** advertised servers, not just one (see §3.4)
 - All files are content-addressed (SHA-256 hash verified)
 - Clients MUST verify file hash matches the expected value before trusting contents
 - If a file from one Blossom server fails hash verification, the client SHOULD try the next server
@@ -341,6 +341,18 @@ Hub events reference Blossom servers via `o` tags.
 |------|--------|---------------|----------|
 | `general` relay | Hub event, join requests, channel messages, reports, all hub events | None at the relay (public); enforcement is client-side (§9.9) | Yes (≥1) |
 | Blossom server | Member files, block lists, history, media | Public download, hash-verified | Yes (≥1, recommend 3) |
+
+### 3.4 Redundant publishing (normative)
+
+A hub MAY advertise as few as one `general` relay and one `o` Blossom server (§3.3). When a hub advertises **more than one**, a client MUST use all of them for the hub's backbone, so that no single relay or server becomes a point of failure:
+
+- **Hub event.** A client MUST publish the kind-36942 hub event (and every republish of it) to **all** `general` relays the hub advertises, with failover and retry. It MUST NOT treat the publish as complete after a single relay has accepted it.
+- **Core structure files.** A client MUST upload each of the hub's **core structure files** (the index `m`, and every file it references: the LKH tree in v1 or the spine and leaf pages in v2, the epoch-secret-history blob, the struct blob, and any ban pages) to **all** `o` Blossom servers the hub advertises, with failover and retry, before treating the mutation as durable.
+- **Messages and media** SHOULD follow the same fan-out, but MAY be best-effort (high volume, lower stakes than the backbone).
+
+The **number** of advertised targets stays a recommendation, not a requirement: operators SHOULD advertise **≥3 Blossom servers and ≥2 general relays** for redundancy (§3.1, §3.2), but a hub with fewer remains conformant. This rule governs only that a client actually *uses* every target the hub declared; it does not force an operator to run a fleet. It is the normative form of the failover behavior described for dedicated servers in §6.1.1.
+
+Like every client-side obligation in this spec, this is a conformance requirement, not something a relay or server can enforce or attest. Its purpose is to make the multi-relay censorship-resistance property (§10) real in practice rather than aspirational. The fixed hub coordinate remains a durable routing target, so redundant publishing keeps a hub **at** the Nostr baseline; it does not push it above.
 
 ---
 
@@ -1198,8 +1210,8 @@ Deleting a role does NOT trigger a tree update. The hub event is the authority f
 | `message_expiration` | No | Disappearing-messages timer as a DURATION in **seconds** (a JSON-number-as-string). Absent, `0`, or malformed ⇒ off. When set, every durable chat event in the hub carries a NIP-40 `["expiration", <created_at + this>]` tag (§9.10). **Named distinctly from NIP-40's `expiration` on purpose** — an `expiration` tag on the hub event would make relays delete the hub itself. Hub-wide policy only; per-message expiry is stamped at send time. |
 | `epoch` | Yes | Current hub-wide secret epoch. Incrementing integer starting at `1`. Increments only on secret rotation (member removal or a user being added to the block list). |
 | `b` | No | DNN ID requirement (`on`/`off`). Default: `off`. |
-| `r` | Yes | Relay. Third value is `general`. At least one `general` MUST be defined. A relay the hub operates itself for committed retention MAY carry an additional `dedicated` marker (`["r", "<url>", "general", "dedicated"]`) — see §6.1.1. |
-| `o` | Yes | Blossom server URL. Recommend ≥3 for redundancy. Used for member files and media. A server the hub operates itself MAY carry a `dedicated` marker (`["o", "<url>", "dedicated"]`) — see §6.1.1. |
+| `r` | Yes | Relay. Third value is `general`. At least one `general` MUST be defined; clients MUST publish the hub event to **all** advertised `general` relays (§3.4). A relay the hub operates itself for committed retention MAY carry an additional `dedicated` marker (`["r", "<url>", "general", "dedicated"]`) — see §6.1.1. |
+| `o` | Yes | Blossom server URL. Recommend ≥3 for redundancy; clients MUST upload core structure files to **all** advertised servers (§3.4). Used for member files and media. A server the hub operates itself MAY carry a `dedicated` marker (`["o", "<url>", "dedicated"]`) — see §6.1.1. |
 | `m` | Yes | Index file reference: `["m", "<sha256>", "<epoch>"]`. |
 | `struct` | Yes | **Structure-blob reference**: `["struct", "<sha256>", "<epoch>"]`, parallel to `m`. The hub's structural arrays (`roles`, `grouped_roles`, `categories`, `channels`, `plugins`) live in a Blossom blob at that hash, **not** inline in `content`, so the event is O(1) regardless of how many channels/roles the hub has. The blob is encrypted the same way the hub encrypts its `content` (v1 plaintext JSON, v2 `hub_content_key`). Required for all hubs; applies to **both** v1 and v2 with no `version` bump (orthogonal to the privacy type). **Legacy exception:** hubs created before the struct format existed inline the structure in `content` and omit this tag (the sole backward-compatibility case); clients MUST still read those and SHOULD prompt migration. See **Structure Blob** at the end of this section. |
 | `updated_at` | No | Real wall-clock time of the last edit, `["updated_at", "<unix_seconds>"]` (corrected clock). `created_at` is a logical counter (see below), so this is the actual "last edited" time: used for display and tie resolution, never for relay filtering or client-side selection. |
