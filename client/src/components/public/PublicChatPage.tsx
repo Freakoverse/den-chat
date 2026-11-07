@@ -18,7 +18,6 @@ import { useProfileCache, getCachedProfile } from '@/hooks/useProfileCache'
 import { UserPanel } from '@/components/ui/UserPanel'
 import { ResizablePanel } from '@/components/ui/ResizablePanel'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
-import { Mouth } from '@/components/ui/MouthIcon'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { ChatInputBar, type FileAttachment } from '@/components/chat/ChatInputBar'
 import { MessageContent } from '@/components/chat/MessageContent'
@@ -1154,9 +1153,9 @@ function PublicChatView({ topic, pendingHighlightId, onHighlightConsumed, onBack
               <TooltipTrigger asChild>
                 <button
                   onClick={() => setIsNsfw(!isNsfw)}
-                  className={`p-1 cursor-pointer transition-colors rounded ${isNsfw ? 'text-red-400 bg-red-400/10' : 'text-muted-foreground hover:text-foreground'}`}
+                  className={`p-1 cursor-pointer transition-colors text-xs font-bold rounded ${isNsfw ? 'text-red-400 bg-red-400/10' : 'text-muted-foreground hover:text-foreground'}`}
                 >
-                  <Mouth size={16} />
+                  <span className="flex flex-col items-center font-bold leading-[0.8] text-[9px] tracking-tight"><span>NS</span><span>FW</span></span>
                 </button>
               </TooltipTrigger>
               <TooltipContent side="top" className="text-xs">Mark as NSFW</TooltipContent>

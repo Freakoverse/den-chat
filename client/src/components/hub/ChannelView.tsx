@@ -23,7 +23,6 @@ import { HubBlossomHealthBanner } from '@/components/hub/HubBlossomHealthBanner'
 import { HubRelayHealthBanner } from '@/components/hub/HubRelayHealthBanner'
 import { HubUpgradeBanner } from '@/components/hub/HubUpgradeBanner'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
-import { Mouth } from '@/components/ui/MouthIcon'
 import { Hash, Megaphone, Users, Pin, PinOff, Bell, Search, Send, Plus, Smile, Check, X, RotateCcw, Pencil, Reply, MoreVertical, Copy, MessageSquarePlus, Trash2, Loader2, Zap, Code, Bold, Italic, Strikethrough, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, ListTodo, Quote, Link, CodeSquare, ALargeSmall, Clipboard, ClipboardCheck, ClipboardPaste, Upload, FileIcon, Download, Image, Paperclip, AlertTriangle, AlertCircle, Eye, EyeOff, ShieldBan, ShieldAlert, ShieldOff, Lock, LockOpen, Settings, ArrowDown, ArrowLeft, Star, Vote, Clock, Flame, Flag, Shield, Globe, Radio, History, BadgeCheck, Mic, WifiOff, Scissors, Type } from 'lucide-react'
 import { useState, useEffect, useRef, useCallback, memo, useMemo, Fragment } from 'react'
 import { useEscToClose, useEscBlock } from '@/hooks/useEscToClose'
@@ -4800,9 +4799,9 @@ function EditField({ text, onChange, onCancel, unchanged, onSave, hubDTag, chann
             <button
               onClick={() => setNsfw((v) => !v)}
               disabled={saving}
-              className={`px-1.5 py-1 cursor-pointer transition-colors rounded disabled:opacity-40 disabled:cursor-not-allowed ${nsfw ? 'text-red-400 bg-red-400/10' : 'text-muted-foreground hover:text-foreground'}`}
+              className={`px-1.5 py-0.5 cursor-pointer transition-colors text-[11px] font-bold rounded disabled:opacity-40 disabled:cursor-not-allowed ${nsfw ? 'text-red-400 bg-red-400/10' : 'text-muted-foreground hover:text-foreground'}`}
             >
-              <Mouth size={15} />
+              <span className="flex flex-col items-center font-bold leading-[0.8] text-[9px] tracking-tight"><span>NS</span><span>FW</span></span>
             </button>
           </TooltipTrigger>
           <TooltipContent side="top" className="text-xs">{nsfw ? 'Marked NSFW, click to unmark' : 'Mark as NSFW'}</TooltipContent>
@@ -6249,9 +6248,9 @@ export function MessageInput({ hubDTag, channelId, channelName, optimisticMessag
               <TooltipTrigger asChild>
                 <button
                   onClick={() => setIsNsfw(!isNsfw)}
-                  className={`p-1 cursor-pointer transition-colors rounded ${isNsfw ? 'text-red-400 bg-red-400/10' : 'text-muted-foreground hover:text-foreground'}`}
+                  className={`p-1 cursor-pointer transition-colors text-xs font-bold rounded ${isNsfw ? 'text-red-400 bg-red-400/10' : 'text-muted-foreground hover:text-foreground'}`}
                 >
-                  <Mouth size={16} />
+                  <span className="flex flex-col items-center font-bold leading-[0.8] text-[9px] tracking-tight"><span>NS</span><span>FW</span></span>
                 </button>
               </TooltipTrigger>
               <TooltipContent side="top" className="text-xs">Mark as NSFW</TooltipContent>
