@@ -1,13 +1,8 @@
 # NIP-SKD: Sub-Key Derivation
 
-`draft` `optional`
-
-> **Status**: Draft. The scheme is identified by the stable salt `"nip-skd-v1"`. It offers three
-> derivation **forms** — `self`, `shared`, and `blinded` — all under that one scheme version.
-
 ## Abstract
 
-NIP-SKD defines two signer capabilities:
+NIP-SKD (Sub-Key Derivation) defines two signer capabilities:
 
 1. **Deterministic derivation of application-scoped keys** from the user's identity key, via
    HKDF (optionally combined with ECDH to a peer), under a fixed, versioned salt. Three forms are
