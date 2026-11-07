@@ -1956,7 +1956,7 @@ function CreateForumPostModal({ onClose, sendMessage, canPublish, signer, privat
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <button type="button" onClick={() => setIsNsfw(!isNsfw)} className={cn('p-1.5 rounded cursor-pointer transition-colors text-xs font-bold', isNsfw ? 'text-red-400 bg-red-400/10' : 'text-muted-foreground hover:text-foreground hover:bg-accent/50')}>
-                      <span className="flex flex-col items-center font-bold leading-[0.8] text-[9px] tracking-tight"><span>NS</span><span>FW</span></span>
+                      NSFW
                     </button>
                   </TooltipTrigger>
                   <TooltipContent side="top" className="text-xs">Mark as NSFW</TooltipContent>
@@ -2488,7 +2488,7 @@ function EditForumPostModal({ post, onClose, editMessage, signer, privateKey, hu
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <button type="button" onClick={() => setIsNsfw(!isNsfw)} className={cn('p-1.5 rounded cursor-pointer transition-colors text-xs font-bold', isNsfw ? 'text-red-400 bg-red-400/10' : 'text-muted-foreground hover:text-foreground hover:bg-accent/50')}>
-                      <span className="flex flex-col items-center font-bold leading-[0.8] text-[9px] tracking-tight"><span>NS</span><span>FW</span></span>
+                      NSFW
                     </button>
                   </TooltipTrigger>
                   <TooltipContent side="top" className="text-xs">Mark as NSFW</TooltipContent>
