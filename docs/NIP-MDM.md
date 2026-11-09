@@ -11,24 +11,20 @@ and cannot tell who the sender is.
 
 This does **not** aim to be a maximal-privacy DM system, and does not try to be: the goal is to be
 **private enough** for its purpose while keeping the **simple reliability and moderation** of an ordinary
-DM. Like other DM schemes, the recipient is visible (addressed by their
-real key); unlike a maximal-unlinkability scheme, the sender uses one stable masked key per recipient
-instead of a fresh ephemeral key per message, and timestamps and sizes are truthful rather than jittered,
-so a sender's messages to a given recipient are publicly linkable to each other (never to the sender's
-real key). The sender is hidden from everyone, and both the content and the sender's real identity are
-disclosed only to the recipient, who can cryptographically **verify** that identity. Your outbound social
-graph is fully hidden; only the fact that you received something from someone masked is visible.
+DM. Like other DM schemes it reveals the recipient (addressed by their real key) and hides the content;
+what it adds is a sender who is hidden from the public yet **accountable to the recipient**.
 
-It is a different tradeoff from a maximal-unlinkability DM scheme. Such a scheme maximizes sender
-unlinkability with a fresh ephemeral key per message and jittered timing, at the cost of being
-unorderable, unbannable, and unsortable (both approaches reveal the recipient). A masked key is **stable,
-deterministic, and verifiable**:
-the recipient confirms it
-belongs to the claimed root (so it is accountable and spoof-proof), it is reproducible on every device
-from the root key alone (so the sender's own devices recover their sent history from a static self-derived
-reference, §3.4), and it is a single stable author (so messages order and thread normally). This is
-*accountable sender
-pseudonymity* rather than full-conversation anonymity.
+Where a maximal-unlinkability scheme uses a fresh ephemeral key per message and jittered timing, maximizing
+sender unlinkability at the cost of being unorderable, unbannable, and unsortable, NIP-MDM gives the sender
+one **stable, deterministic, verifiable** masked key per recipient: the recipient confirms it belongs to the
+claimed root (accountable and spoof-proof), any of the sender's own devices reproduce it from the root key
+alone (recovering sent history from a static self-derived reference, §3.4), and it is a single stable author
+(so messages order and thread normally). Timestamps and sizes are truthful rather than jittered, so a
+sender's messages to a given recipient are publicly linkable to each other but never to the sender's real
+key. The sender is hidden from everyone; the content and the sender's real identity are disclosed only to
+the recipient, who can cryptographically **verify** that identity; the outbound social graph is fully
+hidden, and only the fact that an account received something from some masked sender is visible. This is
+*accountable sender pseudonymity*, not full-conversation anonymity.
 
 It also needs **no dedicated relay list**. Where some sender-hiding DM schemes define a separate dedicated
 DM-relay list that clients must publish, discover, and keep in sync, NIP-MDM uses each party's single
@@ -368,13 +364,16 @@ The two events carry the **same `created_at`** and are **published together**; n
 (§7). Because the self-copy's recipient `C_to` is itself a masked self-key and not the sender's real key,
 nothing on the wire addresses the copies to the sender or ties them to the sender's identity.
 
-**No shared public identifier.** The self-copy's `d` is its **own** random id, not the real message's. The
-two events deliberately share no public field that an observer could join on: a shared `d` would be a
-hard, volume-proof link between the real message (`M → R`) and the self-copy (`C_from → C_to`), and since
-`C_from` is stable across every conversation, that link would cluster all of a sender's masked keys and
-reveal every recipient. The whole real event is instead carried **encrypted** inside the self-copy payload
-(§3.4.1), so only the sender, who can decrypt it, knows the two events are a pair. The only residual
-correlation is the shared `created_at`, a soft link that grows ambiguous as network volume rises (§7).
+**Two events, no shared public identifier.** The self-copy is a separate event from the real message, and
+the two share no public field. One threat drives both choices: `C_from` / `C_to` are **static**, identical
+across all of a sender's conversations, so if the self-copy handle and a recipient address ever met on one
+public event, or if the two events shared a public join key such as a common `d`, an observer could join
+that stable handle to each recipient and rebuild the entire outbound graph. So the self-copy carries its
+**own** random `d` (never the real message's), is addressed to `C_to` with no recipient tag, and holds the
+real event only **encrypted** in its payload (§3.4.1). Nothing public ties it to the real message or to any
+recipient; only the sender, who can decrypt it, knows the two are a pair. The sole residual link is the
+shared `created_at`, a soft correlation that grows ambiguous as network volume rises (§7). The cost of the
+separation is one extra event per message.
 
 **Fetching.** A client fetches both streams under kind 30092:
 
@@ -395,14 +394,6 @@ alone.
 `author == C_from` check is therefore both the authenticity check and an absolute spam guarantee: the
 send/recovery side cannot be polluted at all. (The **received** side, `#p = [R_pub]` on the recipient's
 real key, is openly addressable and so is spammable like any DM, which is what §4.1 and §4.2 are for.)
-
-**Why two events and not one.** The self-copy handle must be static so a fresh device can fetch by it, and
-the recipient address must be on the message, but if both lived on one public event an observer would
-simply join the static handle to each recipient, rebuilding the outbound graph. A single static handle
-placed as a second tag on the real message would be identical across all of a sender's messages and
-visible to every recipient, linking all your sent messages and their recipients. Keeping the handle (`C_to`)
-on a separate event whose `p` tag is `C_to` and which never carries a recipient (its only other tag is an
-opaque `d`) is what prevents that join. The cost is one extra event per message.
 
 #### 3.4.1 Self-copy payload
 
