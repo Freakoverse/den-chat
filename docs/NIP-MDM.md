@@ -435,10 +435,11 @@ the chosen set a client fans out and fails over until a relay (ideally several) 
 relay reachable is left to the client.
 
 **Recovery.** A sender rebuilds its history by reading the index (§3.4), then for each recipient root
-re-deriving `M` and fetching `{ kinds:[30092], authors:[M], "#p":[R_pub] }` from that recipient's relays or
-its own. A recipient missing a known partner's messages **SHOULD** likewise query the partner's relays by
-the same filter. Durability is a property of this multi-relay spread (plus any retention layer a sender
-runs), not of a per-message copy.
+re-deriving its own `M` (`getBlindedPubkey(context, R_pub)`) and fetching `{ kinds:[30092], authors:[M],
+"#p":[R_pub] }` from that recipient's relays or its own. A recipient missing a known partner `S`'s messages
+**SHOULD** likewise query `S`'s relays, authored by `S`'s masked key toward it
+(`getPeerBlindedPubkey(context, S_pub)`, §3.3). Durability is a property of this multi-relay spread (plus any
+retention layer a sender runs), not of a per-message copy.
 
 **Privacy mode (optional).** Putting the real message on the sender's own relays means an `M`-authored event
 sits on relays the sender advertises, a **soft** correlation only (the public cannot derive `M`, shared
