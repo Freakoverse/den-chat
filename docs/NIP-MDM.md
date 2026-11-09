@@ -308,115 +308,75 @@ The sender's sent-contacts index (§3.4) closes that gap.
 
 ### 3.4 The sender's sent-contacts index
 
-§3.3 leaves the sender unable to enumerate its own conversations from the root key alone: each sent message
-is authored by a different per-recipient masked key `M`, so a device holding only the root key does not know
-which `M`s or which recipients to look for. The sender closes this gap with a single **sent-contacts
-index**: one addressable event that records the recipients it has messaged, so a fresh device rediscovers
-every (recent) conversation and then fetches each thread from relays (§5).
+Each sent message is authored by a different per-recipient `M`, so a device with only the root key cannot
+enumerate its own conversations (§3.3). The sender closes this with a single **sent-contacts index**: one
+addressable event whose encrypted payload lists the recipients it has messaged. It is **not** a copy of any
+message, content durability is §5's job; the index only answers *whom did I message*.
 
-It is **not** a copy of any message. Message content is made durable by §5 (each real event is published to
-several relays); the index only answers *whom did I message*, which is the one thing the root key cannot
-reconstruct on its own.
-
-**Keys.** Two static NIP-SKD **self** sub-keys, derived from the root alone (self form, no peer, so no one
-else can derive or address them):
+**Keys.** Two static NIP-SKD **self** sub-keys from the root alone (no peer, so only the sender can derive or
+address them). The `copy-*` strings are fixed opaque labels, their wording carries no meaning beyond being
+constant and distinct:
 
 ```
-C_from = getSelfSubkeyPubkey("nip-mdm:v1:copy-from")    // authors the index; sender holds its private key
-C_to   = getSelfSubkeyPubkey("nip-mdm:v1:copy-to")      // the index's address; the sender subscribes here
+C_from = getSelfSubkeyPubkey("nip-mdm:v1:copy-from")    // authors the index
+C_to   = getSelfSubkeyPubkey("nip-mdm:v1:copy-to")      // the index's address
 ```
 
-The two `copy-*` context strings are fixed opaque labels (their wording carries no meaning beyond being
-constant and distinct); `C_from` authors the index and `C_to` addresses it.
-
-**The event.** One kind-30092 event, the **same kind as a message** so it is indistinguishable on the wire,
-replaced in place on every update:
+**The event.** One kind-30092 event, same kind as a message so it is indistinguishable on the wire,
+replaced in place on each update:
 
 ```jsonc
 {
   "kind": 30092,
-  "pubkey": "<C_from>",                        // the index's author key (a sender self-key)
-  "created_at": <previous created_at + 1 per update>,   // replacement counter only: no published_at / updated_at
+  "pubkey": "<C_from>",
+  "created_at": <previous created_at + 1 per update>,   // replacement counter only
   "tags": [
-    ["d", "<random opaque id, generated once and reused on every update>"],   // same shape as a message's d
-    ["p", "<C_to>"]                            // the index's address key (a sender self-key); the sender subscribes here
+    ["d", "<random opaque id, generated once and reused on every update>"],
+    ["p", "<C_to>"]
   ],
-  "content": "<NIP-44 ciphertext from C_from to C_to of the binary payload below>",
-  "sig": "<BIP-340 by C_from>"                 // signAsSelfSubkey("nip-mdm:v1:copy-from", event)
+  "content": "<NIP-44 ciphertext C_from -> C_to of the packed payload below>",
+  "sig": "<BIP-340 by C_from, via signAsSelfSubkey>"
 }
 ```
 
-Only `d` and `p` are public, as with a message (§2). The `d` is a **random** opaque id, generated once when
-the index is first created and reused on every update, exactly like a message's `d`: nothing about it is
-derived or recomputable, so it looks like any other kind-30092 event and cannot be used to pick indexes out
-of ordinary message traffic. A device never needs to know `d` in advance: it finds the index by **author**,
-`{ authors: [C_from] }` (`C_from` is derived from the root), reads the returned event's `d`, and reuses it
-for updates. A client never confuses the index with a message: its own `{ authors: [C_from] }` event is the
-index, every other kind-30092 event is a message. There is **no `published_at` or `updated_at`**: the index
-is never displayed or ordered as a message, so `created_at` is purely the NIP-01 replacement counter
-(previous + 1 per update, §2.2).
+Only `d` and `p` are public. The `d` is **random**, like a message's, so nothing distinguishes the index on
+the wire; a device finds it by author (`{ authors: [C_from] }`) and reads `d` off the returned event. There
+is no `published_at`/`updated_at`: the index is never displayed, so `created_at` is purely the NIP-01
+replacement counter (§2.2).
 
-**Payload (packed bytes).** The plaintext is **not** the JSON message envelope (§2.1); it is a compact
-packed list, a version byte followed by the recipients' **root** pubkeys, 32 bytes each, most-recent first:
+**Payload.** A version byte then the recipients' **root** pubkeys, 32 bytes each, most-recent first:
 
 ```
 0x01 ‖ root_0 (32 bytes) ‖ root_1 (32) ‖ … ‖ root_{n-1} (32)      // newest first
 ```
 
-Because NIP-44 encrypts a UTF-8 **string**, these packed bytes are **base64-encoded** to form the NIP-44
-plaintext (this is also the only form a remote signer's NIP-44 op accepts). An implementation **MAY** use
-any equivalent compact byte-to-string encoding, as long as both sides agree; base64 is the default.
+Because NIP-44 encrypts a UTF-8 **string**, the packed bytes are **base64-encoded** to form the plaintext
+(the only form a remote signer accepts; a client **MAY** use any agreed compact encoding). **Roots**, not
+masked keys, are stored: `M` derives from a root but not the reverse, and the list is encrypted, so the
+roots never leave the sender. Position encodes recency; no timestamps.
 
-**Roots** are stored, not masked keys: `M` derives from a root (`getBlindedPubkey(context, root)`) but not
-the reverse, and the list is encrypted so the roots never reach anyone but the sender. Position encodes
-recency, so no per-entry timestamp is kept.
+**Update.** On a new message to `R`: dedup `R_pub`, insert it at the front, drop the tail if over the cap,
+republish at `created_at + 1`. A client **MUST** republish when the **set** changes (a new contact or a
+prune) and **MAY** debounce a republish that only reorders existing contacts, so messaging a contact already
+in the list puts no index event on the wire. The cap keeps the event within the sender's target relay size
+limit; under 64 KB it is **767** roots (the last count whose base64 payload stays below NIP-44's 2^15-byte
+padding step, a ~43 KB event). Pruning sheds only the least-recent contacts beyond the cap; those threads
+stay reachable by npub, just not auto-enumerated on a fresh device.
 
-**Update rule.** When the sender sends a new message (not an edit) to recipient `R`:
+**Multi-device.** The index is one replaceable event, so concurrent updates **merge**: fetch the latest,
+union the lists (dedup, keep each root's front-most position), republish at `max(seen created_at) + 1`.
+Because `d` is chosen at creation, two devices creating the first index before syncing can pick different
+`d`s; a client that sees more than one `C_from` event unions all their lists and converges future writes
+onto the lowest `d`.
 
-1. Remove `R_pub` from the list if already present (dedup).
-2. Insert `R_pub` at the **front** (most recent).
-3. If the list now exceeds the **cap**, drop the oldest (tail) entries until it fits.
-4. Re-encrypt and republish the index at `created_at + 1`.
+**Cold start.** A fresh device derives `C_from`/`C_to` (it does not need `d`), fetches
+`{ kinds:[30092], authors:[C_from] }`, decrypts the roots, and for each derives `M` and fetches that thread
+(§5). With the received stream `{ kinds:[30092], "#p":[R_pub] }` it rebuilds the full conversation list from
+the root alone.
 
-A client **MUST** republish when the **set** of roots changes (a new contact, or a prune), and **MAY**
-debounce or skip a republish that only reorders existing contacts (a repeat message to someone already in
-the list), since cold-start recovery depends on the set, not the exact order. So the common case, messaging
-a contact already in the list, puts no index event on the wire, and the index is not an extra event per
-message.
-
-The cap is whatever keeps the event within the relay size limit the sender targets. Under a 64 KB event the
-ceiling is **767** roots: NIP-44 pads by powers of two, and 767 is the last count whose base64 payload stays
-below the 2^15-byte padding step, leaving the event near 43 KB with comfortable margin. A client caps there,
-and **MAY** cap lower, or higher against a relay that allows larger events. Pruning only ever sheds the
-least-recently-messaged contacts beyond the cap; those threads stay reachable if the sender still knows the
-npub, they are simply not auto-enumerated on a fresh device.
-
-**Multi-device.** The index is a single replaceable event, so two devices updating it concurrently
-**merge** rather than clobber: fetch the latest index, union the two lists (dedup, keeping the front-most,
-hence most recent, position of each root), and republish at `max(seen created_at) + 1`. Because `d` is
-chosen at first creation (not derived), two devices that both create the very first index before syncing can
-briefly pick **different** `d`s, leaving two coordinates under `C_from`. A client that sees more than one
-kind-30092 event authored by `C_from` **unions all their lists** (recovery loses nothing) and **converges
-future writes onto the lowest `d`**, so the index collapses back to one coordinate.
-
-**Fetching / cold start.** A fresh device derives `C_from` and `C_to` from the root (it does not need `d`,
-the index is found by author), then fetches:
-
-```
-index:     { kinds: [30092], authors: [ C_from ] }       // the one sent-contacts index
-received:  { kinds: [30092], "#p": [ R_pub ] }            // messages others sent to me
-```
-
-It decrypts the index payload, and for each root `R` derives `M = getBlindedPubkey(context, R)` and fetches
-that thread (§3.3, §5). Combined with the received stream (each message carrying its own verified `from`),
-the device rebuilds the entire conversation list from the root key alone.
-
-**Unspammable.** Both identifiers are keys only the sender can produce: `C_from` is a keypair only the
-sender holds, so no one else can sign a valid event with that author, and `C_to` is a secret self-key no one
-else can derive, so no one else can even address an event to it. The `author == C_from` check is therefore
-both the authenticity check and an absolute spam guarantee: the index cannot be polluted. (The **received**
-side, `#p = [R_pub]` on the recipient's real key, is openly addressable and so is spammable like any DM,
-which is what §4.1 and §4.2 are for.)
+**Unspammable.** `C_from` is a keypair only the sender holds and `C_to` a secret only the sender can
+address, so the index cannot be polluted; `author == C_from` is both the authenticity check and the spam
+guard. (The received side, `#p = [R_pub]`, is spammable like any DM, which §4.1 and §4.2 address.)
 
 ## 4. Bootstrap, blocking, and spam
 
@@ -580,22 +540,19 @@ the choice when the recipient must also be hidden.
 
 ## 8. Security considerations
 
-- **The masked private key is root-sensitive.** A blinded private scalar is **root-equivalent** per
-  NIP-SKD §3 (`s_priv = M_priv − t`, and `t` is computable by the ECDH peer). It MUST be generated, held,
-  used, and destroyed at exactly the security level applied to the root key, never cached to disk, logged,
-  or handed to a less-trusted component. A conforming signer never exports it; a local-key client treats
-  it as it treats the root.
-- **No new signer surface.** NIP-MDM introduces no new signer op and no new derivation, so it adds no
-  attack surface to a conforming `skd:1` signer beyond what NIP-SKD already defines.
-- **Forgery is infeasible, not merely detectable** (§1.3): a valid masked author signature requires the
-  sender's blinded private scalar, and a forged `from` fails the constant-time verification.
-- **Replay.** A relay or observer can re-publish an existing masked event; clients dedupe by event id.
-  An attacker cannot craft a new valid message, only resurface an old one.
-- **The recipient learns the sender's root.** This is by design (`from`, §2.1); a sender who does not
-  want the recipient to learn its identity should not use NIP-MDM (it is accountable sender pseudonymity,
-  not anonymity toward the recipient).
-- **Context pinning.** `"nip-mdm:v1:peer"` is fixed and version-stamped; a client MUST NOT accept a
-  masked key derived under any other context as a NIP-MDM identity (NIP-SKD §1.1, §5).
+- **The masked private key is root-sensitive.** A blinded private scalar is root-equivalent (NIP-SKD §3),
+  so it **MUST** be generated, held, used, and destroyed at the root key's security level, never exported,
+  cached to disk, logged, or handed to a less-trusted component. A conforming signer never exports it.
+- **No new signer surface.** NIP-MDM adds no signer op and no derivation beyond NIP-SKD, so no new attack
+  surface on a conforming `skd:1` signer.
+- **Forgery is infeasible, not merely detectable** (§1.3): authoring as `M` needs the sender's blinded
+  private scalar, and a forged `from` fails the constant-time check.
+- **Replay.** An existing event can be re-published; clients dedupe by event id. An attacker cannot craft a
+  new valid message, only resurface an old one.
+- **The recipient learns the sender's root** (`from`, §2.1), by design: this is accountable pseudonymity,
+  not anonymity toward the recipient.
+- **Context pinning.** A client **MUST NOT** accept a masked key derived under any context other than the
+  fixed `"nip-mdm:v1:peer"` as a NIP-MDM identity (NIP-SKD §1.1, §5).
 
 ## 9. Versioning and the kind number
 
