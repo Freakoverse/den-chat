@@ -384,12 +384,16 @@ index, every other kind-30092 event is a message. There is **no `published_at` o
 is never displayed or ordered as a message, so `created_at` is purely the NIP-01 replacement counter
 (previous + 1 per update, §2.2).
 
-**Payload (binary).** The decrypted content is **not** the JSON message envelope (§2.1); it is a compact
-binary list, a version byte followed by the recipients' **root** pubkeys, 32 bytes each, most-recent first:
+**Payload (packed bytes).** The plaintext is **not** the JSON message envelope (§2.1); it is a compact
+packed list, a version byte followed by the recipients' **root** pubkeys, 32 bytes each, most-recent first:
 
 ```
-0x01 ‖ root_0 (32 bytes) ‖ root_1 (32) ‖ … ‖ root_{n-1} (32)      // n ≤ 1024, newest first
+0x01 ‖ root_0 (32 bytes) ‖ root_1 (32) ‖ … ‖ root_{n-1} (32)      // newest first
 ```
+
+Because NIP-44 encrypts a UTF-8 **string**, these packed bytes are **base64-encoded** to form the NIP-44
+plaintext (this is also the only form a remote signer's NIP-44 op accepts). An implementation **MAY** use
+any equivalent compact byte-to-string encoding, as long as both sides agree; base64 is the default.
 
 **Roots** are stored, not masked keys: `M` derives from a root (`getBlindedPubkey(context, root)`) but not
 the reverse, and the list is encrypted so the roots never reach anyone but the sender. Position encodes
@@ -399,7 +403,7 @@ recency, so no per-entry timestamp is kept.
 
 1. Remove `R_pub` from the list if already present (dedup).
 2. Insert `R_pub` at the **front** (most recent).
-3. If the list now exceeds **1024** entries, drop the oldest (tail) entries until it fits.
+3. If the list now exceeds the **cap**, drop the oldest (tail) entries until it fits.
 4. Re-encrypt and republish the index at `created_at + 1`.
 
 A client **MUST** republish when the **set** of roots changes (a new contact, or a prune), and **MAY**
@@ -408,9 +412,11 @@ the list), since cold-start recovery depends on the set, not the exact order. So
 a contact already in the list, puts no index event on the wire, and the index is not an extra event per
 message.
 
-1024 roots is 32 KB of plaintext, comfortably inside a 64 KB event; a client **MAY** use a lower cap.
-Pruning only ever sheds the least-recently-messaged contacts beyond 1024; those threads stay reachable if
-the sender still knows the npub, they are simply not auto-enumerated on a fresh device.
+The cap is whatever keeps the event within the relay size limit the sender targets. Under a 64 KB event,
+base64 of the packed roots plus NIP-44 and envelope overhead fits roughly **900** roots, so a client caps
+there (and **MAY** cap lower, or higher against a relay that allows larger events). Pruning only ever sheds
+the least-recently-messaged contacts beyond the cap; those threads stay reachable if the sender still knows
+the npub, they are simply not auto-enumerated on a fresh device.
 
 **Multi-device.** The index is a single replaceable event, so two devices updating it concurrently
 **merge** rather than clobber: fetch the latest index, union the two lists (dedup, keeping the front-most,
