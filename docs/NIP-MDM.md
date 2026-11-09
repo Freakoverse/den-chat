@@ -1,10 +1,6 @@
 # NIP-MDM: Masked Direct Messages
 
-`draft` `optional`
-
-> **Status**: Draft v1. The masked sender identity is the NIP-SKD **blinded** form under the context `"nip-mdm:v1:peer"`.
 > **Depends on**: NIP-01 (addressable events), NIP-09 (deletion), NIP-44, [`NIP-SKD.md`](./NIP-SKD.md) (the `skd:1` blinded ops this spec composes).
-> **Companion**: [`NIP-SKD.md`](./NIP-SKD.md) (sub-key derivation), [`NIP-CHAT.md`](./NIP-CHAT.md) (the other NIP-SKD consumer, for hubs and groups).
 
 ## Abstract
 
@@ -15,18 +11,19 @@ ordinary DM, so a recipient receives with no derivation and no enumeration: they
 their own key. A public observer sees a masked key delivering an encrypted message to a known recipient,
 and cannot tell who the sender is.
 
-This is **not** NIP-17 level privacy, and does not try to be. Like NIP-17, the recipient is visible
-(addressed by their real key); unlike NIP-17, the sender uses one stable masked key per recipient instead
-of a fresh ephemeral key per message, and timestamps and sizes are truthful rather than jittered, so a
-sender's messages to a given recipient are publicly linkable to each other (never to the sender's real
-key). It is **private enough** for its purpose: the sender is hidden from everyone, and both the content
-and the sender's real identity are disclosed only to the recipient, who can cryptographically **verify**
-that identity. Your outbound social graph is fully hidden; only the fact that you received something from
-someone masked is visible.
+This does **not** aim to be a maximal-privacy DM system, and does not try to be: the goal is to be
+**private enough** for its purpose. Like other DM schemes, the recipient is visible (addressed by their
+real key); unlike a maximal-unlinkability scheme, the sender uses one stable masked key per recipient
+instead of a fresh ephemeral key per message, and timestamps and sizes are truthful rather than jittered,
+so a sender's messages to a given recipient are publicly linkable to each other (never to the sender's
+real key). The sender is hidden from everyone, and both the content and the sender's real identity are
+disclosed only to the recipient, who can cryptographically **verify** that identity. Your outbound social
+graph is fully hidden; only the fact that you received something from someone masked is visible.
 
-It is a different tradeoff from a NIP-17 gift wrap. A gift wrap maximizes sender unlinkability with a
-fresh ephemeral key per message and jittered timing, at the cost of being unorderable, unbannable, and
-unsortable (both schemes reveal the recipient). A masked key is **stable, deterministic, and verifiable**:
+It is a different tradeoff from a maximal-unlinkability DM scheme. Such a scheme maximizes sender
+unlinkability with a fresh ephemeral key per message and jittered timing, at the cost of being
+unorderable, unbannable, and unsortable (both approaches reveal the recipient). A masked key is **stable,
+deterministic, and verifiable**:
 the recipient confirms it
 belongs to the claimed root (so it is accountable and spoof-proof), it is reproducible on every device
 from the root key alone (so the sender's own devices recover their sent history from a static self-derived
@@ -34,10 +31,10 @@ reference, §3.4), and it is a single stable author (so messages order and threa
 *accountable sender
 pseudonymity* rather than full-conversation anonymity.
 
-It also needs **no dedicated relay list**. Where NIP-17 defines a separate DM-relay list (kind 10050) that
-clients must publish, discover, and keep in sync, NIP-MDM delivers over the recipient's ordinary NIP-65
-relays (kind 10002), falling back to the client's own relay list when the recipient advertises none (§5).
-There is no second list for a user to manage.
+It also needs **no dedicated relay list**. Where some sender-hiding DM schemes define a separate dedicated
+DM-relay list that clients must publish, discover, and keep in sync, NIP-MDM delivers over the recipient's
+ordinary NIP-65 relays (kind 10002), falling back to the client's own relay list when the recipient
+advertises none (§5). There is no second list for a user to manage.
 
 NIP-MDM adds **no new signer operations**, but it does require a signer that supports **NIP-SKD** (scheme
 `skd:1`): it is otherwise a pure composition of that scheme's blinded and self ops (§1), an addressing
@@ -47,11 +44,11 @@ convention (§2, §3), and one new event kind (§2). A signer without NIP-SKD su
 
 NIP-04 direct messages publish both parties' **real** keys: the sender as the event author, the
 recipient in a `p` tag. The content is encrypted, but the **social graph is not**: anyone can read the
-full who-talks-to-whom map off the relays. NIP-17 hides the **sender** with gift wraps (the recipient is
-still addressed in the clear by their real key), but the randomness that achieves it makes gift-wrapped
-messages hard to order, rate, or ban, forces a self-addressed copy so the sender's own other devices can
-read the thread, and adds a separate DM-relay list (kind 10050) that clients must publish and keep in
-sync on top of the user's ordinary relay list.
+full who-talks-to-whom map off the relays. A maximal-unlinkability scheme hides the **sender** with
+per-message ephemeral wrappers (the recipient is still addressed in the clear by their real key), but the
+randomness that achieves it makes those messages hard to order, rate, or ban, forces a self-addressed copy
+so the sender's own other devices can read the thread, and adds a separate dedicated DM-relay list that
+clients must publish and keep in sync on top of the user's ordinary relay list.
 
 Many conversations do not need to hide the recipient, they need to hide the **sender**. A reporter
 contacting a public inbox, an anonymous tip to a known account, or simply not wanting your outbound
@@ -74,7 +71,7 @@ masked sender key provides exactly that:
   sent history from the root key alone, with no stored recipient list.
 
 The honest cost is in §7: the recipient is not hidden, and timing and size are visible. NIP-MDM is a
-point between NIP-04 and NIP-17, not a replacement for either.
+point between NIP-04 and a maximal-unlinkability DM scheme, not a replacement for either.
 
 ## Terminology
 
@@ -185,7 +182,7 @@ A masked message is an **addressable** (parameterized-replaceable) event, kind *
 ```
 
 The event is **addressable** rather than regular on purpose: it makes a message **editable** (§2.2),
-which neither NIP-04 nor NIP-17 supports. Each message carries a unique `d` tag, so every message is its
+which neither NIP-04 nor an ephemeral-wrap DM supports. Each message carries a unique `d` tag, so every message is its
 own `(kind, pubkey, d)` coordinate and all messages are retained; editing a single message republishes
 that one coordinate and the relay keeps only the latest version.
 
@@ -211,7 +208,7 @@ The decrypted `content` is a UTF-8 JSON object:
   "t": "Hello",                   // message text (optional if an attachment-only message)
   "edited": 1733251200,           // optional: unix time of the latest edit (present only on an edit, §2.2)
   "reply": "30092:<authorM>:<d>", // optional: addressable coordinate of the message this replies to (kept private; survives edits)
-  "attachments": [                // optional: structured file references (the same shape hub messages and DEN DMs use)
+  "attachments": [                // optional: structured file references
     {
       "hash": "<sha256 hex>",            // Blossom blob hash (the ciphertext blob's hash when encrypted)
       "type": "image/png",              // MIME type of the original file
@@ -226,7 +223,7 @@ The decrypted `content` is a UTF-8 JSON object:
       }
     }
   ],
-  "emoji":   [["shortcode", "<url>"]],   // optional: custom emoji refs, as DEN DMs
+  "emoji":   [["shortcode", "<url>"]],   // optional: custom emoji refs
   "sticker": [["id", "<url>"]],          // optional
   "gif":     [["id", "<url>"]]           // optional
 }
@@ -525,12 +522,13 @@ What NIP-MDM **hides** from a passive relay observer:
   unlinkable).
 - The message text, the sender identity, reply structure, and attachments (all inside the ciphertext).
 
-What it **does not** hide (deliberately below NIP-17 on sender unlinkability and timing):
+What it **does not** hide (deliberately below a maximal-unlinkability scheme on sender unlinkability and timing):
 
 - **The recipient.** The `p` tag is the recipient's real key. An observer sees that a given account
   received a message from some masked sender. A person's **inbound** exposure (that they received
   something, and when) is visible; only the sender is concealed. This is the **same** recipient exposure
-  NIP-17 has: a gift wrap also carries the recipient's real key in its public `p` tag.
+  any sender-hiding DM scheme has: a per-message ephemeral wrapper also carries the recipient's real key
+  in its public `p` tag.
 - **Timing and size.** `created_at` is truthful and not jittered, and message sizes are visible (NIP-44
   pads but does not fully mask length).
 - **Per-pair linkage.** All of one sender's messages to one recipient share a stable `M`, so they group
@@ -552,7 +550,7 @@ sender.
 
 Comparison:
 
-| | NIP-04 | NIP-17 gift wrap | NIP-MDM |
+| | NIP-04 | Ephemeral-wrap DM | NIP-MDM |
 | --- | --- | --- | --- |
 | Hides sender from the public | no | yes | yes |
 | Hides recipient from the public | no | no | no |
@@ -565,9 +563,9 @@ Comparison:
 | Sender multi-device sync | n/a | self-copy to the real key | self-copy to a masked self-key |
 
 Choose NIP-MDM when a conversation wants **sender** privacy with a stable, accountable, editable sender
-identity. Choose a gift wrap when per-message unlinkability and jittered timing matter more than a stable
-identity, ordering, rate-limiting, or editing. Both reveal the recipient; neither is the choice when the
-recipient must also be hidden.
+identity. Choose a maximal-unlinkability scheme when per-message unlinkability and jittered timing matter
+more than a stable identity, ordering, rate-limiting, or editing. Both reveal the recipient; neither is
+the choice when the recipient must also be hidden.
 
 ## 8. Security considerations
 
@@ -597,38 +595,14 @@ split a conversation. The **scheme** version is NIP-SKD's salt (`skd:1`), record
 NIP-SKD §5. Changing the payload shape (§2.1) is a `v` bump inside the payload, not a context change.
 
 The **event kind is 30092**, in the **addressable** range (30000-39999) so a message is editable (§2.2),
-the property that distinguishes NIP-MDM from NIP-04 and NIP-17. The number encodes the BIP-39 index of the
+the property that distinguishes NIP-MDM from both NIP-04 and an ephemeral-wrap DM. The number encodes the BIP-39 index of the
 word "mask" (92). It was checked against popular relays and the NIP kind registry and found unused; the
 number threads through §2, §3, and §6 only.
 
-## 10. Reference consumer, DEN Chat
-
-DEN Chat implements the masked sender key with the same `skd:1` helpers it uses for NIP-CHAT v2
-pseudonyms (`client/src/lib/crypto/skd.ts`): `getBlindedPubkey` / `signAsBlinded` / `nip44EncryptAsBlinded`
-on the sender side, `getPeerBlindedPubkey` for recipient-side verification, and `getSelfSubkeyPubkey` /
-`signAsSelfSubkey` / `nip44*AsSelfSubkey` for the self-copy (§3.4), all under `ChatContext`-style
-helpers for the `"nip-mdm:v1:*"` contexts. On the recipient side, DEN reuses its existing DM subscription
-on the user's real key.
-
-Within the §5 contract, DEN makes the client-specific choices §5 leaves open:
-
-- it ranks and selects relays with its relay **health probe** (write plus read-back, preferring relays it
-  has confirmed working) and its existing publish **failover**;
-- for the self-copy's fallback when the sender has no usable kind-10002 list, it picks relays **from its
-  client relay list deterministically, seeding the choice with `C_to`**, which is recipient-independent (no
-  leak) and reproducible on any device, so a fresh device lands on the same relays and recovers the
-  self-copies with no stored state;
-- it keeps both events durable with the same **cooperative rebroadcasting** it uses for other critical
-  events, topping each up to its redundancy target independently, and it restores a real message to the
-  recipient's relays from the verbatim backup in the self-copy (§3.4.1) when it finds it dropped there.
-
-None of these are required by this spec; another client may reach or verify relays however it likes, as
-long as it honours the §5 ordering and the two invariants.
-
-## 11. Test vectors
+## 10. Test vectors
 
 Every value below is a pure composition of the NIP-SKD derivations and is reproduced byte-for-byte by the
-reference implementation (`client/src/lib/crypto/skd.ts`); the byte encodings and even-`y` rules are
+reference implementation; the byte encodings and even-`y` rules are
 exactly NIP-SKD §1/§8 (an implementation that reproduces NIP-SKD §8 reproduces these). The sender and
 recipient roots are the same key pair as NIP-SKD §8, for cross-reference. Only the three deterministic
 primitives are pinned: the masked key `M`, its recipient-side re-derivation, and the message
