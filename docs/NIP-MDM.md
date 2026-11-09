@@ -227,8 +227,14 @@ The decrypted `content` is a UTF-8 JSON object:
 }
 ```
 
+Two variants reuse this same envelope (`v`, `from`, `published_at`, and the edit fields): a **reaction**
+carries a `reaction` object in place of `text` (§6), and a **tombstone** (a deleted message, §6) carries
+none of `text`, `attachments`, or `reaction`. A reader routes on these: `text` or `attachments` is a
+message, a `reaction` object is a reaction, and an envelope with none of them is a tombstone.
+
 A recipient **MUST** verify `from` per §1.3 before attributing or displaying a sender, **MUST** ignore
-unknown fields, **MUST** tolerate a missing `text` when an attachment is present, and **MUST** order the
+unknown fields, **MUST** tolerate a missing `text` (an attachment-only message, a reaction, or a
+tombstone), and **MUST** order the
 conversation by `published_at` rather than the event's `created_at` (§2.2). A message whose
 `from` fails verification **MUST** be treated as unattributed (the stable masked key `M` is still a valid
 opaque pseudonym; a client MAY drop it or surface it as "unverified sender").
@@ -554,17 +560,41 @@ unlinkability; a client SHOULD make clear which mode is in effect.
 ## 6. Ancillary events
 
 Edits are **native** to the message kind (§2.2): a message is edited by republishing its addressable
-coordinate, with no separate event. Reactions and deletions are authored under the **masked sender key**
-and addressed to the recipient's **real** key, never the sender's root, and they reference the target by
-its addressable **coordinate** (`a` tag) so the reference survives edits (an edit changes the target's
-event id but not its `(kind, M, d)` coordinate):
+coordinate, with no separate event. Reactions and deletions stay inside the same masked envelope as
+messages, so none of them exposes anything a message would not.
 
-- **Reactions** (kind 7): `pubkey = M`, `tags = [["a", "30092:<targetM>:<d>"], ["p", R_pub]]`, signed with
-  `signAsBlinded`. The reacting party is a sender in that moment, so it uses its own masked key toward the
-  other party.
-- **Deletions** (NIP-09, kind 5): authored by the same masked key that authored the target, with `["a",
-  "30092:<M>:<d>"]` (and `["k", "30092"]`); a relay that honors deletions sees the authors match. A client
-  MAY instead edit the message to an empty/tombstone payload (§2.2), since the kind is replaceable.
+**Reactions.** A reaction is just another masked kind-30092 event (§2): only `d` and `p` (the other party's
+real key) are public, the author is the reactor's masked key `M` toward that party, and the reaction itself
+rides in the NIP-44 encrypted payload, never in a public tag. So nothing public distinguishes a reaction
+from a message, and neither the message reacted to nor the glyph is exposed. The payload reuses the §2.1
+envelope with a `reaction` object in place of `text`:
+
+```jsonc
+{
+  "v": 1,
+  "from": "<hex sender root>",                 // REQUIRED: verified per §1.3, exactly as a message
+  "published_at": 1733251200,                  // REQUIRED, as a message (§2.2)
+  "reaction": {
+    "target": "30092:<targetM>:<targetD>",     // coordinate of the message being reacted to (survives edits)
+    "emoji": "+"                               // the reaction glyph, or a NIP-30 custom-emoji shortcode
+  }
+}
+```
+
+The recipient decrypts and verifies `from` exactly as for a message (§3.2), then routes on the `reaction`
+object. `target` is a **coordinate**, not an event id, so it survives edits of the target (an edit changes
+the target's id but not its `(kind, M, d)` coordinate). To change or remove a reaction, the reactor edits
+or tombstones the reaction's own coordinate (§2.2); a client **SHOULD** keep at most one active reaction
+event per target per reactor. A reaction needs no self-copy: the reactor recovers it through the direct
+`{ kinds: [30092], authors: [M], "#p": [X] }` query for the already-known counterparty `X` (§3.3).
+
+**Deletions.** A sender deletes its own message **privately** by tombstone-editing it: republish the
+coordinate with an empty payload (no `text`, `attachments`, or `reaction`) at `previous created_at + 1`
+(§2.2). Because the kind is addressable, the relay keeps only this latest empty version, so the content is
+gone and nothing public reveals what was removed. A client **MAY** additionally publish a NIP-09 `kind 5`
+deletion (authored by the same masked key `M`, with `["a", "30092:<M>:<d>"]` and `["k", "30092"]`) to ask
+relays to hard-purge the event, but a `kind 5` is **public and reveals the target coordinate**, so it is an
+explicit opt-in, not the default.
 
 No ancillary event may carry the sender's root pubkey in any public position; a sender identity, if
 needed, travels encrypted as in §2.1.
@@ -578,6 +608,9 @@ What NIP-MDM **hides** from a passive relay observer:
 - Which of a sender's conversations belong to the same sender (per-recipient masked keys are mutually
   unlinkable).
 - The message text, the sender identity, reply structure, and attachments (all inside the ciphertext).
+- Reaction and deletion activity: reactions and tombstone-deletions are masked kind-30092 events too (§6),
+  so the glyph, the target, and even whether an event is a reaction rather than a message are encrypted;
+  only an optional NIP-09 hard-purge, if a client opts into one, is public.
 
 What it **does not** hide (deliberately below a maximal-unlinkability scheme on sender unlinkability and timing):
 
