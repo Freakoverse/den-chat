@@ -548,7 +548,7 @@ sender.
 
 Comparison:
 
-| | NIP-04 | Ephemeral-wrap DM | NIP-MDM |
+| | NIP-04 | NIP-17 gift wrap | NIP-MDM |
 | --- | --- | --- | --- |
 | Hides sender from the public | no | yes | yes |
 | Hides recipient from the public | no | no | no |
