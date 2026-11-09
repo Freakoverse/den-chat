@@ -7,10 +7,15 @@
  * base `skd:1` ops via {@link makeSubkeySigner}; this module adds the addressing/envelope conventions and
  * the kind-30092 event shape. No new signer surface.
  *
- * Two events per message (docs §3.4):
- *   - the real message  (author `M`,  p = recipient root)  → published to the recipient's relays;
- *   - a self-copy       (author `C_from`, p = `C_to`)      → published to the sender's own relays,
- *     carrying the ENTIRE signed real event encrypted inside, so the sender recovers/rebroadcasts it.
+ * On the wire (docs §2, §6):
+ *   - a message   (author `M`,  p = recipient root)  — `text`/`attachments` in the encrypted payload;
+ *   - a reaction  (author `M`,  p = recipient root)  — a `reaction` object in the encrypted payload;
+ *   - a tombstone (author `M`,  p = recipient root)  — an empty payload (no text/attachments/reaction).
+ * All three are kind 30092 and indistinguishable on the wire.
+ *
+ * Sender recovery (docs §3.4) is a single **sent-contacts index** (author `C_from`, p = `C_to`): one
+ * addressable event whose encrypted payload is the packed list of recipient ROOT pubkeys the sender has
+ * messaged, most-recent first. A fresh device reads it, derives each `M`, and refetches the threads.
  */
 
 import { nip44, type Event, type UnsignedEvent } from 'nostr-tools'
@@ -40,53 +45,58 @@ const MDM_PEER: ChatCtx = { context: CTX_PEER, form: 'blinded' }
 const MDM_COPY_FROM: ChatCtx = { context: CTX_COPY_FROM, form: 'self' }
 const MDM_COPY_TO: ChatCtx = { context: CTX_COPY_TO, form: 'self' }
 
+/** Sent-contacts index: packed-payload version byte and the default cap (docs §3.4). ~900 roots keeps the
+ *  base64 of the packed list within a 64 KB event after NIP-44 + envelope overhead. */
+const INDEX_VERSION = 0x01
+export const MDM_INDEX_CAP = 900
+
 export interface MdmKeys {
   privateKey?: string | null
   signer?: ISigner | null
 }
 
-/** Decrypted real-message payload (docs §2.1). */
-export interface MdmPayload {
-  v: 1
-  /** sender's real key, disclosed only to the recipient; verified per docs §1.3 */
-  from: string
-  t?: string
-  edited?: number
-  /** tombstone marker for a deleted message (docs §6) */
-  deleted?: boolean
-  /** addressable coordinate of the replied-to message: "30092:<authorM>:<d>" */
-  reply?: string
-  /** addressable coordinate of the thread root */
-  rootRef?: string
-  isThread?: boolean
-  emoji?: [string, string, string?][]
-  sticker?: [string, string, string?][]
-  gif?: [string, string, string][]
-  /** Structured file attachments (docs §2.1), private inside the encrypted payload. Reuses the hub
-   *  Attachment shape (hash, type, name, size, optional servers, optional per-file encryption). */
-  attachments?: Attachment[]
-}
-
-/** The masked reaction kind (NIP-25, authored by the masked key, content encrypted). docs §6. */
-export const MDM_REACTION_KIND = 7
-
-/** Decrypted reaction payload (emoji private, like a message). */
-export interface MdmReactionPayload {
-  v: 1
-  from: string
+/** A reaction reference carried inside the encrypted payload (docs §6). */
+export interface MdmReactionRef {
+  /** addressable coordinate of the reacted-to message: "30092:<authorM>:<d>" */
+  target: string
+  /** the reaction glyph, or a NIP-30 custom-emoji shortcode */
   emoji: string
   /** image URL for a NIP-30 custom emoji */
   customUrl?: string
 }
 
-/** The body a caller supplies (everything but `v`/`from`, which this module fills). */
-export type MdmBody = Omit<MdmPayload, 'v' | 'from'>
-
-/** Self-copy payload (docs §3.4.1): the entire signed real event, verbatim. */
-interface MdmSelfCopyPayload {
+/**
+ * Decrypted payload (docs §2.1 / §6). One envelope serves messages, reactions and tombstones:
+ *   - message:   `text` and/or `attachments` present;
+ *   - reaction:  `reaction` present (no `text`);
+ *   - tombstone: none of `text` / `attachments` / `reaction` present.
+ * `emoji` / `sticker` / `gif` and `rootRef` / `isThread` are DEN client extensions (others ignore them).
+ */
+export interface MdmPayload {
   v: 1
-  event: Event
+  /** sender's real key, disclosed only to the recipient; verified per docs §1.3 */
+  from: string
+  /** REQUIRED: real original send time = the FIRST version's created_at; the sort key (docs §2.2) */
+  published_at: number
+  /** optional: real wall-clock time of the latest edit (present only on an edit); drives the "edited" marker */
+  updated_at?: number
+  text?: string
+  /** a reaction instead of a message (docs §6) */
+  reaction?: MdmReactionRef
+  /** addressable coordinate of the replied-to message: "30092:<authorM>:<d>" */
+  reply?: string
+  /** addressable coordinate of the thread root (DEN extension) */
+  rootRef?: string
+  isThread?: boolean
+  emoji?: [string, string, string?][]
+  sticker?: [string, string, string?][]
+  gif?: [string, string, string][]
+  /** Structured file attachments (docs §2.1), private inside the encrypted payload. */
+  attachments?: Attachment[]
 }
+
+/** The body a caller supplies for a message (everything but the managed envelope fields). */
+export type MdmBody = Omit<MdmPayload, 'v' | 'from' | 'published_at' | 'updated_at' | 'reaction'>
 
 /** Whether masked DMs are possible with this key setup (local key, or a signer with NIP-SKD support). */
 export function mdmSupported(keys: MdmKeys): boolean {
@@ -96,6 +106,20 @@ export function mdmSupported(keys: MdmKeys): boolean {
 /** A fresh opaque random `d` tag (16 bytes hex). docs §2. */
 function randomD(): string {
   return bytesToHex(crypto.getRandomValues(new Uint8Array(16)))
+}
+
+// ── base64 (chunked so large lists don't blow the arg limit) ──
+function toB64(bytes: Uint8Array): string {
+  let bin = ''
+  const CHUNK = 0x8000
+  for (let i = 0; i < bytes.length; i += CHUNK) bin += String.fromCharCode(...bytes.subarray(i, i + CHUNK))
+  return btoa(bin)
+}
+function fromB64(b64: string): Uint8Array {
+  const bin = atob(b64)
+  const out = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i)
+  return out
 }
 
 /** The sender's masked sub-signer toward `recipientRootPub` (its pubkey is `M`). */
@@ -123,8 +147,8 @@ export async function peerMaskedPub(senderRootPub: string, keys: MdmKeys): Promi
   throw new SkdUnsupportedError()
 }
 
-/** The sender's two static self-copy keys (docs §3.4). Deterministic from the root alone. */
-export async function selfCopyKeys(keys: MdmKeys): Promise<{ from: string; to: string }> {
+/** The sender's two static sent-contacts-index keys (docs §3.4). Deterministic from the root alone. */
+export async function indexKeys(keys: MdmKeys): Promise<{ from: string; to: string }> {
   const [from, to] = await Promise.all([
     makeSubkeySigner(MDM_COPY_FROM, keys).getPublicKey(),
     makeSubkeySigner(MDM_COPY_TO, keys).getPublicKey(),
@@ -141,34 +165,13 @@ function realNip44Decrypt(ciphertext: string, counterpartyPub: string, keys: Mdm
   return guardedDecrypt(ciphertext, counterpartyPub, keys.signer ?? null, null, 'nip44')
 }
 
-/** Build a self-copy (docs §3.4): authored by `C_from`, addressed to `C_to`, embedding any signed event
- *  (a message or a reaction) verbatim so the sender can recover it. */
-export async function buildMdmSelfCopy(real: Event, keys: MdmKeys, dSelf?: string): Promise<Event> {
-  const fromSigner = makeSubkeySigner(MDM_COPY_FROM, keys)
-  const [cFrom, cTo] = await Promise.all([fromSigner.getPublicKey(), makeSubkeySigner(MDM_COPY_TO, keys).getPublicKey()])
-  const payload: MdmSelfCopyPayload = { v: 1, event: real }
-  const content = await fromSigner.nip44Encrypt(cTo, JSON.stringify(payload))
-  const tags: string[][] = [['d', dSelf ?? randomD()], ['p', cTo]]
-  // Carry the real message's NIP-40 expiration onto the self-copy so the sender's own
-  // copy auto-deletes on the same schedule.
-  const exp = real.tags.find((t) => t[0] === 'expiration')
-  if (exp) tags.push(exp)
-  const unsigned: UnsignedEvent = {
-    kind: MDM_KIND,
-    created_at: real.created_at, // SAME created_at as the real message (docs §3.4)
-    tags,
-    content,
-    pubkey: cFrom,
-  }
-  return fromSigner.signEvent(unsigned)
-}
-
 /**
- * Build a masked message and its self-copy (docs §2, §3.1, §3.4). Returns both signed events; the caller
- * publishes `real` to the recipient's relays and `selfCopy` to the sender's own relays (docs §5).
+ * Build a masked message (docs §2, §3.1). Returns the signed real event; the caller publishes it to the
+ * recipient's relays, the sender's own relays, and the client relay list (docs §5), then updates the
+ * sent-contacts index (docs §3.4).
  *
- * For an EDIT, pass the original message's `d` and `created_at + 1`, plus the self-copy's own `dSelf`,
- * so both addressable coordinates are replaced in place (docs §2.2 / §3.4.1).
+ * For an EDIT pass the original `d`, `createdAt = previous created_at + 1`, the unchanged `publishedAt`,
+ * and `updatedAt = now` (docs §2.2). A tombstone (delete) is an edit with an empty `body`.
  */
 export async function buildMdmMessage(opts: {
   recipientRootPub: string
@@ -177,35 +180,37 @@ export async function buildMdmMessage(opts: {
   keys: MdmKeys
   d?: string
   createdAt?: number
-  dSelf?: string
+  /** original send time; defaults to this event's created_at (first send) */
+  publishedAt?: number
+  /** wall-clock edit time; present only on an edit */
+  updatedAt?: number
   /** Per-message auto-delete (NIP-40): stamp expiry = created_at + this (seconds) on the real event. */
   expirationSeconds?: number
-}): Promise<{ real: Event; selfCopy: Event; maskedPub: string }> {
+}): Promise<{ real: Event; maskedPub: string }> {
   const mSigner = maskedSigner(opts.recipientRootPub, opts.keys)
   const maskedPub = await mSigner.getPublicKey()
-  const payload: MdmPayload = { v: 1, from: opts.myRootPub, ...opts.body }
-  const content = await mSigner.nip44Encrypt(opts.recipientRootPub, JSON.stringify(payload))
   const createdAt = opts.createdAt ?? nowSeconds()
+  const payload: MdmPayload = {
+    v: 1,
+    from: opts.myRootPub,
+    published_at: opts.publishedAt ?? createdAt,
+    ...(opts.updatedAt ? { updated_at: opts.updatedAt } : {}),
+    ...opts.body,
+  }
+  const content = await mSigner.nip44Encrypt(opts.recipientRootPub, JSON.stringify(payload))
   const tags: string[][] = [['d', opts.d ?? randomD()], ['p', opts.recipientRootPub]]
   if (opts.expirationSeconds && opts.expirationSeconds > 0) {
     tags.push(['expiration', Math.floor(createdAt + opts.expirationSeconds).toString()])
   }
-  const unsigned: UnsignedEvent = {
-    kind: MDM_KIND,
-    created_at: createdAt,
-    tags,
-    content,
-    pubkey: maskedPub,
-  }
+  const unsigned: UnsignedEvent = { kind: MDM_KIND, created_at: createdAt, tags, content, pubkey: maskedPub }
   const real = await mSigner.signEvent(unsigned)
-  const selfCopy = await buildMdmSelfCopy(real, opts.keys, opts.dSelf)
-  return { real, selfCopy, maskedPub }
+  return { real, maskedPub }
 }
 
 /**
- * Build a masked reaction (docs §6) and its self-copy: a kind-7 event authored by the reactor's masked key
- * `M`, tagged with the target's addressable coordinate (`a`) and the recipient's real key (`p`), with the
- * emoji NIP-44-encrypted from `M` to the recipient. The self-copy embeds the full reaction event.
+ * Build a masked reaction (docs §6): a kind-30092 event authored by the reactor's masked key `M`, with the
+ * reaction glyph and the target coordinate NIP-44-encrypted inside the payload (only `d`/`p` public), so it
+ * is indistinguishable from a message. Returns the signed event; the caller publishes it like a message.
  */
 export async function buildMdmReaction(opts: {
   targetCoordinate: string
@@ -214,70 +219,29 @@ export async function buildMdmReaction(opts: {
   emoji: string
   customUrl?: string
   keys: MdmKeys
-}): Promise<{ real: Event; selfCopy: Event }> {
+  /** reuse an existing reaction coordinate to change/remove it (docs §6); else a fresh random d */
+  d?: string
+  createdAt?: number
+}): Promise<{ real: Event; maskedPub: string }> {
   const mSigner = maskedSigner(opts.recipientRootPub, opts.keys)
   const maskedPub = await mSigner.getPublicKey()
-  const payload: MdmReactionPayload = { v: 1, from: opts.myRootPub, emoji: opts.emoji, ...(opts.customUrl ? { customUrl: opts.customUrl } : {}) }
+  const createdAt = opts.createdAt ?? nowSeconds()
+  const reaction: MdmReactionRef = {
+    target: opts.targetCoordinate,
+    emoji: opts.emoji,
+    ...(opts.customUrl ? { customUrl: opts.customUrl } : {}),
+  }
+  const payload: MdmPayload = { v: 1, from: opts.myRootPub, published_at: createdAt, reaction }
   const content = await mSigner.nip44Encrypt(opts.recipientRootPub, JSON.stringify(payload))
   const unsigned: UnsignedEvent = {
-    kind: MDM_REACTION_KIND,
-    created_at: nowSeconds(),
-    tags: [['a', opts.targetCoordinate], ['p', opts.recipientRootPub]],
+    kind: MDM_KIND,
+    created_at: createdAt,
+    tags: [['d', opts.d ?? randomD()], ['p', opts.recipientRootPub]],
     content,
     pubkey: maskedPub,
   }
   const real = await mSigner.signEvent(unsigned)
-  const selfCopy = await buildMdmSelfCopy(real, opts.keys)
-  return { real, selfCopy }
-}
-
-export interface MdmReactionDecrypted {
-  payload: MdmReactionPayload
-  senderRootPub: string
-  verified: boolean
-  /** the `a` coordinate of the reacted-to masked message */
-  targetCoordinate: string | null
-}
-
-/** Decrypt a RECEIVED masked reaction (I am the recipient) and verify its author (docs §1.3 / §6). */
-export async function decryptReceivedReaction(event: Event, keys: MdmKeys): Promise<MdmReactionDecrypted | null> {
-  let payload: MdmReactionPayload
-  try {
-    payload = JSON.parse(await realNip44Decrypt(event.content, event.pubkey, keys))
-  } catch {
-    return null
-  }
-  if (!payload || payload.v !== 1 || typeof payload.from !== 'string' || typeof payload.emoji !== 'string') return null
-  let verified = false
-  try {
-    verified = (await peerMaskedPub(payload.from, keys)) === event.pubkey
-  } catch {
-    verified = false
-  }
-  return { payload, senderRootPub: payload.from, verified, targetCoordinate: event.tags.find((t) => t[0] === 'a')?.[1] ?? null }
-}
-
-/** Decrypt one of MY OWN reactions (from its embedded self-copy event) so my reactions show on any device. */
-export async function decryptOwnReaction(reactionEvent: Event, keys: MdmKeys): Promise<MdmReactionPayload | null> {
-  const recipientRootPub = reactionEvent.tags.find((t) => t[0] === 'p')?.[1]
-  if (!recipientRootPub) return null
-  try {
-    const payload: MdmReactionPayload = JSON.parse(await maskedSigner(recipientRootPub, keys).nip44Decrypt(recipientRootPub, reactionEvent.content))
-    if (!payload || payload.v !== 1) return null
-    return payload
-  } catch {
-    return null
-  }
-}
-
-/**
- * A Blossom 24242 auth signer bound to the sender's masked key toward `recipientRootPub` (docs §6 / §10):
- * uploads are authorized as `M`, so the Blossom server never sees the real key. Reuses ChatInputBar's
- * `getUploadAuthSigner` seam, exactly as v2 hubs upload as their pseudonym.
- */
-export function mdmBlossomAuthSigner(recipientRootPub: string, keys: MdmKeys): (unsigned: UnsignedEvent) => Promise<Event> {
-  const mSigner = maskedSigner(recipientRootPub, keys)
-  return (unsigned: UnsignedEvent) => mSigner.signEvent(unsigned)
+  return { real, maskedPub }
 }
 
 export interface MdmDecrypted {
@@ -288,10 +252,16 @@ export interface MdmDecrypted {
   verified: boolean
 }
 
+/** A decrypted payload is a tombstone when it carries no message content and no reaction (docs §2.1 / §6). */
+export function isTombstone(p: MdmPayload): boolean {
+  return !p.text && !p.reaction && !(p.attachments && p.attachments.length)
+}
+
 /**
- * Decrypt a RECEIVED masked message (I am the recipient, unmasked) and verify its sender (docs §1.3, §3.2).
+ * Decrypt a RECEIVED masked event (I am the recipient, unmasked) and verify its sender (docs §1.3, §3.2).
  * Decryption uses my real key against the visible masked author; verification re-derives the claimed
- * sender's masked key and checks it equals the author. Returns null if the ciphertext/payload is unusable.
+ * sender's masked key and checks it equals the author. The payload may be a message, a reaction, or a
+ * tombstone; the caller routes on `reaction` / {@link isTombstone}.
  */
 export async function decryptReceivedMdm(event: Event, keys: MdmKeys): Promise<MdmDecrypted | null> {
   let payload: MdmPayload
@@ -311,15 +281,15 @@ export async function decryptReceivedMdm(event: Event, keys: MdmKeys): Promise<M
 }
 
 /**
- * Decrypt one of MY OWN sent messages from its embedded real event (docs §3.4.1): I am the sender `M`, so
- * the conversation key is `conversationKey(M_priv, R)` with `R` the real event's `p` tag.
+ * Decrypt one of MY OWN events (refetched from relays, docs §3.4): I am the sender `M`, so the conversation
+ * key is `conversationKey(M_priv, R)` with `R` the event's `p` tag. Works for a message, reaction, or
+ * tombstone (same envelope).
  */
-export async function decryptOwnMdm(realEvent: Event, keys: MdmKeys): Promise<MdmPayload | null> {
-  const recipientRootPub = realEvent.tags.find((t) => t[0] === 'p')?.[1]
+export async function decryptOwnMdm(event: Event, keys: MdmKeys): Promise<MdmPayload | null> {
+  const recipientRootPub = event.tags.find((t) => t[0] === 'p')?.[1]
   if (!recipientRootPub) return null
   try {
-    const plaintext = await maskedSigner(recipientRootPub, keys).nip44Decrypt(recipientRootPub, realEvent.content)
-    const payload: MdmPayload = JSON.parse(plaintext)
+    const payload: MdmPayload = JSON.parse(await maskedSigner(recipientRootPub, keys).nip44Decrypt(recipientRootPub, event.content))
     if (!payload || payload.v !== 1) return null
     return payload
   } catch {
@@ -328,21 +298,58 @@ export async function decryptOwnMdm(realEvent: Event, keys: MdmKeys): Promise<Md
 }
 
 /**
- * Decrypt one of my self-copy events (I am `C_to`) and return the embedded real event (docs §3.4.1). The
- * caller then reads the message with {@link decryptOwnMdm} and re-publishes `real` verbatim if needed.
+ * Build the sender's sent-contacts index event (docs §3.4): author `C_from`, p = `C_to`, with the packed,
+ * base64-encoded list of recipient ROOT pubkeys (most-recent first, capped) NIP-44-encrypted from
+ * `C_from` to `C_to`. Reuse the existing `d` so updates replace in place; on first create pass a random one.
  */
-export async function decryptSelfCopy(event: Event, keys: MdmKeys): Promise<Event | null> {
+export async function buildSentContactsIndex(opts: {
+  roots: string[]
+  keys: MdmKeys
+  d: string
+  createdAt?: number
+}): Promise<Event> {
+  const fromSigner = makeSubkeySigner(MDM_COPY_FROM, opts.keys)
+  const [cFrom, cTo] = await Promise.all([fromSigner.getPublicKey(), makeSubkeySigner(MDM_COPY_TO, opts.keys).getPublicKey()])
+  const capped = opts.roots.slice(0, MDM_INDEX_CAP)
+  const bytes = new Uint8Array(1 + capped.length * 32)
+  bytes[0] = INDEX_VERSION
+  capped.forEach((r, i) => bytes.set(hexToBytes(r), 1 + i * 32))
+  const content = await fromSigner.nip44Encrypt(cTo, toB64(bytes))
+  const unsigned: UnsignedEvent = {
+    kind: MDM_KIND,
+    created_at: opts.createdAt ?? nowSeconds(),
+    tags: [['d', opts.d], ['p', cTo]],
+    content,
+    pubkey: cFrom,
+  }
+  return fromSigner.signEvent(unsigned)
+}
+
+/** Decrypt a sent-contacts index event (I am `C_to`) and return its recipient-root list (docs §3.4). */
+export async function parseSentContactsIndex(event: Event, keys: MdmKeys): Promise<string[] | null> {
   try {
-    const toSigner = makeSubkeySigner(MDM_COPY_TO, keys)
-    const payload: MdmSelfCopyPayload = JSON.parse(await toSigner.nip44Decrypt(event.pubkey, event.content))
-    if (!payload || payload.v !== 1 || !payload.event) return null
-    return payload.event
+    const b64 = await makeSubkeySigner(MDM_COPY_TO, keys).nip44Decrypt(event.pubkey, event.content)
+    const bytes = fromB64(b64)
+    if (bytes.length === 0 || bytes[0] !== INDEX_VERSION) return null
+    const out: string[] = []
+    for (let i = 1; i + 32 <= bytes.length; i += 32) out.push(bytesToHex(bytes.subarray(i, i + 32)))
+    return out
   } catch {
     return null
   }
 }
 
-/** The addressable coordinate of a masked message, for `reply` refs and reactions (docs §2.1, §6). */
+/**
+ * A Blossom 24242 auth signer bound to the sender's masked key toward `recipientRootPub` (docs §6 / §10):
+ * uploads are authorized as `M`, so the Blossom server never sees the real key. Reuses ChatInputBar's
+ * `getUploadAuthSigner` seam, exactly as v2 hubs upload as their pseudonym.
+ */
+export function mdmBlossomAuthSigner(recipientRootPub: string, keys: MdmKeys): (unsigned: UnsignedEvent) => Promise<Event> {
+  const mSigner = maskedSigner(recipientRootPub, keys)
+  return (unsigned: UnsignedEvent) => mSigner.signEvent(unsigned)
+}
+
+/** The addressable coordinate of a masked event, for `reply` refs and reactions (docs §2.1, §6). */
 export function mdmCoordinate(event: Pick<Event, 'pubkey' | 'tags'>): string | null {
   const d = event.tags.find((t) => t[0] === 'd')?.[1]
   return d ? `${MDM_KIND}:${event.pubkey}:${d}` : null

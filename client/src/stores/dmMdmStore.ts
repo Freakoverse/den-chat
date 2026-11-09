@@ -3,15 +3,16 @@
  *
  * Its own store (like the NIP-17 store), reusing dm04's message/reaction SHAPES so the MDM chat view can
  * render with the same components, but with MDM crypto inside: the sender authors under a per-recipient
- * masked key `M`, the recipient is addressed by their real key, and every message/reaction also publishes
- * a self-copy to the sender's own relays so the sender recovers them (docs §3.4). Three subscriptions on
- * the user's read relays:
- *   - received messages   { kinds:[30092], "#p":[myRoot] }
- *   - my self-copies      { kinds:[30092], authors:[C_from], "#p":[C_to] }   (messages + reactions)
- *   - received reactions  { kinds:[7],     "#p":[myRoot] }
+ * masked key `M`, the recipient is addressed by their real key, and the sender recovers its own sent
+ * history from a single **sent-contacts index** (docs §3.4), not per-message copies.
  *
- * Relay split (docs §5): real events → recipient relays + client defaults (NEVER the sender's own NIP-65);
- * self-copies → sender's own relays + client (publishPersonal; NEVER the recipient's).
+ * Subscriptions (docs §3.2, §3.4):
+ *   - received events     { kinds:[30092], "#p":[myRoot] }          messages, reactions and tombstones
+ *   - sent-contacts index { kinds:[30092], authors:[C_from] }       my index (its payload = my recipients)
+ *   - my sent threads      { kinds:[30092], authors:[M_1..M_k] }    rebuilt from the index's roots
+ *
+ * Relays (docs §5): real events → recipient relays + the sender's own relays + client defaults (reliability
+ * first); the index → the sender's own relays + client (publishPersonal).
  */
 
 import { create } from 'zustand'
@@ -32,19 +33,21 @@ import type { Attachment } from '@/stores/messageStore'
 import type { DM04Message, DM04Conversation, DM04Reaction } from '@/stores/dm04Store'
 import {
   MDM_KIND,
-  MDM_REACTION_KIND,
+  MDM_INDEX_CAP,
   mdmSupported,
-  selfCopyKeys,
+  indexKeys,
+  myMaskedPub,
   buildMdmMessage,
   buildMdmReaction,
+  buildSentContactsIndex,
+  parseSentContactsIndex,
   decryptReceivedMdm,
-  decryptSelfCopy,
   decryptOwnMdm,
-  decryptReceivedReaction,
-  decryptOwnReaction,
+  isTombstone,
   mdmCoordinate,
   type MdmKeys,
   type MdmBody,
+  type MdmPayload,
 } from '@/lib/nostr/nipMdm'
 
 const MDM_LIMIT = 300
@@ -54,9 +57,19 @@ type Tuple4 = [string, string, string, string]
 // ── module-level indices (not reactive) ──
 const idToCoord = new Map<string, string>()   // real event id → "30092:<M>:<d>"
 const coordToId = new Map<string, string>()   // coordinate → the real event id currently shown
+const coordEventTime = new Map<string, number>() // coordinate → the event created_at of the shown version (edit newness)
 const pendingReactions = new Map<string, { emoji: string; user: string; customUrl?: string }[]>() // coord → reactions whose target isn't loaded yet
 const processedIds = new Set<string>()
-const processedReactionIds = new Set<string>()
+
+// ── sent-contacts index state (docs §3.4), module-level (not reactive) ──
+let indexRoots: string[] = []        // recipient roots, most-recent first
+let indexD: string | null = null     // the index's addressable d (lowest, on the multi-device race)
+let indexCreatedAt = 0               // highest created_at seen for the index
+
+const randomHex16 = () => {
+  const b = crypto.getRandomValues(new Uint8Array(16))
+  return Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('')
+}
 
 // Only real-time messages (received this session) play the DM sound; backfilled history never does.
 const mdmSessionStartTime = nowSeconds()
@@ -112,6 +125,12 @@ const drop4 = (t?: Tuple4[]): [string, string, string?][] | undefined =>
 function upsertMessage(conversations: Map<string, DM04Conversation>, counterparty: string, real: Event, msg: DM04Message, active: string | null): void {
   const coord = mdmCoordinate(real)
   if (!coord) return
+  // Edit newness is decided by the EVENT created_at (which drifts +1 per edit), not the displayed sort
+  // time (published_at). An older/equal version is ignored.
+  const prevTime = coordEventTime.get(coord)
+  if (prevTime !== undefined && real.created_at <= prevTime) return
+  coordEventTime.set(coord, real.created_at)
+
   const existing = conversations.get(counterparty)
   const conv: DM04Conversation = existing
     ? { ...existing, messages: [...existing.messages] }
@@ -120,22 +139,17 @@ function upsertMessage(conversations: Map<string, DM04Conversation>, counterpart
   const prevId = coordToId.get(coord)
   const at = prevId ? conv.messages.findIndex((m) => m.id === prevId) : -1
   if (at >= 0) {
-    if (conv.messages[at].createdAt > msg.createdAt) { conversations.set(counterparty, conv); return }
     if (prevId && prevId !== msg.id) idToCoord.delete(prevId)
     conv.messages[at] = msg
   } else {
     conv.messages.push(msg)
     if (!msg.isMine) {
       if (counterparty === active) {
-        // Arrived while viewing it: advance the read mark so it stays read on reload / other devices.
         useNotificationStore.getState().markDmRead(counterparty, 'mdm')
       } else {
-        // Count toward unread only if newer than the last time this conversation was read (persisted),
-        // so backfilled history doesn't re-count every time the subscription re-runs.
         const lastRead = mdmLastRead(counterparty)
         if (!(lastRead > 0 && msg.createdAt <= lastRead)) conv.unread += 1
       }
-      // Real-time message from a followed user: play the DM sound (never for backfill).
       if (msg.createdAt >= mdmSessionStartTime && useFollowStore.getState().followedPubkeys.has(counterparty)) {
         playSoundEffect('dm_message')
       }
@@ -164,7 +178,6 @@ export const useMdmStore = create<MdmState>((set, get) => ({
   subscription: null,
 
   setActiveConversation: (pubkey) => {
-    // Persist + sync the read mark so this conversation's backfilled history doesn't re-count as unread.
     if (pubkey) useNotificationStore.getState().markDmRead(pubkey, 'mdm')
     set((s) => {
       if (pubkey && s.conversations.has(pubkey)) {
@@ -185,11 +198,10 @@ export const useMdmStore = create<MdmState>((set, get) => ({
     get().subscription?.close()
     set({ loading: true })
 
-    let cFrom: string, cTo: string
-    try { ({ from: cFrom, to: cTo } = await selfCopyKeys(keys)) }
+    let cFrom: string
+    try { ({ from: cFrom } = await indexKeys(keys)) }
     catch { set({ loading: false }); return }
 
-    // Apply reactions (merge) helper that also drains pendingReactions reconciled by upsert.
     const applyReaction = (targetId: string, emoji: string, user: string, customUrl?: string) => set((s) => {
       const reactions = new Map(s.reactions)
       const byEmoji = new Map(reactions.get(targetId) ?? [])
@@ -200,61 +212,24 @@ export const useMdmStore = create<MdmState>((set, get) => ({
       return { reactions }
     })
 
+    const pushPending = (coord: string, emoji: string, user: string, customUrl?: string) => {
+      const list = pendingReactions.get(coord) ?? []
+      list.push({ emoji, user, customUrl })
+      pendingReactions.set(coord, list)
+    }
+    const routeReaction = (ref: MdmPayload['reaction'], user: string) => {
+      if (!ref) return
+      const targetId = coordToId.get(ref.target)
+      if (targetId) applyReaction(targetId, ref.emoji, user, ref.customUrl)
+      else pushPending(ref.target, ref.emoji, user, ref.customUrl)
+    }
+
     const commitMessage = (counterparty: string, real: Event, msg: DM04Message) => set((s) => {
       const conversations = new Map(s.conversations)
       upsertMessage(conversations, counterparty, real, msg, s.activeConversation)
       return { conversations }
     })
 
-    const onReceivedMessage = async (event: Event) => {
-      if (processedIds.has(event.id)) return
-      processedIds.add(event.id)
-      const dec = await decryptReceivedMdm(event, keys)
-      if (!dec) return
-      const counterparty = dec.senderRootPub
-      if (useBlockStore.getState().blockedPubkeys.has(counterparty)) return
-      commitMessage(counterparty, event, toMessage(event, dec.payload, counterparty, myPubkey, false, dec.verified))
-      drainPending(event)
-    }
-
-    const onMyCopy = async (event: Event) => {
-      if (event.pubkey !== cFrom || processedIds.has(event.id)) return
-      processedIds.add(event.id)
-      const embedded = await decryptSelfCopy(event, keys)
-      if (!embedded) return
-      if (embedded.kind === MDM_KIND) {
-        const recipient = embedded.tags.find((t) => t[0] === 'p')?.[1]
-        if (!recipient) return
-        const payload = await decryptOwnMdm(embedded, keys)
-        if (!payload) return
-        commitMessage(recipient, embedded, toMessage(embedded, payload, recipient, myPubkey, true, true))
-        drainPending(embedded)
-      } else if (embedded.kind === MDM_REACTION_KIND) {
-        const payload = await decryptOwnReaction(embedded, keys)
-        const coord = embedded.tags.find((t) => t[0] === 'a')?.[1]
-        if (!payload || !coord) return
-        const targetId = coordToId.get(coord)
-        if (targetId) applyReaction(targetId, payload.emoji, myPubkey, payload.customUrl)
-        else pushPending(coord, payload.emoji, myPubkey, payload.customUrl)
-      }
-    }
-
-    const onReceivedReaction = async (event: Event) => {
-      if (processedReactionIds.has(event.id)) return
-      processedReactionIds.add(event.id)
-      const dec = await decryptReceivedReaction(event, keys)
-      if (!dec || !dec.verified || !dec.targetCoordinate) return
-      if (useBlockStore.getState().blockedPubkeys.has(dec.senderRootPub)) return
-      const targetId = coordToId.get(dec.targetCoordinate)
-      if (targetId) applyReaction(targetId, dec.payload.emoji, dec.senderRootPub, dec.payload.customUrl)
-      else pushPending(dec.targetCoordinate, dec.payload.emoji, dec.senderRootPub, dec.payload.customUrl)
-    }
-
-    const pushPending = (coord: string, emoji: string, user: string, customUrl?: string) => {
-      const list = pendingReactions.get(coord) ?? []
-      list.push({ emoji, user, customUrl })
-      pendingReactions.set(coord, list)
-    }
     const drainPending = (real: Event) => {
       const coord = mdmCoordinate(real)
       const id = coord ? coordToId.get(coord) : undefined
@@ -262,10 +237,62 @@ export const useMdmStore = create<MdmState>((set, get) => ({
       if (coord && id && list) { pendingReactions.delete(coord); for (const r of list) applyReaction(id, r.emoji, r.user, r.customUrl) }
     }
 
-    const subMsg = subscribeEventsWide({ kinds: [MDM_KIND], '#p': [myPubkey], limit: MDM_LIMIT } as Filter, onReceivedMessage)
-    const subMine = subscribeEventsWide({ kinds: [MDM_KIND], authors: [cFrom], '#p': [cTo], limit: MDM_LIMIT } as Filter, onMyCopy)
-    const subReact = subscribeEventsWide({ kinds: [MDM_REACTION_KIND], '#p': [myPubkey], limit: MDM_LIMIT } as Filter, onReceivedReaction)
-    set({ subscription: { close: () => { subMsg.close(); subMine.close(); subReact.close() } }, loading: false })
+    // A decrypted payload for a KNOWN counterparty (received = sender; own = recipient). Routes to a
+    // message/tombstone or a reaction.
+    const applyPayload = (counterparty: string, real: Event, payload: MdmPayload, isMine: boolean, verified: boolean, reactionUser: string) => {
+      if (payload.reaction) { routeReaction(payload.reaction, reactionUser); return }
+      commitMessage(counterparty, real, toMessage(real, payload, counterparty, myPubkey, isMine, verified))
+      drainPending(real)
+    }
+
+    const onReceived = async (event: Event) => {
+      if (processedIds.has(event.id)) return
+      processedIds.add(event.id)
+      const dec = await decryptReceivedMdm(event, keys)
+      if (!dec) return
+      const counterparty = dec.senderRootPub
+      if (useBlockStore.getState().blockedPubkeys.has(counterparty)) return
+      // A received reaction must be verified before it is attributed (docs §6).
+      if (dec.payload.reaction && !dec.verified) return
+      applyPayload(counterparty, event, dec.payload, false, dec.verified, counterparty)
+    }
+
+    // ── my own sent threads, rebuilt from the index's roots (docs §3.4) ──
+    const subscribedRoots = new Set<string>()
+    let ownSub: { close: () => void } | null = null
+    const refreshOwnThreads = async () => {
+      const fresh = indexRoots.filter((r) => !subscribedRoots.has(r))
+      if (!fresh.length) return
+      fresh.forEach((r) => subscribedRoots.add(r))
+      const masked = (await Promise.all([...subscribedRoots].map((r) => myMaskedPub(r, keys).catch(() => null)))).filter(Boolean) as string[]
+      if (!masked.length) return
+      ownSub?.close()
+      ownSub = subscribeEventsWide({ kinds: [MDM_KIND], authors: masked, limit: MDM_LIMIT } as Filter, async (event: Event) => {
+        if (processedIds.has(event.id)) return
+        processedIds.add(event.id)
+        const recipient = event.tags.find((t) => t[0] === 'p')?.[1]
+        if (!recipient) return
+        const payload = await decryptOwnMdm(event, keys)
+        if (!payload) return
+        applyPayload(recipient, event, payload, true, true, myPubkey)
+      })
+    }
+
+    const onIndex = async (event: Event) => {
+      if (event.pubkey !== cFrom) return
+      const roots = await parseSentContactsIndex(event, keys)
+      if (!roots) return
+      const d = event.tags.find((t) => t[0] === 'd')?.[1]
+      // Multi-device race (docs §3.4): union lists, converge to the lowest d.
+      indexRoots = [...new Set([...roots, ...indexRoots])].slice(0, MDM_INDEX_CAP)
+      if (d && (indexD === null || d < indexD)) indexD = d
+      indexCreatedAt = Math.max(indexCreatedAt, event.created_at)
+      await refreshOwnThreads()
+    }
+
+    const subReceived = subscribeEventsWide({ kinds: [MDM_KIND], '#p': [myPubkey], limit: MDM_LIMIT } as Filter, onReceived)
+    const subIndex = subscribeEventsWide({ kinds: [MDM_KIND], authors: [cFrom], limit: 8 } as Filter, onIndex)
+    set({ subscription: { close: () => { subReceived.close(); subIndex.close(); ownSub?.close() } }, loading: false })
   },
 
   stopSubscription: () => { get().subscription?.close(); set({ subscription: null }) },
@@ -274,7 +301,7 @@ export const useMdmStore = create<MdmState>((set, get) => ({
     const keys: MdmKeys = { privateKey, signer }
     if (!mdmSupported(keys)) throw new Error('Masked DMs need a local key or a signer with NIP-SKD support.')
     const body: MdmBody = {
-      t: content || undefined,
+      text: content || undefined,
       reply: replyTo ? idToCoord.get(replyTo) : undefined,
       rootRef: rootRef ? idToCoord.get(rootRef) : undefined,
       isThread: isThread || undefined,
@@ -283,26 +310,16 @@ export const useMdmStore = create<MdmState>((set, get) => ({
       gif: drop4(gifTags) as [string, string, string][] | undefined,
       attachments: attachments && attachments.length ? attachments : undefined,
     }
-    const { real, selfCopy } = await buildMdmMessage({ recipientRootPub: recipientPubkey, myRootPub: myPubkey, body, keys, expirationSeconds })
+    const { real } = await buildMdmMessage({ recipientRootPub: recipientPubkey, myRootPub: myPubkey, body, keys, expirationSeconds })
 
-    const payload = { v: 1 as const, from: myPubkey, ...body }
+    const payload: MdmPayload = { v: 1, from: myPubkey, published_at: real.created_at, ...body }
     set((s) => { const conversations = new Map(s.conversations); upsertMessage(conversations, recipientPubkey, real, toMessage(real, payload, recipientPubkey, myPubkey, true, true), s.activeConversation); return { conversations } })
 
     onPhase?.('publishing')
-    const recipientRelays = usePostingBehaviourStore.getState().postToRecipientRelays
-      ? await discoverRecipientRelays(recipientPubkey, getRelays()).catch(() => [] as string[])
-      : []
-    const realPool = [...recipientRelays, ...getRelays()]
-    const realSeed = recipientRelays.length > 0 ? recipientRelays : getRelays()
-    const target = Math.min(new Set(realPool.map(norm)).size || 1, 4)
-    try {
-      await Promise.all([
-        publishWithFailover(real, realSeed, { pool: realPool, target, onProgress: (c, t, accepted) => { get().setRelayProgress(real.id, c, t, accepted); onPhase?.('publishing', { confirmed: c, total: t }) } }),
-        publishPersonal(selfCopy),
-      ])
-    } finally {
-      setTimeout(() => get().clearRelayProgress(real.id), 4000)
-    }
+    await Promise.all([
+      publishReal(recipientPubkey, real, (c, t, accepted) => { get().setRelayProgress(real.id, c, t, accepted); onPhase?.('publishing', { confirmed: c, total: t }) }),
+      noteSentTo(recipientPubkey, keys),
+    ]).finally(() => setTimeout(() => get().clearRelayProgress(real.id), 4000))
   },
 
   deleteMessage: async (eventId, myPubkey, signer, privateKey) => {
@@ -310,16 +327,20 @@ export const useMdmStore = create<MdmState>((set, get) => ({
     const coord = idToCoord.get(eventId)
     if (!coord) return
     const d = coord.split(':')[2]
-    // Find the message + its conversation to recover the recipient and original created_at.
+    // Recover the recipient, the original d, created_at and published_at from the shown message.
     let recipient: string | undefined
     let createdAt = 0
+    let publishedAt = 0
     for (const [cp, conv] of get().conversations) {
       const m = conv.messages.find((x) => x.id === eventId)
-      if (m) { recipient = cp; createdAt = m.createdAt; break }
+      if (m) { recipient = cp; publishedAt = m.createdAt; createdAt = coordEventTime.get(coord) ?? m.createdAt; break }
     }
     if (!recipient || !d) return
-    const { real, selfCopy } = await buildMdmMessage({ recipientRootPub: recipient, myRootPub: myPubkey, body: { deleted: true }, keys, d, createdAt: createdAt + 1 })
-    // Local tombstone.
+    // Tombstone = an edit with an empty body (docs §2.2, §6).
+    const { real } = await buildMdmMessage({
+      recipientRootPub: recipient, myRootPub: myPubkey, body: {}, keys,
+      d, createdAt: createdAt + 1, publishedAt, updatedAt: nowSeconds(),
+    })
     set((s) => {
       const conversations = new Map(s.conversations)
       const conv = conversations.get(recipient!)
@@ -329,18 +350,13 @@ export const useMdmStore = create<MdmState>((set, get) => ({
       }
       return { conversations }
     })
-    const recipientRelays = await discoverRecipientRelays(recipient, getRelays()).catch(() => [] as string[])
-    await Promise.all([
-      publishWithFailover(real, recipientRelays.length ? recipientRelays : getRelays(), { pool: [...recipientRelays, ...getRelays()], target: 2 }),
-      publishPersonal(selfCopy),
-    ]).catch(() => {})
+    await publishReal(recipient, real).catch(() => {})
   },
 
   addReaction: async (targetEventId, _targetPubkey, emoji, myPubkey, recipientPubkey, signer, privateKey, customUrl) => {
     const keys: MdmKeys = { privateKey, signer }
     const coord = idToCoord.get(targetEventId)
     if (!coord) return
-    // Optimistic local echo.
     set((s) => {
       const reactions = new Map(s.reactions)
       const byEmoji = new Map(reactions.get(targetEventId) ?? [])
@@ -348,12 +364,8 @@ export const useMdmStore = create<MdmState>((set, get) => ({
       entry.users.add(myPubkey); byEmoji.set(emoji, entry); reactions.set(targetEventId, byEmoji)
       return { reactions }
     })
-    const { real, selfCopy } = await buildMdmReaction({ targetCoordinate: coord, recipientRootPub: recipientPubkey, myRootPub: myPubkey, emoji, customUrl, keys })
-    const recipientRelays = await discoverRecipientRelays(recipientPubkey, getRelays()).catch(() => [] as string[])
-    await Promise.all([
-      publishWithFailover(real, recipientRelays.length ? recipientRelays : getRelays(), { pool: [...recipientRelays, ...getRelays()], target: 2 }),
-      publishPersonal(selfCopy),
-    ]).catch(() => {})
+    const { real } = await buildMdmReaction({ targetCoordinate: coord, recipientRootPub: recipientPubkey, myRootPub: myPubkey, emoji, customUrl, keys })
+    await publishReal(recipientPubkey, real).catch(() => {})
   },
 
   loadOlderMessages: async () => { /* MDM loads up to MDM_LIMIT at once; no pagination in v1 (hasMore=false) */ },
@@ -389,34 +401,70 @@ export const useMdmStore = create<MdmState>((set, get) => ({
   clearRelayProgress: (eventId) => set((s) => { const { [eventId]: _, ...rest } = s.relayProgress; return { relayProgress: rest } }),
 }))
 
-/** Build a DM04Message-shaped record from a decrypted MDM payload. */
+/**
+ * Publish a real masked event (message, reaction or tombstone) to the recipient's relays, the sender's own
+ * relays, and the client defaults (docs §5, reliability first). `publishPersonal` covers the sender's own
+ * NIP-65 + client; `publishWithFailover` covers the recipient's relays + client.
+ */
+async function publishReal(recipientPubkey: string, real: Event, onProgress?: (c: number, t: number, accepted: string[]) => void): Promise<void> {
+  const recipientRelays = usePostingBehaviourStore.getState().postToRecipientRelays
+    ? await discoverRecipientRelays(recipientPubkey, getRelays()).catch(() => [] as string[])
+    : []
+  const realPool = [...recipientRelays, ...getRelays()]
+  const realSeed = recipientRelays.length > 0 ? recipientRelays : getRelays()
+  const target = Math.min(new Set(realPool.map(norm)).size || 1, 4)
+  await Promise.all([
+    publishWithFailover(real, realSeed, { pool: realPool, target, onProgress }),
+    publishPersonal(real),
+  ])
+}
+
+/**
+ * Record that the sender messaged `root`: move it to the front of the sent-contacts index and, when the SET
+ * of contacts changed (a new contact), republish the index (docs §3.4). A repeat to an existing contact
+ * only reorders in memory (debounced), so it puts no index event on the wire.
+ */
+async function noteSentTo(root: string, keys: MdmKeys): Promise<void> {
+  const was = indexRoots.indexOf(root)
+  if (was === 0) return
+  indexRoots = [root, ...indexRoots.filter((r) => r !== root)].slice(0, MDM_INDEX_CAP)
+  if (was !== -1) return // reorder-only: debounced, rides the next set-change republish
+  if (!indexD) indexD = randomHex16()
+  indexCreatedAt = indexCreatedAt > 0 ? indexCreatedAt + 1 : nowSeconds()
+  try {
+    const ev = await buildSentContactsIndex({ roots: indexRoots, keys, d: indexD, createdAt: indexCreatedAt })
+    await publishPersonal(ev)
+  } catch { /* index republish is best-effort; a later send retries */ }
+}
+
+/** Build a DM04Message-shaped record from a decrypted MDM payload. Ordering uses published_at (docs §2.2). */
 function toMessage(
   real: Event,
-  payload: { t?: string; deleted?: boolean; reply?: string; rootRef?: string; isThread?: boolean; emoji?: [string, string, string?][]; sticker?: [string, string, string?][]; gif?: [string, string, string][]; attachments?: Attachment[] },
+  payload: MdmPayload,
   counterparty: string,
   myPubkey: string,
   isMine: boolean,
   verified: boolean,
 ): DM04Message & { verified?: boolean } {
+  const tomb = isTombstone(payload)
   return {
     id: real.id,
-    content: payload.deleted ? '' : (payload.t ?? ''),
+    content: tomb ? '' : (payload.text ?? ''),
     senderPubkey: isMine ? myPubkey : counterparty,
     recipientPubkey: isMine ? counterparty : myPubkey,
-    createdAt: real.created_at,
+    createdAt: payload.published_at || real.created_at,
     isMine,
     expiration: getExpirationFromTags(real.tags),
-    deleted: payload.deleted,
+    deleted: tomb || undefined,
     replyTo: payload.reply ? coordToId.get(payload.reply) : undefined,
     rootRef: payload.rootRef ? coordToId.get(payload.rootRef) : undefined,
     isThread: payload.isThread,
     emojiTags: payload.emoji,
     stickerTags: payload.sticker,
     gifTags: payload.gif,
-    attachments: payload.deleted ? undefined : payload.attachments,
+    attachments: tomb ? undefined : payload.attachments,
     rawEvent: JSON.stringify(real),
-    // Full decrypted payload for the raw-event viewer's faithful "Decrypted" tab (the real {v,from,t,...}).
-    decryptedRaw: payload.deleted ? undefined : JSON.stringify(payload, null, 2),
+    decryptedRaw: tomb ? undefined : JSON.stringify(payload, null, 2),
     verified,
   }
 }
