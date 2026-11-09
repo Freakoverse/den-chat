@@ -10,7 +10,9 @@ their own key. A public observer sees a masked key delivering an encrypted messa
 and cannot tell who the sender is.
 
 This does **not** aim to be a maximal-privacy DM system, and does not try to be: the goal is to be
-**private enough** for its purpose. Like other DM schemes, the recipient is visible (addressed by their
+**private enough** for its purpose while keeping the **simple reliability and moderability** of an ordinary
+DM, staying close to NIP-04 on both. More private than NIP-04 (which exposes the whole social graph), less
+private than a maximal-unlinkability scheme, and about as reliable and easy to moderate as NIP-04. Like other DM schemes, the recipient is visible (addressed by their
 real key); unlike a maximal-unlinkability scheme, the sender uses one stable masked key per recipient
 instead of a fresh ephemeral key per message, and timestamps and sizes are truthful rather than jittered,
 so a sender's messages to a given recipient are publicly linkable to each other (never to the sender's
