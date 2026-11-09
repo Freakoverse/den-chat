@@ -233,7 +233,7 @@ The author is unchanged (`M`), so only the sender can edit their own message.
 
 NIP-01 selects the current version of a coordinate by **highest `created_at`, lowest id on a tie**, and a
 relay accepts a replacement only when its `created_at` is strictly greater. That overloads `created_at` as a
-replacement token, so it can no longer double as an honest timestamp. NIP-MDM therefore splits the three
+replacement token, so it cannot also serve as an honest timestamp. NIP-MDM therefore splits the three
 concerns NIP-01 folds into that one field across three values. (A single standard original-send-time field
 would have avoided this; absent one, these three are the workaround.)
 
@@ -326,7 +326,8 @@ C_from = getSelfSubkeyPubkey("nip-mdm:v1:copy-from")    // authors the index; se
 C_to   = getSelfSubkeyPubkey("nip-mdm:v1:copy-to")      // the index's address; the sender subscribes here
 ```
 
-The `copy-*` context labels are historical; the keys author and address the index.
+The two `copy-*` context strings are fixed opaque labels (their wording carries no meaning beyond being
+constant and distinct); `C_from` authors the index and `C_to` addresses it.
 
 **The event.** One kind-30092 event, the **same kind as a message** so it is indistinguishable on the wire,
 replaced in place on every update:
