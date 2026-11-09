@@ -2,72 +2,43 @@
 
 ## Abstract
 
-NIP-MDM is a one-to-one direct message in which the **sender's root identity never appears on the
-wire**. The sender writes under a per-recipient **masked key**: a NIP-SKD **blinded** sub-key of its own
-root, blinded toward the recipient. The recipient is addressed by their **real** key, exactly as an
-ordinary DM, so a recipient receives with no derivation and no enumeration: they simply subscribe to
-their own key. A public observer sees a masked key delivering an encrypted message to a known recipient,
-and cannot tell who the sender is.
+NIP-MDM is a one-to-one direct message in which the **sender's root identity never appears on the wire**.
+The sender authors under a per-recipient **masked key** `M` (a NIP-SKD **blinded** sub-key of its root,
+blinded toward the recipient); the recipient is addressed by their **real** key, so they receive with no
+derivation, just a subscription to their own key. A public observer sees a masked key delivering an
+encrypted message to a known recipient, and cannot tell who the sender is.
 
-This does **not** aim to be a maximal-privacy DM system, and does not try to be: the goal is to be
-**private enough** for its purpose while keeping the **simple reliability and moderation** of an ordinary
-DM. Like other DM schemes it reveals the recipient (addressed by their real key) and hides the content;
-what it adds is a sender who is hidden from the public yet **accountable to the recipient**.
+The goal is to be **private enough** while keeping the **reliability and moderation** of an ordinary DM, not
+to be a maximal-privacy system. Where a maximal-unlinkability scheme uses a fresh ephemeral key per message
+and jittered timing (unorderable, unbannable, unsortable), NIP-MDM gives one **stable, deterministic,
+verifiable** masked key per recipient: the recipient confirms it belongs to the claimed root (accountable
+and spoof-proof, §1.3), any of the sender's devices reproduce it from the root alone (§3.4), and it is a
+single stable author that orders and threads normally. Timestamps are truthful, so a sender's messages to
+one recipient are publicly linkable to each other but never to the sender's root. This is *accountable
+sender pseudonymity*, not anonymity toward the recipient.
 
-Where a maximal-unlinkability scheme uses a fresh ephemeral key per message and jittered timing, maximizing
-sender unlinkability at the cost of being unorderable, unbannable, and unsortable, NIP-MDM gives the sender
-one **stable, deterministic, verifiable** masked key per recipient: the recipient confirms it belongs to the
-claimed root (accountable and spoof-proof), any of the sender's own devices reproduce it from the root key
-alone (recovering sent history from a static self-derived index, §3.4), and it is a single stable author
-(so messages order and thread normally). Timestamps and sizes are truthful rather than jittered, so a
-sender's messages to a given recipient are publicly linkable to each other but never to the sender's real
-key. The sender is hidden from everyone; the content and the sender's real identity are disclosed only to
-the recipient, who can cryptographically **verify** that identity; the outbound social graph is fully
-hidden, and only the fact that an account received something from some masked sender is visible. This is
-*accountable sender pseudonymity*, not full-conversation anonymity.
-
-It also needs **no dedicated relay list**. Where some sender-hiding DM schemes define a separate dedicated
-DM-relay list that clients must publish, discover, and keep in sync, NIP-MDM uses each party's single
-ordinary relay list (kind 10002, the normal relay list a user already has, with no read/write split to
-honor), plus the client's own relay list as a shared fallback, and delivers to both parties' lists for
-NIP-04-grade reliability (§5). There is no second list for a user to manage.
-
-NIP-MDM adds **no new signer operations**, but it does require a signer that supports **NIP-SKD** (scheme
-`skd:1`): it is otherwise a pure composition of that scheme's blinded and self ops (§1), an addressing
-convention (§2, §3), and one new event kind (§2). A signer without NIP-SKD support cannot participate.
+It needs **no dedicated relay list** (it uses each party's ordinary kind-10002 list, §5) and **no new signer
+operations**: it is a pure composition of NIP-SKD's blinded and self ops (§1), an addressing convention (§2,
+§3), and one event kind (§2). A signer without NIP-SKD (`skd:1`) support cannot participate.
 
 ## Motivation
 
-NIP-04 direct messages publish both parties' **real** keys: the sender as the event author, the
-recipient in a `p` tag. The content is encrypted, but the **social graph is not**: anyone can read the
-full who-talks-to-whom map off the relays. A maximal-unlinkability scheme hides the **sender** with
-per-message ephemeral wrappers (the recipient is still addressed in the clear by their real key), but the
-randomness that achieves it makes those messages hard to order, rate, or ban, forces a self-addressed copy
-so the sender's own other devices can read the thread, and adds a separate dedicated DM-relay list that
-clients must publish and keep in sync on top of the user's ordinary relay list.
+NIP-04 publishes both parties' **real** keys (sender as author, recipient in `p`): the content is encrypted
+but the **social graph is not**, so anyone can read the who-talks-to-whom map off the relays. A
+maximal-unlinkability scheme hides the sender with per-message ephemeral wrappers, but the randomness makes
+messages hard to order, rate, or ban, forces a self-addressed copy for the sender's other devices, and adds
+a dedicated DM-relay list to maintain.
 
-Many conversations do not need to hide the recipient, they need to hide the **sender**. A reporter
-contacting a public contact point, an anonymous tip to a known account, or simply not wanting your outbound
-contacts enumerable: in all of these the recipient is content to be reachable in the clear, while the
-sender wants to stay unidentified to the public yet **accountable to the recipient**. A per-recipient
-masked sender key provides exactly that:
+Many conversations need to hide the **sender**, not the recipient: a reporter's public tip line, an
+anonymous tip to a known account, or simply keeping your outbound contacts unenumerable. The recipient is
+content to be reachable in the clear; the sender wants to stay unidentified to the public yet accountable to
+the recipient. A per-recipient masked key gives exactly that: the author is a blinded key (recovering the
+root is a discrete log), the recipient decrypts with their own key and never enumerates senders, the key is
+stable and verifiable per pair so a verified message is provably from that sender, and it is a pure function
+of `(sender root, recipient root)` so every device rebuilds the conversation list from the root alone (§3.4).
 
-- **Sender privacy.** The event author is a blinded key; recovering the sender's root is a discrete log.
-  The sender's identity is disclosed only inside the ciphertext, only to the recipient.
-- **No recipient-side cost.** Because the recipient is addressed by their real key, they receive and
-  decrypt with their own key and **never enumerate** candidate senders. (Masking the recipient instead
-  would force them to derive and subscribe to a key per possible sender, which does not scale, this is
-  precisely why the recipient is left in the clear.)
-- **Accountability and spoof-proofing.** The masked key is stable per sender-recipient pair and the
-  recipient can **verify** it belongs to a specific root (§1.3) in constant time. Only the real sender
-  can author as it (it requires their blinded private scalar), so a verified message is **provably**
-  from that sender. Forgery is infeasible, not merely detectable.
-- **Determinism.** The masked key is a pure function of `(sender root, recipient root)`, and the sender's
-  sent-contacts index is addressed to static self-derived keys (§3.4), so every device of the sender rebuilds
-  the full conversation list from the root key alone, with no stored recipient list.
-
-The honest cost is in §7: the recipient is not hidden, and timing and size are visible. NIP-MDM is a
-point between NIP-04 and a maximal-unlinkability DM scheme, not a replacement for either.
+NIP-MDM is a point between NIP-04 and a maximal-unlinkability scheme (its honest costs are in §7), not a
+replacement for either.
 
 ## Terminology
 
@@ -456,32 +427,18 @@ toward `S`). **No handshake event is ever published.**
 
 ### 4.1 Blocking
 
-Blocking reuses the user's **normal block list** of real keys; there is no separate masked block list to
-maintain. A blocked root `B` always authors toward this recipient `R` under the single deterministic
-masked key `getPeerBlindedPubkey(context, B_pub)` (base `B`, `ecdh_x(r_priv, B)`), so the recipient drops
-a blocked sender at the **author-pubkey level, before decrypting**:
+Blocking reuses the user's **normal block list** of real keys; there is no separate masked block list. A
+blocked root `B` always authors toward recipient `R` under the one deterministic key
+`getPeerBlindedPubkey(context, B_pub)`, so the recipient drops it at the **author-pubkey level, before
+decrypting**: keep a `blockedMasked` set and, on each event, drop in O(1) if `event.pubkey` is in it.
 
-- Keep a local `blockedMasked` set of masked keys known to belong to blocked roots.
-- On each incoming event, if `event.pubkey ∈ blockedMasked`, drop it with no decryption and no further
-  work (an O(1) set lookup, so a blocked flooder costs nothing per message).
-- Otherwise decrypt and verify as usual (§3.2); if the verified `from` is in the block list, add
-  `event.pubkey` to `blockedMasked` and drop. This **lazily** populates `blockedMasked` the first time a
-  blocked person actually messages you (one decrypt, then zero forever), so a client need never derive for
-  blocked roots that never contact you.
-
-A client **MAY** instead **eagerly** precompute `blockedMasked` by deriving `getPeerBlindedPubkey(context,
-B_pub)` for every blocked root, which lets it drop even a blocked sender's *first* message pre-decryption.
-Each derivation is a single `getPeerBlindedPubkey` (about two secp256k1 scalar multiplications), it is
-deterministic and cached permanently, and it is recipient-specific (it folds the recipient's own key into
-the ECDH). A local-key client can derive a very large block list this way as a one-time background pass (a
-10k-entry list is on the order of tens of seconds and never recomputed); the masked key is fixed per pair,
-so a blocked sender cannot rotate it to evade, only a brand-new root escapes, exactly as with normal
-blocking. A client backed by a **remote** signer SHOULD prefer the lazy variant, since each
-`getPeerBlindedPubkey` is a (non-interactive) signer round-trip and an eager backfill of a large list over
-a remote signer is impractical.
-
-The same derivation underlies per-`M` **rate limiting**: `M` is a stable, bannable pseudonym, so a client
-or relay can rate or mute a masked key with no knowledge of the root behind it.
+Populate `blockedMasked` **lazily** (the default): on a verified message whose `from` is blocked, add
+`event.pubkey` and drop, one decrypt per blocked sender, then zero forever. A client **MAY** instead
+**eagerly** precompute it by deriving `getPeerBlindedPubkey(context, B_pub)` for every blocked root, to drop
+even a blocked sender's first message pre-decryption; this is cheap and permanent for a local key, but a
+client on a **remote** signer SHOULD prefer lazy (each derivation is a signer round-trip). The masked key is
+fixed per pair, so a blocked sender cannot rotate to evade, only a new root escapes, as with normal
+blocking. The same derivation powers per-`M` **rate limiting**: `M` is a stable, bannable pseudonym.
 
 ### 4.2 Spam
 
@@ -498,71 +455,35 @@ own **sent-contacts index** (§3.4) is cryptographically unspammable, since its 
 
 ## 5. Relays
 
-NIP-MDM uses one relay concept: each party's **ordinary relay list**, kind 10002, the single normal relay
-list a Nostr user already publishes. There is no read/write split to honor and no separate DM-relay list to
-define, advertise, or keep in sync. A masked message travels over the same relays the parties use for
-everything else.
+NIP-MDM uses one relay concept: each party's **ordinary kind-10002 relay list**, with no read/write split
+and no separate DM-relay list. Events are found on their author's relays, and the recipient already knows
+the sender (it must, to derive `M`), so it can look on the sender's relays as well as its own. Publishing to
+both parties' lists plus a shared **client relay list** gives NIP-04-grade deliverability; the default
+favors reliability, with an optional privacy mode below.
 
-Delivery follows the ordinary Nostr idea that an author's events are found on that author's relays. The
-recipient already knows the real sender (it must, to derive and verify `M`, §1.3), so it can locate the
-sender's relay list and look there; and the message is also placed on the recipient's own relays, where the
-recipient subscribes directly. Publishing to both parties' lists, plus a shared client relay list, is what
-gives NIP-MDM NIP-04-grade deliverability: no single relay, and no single party's list, is a point of
-failure. The default therefore favors **reliability**, with an optional privacy mode below for the sender
-who wants to narrow it.
+- **Real message** (`M`, `p = R_pub`): a client **SHOULD** publish to the recipient's relays (where it
+  subscribes `{ kinds:[30092], "#p":[R_pub] }`), the sender's own relays (where the recipient can also find
+  it by `{ kinds:[30092], authors:[M], "#p":[R_pub] }`), and the client relay list.
+- **Sent-contacts index** (`C_from`, `p = C_to`, §3.4): the sender's own relays (read by
+  `{ kinds:[30092], authors:[C_from] }`) and the client relay list, never the recipient's, who cannot
+  derive `C_to`.
 
-**Real message** (`M`, `p = R_pub`). A client **SHOULD** publish it, in combination, to:
+If a party advertises no kind-10002 list, that part falls back to the client relay list; if that is also
+empty or the whole set is unreachable, the publish **fails loudly** rather than dropping silently. Within
+the chosen set a client fans out and fails over until a relay (ideally several) accepts; how it judges a
+relay reachable is left to the client.
 
-- the **recipient's** kind-10002 relays, where the recipient subscribes `{ kinds: [30092], "#p": [R_pub] }`;
-- the **sender's own** kind-10002 relays, where the recipient can also find it, once it knows the sender,
-  by `{ kinds: [30092], authors: [M], "#p": [R_pub] }`; and
-- the **client relay list**, the client's own configured or default relays, a shared rendezvous that
-  belongs to neither party.
+**Recovery.** A sender rebuilds its history by reading the index (§3.4), then for each recipient root
+re-deriving `M` and fetching `{ kinds:[30092], authors:[M], "#p":[R_pub] }` from that recipient's relays or
+its own. A recipient missing a known partner's messages **SHOULD** likewise query the partner's relays by
+the same filter. Durability is a property of this multi-relay spread (plus any retention layer a sender
+runs), not of a per-message copy.
 
-**Sent-contacts index** (`C_from`, `p = C_to`, §3.4). A client **SHOULD** publish it to:
-
-- the **sender's own** kind-10002 relays, where the sender reads `{ kinds: [30092], authors: [C_from] }`; and
-- the **client relay list**.
-
-The index is addressed to `C_to`, a sender self-key the recipient cannot derive, so there is nothing for the
-recipient to fetch and no reason to place it on the recipient's relays.
-
-**Fallbacks.** If a party advertises no kind-10002 list, that party's portion of the targets falls back to
-the client relay list. If the client relay list is also absent, or every relay in the whole set is
-unreachable, the publish **fails loudly**: the client reports the failure rather than silently dropping the
-message.
-
-**Fetching (recipient).** A recipient receives on its own relays with `{ kinds: [30092], "#p": [R_pub] }`
-(§3.2). When messages from a known partner `S` are missing there, because a relay of the recipient's was
-down when the sender published, or has since dropped the event, the recipient **SHOULD** also query `S`'s
-kind-10002 relays for
-`{ kinds: [30092], authors: [ getPeerBlindedPubkey(context, S_pub) ], "#p": [R_pub] }`. This looks for the
-message on the sender's own relay list, which is the reason the real message is placed on the sender's
-relays as well as the recipient's.
-
-**Failover.** Within the chosen set a client fans out and fails over until at least one relay (ideally
-several, for redundancy) accepts the event; a relay that rejects or does not acknowledge is skipped and the
-next is tried. How a client judges a relay reachable or trustworthy (connectivity, acknowledgement,
-read-back, reputation) is left to the client; this spec requires only the SHOULD targets above and the
-loud-failure rule.
-
-**Recovery.** The real message is spread across the recipient's relays, the sender's own relays, and the
-client relay list, so a single relay or list failing does not lose it. A sender rebuilds its sent history by
-reading the sent-contacts index from its own (or the client) relays (§3.4), then, for each recipient root
-`R`, re-deriving the deterministic `M` and fetching `{ kinds: [30092], authors: [M], "#p": [R_pub] }` from
-`R`'s relays or its own. Because the keys are deterministic rather than ephemeral, every thread is always
-re-derivable and re-fetchable from whichever relay set still holds it; content durability is a property of
-this multi-relay spread (and any retention layer a sender runs), not of a per-message copy.
-
-**Privacy mode (optional).** Placing the real message on the sender's own relays means an event authored by
-`M` resides on relays the sender publicly advertises. This is a **soft** correlation only: a third party
-cannot derive `M` (it needs the sender-recipient ECDH secret, §1.1), so to the public `M` is just some key
-that happens to share relays with the sender; shared public relays dilute it further, and no relay attests
-who uploaded an event, so residence does not establish authorship. For a sender who runs a **distinctive
-personal relay set** and wants to avoid even that correlation (§7), a client **MAY** offer a privacy mode
-that narrows publishing: the real message to the recipient's relays only, and the sent-contacts index to the
-sender's relays only, sharing just the client relay list. This trades the default's deliverability for
-tighter unlinkability; a client SHOULD make clear which mode is in effect.
+**Privacy mode (optional).** Putting the real message on the sender's own relays means an `M`-authored event
+sits on relays the sender advertises, a **soft** correlation only (the public cannot derive `M`, shared
+relays dilute it, and no relay attests who uploaded, §7). A sender on a distinctive personal relay set
+**MAY** use a mode that narrows publishing to the recipient's relays only (real message) and the sender's
+relays only (index), sharing just the client list, trading deliverability for tighter unlinkability.
 
 ## 6. Ancillary events
 
@@ -611,46 +532,31 @@ needed, travels encrypted as in §2.1.
 
 What NIP-MDM **hides** from a passive relay observer:
 
-- The sender's real identity (the author is a blinded key; recovering the root is a discrete log).
-- The sender's entire **outbound** graph (there is no event publicly attributable to the sender's root).
-- Which of a sender's conversations belong to the same sender (per-recipient masked keys are mutually
-  unlinkable).
-- The message text, the sender identity, reply structure, and attachments (all inside the ciphertext).
-- Reaction and deletion activity: reactions and tombstone-deletions are masked kind-30092 events too (§6),
-  so the glyph, the target, and even whether an event is a reaction rather than a message are encrypted;
-  only an optional NIP-09 hard-purge, if a client opts into one, is public.
-- The sender's message and contact volume: the sent-contacts index (§3.4) is a single capped, replaceable
-  event (not one copy per message), authored by a self-key no one else can link to the root, so an observer
-  can neither count a sender's messages nor its contacts, and there is no per-message paired event to
-  correlate.
+- The sender's real identity and entire **outbound graph** (the author is a blinded key; no event is
+  publicly attributable to the sender's root).
+- Which conversations share one sender (per-recipient masked keys are mutually unlinkable).
+- The message text, sender identity, reply structure, and attachments (all in the ciphertext).
+- Reaction and deletion activity: reactions and tombstones are masked kind-30092 events too (§6), so the
+  glyph, target, and even whether an event is a reaction are encrypted; only an optional NIP-09 purge is
+  public.
+- Message and contact **volume**: the sent-contacts index (§3.4) is one capped, replaceable, self-keyed
+  event, not a per-message copy, so an observer can count neither messages nor contacts.
 
 What it **does not** hide (deliberately below a maximal-unlinkability scheme on sender unlinkability and timing):
 
-- **The recipient.** The `p` tag is the recipient's real key. An observer sees that a given account
-  received a message from some masked sender. A person's **inbound** exposure (that they received
-  something, and when) is visible; only the sender is concealed. This is the **same** recipient exposure
-  any sender-hiding DM scheme has: a per-message ephemeral wrapper also carries the recipient's real key
-  in its public `p` tag.
-- **Timing and size.** `created_at` is truthful and not jittered, and message sizes are visible (NIP-44
-  pads but does not fully mask length).
-- **Per-pair linkage.** All of one sender's messages to one recipient share a stable `M`, so they group
-  trivially. This is deliberate: it is what makes the pseudonym orderable and bannable.
-- **Edit activity.** Because messages are addressable (§2.2), an observer can see that a masked key
-  replaced one of its coordinates, and that the public `created_at` advanced by one, so **that** an edit
-  happened is visible. The real edit time (`updated_at`) and original send time (`published_at`) are in the
-  ciphertext (§2.2), so neither the true timing of the edit, nor the content, nor the roots are exposed.
-- **Relay residence (default publishing).** By default (§5) the real message is also published to the
-  sender's own relay list for deliverability, so an event authored by `M` resides on relays the sender
-  publicly advertises. This is a **soft** correlation only: `M` is underivable without the
-  sender-recipient ECDH secret (so the public cannot tie `M` to the sender from the relay fact alone),
-  shared public relays dilute it, and, absent any relay attestation of who uploaded an event, residence
-  does not establish authorship. A sender who runs a distinctive personal relay set and wants to remove
-  even this signal can use the §5 privacy mode, at a cost in deliverability.
+- **The recipient**, and their inbound exposure: the `p` tag is their real key, so an observer sees that
+  they received something, and when. Same as any sender-hiding DM.
+- **Timing and size**: `created_at` is truthful and not jittered; NIP-44 pads but does not fully mask length.
+- **Per-pair linkage**: a sender's messages to one recipient share a stable `M` (deliberate, it makes the
+  pseudonym orderable and bannable).
+- **Edit activity**: an observer sees a coordinate replaced and `created_at` advance, so *that* an edit
+  happened, but not its real time (`updated_at`), content, or roots (all encrypted, §2.2).
+- **Relay residence (default)**: the real message also sits on the sender's own relays (§5), a soft
+  correlation only, removable via the §5 privacy mode at a deliverability cost.
 
-**Deniability.** No masked event is publicly attributable to a root: linking `M` (or `C_from` / `C_to`) to
-a real key requires that key's private scalar, so toward the public every NIP-MDM event a person authored
-is plausibly deniable. The accountability of §1.3 runs only toward the recipient, who alone can verify the
-sender.
+**Deniability.** Linking `M` (or `C_from` / `C_to`) to a real key requires that key's private scalar, so
+toward the public every NIP-MDM event is plausibly deniable; the accountability of §1.3 runs only toward
+the recipient.
 
 Comparison:
 
@@ -705,14 +611,10 @@ number threads through §2, §3, and §6 only.
 
 ## 10. Test vectors
 
-Every value below is a pure composition of the NIP-SKD derivations and is reproduced byte-for-byte by the
-reference implementation; the byte encodings and even-`y` rules are
-exactly NIP-SKD §1/§8 (an implementation that reproduces NIP-SKD §8 reproduces these). The sender and
-recipient roots are the same key pair as NIP-SKD §8, for cross-reference. Only the three deterministic
-primitives are pinned: the masked key `M`, its recipient-side re-derivation, and the message
-conversation key, plus the two sent-contacts index keys. A message event's `content`, `id`, and `sig` are **not**
-pinned, because NIP-44 randomizes the nonce per encryption (so the ciphertext, and therefore the id and
-sig, differ each send).
+A cross-check that an implementation wired MDM's context strings into NIP-SKD correctly (not a re-pinning of
+NIP-SKD's own primitives): the values below compose NIP-SKD's derivations under MDM's contexts. Roots are
+the same key pair as NIP-SKD §8. Only the deterministic keys are pinned; a message's `content`/`id`/`sig`
+are not (NIP-44 randomizes the nonce per encryption).
 
 ```
 # roots
