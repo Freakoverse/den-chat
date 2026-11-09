@@ -237,8 +237,9 @@ export const useDM04Store = create<DM04State>((set, get) => ({
 
       // Also pull from the COUNTERPARTY'S own relays on open (one-shot, once per contact per session), so
       // messages they published only to their advertised relays still surface. Runs regardless of whether
-      // we already have messages, since our relays may simply be missing some of theirs.
-      if (_myPubkey && !_counterpartyRelayFetched.has(pubkey)) {
+      // we already have messages, since our relays may simply be missing some of theirs. Gated by the
+      // "Fetch from recipient relays" Behaviour toggle (Settings > Network).
+      if (_myPubkey && !_counterpartyRelayFetched.has(pubkey) && usePostingBehaviourStore.getState().fetchFromRecipientRelays) {
         _counterpartyRelayFetched.add(pubkey)
         fetchFromCounterpartyRelays(pubkey, _myPubkey, _signer, _privateKey, set, get).catch(() => {})
       }

@@ -36,6 +36,7 @@ interface PostingBehaviourState {
   postToUserRelays: boolean
   postToHubRelays: boolean
   postToRecipientRelays: boolean // DMs: also deliver to the recipient's discovered relays
+  fetchFromRecipientRelays: boolean // DMs: on opening a chat, also pull from the counterparty's own relays
   limitClientRelays: boolean // cap client relays to RELAY_PUBLISH_CAP
   limitUserRelays: boolean   // cap user (NIP-65) relays to RELAY_PUBLISH_CAP
   limitHubRelays: boolean    // cap hub relays to RELAY_PUBLISH_CAP
@@ -49,6 +50,7 @@ interface PostingBehaviourState {
   setPostToUserRelays: (v: boolean) => void
   setPostToHubRelays: (v: boolean) => void
   setPostToRecipientRelays: (v: boolean) => void
+  setFetchFromRecipientRelays: (v: boolean) => void
   setLimitClientRelays: (v: boolean) => void
   setLimitUserRelays: (v: boolean) => void
   setLimitHubRelays: (v: boolean) => void
@@ -59,7 +61,7 @@ interface PostingBehaviourState {
   setBypassDeleteRelayLimits: (v: boolean) => void
 }
 
-type PersistedKeys = 'postToClientRelays' | 'postToUserRelays' | 'postToHubRelays' | 'postToRecipientRelays' | 'limitClientRelays' | 'limitUserRelays' | 'limitHubRelays' | 'limitClientBlossoms' | 'limitUserBlossoms' | 'limitHubBlossoms' | 'parallelBlossomUploads' | 'bypassDeleteRelayLimits'
+type PersistedKeys = 'postToClientRelays' | 'postToUserRelays' | 'postToHubRelays' | 'postToRecipientRelays' | 'fetchFromRecipientRelays' | 'limitClientRelays' | 'limitUserRelays' | 'limitHubRelays' | 'limitClientBlossoms' | 'limitUserBlossoms' | 'limitHubBlossoms' | 'parallelBlossomUploads' | 'bypassDeleteRelayLimits'
 
 function loadDefaults(): Pick<PostingBehaviourState, PersistedKeys> {
   try {
@@ -74,6 +76,7 @@ const defaultValues = {
   postToUserRelays: true,
   postToHubRelays: true,
   postToRecipientRelays: true,
+  fetchFromRecipientRelays: true,
   limitClientRelays: true,
   limitUserRelays: true,
   limitHubRelays: true,
@@ -85,8 +88,8 @@ const defaultValues = {
 }
 
 function persist(state: PostingBehaviourState) {
-  const { postToClientRelays, postToUserRelays, postToHubRelays, postToRecipientRelays, limitClientRelays, limitUserRelays, limitHubRelays, limitClientBlossoms, limitUserBlossoms, limitHubBlossoms, parallelBlossomUploads, bypassDeleteRelayLimits } = state
-  localStorage.setItem(LS_KEY, JSON.stringify({ postToClientRelays, postToUserRelays, postToHubRelays, postToRecipientRelays, limitClientRelays, limitUserRelays, limitHubRelays, limitClientBlossoms, limitUserBlossoms, limitHubBlossoms, parallelBlossomUploads, bypassDeleteRelayLimits }))
+  const { postToClientRelays, postToUserRelays, postToHubRelays, postToRecipientRelays, fetchFromRecipientRelays, limitClientRelays, limitUserRelays, limitHubRelays, limitClientBlossoms, limitUserBlossoms, limitHubBlossoms, parallelBlossomUploads, bypassDeleteRelayLimits } = state
+  localStorage.setItem(LS_KEY, JSON.stringify({ postToClientRelays, postToUserRelays, postToHubRelays, postToRecipientRelays, fetchFromRecipientRelays, limitClientRelays, limitUserRelays, limitHubRelays, limitClientBlossoms, limitUserBlossoms, limitHubBlossoms, parallelBlossomUploads, bypassDeleteRelayLimits }))
 }
 
 export const usePostingBehaviourStore = create<PostingBehaviourState>((set, get) => {
@@ -98,6 +101,7 @@ export const usePostingBehaviourStore = create<PostingBehaviourState>((set, get)
     setPostToUserRelays: (v) => { set({ postToUserRelays: v }); persist({ ...get(), postToUserRelays: v }) },
     setPostToHubRelays: (v) => { set({ postToHubRelays: v }); persist({ ...get(), postToHubRelays: v }) },
     setPostToRecipientRelays: (v) => { set({ postToRecipientRelays: v }); persist({ ...get(), postToRecipientRelays: v }) },
+    setFetchFromRecipientRelays: (v) => { set({ fetchFromRecipientRelays: v }); persist({ ...get(), fetchFromRecipientRelays: v }) },
     setLimitClientRelays: (v) => { set({ limitClientRelays: v }); persist({ ...get(), limitClientRelays: v }) },
     setLimitUserRelays: (v) => { set({ limitUserRelays: v }); persist({ ...get(), limitUserRelays: v }) },
     setLimitHubRelays: (v) => { set({ limitHubRelays: v }); persist({ ...get(), limitHubRelays: v }) },

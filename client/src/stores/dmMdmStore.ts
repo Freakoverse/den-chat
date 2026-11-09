@@ -18,7 +18,7 @@
 import { create } from 'zustand'
 import type { Event, Filter } from 'nostr-tools'
 import { subscribeEventsWide } from '@/lib/nostr/readRelays'
-import { publishWithFailover, getRelays } from '@/lib/nostr/relay-pool'
+import { publishWithFailover, getRelays, fetchEventsFromRelays } from '@/lib/nostr/relay-pool'
 import { publishPersonal, usePostingBehaviourStore } from '@/stores/postingBehaviourStore'
 import { discoverRecipientRelays } from '@/lib/nostr/relayDiscovery'
 import { getExpirationFromTags } from '@/lib/hub/messageExpiration'
@@ -37,6 +37,7 @@ import {
   mdmSupported,
   indexKeys,
   myMaskedPub,
+  peerMaskedPub,
   buildMdmMessage,
   buildMdmReaction,
   buildSentContactsIndex,
@@ -65,6 +66,14 @@ const processedIds = new Set<string>()
 let indexRoots: string[] = []        // recipient roots, most-recent first
 let indexD: string | null = null     // the index's addressable d (lowest, on the multi-device race)
 let indexCreatedAt = 0               // highest created_at seen for the index
+
+// ── per-conversation counterparty-relay fetch (docs §5): handlers + creds exposed from startSubscription,
+//    so opening a chat can pull that partner's messages from the partner's OWN relays (once per session). ──
+let _mdmReceived: ((e: Event) => Promise<void>) | null = null
+let _mdmOwn: ((e: Event) => Promise<void>) | null = null
+let _mdmKeys: MdmKeys | null = null
+let _mdmMyPubkey: string | null = null
+const _mdmCounterpartyFetched = new Set<string>()
 
 const randomHex16 = () => {
   const b = crypto.getRandomValues(new Uint8Array(16))
@@ -188,6 +197,12 @@ export const useMdmStore = create<MdmState>((set, get) => ({
       }
       return { activeConversation: pubkey }
     })
+    // On open, also pull this partner's masked messages from THEIR own relays (docs §5), gated by the
+    // "Fetch from recipient relays" Behaviour toggle, once per contact per session.
+    if (pubkey && usePostingBehaviourStore.getState().fetchFromRecipientRelays && !_mdmCounterpartyFetched.has(pubkey)) {
+      _mdmCounterpartyFetched.add(pubkey)
+      fetchCounterpartyRelaysMdm(pubkey).catch(() => {})
+    }
   },
   addPendingConversation: (pubkey) => set((s) => ({ pendingConversations: new Set(s.pendingConversations).add(pubkey) })),
   removePendingConversation: (pubkey) => set((s) => { const n = new Set(s.pendingConversations); n.delete(pubkey); return { pendingConversations: n } }),
@@ -257,6 +272,17 @@ export const useMdmStore = create<MdmState>((set, get) => ({
       applyPayload(counterparty, event, dec.payload, false, dec.verified, counterparty)
     }
 
+    // Decrypt + route one of MY OWN sent events (I am `M`), for the own-threads sub and the counterparty fetch.
+    const onOwn = async (event: Event) => {
+      if (processedIds.has(event.id)) return
+      processedIds.add(event.id)
+      const recipient = event.tags.find((t) => t[0] === 'p')?.[1]
+      if (!recipient) return
+      const payload = await decryptOwnMdm(event, keys)
+      if (!payload) return
+      applyPayload(recipient, event, payload, true, true, myPubkey)
+    }
+
     // ── my own sent threads, rebuilt from the index's roots (docs §3.4) ──
     const subscribedRoots = new Set<string>()
     let ownSub: { close: () => void } | null = null
@@ -267,15 +293,7 @@ export const useMdmStore = create<MdmState>((set, get) => ({
       const masked = (await Promise.all([...subscribedRoots].map((r) => myMaskedPub(r, keys).catch(() => null)))).filter(Boolean) as string[]
       if (!masked.length) return
       ownSub?.close()
-      ownSub = subscribeEventsWide({ kinds: [MDM_KIND], authors: masked, limit: MDM_LIMIT } as Filter, async (event: Event) => {
-        if (processedIds.has(event.id)) return
-        processedIds.add(event.id)
-        const recipient = event.tags.find((t) => t[0] === 'p')?.[1]
-        if (!recipient) return
-        const payload = await decryptOwnMdm(event, keys)
-        if (!payload) return
-        applyPayload(recipient, event, payload, true, true, myPubkey)
-      })
+      ownSub = subscribeEventsWide({ kinds: [MDM_KIND], authors: masked, limit: MDM_LIMIT } as Filter, onOwn)
     }
 
     const onIndex = async (event: Event) => {
@@ -289,6 +307,10 @@ export const useMdmStore = create<MdmState>((set, get) => ({
       indexCreatedAt = Math.max(indexCreatedAt, event.created_at)
       await refreshOwnThreads()
     }
+
+    // Expose the handlers + creds so opening a conversation can pull from the counterparty's own relays.
+    _mdmReceived = onReceived; _mdmOwn = onOwn; _mdmKeys = keys; _mdmMyPubkey = myPubkey
+    _mdmCounterpartyFetched.clear()
 
     const subReceived = subscribeEventsWide({ kinds: [MDM_KIND], '#p': [myPubkey], limit: MDM_LIMIT } as Filter, onReceived)
     const subIndex = subscribeEventsWide({ kinds: [MDM_KIND], authors: [cFrom], limit: 8 } as Filter, onIndex)
@@ -403,20 +425,48 @@ export const useMdmStore = create<MdmState>((set, get) => ({
 
 /**
  * Publish a real masked event (message, reaction or tombstone) to the recipient's relays, the sender's own
- * relays, and the client defaults (docs §5, reliability first). `publishPersonal` covers the sender's own
- * NIP-65 + client; `publishWithFailover` covers the recipient's relays + client.
+ * relays, and the client defaults (docs §5, reliability first). `publishPersonal` owns the sender's own
+ * NIP-65 + client, honouring the `postToClientRelays` / `postToUserRelays` toggles; a second failover
+ * publish carries ONLY the recipient's discovered relays, honouring `postToRecipientRelays`. This keeps
+ * every destination gated by its own Settings > Network toggle (no raw `getRelays()` bypass).
  */
 async function publishReal(recipientPubkey: string, real: Event, onProgress?: (c: number, t: number, accepted: string[]) => void): Promise<void> {
   const recipientRelays = usePostingBehaviourStore.getState().postToRecipientRelays
     ? await discoverRecipientRelays(recipientPubkey, getRelays()).catch(() => [] as string[])
     : []
-  const realPool = [...recipientRelays, ...getRelays()]
-  const realSeed = recipientRelays.length > 0 ? recipientRelays : getRelays()
-  const target = Math.min(new Set(realPool.map(norm)).size || 1, 4)
-  await Promise.all([
-    publishWithFailover(real, realSeed, { pool: realPool, target, onProgress }),
-    publishPersonal(real),
-  ])
+  const tasks: Promise<unknown>[] = [publishPersonal(real)] // sender's own NIP-65 + client, toggle-aware
+  if (recipientRelays.length) {
+    const target = Math.min(new Set(recipientRelays.map(norm)).size || 1, 6)
+    tasks.push(publishWithFailover(real, recipientRelays, { pool: recipientRelays, target, onProgress }))
+  }
+  await Promise.all(tasks)
+}
+
+/**
+ * Pull a conversation's masked messages from the COUNTERPARTY'S OWN relays on open (docs §5): a one-shot
+ * fetch (no subscription, both directions) from the partner's advertised relays, deduped by the normal
+ * handlers. Gated by the "Fetch from recipient relays" Behaviour toggle; run once per contact per session.
+ */
+async function fetchCounterpartyRelaysMdm(counterpartyRoot: string): Promise<void> {
+  const keys = _mdmKeys, myPubkey = _mdmMyPubkey, onReceived = _mdmReceived, onOwn = _mdmOwn
+  if (!keys || !myPubkey || !onReceived || !onOwn) return
+  try {
+    const relays = await discoverRecipientRelays(counterpartyRoot, getRelays()).catch(() => [] as string[])
+    if (!relays.length) return
+    const [theirM, myM] = await Promise.all([
+      peerMaskedPub(counterpartyRoot, keys).catch(() => null),   // messages they sent me
+      myMaskedPub(counterpartyRoot, keys).catch(() => null),     // messages I sent them
+    ])
+    const filters: Filter[] = []
+    if (theirM) filters.push({ kinds: [MDM_KIND], authors: [theirM], '#p': [myPubkey], limit: MDM_LIMIT })
+    if (myM) filters.push({ kinds: [MDM_KIND], authors: [myM], '#p': [counterpartyRoot], limit: MDM_LIMIT })
+    if (!filters.length) return
+    const events = await fetchEventsFromRelays(relays, filters)
+    for (const ev of events) {
+      if (theirM && ev.pubkey === theirM) await onReceived(ev)
+      else if (myM && ev.pubkey === myM) await onOwn(ev)
+    }
+  } catch { /* best-effort */ }
 }
 
 /**

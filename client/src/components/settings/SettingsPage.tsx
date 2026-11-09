@@ -2990,6 +2990,7 @@ function PostingBehaviourSection() {
     postToUserRelays, setPostToUserRelays,
     postToHubRelays, setPostToHubRelays,
     postToRecipientRelays, setPostToRecipientRelays,
+    fetchFromRecipientRelays, setFetchFromRecipientRelays,
     limitClientRelays, setLimitClientRelays,
     limitUserRelays, setLimitUserRelays,
     limitHubRelays, setLimitHubRelays,
@@ -3054,6 +3055,13 @@ function PostingBehaviourSection() {
               </p>
             </div>
           )}
+        </div>
+        <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-border bg-secondary/30">
+          <div>
+            <p className="text-sm font-medium text-foreground">Fetch from recipient relays</p>
+            <p className="text-xs text-muted-foreground">When you open a DM, also pull the conversation from the other person's own relays, so messages they only published there still show up</p>
+          </div>
+          <ToggleSwitch checked={fetchFromRecipientRelays} onChange={setFetchFromRecipientRelays} />
         </div>
         <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-border bg-secondary/30">
           <div>
