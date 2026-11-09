@@ -206,7 +206,8 @@ The decrypted `content` is a UTF-8 JSON object:
   "v": 1,                         // payload version
   "from": "<hex sender root>",    // REQUIRED: the sender's real key, disclosed only to the recipient; verified per §1.3
   "t": "Hello",                   // message text (optional if an attachment-only message)
-  "edited": 1733251200,           // optional: unix time of the latest edit (present only on an edit, §2.2)
+  "published_at": 1733251200,     // REQUIRED: real original send time = the FIRST version's created_at; carried forward unchanged on edits; the sort key (§2.2)
+  "updated_at": 1733251260,       // optional: real wall-clock time of the latest edit (present only on an edit); drives the "edited" marker (§2.2)
   "reply": "30092:<authorM>:<d>", // optional: addressable coordinate of the message this replies to (kept private; survives edits)
   "attachments": [                // optional: structured file references
     {
@@ -230,7 +231,8 @@ The decrypted `content` is a UTF-8 JSON object:
 ```
 
 A recipient **MUST** verify `from` per §1.3 before attributing or displaying a sender, **MUST** ignore
-unknown fields, and **MUST** tolerate a missing `t` when an attachment is present. A message whose
+unknown fields, **MUST** tolerate a missing `t` when an attachment is present, and **MUST** order the
+conversation by `published_at` rather than the event's `created_at` (§2.2). A message whose
 `from` fails verification **MUST** be treated as unattributed (the stable masked key `M` is still a valid
 opaque pseudonym; a client MAY drop it or surface it as "unverified sender").
 
@@ -240,9 +242,10 @@ text. Three reasons:
 1. **One shape for text and attachments.** A text-only message and one that carries `attachments` (or
    `emoji`, `sticker`, `gif`) share a single structure, so a reader parses the same object either way and
    never has to guess whether the content is a bare string or a wrapper.
-2. **Privacy.** All of it, the message text, the sender's `from`, reply references, and every attachment
-   field (filenames, sizes, and per-file encryption keys) lives inside the NIP-44 ciphertext, because
-   only the `d` and `p` tags are public (§2). Putting attachment metadata in tags would expose it.
+2. **Privacy.** All of it, the message text, the sender's `from`, reply references, the real send and edit
+   timestamps (`published_at` / `updated_at`, §2.2), and every attachment field (filenames, sizes, and
+   per-file encryption keys) lives inside the NIP-44 ciphertext, because only the `d` and `p` tags are
+   public (§2). Putting any of it in tags would expose it.
 3. **No collision with user-typed JSON.** The user's own message is always the string value of `t`, one
    level deep, so content a user literally types, even `{"t":"hi"}` or `{"v":1,"text":"hi"}`, is stored
    and rendered verbatim as that string and can never be mistaken for the envelope. The reader also keys
@@ -251,27 +254,53 @@ text. Three reasons:
 
 ### 2.2 Editing
 
-An edit republishes the **same** `(kind, M, d)` coordinate with new encrypted content and a `created_at`
-of **the original `created_at` plus one** (not the current time). The `+1` guarantees the edit supersedes
-the original under NIP-01 addressable-replacement (newest `created_at` wins, lowest id on a tie) while
-keeping the message in its original timeline position, so an edited message does not jump to the bottom of
-the conversation. The payload MAY carry an `edited` timestamp (§2.1) so the recipient can show an
-"edited" marker; the author is unchanged (`M`), so only the sender can edit their own message. No separate
-edit-hint event is needed, the replacement is the edit.
+Because the message is addressable, editing it is just re-publishing the **same** `(kind, M, d)` coordinate
+with new encrypted content: the relay replaces the previous version, and no separate edit event is needed.
+The author is unchanged (`M`), so only the sender can edit their own message.
+
+NIP-01 selects the current version of a coordinate by **highest `created_at`, lowest id on a tie**, and a
+relay accepts a replacement only when its `created_at` is strictly greater. That overloads `created_at` as a
+replacement token, so it can no longer double as an honest timestamp. NIP-MDM therefore splits the three
+concerns NIP-01 folds into that one field across three values. (A single standard original-send-time field
+would have avoided this; absent one, these three are the workaround.)
+
+- **`created_at` (event field): a logical version counter.** On the first send it equals the true send
+  time. On each edit the client **MUST** set it to the **previous version's `created_at` + 1**, never the
+  wall clock. Edits accumulate: a message edited `k` times has `created_at = original + k`. The `+1` is the
+  smallest increment a relay accepts as a replacement, so the edit supersedes with no id-tie ambiguity, and
+  staying near the original keeps the message in its timeline slot instead of jumping to "now" and stealing
+  slots in `limit`-based relay fetches.
+- **`published_at` (payload field, REQUIRED): the real original send time.** It is the first version's
+  `created_at`, carried forward **unchanged** on every edit. Clients **MUST** order the conversation by
+  `published_at`, not by `created_at` (which drifts with edit count). On the first send
+  `published_at == created_at`.
+- **`updated_at` (payload field, optional): the real wall-clock time of the latest edit** (the corrected
+  clock, §3.1). Present only on an edit. It drives the "edited" marker and any "last edited" display, and is
+  never used for ordering or for replacement selection.
+
+Unlike NIP-CHAT, which carries `published_at` and `updated_at` as **public tags**, NIP-MDM keeps both inside
+the **encrypted payload** (§2.1): only `d` and `p` are ever public (§2), so the true send and edit times
+stay private. The public `created_at` still leaks a coarse time (the original, advancing by one per edit),
+which §7 accounts for.
+
+A client **SHOULD** show an "edited" marker when `updated_at` is present (equivalently, when the stored
+`created_at` has advanced past `published_at`). An edit to a reply **MUST** carry its `reply` reference
+forward unchanged (§2.1). The self-copy is edited in lockstep (§3.4.1).
 
 ## 3. Sending and receiving
 
 ### 3.1 Send (S to R)
 
 1. `M = getBlindedPubkey(context, R_pub)`.
-2. Build the payload (§2.1) with `from = S_pub`; `ciphertext = nip44EncryptAsBlinded(context, R_pub,
-   payloadJson, R_pub)`.
+2. Build the payload (§2.1) with `from = S_pub` and `published_at` set to this message's `created_at`
+   (step 4); `ciphertext = nip44EncryptAsBlinded(context, R_pub, payloadJson, R_pub)`.
 3. Generate a random opaque `d` (for example 16 random bytes, hex).
 4. Assemble the kind-30092 event with `pubkey = M`, `tags = [["d", d], ["p", R_pub]]`, `content =
    ciphertext`, `created_at = nowSeconds()` (the corrected clock), and sign with `signAsBlinded(context,
    event, R_pub)`.
 5. Publish per §5 (the recipient's relay list, the sender's own list, and the client relay list for
-   redundancy). To **edit** later, repeat with the same `d` and `created_at = original + 1` (§2.2).
+   redundancy). To **edit** later, repeat with the same `d`, `created_at = previous version's created_at +
+   1`, `published_at` unchanged, and `updated_at = nowSeconds()` (§2.2).
 
 ### 3.2 Receive (as R)
 
@@ -394,12 +423,15 @@ purged from the recipient's relays can re-publish it there **byte-for-byte**, sa
 re-encryption (which NIP-44's random nonce would otherwise change) and no re-signing. The self-copy is
 thus both the sender's recovery store and a durable backup of the delivered event.
 
-**Editing and deletion.** An edit is a new real event `(30092, M, <real d>)` with new `content` at
-`created_at + 1` (re-deriving `M`'s key from the root and `R`); the sender then republishes its own
-self-copy `(30092, C_from, <copy d>)`, also at `created_at + 1`, embedding the **new** real event, so the
-copy always holds the current version. The two `d`s are each an independent, unique random id (§2),
-unrelated to each other and derived from nothing; the link between the two events exists only inside the
-self-copy's ciphertext (the embedded event), never as a shared public tag.
+**Editing and deletion.** An edit is a new real event `(30092, M, <real d>)` with new `content` at the
+**previous version's `created_at` + 1** (re-deriving `M`'s key from the root and `R`, and carrying
+`published_at` forward unchanged with a fresh `updated_at` in the payload, §2.2); the sender then
+republishes its own self-copy `(30092, C_from, <copy d>)`, also at its previous `created_at + 1`, embedding
+the **new** real event, so the copy always holds the current version. Because the whole real event (with its
+updated `published_at` / `updated_at` payload) rides inside the self-copy's ciphertext, the copy needs no
+timestamp handling of its own. The two `d`s are each an independent, unique random id (§2), unrelated to
+each other and derived from nothing; the link between the two events exists only inside the self-copy's
+ciphertext (the embedded event), never as a shared public tag.
 
 ## 4. Bootstrap, blocking, and spam
 
@@ -561,7 +593,9 @@ What it **does not** hide (deliberately below a maximal-unlinkability scheme on 
 - **Per-pair linkage.** All of one sender's messages to one recipient share a stable `M`, so they group
   trivially. This is deliberate: it is what makes the pseudonym orderable and bannable.
 - **Edit activity.** Because messages are addressable (§2.2), an observer can see that a masked key
-  replaced one of its coordinates (an edit happened, and when), though not the content or the roots.
+  replaced one of its coordinates, and that the public `created_at` advanced by one, so **that** an edit
+  happened is visible. The real edit time (`updated_at`) and original send time (`published_at`) are in the
+  ciphertext (§2.2), so neither the true timing of the edit, nor the content, nor the roots are exposed.
 - **Self-copy existence and volume.** Each message is mirrored by a self-copy (§3.4) published at the same
   `created_at`, so an observer may correlate the two events by timing, and all of a sender's self-copies
   share the stable `C_from` / `C_to` pair, which reveals how many messages some sender has sent. Both the correlation and
