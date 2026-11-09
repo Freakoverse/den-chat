@@ -1,7 +1,5 @@
 # NIP-MDM: Masked Direct Messages
 
-> **Depends on**: NIP-01 (addressable events), NIP-09 (deletion), NIP-44, [`NIP-SKD.md`](./NIP-SKD.md) (the `skd:1` blinded ops this spec composes).
-
 ## Abstract
 
 NIP-MDM is a one-to-one direct message in which the **sender's root identity never appears on the
