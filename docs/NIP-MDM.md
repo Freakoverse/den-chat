@@ -205,7 +205,7 @@ The decrypted `content` is a UTF-8 JSON object:
 {
   "v": 1,                         // payload version
   "from": "<hex sender root>",    // REQUIRED: the sender's real key, disclosed only to the recipient; verified per §1.3
-  "t": "Hello",                   // message text (optional if an attachment-only message)
+  "text": "Hello",                // the message text (optional if an attachment-only message)
   "published_at": 1733251200,     // REQUIRED: real original send time = the FIRST version's created_at; carried forward unchanged on edits; the sort key (§2.2)
   "updated_at": 1733251260,       // optional: real wall-clock time of the latest edit (present only on an edit); drives the "edited" marker (§2.2)
   "reply": "30092:<authorM>:<d>", // optional: addressable coordinate of the message this replies to (kept private; survives edits)
@@ -223,15 +223,12 @@ The decrypted `content` is a UTF-8 JSON object:
         "originalHash": "<sha256 hex>"  // hash of the plaintext file
       }
     }
-  ],
-  "emoji":   [["shortcode", "<url>"]],   // optional: custom emoji refs
-  "sticker": [["id", "<url>"]],          // optional
-  "gif":     [["id", "<url>"]]           // optional
+  ]
 }
 ```
 
 A recipient **MUST** verify `from` per §1.3 before attributing or displaying a sender, **MUST** ignore
-unknown fields, **MUST** tolerate a missing `t` when an attachment is present, and **MUST** order the
+unknown fields, **MUST** tolerate a missing `text` when an attachment is present, and **MUST** order the
 conversation by `published_at` rather than the event's `created_at` (§2.2). A message whose
 `from` fails verification **MUST** be treated as unattributed (the stable masked key `M` is still a valid
 opaque pseudonym; a client MAY drop it or surface it as "unverified sender").
@@ -239,16 +236,17 @@ opaque pseudonym; a client MAY drop it or surface it as "unverified sender").
 The payload is **always** this versioned object, on every message, including one that is only plain
 text. Three reasons:
 
-1. **One shape for text and attachments.** A text-only message and one that carries `attachments` (or
-   `emoji`, `sticker`, `gif`) share a single structure, so a reader parses the same object either way and
-   never has to guess whether the content is a bare string or a wrapper.
+1. **One shape for text and attachments.** A text-only message and one that carries `attachments` share a
+   single structure, so a reader parses the same object either way and never has to guess whether the
+   content is a bare string or a wrapper.
 2. **Privacy.** All of it, the message text, the sender's `from`, reply references, the real send and edit
    timestamps (`published_at` / `updated_at`, §2.2), and every attachment field (filenames, sizes, and
    per-file encryption keys) lives inside the NIP-44 ciphertext, because only the `d` and `p` tags are
    public (§2). Putting any of it in tags would expose it.
-3. **No collision with user-typed JSON.** The user's own message is always the string value of `t`, one
-   level deep, so content a user literally types, even `{"t":"hi"}` or `{"v":1,"text":"hi"}`, is stored
-   and rendered verbatim as that string and can never be mistaken for the envelope. The reader also keys
+3. **No collision with user-typed JSON.** The user's own message is always the string value of `text`, one
+   level deep, so content a user literally types, even a string like `{"text":"hi"}` or `{"v":1,"text":"hi"}`
+   that mimics the envelope, is stored and rendered verbatim as that string and can never be mistaken for
+   the envelope itself. The reader also keys
    off `v`: it interprets the structured fields only when `v` is present (`v` is the payload version, so
    a future shape change bumps it per §9), which is the discriminator a bare-string format would lack.
 
