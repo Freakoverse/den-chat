@@ -50,7 +50,7 @@ so the sender's own other devices can read the thread, and adds a separate dedic
 clients must publish and keep in sync on top of the user's ordinary relay list.
 
 Many conversations do not need to hide the recipient, they need to hide the **sender**. A reporter
-contacting a public inbox, an anonymous tip to a known account, or simply not wanting your outbound
+contacting a public contact point, an anonymous tip to a known account, or simply not wanting your outbound
 contacts enumerable: in all of these the recipient is content to be reachable in the clear, while the
 sender wants to stay unidentified to the public yet **accountable to the recipient**. A per-recipient
 masked sender key provides exactly that:
@@ -491,9 +491,9 @@ message.
 (§3.2). When messages from a known partner `S` are missing there, because a relay of the recipient's was
 down when the sender published, or has since dropped the event, the recipient **SHOULD** also query `S`'s
 kind-10002 relays for
-`{ kinds: [30092], authors: [ getPeerBlindedPubkey(context, S_pub) ], "#p": [R_pub] }`. This is the
-ordinary outbox fetch against the sender's relay list, and it is the reason the real message is placed on
-the sender's relays as well as the recipient's.
+`{ kinds: [30092], authors: [ getPeerBlindedPubkey(context, S_pub) ], "#p": [R_pub] }`. This looks for the
+message on the sender's own relay list, which is the reason the real message is placed on the sender's
+relays as well as the recipient's.
 
 **Failover.** Within the chosen set a client fans out and fails over until at least one relay (ideally
 several, for redundancy) accepts the event; a relay that rejects or does not acknowledge is skipped and the
