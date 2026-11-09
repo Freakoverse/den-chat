@@ -45,10 +45,11 @@ const MDM_PEER: ChatCtx = { context: CTX_PEER, form: 'blinded' }
 const MDM_COPY_FROM: ChatCtx = { context: CTX_COPY_FROM, form: 'self' }
 const MDM_COPY_TO: ChatCtx = { context: CTX_COPY_TO, form: 'self' }
 
-/** Sent-contacts index: packed-payload version byte and the default cap (docs §3.4). ~900 roots keeps the
- *  base64 of the packed list within a 64 KB event after NIP-44 + envelope overhead. */
+/** Sent-contacts index: packed-payload version byte and the default cap (docs §3.4). 767 is the last root
+ *  count whose base64 payload stays under NIP-44's 2^15-byte padding step, so the event sits near 43 KB,
+ *  well under 64 KB. */
 const INDEX_VERSION = 0x01
-export const MDM_INDEX_CAP = 900
+export const MDM_INDEX_CAP = 767
 
 export interface MdmKeys {
   privateKey?: string | null

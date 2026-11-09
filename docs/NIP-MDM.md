@@ -412,11 +412,12 @@ the list), since cold-start recovery depends on the set, not the exact order. So
 a contact already in the list, puts no index event on the wire, and the index is not an extra event per
 message.
 
-The cap is whatever keeps the event within the relay size limit the sender targets. Under a 64 KB event,
-base64 of the packed roots plus NIP-44 and envelope overhead fits roughly **900** roots, so a client caps
-there (and **MAY** cap lower, or higher against a relay that allows larger events). Pruning only ever sheds
-the least-recently-messaged contacts beyond the cap; those threads stay reachable if the sender still knows
-the npub, they are simply not auto-enumerated on a fresh device.
+The cap is whatever keeps the event within the relay size limit the sender targets. Under a 64 KB event the
+ceiling is **767** roots: NIP-44 pads by powers of two, and 767 is the last count whose base64 payload stays
+below the 2^15-byte padding step, leaving the event near 43 KB with comfortable margin. A client caps there,
+and **MAY** cap lower, or higher against a relay that allows larger events. Pruning only ever sheds the
+least-recently-messaged contacts beyond the cap; those threads stay reachable if the sender still knows the
+npub, they are simply not auto-enumerated on a fresh device.
 
 **Multi-device.** The index is a single replaceable event, so two devices updating it concurrently
 **merge** rather than clobber: fetch the latest index, union the two lists (dedup, keeping the front-most,
