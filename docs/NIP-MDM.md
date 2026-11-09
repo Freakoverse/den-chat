@@ -86,7 +86,7 @@ point between NIP-04 and a maximal-unlinkability DM scheme, not a replacement fo
 
 ### 1.1 Derivation
 
-The masked key is the NIP-SKD **blinded** form (see [`NIP-SKD.md`](./NIP-SKD.md) §1) under one fixed
+The masked key is the NIP-SKD **blinded** form (see NIP-SKD §1) under one fixed
 context:
 
 ```
@@ -632,3 +632,7 @@ C_from = getSelfSubkeyPubkey("nip-mdm:v1:copy-from")
 C_to   = getSelfSubkeyPubkey("nip-mdm:v1:copy-to")
 #   => ef7bcea2043ec5035f902860cbf6702209178f9ad1fed0b07b40d223d89863e7
 ```
+
+## References
+
+- NIP-SKD: `nevent1qvzqqqpqpypzq082fqrtrcdfs2wnp4wt3fuqz82zw8rywn4nz5c7ey0jsyg0u06qqqsqqqpw7aeayck39jqm037l3gvyz6wln4vqtyrvvk5l7uau6lrwsaq86dufr`
