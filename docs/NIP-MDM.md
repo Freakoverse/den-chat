@@ -2,7 +2,8 @@
 
 ## Abstract
 
-NIP-MDM is a one-to-one direct message in which the **sender's root identity never appears on the wire**.
+NIP-MDM (Masked Direct Messages) is a one-to-one direct message in which the **sender's root identity never
+appears on the wire**.
 The sender authors under a per-recipient **masked key** `M` (a NIP-SKD **blinded** sub-key of its root,
 blinded toward the recipient); the recipient is addressed by their **real** key, so they receive with no
 derivation, just a subscription to their own key. A public observer sees a masked key delivering an
