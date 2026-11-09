@@ -18,7 +18,7 @@ Where a maximal-unlinkability scheme uses a fresh ephemeral key per message and 
 sender unlinkability at the cost of being unorderable, unbannable, and unsortable, NIP-MDM gives the sender
 one **stable, deterministic, verifiable** masked key per recipient: the recipient confirms it belongs to the
 claimed root (accountable and spoof-proof), any of the sender's own devices reproduce it from the root key
-alone (recovering sent history from a static self-derived reference, §3.4), and it is a single stable author
+alone (recovering sent history from a static self-derived index, §3.4), and it is a single stable author
 (so messages order and thread normally). Timestamps and sizes are truthful rather than jittered, so a
 sender's messages to a given recipient are publicly linkable to each other but never to the sender's real
 key. The sender is hidden from everyone; the content and the sender's real identity are disclosed only to
@@ -63,8 +63,8 @@ masked sender key provides exactly that:
   can author as it (it requires their blinded private scalar), so a verified message is **provably**
   from that sender. Forgery is infeasible, not merely detectable.
 - **Determinism.** The masked key is a pure function of `(sender root, recipient root)`, and the sender's
-  self-copies are addressed to static self-derived keys (§3.4), so every device of the sender rebuilds the full
-  sent history from the root key alone, with no stored recipient list.
+  sent-contacts index is addressed to static self-derived keys (§3.4), so every device of the sender rebuilds
+  the full conversation list from the root key alone, with no stored recipient list.
 
 The honest cost is in §7: the recipient is not hidden, and timing and size are visible. NIP-MDM is a
 point between NIP-04 and a maximal-unlinkability DM scheme, not a replacement for either.
@@ -149,7 +149,7 @@ verifier ops (NIP-SKD §1.2), because §1.3 is a plain root-to-root `getPeerBlin
 | Sender | Encrypt to the recipient | `nip44EncryptAsBlinded(context, R_pub, plaintext, R_pub)` |
 | Recipient | Decrypt | plain `nip44Decrypt(ciphertext, r_priv, M)` (no blinded op; recipient is unmasked) |
 | Recipient | Verify the sender | `getPeerBlindedPubkey(context, S_pub)` |
-| Sender | Self-copy (§3.4) | `getSelfSubkeyPubkey`, `signAsSelfSubkey`, `nip44EncryptAsSelfSubkey` / `nip44DecryptAsSelfSubkey` |
+| Sender | Sent-contacts index (§3.4) | `getSelfSubkeyPubkey`, `signAsSelfSubkey`, `nip44EncryptAsSelfSubkey` / `nip44DecryptAsSelfSubkey` |
 
 A local-key client derives directly (same trust boundary as the root it already holds). `getBlindedPubkey`,
 `getPeerBlindedPubkey`, and `getSelfSubkeyPubkey` are read-only and **MUST** be answered non-interactively
@@ -226,7 +226,9 @@ The decrypted `content` is a UTF-8 JSON object:
 Two variants reuse this same envelope (`v`, `from`, `published_at`, and the edit fields): a **reaction**
 carries a `reaction` object in place of `text` (§6), and a **tombstone** (a deleted message, §6) carries
 none of `text`, `attachments`, or `reaction`. A reader routes on these: `text` or `attachments` is a
-message, a `reaction` object is a reaction, and an envelope with none of them is a tombstone.
+message, a `reaction` object is a reaction, and an envelope with none of them is a tombstone. The
+sent-contacts index (§3.4) is **not** one of these: it is a separate **binary** payload under the same
+kind, never parsed as a message, recognized by its author being the sender's own `C_from`.
 
 A recipient **MUST** verify `from` per §1.3 before attributing or displaying a sender, **MUST** ignore
 unknown fields, **MUST** tolerate a missing `text` (an attachment-only message, a reaction, or a
@@ -285,7 +287,7 @@ which §7 accounts for.
 
 A client **SHOULD** show an "edited" marker when `updated_at` is present (equivalently, when the stored
 `created_at` has advanced past `published_at`). An edit to a reply **MUST** carry its `reply` reference
-forward unchanged (§2.1). The self-copy is edited in lockstep (§3.4.1).
+forward unchanged (§2.1).
 
 ## 3. Sending and receiving
 
@@ -301,6 +303,8 @@ forward unchanged (§2.1). The self-copy is edited in lockstep (§3.4.1).
 5. Publish per §5 (the recipient's relay list, the sender's own list, and the client relay list for
    redundancy). To **edit** later, repeat with the same `d`, `created_at = previous version's created_at +
    1`, `published_at` unchanged, and `updated_at = nowSeconds()` (§2.2).
+6. Update the sent-contacts index (§3.4): move `R_pub` to the front (a new contact triggers a republish; a
+   repeat to an existing contact MAY be debounced). Skipped on an edit (an edit adds no new recipient).
 
 ### 3.2 Receive (as R)
 
@@ -329,104 +333,106 @@ The **recipient** side needs no stored state: `{ kinds: [30092], "#p": [R_pub] }
 addressed to you, and each sender is attributed from its verified `from` (§3.2). The **sender** side has
 no such single reference: each sent message is authored by a different per-recipient masked key `M`, so a
 device holding only the root key does not know which `M`s to query and cannot list "everything I sent".
-The sender's self-copies (§3.4) close that gap.
+The sender's sent-contacts index (§3.4) closes that gap.
 
-### 3.4 The sender's self-copies
+### 3.4 The sender's sent-contacts index
 
-So a sender can recover its own sent history on a device that holds only the root key, every message is
-mirrored to a **self-copy** addressed to a key the sender alone can derive. Two NIP-SKD **self** sub-keys
-serve this (self form, no peer, so both require the sender's root to derive and neither is linkable to the
-sender's real key by anyone else):
+§3.3 leaves the sender unable to enumerate its own conversations from the root key alone: each sent message
+is authored by a different per-recipient masked key `M`, so a device holding only the root key does not know
+which `M`s or which recipients to look for. The sender closes this gap with a single **sent-contacts
+index**: one addressable event that records the recipients it has messaged, so a fresh device rediscovers
+every (recent) conversation and then fetches each thread from relays (§5).
+
+It is **not** a copy of any message. Message content is made durable by §5 (each real event is published to
+several relays); the index only answers *whom did I message*, which is the one thing the root key cannot
+reconstruct on its own.
+
+**Keys.** Two static NIP-SKD **self** sub-keys, derived from the root alone (self form, no peer, so no one
+else can derive or address them):
 
 ```
-C_from = getSelfSubkeyPubkey("nip-mdm:v1:copy-from")    // authors the self-copy; sender holds its private key
-C_to   = getSelfSubkeyPubkey("nip-mdm:v1:copy-to")      // the self-copy's address; the sender subscribes here
+C_from = getSelfSubkeyPubkey("nip-mdm:v1:copy-from")    // authors the index; sender holds its private key
+C_to   = getSelfSubkeyPubkey("nip-mdm:v1:copy-to")      // the index's address; the sender subscribes here
 ```
 
-When sending a kind-30092 message to `R`, the sender publishes a second kind-30092 event, identical in
-kind and shape so it is indistinguishable from any masked message on the wire:
+The `copy-*` context labels are historical; the keys author and address the index.
+
+**The event.** One kind-30092 event, the **same kind as a message** so it is indistinguishable on the wire,
+replaced in place on every update:
 
 ```jsonc
 {
   "kind": 30092,
-  "pubkey": "<C_from>",                        // the self-copy's author key (a sender self-key)
-  "created_at": <the SAME value as the real message>,
+  "pubkey": "<C_from>",                        // the index's author key (a sender self-key)
+  "created_at": <previous created_at + 1 per update>,   // replacement counter only: no published_at / updated_at
   "tags": [
-    ["d", "<its own unique random id - NOT the real message's d>"],   // see "no shared public identifier" below
-    ["p", "<C_to>"]                            // the self-copy's address key (a sender self-key); the sender subscribes here
+    ["d", "<fixed per-identity opaque id, derived from a sender-only secret, see below>"],   // reproducible on the sender's devices, not computable by the public
+    ["p", "<C_to>"]                            // the index's address key (a sender self-key); the sender subscribes here
   ],
-  "content": "<NIP-44 ciphertext from C_from to C_to of the self-copy payload (§3.4.1)>",
+  "content": "<NIP-44 ciphertext from C_from to C_to of the binary payload below>",
   "sig": "<BIP-340 by C_from>"                 // signAsSelfSubkey("nip-mdm:v1:copy-from", event)
 }
 ```
 
-The two events carry the **same `created_at`** and are **published together**; no timing offset is applied
-(§7). Because the self-copy's recipient `C_to` is itself a masked self-key and not the sender's real key,
-nothing on the wire addresses the copies to the sender or ties them to the sender's identity.
+Only `d` and `p` are public, as with a message (§2). The `d` is a fixed per-identity value derived from a
+**sender-only secret**, the first 16 bytes of `SHA-256("nip-mdm:v1:index-d" ‖ conversationKey(C_from,
+C_to))`: the sender's devices all reproduce it (they hold the keys), but the public **cannot** recompute it
+from the visible `C_from` / `C_to`, since the NIP-44 conversation key needs a private key. So the index's
+`d` looks like any message's random `d` and cannot be used to pick indexes out of ordinary message traffic.
+A client never confuses the index with a message anyway: it reads its own `{ authors: [C_from] }` event as
+the index and every other kind-30092 event as a message. There is **no `published_at` or `updated_at`**: the
+index is never displayed or ordered as a message, so `created_at` is purely the NIP-01 replacement counter
+(previous + 1 per update, §2.2).
 
-**Two events, no shared public identifier.** The self-copy is a separate event from the real message, and
-the two share no public field. One threat drives both choices: `C_from` / `C_to` are **static**, identical
-across all of a sender's conversations, so if the self-copy handle and a recipient address ever met on one
-public event, or if the two events shared a public join key such as a common `d`, an observer could join
-that stable handle to each recipient and rebuild the entire outbound graph. So the self-copy carries its
-**own** random `d` (never the real message's), is addressed to `C_to` with no recipient tag, and holds the
-real event only **encrypted** in its payload (§3.4.1). Nothing public ties it to the real message or to any
-recipient; only the sender, who can decrypt it, knows the two are a pair. The sole residual link is the
-shared `created_at`, a soft correlation that grows ambiguous as network volume rises (§7). The cost of the
-separation is one extra event per message.
-
-**Fetching.** A client fetches both streams under kind 30092:
+**Payload (binary).** The decrypted content is **not** the JSON message envelope (§2.1); it is a compact
+binary list, a version byte followed by the recipients' **root** pubkeys, 32 bytes each, most-recent first:
 
 ```
-received:    { kinds: [30092], "#p": [ R_pub ] }                       // messages others sent to me
-my copies:   { kinds: [30092], authors: [ C_from ], "#p": [ C_to ] }   // copies of what I sent
+0x01 ‖ root_0 (32 bytes) ‖ root_1 (32) ‖ … ‖ root_{n-1} (32)      // n ≤ 1024, newest first
 ```
 
-`C_from` and `C_to` are static (fixed self-derivations from the root), so any device reproduces them with
-no stored state. A client accepts a self-copy event only when its author equals the derived `C_from`. The
-self-copy stream yields the sender's full sent history; combined with the received stream (each message
-carrying its own verified `from`), a fresh device rebuilds the entire conversation list from the root key
-alone.
+**Roots** are stored, not masked keys: `M` derives from a root (`getBlindedPubkey(context, root)`) but not
+the reverse, and the list is encrypted so the roots never reach anyone but the sender. Position encodes
+recency, so no per-entry timestamp is kept.
 
-**The self-copy stream is unspammable.** Both of its identifiers are keys only the sender can produce:
-`C_from` is a keypair only the sender holds, so no one else can sign a valid event with that author, and
-`C_to` is a secret self-key no one else can derive, so no one else can even address an event to it. The
-`author == C_from` check is therefore both the authenticity check and an absolute spam guarantee: the
-send/recovery side cannot be polluted at all. (The **received** side, `#p = [R_pub]` on the recipient's
-real key, is openly addressable and so is spammable like any DM, which is what §4.1 and §4.2 are for.)
+**Update rule.** When the sender sends a new message (not an edit) to recipient `R`:
 
-#### 3.4.1 Self-copy payload
+1. Remove `R_pub` from the list if already present (dedup).
+2. Insert `R_pub` at the **front** (most recent).
+3. If the list now exceeds **1024** entries, drop the oldest (tail) entries until it fits.
+4. Re-encrypt and republish the index at `created_at + 1`.
 
-The self-copy's encrypted payload carries the **entire signed real message event**, verbatim, so the copy
-is a complete backup of it, not a reconstruction:
+A client **MUST** republish when the **set** of roots changes (a new contact, or a prune), and **MAY**
+debounce or skip a republish that only reorders existing contacts (a repeat message to someone already in
+the list), since cold-start recovery depends on the set, not the exact order. So the common case, messaging
+a contact already in the list, puts no index event on the wire, and the index is not an extra event per
+message.
 
-```jsonc
-{
-  "v": 1,
-  "event": { /* the full signed kind-30092 real message: pubkey=M, tags=[["d",<real d>],["p",R]], content, id, sig */ }
-}
+1024 roots is 32 KB of plaintext, comfortably inside a 64 KB event; a client **MAY** use a lower cap.
+Pruning only ever sheds the least-recently-messaged contacts beyond 1024; those threads stay reachable if
+the sender still knows the npub, they are simply not auto-enumerated on a fresh device.
+
+**Multi-device.** The index is a single replaceable event, so two devices updating it concurrently
+**merge** rather than clobber: fetch the latest index, union the two lists (dedup, keeping the front-most,
+hence most recent, position of each root), and republish at `max(seen created_at) + 1`.
+
+**Fetching / cold start.** A fresh device derives `C_from`, `C_to`, and `d` from the root, then fetches:
+
+```
+index:     { kinds: [30092], authors: [ C_from ] }       // the one sent-contacts index
+received:  { kinds: [30092], "#p": [ R_pub ] }            // messages others sent to me
 ```
 
-Everything the sender needs is inside that embedded event, so no separate `to`, `ref`, or text field is
-required: the recipient `R` is its `p` tag, its coordinate is `(30092, M, <its d>)`, and the message text
-is its `content`, which the sender decrypts with `M` (it holds `M`'s key, so `conversationKey(M_priv,
-R)`). The two events still share nothing in public (§3.4): the real event's identifiers live only inside
-the self-copy's ciphertext.
+It decrypts the index payload, and for each root `R` derives `M = getBlindedPubkey(context, R)` and fetches
+that thread (§3.3, §5). Combined with the received stream (each message carrying its own verified `from`),
+the device rebuilds the entire conversation list from the root key alone.
 
-**Rebroadcast.** Because the copy holds the exact signed event, a sender whose message was dropped or
-purged from the recipient's relays can re-publish it there **byte-for-byte**, same `id` and `sig`, with no
-re-encryption (which NIP-44's random nonce would otherwise change) and no re-signing. The self-copy is
-thus both the sender's recovery store and a durable backup of the delivered event.
-
-**Editing and deletion.** An edit is a new real event `(30092, M, <real d>)` with new `content` at the
-**previous version's `created_at` + 1** (re-deriving `M`'s key from the root and `R`, and carrying
-`published_at` forward unchanged with a fresh `updated_at` in the payload, §2.2); the sender then
-republishes its own self-copy `(30092, C_from, <copy d>)`, also at its previous `created_at + 1`, embedding
-the **new** real event, so the copy always holds the current version. Because the whole real event (with its
-updated `published_at` / `updated_at` payload) rides inside the self-copy's ciphertext, the copy needs no
-timestamp handling of its own. The two `d`s are each an independent, unique random id (§2), unrelated to
-each other and derived from nothing; the link between the two events exists only inside the self-copy's
-ciphertext (the embedded event), never as a shared public tag.
+**Unspammable.** Both identifiers are keys only the sender can produce: `C_from` is a keypair only the
+sender holds, so no one else can sign a valid event with that author, and `C_to` is a secret self-key no one
+else can derive, so no one else can even address an event to it. The `author == C_from` check is therefore
+both the authenticity check and an absolute spam guarantee: the index cannot be polluted. (The **received**
+side, `#p = [R_pub]` on the recipient's real key, is openly addressable and so is spammable like any DM,
+which is what §4.1 and §4.2 are for.)
 
 ## 4. Bootstrap, blocking, and spam
 
@@ -475,8 +481,8 @@ to `S`), or (b) unverified, which a client MAY drop or quarantine. Combined with
 blocked senders pre-decryption and unknown senders post-verification.
 
 Spam exposure is therefore one-sided: the **inbound** side is spammable like any DM, while the sender's
-own **self-copy** stream (§3.4) is cryptographically unspammable, since its identifiers (`C_from`, `C_to`)
-are self-keys only the sender can sign as or address.
+own **sent-contacts index** (§3.4) is cryptographically unspammable, since its identifiers (`C_from`,
+`C_to`) are self-keys only the sender can sign as or address.
 
 ## 5. Relays
 
@@ -501,14 +507,13 @@ who wants to narrow it.
 - the **client relay list**, the client's own configured or default relays, a shared rendezvous that
   belongs to neither party.
 
-**Self-copy** (`C_from`, `p = C_to`). A client **SHOULD** publish it to:
+**Sent-contacts index** (`C_from`, `p = C_to`, §3.4). A client **SHOULD** publish it to:
 
-- the **sender's own** kind-10002 relays, where the sender reads
-  `{ kinds: [30092], authors: [C_from], "#p": [C_to] }`; and
+- the **sender's own** kind-10002 relays, where the sender reads `{ kinds: [30092], authors: [C_from] }`; and
 - the **client relay list**.
 
-The self-copy is addressed to `C_to`, a sender self-key the recipient cannot derive, so there is nothing for
-the recipient to fetch and no reason to place it on the recipient's relays.
+The index is addressed to `C_to`, a sender self-key the recipient cannot derive, so there is nothing for the
+recipient to fetch and no reason to place it on the recipient's relays.
 
 **Fallbacks.** If a party advertises no kind-10002 list, that party's portion of the targets falls back to
 the client relay list. If the client relay list is also absent, or every relay in the whole set is
@@ -529,14 +534,13 @@ next is tried. How a client judges a relay reachable or trustworthy (connectivit
 read-back, reputation) is left to the client; this spec requires only the SHOULD targets above and the
 loud-failure rule.
 
-**Recovery.** Each message exists as two independent copies: the real event, and a full verbatim backup of
-that same signed event inside the self-copy (§3.4.1), on relay sets that overlap only partly. A sender
-recovers sent history either **blindly**, via the static `C_to` on its own or the client relays, or, once a
-recipient `R` is known again, by re-deriving the deterministic `M` and fetching `{ authors: [M] }` from
-`R`'s relays or its own. If the real event is dropped or purged from one relay set, the sender re-publishes
-it **byte-for-byte** from the self-copy (same `id` and `sig`, §3.4.1), to the recipient's current relays.
-Because the keys are deterministic rather than ephemeral, a lost copy is always re-derivable, re-fetchable,
-and re-publishable.
+**Recovery.** The real message is spread across the recipient's relays, the sender's own relays, and the
+client relay list, so a single relay or list failing does not lose it. A sender rebuilds its sent history by
+reading the sent-contacts index from its own (or the client) relays (§3.4), then, for each recipient root
+`R`, re-deriving the deterministic `M` and fetching `{ kinds: [30092], authors: [M], "#p": [R_pub] }` from
+`R`'s relays or its own. Because the keys are deterministic rather than ephemeral, every thread is always
+re-derivable and re-fetchable from whichever relay set still holds it; content durability is a property of
+this multi-relay spread (and any retention layer a sender runs), not of a per-message copy.
 
 **Privacy mode (optional).** Placing the real message on the sender's own relays means an event authored by
 `M` resides on relays the sender publicly advertises. This is a **soft** correlation only: a third party
@@ -544,9 +548,9 @@ cannot derive `M` (it needs the sender-recipient ECDH secret, §1.1), so to the 
 that happens to share relays with the sender; shared public relays dilute it further, and no relay attests
 who uploaded an event, so residence does not establish authorship. For a sender who runs a **distinctive
 personal relay set** and wants to avoid even that correlation (§7), a client **MAY** offer a privacy mode
-that narrows publishing: the real message to the recipient's relays only, and the self-copy to the sender's
-relays only, sharing just the client relay list. This trades the default's deliverability for tighter
-unlinkability; a client SHOULD make clear which mode is in effect.
+that narrows publishing: the real message to the recipient's relays only, and the sent-contacts index to the
+sender's relays only, sharing just the client relay list. This trades the default's deliverability for
+tighter unlinkability; a client SHOULD make clear which mode is in effect.
 
 ## 6. Ancillary events
 
@@ -576,7 +580,8 @@ The recipient decrypts and verifies `from` exactly as for a message (§3.2), the
 object. `target` is a **coordinate**, not an event id, so it survives edits of the target (an edit changes
 the target's id but not its `(kind, M, d)` coordinate). To change or remove a reaction, the reactor edits
 or tombstones the reaction's own coordinate (§2.2); a client **SHOULD** keep at most one active reaction
-event per target per reactor. A reaction needs no self-copy: the reactor recovers it through the direct
+event per target per reactor. A reaction needs no index entry of its own: the counterparty is already in the
+sent-contacts index (§3.4), and the reaction is recovered along with the thread through the direct
 `{ kinds: [30092], authors: [M], "#p": [X] }` query for the already-known counterparty `X` (§3.3).
 
 **Deletions.** A sender deletes its own message **privately** by tombstone-editing it: republish the
@@ -602,6 +607,10 @@ What NIP-MDM **hides** from a passive relay observer:
 - Reaction and deletion activity: reactions and tombstone-deletions are masked kind-30092 events too (§6),
   so the glyph, the target, and even whether an event is a reaction rather than a message are encrypted;
   only an optional NIP-09 hard-purge, if a client opts into one, is public.
+- The sender's message and contact volume: the sent-contacts index (§3.4) is a single capped, replaceable
+  event (not one copy per message), authored by a self-key no one else can link to the root, so an observer
+  can neither count a sender's messages nor its contacts, and there is no per-message paired event to
+  correlate.
 
 What it **does not** hide (deliberately below a maximal-unlinkability scheme on sender unlinkability and timing):
 
@@ -618,13 +627,6 @@ What it **does not** hide (deliberately below a maximal-unlinkability scheme on 
   replaced one of its coordinates, and that the public `created_at` advanced by one, so **that** an edit
   happened is visible. The real edit time (`updated_at`) and original send time (`published_at`) are in the
   ciphertext (§2.2), so neither the true timing of the edit, nor the content, nor the roots are exposed.
-- **Self-copy existence and volume.** Each message is mirrored by a self-copy (§3.4) published at the same
-  `created_at`, so an observer may correlate the two events by timing, and all of a sender's self-copies
-  share the stable `C_from` / `C_to` pair, which reveals how many messages some sender has sent. Both the correlation and
-  the volume are **unlinkable to the sender's real key** (`C_from` / `C_to` need the root to derive), and
-  the design deliberately accepts them rather than jittering timing: as overall network activity grows,
-  co-timed masked events become ordinary noise. The self-copy's own recipient `C_to` is masked too, so
-  recovering the sent history never exposes the sender either.
 - **Relay residence (default publishing).** By default (§5) the real message is also published to the
   sender's own relay list for deliverability, so an event authored by `M` resides on relays the sender
   publicly advertises. This is a **soft** correlation only: `M` is underivable without the
@@ -650,7 +652,7 @@ Comparison:
 | Orderable / rate-limitable / bannable author | yes | no | yes |
 | Editable messages | no | no | yes (addressable) |
 | Timing | truthful | jittered | truthful |
-| Sender multi-device sync | n/a | self-copy to the real key | self-copy to a masked self-key |
+| Sender multi-device sync | n/a | self-copy to the real key | sent-contacts index at a masked self-key |
 
 Choose NIP-MDM when a conversation wants **sender** privacy with a stable, accountable, editable sender
 identity. Choose a maximal-unlinkability scheme when per-message unlinkability and jittered timing matter
@@ -679,7 +681,7 @@ the choice when the recipient must also be hidden.
 ## 9. Versioning and the kind number
 
 The `nip-mdm:v1:*` context family (`:peer` for the masked key, `:copy-from` / `:copy-to` for the
-self-copy keys) carries the **masked-identity** version; a backwards-incompatible change to any of those
+sent-contacts index keys) carries the **masked-identity** version; a backwards-incompatible change to any of those
 derivations increments the whole family together (`nip-mdm:v2:*`), since changing one in isolation would
 split a conversation. The **scheme** version is NIP-SKD's salt (`skd:1`), recorded by consumers per
 NIP-SKD §5. Changing the payload shape (§2.1) is a `v` bump inside the payload, not a context change.
@@ -696,7 +698,7 @@ reference implementation; the byte encodings and even-`y` rules are
 exactly NIP-SKD §1/§8 (an implementation that reproduces NIP-SKD §8 reproduces these). The sender and
 recipient roots are the same key pair as NIP-SKD §8, for cross-reference. Only the three deterministic
 primitives are pinned: the masked key `M`, its recipient-side re-derivation, and the message
-conversation key, plus the two self-copy keys. A message event's `content`, `id`, and `sig` are **not**
+conversation key, plus the two sent-contacts index keys. A message event's `content`, `id`, and `sig` are **not**
 pinned, because NIP-44 randomizes the nonce per encryption (so the ciphertext, and therefore the id and
 sig, differ each send).
 
@@ -718,7 +720,7 @@ M      = da1ae646a84d43609e7b69ae637b8457bd939ef1a725ecefdff2fc8989719bf7
 # recipient: conversationKey(r_priv, M_pub)
 #   => 3cb3501b3af4e59fa1b5df9323cb43a53c3b3b01714c79c69b3623afcf7530cc     ✓ (both sides equal)
 
-# ── sender self-copy keys (self form; from s_priv alone, independent of any recipient) ──
+# ── sent-contacts index keys (self form; from s_priv alone, independent of any recipient) ──
 C_from = getSelfSubkeyPubkey("nip-mdm:v1:copy-from")
 #   => 7b63c265022d3fd35c2b5b90ffe5f5c3fc28c6a5e1bb7e90a292c5bd3d636b00
 C_to   = getSelfSubkeyPubkey("nip-mdm:v1:copy-to")
