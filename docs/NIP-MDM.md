@@ -366,7 +366,7 @@ replaced in place on every update:
   "pubkey": "<C_from>",                        // the index's author key (a sender self-key)
   "created_at": <previous created_at + 1 per update>,   // replacement counter only: no published_at / updated_at
   "tags": [
-    ["d", "<fixed per-identity opaque id, derived from a sender-only secret, see below>"],   // reproducible on the sender's devices, not computable by the public
+    ["d", "<random opaque id, generated once and reused on every update>"],   // same shape as a message's d
     ["p", "<C_to>"]                            // the index's address key (a sender self-key); the sender subscribes here
   ],
   "content": "<NIP-44 ciphertext from C_from to C_to of the binary payload below>",
@@ -374,14 +374,14 @@ replaced in place on every update:
 }
 ```
 
-Only `d` and `p` are public, as with a message (§2). The `d` is a fixed per-identity value derived from a
-**sender-only secret**, the first 16 bytes of `SHA-256("nip-mdm:v1:index-d" ‖ conversationKey(C_from,
-C_to))`: the sender's devices all reproduce it (they hold the keys), but the public **cannot** recompute it
-from the visible `C_from` / `C_to`, since the NIP-44 conversation key needs a private key. So the index's
-`d` looks like any message's random `d` and cannot be used to pick indexes out of ordinary message traffic.
-A client never confuses the index with a message anyway: it reads its own `{ authors: [C_from] }` event as
-the index and every other kind-30092 event as a message. There is **no `published_at` or `updated_at`**: the
-index is never displayed or ordered as a message, so `created_at` is purely the NIP-01 replacement counter
+Only `d` and `p` are public, as with a message (§2). The `d` is a **random** opaque id, generated once when
+the index is first created and reused on every update, exactly like a message's `d`: nothing about it is
+derived or recomputable, so it looks like any other kind-30092 event and cannot be used to pick indexes out
+of ordinary message traffic. A device never needs to know `d` in advance: it finds the index by **author**,
+`{ authors: [C_from] }` (`C_from` is derived from the root), reads the returned event's `d`, and reuses it
+for updates. A client never confuses the index with a message: its own `{ authors: [C_from] }` event is the
+index, every other kind-30092 event is a message. There is **no `published_at` or `updated_at`**: the index
+is never displayed or ordered as a message, so `created_at` is purely the NIP-01 replacement counter
 (previous + 1 per update, §2.2).
 
 **Payload (binary).** The decrypted content is **not** the JSON message envelope (§2.1); it is a compact
@@ -414,9 +414,14 @@ the sender still knows the npub, they are simply not auto-enumerated on a fresh 
 
 **Multi-device.** The index is a single replaceable event, so two devices updating it concurrently
 **merge** rather than clobber: fetch the latest index, union the two lists (dedup, keeping the front-most,
-hence most recent, position of each root), and republish at `max(seen created_at) + 1`.
+hence most recent, position of each root), and republish at `max(seen created_at) + 1`. Because `d` is
+chosen at first creation (not derived), two devices that both create the very first index before syncing can
+briefly pick **different** `d`s, leaving two coordinates under `C_from`. A client that sees more than one
+kind-30092 event authored by `C_from` **unions all their lists** (recovery loses nothing) and **converges
+future writes onto the lowest `d`**, so the index collapses back to one coordinate.
 
-**Fetching / cold start.** A fresh device derives `C_from`, `C_to`, and `d` from the root, then fetches:
+**Fetching / cold start.** A fresh device derives `C_from` and `C_to` from the root (it does not need `d`,
+the index is found by author), then fetches:
 
 ```
 index:     { kinds: [30092], authors: [ C_from ] }       // the one sent-contacts index
