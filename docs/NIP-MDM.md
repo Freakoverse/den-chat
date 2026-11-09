@@ -30,9 +30,10 @@ reference, §3.4), and it is a single stable author (so messages order and threa
 pseudonymity* rather than full-conversation anonymity.
 
 It also needs **no dedicated relay list**. Where some sender-hiding DM schemes define a separate dedicated
-DM-relay list that clients must publish, discover, and keep in sync, NIP-MDM delivers over the recipient's
-ordinary NIP-65 relays (kind 10002), falling back to the client's own relay list when the recipient
-advertises none (§5). There is no second list for a user to manage.
+DM-relay list that clients must publish, discover, and keep in sync, NIP-MDM uses each party's single
+ordinary relay list (kind 10002, the normal relay list a user already has, with no read/write split to
+honor), plus the client's own relay list as a shared fallback, and delivers to both parties' lists for
+NIP-04-grade reliability (§5). There is no second list for a user to manage.
 
 NIP-MDM adds **no new signer operations**, but it does require a signer that supports **NIP-SKD** (scheme
 `skd:1`): it is otherwise a pure composition of that scheme's blinded and self ops (§1), an addressing
@@ -268,8 +269,8 @@ edit-hint event is needed, the replacement is the edit.
 4. Assemble the kind-30092 event with `pubkey = M`, `tags = [["d", d], ["p", R_pub]]`, `content =
    ciphertext`, `created_at = nowSeconds()` (the corrected clock), and sign with `signAsBlinded(context,
    event, R_pub)`.
-5. Publish to the recipient's relays (§5). To **edit** later, repeat with the same `d` and `created_at =
-   original + 1` (§2.2).
+5. Publish per §5 (the recipient's relay list, the sender's own list, and the client relay list for
+   redundancy). To **edit** later, repeat with the same `d` and `created_at = original + 1` (§2.2).
 
 ### 3.2 Receive (as R)
 
@@ -451,46 +452,73 @@ are self-keys only the sender can sign as or address.
 
 ## 5. Relays
 
-The two events go to **different** relay sets, and each set has the same simple fallback: the party's own
-NIP-65 (kind 10002) list, then the client's configured relay list, then failure. Two invariants hold in
-every case:
+NIP-MDM uses one relay concept: each party's **ordinary relay list**, kind 10002, the single normal relay
+list a Nostr user already publishes. There is no read/write split to honor and no separate DM-relay list to
+define, advertise, or keep in sync. A masked message travels over the same relays the parties use for
+everything else.
 
-- the **real message** is published to the **recipient's** relays, **never the sender's** (an event
-  authored by the sender's masked key `M` sitting on the sender's own advertised relays would correlate
-  `M` with the sender by relay residence, §7);
-- the **self-copy** is published to the **sender's** relays, **never the recipient's** (its stable `C_to`
-  appearing across several recipients' public relay lists would let those recipients be grouped as one
-  sender's recipient set, §7).
+Delivery follows the ordinary Nostr idea that an author's events are found on that author's relays. The
+recipient already knows the real sender (it must, to derive and verify `M`, §1.3), so it can locate the
+sender's relay list and look there; and the message is also placed on the recipient's own relays, where the
+recipient subscribes directly. Publishing to both parties' lists, plus a shared client relay list, is what
+gives NIP-MDM NIP-04-grade deliverability: no single relay, and no single party's list, is a point of
+failure. The default therefore favors **reliability**, with an optional privacy mode below for the sender
+who wants to narrow it.
 
-The two sets only ever share the **client relay list**: a client's own configured/default relays, which
-belong to neither party and so trigger neither correlation. Because clients read their own configured
-relays, that shared set also serves as the delivery and recovery rendezvous when a personal list is
-missing or unreachable.
+**Real message** (`M`, `p = R_pub`). A client **SHOULD** publish it, in combination, to:
 
-**Real message** (`M`, `p = R_pub`): publish to the recipient's kind-10002 relays; if the recipient has
-none, to the client's own relay list; if the client has none either, publishing fails. The recipient
-subscribes `{ kinds: [30092], "#p": [R_pub] }` on those relays.
+- the **recipient's** kind-10002 relays, where the recipient subscribes `{ kinds: [30092], "#p": [R_pub] }`;
+- the **sender's own** kind-10002 relays, where the recipient can also find it, once it knows the sender,
+  by `{ kinds: [30092], authors: [M], "#p": [R_pub] }`; and
+- the **client relay list**, the client's own configured or default relays, a shared rendezvous that
+  belongs to neither party.
 
-**Self-copy** (`C_from`, `p = C_to`): publish to the sender's own kind-10002 relays; if the sender has
-none, to the client's own relay list; if neither, publishing fails. The sender reads
-`{ kinds: [30092], authors: [C_from], "#p": [C_to] }` there.
+**Self-copy** (`C_from`, `p = C_to`). A client **SHOULD** publish it to:
 
-**Failover.** A client publishes across the chosen set and fails over within it until at least one relay
-(ideally a few, for redundancy) accepts the event; a relay that rejects or does not acknowledge is skipped
-and the next is tried, expanding from the personal list into the client relay list. How a client decides a
-relay is reachable or trustworthy (connectivity, acknowledgement, read-back, reputation) is left to the
-client; this spec requires only the ordering above and the two invariants. If the whole chain including
-the client relay list is exhausted with no acceptance, the publish fails and the client reports it rather
-than falling back to the counterparty's relays.
+- the **sender's own** kind-10002 relays, where the sender reads
+  `{ kinds: [30092], authors: [C_from], "#p": [C_to] }`; and
+- the **client relay list**.
 
-**Recovery.** Each message therefore exists as two independent copies on two independent relay sets: the
-real event on the recipient's relays, and a full verbatim backup of that same signed event inside the
-self-copy on the sender's relays (§3.4.1). A sender recovers sent history either **blindly**, from its own
-(or the client) relays via the static `C_to`, or, once a recipient `R` is known again, by re-deriving the
-deterministic `M` and fetching `{ authors: [M] }` from `R`'s relays. And if the real event is dropped or
-purged from the recipient's relays, the sender re-publishes it there **byte-for-byte** from the self-copy
-(same `id` and `sig`, §3.4.1). All of this works because the keys are deterministic rather than ephemeral:
-a lost copy is always re-derivable, re-fetchable, and re-publishable.
+The self-copy is addressed to `C_to`, a sender self-key the recipient cannot derive, so there is nothing for
+the recipient to fetch and no reason to place it on the recipient's relays.
+
+**Fallbacks.** If a party advertises no kind-10002 list, that party's portion of the targets falls back to
+the client relay list. If the client relay list is also absent, or every relay in the whole set is
+unreachable, the publish **fails loudly**: the client reports the failure rather than silently dropping the
+message.
+
+**Fetching (recipient).** A recipient receives on its own relays with `{ kinds: [30092], "#p": [R_pub] }`
+(§3.2). When messages from a known partner `S` are missing there, because a relay of the recipient's was
+down when the sender published, or has since dropped the event, the recipient **SHOULD** also query `S`'s
+kind-10002 relays for
+`{ kinds: [30092], authors: [ getPeerBlindedPubkey(context, S_pub) ], "#p": [R_pub] }`. This is the
+ordinary outbox fetch against the sender's relay list, and it is the reason the real message is placed on
+the sender's relays as well as the recipient's.
+
+**Failover.** Within the chosen set a client fans out and fails over until at least one relay (ideally
+several, for redundancy) accepts the event; a relay that rejects or does not acknowledge is skipped and the
+next is tried. How a client judges a relay reachable or trustworthy (connectivity, acknowledgement,
+read-back, reputation) is left to the client; this spec requires only the SHOULD targets above and the
+loud-failure rule.
+
+**Recovery.** Each message exists as two independent copies: the real event, and a full verbatim backup of
+that same signed event inside the self-copy (§3.4.1), on relay sets that overlap only partly. A sender
+recovers sent history either **blindly**, via the static `C_to` on its own or the client relays, or, once a
+recipient `R` is known again, by re-deriving the deterministic `M` and fetching `{ authors: [M] }` from
+`R`'s relays or its own. If the real event is dropped or purged from one relay set, the sender re-publishes
+it **byte-for-byte** from the self-copy (same `id` and `sig`, §3.4.1), to the recipient's current relays.
+Because the keys are deterministic rather than ephemeral, a lost copy is always re-derivable, re-fetchable,
+and re-publishable.
+
+**Privacy mode (optional).** Placing the real message on the sender's own relays means an event authored by
+`M` resides on relays the sender publicly advertises. This is a **soft** correlation only: a third party
+cannot derive `M` (it needs the sender-recipient ECDH secret, §1.1), so to the public `M` is just some key
+that happens to share relays with the sender; shared public relays dilute it further, and no relay attests
+who uploaded an event, so residence does not establish authorship. For a sender who runs a **distinctive
+personal relay set** and wants to avoid even that correlation (§7), a client **MAY** offer a privacy mode
+that narrows publishing: the real message to the recipient's relays only, and the self-copy to the sender's
+relays only, sharing just the client relay list. This trades the default's deliverability for tighter
+unlinkability; a client SHOULD make clear which mode is in effect.
 
 ## 6. Ancillary events
 
@@ -540,6 +568,13 @@ What it **does not** hide (deliberately below a maximal-unlinkability scheme on 
   the design deliberately accepts them rather than jittering timing: as overall network activity grows,
   co-timed masked events become ordinary noise. The self-copy's own recipient `C_to` is masked too, so
   recovering the sent history never exposes the sender either.
+- **Relay residence (default publishing).** By default (§5) the real message is also published to the
+  sender's own relay list for deliverability, so an event authored by `M` resides on relays the sender
+  publicly advertises. This is a **soft** correlation only: `M` is underivable without the
+  sender-recipient ECDH secret (so the public cannot tie `M` to the sender from the relay fact alone),
+  shared public relays dilute it, and, absent any relay attestation of who uploaded an event, residence
+  does not establish authorship. A sender who runs a distinctive personal relay set and wants to remove
+  even this signal can use the §5 privacy mode, at a cost in deliverability.
 
 **Deniability.** No masked event is publicly attributable to a root: linking `M` (or `C_from` / `C_to`) to
 a real key requires that key's private scalar, so toward the public every NIP-MDM event a person authored
