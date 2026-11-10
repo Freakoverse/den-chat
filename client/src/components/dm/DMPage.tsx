@@ -41,11 +41,11 @@ import { getHour12 } from '@/stores/preferencesStore'
 import { nip19, type Event } from 'nostr-tools'
 import { getUploadBlossoms, getReadBlossoms, usePostingBehaviourStore } from '@/stores/postingBehaviourStore'
 import { useUserListsStore } from '@/stores/userListsStore'
-import { useDmSpamFilterStore, conversationClearsDmPow, DEFAULT_DM_POW_THRESHOLD, DM_POW_MIN, DM_POW_MAX } from '@/stores/dmSpamFilterStore'
+import { useDmSpamFilterStore, conversationClearsDmPow, DEFAULT_DM_POW_THRESHOLD, DM_POW_MIN, DM_POW_MAX, DEFAULT_DM_SEND_POW, DM_SEND_POW_MIN, DM_SEND_POW_MAX } from '@/stores/dmSpamFilterStore'
 import {
   Search, Plus, MessageSquare, Loader2,
   Lock, Users, UserPlus, AlertCircle, X, ShieldBan, Eye, EyeOff, Ghost, Info, VenetianMask, MoreVertical,
-  AlertTriangle, Download, Star, ChevronLeft, Check, NotebookPen, RefreshCw, Radio, Send,
+  AlertTriangle, Download, Star, ChevronLeft, Check, NotebookPen, RefreshCw, Radio, Send, Settings, Hammer,
 } from 'lucide-react'
 import { useEscToClose } from '@/hooks/useEscToClose'
 import { fetchDMRelayList, type DMRelayListInfo } from '@/lib/nostr/relayDiscovery'
@@ -476,6 +476,8 @@ function ConversationList({
   const spamFilterEnabled = useDmSpamFilterStore((s) => s.enabled)
   const spamFilterThreshold = useDmSpamFilterStore((s) => s.threshold)
   const [showSpamFilterModal, setShowSpamFilterModal] = useState(false)
+  // Global send-side DM proof-of-work (gear in the header): mines ALL outgoing DMs to this bar.
+  const [showSendPowModal, setShowSendPowModal] = useState(false)
 
   // Get conversations from the active protocol's store
   const { following, other } = useMemo(
@@ -516,20 +518,34 @@ function ConversationList({
           <Lock size={14} className="text-primary" />
           <h2 className="text-sm font-semibold text-foreground">Direct Messages</h2>
         </div>
-        <TooltipProvider delayDuration={200}>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={onNewMessage}
-                className="p-1.5 rounded-lg hover:bg-accent/50 text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-              >
-                <Plus size={16} />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" className="text-xs">New Message</TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
+        <div className="flex items-center gap-0.5">
+          <TooltipProvider delayDuration={200}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={() => setShowSendPowModal(true)}
+                  className="p-1.5 rounded-lg hover:bg-accent/50 text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                >
+                  <Settings size={15} />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="text-xs">DM proof-of-work</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={onNewMessage}
+                  className="p-1.5 rounded-lg hover:bg-accent/50 text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                >
+                  <Plus size={16} />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="text-xs">New Message</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        </div>
       </div>
+      {showSendPowModal && <DmSendPowModal onClose={() => setShowSendPowModal(false)} />}
 
       {/* Tabs, one container, two rows: row 1 the 1:1 protocols, row 2 Groups (§21). Exactly one is active. */}
       <div className="shrink-0">
@@ -1516,6 +1532,68 @@ function DmPowToggle({ checked, onChange }: { checked: boolean; onChange: (v: bo
     >
       <span className={`absolute top-[3px] w-2.5 h-2.5 rounded-full bg-white shadow transition-all duration-200 ${checked ? 'left-[15px]' : 'left-[3px]'}`} />
     </button>
+  )
+}
+
+/** Global send-side DM proof-of-work: mine every outgoing DM (B/M/W) to this NIP-13 bar. 0 = off. */
+function DmSendPowModal({ onClose }: { onClose: () => void }) {
+  const sendTarget = useDmSpamFilterStore((s) => s.sendTarget)
+  const setSendTarget = useDmSpamFilterStore((s) => s.setSendTarget)
+  const pct = ((sendTarget - DM_SEND_POW_MIN) / (DM_SEND_POW_MAX - DM_SEND_POW_MIN)) * 100
+  return createPortal(
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="w-full max-w-sm rounded-xl border border-border bg-card shadow-xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-3.5 border-b border-border">
+          <h3 className="text-sm font-semibold text-foreground flex items-center gap-2"><Hammer size={15} /> DM proof-of-work</h3>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors cursor-pointer"><X size={16} /></button>
+        </div>
+        <div className="px-5 py-4 space-y-4">
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            Mine a proof-of-work on every DM you send (B-DMs, M-DMs and W-DMs) so recipients who hide low-effort DMs still receive yours. Higher is more spam-resistant but slower to send, especially on phones. Set to 0 to send with no proof-of-work.
+          </p>
+          <div className="space-y-2">
+            <div className="flex items-center gap-3">
+              <div className="flex-1 relative h-6 flex items-center">
+                <div className="absolute left-0 right-0 h-2 rounded-full overflow-hidden">
+                  <div className="absolute inset-0 bg-muted-foreground/20" />
+                  <div className="absolute inset-y-0 left-0 bg-primary" style={{ width: `${pct}%` }} />
+                </div>
+                <div
+                  className="absolute w-5 h-5 rounded-full bg-primary border-2 border-background shadow-lg pointer-events-none transition-all"
+                  style={{ left: `calc(${pct}% - 10px)` }}
+                />
+                <input
+                  type="range"
+                  min={DM_SEND_POW_MIN}
+                  max={DM_SEND_POW_MAX}
+                  step={1}
+                  value={sendTarget}
+                  onChange={(e) => setSendTarget(Number(e.target.value))}
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                />
+              </div>
+              <span className="text-sm font-medium tabular-nums min-w-[48px] text-right text-foreground">{sendTarget === 0 ? 'Off' : `${sendTarget} bits`}</span>
+            </div>
+            <div className="flex items-center justify-between text-[10px] text-muted-foreground/60">
+              <span>off ({DM_SEND_POW_MIN})</span>
+              <span>strict ({DM_SEND_POW_MAX})</span>
+            </div>
+            {sendTarget > 20 && (
+              <p className="text-[11px] text-amber-500/90 leading-relaxed pt-0.5">
+                Above 20 bits takes a while to mine per message and is painfully slow on phones. Most recipients&apos; filters sit well below this, so you rarely need it.
+              </p>
+            )}
+          </div>
+          <div className="flex items-center justify-between pt-1">
+            <button onClick={() => setSendTarget(DEFAULT_DM_SEND_POW)} className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
+              <RefreshCw size={12} /> Reset to default ({DEFAULT_DM_SEND_POW})
+            </button>
+            <button onClick={onClose} className="px-3 py-1.5 rounded-lg text-sm font-medium bg-secondary hover:bg-secondary/70 text-foreground transition-colors cursor-pointer">Done</button>
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body
   )
 }
 

@@ -20,7 +20,8 @@ import { useBlockStore } from '@/stores/blockStore'
 import { useNotificationStore } from '@/stores/notificationStore'
 import { useWotStore } from '@/stores/wotStore'
 import { useFollowStore } from '@/stores/followStore'
-import { createUnsignedEvent, signWithSigner } from '@/lib/nostr/events'
+import { createUnsignedEvent, signWithSigner, mineAndSign } from '@/lib/nostr/events'
+import { getDmSendPowTarget } from '@/stores/dmSpamFilterStore'
 import {
   loadContactRegistry,
   addContact,
@@ -609,7 +610,8 @@ export const useDM04Store = create<DM04State>((set, get) => ({
       }
 
       const unsigned = createUnsignedEvent(STANDARD_KINDS.NIP04_DM, encrypted, tags)
-      const signed = await signWithSigner(unsigned, signer, privateKey)
+      // Mine NIP-13 PoW to the DM send target so a recipient's "hide low-effort DMs" filter passes it.
+      const signed = await mineAndSign(unsigned, getDmSendPowTarget(), myPubkey, signer, privateKey)
 
       // Pre-register
       set((s) => ({

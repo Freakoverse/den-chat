@@ -21,6 +21,7 @@
 import { nip44, type Event, type UnsignedEvent } from 'nostr-tools'
 import { hexToBytes, bytesToHex } from '@noble/hashes/utils'
 import { makeSubkeySigner, type SubkeySigner } from './v2send'
+import { getDmSendPowTarget } from '@/stores/dmSpamFilterStore'
 import {
   deriveBlindedPubForPeer,
   signerSupportsSkd,
@@ -138,6 +139,30 @@ export function myMaskedPub(recipientRootPub: string, keys: MdmKeys): Promise<st
 }
 
 /**
+ * Sign a masked event, first mining NIP-13 PoW to the user's DM send target (dmSpamFilterStore). This is
+ * the same spam-resistance other DMs mine for, so a recipient running the "hide low-effort DMs" PoW filter
+ * doesn't drop it. Mines against the MASKED pubkey (the event author), then signs; a NIP-SKD signer signs
+ * the template byte-for-byte (NIP-SKD §2) so one pass suffices, with a small defensive retry if a signer
+ * ever re-stamps. target 0 = off.
+ */
+async function signMaskedWithPow(unsigned: UnsignedEvent, maskedPub: string, mSigner: SubkeySigner): Promise<Event> {
+  const target = getDmSendPowTarget()
+  if (target <= 0) return mSigner.signEvent(unsigned)
+  const { mineEvent, countLeadingZeroBits } = await import('@/lib/pow/pow')
+  let mined = await mineEvent(unsigned, target, maskedPub)
+  let real = await mSigner.signEvent(mined)
+  for (let i = 0; i < 3 && countLeadingZeroBits(real.id) < target; i++) {
+    const retry: UnsignedEvent = {
+      kind: real.kind, content: real.content, created_at: real.created_at,
+      tags: real.tags.filter((t) => t[0] !== 'nonce'), pubkey: maskedPub,
+    }
+    mined = await mineEvent(retry, target, maskedPub)
+    real = await mSigner.signEvent(mined)
+  }
+  return real
+}
+
+/**
  * A peer's masked key toward me, re-derived from their real key (docs §1.3). The recipient uses this to
  * verify a received message's author, and either party uses it to fetch the other side's messages.
  * Simple root-to-root blinded case (the recipient's ROOT is the ECDH identity), so no composed op.
@@ -204,7 +229,7 @@ export async function buildMdmMessage(opts: {
     tags.push(['expiration', Math.floor(createdAt + opts.expirationSeconds).toString()])
   }
   const unsigned: UnsignedEvent = { kind: MDM_KIND, created_at: createdAt, tags, content, pubkey: maskedPub }
-  const real = await mSigner.signEvent(unsigned)
+  const real = await signMaskedWithPow(unsigned, maskedPub, mSigner)
   return { real, maskedPub }
 }
 
@@ -241,7 +266,7 @@ export async function buildMdmReaction(opts: {
     content,
     pubkey: maskedPub,
   }
-  const real = await mSigner.signEvent(unsigned)
+  const real = await signMaskedWithPow(unsigned, maskedPub, mSigner)
   return { real, maskedPub }
 }
 
