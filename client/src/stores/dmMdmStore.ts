@@ -18,8 +18,9 @@
 import { create } from 'zustand'
 import type { Event, Filter } from 'nostr-tools'
 import { subscribeEventsWide } from '@/lib/nostr/readRelays'
-import { publishWithFailover, getRelays, fetchEventsFromRelays } from '@/lib/nostr/relay-pool'
+import { getRelays, fetchEventsFromRelays } from '@/lib/nostr/relay-pool'
 import { publishPersonal, usePostingBehaviourStore } from '@/stores/postingBehaviourStore'
+import { dmSectionsStandard, publishDmSectioned, dmProgressTotal, dmProgressConfirmed, type DmRelayProgress } from '@/lib/nostr/dmRelayTargets'
 import { discoverRecipientRelays } from '@/lib/nostr/relayDiscovery'
 import { getExpirationFromTags } from '@/lib/hub/messageExpiration'
 import { nowSeconds } from '@/lib/time/clockOffset'
@@ -52,7 +53,6 @@ import {
 } from '@/lib/nostr/nipMdm'
 
 const MDM_LIMIT = 300
-const norm = (u: string) => u.replace(/\/+$/, '')
 type Tuple4 = [string, string, string, string]
 
 // ── module-level indices (not reactive) ──
@@ -119,7 +119,7 @@ interface MdmState {
   /** MDM has no NIP-78 registry; present (empty) only so the shared chat UI can read it. */
   registryOnlyContacts: Set<string>
   reactions: Map<string, Map<string, ReactionEntry>>  // keyed by target real event id
-  relayProgress: Record<string, { confirmed: number; total: number; acceptedRelays: string[] }>
+  relayProgress: Record<string, DmRelayProgress>
   subscription: { close: () => void } | null
 
   setActiveConversation: (pubkey: string | null) => void
@@ -142,7 +142,7 @@ interface MdmState {
   getReactions: (messageId: string, myPubkey: string) => DM04Reaction[]
   loadOlderMessages: (counterpartyPubkey?: string, myPubkey?: string, signer?: ISigner | null, privateKey?: string | null) => Promise<void>
   getFilteredConversations: (followList: Set<string>) => { following: DM04Conversation[]; other: DM04Conversation[] }
-  setRelayProgress: (eventId: string, confirmed: number, total: number, acceptedRelays?: string[]) => void
+  setRelayProgress: (eventId: string, progress: DmRelayProgress) => void
   clearRelayProgress: (eventId: string) => void
 }
 
@@ -372,7 +372,7 @@ export const useMdmStore = create<MdmState>((set, get) => ({
 
     onPhase?.('publishing')
     await Promise.all([
-      publishReal(recipientPubkey, real, (c, t, accepted) => { get().setRelayProgress(real.id, c, t, accepted); onPhase?.('publishing', { confirmed: c, total: t }) }),
+      publishReal(recipientPubkey, real, (p) => { get().setRelayProgress(real.id, p); onPhase?.('publishing', { confirmed: dmProgressConfirmed(p), total: dmProgressTotal(p) }) }),
       noteSentTo(recipientPubkey, keys),
     ]).finally(() => setTimeout(() => get().clearRelayProgress(real.id), 4000))
   },
@@ -452,27 +452,25 @@ export const useMdmStore = create<MdmState>((set, get) => ({
     return { following, other }
   },
 
-  setRelayProgress: (eventId, confirmed, total, acceptedRelays) => set((s) => ({ relayProgress: { ...s.relayProgress, [eventId]: { confirmed, total, acceptedRelays: acceptedRelays || [] } } })),
+  setRelayProgress: (eventId, progress) => set((s) => ({ relayProgress: { ...s.relayProgress, [eventId]: progress } })),
   clearRelayProgress: (eventId) => set((s) => { const { [eventId]: _, ...rest } = s.relayProgress; return { relayProgress: rest } }),
 }))
 
 /**
- * Publish a real masked event (message, reaction or tombstone) to the recipient's relays, the sender's own
- * relays, and the client defaults (docs §5, reliability first). `publishPersonal` owns the sender's own
- * NIP-65 + client, honouring the `postToClientRelays` / `postToUserRelays` toggles; a second failover
- * publish carries ONLY the recipient's discovered relays, honouring `postToRecipientRelays`. This keeps
- * every destination gated by its own Settings > Network toggle (no raw `getRelays()` bypass).
+ * Publish a real masked event (message, reaction or tombstone) to one unified relay set (docs §5,
+ * reliability first): the sender's NIP-65 relays, the recipient's discovered relays, and the client
+ * defaults, each a labelled section (dmSectionsStandard) that honours its Settings > Network toggle. One
+ * failover over their union reports accepted relays into the shared DmRelayProgress shape, so the UI
+ * counter reflects EVERY relay (not just the recipient leg).
  */
-async function publishReal(recipientPubkey: string, real: Event, onProgress?: (c: number, t: number, accepted: string[]) => void): Promise<void> {
+async function publishReal(recipientPubkey: string, real: Event, onProgress?: (p: DmRelayProgress) => void): Promise<void> {
   const recipientRelays = usePostingBehaviourStore.getState().postToRecipientRelays
     ? await discoverRecipientRelays(recipientPubkey, getRelays()).catch(() => [] as string[])
     : []
-  const tasks: Promise<unknown>[] = [publishPersonal(real)] // sender's own NIP-65 + client, toggle-aware
-  if (recipientRelays.length) {
-    const target = Math.min(new Set(recipientRelays.map(norm)).size || 1, 6)
-    tasks.push(publishWithFailover(real, recipientRelays, { pool: recipientRelays, target, onProgress }))
-  }
-  await Promise.all(tasks)
+  const sections = dmSectionsStandard(recipientRelays)
+  onProgress?.({ sections, acceptedRelays: [], settled: false })
+  const accepted = await publishDmSectioned(real, sections, (acc) => onProgress?.({ sections, acceptedRelays: acc, settled: false }))
+  onProgress?.({ sections, acceptedRelays: accepted, settled: true })
 }
 
 /**

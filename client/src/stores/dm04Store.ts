@@ -13,7 +13,8 @@ import { create } from 'zustand'
 import { nowSeconds } from '@/lib/time/clockOffset'
 import { fetchEventsFromRelays, publishToSpecificRelays, subscribeToRelays } from '@/lib/nostr/relay-pool'
 import { fetchEventsWide, subscribeEventsWide, getReadRelays } from '@/lib/nostr/readRelays'
-import { getPublishRelays, publishDM, publishPersonal, usePostingBehaviourStore } from '@/stores/postingBehaviourStore'
+import { getPublishRelays, publishPersonal, usePostingBehaviourStore } from '@/stores/postingBehaviourStore'
+import { dmSectionsStandard, publishDmSectioned, dmProgressTotal, dmProgressConfirmed, type DmRelayProgress } from '@/lib/nostr/dmRelayTargets'
 import { STANDARD_KINDS } from '@/lib/crypto/constants'
 import { encryptNip04, decryptNip04 } from '@/lib/nostr/nip04dm'
 import { useBlockStore } from '@/stores/blockStore'
@@ -109,7 +110,7 @@ interface DM04State {
   registryOnlyContacts: Set<string>
 
   /** Relay publish progress per event ID (for inline indicators on real messages) */
-  relayProgress: Record<string, { confirmed: number; total: number; acceptedRelays: string[] }>
+  relayProgress: Record<string, DmRelayProgress>
 
   setActiveConversation: (pubkey: string | null) => void
   addPendingConversation: (pubkey: string) => void
@@ -162,7 +163,7 @@ interface DM04State {
     following: DM04Conversation[]
     other: DM04Conversation[]
   }
-  setRelayProgress: (eventId: string, confirmed: number, total: number, acceptedRelays?: string[]) => void
+  setRelayProgress: (eventId: string, progress: DmRelayProgress) => void
   clearRelayProgress: (eventId: string) => void
 }
 
@@ -686,11 +687,14 @@ export const useDM04Store = create<DM04State>((set, get) => ({
         return { conversations }
       })
 
-      // Publish entirely in background — relay discovery + publish don't block the return
-      // Seed relay progress at 0/N immediately so the counter is visible
-      // from the moment the message appears — no gap where it looks "published"
-      get().setRelayProgress(signed.id, 0, publishRelays.length, [])
-      onPhase?.('publishing', { confirmed: 0, total: publishRelays.length })
+      // Publish entirely in background — relay discovery + publish don't block the return.
+      // Seed the counter immediately with the known sections (your NIP-65 + client); the recipient's
+      // relays are merged in once discovery resolves. Sections honour the Settings > Network toggles.
+      {
+        const seedSections = dmSectionsStandard([])
+        get().setRelayProgress(signed.id, { sections: seedSections, acceptedRelays: [], settled: false })
+        onPhase?.('publishing', { confirmed: 0, total: dmProgressTotal({ sections: seedSections, acceptedRelays: [] }) })
+      }
 
       ;(async () => {
         try {
@@ -700,18 +704,18 @@ export const useDM04Store = create<DM04State>((set, get) => ({
             console.log(`[DM04] Merging ${extraRelays.length} recipient relay(s):`, extraRelays)
           }
 
-          onPhase?.('publishing')
-
-          // Failover across the enabled Behaviour-toggle relays + the recipient's relays + our own DM inbox,
-          // so a deterministic pick that lands on dead relays no longer silently loses the sent message.
-          await publishDM(
-            signed,
-            extraRelays,
-            (confirmed, total, acceptedRelays) => {
-              get().setRelayProgress(signed.id, confirmed, total, acceptedRelays)
-              onPhase?.('publishing', { confirmed, total })
-            },
-          )
+          // One unified failover over your NIP-65 + recipient + client relays (dmSectionsStandard), so a
+          // dead pick no longer silently loses the message AND the counter reflects every relay.
+          const sections = dmSectionsStandard(extraRelays)
+          get().setRelayProgress(signed.id, { sections, acceptedRelays: [], settled: false })
+          const accepted = await publishDmSectioned(signed, sections, (acc) => {
+            const p: DmRelayProgress = { sections, acceptedRelays: acc, settled: false }
+            get().setRelayProgress(signed.id, p)
+            onPhase?.('publishing', { confirmed: dmProgressConfirmed(p), total: dmProgressTotal(p) })
+          })
+          const fin: DmRelayProgress = { sections, acceptedRelays: accepted, settled: true }
+          get().setRelayProgress(signed.id, fin)
+          onPhase?.('publishing', { confirmed: dmProgressConfirmed(fin), total: dmProgressTotal(fin) })
 
           // Auto-clear relay progress after 5 seconds
           setTimeout(() => {
@@ -862,11 +866,11 @@ export const useDM04Store = create<DM04State>((set, get) => ({
     return { following, other }
   },
 
-  setRelayProgress: (eventId, confirmed, total, acceptedRelays) =>
+  setRelayProgress: (eventId, progress) =>
     set((state) => ({
       relayProgress: {
         ...state.relayProgress,
-        [eventId]: { confirmed, total, acceptedRelays: acceptedRelays || [] },
+        [eventId]: progress,
       },
     })),
 

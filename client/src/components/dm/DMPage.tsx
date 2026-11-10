@@ -17,6 +17,8 @@ import { createPortal } from 'react-dom'
 import { useUserStore } from '@/stores/userStore'
 import { primaryBlossomServer } from '@/lib/blossom'
 import { useDMStore, type DMMessage } from '@/stores/dmStore'
+import { DmRelayStatus } from './DmRelayStatus'
+import type { DmRelayProgress } from '@/lib/nostr/dmRelayTargets'
 import { useGroupStore } from '@/stores/groupStore'
 import { GroupList } from '@/components/group/GroupList'
 import { GroupChatView } from '@/components/group/GroupChatView'
@@ -1675,151 +1677,32 @@ function DmPowModal({ onClose }: { onClose: () => void }) {
 function DMRelayProgressIndicator({ eventId }: { eventId: string }) {
   const progress = useDMStore((s) => s.relayProgress[eventId])
   const retryDelivery = useDMStore((s) => s.retryDelivery)
-  const [showPopover, setShowPopover] = useState(false)
-  const popRef = useRef<HTMLDivElement>(null)
-  const btnRef = useRef<HTMLButtonElement>(null)
-
-  useEffect(() => {
-    if (!showPopover) return
-    const handler = (e: MouseEvent) => {
-      if (btnRef.current?.contains(e.target as Node)) return
-      if (popRef.current && !popRef.current.contains(e.target as Node)) setShowPopover(false)
-    }
-    const close = () => setShowPopover(false)
-    document.addEventListener('mousedown', handler)
-    window.addEventListener('scroll', close, true) // close on scroll (fixed popover would detach)
-    return () => {
-      document.removeEventListener('mousedown', handler)
-      window.removeEventListener('scroll', close, true)
-    }
-  }, [showPopover])
-
   if (!progress) return null
   const self = progress.self
-  const recipientDone = !!progress.recipientSettled || progress.confirmed >= progress.total
-  // Recipient copy finished and reached no relay → per strict NIP-17 the self copy is skipped.
+  // Failed = per strict NIP-17: recipient reached no relay (self skipped), or the self copy saved nowhere.
   const recipientFailed = !!progress.recipientSettled && progress.confirmed === 0 && progress.total > 0
   const selfSkipped = !!self && self.skipped
-  const selfPending = !!self && !self.settled && !selfSkipped
-  // "Saved nowhere": our relays all answered and none kept the copy. Pinned (store skips auto-clear).
   const selfFailed = !!self && self.settled && self.confirmed === 0 && !selfSkipped
   const failed = recipientFailed || selfSkipped || selfFailed
-  const done = !failed && recipientDone && !selfPending
-
-  const tone = failed
-    ? 'text-amber-400 hover:text-amber-300'
-    : done ? 'text-muted-foreground/40 hover:text-muted-foreground' : 'text-muted-foreground/70 hover:text-muted-foreground'
-
-  const relayRows = (accepted: string[], pending: number, spinning: boolean) => (
-    <div className="space-y-1">
-      {accepted.map((url) => (
-        <div key={url} className="flex items-center gap-2">
-          <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
-          <span className="text-[10px] text-muted-foreground font-mono truncate">{url.replace('wss://', '')}</span>
-        </div>
-      ))}
-      {pending > 0 && (
-        <div className="flex items-center gap-2">
-          {spinning
-            ? <Loader2 size={8} className="animate-spin text-muted-foreground/50 shrink-0" />
-            : <div className="w-1.5 h-1.5 rounded-full bg-muted-foreground/30 shrink-0" />}
-          <span className="text-[10px] text-muted-foreground/50">{pending} {spinning ? 'pending...' : 'rejected / timed out'}</span>
-        </div>
-      )}
-    </div>
-  )
-
+  // Unified sectioned progress: your 10050 inbox (self copy) + the recipient's relays, accepts merged.
+  const built: DmRelayProgress = {
+    sections: progress.sections ?? [],
+    acceptedRelays: [...(progress.acceptedRelays ?? []), ...(self?.acceptedRelays ?? [])],
+    settled: self ? self.settled : !!progress.recipientSettled,
+  }
   return (
-    <span className="relative inline-flex items-center">
-      <button
-        ref={btnRef}
-        onClick={(e) => { e.stopPropagation(); setShowPopover(!showPopover) }}
-        className={`text-[10px] inline-flex items-center gap-1 ml-1 cursor-pointer transition-colors ${tone}`}
-      >
-        {!done && !failed && <Loader2 size={9} className="animate-spin" />}
-        {failed && <AlertTriangle size={9} />}
-        {progress.confirmed}/{progress.total}
-        {self && (
-          <span className={failed ? '' : 'opacity-70'}>
-            {selfSkipped
-              ? '· copy skipped'
-              : selfFailed
-                ? `· not saved ${self.confirmed}/${self.total}`
-                : `· you ${self.confirmed}/${self.total}`}
-          </span>
-        )}
-      </button>
-      {showPopover && createPortal(
-        <div
-          ref={(el) => {
-            popRef.current = el
-            if (!el || !btnRef.current) return
-            // Fixed-position above the trigger, clamped to the viewport, rendered in a
-            // portal so the chat's overflow-scroll never clips it.
-            const b = btnRef.current.getBoundingClientRect()
-            const r = el.getBoundingClientRect()
-            let left = b.left
-            if (left + r.width > window.innerWidth - 4) left = window.innerWidth - r.width - 4
-            if (left < 4) left = 4
-            let top = b.top - r.height - 4
-            if (top < 4) top = b.bottom + 4 // flip below if no room above
-            el.style.left = `${left}px`
-            el.style.top = `${top}px`
-            el.style.opacity = '1'
-          }}
-          className="fixed z-[9999] bg-popover border border-border rounded-lg shadow-xl p-2.5 min-w-[220px] max-w-[280px]"
-          style={{ left: -9999, top: -9999, opacity: 0 }}
-          onClick={(e) => e.stopPropagation()}
+    <span className="inline-flex items-center gap-1">
+      <DmRelayStatus progress={built} />
+      {failed && (
+        <button
+          onClick={(e) => { e.stopPropagation(); retryDelivery(eventId) }}
+          disabled={self?.retrying}
+          className="text-[10px] inline-flex items-center gap-0.5 ml-0.5 text-amber-400 hover:text-amber-300 cursor-pointer disabled:opacity-50 disabled:cursor-default"
+          title="Your copy was not saved (strict NIP-17: a copy is kept only once the message reaches them). Retry delivery."
         >
-          <p className="text-[10px] font-medium text-foreground mb-1.5">To them</p>
-          {relayRows(progress.acceptedRelays, progress.total - progress.confirmed, !recipientDone)}
-          {recipientFailed && (
-            <p className="text-[10px] text-amber-400/90 leading-relaxed mt-1.5">
-              Couldn&rsquo;t reach them on {progress.total === 1 ? 'their relay' : `any of their ${progress.total} relays`}.
-            </p>
-          )}
-
-          {self && (
-            <>
-              <p className="text-[10px] font-medium text-foreground mt-2.5 mb-1.5">Your copy</p>
-              {selfSkipped ? (
-                <div className="space-y-2">
-                  <p className="text-[10px] text-amber-400/90 leading-relaxed">
-                    Not saved. A copy is only kept once the message reaches them (strict NIP-17: recipient first, then a copy). It shows here now but will be gone after a reload.
-                  </p>
-                  <button
-                    onClick={() => retryDelivery(eventId)}
-                    disabled={self.retrying}
-                    className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-medium bg-secondary hover:bg-secondary/70 text-foreground border border-border/50 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-default"
-                  >
-                    {self.retrying ? <Loader2 size={9} className="animate-spin" /> : <RefreshCw size={9} />}
-                    {self.retrying ? 'Retrying…' : 'Retry delivery'}
-                  </button>
-                </div>
-              ) : selfFailed ? (
-                <div className="space-y-2">
-                  <p className="text-[10px] text-amber-400/90 leading-relaxed">
-                    {self.total === 0
-                      ? 'No publish relays are configured, so your copy was saved nowhere.'
-                      : `None of your ${self.total} relay${self.total === 1 ? '' : 's'} accepted your copy.`}
-                    {' '}It shows here now but will be gone after a reload.
-                  </p>
-                  <button
-                    onClick={() => retryDelivery(eventId)}
-                    disabled={self.retrying}
-                    className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-medium bg-secondary hover:bg-secondary/70 text-foreground border border-border/50 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-default"
-                  >
-                    {self.retrying ? <Loader2 size={9} className="animate-spin" /> : <RefreshCw size={9} />}
-                    {self.retrying ? 'Retrying…' : 'Retry'}
-                  </button>
-                </div>
-              ) : (
-                relayRows(self.acceptedRelays, self.total - self.confirmed, !self.settled)
-              )}
-            </>
-          )}
-        </div>,
-        document.body
+          {self?.retrying ? <Loader2 size={9} className="animate-spin" /> : <RefreshCw size={9} />}
+          {self?.retrying ? 'retrying' : 'retry'}
+        </button>
       )}
     </span>
   )

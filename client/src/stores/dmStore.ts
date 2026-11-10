@@ -12,6 +12,7 @@ import { nowSeconds } from '@/lib/time/clockOffset'
 import { fetchDMInbox, subscribeDMInbox, getDMReadRelays } from '@/lib/nostr/readRelays'
 import { usePostingBehaviourStore } from '@/stores/postingBehaviourStore'
 import { publishWithFailover, getRelays } from '@/lib/nostr/relay-pool'
+import { dmSectionsNip17, type RelaySection } from '@/lib/nostr/dmRelayTargets'
 import { useUserListsStore } from '@/stores/userListsStore'
 import { STANDARD_KINDS } from '@/lib/crypto/constants'
 import { createGiftWrap, unwrapGiftWrap, computeRumorId, foreignKindWrapIds, type UnwrappedDM } from '@/lib/nostr/nip17'
@@ -83,7 +84,7 @@ interface DMState {
    *  message still be here after a reload? (see SelfCopyProgress)
    *  `recipientSettled` flips true once the recipient publish has finished (success OR failure), so
    *  the UI can tell a finished 0/N (failed) from an in-flight one. */
-  relayProgress: Record<string, { confirmed: number; total: number; acceptedRelays: string[]; recipientSettled?: boolean; self?: SelfCopyProgress }>
+  relayProgress: Record<string, { confirmed: number; total: number; acceptedRelays: string[]; recipientSettled?: boolean; self?: SelfCopyProgress; sections?: RelaySection[] }>
 
   setActiveConversation: (pubkey: string | null) => void
   addPendingConversation: (pubkey: string) => void
@@ -119,6 +120,8 @@ interface DMState {
   setRelayProgress: (eventId: string, confirmed: number, total: number, acceptedRelays?: string[]) => void
   setRecipientSettled: (eventId: string, settled: boolean) => void
   setSelfCopyProgress: (eventId: string, self: SelfCopyProgress) => void
+  /** Record the labelled publish targets (your 10050 inbox + the recipient's relays) for the sectioned UI. */
+  setRelaySections: (eventId: string, sections: RelaySection[]) => void
   /** Re-run strict delivery (recipient's 10050 first, then our own copy) for a message whose first
    *  attempt failed. Both wraps are kept in memory; the recipient list is re-resolved on retry. */
   retryDelivery: (eventId: string) => Promise<void>
@@ -194,10 +197,13 @@ async function deliverStrict(
   const store = useDMStore.getState()
   const myDMRelays = useUserListsStore.getState().userDMRelays
 
+  const recipientRelays = d.postRecip
+    ? (retrying ? await fetchDMRelayList(d.recipientPubkey).then((i) => i?.relays ?? []).catch(() => []) : d.recipientRelays)
+    : []
+  // Sections for the shared relay-status UI: your 10050 inbox (the self copy) + the recipient's relays.
+  store.setRelaySections(progressId, dmSectionsNip17(myDMRelays, recipientRelays))
+
   if (d.postRecip) {
-    const recipientRelays = retrying
-      ? await fetchDMRelayList(d.recipientPubkey).then((i) => i?.relays ?? []).catch(() => [])
-      : d.recipientRelays
     store.setRelayProgress(progressId, 0, recipientRelays.length, [])
     store.setRecipientSettled(progressId, false)
     const accepted = recipientRelays.length === 0
@@ -816,6 +822,15 @@ export const useDMStore = create<DMState>((set, get) => ({
       if (!cur) return {} // already cleared — nothing to attach to
       return { relayProgress: { ...state.relayProgress, [eventId]: { ...cur, self } } }
     }),
+
+  setRelaySections: (eventId, sections) =>
+    set((state) => ({
+      relayProgress: {
+        ...state.relayProgress,
+        // Create a base entry if none yet (so a recipient-off send still shows its self section).
+        [eventId]: { confirmed: 0, total: 0, acceptedRelays: [], ...state.relayProgress[eventId], sections },
+      },
+    })),
 
   retryDelivery: async (eventId) => {
     const cur = get().relayProgress[eventId]

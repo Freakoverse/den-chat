@@ -11,6 +11,7 @@ import { createPortal } from 'react-dom'
 import { useUserStore } from '@/stores/userStore'
 import { primaryBlossomServer } from '@/lib/blossom'
 import { useDM04Store, type DM04Message, type DM04Reaction } from '@/stores/dm04Store'
+import { DmRelayStatus } from './DmRelayStatus'
 import { useBlockStore } from '@/stores/blockStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { useMobile } from '@/hooks/useMobile'
@@ -1069,78 +1070,7 @@ export function DM04ChatView({ recipientPubkey, onSwitchProtocol, onBack }: { re
 
 function DM04RelayProgressIndicator({ eventId }: { eventId: string }) {
   const progress = useDM04Store((s) => s.relayProgress[eventId])
-  const [showPopover, setShowPopover] = useState(false)
-  const popRef = useRef<HTMLDivElement>(null)
-  const btnRef = useRef<HTMLButtonElement>(null)
-
-  useEffect(() => {
-    if (!showPopover) return
-    const handler = (e: MouseEvent) => {
-      if (btnRef.current?.contains(e.target as Node)) return
-      if (popRef.current && !popRef.current.contains(e.target as Node)) setShowPopover(false)
-    }
-    const close = () => setShowPopover(false)
-    document.addEventListener('mousedown', handler)
-    window.addEventListener('scroll', close, true)
-    return () => {
-      document.removeEventListener('mousedown', handler)
-      window.removeEventListener('scroll', close, true)
-    }
-  }, [showPopover])
-
-  if (!progress) return null
-  const done = progress.confirmed >= progress.total
-  return (
-    <span className="relative inline-flex items-center">
-      <button
-        ref={btnRef}
-        onClick={(e) => { e.stopPropagation(); setShowPopover(!showPopover) }}
-        className={`text-[10px] inline-flex items-center gap-1 ml-1 cursor-pointer hover:text-muted-foreground transition-colors ${done ? 'text-muted-foreground/40' : 'text-muted-foreground/70'}`}
-      >
-        {!done && <Loader2 size={9} className="animate-spin" />}
-        {progress.confirmed}/{progress.total}
-      </button>
-      {showPopover && createPortal(
-        <div
-          ref={(el) => {
-            popRef.current = el
-            if (!el || !btnRef.current) return
-            // Fixed-position in a portal so the chat's overflow-scroll can't clip it.
-            const b = btnRef.current.getBoundingClientRect()
-            const r = el.getBoundingClientRect()
-            let left = b.left
-            if (left + r.width > window.innerWidth - 4) left = window.innerWidth - r.width - 4
-            if (left < 4) left = 4
-            let top = b.top - r.height - 4
-            if (top < 4) top = b.bottom + 4
-            el.style.left = `${left}px`
-            el.style.top = `${top}px`
-            el.style.opacity = '1'
-          }}
-          className="fixed z-[9999] bg-popover border border-border rounded-lg shadow-xl p-2.5 min-w-[200px] max-w-[280px]"
-          style={{ left: -9999, top: -9999, opacity: 0 }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <p className="text-[10px] font-medium text-foreground mb-1.5">Relay Status</p>
-          <div className="space-y-1">
-            {progress.acceptedRelays.map((url) => (
-              <div key={url} className="flex items-center gap-2">
-                <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
-                <span className="text-[10px] text-muted-foreground font-mono truncate">{url.replace('wss://', '')}</span>
-              </div>
-            ))}
-            {progress.confirmed < progress.total && (
-              <div className="flex items-center gap-2">
-                <Loader2 size={8} className="animate-spin text-muted-foreground/50 shrink-0" />
-                <span className="text-[10px] text-muted-foreground/50">{progress.total - progress.confirmed} pending...</span>
-              </div>
-            )}
-          </div>
-        </div>,
-        document.body
-      )}
-    </span>
-  )
+  return <DmRelayStatus progress={progress} />
 }
 
 /* ═══════════════════════════════════════════ */
