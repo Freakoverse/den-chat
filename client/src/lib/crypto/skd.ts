@@ -7,7 +7,8 @@
  * This is the LOCAL-KEY path and the **reference implementation**: a remote
  * NIP-SKD signer (e.g. DENOS) MUST produce byte-identical results, verified by
  * the shared test vectors (NIP-SKD §8). Three derivation forms, each with a
- * form-tagged HKDF `info` = "nip-skd:" ‖ form ‖ 0x1F ‖ context (NIP-SKD §1):
+ * form-tagged HKDF `info` = "nip-skd:" ‖ form ‖ 0x1F ‖ context (NIP-SKD §1); the blinded form additionally
+ * binds the 32-byte x-only base key into `info` (see skdBlindedInfo), so no two blinded keys share a tweak:
  *
  *   - self    : HKDF( root_priv,               … ) → seed·G                     (independent key)
  *   - shared  : HKDF( ECDH_x(root_priv, peer),  … ) → seed·G                     (both parties derive it)
@@ -28,8 +29,10 @@
  */
 
 import { getSharedSecret, getPublicKey, Point } from '@noble/secp256k1'
-import { hexToBytes, bytesToHex } from '@noble/hashes/utils'
+import { hexToBytes, bytesToHex, concatBytes } from '@noble/hashes/utils'
 import { hkdfWithSalt } from './hkdf'
+
+const textEncoder = new TextEncoder()
 
 /** NIP-SKD scheme salt (frozen). Family `skd`, version `1`. */
 export const SKD_SALT = 'nip-skd-v1'
@@ -57,12 +60,30 @@ function scalarToBytes(d: bigint): Uint8Array {
 const SKD_FORM_SEP = '\x1f'
 
 /**
- * HKDF `info` = form-tagged context (NIP-SKD §1). The form tag guarantees no two forms share a `seed`
- * on the same `(IKM, context)` — critical for shared vs blinded, which otherwise would (same ECDH IKM),
- * and `blinded_pub − shared_pub` would then leak `root_pub`.
+ * HKDF `info` for the self/shared forms: form-tagged context (NIP-SKD §1). The form tag guarantees no two
+ * forms share a `seed` on the same `(IKM, context)`, critical for shared vs blinded (same ECDH IKM), where
+ * `blinded_pub − shared_pub` would otherwise leak `root_pub`. The blinded form has its own builder,
+ * {@link skdBlindedInfo}, which additionally binds the base key.
  */
-function skdInfo(form: 'self' | 'shared' | 'blinded', context: string): string {
+function skdInfo(form: 'self' | 'shared', context: string): string {
   return `nip-skd:${form}${SKD_FORM_SEP}${context}`
+}
+
+/**
+ * HKDF `info` for the blinded form, as BYTES (NIP-SKD §1):
+ *   "nip-skd:blinded" ‖ 0x1F ‖ base(32 raw bytes) ‖ context
+ * Binding `base` (the x-only key being blinded) gives each direction of a two-party blinding its own tweak,
+ * so no two blinded keys ever share an offset `t·G`. Without it, a key and its reverse-direction blinding
+ * share one `ecdh_x` and the same `t`, letting an observer link both to their roots by subtraction (the
+ * `blinded_A − A == blinded_B − B` reply attack; NIP-SKD §3, NIP-MDM §1.1). `base` is fixed 32 bytes, so no
+ * trailing separator is needed. A remote NIP-SKD signer (e.g. DENOS) MUST build this identically.
+ */
+function skdBlindedInfo(context: string, baseXonlyHex: string): Uint8Array {
+  return concatBytes(
+    textEncoder.encode(`nip-skd:blinded${SKD_FORM_SEP}`),
+    hexToBytes(baseXonlyHex),
+    textEncoder.encode(context),
+  )
 }
 
 /** Reconstruct the even-`y` point from an x-only key (BIP-340) — the base for a blinded derivation. */
@@ -136,15 +157,16 @@ export function deriveSubKeyLocal(rootPrivHex: string, context: string, peerPubH
  */
 export function deriveBlindedLocal(rootPrivHex: string, context: string, peerPubHex: string): SubKey {
   if (!context) throw new Error('NIP-SKD: context must be non-empty')
-  const seed = hkdfWithSalt(ecdhX(rootPrivHex, peerPubHex), SKD_SALT, skdInfo('blinded', context), 48)
-  const t = bytesToBigIntBE(seedToPrivKey(seed)) // reduce(seed): 48-byte wide reduction with the 0→1 pin
   const rootPubComp = getPublicKey(hexToBytes(rootPrivHex), true) // 33-byte compressed (02/03 ‖ x)
+  const rootXonly = bytesToHex(rootPubComp.slice(1))
+  // info binds base = this holder's root_pub (NIP-SKD §1), so the reverse direction gets a different tweak.
+  const seed = hkdfWithSalt(ecdhX(rootPrivHex, peerPubHex), SKD_SALT, skdBlindedInfo(context, rootXonly), 48)
+  const t = bytesToBigIntBE(seedToPrivKey(seed)) // reduce(seed): 48-byte wide reduction with the 0→1 pin
   const dRaw = bytesToBigIntBE(hexToBytes(rootPrivHex))
   // Normalize to the even-y representative so holder and verifier agree (BIP-340/Taproot tweak rule).
   const dEven = (rootPubComp[0] & 1) === 1 ? SECP256K1_N - dRaw : dRaw
   let priv = (dEven + t) % SECP256K1_N
   if (priv === 0n) priv = 1n // ~2^-256 invalid-key edge (t ≡ -root_priv)
-  const rootXonly = bytesToHex(rootPubComp.slice(1))
   const pubHex = pointToXonly(liftEvenY(rootXonly).add(Point.BASE.multiply(t)))
   return { privHex: bytesToHex(scalarToBytes(priv)), pubHex }
 }
@@ -157,7 +179,8 @@ export function deriveBlindedLocal(rootPrivHex: string, context: string, peerPub
  */
 export function deriveBlindedPubForPeer(rootPrivHex: string, context: string, peerBaseXonlyHex: string): string {
   if (!context) throw new Error('NIP-SKD: context must be non-empty')
-  const seed = hkdfWithSalt(ecdhX(rootPrivHex, peerBaseXonlyHex), SKD_SALT, skdInfo('blinded', context), 48)
+  // info binds base = peerBaseXonly (the key being blinded), which matches the holder's own root_pub above.
+  const seed = hkdfWithSalt(ecdhX(rootPrivHex, peerBaseXonlyHex), SKD_SALT, skdBlindedInfo(context, peerBaseXonlyHex), 48)
   const t = bytesToBigIntBE(seedToPrivKey(seed))
   return pointToXonly(liftEvenY(peerBaseXonlyHex).add(Point.BASE.multiply(t)))
 }

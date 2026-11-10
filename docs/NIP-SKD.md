@@ -53,7 +53,7 @@ general: any app can carve out its own deterministic sub-keyspace.
   the `shared` and `blinded` forms, a peer public key). Covers all three forms; where the
   distinction matters, `blinded` keys are called out explicitly.
 - **blinded key** — a sub-key of the `blinded` form: `root_pub + t·G` where `t` is a scalar
-  derived from the two-party ECDH secret. The root holder can compute its private key
+  derived from the two-party ECDH secret, the context, and the base key being blinded (§1). The root holder can compute its private key
   (`root_priv + t`); the peer can compute only its public key (verify, not impersonate).
 
 ## 1. Derivation
@@ -63,12 +63,16 @@ HKDF `info` is **domain-separated by form** so no two forms ever share a `seed` 
 inputs:
 
 ```
-info(form, context) = "nip-skd:" ‖ form ‖ 0x1F ‖ context      // form ∈ { "self", "shared", "blinded" }
+info(form, context)            = "nip-skd:" ‖ form ‖ 0x1F ‖ context                 // form ∈ { "self", "shared" }
+info("blinded", context, base) = "nip-skd:blinded" ‖ 0x1F ‖ base ‖ context          // base = xonly(key being blinded), 32 raw bytes
 ```
 
 `0x1F` is the ASCII **unit separator**; it makes the form/context boundary unforgeable — no
 `context` value (even one literally starting with `"blinded:"`) can impersonate another form's
-prefix. `salt`, the form tag, and `context` are all **UTF-8**; `0x1F` is a single raw byte.
+prefix. `salt`, the form tag, and `context` are all **UTF-8**; `0x1F` is a single raw byte. The
+**blinded** form additionally binds `base` (the 32-byte x-only key being blinded) into `info`, so each
+direction of a two-party blinding gets an independent tweak and no two blinded keys can ever share an
+offset `t·G` (§3). `base` is fixed-length, so it needs no trailing separator.
 
 Let `reduce(seed)` be the **48-byte (384-bit)** HKDF output interpreted as a big-endian integer,
 reduced `mod n` (the secp256k1 order), with the ~2^-384 case `0` pinned to `1` (see the note
@@ -95,7 +99,7 @@ The root holder gets the private key; the peer can derive only the **public** ke
 binding, never to sign as it):
 ```
 shared       = secp256k1_ecdh_x(root_priv, peer_pub)
-seed         = HKDF-SHA256(IKM = shared, salt = "nip-skd-v1", info = info("blinded", context), L = 48)
+seed         = HKDF-SHA256(IKM = shared, salt = "nip-skd-v1", info = info("blinded", context, root_pub), L = 48)   // base = root_pub (this holder's key)
 t            = reduce(seed)                               // blinding scalar (tweak); reduce() pins t away from 0
 blinded_priv = (root_priv_evenY + t) mod n
 if blinded_priv == 0:  blinded_priv = 1                  // ~2^-256 invalid-key edge (t ≡ -root_priv)
@@ -161,7 +165,10 @@ anywhere the root key is available. HKDF's two stages carry the separation:
   then saw both `shared_pub = seed·G` and `blinded_pub = root_pub + seed·G` for that pair could
   recover `root_pub = blinded_pub − shared_pub` — deanonymizing the root. The distinct `info` makes the
   two seeds independent, so `blinded_pub − shared_pub` is a random point and the leak is closed by
-  construction.
+  construction. The **base** binding (above) closes the analogous *blinded-vs-blinded* leak: `A` blinding
+  toward `B` and `B` blinding toward `A` share the same `ecdh_x` and `context`, so a base-independent tweak
+  would be identical both ways and let an observer link both keys to their roots via `blinded_A − A =
+  blinded_B − B`; binding the base makes the two tweaks independent.
 
 ### 1.1 The `context` (info) rules
 
@@ -187,11 +194,12 @@ but a consumer SHOULD still pick one form per purpose to avoid confusion.
 The verifier-side blinded derivation computes, for a peer's real key `peer`:
 
 ```
-t = reduce(HKDF(ecdh_x(K, peer), salt = "nip-skd-v1", info = info("blinded", context), L = 48))
+t = reduce(HKDF(ecdh_x(K, peer), salt = "nip-skd-v1", info = info("blinded", context, peer), L = 48))   // base = peer (the key being blinded)
 blinded_pub = xonly( lift_even_y(peer) + t·G )
 ```
 
-where **`K` is the verifier's own private key on the ECDH**. In the simple case `K = root_priv` — this is
+where **`K` is the verifier's own private key on the ECDH**, and `base = peer` (the key being blinded) matches
+the holder's `root_pub`, so both sides derive the same `t`. In the simple case `K = root_priv` — this is
 `getPeerBlindedPubkey` (§2), which verifies a peer who blinded toward **your root**.
 
 But a peer may blind toward one of **your sub-keys** rather than your root, e.g. a group-chat protocol
@@ -305,6 +313,10 @@ The `context` rule is a *key-separation* rule (it stops different features from 
 form-tag rule additionally stops the **shared** and **blinded** forms from sharing a seed on the same
 inputs, which would leak the root by subtraction (§1). Neither exposes anything — they are correctness
 invariants.
+
+**No two public keys may share a blinding offset `t·G`.** The blinded `info` binds the base key (§1), which
+guarantees this — in particular for a key and its **reverse-direction** blinding (`A`→`B` and `B`→`A`), which
+share one `ecdh_x` and would otherwise get the same `t` and let an observer link both to their roots.
 
 There is intentionally **no** "export the derived secret" method. Applications that want to
 act as a derived identity do so through §2 operations; the private material stays in the
@@ -470,7 +482,11 @@ values **byte-for-byte**. `ecdh_x` is the **raw** x-coordinate of the shared poi
 reconstructed as even-y `02||x`);
 `xonly(·)` drops the parity byte; `reduce(·)` maps the **48-byte** seed to a secp256k1 scalar (wide
 reduction, `0 → 1`; see §1); `lift_even_y(·)` reconstructs the even-`y` point from an x-only key; `info`
-carries the form tag `"nip-skd:" ‖ form ‖ 0x1F` before the context (§1).
+carries the form tag `"nip-skd:" ‖ form ‖ 0x1F` before the context (§1), and the **blinded** form also
+binds the 32-byte x-only base between the separator and the context.
+
+> The **blinded** vectors below reflect the base-bound `info` (§1); the **self** and **shared** vectors are
+> unaffected by base-binding.
 
 ```
 # ── self derivation (e.g. a group owner pseudonym O) ──
@@ -495,18 +511,18 @@ root_priv = 2222222222222222222222222222222222222222222222222222222222222222    
 root_pub  = 466d7fcae563e5cb09a0d1870bb580344804617879a14949cf22285f1bae3f27     # = R_pub
 peer_pub  = 94576ae28a4583c68e5641b10befe9a90c92680271dc839052937a8552fc0ae5     # owner O_pub
 context   = "nip-chat:v2:member-pseudonym:abc-123"
-info      = "nip-skd:blinded" ‖ 0x1F ‖ context
+info      = "nip-skd:blinded" ‖ 0x1F ‖ root_pub ‖ context      # base = R_pub (the key being blinded)
 seed      = HKDF-SHA256(IKM=ecdh_x(root_priv, peer_pub), salt="nip-skd-v1", info=info, L=48)
 t         = reduce(seed)
 P_pub     = xonly( lift_even_y(root_pub) + t·G )
-         => 059510a63a230047ffe6e978ade8ad31e4bfb59d414331d5b17b6d50038c51a1     # = P_pub
+         => a02fa7340b804d26d55a6f4ae2efb4ad24c6d7a9c2568b7f30acf15a49adbca0     # = P_pub
 
 # ── blinded symmetry (owner re-derives the same P → owner-verification; the ViaSelf composed op §1.2) ──
 # owner computes getPeerBlindedPubkeyViaSelf(viaContext = "nip-chat:v2:owner-pseudonym:abc-123",
 # context = "nip-chat:v2:member-pseudonym:abc-123", peer = R_pub): K = self(owner_root, viaContext) = O_priv,
 # base = lift_even_y(R_pub), IKM = ecdh_x(O_priv, R_pub). By ECDH symmetry the seed (hence t) is identical,
 # so it reproduces P_pub — NOTE this uses O_priv (the owner pseudonym), NOT the owner's root:
-#   => 059510a63a230047ffe6e978ade8ad31e4bfb59d414331d5b17b6d50038c51a1     ✓  (owner never learns P_priv = R_priv + t)
+#   => a02fa7340b804d26d55a6f4ae2efb4ad24c6d7a9c2568b7f30acf15a49adbca0     ✓  (owner never learns P_priv = R_priv + t)
 
 # ── blinded, odd-y base (pins even-y normalization) ──
 # root_priv whose root_pub has ODD y — the holder must tweak root_priv_evenY = n - root_priv,
@@ -515,8 +531,8 @@ root_priv = 0000000000000000000000000000000000000000000000000000000000000006    
 root_pub  = fff97bd5755eeea420453a14355235d382f6472f8568a18b2f057a1460297556
 peer_pub  = 94576ae28a4583c68e5641b10befe9a90c92680271dc839052937a8552fc0ae5     # O_pub
 context   = "nip-chat:v2:member-pseudonym:abc-123"
-blinded_pub (holder, root_priv_evenY = n - root_priv)  => 75a5ff6d888b7065181e9f2108f2ebd7e3000236cd409d19cf4f56ac0224a919
-blinded_pub (verifier, lift_even_y(root_pub))          => 75a5ff6d888b7065181e9f2108f2ebd7e3000236cd409d19cf4f56ac0224a919   ✓
+blinded_pub (holder, root_priv_evenY = n - root_priv)  => e49ad6ea962a9dafe4c36b30eee07159b8690a967399c627368519c4963afdfb
+blinded_pub (verifier, lift_even_y(root_pub))          => e49ad6ea962a9dafe4c36b30eee07159b8690a967399c627368519c4963afdfb   ✓
 
 # ── facilitated: nested blinded (e.g. a facilitated pseudonym Pf; the ViaBlinded composed op §1.2) ──
 # Same blinded form, one level deeper: Pf blinds the facilitated member's R_f toward the FACILITATOR's
@@ -525,12 +541,12 @@ blinded_pub (verifier, lift_even_y(root_pub))          => 75a5ff6d888b7065181e9f
 # member-pseudonym, viaPeer = O_pub, context = facilitated-pseudonym, peer = R_f_pub): K = blinded(R_fac,
 # member-ctx, O_pub) = P_fac_priv, then ECDH(P_fac_priv, R_f_pub) — identical seed by symmetry.
 R_fac_priv = 3333333333333333333333333333333333333333333333333333333333333333
-P_fac_pub  = 55b5f44d71211d5505f3a66115aad173e24a68f5510866269ed52cde4d398803     # R_fac blinded toward O
+P_fac_pub  = 96c8749a7596f1050e8245d81dee67d0c436ff10f46877abd07897a872043469     # R_fac blinded toward O (base-bound)
 R_f_priv   = 4444444444444444444444444444444444444444444444444444444444444444     # facilitated member
 context    = "nip-chat:v2:facilitated-pseudonym:abc-123"
-info       = "nip-skd:blinded" ‖ 0x1F ‖ context
-Pf_pub (facilitated: base = lift_even_y(R_f_pub), IKM = ecdh_x(R_f_priv, P_fac_pub))              => 31b1370ab9902ae59ee73d76bc5c7fb451d7bd52ec7c111a48f42d9ed2389a06
-Pf_pub (facilitator: getPeerBlindedPubkeyViaBlinded, base = R_f_pub, IKM = ecdh_x(P_fac_priv, R_f_pub)) => 31b1370ab9902ae59ee73d76bc5c7fb451d7bd52ec7c111a48f42d9ed2389a06   ✓
+info       = "nip-skd:blinded" ‖ 0x1F ‖ R_f_pub ‖ context      # base = R_f_pub (the key being blinded)
+Pf_pub (facilitated: base = lift_even_y(R_f_pub), IKM = ecdh_x(R_f_priv, P_fac_pub))              => 0b99f9978ac657619d0025fb8b5e4a6fdde3ecccc2b27d474e3f79e2ef2b0392
+Pf_pub (facilitator: getPeerBlindedPubkeyViaBlinded, base = R_f_pub, IKM = ecdh_x(P_fac_priv, R_f_pub)) => 0b99f9978ac657619d0025fb8b5e4a6fdde3ecccc2b27d474e3f79e2ef2b0392   ✓  # REGEN
 ```
 
 The shared and blinded forms feed the **raw** ECDH x-coordinate into HKDF (as NIP-44 does), **not**

@@ -68,6 +68,11 @@ folds `ecdh_x(s_priv, R_pub)` into the derivation, so the same sender produces a
 for every recipient, with no per-conversation string needed. A sender's masked key toward Alice is thus
 unlinkable to the same sender's masked key toward Bob, by construction.
 
+Reverse-direction unlinkability (a reply `R`→`S` versus the original `S`→`R`, which share the one
+`ecdh_x(S, R)`) relies on NIP-SKD binding the **base** key into the blinded tweak (NIP-SKD §1/§3): without
+it both masked keys would share a single offset `t·G` and an observer could link each to its root via
+`M − S == M_reply − R`. With base-binding the two tweaks are independent.
+
 For a message from sender root `S` to recipient root `R`:
 
 ```
@@ -549,6 +554,10 @@ the choice when the recipient must also be hidden.
   surface on a conforming `skd:1` signer.
 - **Forgery is infeasible, not merely detectable** (§1.3): authoring as `M` needs the sender's blinded
   private scalar, and a forged `from` fails the constant-time check.
+- **Reverse-direction unlinkability depends on NIP-SKD base-binding** (§1.1). The masked key `M` and the
+  reply's masked key share one `ecdh_x(S, R)`; NIP-SKD binds the base key into the tweak (§1/§3) so the two
+  get independent offsets. Without it, `M − S == M_reply − R` would let a passive observer link both masked
+  keys to their roots the moment a conversation is answered.
 - **Replay.** An existing event can be re-published; clients dedupe by event id. An attacker cannot craft a
   new valid message, only resurface an old one.
 - **The recipient learns the sender's root** (`from`, §2.1), by design: this is accountable pseudonymity,
@@ -583,18 +592,18 @@ S_pub  = 4f355bdcb7cc0af728ef3cceb9615d90684bb5b2ca5f859ab0f0b704075871aa
 r_priv = 2222222222222222222222222222222222222222222222222222222222222222   # recipient
 R_pub  = 466d7fcae563e5cb09a0d1870bb580344804617879a14949cf22285f1bae3f27
 
-# ── masked sender key M (blinded form, context "nip-mdm:v1:peer") ──
+# ── masked sender key M (blinded form, context "nip-mdm:v1:peer"; info binds base = S_pub, NIP-SKD §1) ──
 # sender:    M = getBlindedPubkey("nip-mdm:v1:peer", R_pub)        base = S, IKM = ecdh_x(s_priv, R_pub)
-M      = da1ae646a84d43609e7b69ae637b8457bd939ef1a725ecefdff2fc8989719bf7
+M      = e4fa4013c03848c3bdf8452c170d38885f4d0d25efa1c3da756b43768c444baf
 # recipient: getPeerBlindedPubkey("nip-mdm:v1:peer", S_pub)        base = S, IKM = ecdh_x(r_priv, S_pub)
-#   => da1ae646a84d43609e7b69ae637b8457bd939ef1a725ecefdff2fc8989719bf7     ✓ (== M, by ECDH symmetry)
+#   => e4fa4013c03848c3bdf8452c170d38885f4d0d25efa1c3da756b43768c444baf     ✓ (== M, by ECDH symmetry)
 
 # ── message conversation key (NIP-44) ──
 # sender:    conversationKey(M_priv, R_pub)
 # recipient: conversationKey(r_priv, M_pub)
-#   => 3cb3501b3af4e59fa1b5df9323cb43a53c3b3b01714c79c69b3623afcf7530cc     ✓ (both sides equal)
+#   => 78a476bef0c88500c5844096dd9cb65daf5553320b400ab85dd3f2e4ef01cecb     ✓ (both sides equal)
 
-# ── sent-contacts index keys (self form; from s_priv alone, independent of any recipient) ──
+# ── sent-contacts index keys (self form; from s_priv alone, independent of any recipient; base-binding is blinded-only, so these are unchanged) ──
 C_from = getSelfSubkeyPubkey("nip-mdm:v1:copy-from")
 #   => 7b63c265022d3fd35c2b5b90ffe5f5c3fc28c6a5e1bb7e90a292c5bd3d636b00
 C_to   = getSelfSubkeyPubkey("nip-mdm:v1:copy-to")

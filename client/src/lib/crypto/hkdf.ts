@@ -61,11 +61,13 @@ function hkdfSha256(ikm: Uint8Array, salt: Uint8Array, info: Uint8Array, length:
  *
  * @param ikm - Input key material (root private key, or a raw ECDH x-coordinate)
  * @param salt - Scheme salt string (e.g. "nip-skd-v1")
- * @param info - Context string (the NIP-SKD context)
+ * @param info - Context: a UTF-8 string, or raw bytes when the info mixes non-UTF-8 material (the NIP-SKD
+ *   blinded form folds a 32-byte x-only base key into its info, so it passes bytes, not a string)
  * @param length - Output length in bytes (default 32)
  */
-export function hkdfWithSalt(ikm: Uint8Array, salt: string, info: string, length = 32): Uint8Array {
-  return hkdfSha256(ikm, textEncoder.encode(salt), textEncoder.encode(info), length)
+export function hkdfWithSalt(ikm: Uint8Array, salt: string, info: string | Uint8Array, length = 32): Uint8Array {
+  const infoBytes = typeof info === 'string' ? textEncoder.encode(info) : info
+  return hkdfSha256(ikm, textEncoder.encode(salt), infoBytes, length)
 }
 
 /**
