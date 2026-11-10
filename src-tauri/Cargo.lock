@@ -973,6 +973,7 @@ dependencies = [
  "url",
  "uuid",
  "webview2-com",
+ "windows-sys 0.59.0",
  "zeroize",
 ]
 

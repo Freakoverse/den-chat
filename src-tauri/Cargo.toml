@@ -41,3 +41,6 @@ tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 
 [target.'cfg(windows)'.dependencies]
 webview2-com = "0.38"
+# Direct Windows Credential Manager access (CredWriteW/CredReadW/CredDeleteW) so we can store with
+# LOCAL_MACHINE persistence instead of the small roaming pool the `keyring` crate hardcodes. See wincred.rs.
+windows-sys = { version = "0.59", features = ["Win32_Security_Credentials", "Win32_Foundation"] }

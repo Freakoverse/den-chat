@@ -1,6 +1,8 @@
 mod keys;
 mod ptt;
 mod state;
+#[cfg(windows)]
+mod wincred;
 mod link_preview;
 mod update;
 

@@ -77,6 +77,7 @@ pub struct AppState {
     pub pending_deep_link: Mutex<Option<String>>,
 }
 
+#[cfg_attr(windows, allow(dead_code))] // used only by the non-Windows keyring path
 const SERVICE_NAME: &str = "den-chat";
 const ACCOUNTS_INDEX_KEY: &str = "accounts-index";
 const SEEDS_INDEX_KEY: &str = "seeds-index";
@@ -110,6 +111,28 @@ impl AppState {
             accounts.len(),
             seeds.len()
         );
+
+        // Windows: migrate any roaming (Enterprise) credentials to the LOCAL store. The roaming pool is
+        // small and shared, and throws "Windows error code 8" when full; reading is persistence-agnostic,
+        // so this just rewrites existing entries as LocalMachine (freeing their roaming quota). Best-effort
+        // and idempotent, so repeat launches are a cheap read-only scan once everything is already local.
+        #[cfg(windows)]
+        {
+            let mut keys: Vec<String> = vec![
+                ACCOUNTS_INDEX_KEY.to_string(),
+                SEEDS_INDEX_KEY.to_string(),
+                ACTIVE_ACCOUNT_KEY.to_string(),
+            ];
+            for a in &accounts {
+                keys.push(format!("acct-{}", a.pubkey));
+                keys.push(format!("sk-{}", a.pubkey));
+            }
+            for s in &seeds {
+                keys.push(format!("seed-info-{}", s.id));
+                keys.push(format!("seed-{}", s.id));
+            }
+            crate::wincred::migrate_to_local(&keys);
+        }
 
         // Check process args for a cold-launch deep link URL
         let pending_deep_link = std::env::args()
@@ -187,41 +210,116 @@ pub fn verify_pin_hash(pin: &str, stored_hash: &str) -> bool {
     hash_pin(pin) == stored_hash
 }
 
-// ─── Keyring Helpers ────────────────────────────────────────────────────
-// Windows Credential Manager has a ~2560-char UTF-16 limit per entry.
-// Collections are stored as individual entries with a lightweight index.
+// ─── Credential Storage Helpers ─────────────────────────────────────────
+// On Windows we talk to the Credential Manager directly (see wincred.rs) with LOCAL_MACHINE
+// persistence, because the `keyring` crate hardcodes the small roaming/Enterprise pool that fills up
+// and throws "Windows error code 8". On macOS/Linux we keep using `keyring`.
+//
+// Windows caps a single credential blob at 2560 bytes (~1280 UTF-16 units). A value larger than that
+// (e.g. a big accounts-index) is transparently SPLIT across `{key}::chunk::{i}` entries with a small
+// manifest under `{key}`, reassembled on load. Values that fit are stored as one entry.
+
+/// Max UTF-16 code units per entry, with headroom under the 1280-unit (2560-byte) platform cap.
+const KEYRING_CHUNK_LIMIT: usize = 1000;
+/// Sentinel prefix marking a chunk manifest. Control chars can't appear in serde_json output.
+const KEYRING_CHUNK_SENTINEL: &str = "\u{1}DENCHUNKED\u{1}";
+
+fn utf16_len(s: &str) -> usize {
+    s.encode_utf16().count()
+}
+
+/// Split a string into pieces each <= `max` UTF-16 units, never breaking a `char`.
+fn split_by_utf16(s: &str, max: usize) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    let mut cur_len = 0usize;
+    for ch in s.chars() {
+        let clen = ch.len_utf16();
+        if cur_len + clen > max && !cur.is_empty() {
+            out.push(std::mem::take(&mut cur));
+            cur_len = 0;
+        }
+        cur.push(ch);
+        cur_len += clen;
+    }
+    if !cur.is_empty() {
+        out.push(cur);
+    }
+    out
+}
+
+/// Delete leftover chunk entries from a previous (chunked) value at `key`. Best-effort.
+fn clear_keyring_chunks(key: &str) {
+    if let Ok(raw) = get_raw_from_keyring(key) {
+        if let Some(n) = raw.strip_prefix(KEYRING_CHUNK_SENTINEL).and_then(|s| s.parse::<usize>().ok()) {
+            for i in 0..n {
+                let _ = delete_raw_from_keyring(&format!("{}::chunk::{}", key, i));
+            }
+        }
+    }
+}
 
 pub fn save_to_keyring<T: Serialize>(key: &str, value: &T) -> Result<(), String> {
     let json = serde_json::to_string(value)
         .map_err(|e| format!("Serialization failed: {}", e))?;
-    let entry = keyring::Entry::new(SERVICE_NAME, key)
-        .map_err(|e| format!("Keyring entry error: {}", e))?;
-    entry.set_password(&json)
-        .map_err(|e| format!("Keyring store error: {}", e))?;
-    Ok(())
+    // Remove chunks from any prior larger value before rewriting.
+    clear_keyring_chunks(key);
+    if utf16_len(&json) <= KEYRING_CHUNK_LIMIT {
+        return save_raw_to_keyring(key, &json);
+    }
+    // Too big for one entry — split and store a manifest under `key`.
+    let chunks = split_by_utf16(&json, KEYRING_CHUNK_LIMIT);
+    for (i, c) in chunks.iter().enumerate() {
+        save_raw_to_keyring(&format!("{}::chunk::{}", key, i), c)?;
+    }
+    save_raw_to_keyring(key, &format!("{}{}", KEYRING_CHUNK_SENTINEL, chunks.len()))
 }
 
 pub fn load_from_keyring<T: for<'de> Deserialize<'de>>(key: &str) -> Option<T> {
-    let entry = keyring::Entry::new(SERVICE_NAME, key).ok()?;
-    let json = entry.get_password().ok()?;
+    let raw = get_raw_from_keyring(key).ok()?;
+    // Reassemble if this is a chunk manifest; otherwise the value is stored inline.
+    let json = if let Some(n) = raw.strip_prefix(KEYRING_CHUNK_SENTINEL).and_then(|s| s.parse::<usize>().ok()) {
+        let mut combined = String::new();
+        for i in 0..n {
+            combined.push_str(&get_raw_from_keyring(&format!("{}::chunk::{}", key, i)).ok()?);
+        }
+        combined
+    } else {
+        raw
+    };
     serde_json::from_str(&json).ok()
 }
 
+// ── Raw per-entry access: Windows → Credential Manager (local); elsewhere → keyring ──
+
+#[cfg(windows)]
+pub fn save_raw_to_keyring(key: &str, value: &str) -> Result<(), String> {
+    crate::wincred::set_raw(key, value)
+}
+#[cfg(windows)]
+pub fn get_raw_from_keyring(key: &str) -> Result<String, String> {
+    crate::wincred::get_raw(key)
+}
+#[cfg(windows)]
+pub fn delete_raw_from_keyring(key: &str) -> Result<(), String> {
+    crate::wincred::delete_raw(key)
+}
+
+#[cfg(not(windows))]
 pub fn save_raw_to_keyring(key: &str, value: &str) -> Result<(), String> {
     let entry = keyring::Entry::new(SERVICE_NAME, key)
         .map_err(|e| format!("Keyring entry error: {}", e))?;
     entry.set_password(value)
-        .map_err(|e| format!("Keyring store error: {}", e))?;
-    Ok(())
+        .map_err(|e| format!("Keyring store error: {}", e))
 }
-
+#[cfg(not(windows))]
 pub fn get_raw_from_keyring(key: &str) -> Result<String, String> {
     let entry = keyring::Entry::new(SERVICE_NAME, key)
         .map_err(|e| format!("Keyring entry error: {}", e))?;
     entry.get_password()
         .map_err(|e| format!("Keyring retrieve error: {}", e))
 }
-
+#[cfg(not(windows))]
 pub fn delete_raw_from_keyring(key: &str) -> Result<(), String> {
     let entry = keyring::Entry::new(SERVICE_NAME, key)
         .map_err(|e| format!("Keyring entry error: {}", e))?;
