@@ -12,9 +12,8 @@
  */
 
 import type { Event } from 'nostr-tools'
-import { getRelays, publishWithFailover } from '@/lib/nostr/relay-pool'
-import { usePostingBehaviourStore } from '@/stores/postingBehaviourStore'
-import { useUserListsStore } from '@/stores/userListsStore'
+import { publishWithFailover } from '@/lib/nostr/relay-pool'
+import { clientPublishRelays, userPublishRelays } from '@/stores/postingBehaviourStore'
 
 export interface RelaySection {
   label: string
@@ -49,16 +48,16 @@ export function dmProgressConfirmed(p: DmRelayProgress): number {
 
 /**
  * Section layout for B-DM (NIP-04) and M-DM (MDM): your NIP-65 relays, the recipient's relays, then the
- * client relays. Honours the Settings > Network post-to-X toggles (an off source contributes no relays),
- * so the counter only ever reflects relays actually targeted. `recipientRelays` is already discovered and
- * gated by the caller (empty when "post to recipient relays" is off).
+ * client relays. Uses the shared publish helpers so it honours the Settings > Network post-to-X toggles
+ * AND the "limit client/user relays" caps (same deterministic per-user pick as getPublishRelays), so the
+ * counter reflects exactly the relays targeted. `recipientRelays` is already discovered and gated by the
+ * caller (empty when "post to recipient relays" is off).
  */
 export function dmSectionsStandard(recipientRelays: string[]): RelaySection[] {
-  const st = usePostingBehaviourStore.getState()
   return [
-    { label: 'Your relays (NIP-65)', relays: st.postToUserRelays ? uniq(useUserListsStore.getState().userRelays) : [] },
+    { label: 'Your relays (NIP-65)', relays: uniq(userPublishRelays()) },
     { label: "Recipient's relays", relays: uniq(recipientRelays) },
-    { label: 'Client relays', relays: st.postToClientRelays ? uniq(getRelays()) : [] },
+    { label: 'Client relays', relays: uniq(clientPublishRelays()) },
   ]
 }
 

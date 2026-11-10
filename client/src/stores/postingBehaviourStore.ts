@@ -218,6 +218,28 @@ export function getPublishRelays(hubRelays?: string[], opts?: { hubSeed?: string
 }
 
 /**
+ * Client relays for a DM publish as their OWN list (for the sectioned relay-status UI), honouring the
+ * post-to-client toggle AND the "limit client relays" cap, with the same deterministic per-user pick
+ * getPublishRelays uses. Empty when the toggle is off.
+ */
+export function clientPublishRelays(): string[] {
+  const state = usePostingBehaviourStore.getState()
+  if (!state.postToClientRelays) return []
+  const me = useUserStore.getState().pubkey ?? ''
+  const limit = state.limitClientRelays ? RELAY_PUBLISH_CAP : Infinity
+  return pickForPubkey(getRelays(), limit, me)
+}
+
+/** User NIP-65 relays for a DM publish as their own list: post-to-user toggle + "limit user relays" cap. */
+export function userPublishRelays(): string[] {
+  const state = usePostingBehaviourStore.getState()
+  if (!state.postToUserRelays) return []
+  const me = useUserStore.getState().pubkey ?? ''
+  const limit = state.limitUserRelays ? RELAY_PUBLISH_CAP : Infinity
+  return pickForPubkey(useUserListsStore.getState().userRelays, limit, me)
+}
+
+/**
  * Relay set for the user's OWN copy of a NIP-17 DM (the gift wrap addressed to themselves).
  *
  * getPublishRelays() PLUS every relay in the user's own kind-10050 DM relay list (minus any they
