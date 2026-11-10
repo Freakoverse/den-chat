@@ -75,6 +75,25 @@ let _mdmKeys: MdmKeys | null = null
 let _mdmMyPubkey: string | null = null
 const _mdmCounterpartyFetched = new Set<string>()
 
+/**
+ * Clear every per-account cache. Called when the active account changes WITHOUT a page refresh (logout +
+ * login, or a remote-signer account switch): otherwise the previous account's `conversations` stay in
+ * memory keyed by THAT account's counterparties. In a two-account self-test the old counterparty is
+ * literally the new account's own key, so opening that leftover thread and replying addresses the message
+ * to yourself (`p` = self) and the conversation splits. A hard reset on the real change prevents it.
+ */
+function resetMdmAccountState(): void {
+  idToCoord.clear()
+  coordToId.clear()
+  coordEventTime.clear()
+  pendingReactions.clear()
+  processedIds.clear()
+  _mdmCounterpartyFetched.clear()
+  indexRoots = []
+  indexD = null
+  indexCreatedAt = 0
+}
+
 const randomHex16 = () => {
   const b = crypto.getRandomValues(new Uint8Array(16))
   return Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('')
@@ -210,6 +229,20 @@ export const useMdmStore = create<MdmState>((set, get) => ({
   startSubscription: async (myPubkey, signer, privateKey) => {
     const keys: MdmKeys = { privateKey, signer }
     if (!mdmSupported(keys)) { set({ loading: false }); return }
+    // Account switched without a page refresh: wipe the previous account's conversations + caches so a reply
+    // in a leftover thread can't be addressed to the wrong recipient (see resetMdmAccountState). Same-account
+    // restarts (relay-list reload, tab visibility) keep their state — `_mdmMyPubkey` is unchanged there.
+    if (_mdmMyPubkey && _mdmMyPubkey !== myPubkey) {
+      resetMdmAccountState()
+      set({
+        conversations: new Map(),
+        activeConversation: null,
+        pendingConversations: new Set(),
+        reactions: new Map(),
+        relayProgress: {},
+        registryOnlyContacts: new Set(),
+      })
+    }
     get().subscription?.close()
     set({ loading: true })
 
