@@ -28,6 +28,9 @@ import { getExpirationFromTags } from '@/lib/hub/messageExpiration'
 /** Unix timestamp (seconds) of when this session started — sounds only play for messages after this */
 const dmSessionStartTime = nowSeconds()
 
+/** The pubkey the store was last started for, to detect an account switch (logout+login without refresh). */
+let _dmMyPubkey: string | null = null
+
 /* ─── Types ─── */
 
 export interface DMMessage {
@@ -360,6 +363,17 @@ export const useDMStore = create<DMState>((set, get) => ({
       set({ loading: false })
       return
     }
+
+    // Account switched without a page refresh (logout+login, or a remote-signer account switch): the
+    // previous account's conversations/caches are still in memory keyed by THAT account, so a reply in a
+    // leftover thread could be sent to the wrong recipient (self, in a two-account test). Wipe on a real
+    // change; same-account restarts (relay-list reload, tab visibility) keep their state.
+    if (_dmMyPubkey && _dmMyPubkey !== myPubkey) {
+      pendingDeliveries.clear()
+      pendingFileAttachments.clear()
+      set({ conversations: new Map(), activeConversation: null, pendingConversations: new Set(), processedWrapIds: new Set() })
+    }
+    _dmMyPubkey = myPubkey
 
     // Close any existing subscription (and drop any pending unwrap retries from it)
     get().subscription?.close()

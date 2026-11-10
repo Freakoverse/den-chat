@@ -279,6 +279,21 @@ export const useDM04Store = create<DM04State>((set, get) => ({
       return
     }
 
+    // Account switched without a page refresh (logout+login, or a remote-signer account switch): the
+    // previous account's conversations/caches are keyed by THAT account's counterparties, so a reply in a
+    // leftover thread could be sent to the wrong recipient (self, in a two-account test). Wipe on a real
+    // change; same-account restarts (relay-list reload, tab visibility) keep their state.
+    if (_myPubkey && _myPubkey !== myPubkey) {
+      _priorityFetched.clear()
+      _counterpartyRelayFetched.clear()
+      set({
+        conversations: new Map(), activeConversation: null, pendingConversations: new Set(),
+        processedIds: new Set(), reactions: new Map(), processedReactionIds: new Set(),
+        pendingNewContacts: new Map(), registryOnlyContacts: new Set(), relayProgress: {},
+        contactRegistry: null, perPersonFetchDone: false,
+      })
+    }
+
     // Close existing subs
     get().subscription?.close()
     get().reactionSub?.close()
