@@ -52,6 +52,7 @@ export default defineConfig({
       '@noble/hashes/utils': path.resolve(__dirname, 'node_modules/@noble/hashes/utils.js'),
       '@noble/hashes/hkdf': path.resolve(__dirname, 'node_modules/@noble/hashes/hkdf.js'),
       '@noble/hashes/sha3': path.resolve(__dirname, 'node_modules/@noble/hashes/sha3.js'),
+      '@noble/hashes/argon2': path.resolve(__dirname, 'node_modules/@noble/hashes/argon2.js'),
       // @noble/curves exports also use ".js" suffixes
       '@noble/curves/secp256k1': path.resolve(__dirname, 'node_modules/@noble/curves/secp256k1.js'),
       // @scure/bip39 wordlists
