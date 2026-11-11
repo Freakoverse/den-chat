@@ -849,11 +849,14 @@ export function LoginScreen() {
   }
 
   const handleFileDecrypt = async () => {
+    if (fileImportLoading) return // guard re-entry (Enter / double-click) during the slow Argon2 decrypt
     if (!pendingFileData) return
     if (!fileImportPassword) { setFileImportError('Enter the backup password'); return }
     setFileImportLoading(true)
     setFileImportError(null)
     try {
+      // Let React paint the loading state before the CPU-heavy Argon2 KDF starts.
+      await new Promise((r) => requestAnimationFrame(() => r(null)))
       const payload = parseBackupPayload(pendingFileData)
       if (!payload) throw new Error('Not a valid backup file')
       const mnemonic = await decryptBackup(payload, fileImportPassword)
@@ -1350,7 +1353,7 @@ export function LoginScreen() {
 
             {/* File decryption password prompt */}
             {showFilePasswordPrompt && (
-              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => { setShowFilePasswordPrompt(false); setPendingFileData(null) }}>
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => { if (fileImportLoading) return; setShowFilePasswordPrompt(false); setPendingFileData(null) }}>
                 <Card className="w-full max-w-sm shadow-lg" onClick={(e) => e.stopPropagation()}>
                   <CardContent className="p-6 flex flex-col items-center gap-4">
                     <div className="flex items-center gap-2">
@@ -1373,9 +1376,12 @@ export function LoginScreen() {
                       </div>
                     )}
                     <Button onClick={handleFileDecrypt} className="w-full" disabled={fileImportLoading}>
-                      {fileImportLoading ? <Loader2 size={16} className="animate-spin" /> : 'Decrypt'}
+                      {fileImportLoading ? <span className="flex items-center gap-2"><Loader2 size={16} className="animate-spin" /> Decrypting backup…</span> : 'Decrypt'}
                     </Button>
-                    <Button variant="ghost" onClick={() => { setShowFilePasswordPrompt(false); setPendingFileData(null) }} className="w-full text-muted-foreground">
+                    {fileImportLoading && (
+                      <p className="text-xs text-muted-foreground text-center">This can take a moment — deriving the key from your password.</p>
+                    )}
+                    <Button variant="ghost" onClick={() => { if (fileImportLoading) return; setShowFilePasswordPrompt(false); setPendingFileData(null) }} disabled={fileImportLoading} className="w-full text-muted-foreground">
                       Cancel
                     </Button>
                   </CardContent>
