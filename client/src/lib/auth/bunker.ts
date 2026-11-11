@@ -10,6 +10,18 @@ import { generateSecretKey, getPublicKey } from 'nostr-tools'
 import { BunkerSigner as NBunkerSigner, parseBunkerInput } from 'nostr-tools/nip46'
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils'
 
+/** Per-attempt timeout for a single signer round-trip. Short because a loopback/LRS signer answers in
+ *  milliseconds; a request still outstanding after this was almost certainly dropped (and is retried
+ *  once). Kept under the SignerGuard's 20s so two attempts still fit inside its window. */
+const SIGNER_ATTEMPT_TIMEOUT_MS = 8000
+
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`Signer ${label} timed out after ${ms / 1000}s`)), ms)
+    p.then((v) => { clearTimeout(t); resolve(v) }, (e) => { clearTimeout(t); reject(e) })
+  })
+}
+
 export class BunkerSigner {
   signer: NBunkerSigner | null = null
   private clientSecretKey: Uint8Array
@@ -18,6 +30,8 @@ export class BunkerSigner {
   // Whether the remote signer implements NIP-SKD (§7) — probed once at login. Gates v2-hub
   // capability so `canUseV2`/the create toggle stay accurate for a signer that predates SKD.
   private skdSupported = false
+  /** Serializes ALL signer round-trips to one-in-flight (see {@link call}). */
+  private queue: Promise<unknown> = Promise.resolve()
 
   constructor(clientSecretKey?: string) {
     this.clientSecretKey = clientSecretKey ? hexToBytes(clientSecretKey) : generateSecretKey()
@@ -50,6 +64,7 @@ export class BunkerSigner {
         window.open(url, '_blank')
       },
     })
+    this.wrapSendRequest() // serialize + timeout + retry every round-trip (see call())
 
     if (isInitialConnection) {
       await this.signer.connect(metadata)
@@ -73,6 +88,7 @@ export class BunkerSigner {
     this.signer = NBunkerSigner.fromBunker(this.clientSecretKey, bunkerPointer, {
       onauth: (url) => { window.open(url, '_blank') },
     })
+    this.wrapSendRequest()
     // Warm the connection in the background; don't block recovery on it.
     this.signer.getPublicKey().catch(() => {})
   }
@@ -236,6 +252,45 @@ export class BunkerSigner {
       nip44EncryptAsBlinded: (context: string, recipientPub: string, plaintext: string, peerPub: string) => this.skdNip44EncryptAsBlinded(context, recipientPub, plaintext, peerPub),
       nip44DecryptAsBlinded: (context: string, senderPub: string, ciphertext: string, peerPub: string) => this.skdNip44DecryptAsBlinded(context, senderPub, ciphertext, peerPub),
     }
+  }
+
+  /**
+   * Route every signer round-trip through here: ONE-IN-FLIGHT serialization + a per-call timeout + a
+   * single re-send retry. A local (LRS/DENOS) signer over the loopback silently DROPS requests that
+   * arrive concurrently, so serializing means it only ever sees one at a time, which removes the burst
+   * that made grouped-hub/DM decrypts hang for 20s and trip the circuit breaker. The timeout also gives
+   * sign/SKD ops a bound they otherwise lack (they can hang forever). `connect` is never timed, it may
+   * legitimately block on first-time user approval at the signer.
+   */
+  private call<T>(label: string, fn: () => Promise<T>): Promise<T> {
+    const run = this.queue.then(() => this.attempt(label, fn), () => this.attempt(label, fn))
+    this.queue = run.then(() => undefined, () => undefined)
+    return run
+  }
+  private async attempt<T>(label: string, fn: () => Promise<T>): Promise<T> {
+    if (label === 'connect') return fn() // first-time approval can take as long as the user needs
+    let lastErr: unknown
+    for (let i = 0; i < 2; i++) {
+      try {
+        return await withTimeout(fn(), SIGNER_ATTEMPT_TIMEOUT_MS, label)
+      } catch (err) {
+        lastErr = err
+        const msg = err instanceof Error ? err.message.toLowerCase() : ''
+        const transient = msg.includes('timeout') || msg.includes('timed out') || msg.includes('connection')
+          || msg.includes('not connected') || msg.includes('closed') || msg.includes('closing') || msg.includes('aborted')
+        if (i === 0 && transient) continue // re-send once over the same connection
+        throw err
+      }
+    }
+    throw lastErr
+  }
+  /** Wrap the inner nostr-tools signer's single request chokepoint so every op (getPublicKey, sign,
+   *  nip04/44, SKD, connect) funnels through {@link call}. Called after (re)creating the signer. */
+  private wrapSendRequest(): void {
+    const s = this.signer as unknown as { sendRequest: (method: string, params: string[]) => Promise<string> } | null
+    if (!s) return
+    const orig = s.sendRequest.bind(s)
+    s.sendRequest = (method: string, params: string[]) => this.call(method, () => orig(method, params))
   }
 
   getClientSecretKey(): string {
