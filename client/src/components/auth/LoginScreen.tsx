@@ -858,28 +858,34 @@ export function LoginScreen() {
       // Let React paint the loading state before the CPU-heavy Argon2 KDF starts.
       await new Promise((r) => requestAnimationFrame(() => r(null)))
       const payload = parseBackupPayload(pendingFileData)
-      if (!payload) throw new Error('Not a valid backup file')
-      const mnemonic = await decryptBackup(payload, fileImportPassword)
+      if (!payload) { setFileImportError('Unrecognized backup format'); return }
 
-      // Reuse the backup password as the device PIN — no need to ask again
-      const usedPin = fileImportPassword
-      setShowFilePasswordPrompt(false)
-      setPendingFileData(null)
-      setFileImportPassword('')
-
-      // Import directly — skip the PIN screen
+      let mnemonic: string
       try {
-        const imported = isValidMnemonic(mnemonic)
+        mnemonic = await decryptBackup(payload, fileImportPassword)
+      } catch {
+        setFileImportError('Incorrect password or corrupted file'); return
+      }
+
+      // Reuse the backup password as the device PIN — no need to ask again. Keep the prompt + spinner
+      // up through the backend import too (it runs its own Argon2id, slow in dev/debug builds); the
+      // navigation at the end unmounts the prompt, so there's no dead screen in between.
+      const usedPin = fileImportPassword
+      let imported: { pubkey: string }
+      try {
+        imported = isValidMnemonic(mnemonic)
           ? await backend.importSeed(mnemonic, usedPin)
           : await backend.importNsec(mnemonic, usedPin)
-        await loadAccounts()
-        setPendingSelectPubkey(imported.pubkey)
-        setScreen('saved-accounts')
       } catch (importErr: unknown) {
-        setError(typeof importErr === 'string' ? importErr : importErr instanceof Error ? importErr.message : 'Import failed')
+        setFileImportError(typeof importErr === 'string' ? importErr : importErr instanceof Error ? importErr.message : 'Import failed')
+        return
       }
-    } catch {
-      setFileImportError('Incorrect password or corrupted file')
+      await loadAccounts()
+      setPendingSelectPubkey(imported.pubkey)
+      setPendingFileData(null)
+      setFileImportPassword('')
+      setShowFilePasswordPrompt(false)
+      setScreen('saved-accounts')
     } finally {
       setFileImportLoading(false)
     }
@@ -1376,10 +1382,10 @@ export function LoginScreen() {
                       </div>
                     )}
                     <Button onClick={handleFileDecrypt} className="w-full" disabled={fileImportLoading}>
-                      {fileImportLoading ? <span className="flex items-center gap-2"><Loader2 size={16} className="animate-spin" /> Decrypting backup…</span> : 'Decrypt'}
+                      {fileImportLoading ? <span className="flex items-center gap-2"><Loader2 size={16} className="animate-spin" /> Importing backup…</span> : 'Decrypt'}
                     </Button>
                     {fileImportLoading && (
-                      <p className="text-xs text-muted-foreground text-center">This can take a moment — deriving the key from your password.</p>
+                      <p className="text-xs text-muted-foreground text-center">This can take a few seconds — encrypting your key at rest.</p>
                     )}
                     <Button variant="ghost" onClick={() => { if (fileImportLoading) return; setShowFilePasswordPrompt(false); setPendingFileData(null) }} disabled={fileImportLoading} className="w-full text-muted-foreground">
                       Cancel
