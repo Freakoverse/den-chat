@@ -131,7 +131,7 @@ A conforming Client SDK SHOULD expose these as a standard `window.nostr` provide
 
 ### 7.1 Sub-key derivation (NIP-SKD `skd:1`)
 
-A Vault MAY implement the [NIP-SKD](./NIP-SKD.md) sub-key surface so origin-isolated apps can use derived per-context pseudonyms (e.g. NIP-CHAT v2 private hubs) **without the derived private material ever leaving the Vault** — exactly like the root key. All ops require the Vault to be **unlocked** and derive from the session root; each returns only a public key, a signed event, or a nip44 result — never a private scalar.
+A Vault MAY implement the NIP-SKD sub-key surface so origin-isolated apps can use derived per-context pseudonyms (e.g. NIP-CHAT v2 private hubs) **without the derived private material ever leaving the Vault** — exactly like the root key. All ops require the Vault to be **unlocked** and derive from the session root; each returns only a public key, a signed event, or a nip44 result — never a private scalar.
 
 | `type` | Params | Result |
 |---|---|---|
