@@ -12,6 +12,7 @@ import { useUserStore } from '@/stores/userStore'
 import { primaryBlossomServer } from '@/lib/blossom'
 import { useDM04Store, type DM04Message, type DM04Reaction } from '@/stores/dm04Store'
 import { DmRelayStatus } from './DmRelayStatus'
+import { dmProgressConfirmed } from '@/lib/nostr/dmRelayTargets'
 import { useBlockStore } from '@/stores/blockStore'
 import { useProfileCache } from '@/hooks/useProfileCache'
 import { useMobile } from '@/hooks/useMobile'
@@ -1138,7 +1139,7 @@ function DM04MessageRow({
   // Relay progress — dim own messages that haven't been accepted by any relay yet
   const relayPending = useDM04Store((s) => {
     const p = s.relayProgress[msg.id]
-    return p && p.confirmed === 0
+    return !!p && dmProgressConfirmed(p) === 0
   })
 
   const senderProfile = getProfile(msg.senderPubkey)

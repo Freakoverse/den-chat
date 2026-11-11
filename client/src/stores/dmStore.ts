@@ -833,7 +833,9 @@ export const useDMStore = create<DMState>((set, get) => ({
       relayProgress: {
         ...state.relayProgress,
         // Create a base entry if none yet (so a recipient-off send still shows its self section).
-        [eventId]: { confirmed: 0, total: 0, acceptedRelays: [], ...state.relayProgress[eventId], sections },
+        [eventId]: state.relayProgress[eventId]
+          ? { ...state.relayProgress[eventId], sections }
+          : { confirmed: 0, total: 0, acceptedRelays: [], sections },
       },
     })),
 
