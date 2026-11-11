@@ -82,6 +82,9 @@ interface DomainState {
 
 const domains: Record<string, DomainState> = {}
 
+/** Monotonic client-side sequence for correlating sends with the signer's logs. */
+let sendSeq = 0
+
 function getDomain(key: string): DomainState {
   if (!domains[key]) {
     domains[key] = {
@@ -168,6 +171,7 @@ function checkPreconditions(domain: DomainState, domainKey: string): void {
     if (Date.now() >= domain.circuitOpenUntil) {
       console.log(`[SignerGuard] ${domainKey} circuit half-open — probe request`)
     } else {
+      console.warn(`[SignerGuard] FAST-FAIL ${domainKey} (circuit open) — NOT sending to signer`)
       throw new SignerCircuitOpenError(domainKey, domain.circuitOpenUntil - Date.now())
     }
   }
@@ -274,11 +278,19 @@ export async function guardedDecrypt(
 
     checkPreconditions(domain, protocol)
 
+    const seq = ++sendSeq
+    const t0 = (typeof performance !== 'undefined' ? performance.now() : Date.now())
+    console.log(`[SignerGuard] SEND #${seq} ${protocol} decrypt pk=${pubkey.slice(0, 8)} ct=${key.slice(0, 12)}`)
+
     try {
       const result = await withTimeout(callSignerDecrypt(ciphertext, pubkey, signer, protocol), SIGNER_CALL_TIMEOUT_MS, 'decrypt')
+      const dt = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0)
+      console.log(`[SignerGuard] RECV #${seq} ${protocol} decrypt OK in ${dt}ms`)
       onSuccess(domain)
       return result
     } catch (err) {
+      const dt = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0)
+      console.warn(`[SignerGuard] FAIL #${seq} ${protocol} decrypt after ${dt}ms: ${err instanceof Error ? err.message : String(err)}`)
       // Only trip circuit for true signer rejections (user denied, timeout, connection lost).
       // All other errors (crypto failures, bad ciphertext, extension-specific errors)
       // mean the signer DID process the request — it was responsive.
