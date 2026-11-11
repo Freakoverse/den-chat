@@ -9,38 +9,27 @@
 import { generateSecretKey, getPublicKey, nip44, SimplePool } from 'nostr-tools'
 import { BunkerSigner as NBunkerSigner, parseBunkerInput } from 'nostr-tools/nip46'
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils'
-import { noteRpcId } from './signerGuard'
 
 /**
- * Diagnostic: wrap the NIP-46 signer's sendRequest so the exact JSON-RPC request id
- * (`idPrefix-serial`, the same value the remote signer logs) is recorded as each request fires.
- * nostr-tools increments `serial` and builds the id synchronously before its first await, so after
- * calling the original we can read it off the instance. Idempotent per signer instance.
+ * A SimplePool whose `subscribe` wraps the NIP-46 response handler to work around a nostr-tools bug.
+ *
+ * nostr-tools' BunkerSigner.onevent does (nip46.js ~1454):
+ *   if (error) handler.reject(error);
+ *   else if (result) handler.resolve(result);   // '' is falsy -> resolve is SKIPPED
+ *   delete listeners[id];                         // ...but the listener is deleted regardless
+ * So a response whose decrypt `result` is an EMPTY STRING (a valid NIP-04/44 decrypt of empty
+ * plaintext — e.g. an empty-content reaction/message) never resolves its request yet loses its
+ * listener, so the call hangs until our 20s SignerGuard timeout. Two such hangs open the global
+ * nip04 circuit and cascade to every decrypt (the "signer connection issue" / undecryptable hub).
+ *
+ * This wrapper intercepts each incoming response, and for one carrying an empty result + no error
+ * whose request is still pending, resolves it itself (as '') before nostr-tools can drop it. It is a
+ * no-op for every other response. The pool MUST be passed into `fromBunker({ pool })`, because
+ * fromBunker calls setupSubscription() internally before returning, so patching afterwards is too
+ * late. `setConvKey`/`setSigner` are called right after fromBunker (the wrapper needs the signer's
+ * conversation key to read the response, and its listener map to resolve).
  */
-function patchIdLogging(signer: NBunkerSigner | null): void {
-  const s = signer as any
-  if (!s || typeof s.sendRequest !== 'function' || s.__idLogPatched) return
-  const orig = s.sendRequest.bind(s)
-  s.sendRequest = (method: string, params: unknown) => {
-    const p = orig(method, params)
-    try { noteRpcId(`${s.idPrefix}-${s.serial}`) } catch { /* best-effort diagnostic */ }
-    return p
-  }
-  s.__idLogPatched = true
-}
-
-/**
- * Diagnostic: a SimplePool whose `subscribe` wraps the response `onevent` handler so we log EVERY
- * event that reaches it (i.e. that survived AbstractRelay._onmessage: subid/dedup/parse/verify/
- * matchFilters), BEFORE decrypt. This MUST be passed into `fromBunker` as `{ pool }`, because
- * fromBunker calls `setupSubscription()` internally before it returns — patching the pool afterwards
- * is too late (the sub already captured the original handler). `setConvKey` is called right after
- * fromBunker so the wrapper can decrypt each response to print its JSON-RPC id. If DENOS delivered a
- * response but no "onevent-entry" appears for it, the drop is BELOW onevent (nostr-tools _onmessage
- * or the browser ws). If it appears but the request still timed out, the loss is at/after decrypt or
- * in our queue.
- */
-function makeLoggingPool(): {
+function makeRescuePool(): {
   pool: SimplePool
   setConvKey: (k: Uint8Array) => void
   setSigner: (sig: unknown) => void
@@ -54,42 +43,22 @@ function makeLoggingPool(): {
       const origOnevent = params.onevent
       params = { ...params, onevent: (event: any) => {
         try {
-          let parsed: any = null
           if (convKey) {
-            try { parsed = JSON.parse(nip44.v2.decrypt(event.content, convKey)) } catch { /* not decryptable here */ }
-          }
-          if (parsed && typeof parsed.id === 'string') {
-            const id: string = parsed.id
-            const hasError = parsed.error != null && parsed.error !== ''
-            const result = parsed.result
-            const resInfo = hasError ? `error=${String(parsed.error).slice(0, 32)}`
-              : result === '' ? 'result=EMPTY'
-              : result != null ? `result=len${String(result).length}`
-              : 'result=MISSING'
-            console.log(`[LRS-recv] onevent-entry id=${id} ${resInfo} evid=${String(event.id).slice(0, 8)} kind=${event.kind}`)
-
-            // FIX (nostr-tools bug workaround): its onevent does `else if (result) handler.resolve()`
-            // then `delete listeners[id]`. A valid EMPTY-string decrypt result ('') is falsy, so resolve
-            // never fires yet the listener is deleted -> the request hangs until our 20s timeout, which
-            // trips the global nip04 circuit and cascades. When a response for a still-pending request
-            // carries an empty result and no error, settle it ourselves (empty plaintext is a valid
-            // nip04/nip44 decrypt) before nostr-tools drops it.
-            if (!hasError && result === '' && signer?.listeners?.[id]?.resolve) {
-              console.log(`[LRS-recv] RESCUE empty-result id=${id} -> resolving as ''`)
-              try { signer.listeners[id].resolve('') } catch { /* ignore */ }
-              try { delete signer.listeners[id] } catch { /* ignore */ }
-              return // settled + deleted; don't let nostr-tools re-process this event
+            const parsed = JSON.parse(nip44.v2.decrypt(event.content, convKey))
+            const id = parsed?.id
+            const hasError = parsed?.error != null && parsed?.error !== ''
+            if (typeof id === 'string' && !hasError && parsed?.result === '' && signer?.listeners?.[id]?.resolve) {
+              signer.listeners[id].resolve('')
+              delete signer.listeners[id]
+              return // settled + deleted; don't let nostr-tools re-process and re-drop it
             }
-          } else {
-            console.log(`[LRS-recv] onevent-entry id=? evid=${String(event.id).slice(0, 8)} kind=${event.kind}`)
           }
-        } catch { /* best-effort diagnostic */ }
+        } catch { /* not our response / not decryptable here — fall through to nostr-tools */ }
         return origOnevent(event)
       } }
     }
     return origSub(relays, filter, params)
   }
-  console.log('[LRS-recv] receipt logging installed')
   return {
     pool: pool as SimplePool,
     setConvKey: (k) => { convKey = k },
@@ -132,7 +101,7 @@ export class BunkerSigner {
     }
     this.bunkerUrl = bunker
 
-    const { pool, setConvKey, setSigner } = makeLoggingPool()
+    const { pool, setConvKey, setSigner } = makeRescuePool()
     this.signer = NBunkerSigner.fromBunker(this.clientSecretKey, bunkerPointer, {
       onauth: (url) => {
         window.open(url, '_blank')
@@ -141,7 +110,6 @@ export class BunkerSigner {
     })
     setConvKey((this.signer as any).conversationKey)
     setSigner(this.signer)
-    patchIdLogging(this.signer)
 
     if (isInitialConnection) {
       await this.signer.connect(metadata)
@@ -162,14 +130,13 @@ export class BunkerSigner {
     if (!this.bunkerUrl) return
     const bunkerPointer = await parseBunkerInput(this.bunkerUrl)
     if (!bunkerPointer) return
-    const { pool, setConvKey, setSigner } = makeLoggingPool()
+    const { pool, setConvKey, setSigner } = makeRescuePool()
     this.signer = NBunkerSigner.fromBunker(this.clientSecretKey, bunkerPointer, {
       onauth: (url) => { window.open(url, '_blank') },
       pool,
     })
     setConvKey((this.signer as any).conversationKey)
     setSigner(this.signer)
-    patchIdLogging(this.signer)
     // Warm the connection in the background; don't block recovery on it.
     this.signer.getPublicKey().catch(() => {})
   }

@@ -82,20 +82,6 @@ interface DomainState {
 
 const domains: Record<string, DomainState> = {}
 
-/** Monotonic client-side sequence for correlating sends with the signer's logs. */
-let sendSeq = 0
-
-/**
- * Diagnostic: the NIP-46 JSON-RPC request id (`idPrefix-serial`) of the most recent signer call.
- * The bunker/LRS signer wrapper records it synchronously as the request fires (before any await),
- * so guardedDecrypt can read it right after initiating the call and stamp the exact id DENOS logs
- * onto its SEND/RECV/FAIL lines. Null for signers that don't use NIP-46 (local key, nip07).
- */
-let lastRpcId: string | null = null
-export function noteRpcId(id: string): void {
-  lastRpcId = id
-}
-
 function getDomain(key: string): DomainState {
   if (!domains[key]) {
     domains[key] = {
@@ -182,7 +168,6 @@ function checkPreconditions(domain: DomainState, domainKey: string): void {
     if (Date.now() >= domain.circuitOpenUntil) {
       console.log(`[SignerGuard] ${domainKey} circuit half-open — probe request`)
     } else {
-      console.warn(`[SignerGuard] FAST-FAIL ${domainKey} (circuit open) — NOT sending to signer`)
       throw new SignerCircuitOpenError(domainKey, domain.circuitOpenUntil - Date.now())
     }
   }
@@ -307,24 +292,11 @@ export async function guardedDecrypt(
 
     checkPreconditions(domain, protocol)
 
-    const seq = ++sendSeq
-    const t0 = (typeof performance !== 'undefined' ? performance.now() : Date.now())
-    // Fire the call synchronously so the signer wrapper records its JSON-RPC id, then read it.
-    lastRpcId = null
-    const callPromise = callSignerDecrypt(ciphertext, pubkey, signer, protocol)
-    const rpcId = lastRpcId ?? '-'
-    const sentAt = new Date().toISOString().slice(11, 23) // HH:MM:SS.mmm wall-clock, for cross-console alignment
-    console.log(`[SignerGuard] SEND #${seq} id=${rpcId} at=${sentAt} ${protocol} decrypt pk=${pubkey.slice(0, 8)} ct=${key.slice(0, 12)}`)
-
     try {
-      const result = await withTimeout(callPromise, SIGNER_CALL_TIMEOUT_MS, 'decrypt')
-      const dt = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0)
-      console.log(`[SignerGuard] RECV #${seq} id=${rpcId} ${protocol} decrypt OK in ${dt}ms (sent ${sentAt})`)
+      const result = await withTimeout(callSignerDecrypt(ciphertext, pubkey, signer, protocol), SIGNER_CALL_TIMEOUT_MS, 'decrypt')
       onSuccess(domain)
       return result
     } catch (err) {
-      const dt = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0)
-      console.warn(`[SignerGuard] FAIL #${seq} id=${rpcId} ${protocol} decrypt after ${dt}ms (sent ${sentAt}): ${err instanceof Error ? err.message : String(err)}`)
       // Only trip circuit for true signer rejections (user denied, timeout, connection lost).
       // All other errors (crypto failures, bad ciphertext, extension-specific errors)
       // mean the signer DID process the request — it was responsive.
