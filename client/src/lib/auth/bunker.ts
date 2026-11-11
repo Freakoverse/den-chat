@@ -9,6 +9,25 @@
 import { generateSecretKey, getPublicKey } from 'nostr-tools'
 import { BunkerSigner as NBunkerSigner, parseBunkerInput } from 'nostr-tools/nip46'
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils'
+import { noteRpcId } from './signerGuard'
+
+/**
+ * Diagnostic: wrap the NIP-46 signer's sendRequest so the exact JSON-RPC request id
+ * (`idPrefix-serial`, the same value the remote signer logs) is recorded as each request fires.
+ * nostr-tools increments `serial` and builds the id synchronously before its first await, so after
+ * calling the original we can read it off the instance. Idempotent per signer instance.
+ */
+function patchIdLogging(signer: NBunkerSigner | null): void {
+  const s = signer as any
+  if (!s || typeof s.sendRequest !== 'function' || s.__idLogPatched) return
+  const orig = s.sendRequest.bind(s)
+  s.sendRequest = (method: string, params: unknown) => {
+    const p = orig(method, params)
+    try { noteRpcId(`${s.idPrefix}-${s.serial}`) } catch { /* best-effort diagnostic */ }
+    return p
+  }
+  s.__idLogPatched = true
+}
 
 export class BunkerSigner {
   signer: NBunkerSigner | null = null
@@ -50,6 +69,7 @@ export class BunkerSigner {
         window.open(url, '_blank')
       },
     })
+    patchIdLogging(this.signer)
 
     if (isInitialConnection) {
       await this.signer.connect(metadata)
@@ -73,6 +93,7 @@ export class BunkerSigner {
     this.signer = NBunkerSigner.fromBunker(this.clientSecretKey, bunkerPointer, {
       onauth: (url) => { window.open(url, '_blank') },
     })
+    patchIdLogging(this.signer)
     // Warm the connection in the background; don't block recovery on it.
     this.signer.getPublicKey().catch(() => {})
   }
