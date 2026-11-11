@@ -150,6 +150,7 @@ interface PendingDelivery {
   recipientPubkey: string
   recipientRelays: string[] // resolved at send time; a retry re-resolves (either side may have fixed their list)
   postRecip: boolean
+  postUser: boolean // "post to user relays": gates the self copy to your own 10050 inbox
 }
 const pendingDeliveries = new Map<string, PendingDelivery>()
 
@@ -195,13 +196,14 @@ async function deliverStrict(
   const d = pendingDeliveries.get(progressId)
   if (!d) return
   const store = useDMStore.getState()
-  const myDMRelays = useUserListsStore.getState().userDMRelays
+  // "Post to user relays" governs the self copy: off = skip it (no publish to your own 10050 inbox).
+  const selfRelays = d.postUser ? useUserListsStore.getState().userDMRelays : []
 
   const recipientRelays = d.postRecip
     ? (retrying ? await fetchDMRelayList(d.recipientPubkey).then((i) => i?.relays ?? []).catch(() => []) : d.recipientRelays)
     : []
   // Sections for the shared relay-status UI: your 10050 inbox (the self copy) + the recipient's relays.
-  store.setRelaySections(progressId, dmSectionsNip17(myDMRelays, recipientRelays))
+  store.setRelaySections(progressId, dmSectionsNip17(selfRelays, recipientRelays))
 
   if (d.postRecip) {
     store.setRelayProgress(progressId, 0, recipientRelays.length, [])
@@ -217,14 +219,15 @@ async function deliverStrict(
 
     if (accepted.length === 0) {
       // Recipient copy reached NO relay → do not save a self copy (strict NIP-17: recipient first).
-      store.setSelfCopyProgress(progressId, { confirmed: 0, total: myDMRelays.length, acceptedRelays: [], settled: true, retrying: false, skipped: true })
+      if (d.postUser) store.setSelfCopyProgress(progressId, { confirmed: 0, total: selfRelays.length, acceptedRelays: [], settled: true, retrying: false, skipped: true })
       console.warn(`[DM] ${progressId.slice(0, 8)}…: recipient copy reached 0 relays — self copy skipped (strict NIP-17: recipient first, then a copy)`)
       return
     }
   }
 
-  // Recipient copy landed on ≥1 relay (or recipient delivery is off) → now keep our own copy.
-  await publishSelfCopy(progressId, d.selfWrap, myDMRelays, retrying)
+  // Recipient copy landed on ≥1 relay (or recipient delivery is off) → keep our own copy, UNLESS
+  // "post to user relays" is off (then no self copy to your 10050 at all).
+  if (d.postUser) await publishSelfCopy(progressId, d.selfWrap, selfRelays, retrying)
 }
 
 /** Fade the indicator after a few seconds — unless the self copy landed nowhere, which stays pinned. */
@@ -639,8 +642,10 @@ export const useDMStore = create<DMState>((set, get) => ({
       // per spec, so fail the send up front (no fallback to client/NIP-65 relays). The precondition
       // is checked BEFORE any wrap is built or the message is shown, so nothing is published.
       const postRecip = usePostingBehaviourStore.getState().postToRecipientRelays
-      const myDMRelays = useUserListsStore.getState().userDMRelays
-      if (myDMRelays.length === 0) {
+      // "Post to user relays" also governs the NIP-17 self copy to your own 10050 inbox: off = no self copy.
+      const postUser = usePostingBehaviourStore.getState().postToUserRelays
+      const myDMRelays = postUser ? useUserListsStore.getState().userDMRelays : []
+      if (postUser && myDMRelays.length === 0) {
         throw new Error('You have no DM relay list (NIP-17 kind 10050). Add one in Settings → Network before sending private DMs.')
       }
       const recipient10050 = postRecip
@@ -730,9 +735,9 @@ export const useDMStore = create<DMState>((set, get) => ({
       const wrapForSelf = wraps.wrapForSelf as unknown as Event
       const wrapForRecipient = wraps.wrapForRecipient as unknown as Event
       // Keep both wraps + the recipient list for strict ordered delivery and Retry.
-      pendingDeliveries.set(progressId, { selfWrap: wrapForSelf, recipientWrap: wrapForRecipient, recipientPubkey, recipientRelays: recipient10050, postRecip })
+      pendingDeliveries.set(progressId, { selfWrap: wrapForSelf, recipientWrap: wrapForRecipient, recipientPubkey, recipientRelays: recipient10050, postRecip, postUser })
       get().setRelayProgress(progressId, 0, postRecip ? recipient10050.length : 0, [])
-      get().setSelfCopyProgress(progressId, { confirmed: 0, total: myDMRelays.length, acceptedRelays: [], settled: false, retrying: false })
+      if (postUser) get().setSelfCopyProgress(progressId, { confirmed: 0, total: myDMRelays.length, acceptedRelays: [], settled: false, retrying: false })
       onProgress?.('publishing')
 
       ;(async () => {
