@@ -248,6 +248,18 @@ export async function guardedDecrypt(
   privateKey: string | null,
   protocol: 'nip04' | 'nip44',
 ): Promise<string> {
+  // A NIP-04 ciphertext is self-describing: NIP-04 mandates the shape `<base64ct>?iv=<base64iv>`,
+  // so a genuine one ALWAYS contains "?iv=" (which cannot occur in base64, hence never in a NIP-44
+  // blob either). Content without it — a public/plaintext emoji reaction, a cleartext media URL, a
+  // custom-emoji shortcode — is simply not NIP-04. Reject it locally instead of spending a signer
+  // round-trip that can only fail with "Invalid NIP04 content format". Every caller here already
+  // treats a throw as "use the value as cleartext", so behaviour is unchanged — but we no longer
+  // flood a remote signer (LRS/DENOS) with hundreds of doomed decrypts, which is what clogged the
+  // serialized nip04 queue and provoked the 20s timeouts that actually trip the circuit breaker.
+  if (protocol === 'nip04' && !ciphertext.includes('?iv=')) {
+    throw new Error('Not NIP-04 content (missing ?iv=) — treating as cleartext')
+  }
+
   // Fast path: local key — no guard (local crypto, no signer round-trip).
   if (privateKey) {
     if (protocol === 'nip04') {
