@@ -2,7 +2,7 @@
 
 > **Status**: Draft v4 (hub format **v2** — privacy)
 > **Depends on**: NIP-01, NIP-13, NIP-44
-> **Companion**: [`NIP-SKD.md`](./NIP-SKD.md) (sub-key derivation for v2 pseudonyms), [`NIP-SHORT.md`](./NIP-SHORT.md) (the short-address scheme the `s` tag uses), [`NIP-TC.md`](./NIP-TC.md) (Topic Chat, the standalone §17 spec), [`NIP-WC.md`](./NIP-WC.md) (Word Communities, the standalone open-community spec within §21).
+> **Companion**: `NIP-SKD.md` (sub-key derivation for v2 pseudonyms), `NIP-SHORT.md` (the short-address scheme the `s` tag uses), `NIP-TC.md` (Topic Chat, the standalone §17 spec), `NIP-WC.md` (Word Communities, the standalone open-community spec within §21).
 
 ---
 
@@ -77,7 +77,7 @@ turning a hub the user joined as v2 into v1 behaviour.
 
 ### 0.1 The v2 model in one page
 
-**Requires NIP-SKD (§0.5).** v2 identities are derived with [NIP-SKD](./NIP-SKD.md) Sub-Key
+**Requires NIP-SKD (§0.5).** v2 identities are derived with NIP-SKD Sub-Key
 Derivation — via a local key, or a signer that implements it. A signer without NIP-SKD
 cannot participate privately.
 
@@ -218,7 +218,7 @@ pointer, not a shutdown.
 
 ### 0.5 Capability requirement — NIP-SKD (v2)
 
-v2 identities are derived with **[NIP-SKD](./NIP-SKD.md) Sub-Key Derivation** (salt
+v2 identities are derived with **NIP-SKD Sub-Key Derivation** (salt
 `"nip-skd-v1"`). Derivation needs one of:
 
 - a **local key** — the client holds `R_priv` and computes the HKDF/ECDH directly; or
@@ -520,7 +520,7 @@ tree still distributes the hub secret exactly as described — but the **leaf id
 pseudonyms**, the **hub owner is itself a pseudonym**, and every member event carries a
 **per-message signature by the real key**. All derivation runs through the v2 capability
 (§0.5): a local key computes the HKDF/ECDH directly; a remote signer derives them as
-[NIP-SKD](./NIP-SKD.md) sub-keys, never exposing the private material.
+NIP-SKD sub-keys, never exposing the private material.
 
 **Owner pseudonym `O`.** The creator does not author the hub under their real key `R_owner`.
 They derive a self-scoped owner pseudonym:
@@ -1235,7 +1235,7 @@ Deleting a role does NOT trigger a tree update. The hub event is the authority f
 > across edits, and a client attaches it once and carries it forward on every republish. The address's
 > authority is the hub event's author as an `npub` — or the creator's DNN ID when they have a verified one,
 > which is much shorter. (On a v2 hub the author is the owner pseudonym `O`, so a DNN-authority address does
-> not apply.) A hub whose event predates the tag can mint one by simply republishing. See **[NIP-SHORT](./NIP-SHORT.md)** for the full scheme: authority forms, code derivation, resolution, and collision handling.
+> not apply.) A hub whose event predates the tag can mint one by simply republishing. See **NIP-SHORT** for the full scheme: authority forms, code derivation, resolution, and collision handling.
 
 #### Updating Hub Events (`created_at`, `updated_at`, and selecting the current event)
 
@@ -3981,7 +3981,7 @@ as in hubs. Voice notes are audio attachments and need nothing further.
 
 Public Chat is a permissionless, topic-based chat system: no hub, no encryption, no authority. The room is a `["t", "<topic>"]` tag (not an owned channel event), messages are plaintext kind `1312`, and spam is gated by proof-of-work (NIP-13). It shares no event kinds with the hub protocol.
 
-**Full specification: [NIP-TC (Topic Chat)](./NIP-TC.md).** The message shape:
+**Full specification: NIP-TC (Topic Chat).** The message shape:
 
 ```json
 {
@@ -4347,7 +4347,7 @@ Both types use **kind `1111`** (NIP-22) for posts and comments, and **kind `7`**
 
 A word community is ownerless and permissionless: no definition event, no creator. The community for a word is every top-level kind-`1111` post carrying `["t", "<word>"]`, exactly one per word globally, handle `w/<word>`. This is the [Public Chat (§17)](#17-public-chat--kind-1312) topic model applied to threaded posts; it does not collide with public chat (kind `1312` vs `1111`, kind-pinned).
 
-**Full specification: [NIP-WC (Word Communities)](./NIP-WC.md).** It reuses NIP-72's `1111` post + comment + `7` reaction layer (§21.2) and drops the `34550` definition and `4550` approval. A top-level post:
+**Full specification: NIP-WC (Word Communities).** It reuses NIP-72's `1111` post + comment + `7` reaction layer (§21.2) and drops the `34550` definition and `4550` approval. A top-level post:
 
 ```json
 {
