@@ -6,7 +6,7 @@
  * via a bunker:// URL (e.g., from nsecBunker).
  */
 
-import { generateSecretKey, getPublicKey, nip44 } from 'nostr-tools'
+import { generateSecretKey, getPublicKey, nip44, SimplePool } from 'nostr-tools'
 import { BunkerSigner as NBunkerSigner, parseBunkerInput } from 'nostr-tools/nip46'
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils'
 import { noteRpcId } from './signerGuard'
@@ -26,67 +26,45 @@ function patchIdLogging(signer: NBunkerSigner | null): void {
     try { noteRpcId(`${s.idPrefix}-${s.serial}`) } catch { /* best-effort diagnostic */ }
     return p
   }
-
-  // Wrap the id->{resolve,reject} listener map so we can observe, at nostr-tools' OWN match point,
-  // whether a response event actually reached its onevent handler. setupSubscription (lazy, on the
-  // first request) closes over `this.listeners`, so we must replace it here, before connect().
-  //   - get(id)  : onevent looks up listeners[id] only AFTER it decrypt+JSON.parse'd an incoming
-  //                kind-24133 event -> "reached onevent" proves the event arrived + decrypted.
-  //   - delete(id): onevent deletes after resolve/reject -> "matched+settled".
-  // Request ids are `${idPrefix}-${serial}` (end in -<digits>); filter to those to skip noise.
-  try {
-    const target: Record<string, unknown> = s.listeners ?? {}
-    s.listeners = new Proxy(target, {
-      get(t, prop) {
-        if (typeof prop === 'string' && /-\d+$/.test(prop)) {
-          console.log(`[LRS-recv] listener-lookup id=${prop} pending=${prop in t}`)
-        }
-        return Reflect.get(t, prop)
-      },
-      deleteProperty(t, prop) {
-        if (typeof prop === 'string' && /-\d+$/.test(prop)) {
-          console.log(`[LRS-recv] matched+settled id=${prop}`)
-        }
-        return Reflect.deleteProperty(t, prop)
-      },
-    })
-
-    // BULLETPROOF hook (independent of the listeners Proxy): wrap the onevent handler at the point
-    // nostr-tools dispatches an event that survived AbstractRelay._onmessage (subid/dedup/parse/
-    // verifyEvent/matchFilters). This fires for EVERY event that reaches the handler, BEFORE decrypt.
-    // We patch the signer's pool.subscribe so that when setupSubscription(lazy) calls it, our wrapper
-    // wraps the onevent it passes. If DENOS delivered a response but no "onevent-entry" appears for
-    // it, the drop is BELOW onevent (in _onmessage or the browser ws). If it appears but the request
-    // still timed out, the loss is at/after decrypt or in our queue.
-    const pool: any = s.pool
-    if (pool && typeof pool.subscribe === 'function' && !pool.__idLogPatched) {
-      const origSub = pool.subscribe.bind(pool)
-      pool.subscribe = (relays: unknown, filter: unknown, params: any) => {
-        if (params && typeof params.onevent === 'function') {
-          const origOnevent = params.onevent
-          params = { ...params, onevent: (event: any) => {
-            try {
-              let idStr = '?'
-              try {
-                const o = JSON.parse(nip44.v2.decrypt(event.content, s.conversationKey))
-                if (o && typeof o.id === 'string') idStr = o.id
-              } catch { /* can't decrypt here; evid still correlates via DENOS */ }
-              console.log(`[LRS-recv] onevent-entry id=${idStr} evid=${String(event.id).slice(0, 8)} kind=${event.kind}`)
-            } catch { /* best-effort diagnostic */ }
-            return origOnevent(event)
-          } }
-        }
-        return origSub(relays, filter, params)
-      }
-      pool.__idLogPatched = true
-    }
-    // Unconditional install marker: lets us tell "build is live + patch ran" (this line appears on
-    // login) from "stale bundle" (absent). If this shows but no "reached onevent" does for a lost id,
-    // the response never reached nostr-tools' onevent = an in-_onmessage drop.
-    console.log('[LRS-recv] receipt logging installed')
-  } catch { /* best-effort diagnostic */ }
-
   s.__idLogPatched = true
+}
+
+/**
+ * Diagnostic: a SimplePool whose `subscribe` wraps the response `onevent` handler so we log EVERY
+ * event that reaches it (i.e. that survived AbstractRelay._onmessage: subid/dedup/parse/verify/
+ * matchFilters), BEFORE decrypt. This MUST be passed into `fromBunker` as `{ pool }`, because
+ * fromBunker calls `setupSubscription()` internally before it returns — patching the pool afterwards
+ * is too late (the sub already captured the original handler). `setConvKey` is called right after
+ * fromBunker so the wrapper can decrypt each response to print its JSON-RPC id. If DENOS delivered a
+ * response but no "onevent-entry" appears for it, the drop is BELOW onevent (nostr-tools _onmessage
+ * or the browser ws). If it appears but the request still timed out, the loss is at/after decrypt or
+ * in our queue.
+ */
+function makeLoggingPool(): { pool: SimplePool; setConvKey: (k: Uint8Array) => void } {
+  let convKey: Uint8Array | null = null
+  const pool = new SimplePool() as any
+  const origSub = pool.subscribe.bind(pool)
+  pool.subscribe = (relays: unknown, filter: unknown, params: any) => {
+    if (params && typeof params.onevent === 'function') {
+      const origOnevent = params.onevent
+      params = { ...params, onevent: (event: any) => {
+        try {
+          let idStr = '?'
+          if (convKey) {
+            try {
+              const o = JSON.parse(nip44.v2.decrypt(event.content, convKey))
+              if (o && typeof o.id === 'string') idStr = o.id
+            } catch { /* not decryptable here; evid still correlates via DENOS */ }
+          }
+          console.log(`[LRS-recv] onevent-entry id=${idStr} evid=${String(event.id).slice(0, 8)} kind=${event.kind}`)
+        } catch { /* best-effort diagnostic */ }
+        return origOnevent(event)
+      } }
+    }
+    return origSub(relays, filter, params)
+  }
+  console.log('[LRS-recv] receipt logging installed')
+  return { pool: pool as SimplePool, setConvKey: (k) => { convKey = k } }
 }
 
 export class BunkerSigner {
@@ -124,11 +102,14 @@ export class BunkerSigner {
     }
     this.bunkerUrl = bunker
 
+    const { pool, setConvKey } = makeLoggingPool()
     this.signer = NBunkerSigner.fromBunker(this.clientSecretKey, bunkerPointer, {
       onauth: (url) => {
         window.open(url, '_blank')
       },
+      pool,
     })
+    setConvKey((this.signer as any).conversationKey)
     patchIdLogging(this.signer)
 
     if (isInitialConnection) {
@@ -150,9 +131,12 @@ export class BunkerSigner {
     if (!this.bunkerUrl) return
     const bunkerPointer = await parseBunkerInput(this.bunkerUrl)
     if (!bunkerPointer) return
+    const { pool, setConvKey } = makeLoggingPool()
     this.signer = NBunkerSigner.fromBunker(this.clientSecretKey, bunkerPointer, {
       onauth: (url) => { window.open(url, '_blank') },
+      pool,
     })
+    setConvKey((this.signer as any).conversationKey)
     patchIdLogging(this.signer)
     // Warm the connection in the background; don't block recovery on it.
     this.signer.getPublicKey().catch(() => {})
