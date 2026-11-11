@@ -828,18 +828,13 @@ export function LoginScreen() {
   // ─── Import from encrypted backup (file or QR) ───
   // Validate a backup JSON string and open the password prompt. Shared by file + QR.
   const loadBackupText = (text: string): boolean => {
-    try {
-      const data = JSON.parse(text)
-      if (data.version !== 1 || data.alg !== 'AES-256-GCM') { setError('Unrecognized backup format'); return false }
-      setPendingFileData(text)
-      setFileImportPassword('')
-      setFileImportError(null)
-      setShowFilePasswordPrompt(true)
-      return true
-    } catch {
-      setError("Could not read backup — make sure it's a valid backup")
-      return false
-    }
+    // Accept v1 (PBKDF2) and v2 (Argon2id) backups.
+    if (!parseBackupPayload(text)) { setError('Unrecognized backup format'); return false }
+    setPendingFileData(text)
+    setFileImportPassword('')
+    setFileImportError(null)
+    setShowFilePasswordPrompt(true)
+    return true
   }
 
   const handleFileImportPick = () => {
