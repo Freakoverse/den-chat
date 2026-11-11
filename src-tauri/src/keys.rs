@@ -1,8 +1,9 @@
 use crate::state::{
     AppState, AccountInfo, SeedInfo, AccountListItem,
-    hash_pin, verify_pin_hash,
+    verify_pin_hash,
     save_raw_to_keyring, get_raw_from_keyring, delete_raw_from_keyring,
 };
+use crate::keystore;
 use nostr_sdk::prelude::*;
 use nostr_sdk::nips::nip06::FromMnemonic;
 use tauri::State;
@@ -22,6 +23,109 @@ fn validate_pin(pin: &str) -> Result<(), String> {
     if pin.len() < 4 {
         return Err("PIN must be at least 4 characters".to_string());
     }
+    Ok(())
+}
+
+// Keyring slot names for an account's secrets.
+fn sk_key(pubkey: &str) -> String { format!("sk-{}", pubkey) }
+/// Per-account encrypted copy of the seed mnemonic (so divergent-PIN siblings each unlock it).
+fn mnseed_key(pubkey: &str) -> String { format!("mnseed-{}", pubkey) }
+/// Legacy shared plaintext mnemonic slot (pre at-rest encryption). Read-only / migrated away.
+fn seed_key(seed_id: &str) -> String { format!("seed-{}", seed_id) }
+
+/// Read + decrypt an account's secret key, proving the PIN in the process.
+///
+/// Routed on the ACTUAL stored value, not the account's `encrypted` flag, so an interrupted migration
+/// (flag and value momentarily disagreeing) still reads correctly: a `denc1:` value is decrypted with
+/// the PIN; a legacy plaintext value is returned after a PIN-hash check. Wrong PIN → `Incorrect PIN`.
+fn unlock_sk(pubkey: &str, pin_hash: &str, pin: &str) -> Result<String, String> {
+    let raw = get_raw_from_keyring(&sk_key(pubkey))?;
+    if keystore::is_encrypted(&raw) {
+        keystore::decrypt(&raw, pin, &sk_key(pubkey))
+    } else if verify_pin_hash(pin, pin_hash) {
+        Ok(raw)
+    } else {
+        Err("Incorrect PIN".to_string())
+    }
+}
+
+/// Read + decrypt an account's seed mnemonic (seed accounts only). Prefers the account's own
+/// encrypted copy (`mnseed-<pubkey>`); otherwise verifies the PIN hash and reads the legacy shared
+/// plaintext `seed-<id>`.
+fn unlock_mnemonic(pubkey: &str, seed_id: &str, pin: &str, pin_hash: &str) -> Result<String, String> {
+    if let Ok(raw) = get_raw_from_keyring(&mnseed_key(pubkey)) {
+        if keystore::is_encrypted(&raw) {
+            return keystore::decrypt(&raw, pin, &mnseed_key(pubkey));
+        }
+    }
+    if !verify_pin_hash(pin, pin_hash) {
+        return Err("Incorrect PIN".to_string());
+    }
+    get_raw_from_keyring(&seed_key(seed_id))
+}
+
+/// Lazily encrypt a legacy-plaintext account's secrets at rest, after its PIN has been proven correct.
+/// Idempotent (no-op if already encrypted). Removes the shared legacy plaintext `seed-<id>` once every
+/// sibling of that seed has its own encrypted mnemonic copy.
+fn ensure_migrated(state: &AppState, pubkey: &str, pin: &str) -> Result<(), String> {
+    let (already, seed_id) = {
+        let accounts = state.accounts.lock().unwrap();
+        match accounts.iter().find(|a| a.pubkey == pubkey) {
+            Some(a) => (a.encrypted, a.seed_id.clone()),
+            None => return Ok(()),
+        }
+    };
+    if already {
+        return Ok(());
+    }
+
+    // Encrypt the secret key (read current plaintext; skip the write if already a denc1 value).
+    let mut sk_raw = get_raw_from_keyring(&sk_key(pubkey))?;
+    if !keystore::is_encrypted(&sk_raw) {
+        let enc = keystore::encrypt(&sk_raw, pin, &sk_key(pubkey))?;
+        save_raw_to_keyring(&sk_key(pubkey), &enc)?;
+    }
+    sk_raw.zeroize();
+
+    // Seed accounts: write this account's own encrypted copy of the mnemonic from the shared plaintext.
+    if let Some(ref sid) = seed_id {
+        let have_enc_copy = get_raw_from_keyring(&mnseed_key(pubkey))
+            .map(|v| keystore::is_encrypted(&v))
+            .unwrap_or(false);
+        if !have_enc_copy {
+            if let Ok(mut mnemonic) = get_raw_from_keyring(&seed_key(sid)) {
+                if !keystore::is_encrypted(&mnemonic) {
+                    let enc = keystore::encrypt(&mnemonic, pin, &mnseed_key(pubkey))?;
+                    save_raw_to_keyring(&mnseed_key(pubkey), &enc)?;
+                }
+                mnemonic.zeroize();
+            }
+        }
+    }
+
+    // Mark encrypted + drop the legacy PIN hash.
+    {
+        let mut accounts = state.accounts.lock().unwrap();
+        if let Some(a) = accounts.iter_mut().find(|a| a.pubkey == pubkey) {
+            a.encrypted = true;
+            a.pin_hash = String::new();
+        }
+    }
+    state.save_accounts()?;
+
+    // If every sibling of this seed is now encrypted, drop the shared plaintext mnemonic.
+    if let Some(ref sid) = seed_id {
+        let all_migrated = {
+            let accounts = state.accounts.lock().unwrap();
+            accounts.iter()
+                .filter(|a| a.seed_id.as_deref() == Some(sid.as_str()))
+                .all(|a| a.encrypted)
+        };
+        if all_migrated {
+            let _ = delete_raw_from_keyring(&seed_key(sid));
+        }
+    }
+
     Ok(())
 }
 
@@ -88,14 +192,12 @@ pub fn generate_account(
     let seed_id = uuid::Uuid::new_v4().to_string();
     let seed_name = name.clone().unwrap_or_else(|| "My Seed".to_string());
 
-    // Store secrets in OS keyring
-    save_raw_to_keyring(&format!("seed-{}", seed_id), &mnemonic_str)?;
-    save_raw_to_keyring(&format!("sk-{}", pubkey_hex), &sk_hex)?;
+    // Store secrets ENCRYPTED at rest (born encrypted — no plaintext slot is ever written).
+    save_raw_to_keyring(&sk_key(&pubkey_hex), &keystore::encrypt(&sk_hex, &pin, &sk_key(&pubkey_hex))?)?;
+    save_raw_to_keyring(&mnseed_key(&pubkey_hex), &keystore::encrypt(&mnemonic_str, &pin, &mnseed_key(&pubkey_hex))?)?;
 
     // Zeroize the secret key from memory
     sk_hex.zeroize();
-
-    let pin_hash = hash_pin(&pin);
 
     let acct = AccountInfo {
         pubkey: pubkey_hex.clone(),
@@ -105,8 +207,9 @@ pub fn generate_account(
         seed_id: Some(seed_id.clone()),
         account_index: Some(0),
         created_at: now_secs(),
-        pin_hash,
+        pin_hash: String::new(),
         pin_hint: pin_hint.clone(),
+        encrypted: true,
     };
 
     let seed_info = SeedInfo {
@@ -180,19 +283,18 @@ pub fn derive_next_account(
             .ok_or("Seed not found")?
     };
 
-    // Verify PIN against an existing sibling account under this seed
-    {
+    // Pick an existing sibling to verify the PIN against + source the mnemonic from.
+    let (sibling_pubkey, sibling_pin_hash) = {
         let accounts = state.accounts.lock().unwrap();
         let sibling = accounts.iter()
             .find(|a| a.seed_id.as_deref() == Some(&seed_id))
             .ok_or("No existing accounts for this seed")?;
-        if !verify_pin_hash(&pin, &sibling.pin_hash) {
-            return Err("Incorrect PIN".to_string());
-        }
-    }
+        (sibling.pubkey.clone(), sibling.pin_hash.clone())
+    };
 
-    // Retrieve mnemonic from keyring
-    let mnemonic = get_raw_from_keyring(&format!("seed-{}", seed_id))?;
+    // Retrieve mnemonic (decrypts the sibling's copy, or the legacy plaintext; verifies the PIN).
+    let mnemonic = unlock_mnemonic(&sibling_pubkey, &seed_id, &pin, &sibling_pin_hash)
+        .map_err(|e| if e == "Incorrect PIN" { "Incorrect PIN".to_string() } else { e })?;
 
     // Find next account index
     let next_index = {
@@ -224,10 +326,10 @@ pub fn derive_next_account(
         }
     }
 
-    save_raw_to_keyring(&format!("sk-{}", pubkey_hex), &sk_hex)?;
+    // New account is born encrypted: its own sk + its own encrypted mnemonic copy.
+    save_raw_to_keyring(&sk_key(&pubkey_hex), &keystore::encrypt(&sk_hex, &pin, &sk_key(&pubkey_hex))?)?;
+    save_raw_to_keyring(&mnseed_key(&pubkey_hex), &keystore::encrypt(&mnemonic, &pin, &mnseed_key(&pubkey_hex))?)?;
     sk_hex.zeroize();
-
-    let pin_hash = hash_pin(&pin);
 
     let acct = AccountInfo {
         pubkey: pubkey_hex.clone(),
@@ -237,8 +339,9 @@ pub fn derive_next_account(
         seed_id: Some(seed_id.clone()),
         account_index: Some(next_index),
         created_at: now_secs(),
-        pin_hash,
+        pin_hash: String::new(),
         pin_hint: pin_hint.clone(),
+        encrypted: true,
     };
 
     {
@@ -255,6 +358,10 @@ pub fn derive_next_account(
         }
     }
     state.save_seeds()?;
+
+    // Opportunistically migrate the sibling we used, so the shared plaintext mnemonic is cleaned up
+    // once every sibling is encrypted. Best-effort — never fails the derive.
+    let _ = ensure_migrated(&state, &sibling_pubkey, &pin);
 
     info!("Derived account #{} from seed '{}': {}", next_index, &seed.name, &npub[..24]);
 
@@ -305,12 +412,11 @@ pub fn import_seed(
     let seed_id = uuid::Uuid::new_v4().to_string();
     let seed_name = name.clone().unwrap_or_else(|| "Imported Seed".to_string());
 
-    // Store secrets
-    save_raw_to_keyring(&format!("seed-{}", seed_id), mnemonic.trim())?;
-    save_raw_to_keyring(&format!("sk-{}", pubkey_hex), &sk_hex)?;
+    // Store secrets encrypted at rest (born encrypted).
+    let mnemonic_trim = mnemonic.trim().to_string();
+    save_raw_to_keyring(&sk_key(&pubkey_hex), &keystore::encrypt(&sk_hex, &pin, &sk_key(&pubkey_hex))?)?;
+    save_raw_to_keyring(&mnseed_key(&pubkey_hex), &keystore::encrypt(&mnemonic_trim, &pin, &mnseed_key(&pubkey_hex))?)?;
     sk_hex.zeroize();
-
-    let pin_hash = hash_pin(&pin);
 
     let acct = AccountInfo {
         pubkey: pubkey_hex.clone(),
@@ -320,8 +426,9 @@ pub fn import_seed(
         seed_id: Some(seed_id.clone()),
         account_index: Some(0),
         created_at: now_secs(),
-        pin_hash,
+        pin_hash: String::new(),
         pin_hint: pin_hint.clone(),
+        encrypted: true,
     };
 
     let seed_info = SeedInfo {
@@ -399,10 +506,8 @@ pub fn import_nsec(
         }
     }
 
-    save_raw_to_keyring(&format!("sk-{}", pubkey_hex), &sk_hex)?;
+    save_raw_to_keyring(&sk_key(&pubkey_hex), &keystore::encrypt(&sk_hex, &pin, &sk_key(&pubkey_hex))?)?;
     sk_hex.zeroize();
-
-    let pin_hash = hash_pin(&pin);
 
     let acct = AccountInfo {
         pubkey: pubkey_hex.clone(),
@@ -412,8 +517,9 @@ pub fn import_nsec(
         seed_id: None,
         account_index: None,
         created_at: now_secs(),
-        pin_hash,
+        pin_hash: String::new(),
         pin_hint: pin_hint.clone(),
+        encrypted: true,
     };
 
     {
@@ -446,10 +552,22 @@ pub fn verify_pin(
     pubkey: String,
     pin: String,
 ) -> Result<bool, String> {
-    let accounts = state.accounts.lock().unwrap();
-    match accounts.iter().find(|a| a.pubkey == pubkey) {
-        Some(acct) => Ok(verify_pin_hash(&pin, &acct.pin_hash)),
-        None => Err("Account not found".to_string()),
+    let pin_hash = {
+        let accounts = state.accounts.lock().unwrap();
+        let acct = accounts.iter().find(|a| a.pubkey == pubkey)
+            .ok_or("Account not found")?;
+        acct.pin_hash.clone()
+    };
+
+    match unlock_sk(&pubkey, &pin_hash, &pin) {
+        Ok(mut sk) => {
+            sk.zeroize();
+            // Correct PIN — migrate the account to at-rest encryption if it's still legacy.
+            ensure_migrated(&state, &pubkey, &pin)?;
+            Ok(true)
+        }
+        Err(ref e) if e == "Incorrect PIN" => Ok(false),
+        Err(e) => Err(e),
     }
 }
 
@@ -463,18 +581,18 @@ pub fn login_account(
     pubkey: String,
     pin: String,
 ) -> Result<serde_json::Value, String> {
-    // Verify PIN
-    {
+    let pin_hash = {
         let accounts = state.accounts.lock().unwrap();
         let acct = accounts.iter().find(|a| a.pubkey == pubkey)
             .ok_or("Account not found")?;
-        if !verify_pin_hash(&pin, &acct.pin_hash) {
-            return Err("Incorrect PIN".to_string());
-        }
-    }
+        acct.pin_hash.clone()
+    };
 
-    // Retrieve secret key from keyring
-    let sk_hex = get_raw_from_keyring(&format!("sk-{}", pubkey))?;
+    // Decrypt (or legacy-read) the secret key — proves the PIN.
+    let sk_hex = unlock_sk(&pubkey, &pin_hash, &pin)?;
+
+    // Migrate legacy storage to at-rest encryption now that the PIN is proven.
+    ensure_migrated(&state, &pubkey, &pin)?;
 
     // Set as active account
     {
@@ -498,19 +616,21 @@ pub fn delete_account(
     pubkey: String,
     pin: String,
 ) -> Result<(), String> {
-    // Verify PIN
-    let seed_id = {
+    // Verify PIN + capture seed_id
+    let (pin_hash, seed_id) = {
         let accounts = state.accounts.lock().unwrap();
         let acct = accounts.iter().find(|a| a.pubkey == pubkey)
             .ok_or("Account not found")?;
-        if !verify_pin_hash(&pin, &acct.pin_hash) {
-            return Err("Incorrect PIN".to_string());
-        }
-        acct.seed_id.clone()
+        (acct.pin_hash.clone(), acct.seed_id.clone())
     };
+    match unlock_sk(&pubkey, &pin_hash, &pin) {
+        Ok(mut sk) => sk.zeroize(),
+        Err(e) => return Err(e),
+    }
 
-    // Delete secret key from keyring
-    let _ = delete_raw_from_keyring(&format!("sk-{}", pubkey));
+    // Delete this account's secrets from the keyring
+    let _ = delete_raw_from_keyring(&sk_key(&pubkey));
+    let _ = delete_raw_from_keyring(&mnseed_key(&pubkey));
 
     // Remove from accounts (lock must be dropped before save_accounts)
     {
@@ -533,9 +653,9 @@ pub fn delete_account(
             }
         } // ← seeds lock dropped
 
-        // Delete mnemonic from keyring if seed was removed
+        // Delete any legacy shared mnemonic from keyring if seed was removed
         if let Some(ref dead_seed_id) = should_delete_seed {
-            let _ = delete_raw_from_keyring(&format!("seed-{}", dead_seed_id));
+            let _ = delete_raw_from_keyring(&seed_key(dead_seed_id));
         }
 
         let _ = state.save_seeds();
@@ -567,19 +687,20 @@ pub fn export_seed(
     pubkey: String,
     pin: String,
 ) -> Result<String, String> {
-    // Verify PIN + find seed_id
-    let seed_id = {
+    // Find seed_id + pin hash
+    let (pin_hash, seed_id) = {
         let accounts = state.accounts.lock().unwrap();
         let acct = accounts.iter().find(|a| a.pubkey == pubkey)
             .ok_or("Account not found")?;
-        if !verify_pin_hash(&pin, &acct.pin_hash) {
-            return Err("Incorrect PIN".to_string());
-        }
-        acct.seed_id.clone()
-            .ok_or("This account has no seed phrase (imported as raw key)")?
+        let sid = acct.seed_id.clone()
+            .ok_or("This account has no seed phrase (imported as raw key)")?;
+        (acct.pin_hash.clone(), sid)
     };
 
-    get_raw_from_keyring(&format!("seed-{}", seed_id))
+    let mnemonic = unlock_mnemonic(&pubkey, &seed_id, &pin, &pin_hash)?;
+    // Correct PIN proven — migrate if still legacy.
+    ensure_migrated(&state, &pubkey, &pin)?;
+    Ok(mnemonic)
 }
 
 // ─── Export nsec (PIN-gated) ────────────────────────────────────────────
@@ -590,17 +711,16 @@ pub fn export_nsec(
     pubkey: String,
     pin: String,
 ) -> Result<String, String> {
-    // Verify PIN
-    {
+    let pin_hash = {
         let accounts = state.accounts.lock().unwrap();
         let acct = accounts.iter().find(|a| a.pubkey == pubkey)
             .ok_or("Account not found")?;
-        if !verify_pin_hash(&pin, &acct.pin_hash) {
-            return Err("Incorrect PIN".to_string());
-        }
-    }
+        acct.pin_hash.clone()
+    };
 
-    let sk_hex = get_raw_from_keyring(&format!("sk-{}", pubkey))?;
+    let sk_hex = unlock_sk(&pubkey, &pin_hash, &pin)?;
+    ensure_migrated(&state, &pubkey, &pin)?;
+
     let secret_key = SecretKey::from_hex(&sk_hex)
         .map_err(|e| format!("Invalid stored key: {}", e))?;
     let nsec = secret_key.to_bech32()
@@ -667,19 +787,54 @@ pub fn change_pin(
 ) -> Result<(), String> {
     validate_pin(&new_pin)?;
 
+    // Snapshot what we need, then release the lock before any keyring crypto.
+    let (pin_hash, seed_id) = {
+        let accounts = state.accounts.lock().unwrap();
+        let acct = accounts.iter().find(|a| a.pubkey == pubkey)
+            .ok_or("Account not found")?;
+        (acct.pin_hash.clone(), acct.seed_id.clone())
+    };
+
+    // Verify current PIN by unlocking the secret key.
+    let mut sk_hex = unlock_sk(&pubkey, &pin_hash, &current_pin)
+        .map_err(|e| if e == "Incorrect PIN" { "Current PIN is incorrect".to_string() } else { e })?;
+
+    // Re-encrypt the secret key under the new PIN.
+    let sk_enc = keystore::encrypt(&sk_hex, &new_pin, &sk_key(&pubkey))?;
+    sk_hex.zeroize();
+    save_raw_to_keyring(&sk_key(&pubkey), &sk_enc)?;
+
+    // Seed accounts: re-encrypt this account's mnemonic copy under the new PIN.
+    if let Some(ref sid) = seed_id {
+        let mut mnemonic = unlock_mnemonic(&pubkey, sid, &current_pin, &pin_hash)?;
+        let mn_enc = keystore::encrypt(&mnemonic, &new_pin, &mnseed_key(&pubkey))?;
+        mnemonic.zeroize();
+        save_raw_to_keyring(&mnseed_key(&pubkey), &mn_enc)?;
+    }
+
+    // Update metadata: now encrypted, legacy hash dropped, hint updated.
     {
         let mut accounts = state.accounts.lock().unwrap();
-        let acct = accounts.iter_mut().find(|a| a.pubkey == pubkey)
-            .ok_or("Account not found")?;
-
-        if !verify_pin_hash(&current_pin, &acct.pin_hash) {
-            return Err("Current PIN is incorrect".to_string());
+        if let Some(acct) = accounts.iter_mut().find(|a| a.pubkey == pubkey) {
+            acct.encrypted = true;
+            acct.pin_hash = String::new();
+            acct.pin_hint = new_hint;
         }
-
-        acct.pin_hash = hash_pin(&new_pin);
-        acct.pin_hint = new_hint;
     }
     state.save_accounts()?;
+
+    // If every sibling of this seed is now encrypted, drop the shared plaintext mnemonic.
+    if let Some(ref sid) = seed_id {
+        let all_migrated = {
+            let accounts = state.accounts.lock().unwrap();
+            accounts.iter()
+                .filter(|a| a.seed_id.as_deref() == Some(sid.as_str()))
+                .all(|a| a.encrypted)
+        };
+        if all_migrated {
+            let _ = delete_raw_from_keyring(&seed_key(sid));
+        }
+    }
 
     info!("Changed PIN for account {}...", &pubkey[..16]);
 

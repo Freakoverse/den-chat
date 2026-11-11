@@ -28,6 +28,11 @@ bip39 = "2"
 rand = "0.8"
 sha2 = "0.10"
 zeroize = "1"
+# At-rest encryption of stored secrets (seed/nsec) under the account PIN: Argon2id-derived KEK +
+# AES-256-GCM, self-describing `denc1:` blob. See keystore.rs.
+argon2 = "0.5"
+aes-gcm = "0.10"
+base64 = "0.22"
 uuid = { version = "1", features = ["v4"] }
 tracing = "0.1"
 futures-util = "0.3"

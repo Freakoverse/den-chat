@@ -1,4 +1,5 @@
 mod keys;
+mod keystore;
 mod ptt;
 mod state;
 #[cfg(windows)]

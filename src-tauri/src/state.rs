@@ -20,11 +20,17 @@ pub struct AccountInfo {
     #[serde(default)]
     pub account_index: Option<u32>,
     pub created_at: u64,
-    /// SHA-256 hash of the 8-digit PIN
+    /// Legacy SHA-256 hash of the PIN. Used only to verify + migrate accounts stored before at-rest
+    /// encryption; cleared to "" once `encrypted` is true (the PIN is then verified by the decrypt).
     pub pin_hash: String,
     /// Optional local hint for PIN
     #[serde(default)]
     pub pin_hint: Option<String>,
+    /// True once this account's secrets (`sk-<pubkey>`, and `mnseed-<pubkey>` for seed accounts) are
+    /// encrypted at rest under Argon2id(PIN) + AES-256-GCM. False = legacy plaintext, migrated lazily
+    /// on the next correct-PIN use. See keystore.rs.
+    #[serde(default)]
+    pub encrypted: bool,
 }
 
 /// Seed metadata — mnemonic stored separately as "seed-{id}"
@@ -61,7 +67,7 @@ impl AccountInfo {
             seed_id: self.seed_id.clone(),
             account_index: self.account_index,
             created_at: self.created_at,
-            has_pin: !self.pin_hash.is_empty(),
+            has_pin: self.encrypted || !self.pin_hash.is_empty(),
             pin_hint: self.pin_hint.clone(),
         }
     }
@@ -126,6 +132,7 @@ impl AppState {
             for a in &accounts {
                 keys.push(format!("acct-{}", a.pubkey));
                 keys.push(format!("sk-{}", a.pubkey));
+                keys.push(format!("mnseed-{}", a.pubkey));
             }
             for s in &seeds {
                 keys.push(format!("seed-info-{}", s.id));

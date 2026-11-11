@@ -28,7 +28,7 @@ import {
 } from '@/lib/auth/secure-storage'
 import { rustBackend, vaultBackend, applyLogin } from '@/lib/auth/authBackend'
 import { rememberLogin, getRememberedLogin } from '@/lib/auth/autoLogin'
-import { verifyBackupMatches } from '@/lib/auth/backupCrypto'
+import { verifyBackupMatches, encryptBackup, decryptBackup, parseBackupPayload } from '@/lib/auth/backupCrypto'
 import { QRScanner } from '@/components/auth/QRScanner'
 import { discoverLocalSigners, findRememberedSigner, LrsSigner, fingerprint, loadLrsState, hasStoredLocalSigner, forgetLocalSigners, type LrsSignerInfo } from '@/lib/auth/lrs'
 import { BunkerSigner } from '@/lib/auth/bunker'
@@ -859,23 +859,9 @@ export function LoginScreen() {
     setFileImportLoading(true)
     setFileImportError(null)
     try {
-      const data = JSON.parse(pendingFileData)
-      const salt = Uint8Array.from(atob(data.salt), c => c.charCodeAt(0))
-      const iv = Uint8Array.from(atob(data.iv), c => c.charCodeAt(0))
-      const ciphertext = Uint8Array.from(atob(data.ciphertext), c => c.charCodeAt(0))
-      const iterations = data.iterations || 600_000
-
-      const enc = new TextEncoder()
-      const keyMaterial = await crypto.subtle.importKey('raw', enc.encode(fileImportPassword), 'PBKDF2', false, ['deriveKey'])
-      const key = await crypto.subtle.deriveKey(
-        { name: 'PBKDF2', salt, iterations, hash: 'SHA-256' },
-        keyMaterial,
-        { name: 'AES-GCM', length: 256 },
-        false,
-        ['decrypt'],
-      )
-      const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ciphertext)
-      const mnemonic = new TextDecoder().decode(decrypted)
+      const payload = parseBackupPayload(pendingFileData)
+      if (!payload) throw new Error('Not a valid backup file')
+      const mnemonic = await decryptBackup(payload, fileImportPassword)
 
       // Reuse the backup password as the device PIN — no need to ask again
       const usedPin = fileImportPassword
@@ -1194,29 +1180,8 @@ export function LoginScreen() {
           if (!valid) { setBackupPinError('Incorrect PIN'); setBackupDownloading(false); return }
         }
       }
-      // Encrypt mnemonic with PBKDF2 + AES-256-GCM
-      const enc = new TextEncoder()
-      const keyMaterial = await crypto.subtle.importKey('raw', enc.encode(backupPin), 'PBKDF2', false, ['deriveKey'])
-      const salt = crypto.getRandomValues(new Uint8Array(16))
-      const iterations = 600_000
-      const key = await crypto.subtle.deriveKey(
-        { name: 'PBKDF2', salt, iterations, hash: 'SHA-256' },
-        keyMaterial,
-        { name: 'AES-GCM', length: 256 },
-        false,
-        ['encrypt'],
-      )
-      const iv = crypto.getRandomValues(new Uint8Array(12))
-      const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, enc.encode(backupMnemonic))
-      const payload = JSON.stringify({
-        version: 1,
-        alg: 'AES-256-GCM',
-        kdf: 'PBKDF2-SHA256',
-        iterations,
-        salt: btoa(String.fromCharCode(...salt)),
-        iv: btoa(String.fromCharCode(...iv)),
-        ciphertext: btoa(String.fromCharCode(...new Uint8Array(ciphertext))),
-      })
+      // Encrypt mnemonic into a v2 (Argon2id) backup payload
+      const payload = JSON.stringify(await encryptBackup(backupMnemonic, backupPin))
       // Trigger download
       await saveTextAs(payload, `den-seed-backup-${Date.now()}.json`, 'application/json', 'Seed backup')
       setShowBackupPinPrompt(false)

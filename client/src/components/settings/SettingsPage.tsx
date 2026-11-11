@@ -62,6 +62,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { truncateNpub, formatDateNumeric } from '@/lib/utils'
 import { Input } from '@/components/ui/input'
 import { rustBackend, vaultBackend } from '@/lib/auth/authBackend'
+import { encryptBackup } from '@/lib/auth/backupCrypto'
 import { PinInput } from '@/components/auth/PinInput'
 import { QRCodeSVG } from 'qrcode.react'
 import { UserPanel } from '@/components/ui/UserPanel'
@@ -4458,21 +4459,8 @@ function SecurityTab() {
     }
 
     try {
-      const enc = new TextEncoder()
-      const keyMaterial = await crypto.subtle.importKey('raw', enc.encode(exportPinConfirm), 'PBKDF2', false, ['deriveKey'])
-      const salt = crypto.getRandomValues(new Uint8Array(16))
-      const key = await crypto.subtle.deriveKey(
-        { name: 'PBKDF2', salt, iterations: 600000, hash: 'SHA-256' },
-        keyMaterial, { name: 'AES-GCM', length: 256 }, false, ['encrypt'],
-      )
-      const iv = crypto.getRandomValues(new Uint8Array(12))
-      const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, enc.encode(secret))
-      return JSON.stringify({
-        version: 1, alg: 'AES-256-GCM', kdf: 'PBKDF2-SHA256', iterations: 600000,
-        salt: btoa(String.fromCharCode(...salt)),
-        iv: btoa(String.fromCharCode(...iv)),
-        ciphertext: btoa(String.fromCharCode(...new Uint8Array(ciphertext))),
-      })
+      // v2 (Argon2id) encrypted backup — same format importable anywhere; old v1 files still decrypt.
+      return JSON.stringify(await encryptBackup(secret, exportPinConfirm))
     } catch (e) { setExportErr(String(e)); return null }
     finally { setExportLoading(false) }
   }
