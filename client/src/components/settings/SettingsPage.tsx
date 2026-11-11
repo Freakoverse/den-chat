@@ -4831,13 +4831,14 @@ function SecurityTab() {
                   onChange={(e) => setNewPinHint(e.target.value)} className="h-9" />
                 {changePinErr && <p className="text-xs text-destructive">{changePinErr}</p>}
                 <div className="flex gap-2">
-                  <button onClick={() => { setShowChangePin(false); setCurrentPin(''); setNewPin(''); setNewPinHint('') }}
-                    className="flex-1 h-9 rounded-lg border border-border bg-secondary/50 text-sm hover:bg-secondary transition-colors cursor-pointer">Cancel</button>
+                  <button onClick={() => { if (loading) return; setShowChangePin(false); setCurrentPin(''); setNewPin(''); setNewPinHint('') }} disabled={loading}
+                    className="flex-1 h-9 rounded-lg border border-border bg-secondary/50 text-sm hover:bg-secondary transition-colors cursor-pointer disabled:opacity-50">Cancel</button>
                   <button onClick={handleChangePin} disabled={loading}
-                    className="flex-1 h-9 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors cursor-pointer disabled:opacity-50">
-                    {loading ? <Loader2 size={14} className="animate-spin" /> : 'Save'}
+                    className="flex-1 h-9 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2">
+                    {loading ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : 'Save'}
                   </button>
                 </div>
+                {loading && <p className="text-xs text-muted-foreground">This can take a few seconds — re-encrypting your key under the new PIN.</p>}
               </div>
             )}
           </div>
