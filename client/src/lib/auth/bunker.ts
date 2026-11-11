@@ -26,6 +26,32 @@ function patchIdLogging(signer: NBunkerSigner | null): void {
     try { noteRpcId(`${s.idPrefix}-${s.serial}`) } catch { /* best-effort diagnostic */ }
     return p
   }
+
+  // Wrap the id->{resolve,reject} listener map so we can observe, at nostr-tools' OWN match point,
+  // whether a response event actually reached its onevent handler. setupSubscription (lazy, on the
+  // first request) closes over `this.listeners`, so we must replace it here, before connect().
+  //   - get(id)  : onevent looks up listeners[id] only AFTER it decrypt+JSON.parse'd an incoming
+  //                kind-24133 event -> "reached onevent" proves the event arrived + decrypted.
+  //   - delete(id): onevent deletes after resolve/reject -> "matched+settled".
+  // Request ids are `${idPrefix}-${serial}` (end in -<digits>); filter to those to skip noise.
+  try {
+    const target: Record<string, unknown> = s.listeners ?? {}
+    s.listeners = new Proxy(target, {
+      get(t, prop) {
+        if (typeof prop === 'string' && /-\d+$/.test(prop)) {
+          console.log(`[LRS-recv] reached onevent id=${prop} pending=${prop in t}`)
+        }
+        return Reflect.get(t, prop)
+      },
+      deleteProperty(t, prop) {
+        if (typeof prop === 'string' && /-\d+$/.test(prop)) {
+          console.log(`[LRS-recv] matched+settled id=${prop}`)
+        }
+        return Reflect.deleteProperty(t, prop)
+      },
+    })
+  } catch { /* best-effort diagnostic */ }
+
   s.__idLogPatched = true
 }
 
