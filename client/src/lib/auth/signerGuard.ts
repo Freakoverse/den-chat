@@ -313,17 +313,18 @@ export async function guardedDecrypt(
     lastRpcId = null
     const callPromise = callSignerDecrypt(ciphertext, pubkey, signer, protocol)
     const rpcId = lastRpcId ?? '-'
-    console.log(`[SignerGuard] SEND #${seq} id=${rpcId} ${protocol} decrypt pk=${pubkey.slice(0, 8)} ct=${key.slice(0, 12)}`)
+    const sentAt = new Date().toISOString().slice(11, 23) // HH:MM:SS.mmm wall-clock, for cross-console alignment
+    console.log(`[SignerGuard] SEND #${seq} id=${rpcId} at=${sentAt} ${protocol} decrypt pk=${pubkey.slice(0, 8)} ct=${key.slice(0, 12)}`)
 
     try {
       const result = await withTimeout(callPromise, SIGNER_CALL_TIMEOUT_MS, 'decrypt')
       const dt = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0)
-      console.log(`[SignerGuard] RECV #${seq} id=${rpcId} ${protocol} decrypt OK in ${dt}ms`)
+      console.log(`[SignerGuard] RECV #${seq} id=${rpcId} ${protocol} decrypt OK in ${dt}ms (sent ${sentAt})`)
       onSuccess(domain)
       return result
     } catch (err) {
       const dt = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0)
-      console.warn(`[SignerGuard] FAIL #${seq} id=${rpcId} ${protocol} decrypt after ${dt}ms: ${err instanceof Error ? err.message : String(err)}`)
+      console.warn(`[SignerGuard] FAIL #${seq} id=${rpcId} ${protocol} decrypt after ${dt}ms (sent ${sentAt}): ${err instanceof Error ? err.message : String(err)}`)
       // Only trip circuit for true signer rejections (user denied, timeout, connection lost).
       // All other errors (crypto failures, bad ciphertext, extension-specific errors)
       // mean the signer DID process the request — it was responsive.
