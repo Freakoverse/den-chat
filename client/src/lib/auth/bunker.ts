@@ -40,8 +40,13 @@ function patchIdLogging(signer: NBunkerSigner | null): void {
  * or the browser ws). If it appears but the request still timed out, the loss is at/after decrypt or
  * in our queue.
  */
-function makeLoggingPool(): { pool: SimplePool; setConvKey: (k: Uint8Array) => void } {
+function makeLoggingPool(): {
+  pool: SimplePool
+  setConvKey: (k: Uint8Array) => void
+  setSigner: (sig: unknown) => void
+} {
   let convKey: Uint8Array | null = null
+  let signer: any = null
   const pool = new SimplePool() as any
   const origSub = pool.subscribe.bind(pool)
   pool.subscribe = (relays: unknown, filter: unknown, params: any) => {
@@ -49,14 +54,35 @@ function makeLoggingPool(): { pool: SimplePool; setConvKey: (k: Uint8Array) => v
       const origOnevent = params.onevent
       params = { ...params, onevent: (event: any) => {
         try {
-          let idStr = '?'
+          let parsed: any = null
           if (convKey) {
-            try {
-              const o = JSON.parse(nip44.v2.decrypt(event.content, convKey))
-              if (o && typeof o.id === 'string') idStr = o.id
-            } catch { /* not decryptable here; evid still correlates via DENOS */ }
+            try { parsed = JSON.parse(nip44.v2.decrypt(event.content, convKey)) } catch { /* not decryptable here */ }
           }
-          console.log(`[LRS-recv] onevent-entry id=${idStr} evid=${String(event.id).slice(0, 8)} kind=${event.kind}`)
+          if (parsed && typeof parsed.id === 'string') {
+            const id: string = parsed.id
+            const hasError = parsed.error != null && parsed.error !== ''
+            const result = parsed.result
+            const resInfo = hasError ? `error=${String(parsed.error).slice(0, 32)}`
+              : result === '' ? 'result=EMPTY'
+              : result != null ? `result=len${String(result).length}`
+              : 'result=MISSING'
+            console.log(`[LRS-recv] onevent-entry id=${id} ${resInfo} evid=${String(event.id).slice(0, 8)} kind=${event.kind}`)
+
+            // FIX (nostr-tools bug workaround): its onevent does `else if (result) handler.resolve()`
+            // then `delete listeners[id]`. A valid EMPTY-string decrypt result ('') is falsy, so resolve
+            // never fires yet the listener is deleted -> the request hangs until our 20s timeout, which
+            // trips the global nip04 circuit and cascades. When a response for a still-pending request
+            // carries an empty result and no error, settle it ourselves (empty plaintext is a valid
+            // nip04/nip44 decrypt) before nostr-tools drops it.
+            if (!hasError && result === '' && signer?.listeners?.[id]?.resolve) {
+              console.log(`[LRS-recv] RESCUE empty-result id=${id} -> resolving as ''`)
+              try { signer.listeners[id].resolve('') } catch { /* ignore */ }
+              try { delete signer.listeners[id] } catch { /* ignore */ }
+              return // settled + deleted; don't let nostr-tools re-process this event
+            }
+          } else {
+            console.log(`[LRS-recv] onevent-entry id=? evid=${String(event.id).slice(0, 8)} kind=${event.kind}`)
+          }
         } catch { /* best-effort diagnostic */ }
         return origOnevent(event)
       } }
@@ -64,7 +90,11 @@ function makeLoggingPool(): { pool: SimplePool; setConvKey: (k: Uint8Array) => v
     return origSub(relays, filter, params)
   }
   console.log('[LRS-recv] receipt logging installed')
-  return { pool: pool as SimplePool, setConvKey: (k) => { convKey = k } }
+  return {
+    pool: pool as SimplePool,
+    setConvKey: (k) => { convKey = k },
+    setSigner: (sig) => { signer = sig },
+  }
 }
 
 export class BunkerSigner {
@@ -102,7 +132,7 @@ export class BunkerSigner {
     }
     this.bunkerUrl = bunker
 
-    const { pool, setConvKey } = makeLoggingPool()
+    const { pool, setConvKey, setSigner } = makeLoggingPool()
     this.signer = NBunkerSigner.fromBunker(this.clientSecretKey, bunkerPointer, {
       onauth: (url) => {
         window.open(url, '_blank')
@@ -110,6 +140,7 @@ export class BunkerSigner {
       pool,
     })
     setConvKey((this.signer as any).conversationKey)
+    setSigner(this.signer)
     patchIdLogging(this.signer)
 
     if (isInitialConnection) {
@@ -131,12 +162,13 @@ export class BunkerSigner {
     if (!this.bunkerUrl) return
     const bunkerPointer = await parseBunkerInput(this.bunkerUrl)
     if (!bunkerPointer) return
-    const { pool, setConvKey } = makeLoggingPool()
+    const { pool, setConvKey, setSigner } = makeLoggingPool()
     this.signer = NBunkerSigner.fromBunker(this.clientSecretKey, bunkerPointer, {
       onauth: (url) => { window.open(url, '_blank') },
       pool,
     })
     setConvKey((this.signer as any).conversationKey)
+    setSigner(this.signer)
     patchIdLogging(this.signer)
     // Warm the connection in the background; don't block recovery on it.
     this.signer.getPublicKey().catch(() => {})
