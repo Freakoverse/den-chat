@@ -50,6 +50,10 @@ function patchIdLogging(signer: NBunkerSigner | null): void {
         return Reflect.deleteProperty(t, prop)
       },
     })
+    // Unconditional install marker: lets us tell "build is live + patch ran" (this line appears on
+    // login) from "stale bundle" (absent). If this shows but no "reached onevent" does for a lost id,
+    // the response never reached nostr-tools' onevent = an in-_onmessage drop.
+    console.log('[LRS-recv] receipt logging installed')
   } catch { /* best-effort diagnostic */ }
 
   s.__idLogPatched = true
