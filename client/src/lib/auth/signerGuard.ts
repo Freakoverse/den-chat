@@ -182,6 +182,22 @@ function checkPreconditions(domain: DomainState, domainKey: string): void {
  * We invert the old logic: instead of trying to enumerate all possible crypto error
  * messages (which misses extension-specific patterns), we explicitly identify rejections.
  */
+/**
+ * Is this the transient "the relay subscription closed" error that nostr-tools (>= 2.26.0) raises
+ * for every in-flight NIP-46 request when the subscription is torn down — e.g. when our own
+ * `reconnect()` swaps in a fresh subscription, or the websocket blips in the background?
+ *
+ * It is about neither the ciphertext (so do NOT cache it as a bad ciphertext — that would brand a
+ * perfectly good message undecryptable forever) nor the signer declining (so do NOT count it toward
+ * the circuit breaker — a reconnect is not a dead signer). The retry on the new subscription
+ * succeeds. A signer that stays genuinely unreachable still trips the circuit via the 20s call
+ * timeout, whose message `isSignerRejection` recognises.
+ */
+function isTransientConnectionReset(err: unknown): boolean {
+  if (!(err instanceof Error)) return false
+  return err.message.toLowerCase().includes('subscription to the remote signer was closed')
+}
+
 function isSignerRejection(err: unknown): boolean {
   if (!(err instanceof Error)) return false
   const msg = err.message.toLowerCase()
@@ -297,6 +313,13 @@ export async function guardedDecrypt(
       onSuccess(domain)
       return result
     } catch (err) {
+      // A reconnect/subscription-close (nostr-tools >= 2.26.0 rejects in-flight requests when the
+      // relay subscription is torn down) is transient: it says nothing about the ciphertext (don't
+      // cache) and nothing about the signer declining (don't open the circuit). Surface it; the next
+      // call runs on the fresh subscription. A truly-dead signer still trips the circuit via timeout.
+      if (isTransientConnectionReset(err)) {
+        throw err
+      }
       // Only trip circuit for true signer rejections (user denied, timeout, connection lost).
       // All other errors (crypto failures, bad ciphertext, extension-specific errors)
       // mean the signer DID process the request — it was responsive.
@@ -344,6 +367,10 @@ export async function guardedEncrypt(
       onSuccess(domain)
       return result
     } catch (err) {
+      // Transient reconnect/subscription-close must not open the circuit (see guardedDecrypt).
+      if (isTransientConnectionReset(err)) {
+        throw err
+      }
       if (isSignerRejection(err)) {
         onFailure(domain, protocol)
       }

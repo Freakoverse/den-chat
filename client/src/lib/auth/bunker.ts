@@ -6,65 +6,16 @@
  * via a bunker:// URL (e.g., from nsecBunker).
  */
 
-import { generateSecretKey, getPublicKey, nip44, SimplePool } from 'nostr-tools'
+import { generateSecretKey, getPublicKey } from 'nostr-tools'
 import { BunkerSigner as NBunkerSigner, parseBunkerInput } from 'nostr-tools/nip46'
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils'
 
-/**
- * A SimplePool whose `subscribe` wraps the NIP-46 response handler to work around a nostr-tools bug.
- *
- * nostr-tools' BunkerSigner.onevent does (nip46.js ~1454):
- *   if (error) handler.reject(error);
- *   else if (result) handler.resolve(result);   // '' is falsy -> resolve is SKIPPED
- *   delete listeners[id];                         // ...but the listener is deleted regardless
- * So a response whose decrypt `result` is an EMPTY STRING (a valid NIP-04/44 decrypt of empty
- * plaintext — e.g. an empty-content reaction/message) never resolves its request yet loses its
- * listener, so the call hangs until our 20s SignerGuard timeout. Two such hangs open the global
- * nip04 circuit and cascade to every decrypt (the "signer connection issue" / undecryptable hub).
- *
- * This wrapper intercepts each incoming response, and for one carrying an empty result + no error
- * whose request is still pending, resolves it itself (as '') before nostr-tools can drop it. It is a
- * no-op for every other response. The pool MUST be passed into `fromBunker({ pool })`, because
- * fromBunker calls setupSubscription() internally before returning, so patching afterwards is too
- * late. `setConvKey`/`setSigner` are called right after fromBunker (the wrapper needs the signer's
- * conversation key to read the response, and its listener map to resolve).
- */
-function makeRescuePool(): {
-  pool: SimplePool
-  setConvKey: (k: Uint8Array) => void
-  setSigner: (sig: unknown) => void
-} {
-  let convKey: Uint8Array | null = null
-  let signer: any = null
-  const pool = new SimplePool() as any
-  const origSub = pool.subscribe.bind(pool)
-  pool.subscribe = (relays: unknown, filter: unknown, params: any) => {
-    if (params && typeof params.onevent === 'function') {
-      const origOnevent = params.onevent
-      params = { ...params, onevent: (event: any) => {
-        try {
-          if (convKey) {
-            const parsed = JSON.parse(nip44.v2.decrypt(event.content, convKey))
-            const id = parsed?.id
-            const hasError = parsed?.error != null && parsed?.error !== ''
-            if (typeof id === 'string' && !hasError && parsed?.result === '' && signer?.listeners?.[id]?.resolve) {
-              signer.listeners[id].resolve('')
-              delete signer.listeners[id]
-              return // settled + deleted; don't let nostr-tools re-process and re-drop it
-            }
-          }
-        } catch { /* not our response / not decryptable here — fall through to nostr-tools */ }
-        return origOnevent(event)
-      } }
-    }
-    return origSub(relays, filter, params)
-  }
-  return {
-    pool: pool as SimplePool,
-    setConvKey: (k) => { convKey = k },
-    setSigner: (sig) => { signer = sig },
-  }
-}
+// NOTE: nostr-tools < 2.25.3 silently dropped a NIP-46 response whose decrypt `result` was an
+// EMPTY STRING (resolve was gated on a truthy `result`, but the listener was deleted regardless),
+// so such a call hung until our 20s SignerGuard timeout and could cascade the global nip04 circuit.
+// We used to pass a custom SimplePool ("makeRescuePool") into fromBunker to rescue those responses.
+// 2.26.0 fixes it upstream — onevent now resolves on `result !== undefined && result !== null`, so
+// '' resolves correctly — and the workaround (plus its SimplePool/nip44 imports) was removed.
 
 export class BunkerSigner {
   signer: NBunkerSigner | null = null
@@ -101,15 +52,11 @@ export class BunkerSigner {
     }
     this.bunkerUrl = bunker
 
-    const { pool, setConvKey, setSigner } = makeRescuePool()
     this.signer = NBunkerSigner.fromBunker(this.clientSecretKey, bunkerPointer, {
       onauth: (url) => {
         window.open(url, '_blank')
       },
-      pool,
     })
-    setConvKey((this.signer as any).conversationKey)
-    setSigner(this.signer)
 
     if (isInitialConnection) {
       await this.signer.connect(metadata)
@@ -130,13 +77,9 @@ export class BunkerSigner {
     if (!this.bunkerUrl) return
     const bunkerPointer = await parseBunkerInput(this.bunkerUrl)
     if (!bunkerPointer) return
-    const { pool, setConvKey, setSigner } = makeRescuePool()
     this.signer = NBunkerSigner.fromBunker(this.clientSecretKey, bunkerPointer, {
       onauth: (url) => { window.open(url, '_blank') },
-      pool,
     })
-    setConvKey((this.signer as any).conversationKey)
-    setSigner(this.signer)
     // Warm the connection in the background; don't block recovery on it.
     this.signer.getPublicKey().catch(() => {})
   }
