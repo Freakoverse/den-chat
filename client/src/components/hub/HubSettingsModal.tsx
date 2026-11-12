@@ -559,12 +559,14 @@ export function HubSettingsModal({ open, onClose, hub, initialPage, focusMemberP
         const v2Hub = isV2Group(hub)
         try {
           await markStep('Fetching encryption index')
-          const { downloadTextFromBlossom } = await import('@/lib/blossom/client')
+          // downloadHubTreeText = cached read for the immutable current index; downloadTextFromBlossom stays
+          // for the post-upload verify below (which must hit a server, not the cache).
+          const { downloadTextFromBlossom, downloadHubTreeText } = await import('@/lib/blossom/client')
           const { parseIndexFile, createAndUploadGroupTree, createAndUploadGroupTreeV2 } = await import('@/lib/blossom/members')
           const { getGroupMembers } = await import('@/lib/hub/groupEncryption')
           const { makeSubkeySigner } = await import('@/lib/nostr/v2send')
           const { ChatContext } = await import('@/lib/crypto/skd')
-          const indexContent = await downloadTextFromBlossom(hub.indexFileHash, hub.blossomServers)
+          const indexContent = await downloadHubTreeText(hub.indexFileHash, hub.blossomServers, hub.dTag)
           const index = parseIndexFile(indexContent)
           markStepDone('Fetching encryption index')
 
@@ -698,7 +700,7 @@ export function HubSettingsModal({ open, onClose, hub, initialPage, focusMemberP
         // Update the member tree — strip deleted role IDs from each member
         // Downloads only affected pages, updates roles, rebuilds spine.
         await markStep('Updating member tree')
-        const { downloadTextFromBlossom } = await import('@/lib/blossom/client')
+        const { downloadHubTreeText } = await import('@/lib/blossom/client')
         const { parseIndexFile, updateMemberRolesInPage } = await import('@/lib/blossom/members')
         const {
           deserializeLeafPage, serializeLeafPage,
@@ -706,11 +708,11 @@ export function HubSettingsModal({ open, onClose, hub, initialPage, focusMemberP
           fromHex,
         } = await import('@/lib/crypto/lkh')
 
-        const indexContent = await downloadTextFromBlossom(currentIndexHash, hub.blossomServers)
+        const indexContent = await downloadHubTreeText(currentIndexHash, hub.blossomServers, hub.dTag)
         const index = parseIndexFile(indexContent)
 
         if (index.spineHash && index.leafPages.length > 0) {
-          const spineContent = await downloadTextFromBlossom(index.spineHash, hub.blossomServers)
+          const spineContent = await downloadHubTreeText(index.spineHash, hub.blossomServers, hub.dTag)
           const spine = deserializeSpine(spineContent)
           const hubSecretHex = useHubStore.getState().hubSecrets[hub.dTag]
           const hubSecret = hubSecretHex ? fromHex(hubSecretHex) : null
@@ -723,7 +725,7 @@ export function HubSettingsModal({ open, onClose, hub, initialPage, focusMemberP
             // Download each page, update roles if needed
             for (let pi = 0; pi < index.leafPages.length; pi++) {
               const pageRef = index.leafPages[pi]
-              const pageContent = await downloadTextFromBlossom(pageRef.hash, hub.blossomServers)
+              const pageContent = await downloadHubTreeText(pageRef.hash, hub.blossomServers, hub.dTag)
               const page = deserializeLeafPage(pageContent)
 
               let pageChanged = false
@@ -4081,7 +4083,7 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
 
       await markStep('Downloading current index')
       // Re-upload ban page + index to Blossom
-      const { uploadBanPages, uploadBanPagesV2, createPaginatedIndexFile, parseIndexFile, downloadTextFromBlossom } = await import('@/lib/blossom')
+      const { uploadBanPages, uploadBanPagesV2, createPaginatedIndexFile, parseIndexFile, downloadHubTreeText } = await import('@/lib/blossom')
 
       // v2: ban pages must be encrypted (real keys R never in plaintext) and every Blossom
       // auth must be signed by the owner pseudonym O (never R_owner).
@@ -4106,7 +4108,7 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
       let leafPages: Array<{ pageIndex: number; firstPubkey: string; hash: string }> = []
       if (hub.indexFileHash && hub.blossomServers.length > 0) {
         try {
-          const indexContent = await downloadTextFromBlossom(hub.indexFileHash, hub.blossomServers)
+          const indexContent = await downloadHubTreeText(hub.indexFileHash, hub.blossomServers, hub.dTag)
           const index = parseIndexFile(indexContent)
           spineHash = index.spineHash
           historyHash = index.historyHash
@@ -4123,7 +4125,7 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
       if (v2 && hub.indexFileHash && hub.blossomServers.length > 0 && hubSecretUnban) {
         try {
           const { downloadBanListV2 } = await import('@/lib/blossom')
-          const idxBans = parseIndexFile(await downloadTextFromBlossom(hub.indexFileHash, hub.blossomServers))
+          const idxBans = parseIndexFile(await downloadHubTreeText(hub.indexFileHash, hub.blossomServers, hub.dTag))
           const freshBans = idxBans.banPages.length > 0
             ? (await downloadBanListV2(idxBans.banPages, hubSecretUnban, hub.blossomServers)).map(e => e.pubkey)
             : []
@@ -4229,7 +4231,7 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
       await markStep('Downloading current index')
       const {
         uploadBanPages, uploadBanPagesV2, createPaginatedIndexFile, parseIndexFile,
-        downloadTextFromBlossom, uploadToBlossomServers,
+        downloadHubTreeText, uploadToBlossomServers,
         rehydratePageKeys, addMemberToPage,
         rehydratePageKeysV2, addMemberToPageV2, findPageForPubkey,
       } = await import('@/lib/blossom')
@@ -4260,7 +4262,7 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
         if (!secretHexReadd) throw new Error('Hub secret not available')
         try {
           const { downloadBanListV2 } = await import('@/lib/blossom')
-          const idxBans = parseIndexFile(await downloadTextFromBlossom(hub.indexFileHash, hub.blossomServers))
+          const idxBans = parseIndexFile(await downloadHubTreeText(hub.indexFileHash, hub.blossomServers, hub.dTag))
           const freshBans = idxBans.banPages.length > 0
             ? (await downloadBanListV2(idxBans.banPages, fromHex(secretHexReadd), hub.blossomServers)).map(e => e.pubkey)
             : []
@@ -4277,7 +4279,7 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
       let leafPages: Array<{ pageIndex: number; firstPubkey: string; hash: string }> = []
       if (hub.indexFileHash && hub.blossomServers.length > 0) {
         try {
-          const indexContent = await downloadTextFromBlossom(hub.indexFileHash, hub.blossomServers)
+          const indexContent = await downloadHubTreeText(hub.indexFileHash, hub.blossomServers, hub.dTag)
           const index = parseIndexFile(indexContent)
           spineHash = index.spineHash
           historyHash = index.historyHash
@@ -4297,7 +4299,7 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
         if (hubSecretHex) {
           const hubSecret = fromHex(hubSecretHex)
 
-          const spineContent = await downloadTextFromBlossom(spineHash, hub.blossomServers)
+          const spineContent = await downloadHubTreeText(spineHash, hub.blossomServers, hub.dTag)
           const spine = deserializeSpine(spineContent)
           const pageRootKeys = await recoverPageRootKeys(spine, hubSecret)
 
@@ -4336,7 +4338,7 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
           const allNewMembers: string[] = []
 
           for (const [pageIndex, mod] of pageMods) {
-            const pageContent = await downloadTextFromBlossom(mod.pageRef.hash, hub.blossomServers)
+            const pageContent = await downloadHubTreeText(mod.pageRef.hash, hub.blossomServers, hub.dTag)
             let rehydrated = v2
               ? await rehydratePageKeysV2(pageContent, ownerSignerV2!, resolveEpochSecret)
               : await rehydratePageKeys(pageContent, signer, privateKey)
@@ -4688,7 +4690,7 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
                                 onClick={async () => {
                                    // Add 'w' flag to member
                                   try {
-                                    const { downloadTextFromBlossom, uploadToBlossomServers: uploadFn } = await import('@/lib/blossom/client')
+                                    const { downloadHubTreeText, uploadToBlossomServers: uploadFn } = await import('@/lib/blossom/client')
                                     const { parseIndexFile, createPaginatedIndexFile, findPageForPubkey, banPageToken } = await import('@/lib/blossom/members')
                                     const {
                                       deserializeLeafPage, serializeLeafPage,
@@ -4697,14 +4699,14 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
                                     } = await import('@/lib/crypto/lkh')
 
                                     if (!hub.indexFileHash) return
-                                    const ic = await downloadTextFromBlossom(hub.indexFileHash, hub.blossomServers)
+                                    const ic = await downloadHubTreeText(hub.indexFileHash, hub.blossomServers, hub.dTag)
                                     const idx = parseIndexFile(ic)
                                     if (!idx.spineHash || idx.leafPages.length === 0) return
 
                                     const pageEntry = findPageForPubkey(idx, bannedPk)
                                     if (!pageEntry) return
 
-                                    const pageContent = await downloadTextFromBlossom(pageEntry.hash, hub.blossomServers)
+                                    const pageContent = await downloadHubTreeText(pageEntry.hash, hub.blossomServers, hub.dTag)
                                     const page = deserializeLeafPage(pageContent)
                                     const leaf = page.leaves.find(l => l.pubkey === bannedPk)
                                     if (leaf) {
@@ -4721,7 +4723,7 @@ function BannedUsersPage({ hub }: { hub: HubData }) {
                                         const hubSecretHex = useHubStore.getState().hubSecrets[hub.dTag]
                                         if (hubSecretHex) {
                                           const hubSecret = fromHex(hubSecretHex)
-                                          const spineContent = await downloadTextFromBlossom(idx.spineHash, hub.blossomServers)
+                                          const spineContent = await downloadHubTreeText(idx.spineHash, hub.blossomServers, hub.dTag)
                                           const spine = deserializeSpine(spineContent)
                                           const pageRootKeys = await recoverPageRootKeys(spine, hubSecret)
                                           const newSpine = await buildSpine(pageRootKeys, hubSecret)
@@ -6343,7 +6345,7 @@ function MembersPage({ hub, onFooterState, focusPubkey }: { hub: HubData; onFoot
     const releaseHubLock = await acquireHubMutationLock(hub.dTag)
     try {
       await markStep('Fetching member tree')
-      const { downloadTextFromBlossom, uploadToBlossomServers } = await import('@/lib/blossom/client')
+      const { downloadHubTreeText, uploadToBlossomServers } = await import('@/lib/blossom/client')
       const { parseIndexFile, updateMemberRolesInPage, createPaginatedIndexFile, banPageToken } = await import('@/lib/blossom/members')
       const {
         deserializeLeafPage, serializeLeafPage,
@@ -6352,11 +6354,11 @@ function MembersPage({ hub, onFooterState, focusPubkey }: { hub: HubData; onFoot
       } = await import('@/lib/crypto/lkh')
 
       if (!hub.indexFileHash) throw new Error('No index file hash')
-      const indexContent = await downloadTextFromBlossom(hub.indexFileHash, hub.blossomServers)
+      const indexContent = await downloadHubTreeText(hub.indexFileHash, hub.blossomServers, hub.dTag)
       const index = parseIndexFile(indexContent)
       if (!index.spineHash || index.leafPages.length === 0) throw new Error('No paginated tree in index')
 
-      const spineContent = await downloadTextFromBlossom(index.spineHash, hub.blossomServers)
+      const spineContent = await downloadHubTreeText(index.spineHash, hub.blossomServers, hub.dTag)
       const spine = deserializeSpine(spineContent)
       const hubSecretHex = useHubStore.getState().hubSecrets[hub.dTag]
       if (!hubSecretHex) throw new Error('No hub secret')
@@ -6390,7 +6392,7 @@ function MembersPage({ hub, onFooterState, focusPubkey }: { hub: HubData; onFoot
       for (let pi = 0; pi < index.leafPages.length; pi++) {
         const pageRef = index.leafPages[pi]
         // Check if any staged changes affect this page
-        const pageContent = await downloadTextFromBlossom(pageRef.hash, hub.blossomServers)
+        const pageContent = await downloadHubTreeText(pageRef.hash, hub.blossomServers, hub.dTag)
         const page = deserializeLeafPage(pageContent)
 
         let pageChanged = false
@@ -6496,7 +6498,9 @@ function MembersPage({ hub, onFooterState, focusPubkey }: { hub: HubData; onFoot
           await markStep('Checking group access')
           const { memberQualifiesForGroup } = await import('@/lib/hub/groupEncryption')
           const { rehydrateTreeKeys, removeMemberFromGroupTree, addMemberToGroupTree, createPaginatedIndexFile: createIdx, banPageToken } = await import('@/lib/blossom/members')
-          const { downloadTextFromBlossom, uploadToBlossomServers: uploadFn } = await import('@/lib/blossom/client')
+          // downloadHubTreeText = cached read for the immutable group trees + history below;
+          // downloadTextFromBlossom stays for the post-write index re-read on the next line.
+          const { downloadTextFromBlossom, downloadHubTreeText, uploadToBlossomServers: uploadFn } = await import('@/lib/blossom/client')
 
           // Re-parse the index (it was just updated by the paginated tree update above)
           const updatedIndexContent = await downloadTextFromBlossom(finalIndexHash, hub.blossomServers)
@@ -6524,7 +6528,7 @@ function MembersPage({ hub, onFooterState, focusPubkey }: { hub: HubData; onFoot
             // source of membership). A removal rotates the secret + bumps the epoch; a pure add reuses
             // the current secret. If a group has no existing tree/secret yet, fall back to a fresh build.
             const { createAndUploadGroupTreeV2, addMemberToGroupTreeV2, removeMemberFromGroupTreeV2 } = await import('@/lib/blossom/members')
-            const { downloadTextFromBlossom, uploadToBlossomServers } = await import('@/lib/blossom')
+            const { downloadHubTreeText, uploadToBlossomServers } = await import('@/lib/blossom')
             const { makeSubkeySigner } = await import('@/lib/nostr/v2send')
             const { ChatContext } = await import('@/lib/crypto/skd')
             const ownerR = useUserStore.getState().pubkey!
@@ -6558,7 +6562,7 @@ function MembersPage({ hub, onFooterState, focusPubkey }: { hub: HubData; onFoot
                 let finalSecretHex = groupSecretHex
                 if (oldHash && groupSecretHex) {
                   // Incremental patch of the existing tree.
-                  let treeContent = await downloadTextFromBlossom(oldHash, hub.blossomServers)
+                  let treeContent = await downloadHubTreeText(oldHash, hub.blossomServers, hub.dTag)
                   let secretBytes = fromHex(groupSecretHex)
                   for (const p of removeP) {
                     const r = await removeMemberFromGroupTreeV2(treeContent, p, secretBytes, hub.dTag, privateKey, signer)
@@ -6588,7 +6592,7 @@ function MembersPage({ hub, onFooterState, focusPubkey }: { hub: HubData; onFoot
                   // recovers every leaf key via O↔P nip44 (NOT the group secret) and rebuilds under a FRESH
                   // secret, so a random placeholder still yields a real revocation that preserves the other
                   // members already in the tree. Any add-side change can't be applied without the real secret.
-                  let treeContent = await downloadTextFromBlossom(oldHash, hub.blossomServers)
+                  let treeContent = await downloadHubTreeText(oldHash, hub.blossomServers, hub.dTag)
                   // Route the random placeholder through fromHex so its type matches r.newGroupSecret (and
                   // the incremental branch above); removeMemberFromGroupTreeV2 discards this and mints a fresh
                   // secret anyway — it only recovers leaf keys via O↔P.
@@ -6654,7 +6658,7 @@ function MembersPage({ hub, onFooterState, focusPubkey }: { hub: HubData; onFoot
                 console.log(`[GroupRotation] Found groupTreeRef hash=${groupTreeRef.hash.slice(0, 12)}…`)
 
                 try {
-                  const groupTreeContent = await downloadTextFromBlossom(groupTreeRef.hash, hub.blossomServers)
+                  const groupTreeContent = await downloadHubTreeText(groupTreeRef.hash, hub.blossomServers, hub.dTag)
                   console.log(`[GroupRotation] Downloaded group tree (${groupTreeContent.length} bytes)`)
                   const { deserializeTree } = await import('@/lib/crypto/lkh')
                   let groupTree = deserializeTree(groupTreeContent)
@@ -6729,7 +6733,7 @@ function MembersPage({ hub, onFooterState, focusPubkey }: { hub: HubData; onFoot
 
                 try {
                   await markStep('Adding to group tree')
-                  const groupTreeContent = await downloadTextFromBlossom(groupTreeRef.hash, hub.blossomServers)
+                  const groupTreeContent = await downloadHubTreeText(groupTreeRef.hash, hub.blossomServers, hub.dTag)
                   const { deserializeTree: deserializeGT } = await import('@/lib/crypto/lkh')
                   let groupTree = deserializeGT(groupTreeContent)
 
@@ -6784,7 +6788,7 @@ function MembersPage({ hub, onFooterState, focusPubkey }: { hub: HubData; onFoot
                 if (historyHash) {
                   // Fail loudly — never rebuild the history blob without the prior one (see historyGuard)
                   try {
-                    const blob = await downloadTextFromBlossom(historyHash, hub.blossomServers)
+                    const blob = await downloadHubTreeText(historyHash, hub.blossomServers, hub.dTag)
                     historyPlaintext = await aesDecryptFn(hubSecret, blob)
                   } catch (err) {
                     throw new Error(historyReadFailure(historyHash, err))

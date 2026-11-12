@@ -712,9 +712,9 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
         const secretHexBans = useHubStore.getState().hubSecrets[dTag]
         if (!secretHexBans) throw new Error('Hub secret not available')
         try {
-          const { downloadTextFromBlossom, parseIndexFile, downloadBanListV2 } = await import('@/lib/blossom')
+          const { downloadHubTreeText, parseIndexFile, downloadBanListV2 } = await import('@/lib/blossom')
           const { fromHex } = await import('@/lib/crypto/lkh')
-          const idx = parseIndexFile(await downloadTextFromBlossom(hub.indexFileHash, hub.blossomServers))
+          const idx = parseIndexFile(await downloadHubTreeText(hub.indexFileHash, hub.blossomServers, hub.dTag))
           currentBans = idx.banPages.length > 0
             ? (await downloadBanListV2(idx.banPages, fromHex(secretHexBans), hub.blossomServers)).map(e => e.pubkey)
             : []
@@ -766,7 +766,7 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
           const { fromHex: fromHexNM } = await import('@/lib/crypto/lkh')
           const { makeSubkeySigner } = await import('@/lib/nostr/v2send')
           const { ChatContext: ChatContextNM } = await import('@/lib/crypto/skd')
-          const { downloadTextFromBlossom, parseIndexFile, uploadBanPagesV2, createPaginatedIndexFile, uploadToBlossomServers } = await import('@/lib/blossom')
+          const { downloadHubTreeText, parseIndexFile, uploadBanPagesV2, createPaginatedIndexFile, uploadToBlossomServers } = await import('@/lib/blossom')
           const { republishV2HubIndex } = await import('@/lib/hub/republishV2')
 
           // Blossom 24242 auth + hub-event author as O (never R_owner).
@@ -775,7 +775,7 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
 
           markDone('Downloading index & tree')
           await markStep('Uploading ban pages')
-          const indexContent = await downloadTextFromBlossom(hub.indexFileHash, hub.blossomServers)
+          const indexContent = await downloadHubTreeText(hub.indexFileHash, hub.blossomServers, hub.dTag)
           const index = parseIndexFile(indexContent)
           const banEntries = effectiveBans.map(pk => ({ pubkey: pk, reason: '' }))
           const banPageHashes = await uploadBanPagesV2(banEntries, fromHexNM(secretHexNM), hub.epoch, signer, privateKey, hub.blossomServers, ownerAuthNM)
@@ -1081,14 +1081,14 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
             rehydrateTreeKeys: rehydrateGT, removeMemberFromGroupTree,
           } = await import('@/lib/blossom/members')
           const {
-            downloadTextFromBlossom: dlGroupText, uploadToBlossomServers: uploadGroupFn,
+            downloadHubTreeText: dlGroupText, uploadToBlossomServers: uploadGroupFn,
           } = await import('@/lib/blossom')
           const { deserializeTree: deserializeGT } = await import('@/lib/crypto/lkh')
 
           // Get current group tree refs from index
           if (hub.indexFileHash && hub.blossomServers.length > 0) {
             try {
-              const ic = await dlGroupText(hub.indexFileHash, hub.blossomServers)
+              const ic = await dlGroupText(hub.indexFileHash, hub.blossomServers, hub.dTag)
               const idx = (await import('@/lib/blossom')).parseIndexFile(ic)
               updatedGroupTrees = [...idx.groupTrees]
             } catch { /* use empty */ }
@@ -1103,7 +1103,7 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
             if (!groupTreeRef) continue
 
             try {
-              const groupTreeContent = await dlGroupText(groupTreeRef.hash, hub.blossomServers)
+              const groupTreeContent = await dlGroupText(groupTreeRef.hash, hub.blossomServers, hub.dTag)
               let groupTree = deserializeGT(groupTreeContent)
 
               const groupSecretHex = useHubStore.getState().groupSecrets[hub.dTag]?.[group.groupId]
@@ -1169,7 +1169,7 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
       await markStep('Uploading ban page & index')
       const {
         uploadBanPages, createPaginatedIndexFile, parseIndexFile: parseIdx,
-        downloadTextFromBlossom: dlText, uploadToBlossomServers: uploadFn,
+        downloadHubTreeText: dlText, uploadToBlossomServers: uploadFn,
       } = await import('@/lib/blossom')
 
       // Get current index data if we didn't already
@@ -1179,7 +1179,7 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
 
       if (hub.indexFileHash && hub.blossomServers.length > 0) {
         try {
-          const ic = await dlText(hub.indexFileHash, hub.blossomServers)
+          const ic = await dlText(hub.indexFileHash, hub.blossomServers, hub.dTag)
           const idx = parseIdx(ic)
           if (!spineHash) spineHash = idx.spineHash
           historyHash = historyHash || idx.historyHash
@@ -1211,7 +1211,7 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
             let plaintext = ''
             // Fail loudly — never rebuild the history blob without the prior one (see historyGuard)
             try {
-              const blob = await dlText(historyHash, hub.blossomServers)
+              const blob = await dlText(historyHash, hub.blossomServers, hub.dTag)
               plaintext = await aesDec2(currentSecret, blob)
             } catch (err) {
               throw new Error(historyReadFailure(historyHash, err))

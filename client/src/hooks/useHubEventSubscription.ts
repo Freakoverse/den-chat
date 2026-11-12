@@ -213,10 +213,10 @@ export function useHubEventSubscription() {
                 if (res.pageCount > 0) store.setHubPageCount(dTag, res.pageCount)
                 if (res.secretHex && res.historyHash) {
                   try {
-                    const { downloadTextFromBlossom } = await import('@/lib/blossom')
+                    const { downloadHubTreeText } = await import('@/lib/blossom')
                     const { aesDecrypt } = await import('@/lib/crypto/aes')
                     const { fromHex } = await import('@/lib/crypto/lkh')
-                    const blob = await downloadTextFromBlossom(res.historyHash, hubData.blossomServers)
+                    const blob = await downloadHubTreeText(res.historyHash, hubData.blossomServers, hubData.dTag)
                     const plaintext = await aesDecrypt(fromHex(res.secretHex), blob)
                     const epochMap: Record<number, string> = {}
                     for (const line of plaintext.split('\n')) {
@@ -277,8 +277,8 @@ export function useHubEventSubscription() {
           if (secretHex && indexChanged) {
             try {
               const { fromHex } = await import('@/lib/crypto/lkh')
-              const { downloadTextFromBlossom, parseIndexFile, downloadBanListV2 } = await import('@/lib/blossom')
-              const idx = parseIndexFile(await downloadTextFromBlossom(hubData.indexFileHash, hubData.blossomServers))
+              const { downloadHubTreeText, parseIndexFile, downloadBanListV2 } = await import('@/lib/blossom')
+              const idx = parseIndexFile(await downloadHubTreeText(hubData.indexFileHash, hubData.blossomServers, hubData.dTag))
               if (idx.banPages.length > 0) {
                 const bans = await downloadBanListV2(idx.banPages, fromHex(secretHex), hubData.blossomServers)
                 store.setHubBanList(dTag, bans.map((e) => e.pubkey))
@@ -314,8 +314,8 @@ export function useHubEventSubscription() {
                 // structure below), NOT a lost-access signal (that is the event-content decrypt above).
                 let structObj: unknown = decrypted
                 if (hubData.structFileHash) {
-                  const { downloadTextFromBlossom } = await import('@/lib/blossom')
-                  const structCipher = await downloadTextFromBlossom(hubData.structFileHash, hubData.blossomServers)
+                  const { downloadHubTreeText } = await import('@/lib/blossom')
+                  const structCipher = await downloadHubTreeText(hubData.structFileHash, hubData.blossomServers, hubData.dTag)
                   structObj = await decryptHubContent(key, structCipher)
                 }
                 full = parseHubEvent(event, JSON.stringify(structObj))
@@ -366,17 +366,17 @@ export function useHubEventSubscription() {
               const { makeSubkeySigner } = await import('@/lib/nostr/v2send')
               const { ChatContext } = await import('@/lib/crypto/skd')
               const { memberQualifiesForGroup } = await import('@/lib/hub/groupEncryption')
-              const { downloadTextFromBlossom, parseIndexFile, decryptGroupSecretV2 } = await import('@/lib/blossom')
+              const { downloadHubTreeText, parseIndexFile, decryptGroupSecretV2 } = await import('@/lib/blossom')
               const oPub = await makeSubkeySigner(ChatContext.owner(dTag), { privateKey, signer }).getPublicKey()
               const isOwner = oPub === full.creatorPubkey
               const groupP = await makeSubkeySigner(ChatContext.member(dTag), { privateKey, signer, peerPub: full.creatorPubkey }).getPublicKey()
               const myRoles = store.hubMembers[dTag]?.find(m => m.pubkey === pubkey)?.roles || 'everyone'
-              const index = parseIndexFile(await downloadTextFromBlossom(full.indexFileHash, full.blossomServers))
+              const index = parseIndexFile(await downloadHubTreeText(full.indexFileHash, full.blossomServers, full.dTag))
               for (const group of full.groupedRoles) {
                 if (!(isOwner || memberQualifiesForGroup(myRoles, group.roleIds))) continue
                 const ref = index.groupTrees.find(gt => gt.groupId === group.groupId)
                 if (!ref) continue
-                const gs = await decryptGroupSecretV2(groupP, full.dTag, privateKey, signer, full.creatorPubkey, await downloadTextFromBlossom(ref.hash, full.blossomServers))
+                const gs = await decryptGroupSecretV2(groupP, full.dTag, privateKey, signer, full.creatorPubkey, await downloadHubTreeText(ref.hash, full.blossomServers, full.dTag))
                 if (!gs) continue
                 const hex = Array.from(gs).map(b => b.toString(16).padStart(2, '0')).join('')
                 const prev = useHubStore.getState().groupSecrets?.[dTag]?.[group.groupId]
@@ -398,8 +398,8 @@ export function useHubEventSubscription() {
         // On a blob fetch miss, keep the structure we already hold rather than wiping it.
         if (hubData.structFileHash) {
           try {
-            const { downloadTextFromBlossom } = await import('@/lib/blossom')
-            const blobText = await downloadTextFromBlossom(hubData.structFileHash, hubData.blossomServers)
+            const { downloadHubTreeText } = await import('@/lib/blossom')
+            const blobText = await downloadHubTreeText(hubData.structFileHash, hubData.blossomServers, hubData.dTag)
             const merged = parseHubEvent(event, blobText)
             if (merged) {
               hubData.channels = merged.channels

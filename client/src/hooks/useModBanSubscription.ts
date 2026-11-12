@@ -102,7 +102,7 @@ export function useModBanSubscription() {
         }
 
         try {
-          const { downloadTextFromBlossom, parseIndexFile, downloadBanList, downloadBanListV2 } = await import('@/lib/blossom')
+          const { downloadHubTreeText, parseIndexFile, downloadBanList, downloadBanListV2 } = await import('@/lib/blossom')
           const currentHub = useHubStore.getState().hubs[activeHubId!]
           if (!currentHub) return
 
@@ -117,7 +117,7 @@ export function useModBanSubscription() {
             return
           }
 
-          const indexContent = await downloadTextFromBlossom(listTag[1], currentHub.blossomServers)
+          const indexContent = await downloadHubTreeText(listTag[1], currentHub.blossomServers, currentHub.dTag)
           const index = parseIndexFile(indexContent)
 
           if (index.banPages.length > 0) {

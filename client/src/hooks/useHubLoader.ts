@@ -17,7 +17,7 @@ import { fetchEvents, fetchEventsProgressive } from '@/lib/nostr/relay-pool'
 import { getAllHubEvents, touchHubEvents, pruneHubEvents } from '@/lib/cache/hubEventCache'
 import { KINDS } from '@/lib/crypto/constants'
 import { getTrustedCreator } from '@/lib/hub/hubCreatorGuard'
-import { downloadTextFromBlossom, parseIndexFile, decryptHubSecret, decryptGroupSecret, downloadBanList } from '@/lib/blossom'
+import { parseIndexFile, decryptHubSecret, decryptGroupSecret, downloadBanList } from '@/lib/blossom'
 import { downloadTextFromBlossomDetailed } from '@/lib/blossom/client'
 import { cacheHubBlob, getCachedHubText } from '@/lib/blossom/hubBlobStore'
 import { aesDecrypt } from '@/lib/crypto/aes'
@@ -566,7 +566,7 @@ export async function loadHubSecret(
     }
 
     // Download LKH tree file
-    const treeContent = await downloadTextFromBlossom(index.treeHash, hubData.blossomServers)
+    const treeContent = await loadHubText(index.treeHash, hubData.blossomServers, hubData.dTag)
 
     // Extract member list from tree (before decryption — available to all)
     let members: HubMember[] = []
@@ -629,7 +629,7 @@ async function parseFacilitatorHistory(
 ): Promise<{ epoch?: number; epochSecrets?: Record<number, string> }> {
   if (!historyHash) return {}
   try {
-    const historyBlob = await downloadTextFromBlossom(historyHash, hubData.blossomServers)
+    const historyBlob = await loadHubText(historyHash, hubData.blossomServers, hubData.dTag)
     const plaintext = await aesDecrypt(treeSecret, historyBlob)
     const map: Record<number, string> = {}
     let maxEpoch = 0
@@ -746,11 +746,11 @@ export async function loadFacilitatorSecret(
       const lt = jrs[0].tags.find((t: string[]) => t[0] === 'list')
       if (!lt?.[1]) return null
       let indexContent: string | null = null
-      try { indexContent = await downloadTextFromBlossom(lt[1], hubData.blossomServers) } catch { return null }
+      try { indexContent = await loadHubText(lt[1], hubData.blossomServers, hubData.dTag) } catch { return null }
       if (!indexContent) return null
       const index = parseIndexFile(indexContent)
       if (!index.treeHash) return null
-      const treeContent = await downloadTextFromBlossom(index.treeHash, hubData.blossomServers)
+      const treeContent = await loadHubText(index.treeHash, hubData.blossomServers, hubData.dTag)
       const { decryptSecretFromFacilitatorTreeV2 } = await import('@/lib/blossom/members')
       const { toHex, deserializeTree } = await import('@/lib/crypto/lkh')
       const secret = await decryptSecretFromFacilitatorTreeV2(facilitatorPubkey, hubData.dTag, memberPrivateKey, signer, treeContent)
@@ -790,7 +790,7 @@ export async function loadFacilitatorSecret(
     // Hub's servers are the natural first-look location
     let indexContent: string | null = null
     try {
-      indexContent = await downloadTextFromBlossom(indexHash, hubData.blossomServers)
+      indexContent = await loadHubText(indexHash, hubData.blossomServers, hubData.dTag)
     } catch {
       console.warn(`Hub ${hubData.dTag}: facilitator index not on hub blossom servers, trying other sources`)
     }
@@ -808,7 +808,7 @@ export async function loadFacilitatorSecret(
     }
 
     // 3. Download the facilitator's LKH tree
-    const treeContent = await downloadTextFromBlossom(index.treeHash, hubData.blossomServers)
+    const treeContent = await loadHubText(index.treeHash, hubData.blossomServers, hubData.dTag)
 
     // 4. Decrypt hub secret from facilitator's tree
     //    The facilitator encrypted leaves with THEIR keypair, so creatorPubkey = facilitatorPubkey
@@ -863,10 +863,10 @@ export async function loadFacilitatorMemberList(
     if (jrs.length === 0) return []
     const listTag = jrs[0].tags.find((t: string[]) => t[0] === 'list')
     if (!listTag?.[1]) return []
-    const indexContent = await downloadTextFromBlossom(listTag[1], hubData.blossomServers)
+    const indexContent = await loadHubText(listTag[1], hubData.blossomServers, hubData.dTag)
     const index = parseIndexFile(indexContent)
     if (!index.treeHash) return []
-    const treeContent = await downloadTextFromBlossom(index.treeHash, hubData.blossomServers)
+    const treeContent = await loadHubText(index.treeHash, hubData.blossomServers, hubData.dTag)
     const { deserializeTree } = await import('@/lib/crypto/lkh')
     return deserializeTree(treeContent).leaves.map((l) => l.pubkey)
   } catch (err) {
@@ -945,7 +945,7 @@ export async function loadModBanLists(
       if (!listTag?.[1]) continue
 
       try {
-        const indexContent = await downloadTextFromBlossom(listTag[1], hubData.blossomServers)
+        const indexContent = await loadHubText(listTag[1], hubData.blossomServers, hubData.dTag)
         const index = parseIndexFile(indexContent)
 
         if (index.banPages.length > 0) {
@@ -1312,8 +1312,8 @@ export function useHubLoader() {
         // loadHubSecret; the facilitator path skipped it.
         try {
           const { fromHex } = await import('@/lib/crypto/lkh')
-          const { downloadTextFromBlossom, parseIndexFile, downloadBanListV2 } = await import('@/lib/blossom')
-          const idx = parseIndexFile(await downloadTextFromBlossom(hubData.indexFileHash, hubData.blossomServers))
+          const { parseIndexFile, downloadBanListV2 } = await import('@/lib/blossom')
+          const idx = parseIndexFile(await loadHubText(hubData.indexFileHash, hubData.blossomServers, hubData.dTag))
           if (idx.banPages.length > 0) {
             const bans = await downloadBanListV2(idx.banPages, fromHex(facResult.secretHex), hubData.blossomServers)
             setHubBanList(dTag, bans.map((e) => e.pubkey))
@@ -1475,7 +1475,7 @@ export function useHubLoader() {
             // Format: single AES blob containing plaintext lines like "hub:1:secrethex"
             if (result.secretHex && result.historyHash) {
               try {
-                const historyBlob = await downloadTextFromBlossom(result.historyHash, hubData.blossomServers)
+                const historyBlob = await loadHubText(result.historyHash, hubData.blossomServers, hubData.dTag)
                 const epochMap: Record<number, string> = {}
                 const secretBytes = new Uint8Array(result.secretHex.length / 2)
                 for (let i = 0; i < result.secretHex.length; i += 2) {
@@ -1568,11 +1568,11 @@ export function useHubLoader() {
                 if (qualifies) {
                   try {
                     // Find the group tree hash from the index file
-                    const indexContent = await downloadTextFromBlossom(hubData.indexFileHash, hubData.blossomServers)
+                    const indexContent = await loadHubText(hubData.indexFileHash, hubData.blossomServers, hubData.dTag)
                     const index = parseIndexFile(indexContent)
                     const groupRef = index.groupTrees.find(gt => gt.groupId === group.groupId)
                     if (groupRef) {
-                      const groupTreeContent = await downloadTextFromBlossom(groupRef.hash, hubData.blossomServers)
+                      const groupTreeContent = await loadHubText(groupRef.hash, hubData.blossomServers, hubData.dTag)
                       const groupSecret = hubData.version === 2
                         ? await (await import('@/lib/blossom')).decryptGroupSecretV2(groupLookupKey, hubData.dTag, privateKey, signer, hubData.creatorPubkey, groupTreeContent)
                         : await decryptGroupSecret(pubkey!, privateKey, signer, hubData.creatorPubkey, groupTreeContent)
