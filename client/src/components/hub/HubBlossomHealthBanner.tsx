@@ -49,7 +49,22 @@ function useHubBrokenBlossoms(hub: HubData): string[] {
     for (const s of serversKey.split(',').filter(Boolean)) probe(s)
   }, [serversKey, probe])
   const failedSet = new Set((loadFailed || []).map(norm))
-  return hub.blossomServers.filter((s) => status[norm(s)] === 'broken' || failedSet.has(norm(s)))
+
+  // A live 'working' probe is authoritative: it uploads + reads a blob back, and it's exactly the badge the
+  // user sees next to each server. A load-time failure, by contrast, is a one-off (a blob not yet
+  // propagated, a transient timeout) and the set only ever grew, so a recovered server stayed flagged
+  // broken — the banner contradicted the badges. Prune any now-working server from the stored set so the
+  // state self-heals, and never report a working server as broken below.
+  const recoveredKey = [...failedSet].filter((s) => status[s] === 'working').sort().join(',')
+  useEffect(() => {
+    if (recoveredKey) useHubStore.getState().removeBlossomHealthFailures(hub.dTag, recoveredKey.split(','))
+  }, [hub.dTag, recoveredKey])
+
+  return hub.blossomServers.filter((s) => {
+    const n = norm(s)
+    if (status[n] === 'working') return false // live probe says it works now → not broken (clears a stale load miss)
+    return status[n] === 'broken' || failedSet.has(n)
+  })
 }
 
 /**

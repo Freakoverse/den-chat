@@ -241,6 +241,8 @@ export interface HubState {
   setHubStatus: (dTag: string, status: HubStatus) => void
   /** Union `servers` into the hub's failed-advertised-server set (see blossomHealth). */
   addBlossomHealthFailures: (dTag: string, servers: string[]) => void
+  /** Drop `servers` from the hub's failed set once they recover (e.g. the live probe now reads working). */
+  removeBlossomHealthFailures: (dTag: string, servers: string[]) => void
   clearBlossomHealth: (dTag: string) => void
   setHubSecret: (dTag: string, secretHex: string) => void
   setActiveHub: (dTag: string | null) => void
@@ -440,6 +442,19 @@ export const useHubStore = create<HubState>((set) => ({
       // Same set as before → keep the reference stable so repeated loads don't re-render the banner.
       if (merged.length === prev.length) return {}
       return { blossomHealth: { ...state.blossomHealth, [dTag]: merged } }
+    }),
+  removeBlossomHealthFailures: (dTag, servers) =>
+    set((state) => {
+      const prev = state.blossomHealth[dTag]
+      if (!prev || prev.length === 0) return {}
+      const drop = new Set(servers.map((s) => s.replace(/\/+$/, '')))
+      const next = prev.filter((s) => !drop.has(s))
+      // Nothing removed → keep the reference stable so this doesn't re-render the banner.
+      if (next.length === prev.length) return {}
+      const map = { ...state.blossomHealth }
+      if (next.length === 0) delete map[dTag]
+      else map[dTag] = next
+      return { blossomHealth: map }
     }),
   clearBlossomHealth: (dTag) =>
     set((state) => {
