@@ -6,7 +6,7 @@
  * via a bunker:// URL (e.g., from nsecBunker).
  */
 
-import { generateSecretKey, getPublicKey } from 'nostr-tools'
+import { generateSecretKey, getPublicKey, SimplePool } from 'nostr-tools'
 import { BunkerSigner as NBunkerSigner, parseBunkerInput } from 'nostr-tools/nip46'
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils'
 
@@ -15,7 +15,23 @@ import { bytesToHex, hexToBytes } from '@noble/hashes/utils'
 // so such a call hung until our 20s SignerGuard timeout and could cascade the global nip04 circuit.
 // We used to pass a custom SimplePool ("makeRescuePool") into fromBunker to rescue those responses.
 // 2.26.0 fixes it upstream — onevent now resolves on `result !== undefined && result !== null`, so
-// '' resolves correctly — and the workaround (plus its SimplePool/nip44 imports) was removed.
+// '' resolves correctly — and that workaround was removed.
+
+/**
+ * nostr-tools 2.26.0 caps each relay's cold-connect at `maxWaitForConnection` (default 3000ms)
+ * before failing a publish with "failed to send ... to any relay" / "connection timed out". For a
+ * bunker:// login the client dials the signer's (often public) relays FRESH on every attempt, and a
+ * cold TLS+WebSocket handshake to a busy public relay routinely exceeds 3s — so a login fails even
+ * though the relays are reachable (the signer stays connected to them, and the request succeeds on
+ * retry). 2.25.2 was effectively more lenient here. Give the login pool a more generous window so a
+ * slow-but-reachable relay still completes within the 30s overall request timeout. Loopback LRS is
+ * unaffected: it connects instantly, well under either value.
+ */
+const BUNKER_MAX_WAIT_FOR_CONNECTION_MS = 10_000
+
+function makeBunkerPool(): SimplePool {
+  return new SimplePool({ maxWaitForConnection: BUNKER_MAX_WAIT_FOR_CONNECTION_MS })
+}
 
 export class BunkerSigner {
   signer: NBunkerSigner | null = null
@@ -56,6 +72,7 @@ export class BunkerSigner {
       onauth: (url) => {
         window.open(url, '_blank')
       },
+      pool: makeBunkerPool(),
     })
 
     if (isInitialConnection) {
@@ -79,6 +96,7 @@ export class BunkerSigner {
     if (!bunkerPointer) return
     this.signer = NBunkerSigner.fromBunker(this.clientSecretKey, bunkerPointer, {
       onauth: (url) => { window.open(url, '_blank') },
+      pool: makeBunkerPool(),
     })
     // Warm the connection in the background; don't block recovery on it.
     this.signer.getPublicKey().catch(() => {})
