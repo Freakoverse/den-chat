@@ -927,7 +927,7 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
       if (isInTree && hub.indexFileHash && hub.blossomServers.length > 0) {
         const {
           parseIndexFile, findPageForPubkey, rehydratePageKeys, removeMemberFromPage,
-          downloadTextFromBlossom, uploadToBlossomServers,
+          downloadHubTreeText, uploadToBlossomServers,
         } = await import('@/lib/blossom')
         const {
           fromHex, deserializeSpine, recoverPageRootKeys,
@@ -935,8 +935,8 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
         } = await import('@/lib/crypto/lkh')
         const { aesEncrypt } = await import('@/lib/crypto/aes')
 
-        // Download current index
-        const indexContent = await downloadTextFromBlossom(hub.indexFileHash, hub.blossomServers)
+        // Download current index (read-through cache: immutable content-addressed blob, hash from the hub event)
+        const indexContent = await downloadHubTreeText(hub.indexFileHash, hub.blossomServers, hub.dTag)
         const index = parseIndexFile(indexContent)
         oldSpineHash = index.spineHash
         oldHistoryHash = index.historyHash
@@ -953,8 +953,8 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
 
         // Download and rehydrate only the affected page + spine
         const [pageContent, spineContent] = await Promise.all([
-          downloadTextFromBlossom(pageEntry.hash, hub.blossomServers),
-          downloadTextFromBlossom(index.spineHash, hub.blossomServers),
+          downloadHubTreeText(pageEntry.hash, hub.blossomServers, hub.dTag),
+          downloadHubTreeText(index.spineHash, hub.blossomServers, hub.dTag),
         ])
         const spine = deserializeSpine(spineContent)
         markDone('Downloading index & tree')
@@ -1018,7 +1018,7 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
             if (index.historyHash) {
               // Fail loudly — never rebuild the history blob without the prior one (see historyGuard)
               try {
-                const historyBlob = await downloadTextFromBlossom(index.historyHash, hub.blossomServers)
+                const historyBlob = await downloadHubTreeText(index.historyHash, hub.blossomServers, hub.dTag)
                 historyPlaintext = await aesDecrypt(hubSecret, historyBlob)
               } catch (err) {
                 throw new Error(historyReadFailure(index.historyHash, err))

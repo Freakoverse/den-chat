@@ -4,6 +4,7 @@ import { bytesToHex } from '@noble/hashes/utils'
 import type { ISigner } from '@/stores/userStore'
 import { signWithSigner, createUnsignedEvent } from '@/lib/nostr'
 import { StorageKey } from '@/lib/constants'
+import { getCachedHubText, cacheHubBlob } from './hubBlobStore'
 
 // Curated to servers that are reachable, CORS-clean, and accept anonymous uploads
 // from a browser origin. Removed 2026-08: cdn.sovbit.host (DNS no longer resolves),
@@ -927,6 +928,33 @@ export async function downloadTextFromBlossomDetailed(
 ): Promise<{ text: string; servedBy: string; failedRequested: string[] }> {
   const { data, servedBy, failedRequested } = await downloadFromBlossomDetailed(hash, servers, TEXT_BLOB_MAX_BYTES)
   return { text: new TextDecoder().decode(data), servedBy, failedRequested }
+}
+
+/**
+ * Read-through local cache for HUB TREE text blobs (index / spine / leaf pages / history).
+ *
+ * Blossom blobs are content-addressed (the hash IS the sha256 of the bytes), so a locally retained
+ * blob whose hash matches the requested hash is byte-identical and can NEVER be stale: there is no
+ * per-blob version to validate. The caller is responsible for resolving the hash from the LATEST hub
+ * event (e.g. freshHub.indexFileHash → index → spine/page hashes); once the hash is correct,
+ * immutability guarantees the content. So: serve from hubBlobStore on a hit (no network), and on a
+ * miss fetch (downloadFromBlossom re-verifies the sha256 of the fetched bytes), then retain the exact
+ * verified bytes for next time.
+ *
+ * Do NOT use this for post-upload VERIFICATION reads — those exist to confirm the blob actually landed
+ * on a server, so they must always hit the network (use downloadTextFromBlossom there).
+ *
+ * Twin of `loadHubText` in useHubLoader (the hub-LOAD path), which adds Blossom-health signaling and a
+ * servers-down→local-retention fallback but depends on the hub store; this layer stays store-free. Both
+ * read/write the same hubBlobStore, so a blob warmed on load is served here with no network.
+ */
+export async function downloadHubTreeText(hash: string, servers: string[], dTag = ''): Promise<string> {
+  const cached = await getCachedHubText(hash)
+  if (cached !== null) return cached
+  const data = await downloadFromBlossom(hash, servers, TEXT_BLOB_MAX_BYTES)
+  // Retain the exact bytes the detailed download already hash-verified, so a future read is a cache hit.
+  try { await cacheHubBlob(hash, data, dTag) } catch { /* retention is best-effort */ }
+  return new TextDecoder().decode(data)
 }
 
 // ─── Mirror (BUD-04) ───

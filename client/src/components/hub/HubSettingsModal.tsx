@@ -3303,8 +3303,8 @@ function SecurityPage({ hub }: { hub: HubData }) {
         let fixBanEntries: Array<{ pubkey: string; reason: string }> = []
         if (hub.indexFileHash && hub.blossomServers.length > 0) {
           try {
-            const { downloadTextFromBlossom, parseIndexFile, downloadBanListV2 } = await import('@/lib/blossom')
-            const idxFix = parseIndexFile(await downloadTextFromBlossom(hub.indexFileHash, hub.blossomServers))
+            const { downloadHubTreeText, parseIndexFile, downloadBanListV2 } = await import('@/lib/blossom')
+            const idxFix = parseIndexFile(await downloadHubTreeText(hub.indexFileHash, hub.blossomServers, hub.dTag))
             if (idxFix.banPages.length > 0) {
               fixBanEntries = (await downloadBanListV2(idxFix.banPages, fromHexV2(oldSecretHexV2), hub.blossomServers)).map(e => ({ pubkey: e.pubkey, reason: '' }))
             }
@@ -3347,7 +3347,7 @@ function SecurityPage({ hub }: { hub: HubData }) {
       }
 
       await markStep('Downloading current tree')
-      const { downloadTextFromBlossom, parseIndexFile, uploadToBlossomServers } = await import('@/lib/blossom')
+      const { downloadHubTreeText, parseIndexFile, uploadToBlossomServers } = await import('@/lib/blossom')
       const { aesEncrypt, aesDecrypt } = await import('@/lib/crypto/aes')
       const { createPaginatedIndexFile, banPageToken } = await import('@/lib/blossom/members')
 
@@ -3363,7 +3363,7 @@ function SecurityPage({ hub }: { hub: HubData }) {
       let oldLeafPageHashes: string[] = []
       if (oldSecret && hub.indexFileHash && hub.blossomServers.length > 0) {
         try {
-          const indexContent = await downloadTextFromBlossom(hub.indexFileHash, hub.blossomServers)
+          const indexContent = await downloadHubTreeText(hub.indexFileHash, hub.blossomServers, hub.dTag)
           const index = parseIndexFile(indexContent)
           oldSpineHash = index.spineHash
           oldHistoryHash = index.historyHash
@@ -3372,7 +3372,7 @@ function SecurityPage({ hub }: { hub: HubData }) {
           oldLeafPageHashes = index.leafPages.map(lp => lp.hash)
 
           if (index.historyHash) {
-            const historyBlob = await downloadTextFromBlossom(index.historyHash, hub.blossomServers)
+            const historyBlob = await downloadHubTreeText(index.historyHash, hub.blossomServers, hub.dTag)
             try {
               const plaintext = await aesDecrypt(oldSecret, historyBlob)
               oldEpochLines = plaintext.split('\n').filter(l => l.trim())

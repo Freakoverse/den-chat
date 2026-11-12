@@ -33,14 +33,14 @@ export async function resolveMemberPByRoster(opts: {
 }): Promise<string | null> {
   const { hub, memberR, epochSecrets } = opts
   if (!hub.indexFileHash || hub.blossomServers.length === 0) return null
-  const { downloadTextFromBlossom, parseIndexFile } = await import('@/lib/blossom')
+  const { downloadHubTreeText, parseIndexFile } = await import('@/lib/blossom')
   const { deserializeLeafPage, fromHex } = await import('@/lib/crypto/lkh')
   const { decryptRoster } = await import('@/lib/hub/hubContent')
   try {
-    const index = parseIndexFile(await downloadTextFromBlossom(hub.indexFileHash, hub.blossomServers))
+    const index = parseIndexFile(await downloadHubTreeText(hub.indexFileHash, hub.blossomServers, hub.dTag))
     for (const pageEntry of index.leafPages) {
       try {
-        const page = deserializeLeafPage(await downloadTextFromBlossom(pageEntry.hash, hub.blossomServers))
+        const page = deserializeLeafPage(await downloadHubTreeText(pageEntry.hash, hub.blossomServers, hub.dTag))
         if (!page.rosterBlob) continue
         const secretHex = epochSecrets[page.rosterEpoch ?? 0]
         if (!secretHex) continue
@@ -115,7 +115,7 @@ async function removeMemberFromGroupsV2(
   signer: ISigner | null,
   blossomServers: string[],
 ): Promise<{ refs: Array<{ groupId: string; hash: string }>; secrets: Record<string, string>; failed: string[] }> {
-  const { removeMemberFromGroupTreeV2, downloadTextFromBlossom } = await import('@/lib/blossom')
+  const { removeMemberFromGroupTreeV2, downloadHubTreeText } = await import('@/lib/blossom')
   const { toHex, fromHex } = await import('@/lib/crypto/lkh')
   const { uploadToBlossomServers } = await import('@/lib/blossom/client')
   const { makeSubkeySigner } = await import('@/lib/nostr/v2send')
@@ -133,7 +133,7 @@ async function removeMemberFromGroupsV2(
     try {
       const oldHash = oldGroupTrees.find(gt => gt.groupId === g.groupId)?.hash
       if (!oldHash) continue
-      const treeContent = await downloadTextFromBlossom(oldHash, blossomServers)
+      const treeContent = await downloadHubTreeText(oldHash, blossomServers, hubDTag)
       const r = await removeMemberFromGroupTreeV2(treeContent, memberP, fromHex(g.currentSecretHex), hubDTag, privateKey, signer)
       if (!r) continue // member wasn't a leaf — nothing to remove
       const { hash } = await uploadToBlossomServers(
@@ -173,7 +173,7 @@ export async function kickMemberV2(opts: {
 }): Promise<KickMemberV2Result> {
   const { hub, memberP, oldSecret, epochSecrets, privateKey, signer, onStep } = opts
 
-  const { downloadTextFromBlossom, uploadToBlossomServers, parseIndexFile, findPageForPubkey, createPaginatedIndexFile, uploadBanPagesV2, banPageToken } =
+  const { downloadHubTreeText, uploadToBlossomServers, parseIndexFile, findPageForPubkey, createPaginatedIndexFile, uploadBanPagesV2, banPageToken } =
     await import('@/lib/blossom')
   const { rehydratePageKeysV2, removeMemberFromPageV2 } = await import('@/lib/blossom/members')
   const {
@@ -197,7 +197,7 @@ export async function kickMemberV2(opts: {
 
   // 1. Download index + locate the kicked member's page by P.
   onStep?.('Downloading index & tree')
-  const indexContent = await downloadTextFromBlossom(hub.indexFileHash, hub.blossomServers)
+  const indexContent = await downloadHubTreeText(hub.indexFileHash, hub.blossomServers, hub.dTag)
   const index = parseIndexFile(indexContent)
   if (!index.spineHash || index.leafPages.length === 0) throw new Error('kickMemberV2: hub is not paginated')
 
@@ -205,8 +205,8 @@ export async function kickMemberV2(opts: {
   if (!pageEntry) throw new Error('kickMemberV2: member not found in any page')
 
   const [pageContent, spineContent] = await Promise.all([
-    downloadTextFromBlossom(pageEntry.hash, hub.blossomServers),
-    downloadTextFromBlossom(index.spineHash, hub.blossomServers),
+    downloadHubTreeText(pageEntry.hash, hub.blossomServers, hub.dTag),
+    downloadHubTreeText(index.spineHash, hub.blossomServers, hub.dTag),
   ])
   const spine = deserializeSpine(spineContent)
 
@@ -244,7 +244,7 @@ export async function kickMemberV2(opts: {
     // Fail loudly: a silent "start fresh" here dropped every earlier epoch secret from the blob on a
     // transient Blossom miss — new members could then never read anything from before this kick.
     try {
-      const historyBlob = await downloadTextFromBlossom(index.historyHash, hub.blossomServers)
+      const historyBlob = await downloadHubTreeText(index.historyHash, hub.blossomServers, hub.dTag)
       const plaintext = await aesDecrypt(oldSecret, historyBlob)
       lines.push(...plaintext.split('\n').filter(l => l.trim()))
     } catch (err) {
@@ -350,7 +350,7 @@ export async function rebuildTreeV2(opts: {
 }): Promise<KickMemberV2Result> {
   const { hub, members, oldSecret, privateKey, signer, onStep } = opts
 
-  const { downloadTextFromBlossom, uploadToBlossomServers, parseIndexFile, createPaginatedIndexFile, uploadBanPagesV2, banPageToken } =
+  const { downloadHubTreeText, uploadToBlossomServers, parseIndexFile, createPaginatedIndexFile, uploadBanPagesV2, banPageToken } =
     await import('@/lib/blossom')
   const {
     toHex, createLeaf, buildLeafPage, buildSpine, serializeLeafPage, serializeSpine, PAGE_SIZE,
@@ -377,7 +377,7 @@ export async function rebuildTreeV2(opts: {
   let oldGroupTrees: Array<{ groupId: string; hash: string }> = []
   if (hub.indexFileHash) {
     try {
-      const index = parseIndexFile(await downloadTextFromBlossom(hub.indexFileHash, hub.blossomServers))
+      const index = parseIndexFile(await downloadHubTreeText(hub.indexFileHash, hub.blossomServers, hub.dTag))
       oldHistoryHash = index.historyHash
       oldBanPageHashes = index.banPages.map(banPageToken) // preserve: keep the epoch stamp
       oldGroupTrees = [...index.groupTrees]
@@ -424,7 +424,7 @@ export async function rebuildTreeV2(opts: {
   if (oldHistoryHash) {
     // Fail loudly (see historyReadFailure): never rebuild history from just the old+new epochs.
     try {
-      lines.push(...(await aesDecrypt(oldSecret, await downloadTextFromBlossom(oldHistoryHash, hub.blossomServers)))
+      lines.push(...(await aesDecrypt(oldSecret, await downloadHubTreeText(oldHistoryHash, hub.blossomServers, hub.dTag)))
         .split('\n').filter(l => l.trim()))
     } catch (err) {
       throw new Error(historyReadFailure(oldHistoryHash, err))

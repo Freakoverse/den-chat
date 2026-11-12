@@ -470,8 +470,8 @@ export function useHubEventSubscription() {
         // Re-download ban list from new index file
         if (hubData.indexFileHash && hubData.blossomServers.length > 0) {
           try {
-            const { downloadTextFromBlossom, parseIndexFile, downloadBanList } = await import('@/lib/blossom')
-            const indexContent = await downloadTextFromBlossom(hubData.indexFileHash, hubData.blossomServers)
+            const { downloadHubTreeText, parseIndexFile, downloadBanList } = await import('@/lib/blossom')
+            const indexContent = await downloadHubTreeText(hubData.indexFileHash, hubData.blossomServers, hubData.dTag)
             const index = parseIndexFile(indexContent)
 
             // Update ban list
@@ -499,8 +499,8 @@ export function useHubEventSubscription() {
                   const pageEntry = findPageForPubkey(index, pubkey)
                   if (pageEntry) {
                     const [pageContent, spineContent] = await Promise.all([
-                      downloadTextFromBlossom(pageEntry.hash, hubData.blossomServers),
-                      downloadTextFromBlossom(index.spineHash, hubData.blossomServers),
+                      downloadHubTreeText(pageEntry.hash, hubData.blossomServers, hubData.dTag),
+                      downloadHubTreeText(index.spineHash, hubData.blossomServers, hubData.dTag),
                     ])
 
                     // Extract members from our page
@@ -517,7 +517,7 @@ export function useHubEventSubscription() {
                 }
                 // ── Monolithic format ──
                 else if (index.treeHash) {
-                  const treeContent = await downloadTextFromBlossom(index.treeHash, hubData.blossomServers)
+                  const treeContent = await downloadHubTreeText(index.treeHash, hubData.blossomServers, hubData.dTag)
                   const tree = deserializeTree(treeContent)
                   members = getMembers(tree)
 
@@ -538,7 +538,7 @@ export function useHubEventSubscription() {
                   // Re-download epoch history so old messages remain decryptable
                   if (index.historyHash) {
                     try {
-                      const historyBlob = await downloadTextFromBlossom(index.historyHash, hubData.blossomServers)
+                      const historyBlob = await downloadHubTreeText(index.historyHash, hubData.blossomServers, hubData.dTag)
                       const epochMap: Record<number, string> = {}
 
                       let plaintext = ''
@@ -609,7 +609,7 @@ export function useHubEventSubscription() {
                         if (!groupRef) continue
 
                         try {
-                          const groupTreeContent = await downloadTextFromBlossom(groupRef.hash, hubData.blossomServers)
+                          const groupTreeContent = await downloadHubTreeText(groupRef.hash, hubData.blossomServers, hubData.dTag)
                           const groupSecret = await decryptGroupSecret(pubkey, privateKey, signer, hubData.creatorPubkey, groupTreeContent)
                           if (groupSecret) {
                             const groupSecretHex = Array.from(groupSecret).map((b) => b.toString(16).padStart(2, '0')).join('')

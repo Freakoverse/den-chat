@@ -369,7 +369,10 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
         findPageForPubkey, parseIndexFile,
         rehydratePageKeysV2, addMemberToPageV2,
       } = await import('@/lib/blossom/members')
-      const { downloadTextFromBlossom } = await import('@/lib/blossom')
+      // downloadHubTreeText = read-through local cache for immutable (content-addressed) tree blobs, so
+      // re-reading an index/spine/page we already hold locally skips the network. The hashes below all
+      // come from the FRESH hub event (freshHub.indexFileHash → index), so a cache hit is never stale.
+      const { downloadHubTreeText } = await import('@/lib/blossom')
       const {
         fromHex, deserializeSpine, recoverPageRootKeys,
         buildSpine, serializeLeafPage, serializeSpine,
@@ -396,7 +399,7 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
       const selectedReqs = requests.filter(r => selected.has(r.pubkey) && r.pPub)
       if (selectedReqs.length === 0) throw new Error('No valid v2 join requests selected')
 
-      const indexContent = await downloadTextFromBlossom(freshHub.indexFileHash, freshHub.blossomServers)
+      const indexContent = await downloadHubTreeText(freshHub.indexFileHash, freshHub.blossomServers, hub.dTag)
       const index = parseIndexFile(indexContent)
       if (!index.spineHash || index.leafPages.length === 0) {
         throw new Error('Hub does not use paginated format')
@@ -420,7 +423,7 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
       }
 
       await markStep('Downloading spine tree')
-      const spineContent = await downloadTextFromBlossom(index.spineHash, hub.blossomServers)
+      const spineContent = await downloadHubTreeText(index.spineHash, hub.blossomServers, hub.dTag)
       const spine = deserializeSpine(spineContent)
       markDone('Downloading spine tree')
 
@@ -453,7 +456,7 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
       // Download + rehydrate (v2) all affected pages.
       const rehydratedPages = new Map<number, Awaited<ReturnType<typeof rehydratePageKeysV2>>>()
       for (const [pageIndex, mod] of pageMods) {
-        const pageContent = await downloadTextFromBlossom(mod.pageEntry.hash, hub.blossomServers)
+        const pageContent = await downloadHubTreeText(mod.pageEntry.hash, hub.blossomServers, hub.dTag)
         const rehydrated = await rehydratePageKeysV2(pageContent, ownerSigner, resolveEpochSecret)
         rehydratedPages.set(pageIndex, rehydrated)
       }
@@ -629,7 +632,9 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
         rehydratePageKeys, addMemberToPage, findPageForPubkey,
         parseIndexFile, createPaginatedIndexFile,
       } = await import('@/lib/blossom/members')
-      const { downloadTextFromBlossom } = await import('@/lib/blossom')
+      // Read-through local cache for immutable tree blobs — skips the network when we already hold the
+      // exact (content-addressed) index/spine/page. Hashes resolve from the fresh hub event, so no staleness.
+      const { downloadHubTreeText } = await import('@/lib/blossom')
       const {
         fromHex, deserializeSpine, recoverPageRootKeys,
         buildSpine, serializeLeafPage, serializeSpine,
@@ -640,7 +645,7 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
       const hubSecret = fromHex(secretHex)
 
       // Download current index + spine
-      const indexContent = await downloadTextFromBlossom(freshHub.indexFileHash, freshHub.blossomServers)
+      const indexContent = await downloadHubTreeText(freshHub.indexFileHash, freshHub.blossomServers, hub.dTag)
       const index = parseIndexFile(indexContent)
 
       if (!index.spineHash || index.leafPages.length === 0) {
@@ -649,7 +654,7 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
       markDone('Downloading index file')
 
       await markStep('Downloading spine tree')
-      const spineContent = await downloadTextFromBlossom(index.spineHash, hub.blossomServers)
+      const spineContent = await downloadHubTreeText(index.spineHash, hub.blossomServers, hub.dTag)
       const spine = deserializeSpine(spineContent)
       markDone('Downloading spine tree')
 
@@ -690,7 +695,7 @@ export function JoinRequestsModal({ open, onClose, hub }: JoinRequestsModalProps
       // Download and rehydrate all affected pages
       const rehydratedPages = new Map<number, Awaited<ReturnType<typeof rehydratePageKeys>>>()
       for (const [pageIndex, mod] of pageMods) {
-        const pageContent = await downloadTextFromBlossom(mod.pageEntry.hash, hub.blossomServers)
+        const pageContent = await downloadHubTreeText(mod.pageEntry.hash, hub.blossomServers, hub.dTag)
         const rehydrated = await rehydratePageKeys(pageContent, signer, privateKey)
         rehydratedPages.set(pageIndex, rehydrated)
       }
