@@ -38,6 +38,11 @@ import { serializeStructBlob, uploadStructBlob } from '@/lib/hub/hubStructBlob'
 import { DEFAULT_EVERYONE_PERMISSIONS } from '@/lib/hub/permissions'
 import type { UploadProgress } from '@/lib/blossom'
 
+// Hub creation pre-selects UP TO this many entries from EACH source list (client + user), for both
+// general relays and Blossom servers. 5 + 5 tops out at the 10-per-list cap (MAX_GENERAL_RELAYS /
+// MAX_BLOSSOM_SERVERS), so a hub created with both lists full still fits without trimming.
+const DEFAULT_PICK_PER_LIST = 5
+
 type UploadStatus = 'idle' | 'uploading' | 'success' | 'error'
 
 /** Steps during hub creation */
@@ -252,7 +257,7 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
 
     // Client relays
     const clientList = getRelayList().filter(r => r.enabled)
-    const clientPicked = pickForAuthor(clientList.map(r => r.url), 3)
+    const clientPicked = pickForAuthor(clientList.map(r => r.url), DEFAULT_PICK_PER_LIST)
     setClientRelayEntries(clientList.map(r => ({
       url: r.url,
       enabled: clientPicked.has(r.url),
@@ -262,7 +267,7 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
     // User NIP-65 relays (dedup against client)
     const clientUrls = new Set(clientList.map(r => r.url))
     const uniqueUserRelays = userRelays.filter(u => !clientUrls.has(u))
-    const userPicked = pickForAuthor(uniqueUserRelays, 3)
+    const userPicked = pickForAuthor(uniqueUserRelays, DEFAULT_PICK_PER_LIST)
     setUserRelayEntries(uniqueUserRelays.map(url => ({
       url,
       enabled: userPicked.has(url),
@@ -271,7 +276,7 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
 
     // Client blossom servers
     const clientBlossomList = blossomServerManager.getList().filter(s => s.enabled)
-    const blossomPicked = pickForAuthor(clientBlossomList.map(s => s.url), 3)
+    const blossomPicked = pickForAuthor(clientBlossomList.map(s => s.url), DEFAULT_PICK_PER_LIST)
     setClientBlossomEntries(clientBlossomList.map(s => ({
       url: s.url,
       enabled: blossomPicked.has(s.url),
@@ -280,7 +285,7 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
     // User blossom server list (dedup against client)
     const clientBlossomUrls = new Set(clientBlossomList.map(s => s.url))
     const uniqueUserBlossoms = userBlossoms.filter(u => !clientBlossomUrls.has(u))
-    const userBlossomPicked = pickForAuthor(uniqueUserBlossoms, 3)
+    const userBlossomPicked = pickForAuthor(uniqueUserBlossoms, DEFAULT_PICK_PER_LIST)
     setUserBlossomEntries(uniqueUserBlossoms.map(url => ({
       url,
       enabled: userBlossomPicked.has(url),
@@ -577,7 +582,7 @@ export function CreateHubDialog({ open, onClose }: CreateHubDialogProps) {
       }]
 
       // Build image URLs from Blossom hashes (dedup by normalized URL to avoid trailing-slash duplicates)
-      const rawBlossoms = getSelectedBlossoms().length > 0 ? getSelectedBlossoms() : blossomServerManager.getServers().slice(0, 3)
+      const rawBlossoms = getSelectedBlossoms().length > 0 ? getSelectedBlossoms() : blossomServerManager.getServers().slice(0, DEFAULT_PICK_PER_LIST)
       const blossomServerList = [...new Set(rawBlossoms.map(u => u.replace(/\/+$/, '')))]
       // Pin each image URL to a server that ACTUALLY accepted the blob (captured at upload time), not to
       // the selected-server[0], which may never have received it. Fall back to the list only if the base
