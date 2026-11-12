@@ -23,7 +23,7 @@
  *    key fingerprint, never the name alone.
  */
 
-import { BunkerSigner } from './bunker'
+import { BunkerSigner, buildAppMetadata } from './bunker'
 
 /** Default port and the ten-port failover range clients scan (§4). */
 const LRS_PORT_START = 7777
@@ -66,14 +66,6 @@ export function fingerprint(transportPubkey: string): string {
 
 function buildBunkerUrl(transportPubkey: string, port: number): string {
   return `bunker://${transportPubkey}?relay=${encodeURIComponent(`ws://127.0.0.1:${port}`)}`
-}
-
-/** App metadata sent on the first connect so the signer can label/brand us by name + logo, not
- *  origin/key (§6.1). The image is origin-relative so it resolves to wherever the app is served. */
-function buildMetadata(): Record<string, unknown> {
-  let origin = ''
-  try { origin = typeof location !== 'undefined' ? location.origin : '' } catch { /* no window */ }
-  return { name: 'DEN Chat', ...(origin ? { url: origin, image: `${origin}/app-icon.png` } : {}) }
 }
 
 /* ─── Discovery ─── */
@@ -266,7 +258,7 @@ export class LrsSigner {
     // Always send app metadata (name/url/logo). It's spec-safe on reconnect — the signer keeps the
     // name it stored at first approval (§6.1) — and it means a connection the signer has forgotten (or
     // that predates our metadata) still gets branded with the real app name + logo rather than a raw origin.
-    const pubkey = await this.bunker.login(url, true, buildMetadata())
+    const pubkey = await this.bunker.login(url, true, buildAppMetadata())
     saveLrsState({ transportPubkey: this.transportPubkey, accountPubkey: pubkey, lastPort: this.port })
     return pubkey
   }

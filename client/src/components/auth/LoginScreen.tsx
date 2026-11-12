@@ -31,7 +31,7 @@ import { rememberLogin, getRememberedLogin } from '@/lib/auth/autoLogin'
 import { verifyBackupMatches, encryptBackup, decryptBackup, parseBackupPayload } from '@/lib/auth/backupCrypto'
 import { QRScanner } from '@/components/auth/QRScanner'
 import { discoverLocalSigners, findRememberedSigner, LrsSigner, fingerprint, loadLrsState, hasStoredLocalSigner, forgetLocalSigners, type LrsSignerInfo } from '@/lib/auth/lrs'
-import { BunkerSigner } from '@/lib/auth/bunker'
+import { BunkerSigner, buildAppMetadata, getBunkerSignerPubkey, loadOrCreateBunkerClientSecret, persistBunkerClientSecret } from '@/lib/auth/bunker'
 import { NostrConnectSigner, generateNostrConnectDetails } from '@/lib/auth/nostr-connect'
 import { Nip07Signer } from '@/lib/auth/nip07'
 import upv2Service from '@/services/upv2.service'
@@ -707,16 +707,26 @@ export function LoginScreen() {
     setLoading('bunker')
     clearError()
     try {
-      const signer = new BunkerSigner()
+      // Reuse ONE client key per signer (keyed by the signer pubkey the bunker string addresses) so
+      // re-pairing the same signer resumes its existing connection + policy instead of minting a fresh
+      // client identity and piling up duplicate connection entries. Falls back to a fresh key when the
+      // URL can't be parsed for a pubkey (login() will then reject on the bad URL anyway).
+      const signerPubkey = await getBunkerSignerPubkey(url)
+      const signer = signerPubkey
+        ? new BunkerSigner(loadOrCreateBunkerClientSecret(signerPubkey).secret)
+        : new BunkerSigner()
       // Bound the attempt so a signer that never responds doesn't hang the button
       // forever. 60s gives ample time to open the signer and approve the request.
+      // Send app metadata so the signer brands the connection by name, not the client key.
       const pubkey = await Promise.race([
-        signer.login(url),
+        signer.login(url, true, buildAppMetadata()),
         new Promise<never>((_, reject) => setTimeout(() => reject(
           new Error('Timed out reaching the signer. Open your signer app, make sure it\'s online, and approve the request — then try again.')
         ), 60_000)),
       ])
-      // Persist bunker URL + client secret for auto-login on startup
+      // Persist bunker URL + client secret for auto-login on startup. The per-signer durable store
+      // (written above) survives logout; this global slot is the active-session pointer the resume
+      // paths read and is cleared on logout/switch.
       localStorage.setItem(StorageKey.BUNKER_URL, url)
       localStorage.setItem(StorageKey.BUNKER_CLIENT_SECRET, signer.getClientSecretKey())
       setSigner(signer)
@@ -767,6 +777,12 @@ export function LoginScreen() {
       if (bunkerStr) {
         localStorage.setItem(StorageKey.BUNKER_URL, bunkerStr)
         localStorage.setItem(StorageKey.BUNKER_CLIENT_SECRET, signer.getClientSecretKey())
+        // Also persist this handshake's client key into the per-signer durable store (survives logout)
+        // so a later bunker re-pair / resume to the same signer reuses it rather than creating a
+        // duplicate connection entry. The nostrconnect:// URI mints its own client key per dialog, so
+        // this keys that key by the derived signer pubkey.
+        const ncSignerPubkey = await getBunkerSignerPubkey(bunkerStr)
+        if (ncSignerPubkey) persistBunkerClientSecret(ncSignerPubkey, signer.getClientSecretKey())
         rememberLogin({ method: 'nostrconnect', pubkey })
       }
     } catch (err) {
