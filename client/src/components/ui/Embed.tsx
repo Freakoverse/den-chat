@@ -76,8 +76,14 @@ export function Embed({ embed, maxWidth, className }: EmbedProps) {
       ? measuredHeight! + 4
       : (expanded ? Math.max(collapsedHeight * 3, 720) : collapsedHeight)
 
+  // Twitter cards look oversized at the full link-preview width. Cap just the CARD's width (height is
+  // unchanged: the tweet reflows to the narrower width and its auto-fit height follows), so the whole
+  // card scales down. Every other embed keeps the caller's maxWidth.
+  const TWITTER_CARD_MAX_WIDTH = 400
+  const cardMaxWidth = typeof maxWidth === 'number' ? Math.min(maxWidth, TWITTER_CARD_MAX_WIDTH) : TWITTER_CARD_MAX_WIDTH
+
   return (
-    <div style={{ maxWidth: isVertical ? 325 : maxWidth, width: isVertical ? 325 : undefined }}>
+    <div style={{ maxWidth: isVertical ? 325 : isCard ? cardMaxWidth : maxWidth, width: isVertical ? 325 : undefined }}>
       <div
         className={`rounded-lg overflow-hidden ${isCard ? 'border border-border' : ''} ${className || ''}`}
         style={{ aspectRatio: layout === 'video' ? '16/9' : undefined }}
