@@ -1444,7 +1444,9 @@ function ParticipantTile({
       className={cn(
         'relative overflow-hidden flex flex-col justify-center items-center h-[160px] w-[220px] gap-2 rounded-2xl transition-all duration-200 cursor-pointer',
         isSpeaking ? 'bg-emerald-500/10 ring-2 ring-emerald-400' : 'bg-secondary/50 hover:bg-secondary/70',
-        isSelf ? 'ring-1 ring-primary/20' : '',
+        // Only show the faint self-identifying ring when NOT speaking; otherwise it overrides the green
+        // speaking ring (both set Tailwind's ring, and the self ring's color wins in the generated CSS).
+        isSelf && !isSpeaking ? 'ring-1 ring-primary/20' : '',
         compact ? 'p-2' : 'p-2',
       )}
     >
