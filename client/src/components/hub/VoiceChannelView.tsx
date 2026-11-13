@@ -1442,13 +1442,26 @@ function ParticipantTile({
     <div
       onClick={onClick}
       className={cn(
-        'flex flex-col justify-center items-center h-[160px] w-[220px] gap-2 rounded-2xl transition-all duration-200 cursor-pointer',
+        'relative overflow-hidden flex flex-col justify-center items-center h-[160px] w-[220px] gap-2 rounded-2xl transition-all duration-200 cursor-pointer',
         isSpeaking ? 'bg-emerald-500/10 ring-2 ring-emerald-400/50' : 'bg-secondary/50 hover:bg-secondary/70',
         isSelf ? 'ring-1 ring-primary/20' : '',
         compact ? 'p-2' : 'p-2',
       )}
     >
-      <div className="relative">
+      {/* Profile banner as the tile background, dimmed by a 65% black overlay, behind the avatar + name. */}
+      {profile?.banner && (
+        <>
+          <img
+            src={profile.banner}
+            alt=""
+            aria-hidden="true"
+            className="absolute inset-0 w-full h-full object-cover pointer-events-none select-none"
+            onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
+          />
+          <div className="absolute inset-0 bg-black/65 pointer-events-none" />
+        </>
+      )}
+      <div className="relative z-10">
         <div
           className={cn(
             'rounded-full overflow-hidden transition-all duration-300',
@@ -1486,7 +1499,7 @@ function ParticipantTile({
         )}
       </div>
 
-      <div className="text-center min-w-0 w-full">
+      <div className="relative z-10 text-center min-w-0 w-full">
         <div className={cn('font-medium text-foreground truncate', compact ? 'text-xs' : 'text-sm')}>
           {isSelf ? `${name} (You)` : name}
         </div>
