@@ -1390,7 +1390,7 @@ function ParticipantTile({
         onClick={onClick}
         className={cn(
           'flex-1 min-h-0 flex flex-col items-center justify-center gap-4 rounded-xl transition-all duration-200 relative cursor-pointer',
-          isSpeaking ? 'bg-emerald-500/10 ring-2 ring-emerald-400/50' : 'bg-secondary/30',
+          isSpeaking ? 'bg-emerald-500/10 ring-2 ring-emerald-400' : 'bg-secondary/30',
         )}
       >
         <div className="relative">
@@ -1443,7 +1443,7 @@ function ParticipantTile({
       onClick={onClick}
       className={cn(
         'relative overflow-hidden flex flex-col justify-center items-center h-[160px] w-[220px] gap-2 rounded-2xl transition-all duration-200 cursor-pointer',
-        isSpeaking ? 'bg-emerald-500/10 ring-2 ring-emerald-400/50' : 'bg-secondary/50 hover:bg-secondary/70',
+        isSpeaking ? 'bg-emerald-500/10 ring-2 ring-emerald-400' : 'bg-secondary/50 hover:bg-secondary/70',
         isSelf ? 'ring-1 ring-primary/20' : '',
         compact ? 'p-2' : 'p-2',
       )}
