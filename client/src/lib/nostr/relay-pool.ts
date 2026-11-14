@@ -534,12 +534,18 @@ function collectEvents(relays: string[], filter: Filter, maxWait: number, idleMs
     const byId = new Map<string, Event>()
     let settled = false
     let idleTimer: ReturnType<typeof setTimeout> | null = null
+    // `sub`/`hard` are assigned AFTER subscribeMany returns, but oneose can fire SYNCHRONOUSLY from inside
+    // that call when every relay is skipped up front (e.g. all tripped by the dead-relay breaker). Declaring
+    // them here (not `const` after the call) keeps finish() out of a temporal dead zone in that case; the
+    // guards make a not-yet-assigned handle a no-op.
+    let sub: { close: () => void } | null = null
+    let hard: ReturnType<typeof setTimeout> | null = null
     const finish = () => {
       if (settled) return
       settled = true
       if (idleTimer) clearTimeout(idleTimer)
-      clearTimeout(hard)
-      try { sub.close() } catch { /* ignore */ }
+      if (hard) clearTimeout(hard)
+      try { sub?.close() } catch { /* ignore */ }
       resolve([...byId.values()])
     }
     const resetIdle = () => {
@@ -547,12 +553,15 @@ function collectEvents(relays: string[], filter: Filter, maxWait: number, idleMs
       if (idleTimer) clearTimeout(idleTimer)
       idleTimer = setTimeout(finish, idleMs)
     }
-    const sub = pool.subscribeMany(relays, filter, {
+    sub = pool.subscribeMany(relays, filter, {
       maxWait,
       onevent(ev) { if (!byId.has(ev.id)) byId.set(ev.id, ev); resetIdle() },
-      oneose() { finish() }, // all relays EOSE'd (healthy fast path)
+      oneose() { finish() }, // all relays EOSE'd (healthy fast path), or all skipped up front (fires synchronously)
     })
-    const hard = setTimeout(finish, maxWait)
+    // If oneose already fired synchronously above, finish() ran with sub still null: close the real sub now
+    // and don't arm the hard cap. Otherwise arm it as usual.
+    if (settled) { try { sub.close() } catch { /* ignore */ } }
+    else hard = setTimeout(finish, maxWait)
   })
 }
 
@@ -589,7 +598,11 @@ export function subscribeEvents(
     filter,
     {
       onevent: onEvent,
-      oneose: onEose,
+      // Defer onEose to a microtask so it NEVER fires synchronously inside this call. With the dead-relay
+      // breaker, subscribeMany can EOSE synchronously (all relays skipped up front) — and callers commonly
+      // write `const sub = subscribeEvents(..., () => sub.close())`, which would hit `sub` in its temporal
+      // dead zone. Deferring restores the pre-breaker invariant (onEose was always async) for every caller.
+      oneose: onEose ? () => queueMicrotask(onEose) : undefined,
     }
   )
 
@@ -624,17 +637,21 @@ export function fetchEventsProgressive(
   let resolveDone!: (e: Event[]) => void
   const done = new Promise<Event[]>((r) => { resolveDone = r })
 
+  // `sub` is assigned AFTER subscribeMany returns, but oneose can fire SYNCHRONOUSLY from inside that call
+  // when every relay is skipped up front (e.g. all tripped by the dead-relay breaker). `let` + `sub?.close()`
+  // keeps teardown() out of a temporal dead zone in that case.
+  let sub: { close: () => void } | null = null
   const teardown = (emitFinal: boolean) => {
     if (closed) return
     closed = true
     if (flushTimer) { clearTimeout(flushTimer); flushTimer = null }
     if (deadline) { clearTimeout(deadline); deadline = null }
-    sub.close()
+    sub?.close()
     if (emitFinal) onEvents(snapshot())
     resolveDone(snapshot())
   }
 
-  const sub = pool.subscribeMany(relays, filter, {
+  sub = pool.subscribeMany(relays, filter, {
     // Pass maxWait as the per-relay EOSE timeout too. Without it, subscribeMany
     // uses nostr-tools' short default (~4.4s), so oneose (fires on all-EOSE) can
     // trigger before a SLOW relay responds — and teardown would drop events that
@@ -644,7 +661,10 @@ export function fetchEventsProgressive(
     onevent(ev) { if (!byId.has(ev.id)) { byId.set(ev.id, ev); scheduleFlush() } },
     oneose() { teardown(true) },
   })
-  deadline = setTimeout(() => teardown(true), maxWait)
+  // If oneose already fired synchronously above, teardown() ran with sub still null: close the real sub now
+  // and don't arm the deadline. Otherwise arm it as usual.
+  if (closed) { try { sub.close() } catch { /* ignore */ } }
+  else deadline = setTimeout(() => teardown(true), maxWait)
 
   return { close: () => teardown(false), done }
 }
@@ -667,7 +687,10 @@ export function subscribeToRelays(
     filter,
     {
       onevent: onEvent,
-      oneose: onEose,
+      // Deferred to a microtask: see subscribeEvents. The breaker can make subscribeMany EOSE synchronously
+      // (all relays skipped), and callers like `const sub = subscribeToRelays(..., () => sub.close())` would
+      // otherwise hit `sub` in its temporal dead zone.
+      oneose: onEose ? () => queueMicrotask(onEose) : undefined,
     }
   )
 
