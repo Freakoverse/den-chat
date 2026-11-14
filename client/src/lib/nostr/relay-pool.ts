@@ -19,6 +19,77 @@ const FETCH_MAX_WAIT_MS = 4000
 /** Per-relay publish timeout: how long to wait for a relay's OK before treating it as failed. */
 const PUBLISH_TIMEOUT_MS = 15_000
 
+// ── Dead-relay circuit breaker ──────────────────────────────────────────────────────────────────────
+// SimplePool DISCARDS a relay's connection object the moment a cold connect fails: ensureRelay's catch and
+// relay.onclose both `this.relays.delete(url)`. So nostr-tools' built-in enableReconnect backoff never
+// actually accumulates for a relay that stays down - every pool operation that targets the active list
+// re-dials it from a fresh DNS+TCP+TLS handshake. With a persistently-dead default relay (e.g. a
+// rate-limiting/blocked relay.damus.io) and a chat app that reads constantly (per-hub subs, profile /
+// reaction / zap fetches), that is ~one failed WebSocket to the dead relay PER read: a steady stream of
+// browser "WebSocket connection failed" console errors and wasted handshakes.
+//
+// This breaker gives us the retry-with-backoff SimplePool throws away, at our layer, through the pool's own
+// hooks (onRelayConnectionFailure/Success feed it; allowConnectingToRelay gates on it). After
+// STRIKES_TO_TRIP consecutive cold-connect failures a relay is "tripped": the pool SKIPS it (no socket, no
+// console error) for a cooldown. After the cooldown the next operation is allowed through as a single
+// half-open probe - success fully resets it, failure re-trips with the next (longer) cooldown. So a relay
+// having a blip recovers within ~5s, while a chronically-dead relay settles into a quiet ~60s re-probe
+// instead of a failed dial every read. It is driven by real traffic, so an unused relay is never probed
+// pointlessly, and a tripped relay fails FAST on the publish path (fast reject, no 15s timeout), which lets
+// publishWithFailover route around it immediately.
+const BREAKER_COOLDOWNS_MS = [5_000, 10_000, 20_000, 30_000, 60_000] // escalating per consecutive trip, capped at the last
+const STRIKES_TO_TRIP = 3 // consecutive cold-connect failures before a relay is first tripped
+
+// tier -1 = still counting strikes (not tripped); until 0 = not blocked. Keyed by the pool-normalized URL
+// the hooks hand us (same normalization for failure/success/gate), so the keys are always internally consistent.
+type BreakerEntry = { fails: number; tier: number; until: number }
+const relayBreaker = new Map<string, BreakerEntry>()
+
+/** A relay's cold connect failed. Count it; trip (first time) or escalate (a failed half-open probe). */
+function noteRelayFailure(url: string): void {
+  let e = relayBreaker.get(url)
+  if (!e) { e = { fails: 0, tier: -1, until: 0 }; relayBreaker.set(url, e) }
+  e.fails++
+  if (e.tier >= 0) {
+    // a half-open probe failed again -> escalate to the next (longer) cooldown
+    e.tier = Math.min(e.tier + 1, BREAKER_COOLDOWNS_MS.length - 1)
+    e.until = Date.now() + BREAKER_COOLDOWNS_MS[e.tier]
+  } else if (e.fails >= STRIKES_TO_TRIP) {
+    e.tier = 0 // first trip
+    e.until = Date.now() + BREAKER_COOLDOWNS_MS[0]
+  }
+}
+
+/** A relay connected successfully -> it is healthy, clear its breaker state entirely. */
+function noteRelaySuccess(url: string): void {
+  if (relayBreaker.size > 0) relayBreaker.delete(url)
+}
+
+/** Pool gate: false = skip this relay (tripped, in cooldown). Lets one half-open probe through per cooldown. */
+function allowRelayConnection(url: string): boolean {
+  const e = relayBreaker.get(url)
+  if (!e || e.tier < 0) return true // never tripped
+  const now = Date.now()
+  if (now < e.until) return false // in cooldown -> skip silently (no socket, no console error)
+  // Cooldown elapsed: allow ONE probe and push the window forward so concurrent operations don't all dial.
+  // The probe's outcome overwrites this: noteRelaySuccess clears the entry, noteRelayFailure escalates it.
+  e.until = now + BREAKER_COOLDOWNS_MS[e.tier]
+  return true
+}
+
+/** Clear all breaker state - give every relay a fresh chance (relay-list edit, or network back online). */
+function resetRelayBreaker(): void { relayBreaker.clear() }
+
+pool.onRelayConnectionFailure = noteRelayFailure
+pool.onRelayConnectionSuccess = noteRelaySuccess
+pool.allowConnectingToRelay = (url) => allowRelayConnection(url)
+
+// When the network comes back (laptop wake, Wi-Fi reconnect), stop waiting out cooldowns - re-probe every
+// relay on the next operation instead of leaving a just-recovered relay tripped for up to 60s.
+if (typeof window !== 'undefined') {
+  window.addEventListener('online', resetRelayBreaker)
+}
+
 /** Default relays — user can customize these later */
 const DEFAULT_RELAYS = [
   'wss://relay.primal.net',
@@ -161,6 +232,7 @@ export function setRelays(list: { url: string; enabled: boolean }[]) {
   // Honor the user's explicit choice, even when they disable every relay (empty set):
   // do NOT fall back to the defaults, or "disable all" would silently keep publishing.
   activeRelaysCache = list.filter((r) => r.enabled).map((r) => r.url)
+  resetRelayBreaker() // the list changed — give every relay (incl. a re-added one) a fresh chance
 }
 
 /**
@@ -169,6 +241,7 @@ export function setRelays(list: { url: string; enabled: boolean }[]) {
  */
 export function reloadRelays() {
   activeRelaysCache = loadRelays()
+  resetRelayBreaker() // the list may have changed under us — re-evaluate every relay fresh
 }
 
 /**
