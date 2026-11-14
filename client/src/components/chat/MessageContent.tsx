@@ -227,6 +227,29 @@ function outsideCode(text: string, fn: (s: string) => string): string {
   return out
 }
 
+/**
+ * Break Markdown's blockquote "lazy continuation". In CommonMark a line right after a `> quote` that
+ * itself has no `>` is pulled INTO the quote (so `> a\nb` renders both as the quote). In chat that's
+ * surprising — people expect each quoted line to need its own `>`, like Discord/Slack. Insert a blank
+ * line between a blockquote line and a following non-blank, non-quote line so the quote closes and that
+ * line renders as normal text. Line-based and idempotent; run via `outsideCode` so a `>` inside code is
+ * untouched. (Consecutive `> …` lines still form one multi-line quote.)
+ */
+function preBlockquoteBreaks(text: string): string {
+  if (!text.includes('>')) return text
+  const isQuote = (l: string) => /^[ \t]*>/.test(l)
+  const lines = text.split('\n')
+  const out: string[] = []
+  for (let i = 0; i < lines.length; i++) {
+    out.push(lines[i])
+    const next = lines[i + 1]
+    if (next !== undefined && isQuote(lines[i]) && !isQuote(next) && next.trim() !== '') {
+      out.push('') // blank line closes the blockquote before the lazy-continuation line
+    }
+  }
+  return out.join('\n')
+}
+
 /** Split content by ||spoiler|| markers into typed segments (markers inside code are ignored). */
 export function splitSpoilerSegments(text: string): { type: 'text' | 'spoiler'; value: string }[] {
   const segments: { type: 'text' | 'spoiler'; value: string }[] = []
@@ -1176,7 +1199,8 @@ export const MessageContent = memo(function MessageContent({ content, suffix, on
     collectedEmbedsRef.current = []
     // Pre-process, but only OUTSIDE code — inside a ``` block or an inline `span` these tokens are
     // literal (no mention pill, timestamp, emoji or channel). react-markdown keeps the code itself literal.
-    const mentioned = outsideCode(text, (t) => preMentionMarkdown(t, hubRoleNames))
+    const dequoted = outsideCode(text, preBlockquoteBreaks)
+    const mentioned = outsideCode(dequoted, (t) => preMentionMarkdown(t, hubRoleNames))
     const timestamped = outsideCode(mentioned, preTimestampMarkdown)
     const emojified = effectiveDisableEmojis ? timestamped : outsideCode(timestamped, (t) => preEmojifyMarkdown(t, emojiTags))
     const channeled = outsideCode(emojified, (t) => preChannelMarkdown(t, hubChannels))
