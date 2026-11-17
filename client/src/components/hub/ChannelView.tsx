@@ -302,6 +302,10 @@ export function ChannelView({ hideHeader = false }: { hideHeader?: boolean } = {
   const [optimisticMessages, setOptimisticMessages] = useState<OptimisticMessage[]>([])
   const [replyContext, setReplyContext] = useState<ReplyContext | null>(null)
 
+  // ChannelView stays mounted across channel/hub switches (it reads active IDs from the store), so a
+  // pending reply would otherwise carry over into the next channel's composer. Clear it on switch.
+  useEffect(() => { setReplyContext(null) }, [activeChannelId, activeHubId])
+
   const channelContainerRef = useRef<HTMLDivElement>(null)
 
   // Membership / facilitation gate (hooks must be called unconditionally).
