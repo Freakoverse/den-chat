@@ -300,11 +300,19 @@ export function ChannelView({ hideHeader = false }: { hideHeader?: boolean } = {
   const activeHubSecret = useHubStore((s) => activeHubId ? s.hubSecrets[activeHubId] : undefined)
 
   const [optimisticMessages, setOptimisticMessages] = useState<OptimisticMessage[]>([])
-  const [replyContext, setReplyContext] = useState<ReplyContext | null>(null)
 
-  // ChannelView stays mounted across channel/hub switches (it reads active IDs from the store), so a
-  // pending reply would otherwise carry over into the next channel's composer. Clear it on switch.
-  useEffect(() => { setReplyContext(null) }, [activeChannelId, activeHubId])
+  // Per-channel pending reply. ChannelView stays mounted across channel/hub switches (it reads the active
+  // IDs from the store rather than remounting), so a single reply value would bleed into the next channel's
+  // composer. Keying by hub+channel instead means each channel keeps its own pending reply: switch away and
+  // the composer is clean, switch back and your reply (if any) is still there. Lives for the view's lifetime,
+  // like the in-flight optimistic list above (not persisted across app restarts).
+  const [replyContexts, setReplyContexts] = useState<Record<string, ReplyContext | null>>({})
+  const replyKey = activeHubId && activeChannelId ? `${activeHubId}:${activeChannelId}` : null
+  const replyContext = replyKey ? (replyContexts[replyKey] ?? null) : null
+  const setReplyContext = useCallback((ctx: ReplyContext | null) => {
+    if (!replyKey) return
+    setReplyContexts((prev) => ({ ...prev, [replyKey]: ctx }))
+  }, [replyKey])
 
   const channelContainerRef = useRef<HTMLDivElement>(null)
 
