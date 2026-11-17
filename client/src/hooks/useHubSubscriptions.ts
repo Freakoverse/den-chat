@@ -118,6 +118,9 @@ function parseMessage(event: Event): ChatMessage | null {
     // otherwise fall back to created_at (unedited messages)
     createdAt: parseInt(event.tags.find((t) => t[0] === 'published_at')?.[1] || '', 10) || event.created_at,
     eventCreatedAt: event.created_at, // actual event timestamp for replacement comparison
+    // Real wall-clock edit time (NIP-CHAT §6.2). Absent on unedited messages and on edits from
+    // clients that predate the tag; undefined then, falling back to the bare "(edited)" indicator.
+    updatedAt: parseInt(event.tags.find((t) => t[0] === 'updated_at')?.[1] || '', 10) || undefined,
     epoch: epochStr ? parseInt(epochStr, 10) : 0,
     replyTo: replyTag?.[1],
     rootRef: rootTag?.[1],

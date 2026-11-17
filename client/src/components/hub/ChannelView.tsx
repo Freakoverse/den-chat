@@ -715,6 +715,22 @@ export function formatShortTime(ts: number): string {
   return new Date(ts * 1000).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: getHour12() })
 }
 
+/** The "(edited)" marker. When the message carries an `updated_at` time (NIP-CHAT §6.2) it becomes a
+ *  tooltip showing when the edit happened; older edits with no such tag keep the bare marker. */
+function EditedIndicator({ updatedAt }: { updatedAt?: number }) {
+  if (!updatedAt) return <span className="text-[10px] text-muted-foreground ml-1"> (edited)</span>
+  return (
+    <TooltipProvider delayDuration={300}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="text-[10px] text-muted-foreground ml-1 cursor-default"> (edited)</span>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="text-xs">Edited {formatDateTimeNumeric(new Date(updatedAt * 1000))}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  )
+}
+
 /* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Message List â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 interface MessageListProps {
@@ -3798,7 +3814,7 @@ export function ChatMessageRow({
               <div className={`text-base text-foreground/90 break-words transition-opacity ${relayPending ? 'opacity-50' : ''}`}>
                 <MessageContent content={contentForRender} onProfileClick={onOpenProfile} emojiTags={msg.emojiTags} mutedWords={mutedWords} disableLinkPreviews={!authorCanEmbed} disableHubInviteCards={!authorCanInvite} hubRoleNames={hubRoleNames} hubChannels={hubChannels} suffix={
                   <>
-                    {msg.edited && <span className="text-[10px] text-muted-foreground ml-1"> (edited)</span>}
+                    {msg.edited && <EditedIndicator updatedAt={msg.updatedAt} />}
                     {msg.expiration && <MessageExpiryNote expiration={msg.expiration} createdAt={msg.timestamp} className="text-[10px] text-muted-foreground/50 cursor-default" />}
                     {mobileGroupedTime}
                     <RelayProgressIndicator eventId={msg.id} />
@@ -4109,7 +4125,7 @@ export function ChatMessageRow({
               <div className={`text-base text-foreground/90 break-words transition-opacity ${relayPending ? 'opacity-50' : ''}`}>
                 <MessageContent content={contentForRender} onProfileClick={onOpenProfile} emojiTags={msg.emojiTags} mutedWords={mutedWords} disableLinkPreviews={!authorCanEmbed} disableHubInviteCards={!authorCanInvite} hubRoleNames={hubRoleNames} hubChannels={hubChannels} suffix={
                   <>
-                    {msg.edited && <span className="text-[10px] text-muted-foreground ml-1"> (edited)</span>}
+                    {msg.edited && <EditedIndicator updatedAt={msg.updatedAt} />}
                     {msg.expiration && <MessageExpiryNote expiration={msg.expiration} createdAt={msg.timestamp} className="text-[10px] text-muted-foreground/50 cursor-default" />}
                     {mobileGroupedTime}
                     <RelayProgressIndicator eventId={msg.id} />

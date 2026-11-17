@@ -976,7 +976,18 @@ function ForumPostDetail({
                       </TooltipContent>
                     </Tooltip>
                     {post.edited && (
-                      <span className="text-muted-foreground/60 italic">(edited)</span>
+                      post.updatedAt ? (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span className="text-muted-foreground/60 italic cursor-default">(edited)</span>
+                          </TooltipTrigger>
+                          <TooltipContent side="top" className="text-xs">
+                            Edited {formatDate(post.updatedAt)}
+                          </TooltipContent>
+                        </Tooltip>
+                      ) : (
+                        <span className="text-muted-foreground/60 italic">(edited)</span>
+                      )
                     )}
                     {post.clientTag && (
                       <Tooltip>

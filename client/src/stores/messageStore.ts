@@ -82,6 +82,7 @@ export interface ChatMessage {
   replyTo?: string      // from a tag with 'reply' marker (format: "36943:pubkey:dTag")
   rootRef?: string      // from a tag with 'root' marker — thread root reference
   edited?: boolean      // true if this message has been edited (replaced with newer version)
+  updatedAt?: number    // from the `updated_at` tag — real wall-clock time of the last edit (NIP-CHAT §6.2). Display only; absent until first edit / on older pre-tag edits
   deleted?: boolean     // true if this message has been request-deleted
   isThread?: boolean    // true if this is a thread reply (has ["thread"] tag)
   rawEvent?: string     // full raw Nostr event JSON (for "View Raw Event")
@@ -146,7 +147,7 @@ interface MessageState {
   /** Mark a message as deleted (by d-tag) */
   markDeleted: (hubDTag: string, channelId: string, dTag: string) => void
   /** Optimistically update a message's content + mark as edited (for instant UI feedback after edits) */
-  updateMessageContent: (hubDTag: string, channelId: string, dTag: string, pubkey: string, newContent: string, newEventCreatedAt: number, newEventId: string, newRawEvent?: string, newEpoch?: number) => void
+  updateMessageContent: (hubDTag: string, channelId: string, dTag: string, pubkey: string, newContent: string, newEventCreatedAt: number, newEventId: string, newRawEvent?: string, newEpoch?: number, newUpdatedAt?: number) => void
   /** Reset unread count for a hub (when user views it) */
   clearUnread: (hubDTag: string) => void
   /** Increment unread count for a hub */
@@ -434,7 +435,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
       }
     }),
 
-  updateMessageContent: (hubDTag, channelId, dTag, pubkey, newContent, newEventCreatedAt, newEventId, newRawEvent, newEpoch) =>
+  updateMessageContent: (hubDTag, channelId, dTag, pubkey, newContent, newEventCreatedAt, newEventId, newRawEvent, newEpoch, newUpdatedAt) =>
     set((state) => {
       const hubMsgs = state.messages[hubDTag] || {}
       const channelMsgs = hubMsgs[channelId] || []
@@ -449,6 +450,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
         eventCreatedAt: newEventCreatedAt,
         ...(newRawEvent ? { rawEvent: newRawEvent } : {}),
         ...(newEpoch !== undefined ? { epoch: newEpoch } : {}),
+        ...(newUpdatedAt !== undefined ? { updatedAt: newUpdatedAt } : {}),
       }
       return {
         messages: {

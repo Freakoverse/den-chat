@@ -19,6 +19,7 @@ import { publishToSpecificRelays } from '@/lib/nostr/relay-pool'
 import { getPublishRelays, getDeletePublishRelays, publishContent } from '@/stores/postingBehaviourStore'
 import { signWithSigner, mineAndSign, createMessageEvent, createDeletionEvent, createDeletedMessageEvent, createReactionEvent, createEditHintEvent } from '@/lib/nostr/events'
 import { nip19, type Event } from 'nostr-tools'
+import { nowSeconds } from '@/lib/time/clockOffset'
 import { KINDS, STANDARD_KINDS } from '@/lib/crypto/constants'
 import { stampHubExpiration } from '@/lib/hub/messageExpiration'
 import { aesEncrypt, aesDecrypt } from '@/lib/crypto/aes'
@@ -50,6 +51,9 @@ export interface ChatMessage {
   replyTo?: string
   rootRef?: string
   edited?: boolean
+  /** Real wall-clock time of the last edit (from the `updated_at` tag, NIP-CHAT §6.2).
+   *  Undefined until first edit / on older pre-tag edits — then show the bare "(edited)" marker. */
+  updatedAt?: number
   deleted?: boolean
   /** Underlying event created_at — carried through so edit/replace comparisons
    *  in messageStore keep working after a local self-edit. */
@@ -421,6 +425,7 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
       replyTo: raw.replyTo,
       rootRef: raw.rootRef,
       edited: raw.edited,
+      updatedAt: raw.updatedAt,
       deleted: raw.deleted,
       decrypted,
       isThread: raw.isThread,
@@ -1014,6 +1019,12 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
       }
     }
 
+    // updated_at: the real wall-clock edit time (NIP-CHAT §6.2). created_at is a logical counter
+    // (prev + 1) and published_at is frozen at creation, so this tag is the only honest "last edited"
+    // time. Always set on an edit; overwrites any prior updated_at carried in via the re-publish.
+    const editTime = nowSeconds(KINDS.MESSAGE)
+    unsigned = { ...unsigned, tags: [...unsigned.tags, ['updated_at', editTime.toString()]] }
+
     // Add client tag if enabled in preferences
     if (isClientTagEnabled()) {
       unsigned = { ...unsigned, tags: [...unsigned.tags, ['client', 'DEN Chat']] }
@@ -1044,6 +1055,7 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
       eventId,
       JSON.stringify(signed),
       epoch, // update epoch so decrypt pipeline uses the correct key
+      editTime, // real wall-clock edit time (updated_at tag)
     )
 
     // Inject pre-decrypted edit into selfDecryptedRef so the UI doesn't briefly
@@ -1058,6 +1070,7 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
         id: eventId,
         content: newText,        // plaintext — the user's actual text
         edited: true,
+        updatedAt: editTime,
         eventCreatedAt: signed.created_at,
         rawEvent: JSON.stringify(signed),
         attachments: attachments,
@@ -1086,6 +1099,7 @@ export function useMessages(hubDTag: string | null, channelId: string | null) {
       replyTo: replyTo,
       rootRef: rootRef,
       edited: true,
+      updatedAt: editTime,
       deleted: false,
       isForum: !!forumFields,
       rawEvent: JSON.stringify(signed),
