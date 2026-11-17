@@ -1520,6 +1520,7 @@ Clients split on known offsets: first 12 bytes = IV, last 16 bytes = auth tag, e
 | `c` | Yes | Channel UUID |
 | `epoch` | Yes | Epoch number of the secret used for encryption. The client infers whether this is a hub epoch or group epoch from the channel's `encryption` field: if `null`, it refers to the hub secret epoch; if `"group:<group_id>"`, it refers to that group's epoch. |
 | `published_at` | Yes | Unix timestamp of the original message creation. On first publish, set to `created_at`. On edits, carry forward unchanged. Used for display ordering (see Editing Messages below). |
+| `updated_at` | No | Real wall-clock time of the last edit, `["updated_at", "<unix_seconds>"]` (corrected clock). Because `created_at` is a logical counter (`original + N`, see Editing Messages), this is the only honest "last edited" time: for a "edited <time>" display and tie resolution, never for relay filtering or client-side selection. Absent on a message that has never been edited (and on older edited events predating this tag: fall back to the bare `(edited)` indicator). |
 | `nonce` | Conditional | PoW nonce (NIP-13 format: `["nonce", "<counter>", "<target_difficulty>"]`). Required if hub has a `w` tag with difficulty > 0. |
 | `facilitator` | No | Hex pubkey of the member who facilitated this non-member's access to the hub secret (see §5.6). Clients SHOULD verify the facilitator is in the creator's member list before rendering. |
 | `identity` | Conditional (**v2**) | Encrypted **per-message** identity signature binding the event's pseudonymous author `P` (= `pubkey`) to the member's real key `R`. Value is `AES-GCM(channel_or_hub_key_for_epoch, "R_pub:sig_R")` where `sig_R` is `R`'s signature on a never-published kind-`27492` attestation whose `m` tag is the message digest = `getEventHash(event)` computed with the `identity` and `nonce` tags removed (so it survives PoW mining and works via `signEvent` on remote signers) — a fresh signature **over this event**, not a static binding and not over `event.id`. Because `P` is a blinded pseudonym the owner cannot sign as (§4.5), this signature is not what prevents forgery; it lets **any member** cryptographically verify which real `R` authored the event (trustless attribution) without trusting the owner's roster. **Required on every member event in a v2 hub**; events lacking a valid signature are dropped (§9.9). Opaque ciphertext — not usable for relay-level filtering. |
@@ -1565,6 +1566,12 @@ Every message MUST include a `published_at` tag containing the **original creati
 
 Clients MUST use `published_at` (not `created_at`) for **display ordering** in the chat timeline. The `created_at` field should only be used internally for relay replacement semantics and edit detection.
 
+##### `updated_at` Tag
+
+Because the `created_at` increment rule makes `created_at` a logical counter (`original + N` after `N` edits) and `published_at` is frozen at the original creation time, **neither field carries the real wall-clock moment of an edit**. An edit MUST therefore also set an `["updated_at", "<corrected unix seconds>"]` tag to the actual time of that edit (from the corrected clock, §6.1), overwritten on each subsequent edit.
+
+`updated_at` is **display-only**: it drives a "edited <time>" label and, for two versions that somehow tie, favors the later edit. It MUST NOT be used for relay filtering (relays ignore it) nor for client-side selection of the current version (that remains the `created_at` + lowest-id rule). A first-publish message has no `updated_at`; older edited events predating this tag simply fall back to the bare `(edited)` indicator. This mirrors the hub event's `updated_at` (§6.1) exactly.
+
 ##### Edited Event Example
 
 ```json
@@ -1576,18 +1583,19 @@ Clients MUST use `published_at` (not `created_at`) for **display ordering** in t
     ["h", "<hub_d_tag>"],
     ["c", "<channel_id>"],
     ["epoch", "<epoch_number>"],
-    ["published_at", "1700000000"]
+    ["published_at", "1700000000"],
+    ["updated_at", "1700086400"]
   ],
   "content": "<AES-256-GCM encrypted edited content>"
 }
 ```
 
-In the example above, the original message had `created_at: 1700000000`. The edit sets `created_at` to `1700000001` (+1), while `published_at` preserves the original timestamp `1700000000` for ordering.
+In the example above, the original message had `created_at: 1700000000`. The edit sets `created_at` to `1700000001` (+1) and `published_at` preserves the original timestamp `1700000000` for ordering, while `updated_at` (`1700086400`) records when the edit actually happened, a day later.
 
 **Client behavior:**
 
 - When a newer version of a message (same `d` tag + `pubkey`, higher `created_at`) is received, the client SHOULD replace the displayed content.
-- The message SHOULD display an `(edited)` indicator when `created_at` differs from `published_at`.
+- The message SHOULD display an `(edited)` indicator when `created_at` differs from `published_at`, and SHOULD surface the `updated_at` time (e.g. a "edited <time>" tooltip) when the tag is present.
 - Display ordering MUST use `published_at`, not `created_at`.
 - Only the **original author** can publish a new version (enforced by the `kind + pubkey + d-tag` uniqueness rule).
 
@@ -2567,6 +2575,8 @@ Published by a hub member to create a calendar event within a hub. Follows the [
     ["d", "<random_uuid_v4>"],
     ["h", "<hub_d_tag>"],
     ["epoch", "<epoch_number>"],
+    ["published_at", "<original_creation_timestamp>"],
+    ["updated_at", "<last_edit_timestamp>"],
     ["title", "<AES-encrypted title>"],
     ["start", "<AES-encrypted unix_timestamp>"],
     ["end", "<AES-encrypted unix_timestamp>"],
@@ -2589,6 +2599,8 @@ Published by a hub member to create a calendar event within a hub. Follows the [
 | `d` | Yes | Unique UUID v4 identifier. Enables addressable replacement (edits). Same `d` tag re-publishes replace the event. |
 | `h` | Yes | Hub d tag — ties this event to a specific hub. |
 | `epoch` | Yes | Epoch number of the hub secret used for encryption. |
+| `published_at` | Yes | Plaintext unix timestamp of the **original** event creation. On first publish, set to `created_at`. On edits, carry forward unchanged. Records when the calendar entry was first posted (distinct from the event's own `start` time), since `created_at` drifts with each edit. |
+| `updated_at` | No | Plaintext real wall-clock time of the last edit, `["updated_at", "<unix_seconds>"]` (corrected clock). Because editing re-publishes with `created_at` = previous + 1 (a logical counter), this is the only honest "last edited" time: display-only (a "edited <time>" label) and tie resolution, never for relay filtering or client-side selection. Absent until the entry is first edited, and on older events predating this tag. |
 | `title` | Yes | AES-encrypted event title string. |
 | `start` | Yes | AES-encrypted unix timestamp (seconds) as a string. Stored in UTC. |
 | `end` | No | AES-encrypted unix timestamp (seconds) as a string. Omitted for events with no defined end time. |
@@ -2635,7 +2647,7 @@ This uses a separate `"events"` domain from channel message keys (`"channel:..."
 
 - Published to the hub's **general relays**
 - PoW requirements follow the hub's `w` tag setting (same as messages)
-- Editing: re-publish with the **same `d` tag** — relays replace the previous version
+- Editing: re-publish with the **same `d` tag** — relays replace the previous version. As with messages (§6.2), set `created_at` to the previous event's `created_at` + 1, carry `published_at` forward unchanged, and set `updated_at` to the real edit time (corrected clock) so clients can show when the entry was last changed.
 
 #### Deletion
 
@@ -3504,7 +3516,7 @@ Clients MUST hide any hub carrying a `new_hub` tag from search/browse/discovery.
 | `r` | Hub | Relay (`general`); optional `dedicated` marker (§6.1.1) |
 | `o` | Hub | Blossom server URL; optional `dedicated` marker (§6.1.1) |
 | `m` | Hub | Index file reference: `["m", "<sha256>", "<epoch>"]` |
-| `updated_at` | Hub | Real wall-clock time of the last edit: `["updated_at", "<unix_seconds>"]` (corrected clock). Display-only and for owner-side tie resolution; never used for relay filtering or client-side event selection (§6.1). Absent on older events: fall back to the lowest-id rule. |
+| `updated_at` | Hub, Hub Chat, Calendar Event | Real wall-clock time of the last edit: `["updated_at", "<unix_seconds>"]` (corrected clock). Display-only (a "edited <time>" label) and for tie resolution; never used for relay filtering or client-side event selection (§6.1 for hubs, §6.2 for messages/forum posts, §6.11 for calendar events). Absent on first publish and on older events: fall back to the lowest-id rule / bare `(edited)` indicator. |
 | `h` | Message | Hub `d` tag reference |
 | `c` | Message, Voice Presence | Channel UUID |
 | `e` | Message | Reply reference |
