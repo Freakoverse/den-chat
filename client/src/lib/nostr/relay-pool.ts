@@ -5,12 +5,35 @@ import {
 } from 'nostr-tools'
 import { StorageKey } from '@/lib/constants'
 
+// nostr-tools' Relay.send() does `this.ws?.send(message)` with NO readyState check. When a flapping relay's
+// socket is mid-close and the lib resubscribes (sends REQ) or tears a sub down (sends CLOSE), each of those
+// frames hits a CLOSING/CLOSED socket and the browser logs "WebSocket is already in CLOSING or CLOSED state."
+// one line per dropped frame, so one flap yields a burst. The send is already a silent no-op in that state;
+// this wrapper just drops it quietly so the browser stops logging it. No behavior change, purely cosmetic.
+// Guarded on `typeof WebSocket` so this module still imports in a non-browser context (no WebSocket global),
+// where it is left undefined and nostr-tools falls back to the platform WebSocket.
+const GuardedWebSocket: typeof WebSocket | undefined =
+  typeof WebSocket !== 'undefined'
+    ? class extends WebSocket {
+        send(data: Parameters<WebSocket['send']>[0]): void {
+          if (this.readyState === WebSocket.OPEN) super.send(data)
+        }
+      }
+    : undefined
+
 // enableReconnect: when a relay's websocket drops (laptop sleep, network blip, relay restart) nostr-tools
 // reconnects with backoff and RE-ISSUES every open subscription (with `since = last seen + 1`). Without it
 // the default is `closeAllSubscriptions` — every live sub on that relay died silently and stayed dead
 // until the app restarted, which is why DMs/hub messages could stop arriving for days and then all show
 // up on the next launch. enablePing detects half-dead connections that never fire onclose.
-const pool = new SimplePool({ enableReconnect: true, enablePing: true })
+// websocketImplementation: the GuardedWebSocket above (the SimplePool ctor type is narrowed to enablePing/
+// enableReconnect, but the pool passes websocketImplementation straight through to each relay, so cast it in
+// the same way bunker.ts sets maxWaitForConnection).
+const pool = new SimplePool({
+  enableReconnect: true,
+  enablePing: true,
+  websocketImplementation: GuardedWebSocket,
+} as ConstructorParameters<typeof SimplePool>[0])
 
 /** Max time a one-shot query waits before returning what responsive relays have.
  *  Prevents a slow/dead relay from stalling the whole fetch. */
