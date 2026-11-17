@@ -524,12 +524,24 @@ export function createCalendarTimeEvent(
   hubDTag: string,
   epoch: number = 1,
   dTag?: string,
-  facilitator?: string
+  facilitator?: string,
+  // Edit metadata (NIP-CHAT §6.11). On a first publish leave this undefined: created_at = now and
+  // published_at = created_at. On an edit pass the original event's values: created_at becomes
+  // originalCreatedAt + 1 (the +1 counter), published_at is carried forward, and updated_at records the
+  // real wall-clock edit time.
+  timestamps?: { publishedAt?: number; updatedAt?: number; originalCreatedAt?: number }
 ): UnsignedEvent {
+  const createdAt = timestamps?.originalCreatedAt != null
+    ? timestamps.originalCreatedAt + 1
+    : nowSeconds(KINDS.CALENDAR_TIME_EVENT)
+  const publishedAt = timestamps?.publishedAt ?? createdAt
+
   const tags: Tag[] = [
     ['d', dTag || crypto.randomUUID()],
     ['h', hubDTag],
     ['epoch', epoch.toString()],
+    ['published_at', publishedAt.toString()],
+    ...(timestamps?.updatedAt ? [['updated_at', timestamps.updatedAt.toString()] as Tag] : []),
     ...encryptedTags,
   ]
 
@@ -537,7 +549,7 @@ export function createCalendarTimeEvent(
     tags.push(['facilitator', facilitator])
   }
 
-  return createUnsignedEvent(KINDS.CALENDAR_TIME_EVENT, content, tags)
+  return createUnsignedEvent(KINDS.CALENDAR_TIME_EVENT, content, tags, createdAt)
 }
 
 /**

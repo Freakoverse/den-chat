@@ -64,6 +64,9 @@ export interface GroupData {
   banner?: string
   about?: string
   publishedAt: number
+  /** Real wall-clock time of the last settings edit (`updated_at` tag, NIP-CHAT §16.2). Carried forward
+   *  across membership-only republishes; undefined until the group's settings are first edited. */
+  updatedAt?: number
   eventCreatedAt: number
   version?: number
   signerScheme?: string
@@ -159,6 +162,7 @@ export function parseGroupEvent(event: Event): GroupData | null {
     banner: tag('banner') || undefined,
     about: tag('about') || undefined,
     publishedAt: parseInt(tag('published_at') ?? '', 10) || event.created_at,
+    updatedAt: parseInt(tag('updated_at') ?? '', 10) || undefined,
     eventCreatedAt: event.created_at,
     version: versionTag ? parseInt(versionTag, 10) || undefined : undefined,
     signerScheme: schemeTag ? `${schemeTag[1]}:${schemeTag[2] ?? '1'}` : undefined,
@@ -375,6 +379,9 @@ export interface BuildGroupEventOptions {
   banner?: string
   about?: string
   publishedAt: number
+  /** Real wall-clock time of this edit (`updated_at` tag). Set fresh on a settings edit; carried forward
+   *  unchanged on membership-only republishes; omitted on first publish. */
+  updatedAt?: number
   /** Previous event's created_at → +1 replacement (never wall-clock on updates). */
   eventCreatedAt?: number
   version: 1 | 2
@@ -407,6 +414,7 @@ function groupTags(o: BuildGroupEventOptions): [string, ...string[]][] {
   if (o.banner) tags.push(['banner', o.banner])
   if (o.about) tags.push(['about', o.about.slice(0, GROUP_ABOUT_MAX)])
   tags.push(['published_at', String(o.publishedAt)])
+  if (o.updatedAt) tags.push(['updated_at', String(o.updatedAt)])
   tags.push(['client', 'DEN Chat'])
   if (o.version === 2) {
     tags.push(['version', '2'])
@@ -496,6 +504,7 @@ export function republishOptions(g: GroupData, patch: Partial<BuildGroupEventOpt
     banner: g.banner,
     about: g.about,
     publishedAt: g.publishedAt,
+    updatedAt: g.updatedAt, // preserve the last edit time across membership-only republishes; updateGroup overrides it
     eventCreatedAt: g.eventCreatedAt,
     version: isGroupV2(g) ? 2 : 1,
     signerScheme: g.signerScheme,

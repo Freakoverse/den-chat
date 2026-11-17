@@ -181,6 +181,7 @@ export async function updateGroup(dTag: string, patch: {
     blossomServers: patch.blossomServers ?? g.blossomServers,
     minPow: patch.minPow ?? g.minPow,
     joinMinPow: patch.joinMinPow ?? g.joinMinPow,
+    updatedAt: nowSeconds(KINDS.GROUP_EVENT), // real wall-clock time of this settings edit (§16.2)
     secret, keys: k,
   })
   await publishAndApply(signed, patch.relays ?? g.relays)

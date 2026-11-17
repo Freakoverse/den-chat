@@ -28,6 +28,7 @@ import { isV2 } from '@/lib/hub/version'
 import { verifyEventIdentity } from '@/lib/nostr/identity'
 import { resolveMemberPubkey } from '@/lib/hub/resolveMemberPubkey'
 import { KINDS } from '@/lib/crypto/constants'
+import { nowSeconds } from '@/lib/time/clockOffset'
 import { aesEncrypt, aesDecrypt } from '@/lib/crypto/aes'
 import { deriveEventsKey } from '@/lib/crypto/hkdf'
 
@@ -50,6 +51,8 @@ export interface DecryptedCalendarEvent {
   realPubkey: string
   dTag: string
   createdAt: number
+  /** Real wall-clock time of the last edit (`updated_at` tag, NIP-CHAT §6.11). Undefined until first edited. */
+  updatedAt?: number
   title: string
   summary?: string
   image?: string
@@ -256,6 +259,7 @@ export function useCalendar(hubDTag: string | null) {
         realPubkey,
         dTag: raw.dTag,
         createdAt: raw.createdAt,
+        updatedAt: parseInt(raw.tags.find((t) => t[0] === 'updated_at')?.[1] || '', 10) || undefined,
         title,
         summary,
         image,
@@ -429,8 +433,16 @@ export function useCalendar(hubDTag: string | null) {
         content = await aesEncrypt(key, data.description)
       }
 
-      // Re-publish with same d-tag — relay replaces old version
-      let unsigned = createCalendarTimeEvent(content, encryptedTags, hubDTag, epoch, dTag)
+      // Re-publish with same d-tag — relay replaces old version. Carry the original published_at forward,
+      // bump created_at off the previous event (+1), and stamp updated_at with the real edit time (§6.11).
+      const existingEvt = useCalendarStore.getState().events[hubDTag]?.find((e) => e.dTag === dTag)
+      const prevCreatedAt = existingEvt?.createdAt
+      const prevPublishedAt = existingEvt?.tags.find((t) => t[0] === 'published_at')?.[1]
+      let unsigned = createCalendarTimeEvent(content, encryptedTags, hubDTag, epoch, dTag, undefined, {
+        publishedAt: prevPublishedAt ? parseInt(prevPublishedAt, 10) : prevCreatedAt,
+        updatedAt: nowSeconds(KINDS.CALENDAR_TIME_EVENT),
+        originalCreatedAt: prevCreatedAt,
+      })
 
       if (isClientTagEnabled()) {
         unsigned = { ...unsigned, tags: [...unsigned.tags, ['client', 'DEN Chat']] }

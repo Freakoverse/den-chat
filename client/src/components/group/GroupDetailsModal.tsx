@@ -243,6 +243,7 @@ export function GroupDetailsModal({ dTag, isCreator, onClose }: { dTag: string; 
                     <span className="truncate">{name}</span>
                   </h2>
                   {privateDescription && <p className="mt-1 text-sm text-muted-foreground whitespace-pre-wrap break-words leading-relaxed">{privateDescription}</p>}
+                  {group?.updatedAt ? <p className="mt-1.5 text-[11px] text-muted-foreground/60">Last edited {formatDateNumeric(new Date(group.updatedAt * 1000))}</p> : null}
                 </div>
               </div>
 

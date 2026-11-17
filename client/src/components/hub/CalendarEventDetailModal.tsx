@@ -257,6 +257,11 @@ export function CalendarEventDetailModal({
                 <span className="text-xs text-muted-foreground">
                   · Created {formatTimestamp(event.createdAt)}
                 </span>
+                {event.updatedAt ? (
+                  <span className="text-xs text-muted-foreground/70">
+                    · edited {formatTimestamp(event.updatedAt)}
+                  </span>
+                ) : null}
               </div>
 
               {/* Date/Time */}
