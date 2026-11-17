@@ -3516,7 +3516,7 @@ Clients MUST hide any hub carrying a `new_hub` tag from search/browse/discovery.
 | `r` | Hub | Relay (`general`); optional `dedicated` marker (§6.1.1) |
 | `o` | Hub | Blossom server URL; optional `dedicated` marker (§6.1.1) |
 | `m` | Hub | Index file reference: `["m", "<sha256>", "<epoch>"]` |
-| `updated_at` | Hub, Hub Chat, Calendar Event | Real wall-clock time of the last edit: `["updated_at", "<unix_seconds>"]` (corrected clock). Display-only (a "edited <time>" label) and for tie resolution; never used for relay filtering or client-side event selection (§6.1 for hubs, §6.2 for messages/forum posts, §6.11 for calendar events). Absent on first publish and on older events: fall back to the lowest-id rule / bare `(edited)` indicator. |
+| `updated_at` | Hub, Hub Chat, Calendar Event, Group | Real wall-clock time of the last edit: `["updated_at", "<unix_seconds>"]` (corrected clock). Display-only (a "edited <time>" label) and for tie resolution; never used for relay filtering or client-side event selection (§6.1 for hubs, §6.2 for messages/forum posts, §6.11 for calendar events, §16.2 for the group event). Absent on first publish and on older events: fall back to the lowest-id rule / bare `(edited)` indicator. |
 | `h` | Message | Hub `d` tag reference |
 | `c` | Message, Voice Presence | Channel UUID |
 | `e` | Message | Reply reference |
@@ -3661,6 +3661,7 @@ by the same action. A join request (§16.6.1) only asks; ignoring it is the whol
     ["banner", "<banner_url>"],
     ["about", "<short description>"],
     ["published_at", "<original_creation_timestamp>"],
+    ["updated_at", "<last_edit_timestamp>"],
     ["client", "<client_app_name>"],
     ["version", "2"],
     ["signer_scheme", "skd", "1"]
@@ -3686,6 +3687,7 @@ by the same action. A join request (§16.6.1) only asks; ignoring it is the whol
 | `picture` / `banner` / `about` | No | The group's public face — icon, banner, short description — **plaintext in both versions** for the same reason as `n`: the person holding an invite has no secret yet. Member-only prose belongs in `settings.description` (below). |
 | `content-warning` / `L` | No | NIP-36 / NIP-32 sensitive-content marking, as for hubs. |
 | `published_at` | Yes | Original creation timestamp, carried forward unchanged on every republish. |
+| `updated_at` | No | Real wall-clock time of the last edit, `["updated_at", "<unix_seconds>"]` (corrected clock). Because `created_at` is a logical counter (previous + 1, see below), this is the only honest "last edited" time: display-only and for tie resolution, never for relay filtering or client-side event selection, exactly as the hub event's `updated_at` (§6.1). Absent on first publish and on older events predating this tag. |
 | `client` | No | Publishing client name. |
 | `version` | No | Group **format** version. Absent ⇒ v1. `"2"` ⇒ v2 (§16.8). Unknown ⇒ prompt to update, do not render. |
 | `signer_scheme` | Conditional (**v2**) | NIP-SKD scheme, exactly as on the hub event (§6.1). |
@@ -3699,7 +3701,9 @@ a way to *ask*; it never changes membership by itself.
 
 The group event is republished on every membership change. As for hubs (§6.1) the client
 MUST set `created_at` to the previous event's `created_at + 1`, never the wall clock, and
-order by `published_at` for display.
+order by `published_at` for display. Because `created_at` is thus a counter, an edit that
+changes group settings (name, picture, description) SHOULD also set `updated_at` to the real
+wall-clock edit time so clients can show when the group was last changed.
 
 #### Content (JSON)
 
@@ -3747,9 +3751,10 @@ MAY let a group declare additional channels (as some messengers do), each with i
 messages with `c = d` remain valid and unchanged. This revision defines exactly one channel and
 clients MUST ignore `c` values that are not the group's `d`.
 
-Everything else carries over unchanged: `epoch`, `published_at`, `nonce` under `w`, edits by
-`d`-tag republish with the `+1` rule, `a`-tag replies and threads, reactions, the `identity`
-tag in v2 (§4.5), edit hints (`26943`), typing (`26950`), polls, `content-warning`.
+Everything else carries over unchanged: `epoch`, `published_at`, `updated_at` (the edit-time
+tag of §6.2), `nonce` under `w`, edits by `d`-tag republish with the `+1` rule, `a`-tag replies
+and threads, reactions, the `identity` tag in v2 (§4.5), edit hints (`26943`), typing (`26950`),
+polls, `content-warning`.
 Subscribing to a group is one filter: `{"kinds": [36943], "#h": ["<group_d_tag>"]}` on its `r`
 relays.
 
