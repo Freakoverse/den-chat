@@ -87,14 +87,17 @@ cannot participate privately.
 **cannot** obtain `P`'s private key:
 
 ```
-// NIP-SKD blinded form: context = "nip-chat:v2:member-pseudonym:" + d_tag, peer = O_pub
-t      = HKDF( ECDH(R_priv, O_pub), salt = "nip-skd-v1", info = blinded(context) )   // see NIP-SKD §1
+// NIP-SKD blinded form: context = "nip-chat:v2:member-pseudonym:" + d_tag, peer = O_pub, base = R_pub
+t      = HKDF( ECDH(R_priv, O_pub), salt = "nip-skd-v1", info = blinded(context, base = R_pub) )   // base binds the key being blinded, NIP-SKD §1
 P_pub  = xonly( lift_even_y(R_pub) + t·G )      // P_priv = R_priv + t, held only by the member
-// owner verifies:  getPeerBlindedPubkey(context, peer = R_pub) == P_pub   // pubkey only; never P_priv
+// owner verifies with the COMPOSED op (the member blinds toward O, a self sub-key, not the owner root,
+// so the owner's ECDH identity must be O_priv, not R_owner_priv):
+//   getPeerBlindedPubkeyViaSelf(viaContext = "nip-chat:v2:owner-pseudonym:" + d_tag, context, peer = R_pub) == P_pub   // pubkey only; never P_priv
 ```
 
-where `O` is the owner pseudonym (below), and `blinded(context)` is the form-tagged HKDF `info`
-of NIP-SKD §1. Local keys compute it directly; capable signers derive `P` as a NIP-SKD blinded
+where `O` is the owner pseudonym (below), and `blinded(context, base)` is the form-tagged, base-bound
+HKDF `info` of NIP-SKD §1. `base` is the x-only key being blinded (here `R_pub`), bound into `info` so
+each direction of a two-party blinding gets an independent tweak. Local keys compute it directly; capable signers derive `P` as a NIP-SKD blinded
 sub-key (§0.5). `P` is deterministic per (member, hub), unlinkable across hubs, unlinkable to
 `R` for the public, **owner-verifiable, and squat-proof**: a leaked `P` cannot be re-bound to a
 different `R` because the owner would derive a *different* `P` for that `R`. Crucially the owner
@@ -225,10 +228,13 @@ v2 identities are derived with **NIP-SKD Sub-Key Derivation** (salt
 - a **remote/browser signer that implements NIP-SKD** — it derives and operates the sub-keys
   **internally**, never exposing their private material:
   - owner `O` → **self** form on context `"nip-chat:v2:owner-pseudonym:"+d_tag`;
-  - member `P` → **blinded** form on `"nip-chat:v2:member-pseudonym:"+d_tag` with peer `O_pub`
-    (the owner verifies `P` via `getPeerBlindedPubkey` but cannot derive `P_priv`);
+  - member `P` → **blinded** form on `"nip-chat:v2:member-pseudonym:"+d_tag` with peer `O_pub`, base
+    `R_pub` (the owner verifies `P` via the composed `getPeerBlindedPubkeyViaSelf`, since `O` is a self
+    sub-key and not the owner root, but cannot derive `P_priv`);
   - facilitated `Pf` → **blinded** form on `"nip-chat:v2:facilitated-pseudonym:"+d_tag` with peer
-    `P_fac`; join address → **blinded** form on `"nip-chat:v2:join-addr:"+d_tag` with peer `O_pub`.
+    `P_fac`, base `R_f_pub` (the facilitator verifies via the composed `getPeerBlindedPubkeyViaBlinded`,
+    since `P_fac` is itself a blinded sub-key); join address → **blinded** form on
+    `"nip-chat:v2:join-addr:"+d_tag` with peer `O_pub`, base `R_pub` (owner verifies via `getPeerBlindedPubkeyViaSelf`).
 
   NIP-CHAT v2 uses only the **self** and **blinded** NIP-SKD forms — never the `shared` form.
 
@@ -556,15 +562,15 @@ derivation of their real key `R` toward the owner, so the owner can independentl
 **public** key to verify it — but cannot obtain its private key:
 
 ```
-// NIP-SKD blinded form: context = "nip-chat:v2:member-pseudonym:" + d_tag, peer = O_pub
-t      = HKDF( ECDH(R_priv, O_pub), salt = "nip-skd-v1", info = blinded(context) )   // see NIP-SKD §1
+// NIP-SKD blinded form: context = "nip-chat:v2:member-pseudonym:" + d_tag, peer = O_pub, base = R_pub
+t      = HKDF( ECDH(R_priv, O_pub), salt = "nip-skd-v1", info = blinded(context, base = R_pub) )   // base = the key being blinded, NIP-SKD §1
 P_pub  = xonly( lift_even_y(R_pub) + t·G )      // P_priv = R_priv + t, held only by the member
 ```
 
 `P` is deterministic per (member, hub), unlinkable across hubs, and unlinkable to `R` for
-the public. The **owner re-derives `P_pub`** via the blinded verifier op
-`getPeerBlindedPubkey(context, peer = R_pub) = xonly( lift_even_y(R_pub) + t·G )` — the same
-`t`, because `ECDH(O_priv, R_pub) == ECDH(R_priv, O_pub)` — and checks it against the claimed
+the public. The **owner re-derives `P_pub`** via the composed blinded verifier op
+`getPeerBlindedPubkeyViaSelf(viaContext = "nip-chat:v2:owner-pseudonym:" + d_tag, context, peer = R_pub) = xonly( lift_even_y(R_pub) + t·G )`. It is the composed form (not plain `getPeerBlindedPubkey`) because the member blinds toward the owner pseudonym `O`, a **self** sub-key, so the owner's ECDH identity is `O_priv`, giving the same
+`t` since `ECDH(O_priv, R_pub) == ECDH(R_priv, O_pub)`. The owner checks it against the claimed
 `P_pub`, giving **owner verification** at admission and **squat-resistance**: a leaked `P`
 cannot be re-bound to a different `R`, because the owner would derive a *different* `P` for that
 `R`. The owner obtains only `P_pub` (to verify and place the leaf) and **never `P_priv`** — so,
@@ -664,10 +670,10 @@ playing the owner's role:
 
 - **The facilitated user's identity is `Pf`, a blinded derivation of `R_f` toward `P_fac`** — the
   exact shape of a member's `P` (blinded toward `O`), one level down with `P_fac` in the owner's
-  role. Context string `nip-chat:v2:facilitated-pseudonym:<dTag>`, peer `P_fac` (NIP-SKD blinded
-  form). The facilitated user derives it from `R_f_priv` + `P_fac_pub` (`Pf_priv = R_f_priv + t`,
-  held only by them); the facilitator re-derives the same **`Pf_pub`** via
-  `getPeerBlindedPubkey(context, peer = R_f_pub)` (same `t` by ECDH symmetry) but **cannot** obtain
+  role. Context string `nip-chat:v2:facilitated-pseudonym:<dTag>`, peer `P_fac`, base `R_f_pub` (NIP-SKD
+  blinded form). The facilitated user derives it from `R_f_priv` + `P_fac_pub` (`Pf_priv = R_f_priv + t`,
+  held only by them); the facilitator re-derives the same **`Pf_pub`** via the composed
+  `getPeerBlindedPubkeyViaBlinded(viaContext = "nip-chat:v2:member-pseudonym:" + d_tag, viaPeer = O_pub, context, peer = R_f_pub)`. It is composed (not plain `getPeerBlindedPubkey`) because `Pf` blinds toward `P_fac`, the facilitator's own blinded sub-key, so the facilitator's ECDH identity is `P_fac_priv`. This gives the same `t` by ECDH symmetry but **cannot** obtain
   `Pf_priv`. So **the facilitator adds people by their real npub `R_f`** (v1's UX) — it derives
   `Pf_pub` itself and keys the leaf on it; `R_f` never enters the tree, and the facilitator cannot
   impersonate the vouched user. (The verifier-side derivation is a sub-sub-key off `P_fac`, so the
@@ -1777,12 +1783,12 @@ Published by a user to signal they want to join a hub. Shows up in a request que
 > whole point of NIP-SKD in v2 is that every identity is re-derivable and nothing per-request has to
 > be generated, stored, or can be lost:
 > 1. The joiner derives the **join address `addr`** — a **blinded** derivation of their `R` toward
->    `O` (NIP-SKD blinded form, context `"nip-chat:v2:join-addr:"+d_tag`, peer `O_pub`;
->    `addr_pub = xonly(lift_even_y(R_pub) + HKDF(ECDH(joiner_priv, O_pub), …)·G)`).
+>    `O` (NIP-SKD blinded form, context `"nip-chat:v2:join-addr:"+d_tag`, peer `O_pub`, base `R_pub`;
+>    `addr_pub = xonly(lift_even_y(R_pub) + HKDF(ECDH(joiner_priv, O_pub), salt, info = blinded(join-addr context, base = R_pub))·G)`).
 > 2. The request is **signed by `addr`** and uses `addr_pub` as its `d`-scoped identifier, so a
 >    repeat request from the same joiner replaces the previous one. The owner can later re-derive
->    `addr_pub` from `R` (via `getPeerBlindedPubkey`) to confirm the authoring key belongs to the
->    sealed `R`.
+>    `addr_pub` from `R` (via the composed `getPeerBlindedPubkeyViaSelf`, the join-addr blinding being
+>    toward the owner pseudonym `O`) to confirm the authoring key belongs to the sealed `R`.
 > 3. The request carries a plaintext `["version", "2"]` marker (so owners route it as a v2 join and
 >    never feed a v1 join into the decrypt path), and its `content` is `NIP-44 v2` encrypted **by
 >    `addr` to `O`** — `nip44EncryptAsBlinded(join-addr context, O_pub, {r, p, note?}, peer = O_pub)`,
@@ -1792,8 +1798,8 @@ Published by a user to signal they want to join a hub. Shows up in a request que
 >    `O_pub`) — e.g. to re-read the note they attached.
 > 4. The owner decrypts as its `O` self sub-key with the request's **author `addr_pub` as sender**
 >    (`nip44DecryptAsSelfSubkey(owner context, addr_pub, content)`) to learn the real requester, then
->    **re-derives `P_pub` from `R`** via the blinded verifier op —
->    `getPeerBlindedPubkey("nip-chat:v2:member-pseudonym:"+d_tag, peer = R_pub)` — and admits `P`
+>    **re-derives `P_pub` from `R`** via the composed blinded verifier op
+>    `getPeerBlindedPubkeyViaSelf(viaContext = "nip-chat:v2:owner-pseudonym:"+d_tag, context = "nip-chat:v2:member-pseudonym:"+d_tag, peer = R_pub)`, and admits `P`
 >    only if it matches the claimed `P_pub`. This makes the pseudonym **owner-verified and
 >    squat-proof**: a `P` that does not derive from the presented `R` is rejected. The owner obtains
 >    `P_pub` only, never `P_priv`.
@@ -3279,7 +3285,7 @@ traffic, the PoW `w`/`W` floors, and the public face tags; see §8.1 of the plan
 | **(v2)** Public learns who is banned | Ban list stores real keys `R` and is encrypted with a hub-secret-derived key. Only members can read it. |
 | **(v2)** Public learns who joined | Join requests are sealed to the owner by, and signed with, the joiner's deterministic blinded join-address sub-key — unlinkable to `R` without `O` (§6.3). |
 | **(v2)** Public links a sender to a hub / across hubs | Messages are signed by `P` (per-hub, derived), unlinkable to `R` or across hubs. Residual: the plaintext `h` tag reveals *a pseudonym* posted to a hub (see plan §8.1). |
-| **(v2)** Member is impersonated by a forged `R` in a leaf/event | `P` is owner-verified at admission (a **blinded** derivation of `R`, re-derived by the owner via `getPeerBlindedPubkey`, §6.3), and each message carries a fresh `sig_R` over the event (§9.9). Only the real `R` holder can produce a valid `P` signature (the owner derives `P_pub` but never `P_priv`), and a `P` that does not derive from the presented `R` is rejected (squat-proof). |
+| **(v2)** Member is impersonated by a forged `R` in a leaf/event | `P` is owner-verified at admission (a **blinded** derivation of `R`, re-derived by the owner via the composed `getPeerBlindedPubkeyViaSelf`, §6.3), and each message carries a fresh `sig_R` over the event (§9.9). Only the real `R` holder can produce a valid `P` signature (the owner derives `P_pub` but never `P_priv`), and a `P` that does not derive from the presented `R` is rejected (squat-proof). |
 | **(v2)** User is coerced/accused over `P`'s messages | **v2 is accountable, not deniable** — a conscious trade (§0.1, §4.5): `R` signs **every** message, so authorship is provable to members, and to outsiders if a member leaks the ciphertext+signature. There is no "leaked pseudonym key" defence. Users should understand a v2 hub attributes their words to their real key within the member set — treat it as a private group chat, not an anonymity tool. |
 | **(v2)** Public learns who created/owns the hub | The hub is authored by the owner pseudonym `O` (`kind:O:d_tag`); `R_owner` never appears publicly. A static owner attestation, encrypted with the hub secret, reveals the creator to **members only** (§4.5). |
 | **(v2)** Public learns the hub's internal structure | Hub `content` (roles, categories, channel names, permissions) is encrypted with `hub_content_key`; only the public face (`n`, `picture`, `banner`, `about`, `t`) is visible. |
@@ -3769,7 +3775,7 @@ involved at this step; they consent by **accepting the invite** (§16.6). The cr
    and `log₂(N)` symmetric re-wraps up the path; **no epoch bump**).
    - **v1:** the leaf is `R`.
    - **v2:** the creator derives the member's pseudonym public key `P_pub` from `R_pub` with the
-     blinded verifier op of §4.5 (`getPeerBlindedPubkey(context = "nip-chat:v2:member-pseudonym:" + d_tag, peer = R_pub)`),
+     composed blinded verifier op of §4.5 (`getPeerBlindedPubkeyViaSelf(viaContext = "nip-chat:v2:owner-pseudonym:" + d_tag, context = "nip-chat:v2:member-pseudonym:" + d_tag, peer = R_pub)`, base `R_pub`, composed because the member blinds toward the owner pseudonym `O`, a self sub-key),
      places `P` as the leaf, and rewrites the tree's `roster` line to include `{P: R}`. The
      creator never obtains `P_priv`. Because this needs only `R_pub`, **v2 adds work exactly
      like v1** — no round-trip with the member.
