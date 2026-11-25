@@ -30,7 +30,7 @@ import {
   MoreVertical, ShieldBan, ShieldCheck, MessageCircle,
   Globe, Zap, AtSign, Camera, ImageIcon, Loader2, XCircle, AlertTriangle,
   Flag, BadgeCheck, RotateCw, Users, TreePine, HandCoins, Code,
-  Plus, FileText, Package, User, Compass, Settings2,
+  Plus, FileText, Package, User, Compass, Settings2, List,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
@@ -48,6 +48,7 @@ import { publishPersonal, getPublishRelays, getUploadBlossoms } from '@/stores/p
 import { signWithSigner } from '@/lib/nostr/events'
 import { nip19, type Event } from 'nostr-tools'
 import { LinksViewerModal, LinksEditorModal } from '@/components/hub/LinksModal'
+import { ListsViewerModal, ListsEditorModal, isPredefinedListDTag } from '@/components/hub/ListsModal'
 import { PaytoModal } from '@/components/hub/PaytoModal'
 import { extractPaymentTargets } from '@/lib/nostr/payto'
 import { STANDARD_KINDS } from '@/lib/crypto/constants'
@@ -199,6 +200,10 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
   const [showLinksViewer, setShowLinksViewer] = useState(false)
   const [showLinksEditor, setShowLinksEditor] = useState(false)
   const [hasLinks, setHasLinks] = useState(false)
+  // Lists modal state (custom lists — 30003 sets that aren't link-tree sets)
+  const [showListsViewer, setShowListsViewer] = useState(false)
+  const [showListsEditor, setShowListsEditor] = useState(false)
+  const [hasLists, setHasLists] = useState(false)
   // Payment targets (NIP-A3, kind 10133)
   const [showPayto, setShowPayto] = useState(false)
   const [hasPayto, setHasPayto] = useState(false)
@@ -369,6 +374,7 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
     setRawProfileEventJson(null)
     setStatus('')
     setHasLinks(false)
+    setHasLists(false)
     setHasPayto(false)
     setFollowingPubkeys([])
     setFollowingLoaded(false)
@@ -411,11 +417,19 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
       }
     }).catch(() => { /* non-critical */ })
 
-    // Fetch link sets to know if "Links" button should show
+    // Fetch 30003 sets once to drive both the "Link tree" and "Lists" buttons.
+    // Link-tree sets carry d-tags prefixed "links-"; a predefined list uses a catalog d-tag.
     fetchEvents({ kinds: [30003], authors: [displayPubkey] }).then((events) => {
       if (cancelled) return
-      const linkSets = events.filter((ev) => ev.tags.some((t) => t[0] === 'd' && t[1]?.startsWith('links-')))
-      setHasLinks(linkSets.some((ev) => ev.tags.some((t) => t[0] === 'r' && t[1])))
+      const isLinkSet = (ev: typeof events[number]) => ev.tags.some((t) => t[0] === 'd' && t[1]?.startsWith('links-'))
+      setHasLinks(events.filter(isLinkSet).some((ev) => ev.tags.some((t) => t[0] === 'r' && t[1])))
+      setHasLists(
+        events.some((ev) => {
+          const d = ev.tags.find((t) => t[0] === 'd')?.[1] || ''
+          if (!isPredefinedListDTag(d)) return false
+          return ev.tags.some((t) => t[0] === 'r' && (t[1] || t[2] || t[3]))
+        }),
+      )
     })
 
     // Fetch payment targets (kind 10133) to know if the "Payment targets" button should show
@@ -2257,20 +2271,28 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
 
                   {/* Link tree + Payment targets — side by side. Editing each lives inside its own modal, so
                       there's no separate edit pencil here. */}
-                  {(hasLinks || hasPayto || isSelf) && (
-                    <div className="flex items-center gap-1.5 mb-2">
+                  {(hasLinks || hasLists || hasPayto || isSelf) && (
+                    <div className="flex items-center flex-wrap gap-1.5 mb-2">
                       {(hasLinks || isSelf) && (
                         <button
                           onClick={() => setShowLinksViewer(true)}
-                          className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-secondary/60 hover:bg-secondary border border-border text-xs font-medium text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                          className="flex-1 min-w-[30%] flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-secondary/60 hover:bg-secondary border border-border text-xs font-medium text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
                         >
                           <TreePine size={13} /> Link tree
+                        </button>
+                      )}
+                      {(hasLists || isSelf) && (
+                        <button
+                          onClick={() => setShowListsViewer(true)}
+                          className="flex-1 min-w-[30%] flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-secondary/60 hover:bg-secondary border border-border text-xs font-medium text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                        >
+                          <List size={13} /> Lists
                         </button>
                       )}
                       {(hasPayto || isSelf) && (
                         <button
                           onClick={() => setShowPayto(true)}
-                          className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-secondary/60 hover:bg-secondary border border-border text-xs font-medium text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                          className="flex-1 min-w-[30%] flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-secondary/60 hover:bg-secondary border border-border text-xs font-medium text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
                         >
                           <HandCoins size={13} /> Payment targets
                         </button>
@@ -2367,6 +2389,31 @@ export function UserProfileModal({ open, onClose, targetPubkey, onViewSocialPost
                 fetchEvents({ kinds: [30003], authors: [displayPubkey] }).then((events) => {
                   const linkSets = events.filter((ev) => ev.tags.some((t) => t[0] === 'd' && t[1]?.startsWith('links-')))
                   setHasLinks(linkSets.some((ev) => ev.tags.some((t) => t[0] === 'r' && t[1])))
+                })
+              }}
+            />
+          )}
+          <ListsViewerModal
+            open={showListsViewer}
+            onClose={() => setShowListsViewer(false)}
+            pubkey={displayPubkey}
+            isSelf={isSelf}
+            onEdit={() => { setShowListsViewer(false); setShowListsEditor(true) }}
+          />
+          {isSelf && (
+            <ListsEditorModal
+              open={showListsEditor}
+              onClose={() => setShowListsEditor(false)}
+              onSaved={() => {
+                // Re-fetch 30003 sets to update hasLists (a filled predefined list)
+                fetchEvents({ kinds: [30003], authors: [displayPubkey] }).then((events) => {
+                  setHasLists(
+                    events.some((ev) => {
+                      const d = ev.tags.find((t) => t[0] === 'd')?.[1] || ''
+                      if (!isPredefinedListDTag(d)) return false
+                      return ev.tags.some((t) => t[0] === 'r' && (t[1] || t[2] || t[3]))
+                    }),
+                  )
                 })
               }}
             />

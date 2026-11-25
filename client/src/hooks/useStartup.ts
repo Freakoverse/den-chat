@@ -451,6 +451,26 @@ export function useStartup() {
         ensureAddressableRedundancy(KINDS.USER_HUB_LIST, pubkey, undefined, useHubStore.getState().hubListCreatedAt) // kind 16942 — hub list (version-aware)
         ensureAddressableRedundancy(STANDARD_KINDS.USER_STATUS, pubkey, 'general')  // kind 30315 — NIP-38 general status
         ensureAddressableRedundancy(STANDARD_KINDS.APP_DATA, pubkey, APP_DATA_DTAGS.HUB_RECOMMENDATIONS, useRecommendationStore.getState().myRecsCreatedAt || undefined) // kind 30078: hub recommendations (Discover, version-aware)
+        ensureAddressableRedundancy(STANDARD_KINDS.PAYTO, pubkey)                    // kind 10133 — NIP-A3 payment targets (replaceable, one per author)
+
+        // kind 30003 sets — the link tree (d-tags prefixed "links-") and custom lists
+        // (every other 30003 set). Both are fetched lazily by their modals, so discover
+        // them here with a generous timeout and top up each one that still carries content.
+        import('@/lib/nostr/relay-pool').then(async ({ fetchEvents }) => {
+          try {
+            const events = await fetchEvents({ authors: [pubkey], kinds: [30003] }, 8000)
+            const seen = new Set<string>()
+            for (const ev of events) {
+              const dTag = ev.tags.find((t) => t[0] === 'd')?.[1]
+              if (!dTag || seen.has(dTag)) continue
+              // Skip tombstoned/emptied sets (no items left). A list item may carry only a
+              // name or box art (empty link slot), so count any non-empty r-tag field.
+              if (!ev.tags.some((t) => t[0] === 'r' && (t[1] || t[2] || t[3]))) continue
+              seen.add(dTag)
+              ensureAddressableRedundancy(30003, pubkey, dTag)
+            }
+          } catch { /* best-effort */ }
+        })
 
         // Emoji sets (kind 30030) — user's own sets, dynamic d-tags
         for (const set of useEmojiStore.getState().myEmojiSets) {
